@@ -6,15 +6,15 @@ stderr-fd: 2
 
 ciovec:
   $record:
-    ptr: $int
-    len: $int
+    ptr: $int64
+    len: $int64
 
 write-raw:
   $function:
     args:
-      fd: $Fd
+      fd: $int64
       bytes: $str
-    return: $int
+    return: $int64
     do:
       - $wasm:
           import:
@@ -27,9 +27,9 @@ write-raw:
 write-all:
   $function:
     args:
-      fd: $Fd
+      fd: $int64
       bytes: $str
-    return: $int
+    return: $int64
     do:
       - $wasm:
           import:
@@ -110,8 +110,8 @@ flush-stdout:
 read-raw:
   $function:
     args:
-      fd: $Fd
-      len: $int
+      fd: $int64
+      len: $int64
     return: $str
     do:
       - $wasm:
@@ -125,7 +125,7 @@ read-raw:
 read-line:
   $function:
     args:
-      fd: $Fd
+      fd: $int64
     return: $str
     do:
       - $wasm:

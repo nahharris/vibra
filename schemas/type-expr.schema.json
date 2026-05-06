@@ -4,7 +4,24 @@
   "title": "VibraTypeExpr",
   "description": "JSON encoding of a Vibra type after YAML parse (surrogate for LLM tooling)",
   "oneOf": [
-    { "type": "string", "enum": ["$int", "$float", "$bool", "$void", "$str"] },
+    {
+      "type": "string",
+      "enum": [
+        "$int8",
+        "$int16",
+        "$int32",
+        "$int64",
+        "$uint8",
+        "$uint16",
+        "$uint32",
+        "$uint64",
+        "$float32",
+        "$float64",
+        "$bool",
+        "$void",
+        "$str"
+      ]
+    },
     {
       "type": "object",
       "required": ["$literal"],
@@ -42,6 +59,18 @@
       "additionalProperties": false,
       "properties": {
         "$union": { "type": "array", "items": { "$ref": "#" }, "minItems": 2 }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$enum"],
+      "additionalProperties": false,
+      "properties": {
+        "$enum": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#" }
+        }
       }
     },
     {
@@ -101,15 +130,20 @@
     {
       "type": "object",
       "required": ["$forall"],
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "$forall": {
           "type": "object",
-          "required": ["params", "body"],
+          "required": ["types", "in"],
+          "additionalProperties": false,
           "properties": {
-            "params": { "type": "array", "items": { "type": "string" } },
-            "bounds": { "type": "object" },
-            "body": { "$ref": "#" }
+            "types": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1
+            },
+            "where": { "type": "object" },
+            "in": { "$ref": "#" }
           }
         }
       }

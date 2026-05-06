@@ -1,5 +1,7 @@
-Result:
-  $union:
-    variants:
-      Ok: $T
-      Err: $E
+result:
+  $forall:
+    types: [t, e]
+    in:
+      $enum:
+        err: $e
+        ok: $t

@@ -91,6 +91,8 @@ A **prefixed symbol** is a YAML key starting with `$` (after merge into a mappin
 
 After `$`, the callee name must be an **identifier** (letters, digits, `-` per symbol rules for unqualified names). **`$+` and other punctuation-only** keys are **invalid** (`E-SYN-001`); use e.g. **`$add`** for addition.
 
+For zero-arg functions (`args: $void`): a bare symbol reference like `$that-func` denotes the function value, while invocation is explicit and canonical as `{ $that-func: null }`.
+
 ### `$function`
 
 Creates a function.
@@ -98,9 +100,9 @@ Creates a function.
 ```yaml
 $function:
   args:
-    x: $int
-    y: $int
-  return: $int
+    x: $int64
+    y: $int64
+  return: $int64
   do:
     - $add: [$args.x, $args.y]
 ```
@@ -114,7 +116,7 @@ Single binding per §4: the mapping has **exactly one** key (the new symbol); th
 ```yaml
 $let:
   a:
-    $as: $int
+    $as: $int64
     $init: 2
 ```
 
@@ -162,7 +164,7 @@ $do:
 
 ### Primitives
 
-`$int`, `$float`, `$bool`, `$void`, `$str`.
+`$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`, `$bool`, `$void`, `$str`.
 
 ### Constructors (YAML forms)
 
@@ -176,11 +178,15 @@ $do:
 | `$list` | **Deprecated** for new code; use **`$array`** for types and YAML sequences for values. |
 | `$dict` | **Deprecated** for product types; use **`$record`** or **`$map`**. |
 | `$union` | `{ $union: [T1, T2, ...] }` — discriminated unions should use a **tag** field in `$record` variants |
-| `$option` | `{ $option: T }` — **no** `null`; optional is always `$option` |
+| `$option` | `{ $option: T }` — optional convenience form (equivalent to `{ $union: [$void, T] }`) |
 | `$intersect` | `{ $intersect: [T1, T2] }` — compose interface requirements |
 | `$interface` | **Go-like structural interface:** `{ $interface: { name: T, ... } }` — each member is a **type**; function members use **`$fn-type`** |
 | `$fn-type` | `{ $fn-type: { args: { $record: ... }, return: R } }` — **one** function type constructor |
-| `$forall` | Generics v1: `{ $forall: { params: [T, U], bounds: {}, body: <type> } }` (exact shape frozen in compiler) |
+| `$forall` | Generics v1: `{ $forall: { types: [t, u], where: {}, in: <type> } }` — `types` declares type parameter names in order for the body; only names in `types` are treated as generics inside `in`. Optional `where` is reserved for future bounds (ignored if present). |
+
+**`$forall` semantics (v1):** Type parameters listed in `types` are the only symbols that resolve to type variables within `in`. At use sites, enum constructors unify payload types with the declared variant field types, producing a fully instantiated enum type (`Instantiated`) whose type arguments are ordered like `types`. Nested `$forall` in `in` shadows outer names.
+
+**Null safety (v1):** `null` is valid only for type `$void`, and is the only source-level value of `$void`. A value of type `T` can be coerced into a union containing `T` (e.g. `$union: [$void, T]`), but a union value cannot be coerced back to `T` without explicit narrowing (for tagged unions this is `$match`).
 
 ### Interface satisfaction
 
@@ -314,6 +320,8 @@ Tuple-typed args and `$dict` in the original draft are **superseded** by §4 and
 
 - **Numeric primitives:** `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`.
 - **No-arg function convention:** use `args: $void` (not empty mapping).
-- **Discriminated unions:** use `$union` with named variants and payload type per variant.
-- **Domain wrappers:** stdlib defines nominal wrappers (`Fd`, `Path`, `File`, `Dir`) in `stdlib/types.vibra`; io/fs signatures use these wrappers instead of raw integers/strings.
-- **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) and `stdlib/result.vibra` (`Result`) use nominal variant constructors and are consumable via `$match`.
+- **Unions:** use direct arrays, e.g. `integer: { $union: [$int64, $int32, $int16, $int8] }`.
+- **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
+- **Early stdlib typing:** io/fs currently use raw primitives (`$int64` and `$str`) instead of nominal wrapper types.
+- **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is modeled as `$forall + $union` (`$union: [$void, $t]`), while `stdlib/result.vibra` (`Result`) uses `$forall + $enum` constructors and `$match`.
+- **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.

@@ -1,5 +1,5 @@
-Option:
-  $union:
-    variants:
-      Some: $T
-      None: $void
+option:
+  $forall:
+    types: [t]
+    in:
+      $union: [$void, $t]

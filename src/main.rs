@@ -30,6 +30,9 @@ fn main() -> Result<()> {
         Command::Run { path, preopen } => {
             let program = load::load_program(&path)?;
             let lowered = lower::lower_program(&program)?;
+            for warning in &lowered.warnings {
+                eprintln!("warning: {warning}");
+            }
             let config = runtime::RunConfig {
                 preopen_host_dirs: preopen,
                 ..runtime::RunConfig::default()

@@ -23,9 +23,9 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
             .get(v)
             .cloned()
             .with_context(|| format!("unknown variable `${v}`")),
-        Expr::Constructor {
-            union_key,
-            variant,
+        Expr::EnumConstructor {
+            enum_key,
+            tag,
             payload,
         } => {
             let payload_value = payload
@@ -33,9 +33,9 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
                 .map(|p| eval_expr(p, env))
                 .transpose()?
                 .map(Box::new);
-            Ok(RuntimeValue::Union {
-                union_key: union_key.clone(),
-                variant: variant.clone(),
+            Ok(RuntimeValue::Enum {
+                enum_key: enum_key.clone(),
+                tag: tag.clone(),
                 payload: payload_value,
             })
         }
@@ -63,30 +63,30 @@ fn exec_statement(
         }
         Statement::Match {
             target,
-            union_key,
+            enum_key,
             arms,
         } => {
             let value = eval_expr(target, env)?;
-            let RuntimeValue::Union {
-                union_key: actual_union,
-                variant,
+            let RuntimeValue::Enum {
+                enum_key: actual_enum,
+                tag,
                 payload,
             } = value
             else {
-                bail!("$match target did not evaluate to union value");
+                bail!("$match target did not evaluate to enum value");
             };
-            if &actual_union != union_key {
-                bail!("$match target union mismatch: expected `{union_key}`, got `{actual_union}`");
+            if &actual_enum != enum_key {
+                bail!("$match target enum mismatch: expected `{enum_key}`, got `{actual_enum}`");
             }
             let arm = arms
                 .iter()
-                .find(|a| a.variant == variant)
-                .with_context(|| format!("missing runtime $match arm for variant `{variant}`"))?;
+                .find(|a| a.tag == tag)
+                .with_context(|| format!("missing runtime $match arm for tag `{tag}`"))?;
             let mut scoped = env.clone();
             if let Some(bind_name) = &arm.bind {
                 let payload_value = payload
                     .map(|p| *p)
-                    .with_context(|| format!("variant `{variant}` had no payload for binding"))?;
+                    .with_context(|| format!("tag `{tag}` had no payload for binding"))?;
                 scoped.insert(bind_name.clone(), payload_value);
             }
             for nested in &arm.body {
@@ -103,15 +103,17 @@ fn exec_statement(
 fn eval_i64(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<i64> {
     match eval_expr(expr, env)? {
         RuntimeValue::Int(i) => Ok(i),
-        RuntimeValue::Union {
-            union_key,
+        RuntimeValue::Float(_) => bail!("expected integer, got float"),
+        RuntimeValue::Enum {
+            enum_key,
             payload: Some(payload),
             ..
-        } if domain_type_matches(&union_key, "Fd") => match *payload {
+        } if domain_type_matches(&enum_key, "fd") => match *payload {
             RuntimeValue::Int(i) => Ok(i),
-            other => bail!("expected Fd payload int, got {other:?}"),
+            RuntimeValue::Float(_) => bail!("expected fd payload integer, got float"),
+            other => bail!("expected fd payload int, got {other:?}"),
         },
-        other => bail!("expected int, got {other:?}"),
+        other => bail!("expected integer, got {other:?}"),
     }
 }
 
@@ -129,11 +131,11 @@ fn eval_domain_string(
 ) -> Result<String> {
     match eval_expr(expr, env)? {
         RuntimeValue::Str(s) => Ok(s),
-        RuntimeValue::Union {
-            union_key,
+        RuntimeValue::Enum {
+            enum_key,
             payload: Some(payload),
             ..
-        } if domain_type_matches(&union_key, domain) => match *payload {
+        } if domain_type_matches(&enum_key, domain) => match *payload {
             RuntimeValue::Str(s) => Ok(s),
             other => bail!("expected {domain} payload string, got {other:?}"),
         },
@@ -146,17 +148,17 @@ fn domain_type_matches(union_key: &str, expected: &str) -> bool {
 }
 
 fn wrap_domain_string(domain: &str, value: String) -> RuntimeValue {
-    RuntimeValue::Union {
-        union_key: format!("types.{domain}"),
-        variant: "FromStr".to_string(),
+    RuntimeValue::Enum {
+        enum_key: format!("types.{domain}"),
+        tag: "str".to_string(),
         payload: Some(Box::new(RuntimeValue::Str(value))),
     }
 }
 
 fn wrap_domain_int(domain: &str, value: i64) -> RuntimeValue {
-    RuntimeValue::Union {
-        union_key: format!("types.{domain}"),
-        variant: "FromInt".to_string(),
+    RuntimeValue::Enum {
+        enum_key: format!("types.{domain}"),
+        tag: "int".to_string(),
         payload: Some(Box::new(RuntimeValue::Int(value))),
     }
 }
@@ -286,36 +288,36 @@ fn exec_call(call: &Call, env: &HashMap<String, RuntimeValue>, config: &RunConfi
         }
 
         "create-dir-all" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let p = resolve_preopen(&path, config)?;
             fs::create_dir_all(p).context("create-dir-all")?;
             Ok(RuntimeValue::Void)
         }
         "remove-file" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let p = resolve_preopen(&path, config)?;
             fs::remove_file(p).context("remove-file")?;
             Ok(RuntimeValue::Void)
         }
         "remove-dir" => {
-            let path = eval_domain_string(&call.args[0], env, "Dir")?;
+            let path = eval_domain_string(&call.args[0], env, "dir")?;
             let p = resolve_preopen(&path, config)?;
             fs::remove_dir_all(p).context("remove-dir")?;
             Ok(RuntimeValue::Void)
         }
         "exists" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let p = resolve_preopen(&path, config)?;
             Ok(RuntimeValue::Int(if p.exists() { 1 } else { 0 }))
         }
         "canonicalize" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let p = resolve_preopen(&path, config)?;
             let c = p.canonicalize().context("canonicalize")?;
-            Ok(wrap_domain_string("Path", c.display().to_string()))
+            Ok(wrap_domain_string("path", c.display().to_string()))
         }
         "metadata" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let p = resolve_preopen(&path, config)?;
             let md = fs::metadata(p).context("metadata")?;
             Ok(RuntimeValue::Str(format!(
@@ -325,20 +327,20 @@ fn exec_call(call: &Call, env: &HashMap<String, RuntimeValue>, config: &RunConfi
             )))
         }
         "read-file" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let p = resolve_preopen(&path, config)?;
             let s = fs::read_to_string(p).context("read-file")?;
             Ok(RuntimeValue::Str(s))
         }
         "write-file" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let contents = eval_string(&call.args[1], env)?;
             let p = resolve_preopen(&path, config)?;
             fs::write(p, contents).context("write-file")?;
             Ok(RuntimeValue::Void)
         }
         "append-file" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let contents = eval_string(&call.args[1], env)?;
             let p = resolve_preopen(&path, config)?;
             let mut f = fs::OpenOptions::new()
@@ -353,10 +355,10 @@ fn exec_call(call: &Call, env: &HashMap<String, RuntimeValue>, config: &RunConfi
             let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             let _ = fs::File::create(p).context("create-file")?;
-            Ok(wrap_domain_string("File", path))
+            Ok(wrap_domain_string("file", path))
         }
         "open-path" => {
-            let path = eval_domain_string(&call.args[0], env, "Path")?;
+            let path = eval_domain_string(&call.args[0], env, "path")?;
             let p = resolve_preopen(&path, config)?;
             let _ = fs::OpenOptions::new()
                 .create(true)
@@ -364,10 +366,10 @@ fn exec_call(call: &Call, env: &HashMap<String, RuntimeValue>, config: &RunConfi
                 .write(true)
                 .open(p)
                 .context("open-path")?;
-            Ok(wrap_domain_int("Fd", 1))
+            Ok(wrap_domain_int("fd", 1))
         }
         "read-dir" => {
-            let path = eval_domain_string(&call.args[0], env, "Dir")?;
+            let path = eval_domain_string(&call.args[0], env, "dir")?;
             let p = resolve_preopen(&path, config)?;
             let mut names = Vec::new();
             for e in fs::read_dir(p).context("read-dir")? {
