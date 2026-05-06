@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Registry of stable Vibra linter and compiler codes (reference for tooling)",
+  "codes": [
+    {
+      "code": "E-YAML-001",
+      "severity": "error",
+      "summary": "YAML construct outside strict subset (anchors, merge, tags, binary, etc.)"
+    },
+    {
+      "code": "E-YAML-002",
+      "severity": "error",
+      "summary": "Block comments forbidden in v1"
+    },
+    {
+      "code": "E-YAML-003",
+      "severity": "error",
+      "summary": "Ambiguous unquoted scalar (bool/null/number) where string required"
+    },
+    {
+      "code": "E-SYN-001",
+      "severity": "error",
+      "summary": "Invalid $-callee name (e.g. punctuation-only like $+); use identifier forms such as $add"
+    },
+    {
+      "code": "E-ONE-001",
+      "severity": "error",
+      "summary": "$function args must use named record, not tuple, in user modules"
+    },
+    {
+      "code": "E-ONE-002",
+      "severity": "error",
+      "summary": "$let must bind exactly one name per invocation"
+    },
+    {
+      "code": "E-ONE-003",
+      "severity": "error",
+      "summary": "$function.do must be a block sequence, not nested $do wrapper"
+    },
+    {
+      "code": "E-ONE-004",
+      "severity": "error",
+      "summary": "Use $do for multi-step sequencing outside $function.do"
+    },
+    {
+      "code": "E-ONE-005",
+      "severity": "error",
+      "summary": "$if requires keys is, then, else"
+    },
+    {
+      "code": "E-ONE-006",
+      "severity": "error",
+      "summary": "String interpolation not allowed except blessed stdlib forms"
+    },
+    {
+      "code": "E-MOD-003",
+      "severity": "error",
+      "summary": "Import cycle detected"
+    },
+    {
+      "code": "E-TY-VARIANCE",
+      "severity": "warning",
+      "summary": "Variance / subtyping audit marker"
+    },
+    {
+      "code": "E-WASM-001",
+      "severity": "error",
+      "summary": "$wasm encoding does not match active compiler WASM mode"
+    }
+  ]
+}

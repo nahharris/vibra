@@ -1,0 +1,16 @@
+[package]
+name = "vibra"
+version = "0.1.0"
+edition = "2021"
+description = "Vibe-coding-first language: YAML surface, static types, compiles to WebAssembly"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/nahharris/vibra"
+keywords = ["compiler", "wasm", "yaml", "functional"]
+categories = ["compilers", "development-tools"]
+
+[[bin]]
+name = "vibra"
+path = "src/main.rs"
+
+[dependencies]

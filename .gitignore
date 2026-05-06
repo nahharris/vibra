@@ -1,0 +1,10 @@
+/target
+.agents/
+skills-lock.json
+*.rs.bk
+.DS_Store
+Thumbs.db
+.env
+.idea/
+.vscode/
+*.log

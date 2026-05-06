@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/expression.schema.json",
+  "title": "VibraExpression",
+  "description": "Surrogate schema: a Vibra expression is a YAML scalar, sequence, or mapping; this schema intentionally permits any JSON-safe value. Tooling narrows by context.",
+  "oneOf": [
+    { "type": "null" },
+    { "type": "boolean" },
+    { "type": "number" },
+    { "type": "string" },
+    { "type": "array", "items": { "$ref": "#" } },
+    {
+      "type": "object",
+      "additionalProperties": { "$ref": "#" }
+    }
+  ]
+}

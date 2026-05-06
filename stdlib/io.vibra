@@ -1,0 +1,11 @@
+# Stdlib: host printing. Implementation lowers $wasm to env.println per language spec §10.
+println:
+  $function:
+    args:
+      msg: $str
+    return: $void
+    do:
+      - $wasm:
+          host: println
+          args:
+            - $args.msg

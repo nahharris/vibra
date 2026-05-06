@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/query-response.schema.json",
+  "title": "VibraQueryResponse",
+  "description": "Payload for LSP custom request vibra/contextAt (or CLI vibra query)",
+  "type": "object",
+  "required": ["uri", "position"],
+  "additionalProperties": false,
+  "properties": {
+    "uri": { "type": "string", "format": "uri" },
+    "position": {
+      "type": "object",
+      "required": ["line", "column"],
+      "additionalProperties": false,
+      "properties": {
+        "line": { "type": "integer", "minimum": 0 },
+        "column": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "symbol": {
+      "type": ["string", "null"],
+      "description": "Resolved symbol at position, if any"
+    },
+    "symbolKind": {
+      "type": ["string", "null"],
+      "enum": ["module", "import-alias", "value", "type", "macro", "builtin", null]
+    },
+    "typeExpr": {
+      "description": "JSON/YAML-serialized type at this node, if known",
+      "type": ["object", "string", "null"]
+    },
+    "expectedKeys": {
+      "type": "array",
+      "description": "Valid child keys for the macro/mapping at cursor (LLM guardrail)",
+      "items": { "type": "string" }
+    },
+    "imports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["alias", "resolvedUri"],
+        "additionalProperties": false,
+        "properties": {
+          "alias": { "type": "string" },
+          "resolvedUri": { "type": "string", "format": "uri" }
+        }
+      }
+    },
+    "macroName": {
+      "type": ["string", "null"],
+      "description": "If inside a $-macro expansion, the macro key e.g. $function"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "./diagnostic.schema.json" }
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/type-expr.schema.json",
+  "title": "VibraTypeExpr",
+  "description": "JSON encoding of a Vibra type after YAML parse (surrogate for LLM tooling)",
+  "oneOf": [
+    { "type": "string", "enum": ["$int", "$float", "$bool", "$void", "$str"] },
+    {
+      "type": "object",
+      "required": ["$literal"],
+      "additionalProperties": false,
+      "properties": { "$literal": { "type": ["string", "number", "boolean"] } }
+    },
+    {
+      "type": "object",
+      "required": ["$record"],
+      "additionalProperties": false,
+      "properties": {
+        "$record": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#" }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$array"],
+      "additionalProperties": false,
+      "properties": { "$array": { "$ref": "#" } }
+    },
+    {
+      "type": "object",
+      "required": ["$tuple"],
+      "additionalProperties": false,
+      "properties": {
+        "$tuple": { "type": "array", "items": { "$ref": "#" } }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$union"],
+      "additionalProperties": false,
+      "properties": {
+        "$union": { "type": "array", "items": { "$ref": "#" }, "minItems": 2 }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$option"],
+      "additionalProperties": false,
+      "properties": { "$option": { "$ref": "#" } }
+    },
+    {
+      "type": "object",
+      "required": ["$interface"],
+      "additionalProperties": false,
+      "properties": {
+        "$interface": { "type": "object", "additionalProperties": { "$ref": "#" } }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$intersect"],
+      "additionalProperties": false,
+      "properties": {
+        "$intersect": { "type": "array", "items": { "$ref": "#" }, "minItems": 2 }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$fn-type"],
+      "additionalProperties": false,
+      "properties": {
+        "$fn-type": {
+          "type": "object",
+          "required": ["args", "return"],
+          "additionalProperties": false,
+          "properties": {
+            "args": { "$ref": "#" },
+            "return": { "$ref": "#" }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$map"],
+      "additionalProperties": false,
+      "properties": {
+        "$map": {
+          "type": "object",
+          "required": ["key", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "key": { "$ref": "#" },
+            "value": { "$ref": "#" }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["$forall"],
+      "additionalProperties": true,
+      "properties": {
+        "$forall": {
+          "type": "object",
+          "required": ["params", "body"],
+          "properties": {
+            "params": { "type": "array", "items": { "type": "string" } },
+            "bounds": { "type": "object" },
+            "body": { "$ref": "#" }
+          }
+        }
+      }
+    }
+  ]
+}

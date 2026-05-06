@@ -1,0 +1,8 @@
+io:
+  $import: ../stdlib/io.vibra
+main:
+  $function:
+    args: {}
+    return: $void
+    do:
+      - $io.println: "Hello, World!"
