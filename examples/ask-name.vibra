@@ -1,5 +1,7 @@
 io:
   $import: ../stdlib/io.vibra
+types:
+  $import: ../stdlib/types.vibra
 main:
   $function:
     args: $void
@@ -8,5 +10,6 @@ main:
       - $io.print: "What is your name? "
       - $let:
           name:
-            $io.read-line: $io.stdin-fd
+            $io.read-line:
+              $types.Fd.FromInt: $io.stdin-fd
       - $io.println: $name

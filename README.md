@@ -20,7 +20,17 @@ This parses the entry `.vibra` file, resolves `$import` **relative to that fileâ
 
 **Preopens:** by default the embedded runner does **not** preopen host directories (stdio is enough for hello). Programs that use [`stdlib/fs.vibra`](stdlib/fs.vibra) need at least one preopened path; configure [`RunConfig::preopen_host_dirs`](src/runtime/wasi_env.rs) when embedding, or add CLI flags when the compiler exposes them.
 
-**Current subset:** entry module defines `main` with empty `args`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns). `io` and `fs` functions declared in [stdlib/io.vibra](stdlib/io.vibra) and [stdlib/fs.vibra](stdlib/fs.vibra) are executable via the runtime execution backend.
+**Current subset:** entry module defines `main` with `args: $void`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns and `$match` over unions). `io` and `fs` functions declared in [stdlib/io.vibra](stdlib/io.vibra) and [stdlib/fs.vibra](stdlib/fs.vibra) are executable via the runtime execution backend.
+
+## Type System Snapshot
+
+- Primitive numerics: `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`
+- Explicit annotations are required on function signatures (`args` + `return`)
+- Algebraic unions are supported in stdlib and lowering (`$union`, constructors, `$match`)
+- Rust-inspired unions available:
+  - [stdlib/option.vibra](stdlib/option.vibra)
+  - [stdlib/result.vibra](stdlib/result.vibra)
+- Strong domain wrappers are available in [stdlib/types.vibra](stdlib/types.vibra): `Fd`, `Path`, `File`, `Dir` (and are used by `io`/`fs` APIs)
 
 ## Examples
 

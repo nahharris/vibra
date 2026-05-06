@@ -12,7 +12,7 @@ ciovec:
 write-raw:
   $function:
     args:
-      fd: $int
+      fd: $Fd
       bytes: $str
     return: $int
     do:
@@ -27,7 +27,7 @@ write-raw:
 write-all:
   $function:
     args:
-      fd: $int
+      fd: $Fd
       bytes: $str
     return: $int
     do:
@@ -110,7 +110,7 @@ flush-stdout:
 read-raw:
   $function:
     args:
-      fd: $int
+      fd: $Fd
       len: $int
     return: $str
     do:
@@ -125,7 +125,7 @@ read-raw:
 read-line:
   $function:
     args:
-      fd: $int
+      fd: $Fd
     return: $str
     do:
       - $wasm:

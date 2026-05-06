@@ -1,6 +1,6 @@
 //! Execute lowered Vibra programs with stdlib io/fs support.
 
-use crate::lower::{Call, Expr, LoweredProgram, RuntimeValue, Statement, WasmArgSpec};
+use crate::lower::{Call, Expr, LetValue, LoweredProgram, RuntimeValue, Statement, WasmArgSpec};
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
@@ -11,15 +11,7 @@ use std::path::{Path, PathBuf};
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     for stmt in &program.statements {
-        match stmt {
-            Statement::Call(call) => {
-                let _ = exec_call(call, &env, config)?;
-            }
-            Statement::Let { var, call } => {
-                let value = exec_call(call, &env, config)?;
-                env.insert(var.clone(), value);
-            }
-        }
+        exec_statement(stmt, &mut env, config)?;
     }
     Ok(())
 }
@@ -31,12 +23,94 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
             .get(v)
             .cloned()
             .with_context(|| format!("unknown variable `${v}`")),
+        Expr::Constructor {
+            union_key,
+            variant,
+            payload,
+        } => {
+            let payload_value = payload
+                .as_ref()
+                .map(|p| eval_expr(p, env))
+                .transpose()?
+                .map(Box::new);
+            Ok(RuntimeValue::Union {
+                union_key: union_key.clone(),
+                variant: variant.clone(),
+                payload: payload_value,
+            })
+        }
     }
+}
+
+fn exec_statement(
+    stmt: &Statement,
+    env: &mut HashMap<String, RuntimeValue>,
+    config: &RunConfig,
+) -> Result<()> {
+    match stmt {
+        Statement::Call(call) => {
+            let _ = exec_call(call, env, config)?;
+        }
+        Statement::Let {
+            var,
+            value: binding,
+        } => {
+            let value = match binding {
+                LetValue::Call(c) => exec_call(c, env, config)?,
+                LetValue::Expr(e) => eval_expr(e, env)?,
+            };
+            env.insert(var.clone(), value);
+        }
+        Statement::Match {
+            target,
+            union_key,
+            arms,
+        } => {
+            let value = eval_expr(target, env)?;
+            let RuntimeValue::Union {
+                union_key: actual_union,
+                variant,
+                payload,
+            } = value
+            else {
+                bail!("$match target did not evaluate to union value");
+            };
+            if &actual_union != union_key {
+                bail!("$match target union mismatch: expected `{union_key}`, got `{actual_union}`");
+            }
+            let arm = arms
+                .iter()
+                .find(|a| a.variant == variant)
+                .with_context(|| format!("missing runtime $match arm for variant `{variant}`"))?;
+            let mut scoped = env.clone();
+            if let Some(bind_name) = &arm.bind {
+                let payload_value = payload
+                    .map(|p| *p)
+                    .with_context(|| format!("variant `{variant}` had no payload for binding"))?;
+                scoped.insert(bind_name.clone(), payload_value);
+            }
+            for nested in &arm.body {
+                exec_statement(nested, &mut scoped, config)?;
+            }
+            for (k, v) in scoped {
+                env.insert(k, v);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn eval_i64(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<i64> {
     match eval_expr(expr, env)? {
         RuntimeValue::Int(i) => Ok(i),
+        RuntimeValue::Union {
+            union_key,
+            payload: Some(payload),
+            ..
+        } if domain_type_matches(&union_key, "Fd") => match *payload {
+            RuntimeValue::Int(i) => Ok(i),
+            other => bail!("expected Fd payload int, got {other:?}"),
+        },
         other => bail!("expected int, got {other:?}"),
     }
 }
@@ -45,6 +119,45 @@ fn eval_string(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Strin
     match eval_expr(expr, env)? {
         RuntimeValue::Str(s) => Ok(s),
         other => bail!("expected string, got {other:?}"),
+    }
+}
+
+fn eval_domain_string(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    domain: &str,
+) -> Result<String> {
+    match eval_expr(expr, env)? {
+        RuntimeValue::Str(s) => Ok(s),
+        RuntimeValue::Union {
+            union_key,
+            payload: Some(payload),
+            ..
+        } if domain_type_matches(&union_key, domain) => match *payload {
+            RuntimeValue::Str(s) => Ok(s),
+            other => bail!("expected {domain} payload string, got {other:?}"),
+        },
+        other => bail!("expected {domain} or string wrapper, got {other:?}"),
+    }
+}
+
+fn domain_type_matches(union_key: &str, expected: &str) -> bool {
+    union_key == expected || union_key.ends_with(&format!(".{expected}"))
+}
+
+fn wrap_domain_string(domain: &str, value: String) -> RuntimeValue {
+    RuntimeValue::Union {
+        union_key: format!("types.{domain}"),
+        variant: "FromStr".to_string(),
+        payload: Some(Box::new(RuntimeValue::Str(value))),
+    }
+}
+
+fn wrap_domain_int(domain: &str, value: i64) -> RuntimeValue {
+    RuntimeValue::Union {
+        union_key: format!("types.{domain}"),
+        variant: "FromInt".to_string(),
+        payload: Some(Box::new(RuntimeValue::Int(value))),
     }
 }
 
@@ -173,36 +286,36 @@ fn exec_call(call: &Call, env: &HashMap<String, RuntimeValue>, config: &RunConfi
         }
 
         "create-dir-all" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             fs::create_dir_all(p).context("create-dir-all")?;
             Ok(RuntimeValue::Void)
         }
         "remove-file" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             fs::remove_file(p).context("remove-file")?;
             Ok(RuntimeValue::Void)
         }
         "remove-dir" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Dir")?;
             let p = resolve_preopen(&path, config)?;
             fs::remove_dir_all(p).context("remove-dir")?;
             Ok(RuntimeValue::Void)
         }
         "exists" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             Ok(RuntimeValue::Int(if p.exists() { 1 } else { 0 }))
         }
         "canonicalize" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             let c = p.canonicalize().context("canonicalize")?;
-            Ok(RuntimeValue::Str(c.display().to_string()))
+            Ok(wrap_domain_string("Path", c.display().to_string()))
         }
         "metadata" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             let md = fs::metadata(p).context("metadata")?;
             Ok(RuntimeValue::Str(format!(
@@ -212,20 +325,20 @@ fn exec_call(call: &Call, env: &HashMap<String, RuntimeValue>, config: &RunConfi
             )))
         }
         "read-file" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             let s = fs::read_to_string(p).context("read-file")?;
             Ok(RuntimeValue::Str(s))
         }
         "write-file" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let contents = eval_string(&call.args[1], env)?;
             let p = resolve_preopen(&path, config)?;
             fs::write(p, contents).context("write-file")?;
             Ok(RuntimeValue::Void)
         }
         "append-file" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let contents = eval_string(&call.args[1], env)?;
             let p = resolve_preopen(&path, config)?;
             let mut f = fs::OpenOptions::new()
@@ -237,13 +350,13 @@ fn exec_call(call: &Call, env: &HashMap<String, RuntimeValue>, config: &RunConfi
             Ok(RuntimeValue::Void)
         }
         "create-file" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             let _ = fs::File::create(p).context("create-file")?;
-            Ok(RuntimeValue::Int(1))
+            Ok(wrap_domain_string("File", path))
         }
         "open-path" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Path")?;
             let p = resolve_preopen(&path, config)?;
             let _ = fs::OpenOptions::new()
                 .create(true)
@@ -251,10 +364,10 @@ fn exec_call(call: &Call, env: &HashMap<String, RuntimeValue>, config: &RunConfi
                 .write(true)
                 .open(p)
                 .context("open-path")?;
-            Ok(RuntimeValue::Int(1))
+            Ok(wrap_domain_int("Fd", 1))
         }
         "read-dir" => {
-            let path = eval_string(&call.args[0], env)?;
+            let path = eval_domain_string(&call.args[0], env, "Dir")?;
             let p = resolve_preopen(&path, config)?;
             let mut names = Vec::new();
             for e in fs::read_dir(p).context("read-dir")? {

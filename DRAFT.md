@@ -294,7 +294,7 @@ io:
   $import: ./stdlib/io.vibra
 main:
   $function:
-    args: {}
+    args: $void
     return: $void
     do:
       - $io.println: "Hello, World!"
@@ -307,3 +307,13 @@ main:
 ## Appendix: legacy draft examples
 
 Tuple-typed args and `$dict` in the original draft are **superseded** by §4 and §6; migrate to **named record `args`** and **`$record`**.
+
+---
+
+## 13. Typed stdlib conventions (current)
+
+- **Numeric primitives:** `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`.
+- **No-arg function convention:** use `args: $void` (not empty mapping).
+- **Discriminated unions:** use `$union` with named variants and payload type per variant.
+- **Domain wrappers:** stdlib defines nominal wrappers (`Fd`, `Path`, `File`, `Dir`) in `stdlib/types.vibra`; io/fs signatures use these wrappers instead of raw integers/strings.
+- **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) and `stdlib/result.vibra` (`Result`) use nominal variant constructors and are consumable via `$match`.

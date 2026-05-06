@@ -19,10 +19,10 @@ lookup-symlink-follow: 1
 open-path:
   $function:
     args:
-      path: $str
+      path: $Path
       oflags: $int
       fdflags: $int
-    return: $int
+    return: $Fd
     do:
       - $wasm:
           import:
@@ -36,8 +36,8 @@ open-path:
 create-file:
   $function:
     args:
-      path: $str
-    return: $int
+      path: $Path
+    return: $File
     do:
       - $wasm:
           import:
@@ -51,7 +51,7 @@ create-file:
 read-file:
   $function:
     args:
-      path: $str
+      path: $Path
     return: $str
     do:
       - $wasm:
@@ -64,7 +64,7 @@ read-file:
 write-file:
   $function:
     args:
-      path: $str
+      path: $Path
       contents: $str
     return: $void
     do:
@@ -79,7 +79,7 @@ write-file:
 append-file:
   $function:
     args:
-      path: $str
+      path: $Path
       contents: $str
     return: $void
     do:
@@ -94,7 +94,7 @@ append-file:
 remove-file:
   $function:
     args:
-      path: $str
+      path: $Path
     return: $void
     do:
       - $wasm:
@@ -107,7 +107,7 @@ remove-file:
 remove-dir:
   $function:
     args:
-      path: $str
+      path: $Dir
     return: $void
     do:
       - $wasm:
@@ -120,7 +120,7 @@ remove-dir:
 create-dir-all:
   $function:
     args:
-      path: $str
+      path: $Path
     return: $void
     do:
       - $wasm:
@@ -133,7 +133,7 @@ create-dir-all:
 read-dir:
   $function:
     args:
-      path: $str
+      path: $Dir
     return: $str
     do:
       - $wasm:
@@ -146,7 +146,7 @@ read-dir:
 exists:
   $function:
     args:
-      path: $str
+      path: $Path
     return: $int
     do:
       - $wasm:
@@ -159,8 +159,8 @@ exists:
 canonicalize:
   $function:
     args:
-      path: $str
-    return: $str
+      path: $Path
+    return: $Path
     do:
       - $wasm:
           import:
@@ -172,7 +172,7 @@ canonicalize:
 metadata:
   $function:
     args:
-      path: $str
+      path: $Path
     return: $str
     do:
       - $wasm:

@@ -2,16 +2,21 @@ io:
   $import: ../stdlib/io.vibra
 fs:
   $import: ../stdlib/fs.vibra
+types:
+  $import: ../stdlib/types.vibra
 main:
   $function:
     args: $void
     return: $void
     do:
-      - $fs.create-dir-all: "tmp"
+      - $fs.create-dir-all:
+          $types.Path.FromStr: "tmp"
       - $fs.write-file:
-          path: "tmp/hello.txt"
+          path:
+            $types.Path.FromStr: "tmp/hello.txt"
           contents: "from vibra fs"
       - $let:
           text:
-            $fs.read-file: "tmp/hello.txt"
+            $fs.read-file:
+              $types.Path.FromStr: "tmp/hello.txt"
       - $io.println: $text
