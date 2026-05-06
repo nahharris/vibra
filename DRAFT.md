@@ -2,6 +2,8 @@
 
 Vibra is a functional, vibe-coding-first language: **YAML surface** (strict subset), **static types** (TypeScript familiarity + Rust-ish safety), compiles to **WebAssembly**, and favors **one obvious form** per construct so LLMs make fewer choices.
 
+The **`vibra` CLI** in this repo implements a **reference subset** for bootstrapping (see [README.md](README.md)); the sections below remain the **authoritative language design**.
+
 ---
 
 ## 1. Design principles
