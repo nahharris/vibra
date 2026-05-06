@@ -1,0 +1,17 @@
+io:
+  $import: ../stdlib/io.vibra
+fs:
+  $import: ../stdlib/fs.vibra
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $fs.create-dir-all: "tmp"
+      - $fs.write-file:
+          path: "tmp/hello.txt"
+          contents: "from vibra fs"
+      - $let:
+          text:
+            $fs.read-file: "tmp/hello.txt"
+      - $io.println: $text

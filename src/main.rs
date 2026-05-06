@@ -3,7 +3,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use vibra::{emit, load, lower, run_wasmer};
+use vibra::{execute, load, lower, runtime};
 
 #[derive(Parser)]
 #[command(name = "vibra", version, about = "Vibra language toolchain")]
@@ -18,17 +18,23 @@ enum Command {
     Run {
         /// Entry module path (e.g. examples/hello.vibra).
         path: PathBuf,
+        /// Preopen host directory for filesystem operations (repeatable).
+        #[arg(long = "preopen")]
+        preopen: Vec<PathBuf>,
     },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Run { path } => {
+        Command::Run { path, preopen } => {
             let program = load::load_program(&path)?;
-            let message = lower::extract_print_message(&program)?;
-            let wasm = emit::emit_println_wasm(message.as_bytes());
-            run_wasmer::run_wasm(&wasm)?;
+            let lowered = lower::lower_program(&program)?;
+            let config = runtime::RunConfig {
+                preopen_host_dirs: preopen,
+                ..runtime::RunConfig::default()
+            };
+            execute::run_lowered(&lowered, &config)?;
         }
     }
     Ok(())

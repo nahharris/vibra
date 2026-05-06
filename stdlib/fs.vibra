@@ -1,0 +1,183 @@
+# Stdlib: filesystem — WASI preview1 names and numeric constants (see https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md).
+
+# `oflags` (path_open)
+oflag-creat: 1
+oflag-directory: 2
+oflag-excl: 4
+oflag-trunc: 8
+
+# `fdflags`
+fdflag-append: 1
+fdflag-dsync: 2
+fdflag-nonblock: 4
+fdflag-rsync: 8
+fdflag-sync: 16
+
+# `lookupflags` (path_open)
+lookup-symlink-follow: 1
+
+open-path:
+  $function:
+    args:
+      path: $str
+      oflags: $int
+      fdflags: $int
+    return: $int
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_open
+          args:
+            - $args.path
+            - $args.oflags
+            - $args.fdflags
+
+create-file:
+  $function:
+    args:
+      path: $str
+    return: $int
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_open
+          args:
+            - $args.path
+            - $const.1
+            - $const.0
+
+read-file:
+  $function:
+    args:
+      path: $str
+    return: $str
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_open
+          args:
+            - $args.path
+
+write-file:
+  $function:
+    args:
+      path: $str
+      contents: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_open
+          args:
+            - $args.path
+            - $args.contents
+
+append-file:
+  $function:
+    args:
+      path: $str
+      contents: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_open
+          args:
+            - $args.path
+            - $args.contents
+
+remove-file:
+  $function:
+    args:
+      path: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_unlink_file
+          args:
+            - $args.path
+
+remove-dir:
+  $function:
+    args:
+      path: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_remove_directory
+          args:
+            - $args.path
+
+create-dir-all:
+  $function:
+    args:
+      path: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_create_directory
+          args:
+            - $args.path
+
+read-dir:
+  $function:
+    args:
+      path: $str
+    return: $str
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_readdir
+          args:
+            - $args.path
+
+exists:
+  $function:
+    args:
+      path: $str
+    return: $int
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_filestat_get
+          args:
+            - $args.path
+
+canonicalize:
+  $function:
+    args:
+      path: $str
+    return: $str
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_filestat_get
+          args:
+            - $args.path
+
+metadata:
+  $function:
+    args:
+      path: $str
+    return: $str
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_filestat_get
+          args:
+            - $args.path

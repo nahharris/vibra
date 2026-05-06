@@ -20,6 +20,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 wasm-encoder = "0.240"
 wasmer = "4.4"
+wasmer-wasix = { version = "0.28.0", default-features = false, features = ["sys-default"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]
 tempfile = "3.14"

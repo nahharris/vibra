@@ -16,9 +16,21 @@ cargo run -- run examples/hello.vibra
 vibra run examples/hello.vibra
 ```
 
-This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), compiles a **small fixed subset** to `wasm32`, and executes it with **embedded Wasmer**. The host provides `env.println(ptr, len)` (UTF-8 in guest linear memory).
+This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is now explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
 
-**Current subset:** entry module must define `main` as `$function` with empty `args`, `return: $void`, and `do:` containing exactly one call: `$alias.println: "literal string"`, where `alias` maps via `$import` to a module whose `println` matches the stub in [stdlib/io.vibra](stdlib/io.vibra). Anything else should produce a clear error until the compiler grows.
+**Preopens:** by default the embedded runner does **not** preopen host directories (stdio is enough for hello). Programs that use [`stdlib/fs.vibra`](stdlib/fs.vibra) need at least one preopened path; configure [`RunConfig::preopen_host_dirs`](src/runtime/wasi_env.rs) when embedding, or add CLI flags when the compiler exposes them.
+
+**Current subset:** entry module defines `main` with empty `args`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns). `io` and `fs` functions declared in [stdlib/io.vibra](stdlib/io.vibra) and [stdlib/fs.vibra](stdlib/fs.vibra) are executable via the runtime execution backend.
+
+## Examples
+
+```sh
+# Interactive stdin path
+cargo run -- run examples/ask-name.vibra
+
+# Filesystem roundtrip (requires preopen)
+cargo run -- run examples/fs-roundtrip.vibra --preopen .
+```
 
 ## Build & test
 

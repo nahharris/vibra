@@ -1,4 +1,58 @@
-# Stdlib: host printing. Implementation lowers $wasm to env.println per language spec §10.
+# Stdlib: stdio via WASI preview1 (`wasi_snapshot_preview1`). The MVP compiler emits `fd_write` to fd 1 for hello/`println`.
+
+stdin-fd: 0
+stdout-fd: 1
+stderr-fd: 2
+
+ciovec:
+  $record:
+    ptr: $int
+    len: $int
+
+write-raw:
+  $function:
+    args:
+      fd: $int
+      bytes: $str
+    return: $int
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_write
+          args:
+            - $args.fd
+            - $args.bytes
+
+write-all:
+  $function:
+    args:
+      fd: $int
+      bytes: $str
+    return: $int
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_write
+          args:
+            - $args.fd
+            - $args.bytes
+
+print:
+  $function:
+    args:
+      msg: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_write
+          args:
+            - $const.1
+            - $args.msg
+
 println:
   $function:
     args:
@@ -6,6 +60,77 @@ println:
     return: $void
     do:
       - $wasm:
-          host: println
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_write
           args:
+            - $const.1
             - $args.msg
+
+eprint:
+  $function:
+    args:
+      msg: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_write
+          args:
+            - $const.2
+            - $args.msg
+
+eprintln:
+  $function:
+    args:
+      msg: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_write
+          args:
+            - $const.2
+            - $args.msg
+
+flush-stdout:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+
+read-raw:
+  $function:
+    args:
+      fd: $int
+      len: $int
+    return: $str
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_read
+          args:
+            - $args.fd
+            - $args.len
+
+read-line:
+  $function:
+    args:
+      fd: $int
+    return: $str
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_read
+          args:
+            - $args.fd

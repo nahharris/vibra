@@ -1,0 +1,12 @@
+io:
+  $import: ../stdlib/io.vibra
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $io.print: "What is your name? "
+      - $let:
+          name:
+            $io.read-line: $io.stdin-fd
+      - $io.println: $name

@@ -214,16 +214,19 @@ $do:
 - **Intrinsic** node carrying **opaque WASM** or a **structured opcode list**—**exactly one** encoding is enabled per compiler build (see §10).
 - Every `$wasm` occurrence must have a **fully explicit** type signature in the typed IR (no implicit unsafe).
 
-**v1 structured stub** (concrete shape frozen with compiler; illustrative):
+**v1 structured stub (WASI):** import module + function name (no ad-hoc `env.*` host for stdio):
 
 ```yaml
 $wasm:
-  host: println
+  import:
+    module: wasi_snapshot_preview1
+    name: fd_write
   args:
+    - $const.1
     - $args.msg
 ```
 
-Opaque mode would use e.g. `bytes: ...` or `wat: |` instead of `host`—**never both**.
+Current compiler behavior validates stdlib signatures and forwards call-site arguments into declared `$wasm.args` entries (`$args.*`/`$const.*`) before execution.
 
 ### Imports as directives
 
@@ -256,12 +259,14 @@ Opaque mode would use e.g. `bytes: ...` or `wat: |` instead of `host`—**never 
 
 **Memory:** **Linear memory** + **bump/arena** allocator strategy recommended for v1; no GC requirement.
 
-**Host imports (`env`):**
+**WASI imports (`wasi_snapshot_preview1`, preview1):**
 
-| Import | Signature (conceptual) | Notes |
-|--------|------------------------|-------|
-| `println` | `(ptr: i32, len: i32) -> ()` | UTF-8 bytes; exact ABI versioned with compiler |
-| (extensible) | … | New host hooks added only with semver |
+| Import | Signature (wasm32) | Notes |
+|--------|-------------------|-------|
+| `fd_write` | `(i32 fd, i32 iovs_ptr, i32 iovs_len, i32 nwritten_ptr) -> i32` | errno; UTF-8 via `ciovec` list in linear memory |
+| (others) | per [WASI preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) | `stdlib/fs.vibra` lists representative names |
+
+The embedded runner uses **wasmer-wasix** (requires a Tokio 1.x runtime). **Preopened directories** map host paths into the guest; stdio does not require preopens.
 
 **`$wasm` encoding (pick one per build):**
 
