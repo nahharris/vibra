@@ -1,5 +1,3 @@
 option:
-  $forall:
-    types: [t]
-    in:
-      $union: [$void, $t]
+  $union: [$void, $t]
+  =where: {t: []}

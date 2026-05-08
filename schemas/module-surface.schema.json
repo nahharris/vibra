@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/module-surface.schema.json",
   "title": "VibraModuleSurface",
-  "description": "Loose schema for a parsed module root mapping (post-YAML). Keys are symbol names; values are arbitrary YAML-JSON encodings.",
+  "description": "Loose schema for a parsed module root mapping (post-YAML). Module-level keys are symbol names (kebab-case, optional leading `-` for module-private). A symbol's value is either a scalar (constant) or a definition envelope: a mapping with exactly one `$`-form key (`$function`, `$import`, or one of the type constructors in type-expr.schema.json) plus zero or more `=`-prefixed annotation siblings (`=where`, `=doc`, and -- introduced in later phases -- `=defs`, `=impl`).",
   "type": "object",
   "propertyNames": {
     "pattern": "^-?[a-z][a-z0-9]*(-[a-z0-9]+)*$"
   },
   "additionalProperties": {
-    "description": "Symbol definition: mapping, sequence, or scalar per Vibra spec"
+    "description": "Symbol definition: scalar (constant), or a mapping whose keys each match `^\\$[A-Za-z][A-Za-z0-9.\\-]*$` (form / type-form key) or `^=[a-z][a-z0-9]*(-[a-z0-9]+)*$` (annotation). Bare un-prefixed keys like `where`/`doc` are rejected (`E-ANNO-002`)."
   }
 }

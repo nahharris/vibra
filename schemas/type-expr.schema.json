@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/type-expr.schema.json",
   "title": "VibraTypeExpr",
-  "description": "JSON encoding of a Vibra type after YAML parse (surrogate for LLM tooling)",
+  "description": "JSON encoding of a Vibra type after YAML parse (surrogate for LLM tooling). Generic parameters are declared at module-symbol level via the `=where` annotation; a use site of a generic alias must instantiate via `{ $alias: { tparam: T, ... } }`. Inline generic types are not expressible. `$self` is a reserved type usable only inside an `$interface` body (existential placeholder) or inside a type's `=defs` / `=impl` annotation (resolves to the enclosing type).",
   "oneOf": [
     {
       "type": "string",
@@ -19,7 +19,8 @@
         "$float64",
         "$bool",
         "$void",
-        "$str"
+        "$str",
+        "$self"
       ]
     },
     {
@@ -129,24 +130,16 @@
     },
     {
       "type": "object",
-      "required": ["$forall"],
-      "additionalProperties": false,
-      "properties": {
-        "$forall": {
+      "minProperties": 1,
+      "maxProperties": 1,
+      "patternProperties": {
+        "^\\$[A-Za-z][A-Za-z0-9.\\-]*$": {
           "type": "object",
-          "required": ["types", "in"],
-          "additionalProperties": false,
-          "properties": {
-            "types": {
-              "type": "array",
-              "items": { "type": "string" },
-              "minItems": 1
-            },
-            "where": { "type": "object" },
-            "in": { "$ref": "#" }
-          }
+          "additionalProperties": { "$ref": "#" },
+          "description": "Use-site instantiation of a generic type alias: keys are the alias's type-parameter names from its `where` annotation."
         }
-      }
+      },
+      "additionalProperties": false
     }
   ]
 }

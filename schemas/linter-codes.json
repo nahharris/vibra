@@ -66,6 +66,91 @@
       "code": "E-WASM-001",
       "severity": "error",
       "summary": "$wasm encoding does not match active compiler WASM mode"
+    },
+    {
+      "code": "E-ANNO-001",
+      "severity": "error",
+      "summary": "Unknown annotation key on a top-level definition (recognised `=`-prefixed annotations: `=doc`, `=where`; further additions documented per phase)"
+    },
+    {
+      "code": "E-ANNO-002",
+      "severity": "error",
+      "summary": "Legacy un-prefixed annotation key (`where:`, `doc:`); v1 annotations must use the `=` prefix (rename to `=where`, `=doc`)"
+    },
+    {
+      "code": "E-WHERE-002",
+      "severity": "error",
+      "summary": "`=where` bound list element does not resolve to an interface (or `$intersect` of interfaces). Bounds may be a registered `$interface` alias, an inline `$interface`, or an `$intersect` of those."
+    },
+    {
+      "code": "E-BOUND-001",
+      "severity": "error",
+      "summary": "Type argument supplied to a generic call site or a generic type-position instantiation does not satisfy its declared `=where` bound. Satisfaction requires a nominal `=impl` block on the implementing type for each interface in the bound. Also raised by interface-qualified dispatch (`$iface.method`) when the dispatch argument's type has no matching `=impl`."
+    },
+    {
+      "code": "E-CALL-IFACE-NOSELF",
+      "severity": "error",
+      "summary": "Interface-qualified call (`$iface.method`) targets an interface method that has no `$self`-typed argument, so dispatch is impossible. Use the type-qualified form `$<implementing-type>.<iface>.<method>` instead."
+    },
+    {
+      "code": "E-DISPATCH-001",
+      "severity": "error",
+      "summary": "Interface-qualified call's `$self` argument has a generic static type. Dispatch through generics requires monomorphisation, which is not yet implemented in v1; pass a concrete value or call the type-qualified form."
+    },
+    {
+      "code": "E-DOC-001",
+      "severity": "error",
+      "summary": "`=doc` annotation must be a string scalar (YAML `|` block or quoted string)"
+    },
+    {
+      "code": "E-GEN-001",
+      "severity": "error",
+      "summary": "Bare reference to a generic type alias requires explicit instantiation `{ $alias: { tparam: T, ... } }`"
+    },
+    {
+      "code": "E-GEN-002",
+      "severity": "error",
+      "summary": "Generic alias instantiation is malformed (unknown alias, missing param, unknown param name, or arity mismatch)"
+    },
+    {
+      "code": "E-SELF-001",
+      "severity": "error",
+      "summary": "Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation"
+    },
+    {
+      "code": "E-DEFS-001",
+      "severity": "error",
+      "summary": "Invalid `=defs` annotation (placed on a non-type definition, entry is not a `$function`, or duplicate inherent op name)"
+    },
+    {
+      "code": "E-IMPL-001",
+      "severity": "error",
+      "summary": "Invalid `=impl` annotation (placed on a non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a `$ref` string)"
+    },
+    {
+      "code": "E-IMPL-002",
+      "severity": "error",
+      "summary": "`=impl` keyed by an alias that does not resolve to a registered `$interface` type"
+    },
+    {
+      "code": "E-IMPL-003",
+      "severity": "error",
+      "summary": "`=impl` block missing a binding for one of the interface's `=where` type-parameters or one of the interface's methods"
+    },
+    {
+      "code": "E-IMPL-004",
+      "severity": "error",
+      "summary": "`=impl` payload contains an unexpected key (not `=where`, an iface type-arg, or an iface method name)"
+    },
+    {
+      "code": "E-IMPL-005",
+      "severity": "error",
+      "summary": "`=impl` method signature does not match the interface declaration (after `$self` and iface type-arg substitution)"
+    },
+    {
+      "code": "E-IMPL-006",
+      "severity": "error",
+      "summary": "`=impl` method binding is a `$ref` string that does not resolve to a registered function"
     }
   ]
 }

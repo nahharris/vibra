@@ -1,7 +1,5 @@
 result:
-  $forall:
-    types: [t, e]
-    in:
-      $enum:
-        err: $e
-        ok: $t
+  $enum:
+    err: $e
+    ok: $t
+  =where: {t: [], e: []}

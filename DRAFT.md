@@ -166,32 +166,63 @@ $do:
 
 `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`, `$bool`, `$void`, `$str`.
 
+**Reserved type `$self`:** A self-reference to the enclosing type. Valid **only** in two contexts:
+
+- Inside an `$interface` body — an existential placeholder bound to each implementing type at impl time (Rust's `Self`-in-trait semantics).
+- Inside a type's `=defs` or `=impl` annotation (introduced in later phases) — resolves to the enclosing type during lowering.
+
+Anywhere else (record fields, free-standing function signatures, generic instantiations, top-level type bodies, …) `$self` is a parse-time error (`E-SELF-001`).
+
 ### Constructors (YAML forms)
 
 | Form | Meaning |
 |------|---------|
 | `$literal` | Literal type: `{ $literal: "ok" }` |
 | `$record` | Concrete product: `{ $record: { f: T, ... } }` |
-| `$map` | Homogeneous map (if in v1): `{ $map: { key: K, value: V } }` |
+| `$map` | Homogeneous map: `{ $map: { key: K, value: V } }` |
 | `$tuple` | Tuple of types: `{ $tuple: [$t1, $t2] }` — **type positions only** |
 | `$array` | Homogeneous array type: `{ $array: T }` |
-| `$list` | **Deprecated** for new code; use **`$array`** for types and YAML sequences for values. |
-| `$dict` | **Deprecated** for product types; use **`$record`** or **`$map`**. |
 | `$union` | `{ $union: [T1, T2, ...] }` — discriminated unions should use a **tag** field in `$record` variants |
-| `$option` | `{ $option: T }` — optional convenience form (equivalent to `{ $union: [$void, T] }`) |
+| `$option` | `{ $option: T }` — desugars at parse time to `{ $union: [$void, T] }` |
 | `$intersect` | `{ $intersect: [T1, T2] }` — compose interface requirements |
-| `$interface` | **Go-like structural interface:** `{ $interface: { name: T, ... } }` — each member is a **type**; function members use **`$fn-type`** |
+| `$interface` | **Go-like structural interface:** `{ $interface: { name: T, ... } }` — each member is a **type**; function members use **`$fn-type`**. Inside the body the reserved `$self` type stands for the implementing type. |
 | `$fn-type` | `{ $fn-type: { args: { $record: ... }, return: R } }` — **one** function type constructor |
-| `$forall` | Generics v1: `{ $forall: { types: [t, u], where: {}, in: <type> } }` — `types` declares type parameter names in order for the body; only names in `types` are treated as generics inside `in`. Optional `where` is reserved for future bounds (ignored if present). |
 
-**`$forall` semantics (v1):** Type parameters listed in `types` are the only symbols that resolve to type variables within `in`. At use sites, enum constructors unify payload types with the declared variant field types, producing a fully instantiated enum type (`Instantiated`) whose type arguments are ordered like `types`. Nested `$forall` in `in` shadows outer names.
+**Generics — `=where` annotation (v1):** Generic type parameters are declared at the **module-symbol level** via the `=where` annotation (see §13). The mapping's key order defines the positional order of type parameters. A bound list is a sequence of interface references (`$some-iface`, `$mod.iface`, or `$intersect` of those); the substituted type at every call site and type-position instantiation must have an explicit `=impl` block for each iface in the list (`E-BOUND-001`). Empty list `[]` means unbounded. `=where` is valid alongside any type-form key (`$enum`, `$union`, `$record`, `$tuple`, `$array`, `$map`, `$intersect`, `$interface`, `$fn-type`, `$literal`) **and** alongside `$function`. Type-parameter names are in scope for the form value (function `args` / `return` / `do:` body, or the type expression body).
+
+**Use-site instantiation (v1):** Every reference to a **generic type alias** at a type position must be an explicit instantiation: `{ $alias: { tparam: T, ... } }`. A bare `$alias` reference for a generic alias is an error (`E-GEN-001`). Non-generic aliases continue to be referenced as bare `$alias`. Mismatched arity, unknown parameter names, or missing parameters at instantiation are `E-GEN-002`.
+
+**Generic functions (v1):** `$function` may carry `=where`. Type parameters in `=where` are in scope for `args`, `return`, and the function body. Both **entry** `.vibra` modules and **imported** modules may define user-bodied functions (normal `do:` sequences) or stdlib-style functions whose `do:` is exactly one `$wasm` statement.
+
+**Calls to generic functions — explicit type arguments:** The call payload is a single mapping whose keys are the **names from `=where`** (type arguments, values are type expressions like `$int64`) plus the function's **value argument** names. Example: `{ $identity: { t: $int64, x: 7 } }`. Every type parameter must appear; there is no inference in v1.
+
+**Generic enum constructors — payload-driven inference:** Constructors at value sites (`$m.result.ok: 7`) infer their type arguments from the payload. This applies only at value sites; type-position uses still require explicit instantiation.
+
+**`$return` (user functions):** User-defined functions (non-`main`) with a non-`$void` return must terminate by **`$return: <expr>`** as the last statement of the function body, or by **`$match`** whose every arm’s `do:` ends with `$return` in the same sense. Functions with `return: $void` may omit `$return`. **`$return` is not allowed in `main`.**
 
 **Null safety (v1):** `null` is valid only for type `$void`, and is the only source-level value of `$void`. A value of type `T` can be coerced into a union containing `T` (e.g. `$union: [$void, T]`), but a union value cannot be coerced back to `T` without explicit narrowing (for tagged unions this is `$match`).
 
 ### Interface satisfaction
 
-- A **`$record` type** **satisfies** an **`$interface` type** if for every field `n: T` in the interface, the record has **`n`** with a type **`U`** such that **`U` is a subtype of `T`** per v1 rules (width subtyping toward the interface for records).
-- **Variance:** **v1:** function types are **invariant** in arguments and **covariant** in returns unless the compiler documents otherwise (`E-TY-VARIANCE` audit).
+Vibra distinguishes **two** ways an `$interface` is matched. They look similar but apply in different contexts and do not subsume each other.
+
+**Structural satisfaction (used as a type).** A `$record` type **structurally satisfies** an `$interface` type when, for every member `n: T` in the interface, the record has a field `n: U` with `U` a subtype of `T` per v1 rules (width subtyping toward the interface for records). This is the rule that lets a value flow into a position annotated with an interface type — function arguments, return types, record fields, etc. No `=impl` block is required. This is the existing Go-like behavior.
+
+**Nominal satisfaction (used as a bound or as a dispatch target).** A type **nominally satisfies** an interface only when its definition includes an explicit `=impl: { $iface: ... }` block (see §13.2). Nominal satisfaction is what `=where` bounds and interface-qualified dispatch (`$iface.method`) require:
+
+- A type argument passed to a `=where`-bounded generic parameter (`E-BOUND-001`).
+- The `$self`-typed dispatch argument of an interface-qualified call (also `E-BOUND-001`).
+
+Structural satisfaction is **not enough** to clear a `=where` bound or be a dispatch target. The asymmetry is intentional: structural matching is convenient at value sites where the relationship is local and obvious, while bounds and dispatch demand a coherent, opt-in registration so the impl table can be populated and the orphan rule can be enforced.
+
+| Context | Required | Mechanism |
+|---------|----------|-----------|
+| Type-annotated parameter / return / field | structural | width subtyping |
+| `=where: { t: [$iface, ...] }` bound | nominal | `=impl: { $iface: ... }` |
+| Interface-qualified call (`$iface.method`) | nominal | `=impl: { $iface: ... }` |
+| Type-qualified call (`$type.iface.method`) | nominal | `=impl: { $iface: ... }` |
+
+**Variance:** **v1:** function types are **invariant** in arguments and **covariant** in returns unless the compiler documents otherwise (`E-TY-VARIANCE` audit).
 
 ---
 
@@ -200,7 +231,7 @@ $do:
 **Host-reserved** keys (expand before user macros where applicable):
 
 - **Module system:** `$import` (compile-time only, appears only under import alias mapping).
-- **Core:** `$function`, `$let`, `$if`, `$do`, `$macro`, `$wasm`, `$as` (type ascription for `$let`).
+- **Core:** `$function`, `$let`, `$if`, `$do`, `$macro`, `$wasm`, `$return`, `$as` (type ascription for `$let`).
 - **Types:** primitive symbols and `$record`, `$array`, `$fn-type`, `$interface`, `$union`, `$option`, etc.
 
 **Effectful** IO and host calls should live in **`stdlib`** modules implemented atop **`$wasm`**, e.g. `io.println`, not as unlimited new host opcodes.
@@ -291,6 +322,28 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 - **Stable errors:** Each diagnostic has **`code`**, **`message`**, **`severity`**, **`span`**, optional **`related`**, optional **`fix`** (JSON Patch RFC 6902).
 - **LSP / `vibra query`:** Custom request **`vibra/contextAt`** (or equivalent): given `uri` + `position`, return **`QueryResponse`** (schema) with **expected keys**, **symbol**, **type**, **imports**, **macro schema** if applicable.
 
+**Annotation / generics codes (added with §13):**
+
+| Code | Severity | Summary |
+|------|----------|---------|
+| `E-ANNO-001` | error | Unknown annotation key on a definition (recognised `=`-prefixed annotations: `=doc`, `=where`, `=defs`, `=impl`). |
+| `E-ANNO-002` | error | Legacy un-prefixed annotation key (`where:`, `doc:`); v1 annotations must use the `=` prefix (rename to `=where`, `=doc`). |
+| `E-WHERE-002` | error | `=where` bound list element does not resolve to an interface (or `$intersect` of interfaces). |
+| `E-BOUND-001` | error | A generic call site or type-position instantiation passes a type argument that does not satisfy its declared `=where` bound (no matching nominal `=impl`). Also raised by interface-qualified dispatch when the dispatch argument's type has no `=impl`. |
+| `E-CALL-IFACE-NOSELF` | error | Interface-qualified call (`$iface.method`) targets a method with no `$self`-typed argument; use the type-qualified form. |
+| `E-DISPATCH-001` | error | Interface-qualified call's `$self` argument has a generic static type. Pending monomorphisation. |
+| `E-DOC-001` | error | `=doc` annotation must be a string scalar. |
+| `E-GEN-001` | error | Bare reference to a generic type alias requires explicit instantiation. |
+| `E-GEN-002` | error | Generic alias instantiation is malformed (unknown alias / param, missing param, arity mismatch). |
+| `E-SELF-001` | error | Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation. |
+| `E-DEFS-001` | error | Invalid `=defs` annotation (placed on a non-type definition, entry is not a `$function`, or duplicate name). |
+| `E-IMPL-001` | error | Invalid `=impl` annotation (non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a `$ref` string). |
+| `E-IMPL-002` | error | `=impl` keyed by an alias that does not resolve to a registered `$interface` type. |
+| `E-IMPL-003` | error | `=impl` block missing a binding for one of the interface's `=where` type-parameters or one of its methods. |
+| `E-IMPL-004` | error | `=impl` payload contains an unexpected key (not `=where`, an iface type-arg, or an iface method name). |
+| `E-IMPL-005` | error | `=impl` method signature does not match the interface declaration (after `$self` and iface type-arg substitution). |
+| `E-IMPL-006` | error | `=impl` method binding is a `$ref` string that does not resolve to a registered function. |
+
 ---
 
 ## 12. Hello world (updated)
@@ -310,18 +363,151 @@ main:
 
 ---
 
-## Appendix: legacy draft examples
+## 13. Annotations (`=doc`, `=where`, …)
 
-Tuple-typed args and `$dict` in the original draft are **superseded** by §4 and §6; migrate to **named record `args`** and **`$record`**.
+A top-level symbol's value is a **definition envelope**: a mapping with **exactly one** `$`-form key (`$function`, `$import`, or one of the type constructors in §6) and **zero or more** `=`-prefixed annotation siblings. v1 currently recognises four annotations: `=doc`, `=where`, `=defs` (inherent ops on a type), and `=impl` (explicit interface implementations).
+
+> **Annotation prefix is normative.** Every annotation key starts with `=`. The pre-1.0 spelling without the prefix (`where:`, `doc:`) is **rejected** with `E-ANNO-002` (rename to `=where`, `=doc`).
+
+| Annotation | Value | Purpose |
+|------------|-------|---------|
+| `=doc` | `$str` (YAML `|` block scalar recommended for multiline markdown) | Compile-time documentation attached to the symbol. Stored on the lowered `FunctionSig` / `TypeAlias`; not yet emitted to runtime or LSP output. |
+| `=where` | `{ <name>: [<iface>, ...], ... }` | Declares ordered generic type parameters. The mapping's **key order** is the positional order of type parameters. Each list element is an interface reference (`$some-iface`, `$mod.iface`, or `$intersect` of those); the substituted type must have a nominal `=impl` for every iface listed. Empty `[]` means unbounded. |
+| `=defs` | `{ <name>: $function-envelope, ... }` | Inherent operations on the enclosing type. Each entry registers a function under the qualified key `<mod>.<type>.<name>`, callable as `$<mod>.<type>.<name>: { ... }`. Inside the function `$self` resolves to the enclosing type. Only valid alongside a type-form key (not on `$function` or `$import`). |
+| `=impl` | `{ $iface-alias: <impl-payload>, ... }` | Explicit nominal interface implementations. The payload binds the interface's `=where` type-arguments by name, supplies one method binding per interface method (either a fresh `$function` envelope or a `$qualified.name` string reference), and may declare impl-local type parameters via `=where`. Each impl populates the global impl table and registers fresh methods under `<mod>.<type>.<iface>.<method>`. |
+
+```yaml
+result:
+  $enum:
+    err: $e
+    ok: $t
+  =where: {t: [], e: []}
+  =doc: |
+    # `result`
+    Tagged success / error. `t` is the success payload; `e` is the error payload.
+
+identity:
+  $function:
+    args:
+      x: $t
+    return: $t
+    do:
+      - $return: $args.x
+  =where: {t: []}
+  =doc: "Identity function: returns its argument unchanged."
+
+pair:
+  $tuple: [$a, $b]
+  =where: {a: [], b: []}
+```
+
+**Validation (v1):**
+
+- Unknown `=`-prefixed annotation key → `E-ANNO-001`.
+- Bare un-prefixed annotation (`where:`, `doc:`) → `E-ANNO-002`.
+- Bound list element that is not an interface (or `$intersect` of interfaces) → `E-WHERE-002`.
+- Non-string `=doc` value → `E-DOC-001`.
+- Duplicate `=where` key → error.
+- Empty `=where: {}` is valid and equivalent to no annotation; `=where: { t: [] }` declares an unbounded `t`.
+- Type argument supplied to a generic call/instantiation that is missing an `=impl` for an iface in the bound list → `E-BOUND-001`.
+
+**Scope:** Type-parameter names declared in `=where` are in scope for the symbol's form value (function `args` / `return` / `do:`, or a type-constructor body). They do **not** leak to other symbols.
+
+**Out of scope (v1):** `=doc` on `$import` aliases or on `main`; bound enforcement; type-arg inference at type positions; emission of `=doc` to LSP / generated documentation.
+
+### 13.1 `=defs` — inherent operations
+
+Inherent ops live directly on a type definition and are dispatched via type-qualified calls. There is no distinction between "instance" and "static" methods; `self` in `args` is purely a convention.
+
+```yaml
+box:
+  $record:
+    value: $int64
+  =defs:
+    identity:
+      $function:
+        args:
+          self: $self
+        return: $self
+        do:
+          - $return: $args.self
+```
+
+Calling: `$<mod>.box.identity: $b` (single-arg shorthand) or `$<mod>.box.identity: { self: $b }`. Inside the op, `$self` resolves to the enclosing type — `Named("<mod>.box")` here, or `Instantiated { base, type_args }` for generic types.
+
+### 13.2 `=impl` — interface implementations
+
+`=impl` lives on the implementing type and binds it to one or more interfaces. Each entry is keyed by a `$<iface-alias>` and carries a payload that:
+
+- **Binds the interface's `=where` type-arguments** by name (e.g. `t: $int64`).
+- **Provides one binding per interface method**, either as a fresh `$function` envelope or as a `$qualified.name` string reference to an already-registered function (an `=defs` op, a free function, or another impl method). The supplied signature must equal the interface's declaration after `$self` and iface-type-arg substitution.
+- **Optionally declares impl-local type-parameters** via a `=where` sibling (used when one of the iface type-args is itself a generic in the impl scope).
+
+```yaml
+box:
+  $record:
+    value: $int64
+  =defs:
+    show:
+      $function:
+        args:
+          x: $self
+        return: $str
+        do:
+          - $return: "shown"
+  =impl:
+    $display:
+      fmt: $box.show               # method-as-ref to the inherent op
+    $from-iface:
+      t: $int64                    # iface type-arg binding
+      from:                         # fresh `$function` envelope
+        $function:
+          args:
+            x: $t
+          return: $int64
+          do:
+            - $wasm: { ... }
+```
+
+Each impl populates the lowered program's `impls` table keyed by `(implementing_type, interface)`. Because `=impl` lives on the type definition, only the module that defines the type can author the impl — this is Vibra's syntactic **orphan rule**.
+
+### 13.3 Calling interface methods
+
+There are **two** call-site shapes for methods declared on an interface:
+
+| Shape | Form | Use when |
+|-------|------|----------|
+| Type-qualified | `$<implementing-type>.<iface>.<method>: { ... }` | The interface method has no `$self`-typed argument (e.g. constructors like `from`), or you want to be explicit about the implementing type. Resolves directly via the registered impl-method sig key. |
+| Interface-qualified | `$<iface>.<method>: { <self-arg-name>: <expr>, ... }` | The interface method has a `$self`-typed argument. The compiler reads the static type of the value passed for that argument and dispatches to the matching `=impl` block. |
+
+Interface-qualified calls do **static** dispatch in v1: the dispatch argument's static type must be a concrete `Named` or `Instantiated` type with a registered `=impl` for the called interface. Specifically:
+
+- An interface method with no `$self`-typed argument cannot be invoked through the interface-qualified form (`E-CALL-IFACE-NOSELF`). Use the type-qualified form instead.
+- A dispatch argument with a *generic* static type (e.g. `$args.x: $t` where `t: [$display]`) is rejected with `E-DISPATCH-001` until monomorphisation lands.
+- A dispatch argument whose static type has no `=impl` for the target interface is rejected with `E-BOUND-001`.
+
+Both call shapes are valid in **statement** position (the body of a `do:` step or the value of a `$let`). Interface-qualified calls are not yet supported in arbitrary expression positions (e.g. directly inside `$return`); bind to a local with `$let` first.
 
 ---
 
-## 13. Typed stdlib conventions (current)
+## 14. Typed stdlib conventions (current)
 
 - **Numeric primitives:** `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`.
 - **No-arg function convention:** use `args: $void` (not empty mapping).
 - **Unions:** use direct arrays, e.g. `integer: { $union: [$int64, $int32, $int16, $int8] }`.
 - **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
 - **Early stdlib typing:** io/fs currently use raw primitives (`$int64` and `$str`) instead of nominal wrapper types.
-- **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is modeled as `$forall + $union` (`$union: [$void, $t]`), while `stdlib/result.vibra` (`Result`) uses `$forall + $enum` constructors and `$match`.
+- **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is `$union: [$void, $t]` with `=where: {t: []}`; `stdlib/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`, used at value sites via `$match`.
 - **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
+
+---
+
+## Appendix: removed forms
+
+The following early-draft forms were removed and have **no compatibility path**:
+
+- **`$forall`** — superseded by the `=where` annotation (§13).
+- **`$list`** — use `$array`.
+- **`$dict`** — use `$record` or `$map`.
+- **Tuple-typed `args:`** — use a named record (`args: { name: T, ... }`).
+- **Legacy `variants:`** under `$union` — use `$union: [...]` or `$enum: { ... }`.
