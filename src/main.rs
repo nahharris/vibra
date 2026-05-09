@@ -54,7 +54,7 @@ enum Command {
         /// Allow system information access.
         #[arg(long = "allow-sys-info")]
         allow_system_info: bool,
-        /// Allow every currently modeled host permission.
+        /// Allow every modeled non-filesystem permission and filesystem access under the current directory.
         #[arg(long = "allow-all")]
         allow_all: bool,
     },

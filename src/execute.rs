@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
@@ -52,7 +52,7 @@ fn grant_status_value(ty: &TypeRef, config: &RunConfig) -> Option<RuntimeValue> 
             enum_key: base.clone(),
             tag: "denied".to_string(),
             payload: Some(Box::new(RuntimeValue::Enum {
-                enum_key: "security.denial-reason".to_string(),
+                enum_key: denial_reason_key(base),
                 tag: "not-granted".to_string(),
                 payload: None,
             })),
@@ -67,6 +67,13 @@ fn grant_status_value(ty: &TypeRef, config: &RunConfig) -> Option<RuntimeValue> 
             }))),
         })
     }
+}
+
+fn denial_reason_key(grant_status_key: &str) -> String {
+    grant_status_key
+        .rsplit_once('.')
+        .map(|(prefix, _)| format!("{prefix}.denial-reason"))
+        .unwrap_or_else(|| "denial-reason".to_string())
 }
 
 fn grant_scopes(grant_type: &str, config: &RunConfig) -> Vec<String> {
@@ -102,7 +109,10 @@ fn grant_scopes(grant_type: &str, config: &RunConfig) -> Vec<String> {
 }
 
 fn path_scope(p: &PathBuf) -> String {
-    p.display().to_string()
+    normalize_absolute_path(p)
+        .unwrap_or_else(|_| p.clone())
+        .display()
+        .to_string()
 }
 
 enum FileHandle {
@@ -608,27 +618,48 @@ fn resolve_granted_path(
             grant.type_key
         );
     }
-    let p = Path::new(path);
-    let abs = if p.is_absolute() {
-        PathBuf::from(p)
-    } else {
-        std::env::current_dir()
-            .context("current dir")?
-            .join(p)
-            .canonicalize()
-            .unwrap_or_else(|_| std::env::current_dir().unwrap().join(p))
-    };
+    let abs = normalize_absolute_path(Path::new(path))?;
     let auth_path = nearest_existing_path(&abs)?;
     let canon_auth = auth_path.canonicalize().unwrap_or(auth_path);
     for root in &grant.scopes {
+        if root == "*" {
+            return Ok(abs);
+        }
         let root_path = PathBuf::from(root);
         if let Ok(canon_root) = root_path.canonicalize() {
             if canon_auth.starts_with(&canon_root) {
                 return Ok(abs);
             }
+        } else {
+            let normalized_root = normalize_absolute_path(&root_path)?;
+            if abs.starts_with(&normalized_root) {
+                return Ok(abs);
+            }
         }
     }
     bail!("path `{}` is outside configured grants", path)
+}
+
+fn normalize_absolute_path(path: &Path) -> Result<PathBuf> {
+    let mut normalized = if path.is_absolute() {
+        PathBuf::new()
+    } else {
+        std::env::current_dir().context("current dir")?
+    };
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    Ok(normalized)
 }
 
 fn nearest_existing_path(path: &Path) -> Result<PathBuf> {
@@ -649,7 +680,10 @@ fn narrow_path_grant(
     required_suffix: &str,
 ) -> Result<CapabilityGrant> {
     let narrowed = resolve_granted_path(path, grant, required_suffix)?;
-    let canon = narrowed.canonicalize().unwrap_or(narrowed);
+    let canon = narrowed
+        .canonicalize()
+        .or_else(|_| normalize_absolute_path(&narrowed))
+        .unwrap_or(narrowed);
     Ok(CapabilityGrant {
         type_key: grant.type_key.clone(),
         scopes: vec![canon.display().to_string()],
@@ -681,6 +715,10 @@ fn env_get(name: &str) -> std::io::Result<String> {
         };
         std::io::Error::new(kind, err.to_string())
     })
+}
+
+fn is_valid_env_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['=', '\0'])
 }
 
 fn exec_call(
@@ -896,6 +934,9 @@ fn exec_call(
                     let value = eval_string(&call.args[1], env)?;
                     let grant = eval_capability(&call.args[2], env)?;
                     ensure_scope(&grant, "env-write-grant", &name)?;
+                    if !is_valid_env_name(&name) {
+                        return Ok(result_err(sig, "invalid-name", None));
+                    }
                     std::env::set_var(name, value);
                     Ok(result_ok(sig, RuntimeValue::Void))
                 }
@@ -943,7 +984,7 @@ fn exec_call(
                     let grant = eval_capability(&call.args[1], env)?;
                     ensure_scope(&grant, "random-grant", "*")?;
                     let len = usize::try_from(len).context("random len < 0")?;
-                    Ok(RuntimeValue::Str("\0".repeat(len)))
+                    Ok(RuntimeValue::Array(vec![RuntimeValue::Int(0); len]))
                 }
                 "info" if sig.alias.ends_with("sys") => {
                     let grant = eval_capability(&call.args[0], env)?;

@@ -1168,6 +1168,328 @@ main:
 }
 
 #[test]
+fn denied_grant_reason_uses_import_alias() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"sec:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $sec.grants
+    return: $void
+    do:
+      - $match:
+          target: $args.grants.stdin-read
+          arms:
+            - pattern:
+                $sec.grant-status.denied:
+                  $sec.denial-reason.not-granted: null
+              do: []
+            - pattern:
+                $sec.grant-status.granted:
+                  $bind: stdin-grant
+              do: []
+"#,
+            security = security.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+        .expect("denial reason enum key should follow the security import alias");
+}
+
+#[test]
+fn fs_write_grant_allows_nonexistent_configured_scope() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let allowed = dir.path().join("created-later");
+    let file = allowed.join("data.txt");
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $security.grants
+    return: $void
+    do:
+      - $let:
+          dir-path:
+            $fs.path.new:
+              s: "{allowed}"
+      - $let:
+          file-path:
+            $fs.path.new:
+              s: "{file}"
+      - $match:
+          target: $args.grants.fs-write
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: write-grant
+              do:
+                - $let:
+                    made:
+                      $fs.create-dir-all:
+                        p: $dir-path
+                        grant: $write-grant
+                - $match:
+                    target: $made
+                    arms:
+                      - pattern:
+                          $result.result.ok: null
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: make-err
+                        do: []
+                - $let:
+                    written:
+                      $fs.write-string-all:
+                        p: $file-path
+                        s: "hello"
+                        grant: $write-grant
+                - $match:
+                    target: $written
+                    arms:
+                      - pattern:
+                          $result.result.ok: null
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: write-err
+                        do: []
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: write-denied
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+            allowed = allowed.display().to_string().replace('\\', "/"),
+            file = file.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            allow_write: vec![allowed],
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("nonexistent configured write scope should authorize created descendants");
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "hello");
+}
+
+#[test]
+fn fs_narrow_write_grant_allows_nonexistent_descendant_scope() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let allowed = dir.path().join("allowed");
+    std::fs::create_dir_all(&allowed).unwrap();
+    let narrowed_dir = allowed.join("created-later");
+    let file = narrowed_dir.join("data.txt");
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $security.grants
+    return: $void
+    do:
+      - $let:
+          narrow-root:
+            $fs.path.new:
+              s: "{narrowed_dir}"
+      - $let:
+          file-path:
+            $fs.path.new:
+              s: "{file}"
+      - $match:
+          target: $args.grants.fs-write
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: write-grant
+              do:
+                - $let:
+                    narrowed:
+                      $fs.narrow-write:
+                        grant: $write-grant
+                        p: $narrow-root
+                - $match:
+                    target: $narrowed
+                    arms:
+                      - pattern:
+                          $result.result.ok:
+                            $bind: narrow-grant
+                        do:
+                          - $let:
+                              made:
+                                $fs.create-dir-all:
+                                  p: $narrow-root
+                                  grant: $narrow-grant
+                          - $match:
+                              target: $made
+                              arms:
+                                - pattern:
+                                    $result.result.ok: null
+                                  do: []
+                                - pattern:
+                                    $result.result.err:
+                                      $bind: make-err
+                                  do: []
+                          - $let:
+                              written:
+                                $fs.write-string-all:
+                                  p: $file-path
+                                  s: "hello"
+                                  grant: $narrow-grant
+                          - $match:
+                              target: $written
+                              arms:
+                                - pattern:
+                                    $result.result.ok: null
+                                  do: []
+                                - pattern:
+                                    $result.result.err:
+                                      $bind: write-err
+                                  do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: narrow-err
+                        do: []
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: write-denied
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+            narrowed_dir = narrowed_dir.display().to_string().replace('\\', "/"),
+            file = file.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            allow_write: vec![allowed],
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("narrowed grant to nonexistent descendant should authorize that descendant");
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "hello");
+}
+
+#[test]
+fn env_set_invalid_name_returns_err_result() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let env_mod = std::fs::canonicalize(root.join("stdlib/env.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"env:
+  $import: "{env_mod}"
+security:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $security.grants
+    return: $void
+    do:
+      - $match:
+          target: $args.grants.env-write
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: env-grant
+              do:
+                - $let:
+                    set-result:
+                      $env.set:
+                        name: "BAD=NAME"
+                        value: "value"
+                        grant: $env-grant
+                - $match:
+                    target: $set-result
+                    arms:
+                      - pattern:
+                          $result.result.ok: null
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $env.env-error.invalid-name: null
+                        do: []
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: env-denied
+              do: []
+"#,
+            env_mod = env_mod.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            allow_env_write: vec!["*".to_string()],
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("invalid env var names should be structured env-error results");
+}
+
+#[test]
 fn duplicate_nested_imports_are_idempotent() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();

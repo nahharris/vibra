@@ -4541,8 +4541,10 @@ fn validate_pattern(
             tag,
             payload,
         } => {
-            let TypeRef::Instantiated { base, type_args } = target_ty else {
-                bail!("enum pattern requires instantiated enum target, got {target_ty:?}");
+            let (base, type_args): (&String, Vec<TypeRef>) = match target_ty {
+                TypeRef::Instantiated { base, type_args } => (base, type_args.clone()),
+                TypeRef::Named(base) => (base, Vec::new()),
+                _ => bail!("enum pattern requires enum target, got {target_ty:?}"),
             };
             if strip_module_prefix(base) != strip_module_prefix(enum_key) {
                 bail!("enum pattern `{enum_key}.{tag}` does not match target `{base}`");
@@ -4557,8 +4559,8 @@ fn validate_pattern(
                 .with_context(|| format!("unknown enum tag `{tag}`"))?;
             covered_enum_tags.insert(tag.clone());
             let mut subst = HashMap::new();
-            for (p, a) in enum_def.type_params.iter().zip(type_args.iter()) {
-                subst.insert(p.clone(), a.clone());
+            for (p, a) in enum_def.type_params.iter().zip(type_args) {
+                subst.insert(p.clone(), a);
             }
             let payload_ty = substitute_type(payload_ty, &subst);
             match (payload_ty == TypeRef::Void, payload) {
