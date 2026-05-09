@@ -58,9 +58,8 @@ main:
       - $let:
           value:
             $m.number.int: 7
-      - $match:
-          target: $value
-          arms:
+      - $match: $value
+        when:
             - pattern:
                 $m.number.int:
                   $bind: x
@@ -100,9 +99,8 @@ main:
       - $let:
           value:
             $maybe.some: "x"
-      - $match:
-          target: $value
-          arms:
+      - $match: $value
+        when:
             some:
               bind: x
               do: []
@@ -115,8 +113,8 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("$match arms must be a sequence"),
-        "expected legacy mapping arms to be rejected, got: {err}"
+        err.contains("$match `when` must be a sequence"),
+        "expected legacy mapping `when` to be rejected, got: {err}"
     );
 }
 
@@ -146,9 +144,8 @@ main:
       - $let:
           value:
             $maybe.some: "payload"
-      - $match:
-          target: $value
-          arms:
+      - $match: $value
+        when:
             - pattern:
                 $maybe.some:
                   $bind: payload
@@ -199,9 +196,8 @@ main:
                 $map:
                   - key: "lang"
                     value: "vibra"
-      - $match:
-          target: $value
-          arms:
+      - $match: $value
+        when:
             - pattern:
                 $record:
                   pair:
@@ -264,12 +260,10 @@ main:
     do:
       - $let:
           distance:
-            $cast:
-              from: 7
-              to: $meter
-      - $match:
-          target: $distance
-          arms:
+            $cast: 7
+            into: $meter
+      - $match: $distance
+        when:
             - pattern:
                 $interface: $display
               do:
@@ -280,9 +274,8 @@ main:
               do:
                 - $let:
                     matched: "other"
-      - $match:
-          target: $distance
-          arms:
+      - $match: $distance
+        when:
             - pattern:
                 $newtype:
                   type: $meter
@@ -441,9 +434,8 @@ main:
     do:
       - $let:
           value-none: $m.option.none
-      - $match:
-          target: $value-none
-          arms:
+      - $match: $value-none
+        when:
             - pattern:
                 $m.option.none: null
               do:
@@ -610,9 +602,8 @@ main:
     do:
       - $take-meter:
           value:
-            $cast:
-              from: 7
-              to: $meter
+            $cast: 7
+            into: $meter
 "#,
     )
     .unwrap();
@@ -698,14 +689,12 @@ main:
     do:
       - $let:
           m:
-            $cast:
-              from: 7
-              to: $meter
+            $cast: 7
+            into: $meter
       - $take-second:
           value:
-            $cast:
-              from: $m
-              to: $second
+            $cast: $m
+            into: $second
 "#,
     )
     .unwrap();
@@ -736,9 +725,8 @@ main:
     do:
       - $let:
           f:
-            $cast:
-              from: 0
-              to: $fs.read-file
+            $cast: 0
+            into: $fs.read-file
       - $fs.writable.write-string:
           self: $f
           s: "nope"
@@ -781,9 +769,8 @@ main:
           p:
             $fs.path.new:
               s: "{path}"
-      - $match:
-          target: $args.grants.fs-write
-          arms:
+      - $match: $args.grants.fs-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: write-grant
@@ -793,9 +780,8 @@ main:
                       $fs.open-write:
                         p: $p
                         grant: $write-grant
-                - $match:
-                    target: $opened-write
-                    arms:
+                - $match: $opened-write
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: out
@@ -813,9 +799,8 @@ main:
                 $security.grant-status.denied:
                   $bind: write-denied
               do: []
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+      - $match: $args.grants.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: read-grant
@@ -825,9 +810,8 @@ main:
                       $fs.open-read:
                         p: $p
                         grant: $read-grant
-                - $match:
-                    target: $opened-read
-                    arms:
+                - $match: $opened-read
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: input
@@ -884,9 +868,8 @@ main:
     do:
       - $let:
           forged:
-            $cast:
-              from: "not a grant"
-              to: $secret
+            $cast: "not a grant"
+            into: $secret
 "#,
     )
     .unwrap();
@@ -966,9 +949,8 @@ main:
           p:
             $fs.path.new:
               s: "{path}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+      - $match: $args.grants.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: grant
@@ -1026,9 +1008,8 @@ main:
           p:
             $fs.path.new:
               s: "{path}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+      - $match: $args.grants.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: grant
@@ -1103,9 +1084,8 @@ main:
           denied-file:
             $fs.path.new:
               s: "{denied_file}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+      - $match: $args.grants.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: read-grant
@@ -1115,9 +1095,8 @@ main:
                       $fs.narrow-read:
                         grant: $read-grant
                         p: $allow-root
-                - $match:
-                    target: $narrowed
-                    arms:
+                - $match: $narrowed
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: narrow-grant
@@ -1185,9 +1164,8 @@ main:
       grants: $sec.grants
     return: $void
     do:
-      - $match:
-          target: $args.grants.stdin-read
-          arms:
+      - $match: $args.grants.stdin-read
+        when:
             - pattern:
                 $sec.grant-status.denied:
                   $sec.denial-reason.not-granted: null
@@ -1239,9 +1217,8 @@ main:
           file-path:
             $fs.path.new:
               s: "{file}"
-      - $match:
-          target: $args.grants.fs-write
-          arms:
+      - $match: $args.grants.fs-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: write-grant
@@ -1251,9 +1228,8 @@ main:
                       $fs.create-dir-all:
                         p: $dir-path
                         grant: $write-grant
-                - $match:
-                    target: $made
-                    arms:
+                - $match: $made
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1267,9 +1243,8 @@ main:
                         p: $file-path
                         s: "hello"
                         grant: $write-grant
-                - $match:
-                    target: $written
-                    arms:
+                - $match: $written
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1338,9 +1313,8 @@ main:
           file-path:
             $fs.path.new:
               s: "{file}"
-      - $match:
-          target: $args.grants.fs-write
-          arms:
+      - $match: $args.grants.fs-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: write-grant
@@ -1350,9 +1324,8 @@ main:
                       $fs.narrow-write:
                         grant: $write-grant
                         p: $narrow-root
-                - $match:
-                    target: $narrowed
-                    arms:
+                - $match: $narrowed
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: narrow-grant
@@ -1362,9 +1335,8 @@ main:
                                 $fs.create-dir-all:
                                   p: $narrow-root
                                   grant: $narrow-grant
-                          - $match:
-                              target: $made
-                              arms:
+                          - $match: $made
+                            when:
                                 - pattern:
                                     $result.result.ok: null
                                   do: []
@@ -1378,9 +1350,8 @@ main:
                                   p: $file-path
                                   s: "hello"
                                   grant: $narrow-grant
-                          - $match:
-                              target: $written
-                              arms:
+                          - $match: $written
+                            when:
                                 - pattern:
                                     $result.result.ok: null
                                   do: []
@@ -1441,9 +1412,8 @@ main:
       grants: $security.grants
     return: $void
     do:
-      - $match:
-          target: $args.grants.env-write
-          arms:
+      - $match: $args.grants.env-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: env-grant
@@ -1454,9 +1424,8 @@ main:
                         name: "BAD=NAME"
                         value: "value"
                         grant: $env-grant
-                - $match:
-                    target: $set-result
-                    arms:
+                - $match: $set-result
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1557,9 +1526,8 @@ main:
           file-path:
             $fs.path.new:
               s: "{data}"
-      - $match:
-          target: $args.grants.fs-write
-          arms:
+      - $match: $args.grants.fs-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: write-grant
@@ -1569,9 +1537,8 @@ main:
                       $fs.create-dir-all:
                         p: $dir-path
                         grant: $write-grant
-                - $match:
-                    target: $made
-                    arms:
+                - $match: $made
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1585,9 +1552,8 @@ main:
                         p: $file-path
                         s: "hello"
                         grant: $write-grant
-                - $match:
-                    target: $written
-                    arms:
+                - $match: $written
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1601,9 +1567,8 @@ main:
                         p: $file-path
                         s: " world"
                         grant: $write-grant
-                - $match:
-                    target: $appended
-                    arms:
+                - $match: $appended
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1611,9 +1576,8 @@ main:
                           $result.result.err:
                             $bind: appended-err
                         do: []
-                - $match:
-                    target: $args.grants.fs-read
-                    arms:
+                - $match: $args.grants.fs-read
+                  when:
                       - pattern:
                           $security.grant-status.granted:
                             $bind: read-grant
@@ -1623,9 +1587,8 @@ main:
                                 $fs.read-to-string:
                                   p: $file-path
                                   grant: $read-grant
-                          - $match:
-                              target: $read
-                              arms:
+                          - $match: $read
+                            when:
                                 - pattern:
                                     $result.result.ok:
                                       $bind: read-ok
@@ -1639,9 +1602,8 @@ main:
                                 $fs.metadata:
                                   p: $file-path
                                   grant: $read-grant
-                          - $match:
-                              target: $stat
-                              arms:
+                          - $match: $stat
+                            when:
                                 - pattern:
                                     $result.result.ok:
                                       $bind: stat-ok
@@ -1655,9 +1617,8 @@ main:
                                 $fs.canonicalize:
                                   p: $file-path
                                   grant: $read-grant
-                          - $match:
-                              target: $canon
-                              arms:
+                          - $match: $canon
+                            when:
                                 - pattern:
                                     $result.result.ok:
                                       $bind: canon-ok
@@ -1671,9 +1632,8 @@ main:
                                 $fs.read-dir:
                                   p: $dir-path
                                   grant: $read-grant
-                          - $match:
-                              target: $entries
-                              arms:
+                          - $match: $entries
+                            when:
                                 - pattern:
                                     $result.result.ok:
                                       $bind: entries-ok
@@ -1691,9 +1651,8 @@ main:
                       $fs.remove-file:
                         p: $file-path
                         grant: $write-grant
-                - $match:
-                    target: $removed-file
-                    arms:
+                - $match: $removed-file
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1706,9 +1665,8 @@ main:
                       $fs.remove-dir:
                         p: $dir-path
                         grant: $write-grant
-                - $match:
-                    target: $removed-dir
-                    arms:
+                - $match: $removed-dir
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1769,9 +1727,8 @@ main:
           missing-path:
             $fs.path.new:
               s: "{missing}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+      - $match: $args.grants.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: read-grant
@@ -1781,9 +1738,8 @@ main:
                       $fs.read-to-string:
                         p: $missing-path
                         grant: $read-grant
-                - $match:
-                    target: $read
-                    arms:
+                - $match: $read
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: read-ok
@@ -1913,9 +1869,8 @@ main:
       - $let:
           r-ok:
             $m.result.ok: 99
-      - $match:
-          target: $r-ok
-          arms:
+      - $match: $r-ok
+        when:
             - pattern:
                 $m.result.ok:
                   $bind: x
@@ -1929,9 +1884,8 @@ main:
       - $let:
           r-err:
             $m.result.err: "fail"
-      - $match:
-          target: $r-err
-          arms:
+      - $match: $r-err
+        when:
             - pattern:
                 $m.result.ok:
                   $bind: x2
@@ -2103,7 +2057,7 @@ main:
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err().to_string();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         err.contains("zero-arg call payload must be `null`"),
         "unexpected error: {err}"

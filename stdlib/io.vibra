@@ -4,144 +4,117 @@ security:
   $import: ./security.vibra
 
 stdin:
-  $function:
-    args:
-      grant: $security.stdin-read-grant
-    return: $fs.read-file
-    do:
-      - $return:
-          $cast:
-            from: 0
-            to: $fs.read-file
+  $function: $security.stdin-read-grant
+  return: $fs.read-file
+  do:
+    - $return:
+        $cast: 0
+        into: $fs.read-file
 
 stdout:
-  $function:
-    args: $void
-    return: $fs.write-file
-    do:
-      - $return:
-          $cast:
-            from: 1
-            to: $fs.write-file
+  $function: $void
+  return: $fs.write-file
+  do:
+    - $return:
+        $cast: 1
+        into: $fs.write-file
 
 stderr:
-  $function:
-    args: $void
-    return: $fs.write-file
-    do:
-      - $return:
-          $cast:
-            from: 2
-            to: $fs.write-file
+  $function: $void
+  return: $fs.write-file
+  do:
+    - $return:
+        $cast: 2
+        into: $fs.write-file
 
 print:
-  $function:
-    args:
-      s: $str
-    return:
-      $result.result:
-        t: $void
-        e: $fs.fs-error
-    do:
-      - $let:
-          out:
-            $io.stdout: null
-      - $let:
-          result:
-            $fs.writable.write-string:
-              self: $out
-              s: $args.s
-      - $return: $result
+  $function: $str
+  return:
+    $result.result:
+      t: $void
+      e: $fs.fs-error
+  do:
+    - $let:
+        out:
+          $io.stdout: null
+    - $let:
+        result:
+          $fs.writable.write-string: $out
+          s: $args.subject
+    - $return: $result
 
 println:
-  $function:
-    args:
-      s: $str
-    return:
-      $result.result:
-        t: $void
-        e: $fs.fs-error
-    do:
-      - $let:
-          first:
-            $io.print:
-              s: $args.s
-      - $let:
-          second:
-            $io.print:
-              s: "\n"
-      - $return: $second
+  $function: $str
+  return:
+    $result.result:
+      t: $void
+      e: $fs.fs-error
+  do:
+    - $let:
+        first:
+          $io.print: $args.subject
+    - $let:
+        second:
+          $io.print: "\n"
+    - $return: $second
 
 eprint:
-  $function:
-    args:
-      s: $str
-    return:
-      $result.result:
-        t: $void
-        e: $fs.fs-error
-    do:
-      - $let:
-          err:
-            $io.stderr: null
-      - $let:
-          result:
-            $fs.writable.write-string:
-              self: $err
-              s: $args.s
-      - $return: $result
+  $function: $str
+  return:
+    $result.result:
+      t: $void
+      e: $fs.fs-error
+  do:
+    - $let:
+        err:
+          $io.stderr: null
+    - $let:
+        result:
+          $fs.writable.write-string: $err
+          s: $args.subject
+    - $return: $result
 
 eprintln:
-  $function:
-    args:
-      s: $str
-    return:
-      $result.result:
-        t: $void
-        e: $fs.fs-error
-    do:
-      - $let:
-          first:
-            $io.eprint:
-              s: $args.s
-      - $let:
-          second:
-            $io.eprint:
-              s: "\n"
-      - $return: $second
+  $function: $str
+  return:
+    $result.result:
+      t: $void
+      e: $fs.fs-error
+  do:
+    - $let:
+        first:
+          $io.eprint: $args.subject
+    - $let:
+        second:
+          $io.eprint: "\n"
+    - $return: $second
 
 readln:
-  $function:
-    args:
-      grant: $security.stdin-read-grant
-    return:
-      $result.result:
-        t: $str
-        e: $fs.fs-error
-    do:
-      - $let:
-          input:
-            $io.stdin:
-              grant: $args.grant
-      - $let:
-          result:
-            $fs.readable.read-string:
-              self: $input
-      - $return: $result
+  $function: $security.stdin-read-grant
+  return:
+    $result.result:
+      t: $str
+      e: $fs.fs-error
+  do:
+    - $let:
+        input:
+          $io.stdin: $args.subject
+    - $let:
+        result:
+          $fs.readable.read-string: $input
+    - $return: $result
 
 flush:
-  $function:
-    args: $void
-    return:
-      $result.result:
-        t: $void
-        e: $fs.fs-error
-    do:
-      - $let:
-          out:
-            $io.stdout: null
-      - $let:
-          result:
-            $fs.writable.flush:
-              self: $out
-      - $return: $result
+  $function: $void
+  return:
+    $result.result:
+      t: $void
+      e: $fs.fs-error
+  do:
+    - $let:
+        out:
+          $io.stdout: null
+    - $let:
+        result:
+          $fs.writable.flush: $out
+    - $return: $result

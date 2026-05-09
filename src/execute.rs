@@ -205,6 +205,15 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
             .map(|(k, v)| Ok((eval_expr(k, env)?, eval_expr(v, env)?)))
             .collect::<Result<Vec<_>>>()
             .map(RuntimeValue::Map),
+        Expr::If {
+            cond,
+            then_e,
+            else_e,
+        } => match eval_expr(cond, env)? {
+            RuntimeValue::Bool(true) => eval_expr(then_e, env),
+            RuntimeValue::Bool(false) => eval_expr(else_e, env),
+            other => bail!("`$if` condition must be `$bool`, got {other:?}"),
+        },
     }
 }
 
@@ -246,6 +255,30 @@ fn exec_statement(
             }
             bail!("non-exhaustive $match reached runtime with value `{value:?}`")
         }
+        Statement::Eval(expr) => {
+            eval_expr(expr, env)?;
+            Ok(None)
+        }
+        Statement::If {
+            cond,
+            then_body,
+            else_body,
+        } => match eval_expr(cond, env)? {
+            RuntimeValue::Bool(true) => run_block(then_body, program, env, files, config),
+            RuntimeValue::Bool(false) => run_block(else_body, program, env, files, config),
+            other => bail!("`$if` condition must be `$bool`, got {other:?}"),
+        },
+        Statement::While { cond, body } => loop {
+            match eval_expr(cond, env)? {
+                RuntimeValue::Bool(true) => {
+                    if let Some(v) = run_block(body, program, env, files, config)? {
+                        return Ok(Some(v));
+                    }
+                }
+                RuntimeValue::Bool(false) => return Ok(None),
+                other => bail!("`$while` condition must be `$bool`, got {other:?}"),
+            }
+        },
     }
 }
 
