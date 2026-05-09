@@ -579,7 +579,10 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$capability",
 ];
 
-fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, AliasSkeleton>> {
+fn collect_alias_skeletons(
+    program: &LoadedProgram,
+    entry_project: Option<&project::LoadedProject>,
+) -> Result<HashMap<String, AliasSkeleton>> {
     let entry_map = program
         .modules
         .get(&program.entry)
@@ -600,12 +603,13 @@ fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, Al
             continue;
         };
         let imp_s = imp.as_str().context("$import value must be string")?;
-        let imported_path = resolve_import_path(&program.entry, imp_s)
+        let imported_path = resolve_import_path(&program.entry, imp_s, entry_project)
             .with_context(|| format!("resolve import alias `{alias}`"))?;
         collect_module_skeleton_tree(
             alias,
             &imported_path,
             program,
+            entry_project,
             &mut skeletons,
             &mut sink,
             &mut visited_imports,
@@ -626,6 +630,7 @@ fn collect_module_skeleton_tree(
     alias: &str,
     module_path: &std::path::Path,
     program: &LoadedProgram,
+    entry_project: Option<&project::LoadedProject>,
     skeletons: &mut HashMap<String, AliasSkeleton>,
     sink: &mut Vec<String>,
     visited_imports: &mut HashSet<(String, PathBuf)>,
@@ -651,12 +656,13 @@ fn collect_module_skeleton_tree(
             continue;
         };
         let imp_s = imp.as_str().context("$import value must be string")?;
-        let nested_path = resolve_import_path(module_path, imp_s)
+        let nested_path = resolve_import_path(module_path, imp_s, entry_project)
             .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
         collect_module_skeleton_tree(
             nested_alias,
             &nested_path,
             program,
+            entry_project,
             skeletons,
             sink,
             visited_imports,
@@ -1552,15 +1558,19 @@ fn strip_module_prefix(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
-fn resolve_import_path(module_path: &std::path::Path, import: &str) -> Result<PathBuf> {
+fn resolve_import_path(
+    module_path: &std::path::Path,
+    import: &str,
+    entry_project: Option<&project::LoadedProject>,
+) -> Result<PathBuf> {
     let raw = if import.starts_with('@') {
-        let project = project::find_project_for_file(module_path)?.with_context(|| {
+        let project = entry_project.with_context(|| {
             format!(
                 "{}: @ import `{import}` requires a project.vibra",
                 module_path.display()
             )
         })?;
-        project::resolve_project_import(&project, import)?
+        project::resolve_project_import(project, import)?
     } else {
         let parent = module_path
             .parent()
@@ -1667,7 +1677,8 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         .context("internal: entry module not loaded")?
         .as_mapping()
         .context("entry root must be mapping")?;
-    let skeletons = collect_alias_skeletons(program)?;
+    let entry_project = project::find_project_for_file(&program.entry)?;
+    let skeletons = collect_alias_skeletons(program, entry_project.as_ref())?;
 
     let mut sigs: HashMap<String, FunctionSig> = HashMap::new();
     let mut constants: HashMap<String, RuntimeValue> = HashMap::new();
@@ -1689,12 +1700,13 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
             continue;
         };
         let imp_s = imp.as_str().context("$import value must be string")?;
-        let imported_path = resolve_import_path(&program.entry, imp_s)
+        let imported_path = resolve_import_path(&program.entry, imp_s, entry_project.as_ref())
             .with_context(|| format!("resolve import alias `{alias}`"))?;
         collect_module_defs_tree(
             alias,
             &imported_path,
             program,
+            entry_project.as_ref(),
             &mut sigs,
             &mut constants,
             &mut type_aliases,
@@ -1804,6 +1816,7 @@ fn collect_module_defs_tree(
     alias: &str,
     module_path: &std::path::Path,
     program: &LoadedProgram,
+    entry_project: Option<&project::LoadedProject>,
     sigs: &mut HashMap<String, FunctionSig>,
     constants: &mut HashMap<String, RuntimeValue>,
     type_aliases: &mut HashMap<String, TypeAlias>,
@@ -1835,12 +1848,13 @@ fn collect_module_defs_tree(
             continue;
         };
         let imp_s = imp.as_str().context("$import value must be string")?;
-        let nested_path = resolve_import_path(module_path, imp_s)
+        let nested_path = resolve_import_path(module_path, imp_s, entry_project)
             .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
         collect_module_defs_tree(
             nested_alias,
             &nested_path,
             program,
+            entry_project,
             sigs,
             constants,
             type_aliases,
@@ -5660,7 +5674,7 @@ fn parse_match_statement(
     fn_ctx: Option<&UserFnContext>,
 ) -> Result<Statement> {
     let match_v = map_get_str(stmt, "$match").context("$match missing subject value")?;
-    let (target_v, arms_v) = if let Some(match_m) = match_v.as_mapping() {
+    let (target_v, arms_v, arms_label) = if let Some(match_m) = match_v.as_mapping() {
         if map_get_str(match_m, "target").is_some() || map_get_str(match_m, "arms").is_some() {
             if stmt.len() != 1 {
                 bail!("structured `$match` must not have sibling keys");
@@ -5668,12 +5682,14 @@ fn parse_match_statement(
             (
                 map_get_str(match_m, "target").context("$match missing `target`")?,
                 map_get_str(match_m, "arms").context("$match missing `arms`")?,
+                "arms",
             )
         } else {
             verify_stmt_keys(stmt, &["$match", "when"])?;
             (
                 match_v,
                 map_get_str(stmt, "when").context("$match missing `when`")?,
+                "when",
             )
         }
     } else {
@@ -5681,6 +5697,7 @@ fn parse_match_statement(
         (
             match_v,
             map_get_str(stmt, "when").context("$match missing `when`")?,
+            "when",
         )
     };
     let target = parse_expr(target_v, constants, type_aliases, enums, locals, warnings)?;
@@ -5689,7 +5706,7 @@ fn parse_match_statement(
 
     let arms_seq = arms_v
         .as_sequence()
-        .context("$match `when` must be a sequence")?;
+        .with_context(|| format!("$match `{arms_label}` must be a sequence"))?;
     let mut arms = Vec::new();
     let mut covered_enum_tags = HashSet::new();
     let mut has_wildcard = false;

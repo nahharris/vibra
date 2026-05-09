@@ -4596,7 +4596,12 @@ fn project_check_resolves_local_dependency_without_copying_it() {
     let dir = tempfile::tempdir().unwrap();
     let dep = dir.path().join("local-utils");
     std::fs::create_dir_all(&dep).unwrap();
-    std::fs::write(dep.join("util.vibra"), "answer: 42\n").unwrap();
+    std::fs::write(
+        dep.join("util.vibra"),
+        "io:\n  $import: \"@std/io.vibra\"\nanswer: 42\n",
+    )
+    .unwrap();
+    let stdlib = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
 
     let project = dir.path().join("app");
     std::fs::create_dir_all(project.join("src/app")).unwrap();
@@ -4618,9 +4623,12 @@ targets:
       root: src/app
       entry: main.vibra
 dependencies:
+  std:
+    path: {}
   local-utils:
     path: {}
 "#,
+            path_str(&stdlib),
             path_str(&dep)
         ),
     )
@@ -4637,6 +4645,17 @@ dependencies:
         String::from_utf8_lossy(&check.stderr)
     );
     assert!(!project.join("dep/local-utils").exists());
+
+    let run = vibra_cmd()
+        .current_dir(&project)
+        .args(["run", "src/app/main.vibra"])
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
 }
 
 #[test]
@@ -4723,6 +4742,22 @@ dependencies:
         String::from_utf8_lossy(&sync.stderr)
     );
     assert!(project.join("dep/math/math.vibra").exists());
+    std::fs::write(project.join("dep/math/math.vibra"), "dirty: 0\n").unwrap();
+
+    let resync = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["sync", "app"])
+        .output()
+        .unwrap();
+    assert!(
+        resync.status.success(),
+        "resync failed: {}",
+        String::from_utf8_lossy(&resync.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.join("dep/math/math.vibra")).unwrap(),
+        "pi: 3\n"
+    );
 
     let check = vibra_cmd()
         .current_dir(dir.path())

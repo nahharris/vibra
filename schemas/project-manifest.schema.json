@@ -19,6 +19,20 @@
     "targets": {
       "type": "object",
       "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": ["libs"],
+          "properties": {
+            "libs": { "minItems": 1 }
+          }
+        },
+        {
+          "required": ["bins"],
+          "properties": {
+            "bins": { "minItems": 1 }
+          }
+        }
+      ],
       "properties": {
         "libs": {
           "type": "array",
@@ -44,7 +58,10 @@
     "relativePath": {
       "type": "string",
       "minLength": 1,
-      "not": { "pattern": "^([A-Za-z]:|/|\\\\|\\.\\.)" }
+      "allOf": [
+        { "not": { "pattern": "^([A-Za-z]:|/|\\\\)" } },
+        { "not": { "pattern": "(^|[/\\\\])\\.\\.?($|[/\\\\])" } }
+      ]
     },
     "target": {
       "type": "object",

@@ -1,7 +1,7 @@
 //! Project manifest, scaffold, dependency sync, and import validation.
 
 use anyhow::{bail, Context, Result};
-use git2::{Oid, Repository};
+use git2::{build::CheckoutBuilder, Oid, Repository, ResetType};
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::collections::{HashMap, HashSet};
@@ -71,11 +71,8 @@ pub fn init_project(path: &Path, template: InitTemplate) -> Result<()> {
     }
     fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
     fs::create_dir_all(path.join("dep")).with_context(|| "create dep directory")?;
-    copy_dir_recursive(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib"),
-        &path.join("dep/std"),
-    )
-    .context("copy stdlib into dep/std")?;
+    copy_dir_recursive(&locate_stdlib_source()?, &path.join("dep/std"))
+        .context("copy stdlib into dep/std")?;
 
     let name = path
         .file_name()
@@ -357,7 +354,14 @@ fn sync_git_dependency(url: &str, rev: &str, dest: &Path) -> Result<()> {
             let mut remote = repo
                 .find_remote("origin")
                 .or_else(|_| repo.remote_anonymous(url))?;
-            remote.fetch(&["refs/heads/*:refs/remotes/origin/*"], None, None)?;
+            remote.fetch(
+                &[
+                    "+refs/heads/*:refs/remotes/origin/*",
+                    "+refs/tags/*:refs/tags/*",
+                ],
+                None,
+                None,
+            )?;
         }
         repo
     } else {
@@ -369,9 +373,30 @@ fn sync_git_dependency(url: &str, rev: &str, dest: &Path) -> Result<()> {
     };
     let oid = Oid::from_str(rev).with_context(|| format!("invalid git rev `{rev}`"))?;
     let object = repo.find_object(oid, None)?;
-    repo.checkout_tree(&object, None)?;
     repo.set_head_detached(oid)?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force().remove_ignored(true).remove_untracked(true);
+    repo.reset(&object, ResetType::Hard, Some(&mut checkout))?;
     Ok(())
+}
+
+fn locate_stdlib_source() -> Result<PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            for ancestor in parent.ancestors() {
+                let candidate = ancestor.join("stdlib");
+                if candidate.join("io.vibra").exists() {
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+
+    let candidate = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
+    if candidate.join("io.vibra").exists() {
+        return Ok(candidate);
+    }
+    bail!("cannot locate stdlib directory for project initialization");
 }
 
 fn write_bin_template(root: &Path, name: &str) -> Result<()> {
