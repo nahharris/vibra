@@ -2231,6 +2231,270 @@ main:
 }
 
 #[test]
+fn bool_literals_are_compatible_with_bool_args() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"accepts-bool:
+  $function:
+    args:
+      x: $bool
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $accepts-bool:
+          x: true
+      - $accepts-bool:
+          x: false
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog);
+    assert!(
+        lowered.is_ok(),
+        "expected true/false literals to lower as $bool"
+    );
+}
+
+#[test]
+fn bool_literal_is_rejected_for_non_bool_arg() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"accepts-int:
+  $function:
+    args:
+      x: $int64
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $accepts-int:
+          x: true
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("type mismatch in call `$accepts-int` arg `x`"),
+        "expected bool -> int mismatch, got: {err}"
+    );
+}
+
+#[test]
+fn fs_exists_returns_boolean_runtime_value() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("exists.txt");
+    std::fs::write(&data, "present").unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $security.grants
+    return: $void
+    do:
+      - $let:
+          p:
+            $fs.path.new:
+              s: "{path}"
+      - $match:
+          target: $args.grants.fs-read
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: read-grant
+              do:
+                - $let:
+                    exists:
+                      $fs.exists:
+                        p: $p
+                        grant: $read-grant
+                - $match:
+                    target: $exists
+                    arms:
+                      - pattern: true
+                        do: []
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: denied
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+            path = data.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).expect("fs.exists bool match should lower");
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            preopen_host_dirs: vec![dir.path().to_path_buf()],
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("fs.exists should return a bool runtime value");
+}
+
+#[test]
+fn non_generic_multi_arg_call_rejects_unknown_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"join-ish:
+  $function:
+    args:
+      left: $str
+      right: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $join-ish:
+          left: "a"
+          right: "b"
+          typo: "ignored"
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("unexpected key `typo`"),
+        "expected unexpected key rejection, got: {err}"
+    );
+}
+
+#[test]
+fn non_generic_single_arg_named_call_rejects_unknown_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"take-text:
+  $function:
+    args:
+      x: $str
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $take-text:
+          x: "ok"
+          typo: "ignored"
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("unexpected key `typo`"),
+        "expected unexpected key rejection, got: {err}"
+    );
+}
+
+#[test]
+fn single_arg_constructor_shorthand_still_lowers() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"maybe:
+  $enum:
+    some: $str
+    none: $void
+take-maybe:
+  $function:
+    args:
+      x: $maybe
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $take-maybe:
+          $maybe.some: "value"
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog);
+    assert!(
+        lowered.is_ok(),
+        "expected single-arg constructor shorthand to keep lowering"
+    );
+}
+
+#[test]
 fn generic_call_value_arg_must_unify_with_substituted_type() {
     let dir = tempfile::tempdir().unwrap();
     let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
