@@ -3,54 +3,47 @@ bytes:
     $array: $uint8
   =defs:
     len:
-      $function:
-        args:
-          self: $self
-        return: $uint64
-        do:
-          - $wasm:
-              import:
-                module: wasi_snapshot_preview1
-                name: bytes_len
-              args:
-                - $args.self
+      $function: $self
+      return: $uint64
+      do:
+        - $wasm:
+            import:
+              module: wasi_snapshot_preview1
+              name: bytes_len
+            args:
+              - $args.self
     slice:
-      $function:
-        args:
-          self: $self
-          start: $uint64
-          end: $uint64
-        return: $self
-        do:
-          - $wasm:
-              import:
-                module: wasi_snapshot_preview1
-                name: bytes_slice
-              args:
-                - $args.self
-                - $args.start
-                - $args.end
+      $function: $self
+      args:
+        start: $uint64
+        end: $uint64
+      return: $self
+      do:
+        - $wasm:
+            import:
+              module: wasi_snapshot_preview1
+              name: bytes_slice
+            args:
+              - $args.self
+              - $args.start
+              - $args.end
     from-str:
-      $function:
-        args:
-          s: $str
-        return: $self
-        do:
-          - $wasm:
-              import:
-                module: wasi_snapshot_preview1
-                name: bytes_from_str
-              args:
-                - $args.s
+      $function: $str
+      return: $self
+      do:
+        - $wasm:
+            import:
+              module: wasi_snapshot_preview1
+              name: bytes_from_str
+            args:
+              - $args.subject
     to-str:
-      $function:
-        args:
-          self: $self
-        return: $str
-        do:
-          - $wasm:
-              import:
-                module: wasi_snapshot_preview1
-                name: bytes_to_str
-              args:
-                - $args.self
+      $function: $self
+      return: $str
+      do:
+        - $wasm:
+            import:
+              module: wasi_snapshot_preview1
+              name: bytes_to_str
+            args:
+              - $args.self

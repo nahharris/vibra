@@ -462,24 +462,18 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             );
         }
     } else {
-        let old_nested = form_value
-            .as_mapping()
-            .map(|inner| {
-                map_get_str(inner, "args").is_some()
-                    && map_get_str(inner, "return").is_some()
-                    && map_get_str(inner, "do").is_some()
-            })
-            .unwrap_or(false);
-        if old_nested {
-            if function_args.is_some() || function_return.is_some() || function_do.is_some() {
+        if let Some(inner) = form_value.as_mapping() {
+            if map_get_str(inner, "args").is_some()
+                && map_get_str(inner, "return").is_some()
+                && map_get_str(inner, "do").is_some()
+            {
                 bail!(
-                    "invalid `$function`: nested `{{ args, return, do }}` body cannot mix with labeled `args` / `return` / `do` siblings"
+                    "invalid `$function`: nested `{{ args, return, do }}` is not supported; use `$function: <first-arg-type>` with sibling `args`, `return`, and `do`"
                 );
             }
-        } else {
-            let _ = function_return.context("missing `return` on `$function`")?;
-            let _ = function_do.context("missing `do` on `$function`")?;
         }
+        let _ = function_return.context("missing `return` on `$function`")?;
+        let _ = function_do.context("missing `do` on `$function`")?;
     }
 
     if defs.is_some() && form_key == "$function" {
@@ -2294,7 +2288,8 @@ fn try_register_function(
     }
     maybe_warn_kebab(name, "function name", warnings);
     let scope = env.type_params.clone();
-    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG)
+    let (primary, first_arg_ty) = labeled_function_first_arg(env.form_value, MODULE_FN_PRIMARY_ARG)?;
+    let args = build_function_args_mapping(&primary, first_arg_ty, env.function_args)
         .with_context(|| {
             if alias.is_empty() {
                 format!("{name}: invalid `$function` envelope")
@@ -2302,6 +2297,11 @@ fn try_register_function(
                 format!("{alias}.{name}: invalid `$function` envelope")
             }
         })?;
+    let ret = env
+        .function_return
+        .context("missing `return` on `$function`")?
+        .clone();
+    let do_seq = env.function_do.context("missing `do` on `$function`")?.clone();
     // Free-standing module-level functions cannot reference `$self`; that
     // privilege belongs to functions declared inside `=defs` / `=impl` (see
     // Phases 3/4). Pass `false` here.
@@ -2507,12 +2507,18 @@ fn register_one_inherent_function(
         all_type_params.push(tp.clone());
     }
 
-    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, INHERENT_FN_PRIMARY_ARG)
+    let (primary, first_arg_ty) = labeled_function_first_arg(env.form_value, INHERENT_FN_PRIMARY_ARG)?;
+    let args = build_function_args_mapping(&primary, first_arg_ty, env.function_args)
         .with_context(|| {
             format!(
                 "`{qualified_type_key}.{entry_name}`: invalid `$function` envelope"
             )
         })?;
+    let ret = env
+        .function_return
+        .context("missing `return` on `$function`")?
+        .clone();
+    let do_seq = env.function_do.context("missing `do` on `$function`")?.clone();
     let (arg_names, arg_types) =
         parse_signature_args(&args, &all_type_params, skeletons, warnings, true)
             .with_context(|| format!("{qualified_type_key}.{entry_name}: invalid function args"))?;
@@ -2947,8 +2953,9 @@ fn bind_impl_method(
         method_scope.push(tp.clone());
     }
 
+    let iface_primary = iface_impl_primary_field_name(expected_fn_type)?;
     let (args, ret, do_seq) =
-        resolve_function_envelope_fields(&env, INHERENT_FN_PRIMARY_ARG)
+        resolve_function_envelope_fields(&env, &iface_primary)
             .context("impl method: invalid `$function` envelope")?;
     let (arg_names, arg_types) =
         parse_signature_args(&args, &method_scope, skeletons, warnings, true)?;
@@ -3666,6 +3673,31 @@ fn verify_stmt_keys(m: &serde_yaml::Mapping, allowed: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// After lowering both branches of `$if`, locals must match on every key that
+/// remains in scope: only bindings present in **both** branch environments with
+/// identical inferred types are kept (same rule as `$match` arms, which use a
+/// fresh `locals` clone per arm and never merge into the parent map).
+fn merge_if_branch_env(
+    then_env: &HashMap<String, TypeRef>,
+    else_env: &HashMap<String, TypeRef>,
+) -> Result<HashMap<String, TypeRef>> {
+    let mut out = HashMap::with_capacity(then_env.len().min(else_env.len()));
+    for k in then_env.keys() {
+        match (then_env.get(k), else_env.get(k)) {
+            (Some(t), Some(e)) if t == e => {
+                out.insert(k.clone(), t.clone());
+            }
+            (Some(t), Some(e)) => {
+                bail!(
+                    "`$if` branches disagree on inferred type of local `{k}` ({t:?} vs {e:?})"
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn lower_branch_to_body(
     v: &Value,
@@ -3733,6 +3765,8 @@ fn parse_if_statement(
     }
     let then_v = map_get_str(stmt, "then").context("$if missing `then`")?;
     let else_v = map_get_str(stmt, "else").context("$if missing `else`")?;
+    let baseline = locals.clone();
+    let mut then_locals = baseline.clone();
     let then_body = lower_branch_to_body(
         then_v,
         sigs,
@@ -3740,10 +3774,11 @@ fn parse_if_statement(
         type_aliases,
         enums,
         impls,
-        locals,
+        &mut then_locals,
         warnings,
         fn_ctx,
     )?;
+    let mut else_locals = baseline.clone();
     let else_body = lower_branch_to_body(
         else_v,
         sigs,
@@ -3751,10 +3786,11 @@ fn parse_if_statement(
         type_aliases,
         enums,
         impls,
-        locals,
+        &mut else_locals,
         warnings,
         fn_ctx,
     )?;
+    *locals = merge_if_branch_env(&then_locals, &else_locals)?;
     Ok(Statement::If {
         cond,
         then_body,
@@ -3792,6 +3828,8 @@ fn parse_while_statement(
     let steps = do_v
         .as_sequence()
         .context("`$while.do` must be a block sequence")?;
+    let baseline = locals.clone();
+    let mut body_locals = baseline.clone();
     let mut body = Vec::with_capacity(steps.len());
     for step in steps {
         body.push(lower_statement(
@@ -3801,11 +3839,12 @@ fn parse_while_statement(
             type_aliases,
             enums,
             impls,
-            locals,
+            &mut body_locals,
             warnings,
             fn_ctx,
         )?);
     }
+    *locals = baseline;
     Ok(Statement::While { cond, body })
 }
 
@@ -4209,41 +4248,77 @@ fn iface_method_record_field_names(
     ))
 }
 
-/// Labeled iface calls use `$iface.method: <dispatch-expr>` plus sibling keys. Legacy nesting put
-/// the full args record under the callee key; pass that mapping through unchanged for dispatch.
-fn iface_resolve_payload_for_try_resolve(
+/// Rejects nesting the full parameter map under the callee (`$f: {{ t: ..., x: ... }}`).
+fn reject_legacy_nested_call_bundle(
+    function: &FunctionSig,
+    call_key: &str,
+    subject: &Value,
+    siblings: &[(String, Value)],
+) -> Result<()> {
+    if !siblings.is_empty() {
+        return Ok(());
+    }
+    let Some(m) = subject.as_mapping() else {
+        return Ok(());
+    };
+    if m.is_empty() {
+        return Ok(());
+    }
+    let expected: HashSet<String> = function
+        .type_params
+        .iter()
+        .chain(function.arg_names.iter())
+        .cloned()
+        .collect();
+    if expected.is_empty() {
+        return Ok(());
+    }
+    let keys: HashSet<String> = m
+        .keys()
+        .filter_map(|k| k.as_str().map(std::string::ToString::to_string))
+        .collect();
+    if keys == expected {
+        let primary = function
+            .arg_names
+            .first()
+            .map(String::as_str)
+            .unwrap_or("primary");
+        bail!(
+            "call `{call_key}` must not nest all parameters under the callee; use `{call_key}: <{primary}>` as the callee value and sibling keys for the rest"
+        );
+    }
+    Ok(())
+}
+
+fn reject_iface_nested_call_bundle(
     call_key: &str,
     subject: &Value,
     siblings: &[(String, Value)],
     type_aliases: &HashMap<String, TypeAlias>,
-) -> Result<Value> {
+) -> Result<()> {
     if !siblings.is_empty() {
-        return build_iface_dispatch_payload(call_key, subject, siblings, type_aliases);
+        return Ok(());
     }
     let Some(fields) = iface_method_record_field_names(call_key, type_aliases)? else {
-        return build_iface_dispatch_payload(call_key, subject, siblings, type_aliases);
+        return Ok(());
     };
-    let self_name = iface_dispatch_arg_name(call_key, type_aliases)?;
-    let field_set: HashSet<String> = fields.iter().cloned().collect();
-    if let Some(subm) = subject.as_mapping() {
-        for k in subm.keys() {
-            let ks = k
-                .as_str()
-                .context("interface call payload key must be string")?;
-            if !field_set.contains(ks) {
-                bail!("unexpected key `{ks}` in call `{call_key}`");
-            }
-        }
-        if subm.contains_key(&Value::String(self_name.clone())) {
-            return Ok(Value::Mapping(subm.clone()));
-        }
-        if !subm.is_empty() {
-            bail!(
-                "interface-qualified call `{call_key}` is missing dispatch argument `{self_name}`"
-            );
-        }
+    let Some(subm) = subject.as_mapping() else {
+        return Ok(());
+    };
+    if subm.is_empty() {
+        return Ok(());
     }
-    build_iface_dispatch_payload(call_key, subject, siblings, type_aliases)
+    let expected: HashSet<String> = fields.iter().cloned().collect();
+    let keys: HashSet<String> = subm
+        .keys()
+        .filter_map(|k| k.as_str().map(std::string::ToString::to_string))
+        .collect();
+    if keys == expected {
+        bail!(
+            "call `{call_key}` must not nest all parameters under the callee; pass the dispatch value as the callee payload and use sibling keys for other parameters"
+        );
+    }
+    Ok(())
 }
 
 fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<(String, Value, Vec<(String, Value)>)> {
@@ -4264,55 +4339,6 @@ fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<(String, Value, Vec<(S
     }
     let (call_key, subject) = callee.context("call missing `$callee` key")?;
     Ok((call_key, subject, siblings))
-}
-
-/// Legacy call shape: `$callee: { t: ..., x: ... }` nests every parameter under the callee key.
-/// Labeled shape uses `$callee: <primary-arg>` plus sibling keys. Expand the legacy nesting when
-/// the payload is a mapping whose keys are exactly the callee's type parameters and value args.
-fn legacy_inline_call_payload(
-    function: &FunctionSig,
-    subject: &Value,
-) -> Option<(Value, Vec<(String, Value)>)> {
-    if function.arg_names.is_empty() {
-        return None;
-    }
-    let map = subject.as_mapping()?;
-    if map.is_empty() {
-        return None;
-    }
-    let allowed: HashSet<String> = function
-        .type_params
-        .iter()
-        .chain(function.arg_names.iter())
-        .cloned()
-        .collect();
-    for k in map.keys() {
-        let ks = k.as_str()?;
-        if !allowed.contains(ks) {
-            return None;
-        }
-    }
-    for tp in &function.type_params {
-        if !map.contains_key(&Value::String(tp.clone())) {
-            return None;
-        }
-    }
-    for n in &function.arg_names {
-        if !map.contains_key(&Value::String(n.clone())) {
-            return None;
-        }
-    }
-    let primary = function.arg_names[0].clone();
-    let pv = map.get(&Value::String(primary.clone()))?.clone();
-    let mut sibs = Vec::new();
-    for (k, v) in map {
-        let ks = k.as_str()?;
-        if ks == primary {
-            continue;
-        }
-        sibs.push((ks.to_string(), v.clone()));
-    }
-    Some((pv, sibs))
 }
 
 fn reject_unknown_call_keys(
@@ -4343,9 +4369,8 @@ fn reject_unknown_call_keys(
     Ok(())
 }
 
-/// After [`legacy_inline_call_payload`] fails, a callee-valued mapping may still be a *partial*
-/// legacy arg map (`$f: {{ p: ... }}` missing `grant`). Report missing fields before
-/// [`merge_call_payload`] nests the map under the wrong primary key.
+/// When the callee payload is a mapping of only parameter names (no `$...` keys), detect a
+/// *partial* arg map (e.g. missing `grant`) before [`merge_call_payload`] nests it incorrectly.
 fn report_missing_inline_call_args(
     function: &FunctionSig,
     call_key: &str,
@@ -4446,13 +4471,9 @@ fn parse_call(
     let callee_key = match resolve_call_target(&call_key, sigs) {
         Ok(k) => k,
         Err(direct_err) => {
-            let merged = iface_resolve_payload_for_try_resolve(
-                &call_key,
-                &subject,
-                &siblings,
-                type_aliases,
-            )
-            .with_context(|| format!("{direct_err}"))?;
+            reject_iface_nested_call_bundle(&call_key, &subject, &siblings, type_aliases)?;
+            let merged = build_iface_dispatch_payload(&call_key, &subject, &siblings, type_aliases)
+                .with_context(|| format!("{direct_err}"))?;
             try_resolve_iface_call(
                 &call_key,
                 &merged,
@@ -4471,19 +4492,9 @@ fn parse_call(
         .get(&callee_key)
         .with_context(|| format!("unknown function `{callee_key}`"))?;
 
-    let (subject, siblings): (Value, Vec<(String, Value)>) =
-        if siblings.is_empty() {
-            if let Some((s, sb)) = legacy_inline_call_payload(function, &subject) {
-                (s, sb)
-            } else {
-                reject_unknown_call_keys(function, &call_key, &subject, &siblings)?;
-                report_missing_inline_call_args(function, &call_key, &subject, &siblings)?;
-                (subject, siblings)
-            }
-        } else {
-            reject_unknown_call_keys(function, &call_key, &subject, &siblings)?;
-            (subject, siblings)
-        };
+    reject_unknown_call_keys(function, &call_key, &subject, &siblings)?;
+    reject_legacy_nested_call_bundle(function, &call_key, &subject, &siblings)?;
+    report_missing_inline_call_args(function, &call_key, &subject, &siblings)?;
 
     let av = merge_call_payload(function, &subject, &siblings)
         .with_context(|| format!("invalid arguments for call `{call_key}`"))?;
@@ -4533,7 +4544,10 @@ fn parse_call(
     for (idx, expr) in args.iter().enumerate() {
         let expected = substitute_type(&function.arg_types[idx], &subst);
         let Some(actual) = infer_expr_type(expr, constants, locals, type_aliases, enums) else {
-            continue;
+            bail!(
+                "could not infer type for call `{call_key}` argument `{}` (unbound variable or incompatible sub-expressions)",
+                function.arg_names[idx]
+            );
         };
         if !type_compatible(&expected, &actual, type_aliases) {
             if crosses_newtype_boundary(&expected, &actual, type_aliases) {
@@ -4919,27 +4933,12 @@ fn build_function_args_mapping(
     Ok(Value::Mapping(combined))
 }
 
-/// Resolves `$function` fields from either labeled syntax (`$function: <ty>` + siblings) or a
-/// legacy nested body (`$function: { args, return, do }`) used under `=defs` / nested envelopes.
+/// Resolves `$function` fields from labeled syntax: `$function: <first-arg-type>` plus optional
+/// sibling `args`, and required `return` / `do`.
 fn resolve_function_envelope_fields(
     env: &DefEnvelope<'_>,
     primary_name: &str,
 ) -> Result<(Value, Value, Value)> {
-    if let Some(inner) = env.form_value.as_mapping() {
-        if let (Some(a), Some(r), Some(d)) = (
-            map_get_str(inner, "args"),
-            map_get_str(inner, "return"),
-            map_get_str(inner, "do"),
-        ) {
-            if env.function_args.is_some() || env.function_return.is_some() || env.function_do.is_some()
-            {
-                bail!(
-                    "invalid `$function`: nested `{{ args, return, do }}` body cannot mix with labeled `args` / `return` / `do` siblings"
-                );
-            }
-            return Ok((a.clone(), r.clone(), d.clone()));
-        }
-    }
     let merged = build_function_args_mapping(primary_name, env.form_value, env.function_args)?;
     let ret = env
         .function_return
@@ -4947,6 +4946,73 @@ fn resolve_function_envelope_fields(
         .clone();
     let d = env.function_do.context("missing `do` on `$function`")?.clone();
     Ok((merged, ret, d))
+}
+
+/// Peel the first parameter from labeled `$function: …` surface syntax.
+///
+/// When the payload is the scalar `$self`, the parameter name is `scalar_self_primary`
+/// (`self` for `=defs`, `subject` for module-level functions).
+///
+/// A mapping with exactly one key that does not start with `$` is treated as
+/// `{ <param-name>: <type> }`. A singleton `$record` mapping peels to its sole field.
+/// Otherwise the whole payload is the first-arg type and the name is `subject`.
+fn labeled_function_first_arg<'a>(
+    form_value: &'a Value,
+    scalar_self_primary: &'static str,
+) -> Result<(String, &'a Value)> {
+    if form_value.as_str() == Some("$self") {
+        return Ok((scalar_self_primary.to_string(), form_value));
+    }
+    let Some(m) = form_value.as_mapping() else {
+        return Ok((MODULE_FN_PRIMARY_ARG.to_string(), form_value));
+    };
+    if m.len() == 1 {
+        let (k, v) = m.iter().next().expect("len checked");
+        let key = k
+            .as_str()
+            .context("`$function` mapping key must be a string")?;
+        if key == "$record" {
+            let inner = v
+                .as_mapping()
+                .context("`$record` value under `$function` must be a mapping")?;
+            if inner.len() == 1 {
+                let (ik, iv) = inner.iter().next().expect("len checked");
+                let iname = ik
+                    .as_str()
+                    .context("record field name under `$function` must be a string")?;
+                return Ok((iname.to_string(), iv));
+            }
+        } else if !key.starts_with('$') {
+            return Ok((key.to_string(), v));
+        }
+    }
+    Ok((MODULE_FN_PRIMARY_ARG.to_string(), form_value))
+}
+
+/// Primary parameter name for an `=impl` `$function` envelope: the `$self` field if present,
+/// otherwise the first record field (declaration order in the stored record).
+fn iface_impl_primary_field_name(expected_fn_type: &TypeRef) -> Result<String> {
+    let TypeRef::FnType { args, .. } = expected_fn_type else {
+        bail!("internal: expected interface method `$fn-type`");
+    };
+    let TypeRef::Record(rec) = args.as_ref() else {
+        bail!("internal: interface method args must be a record");
+    };
+    if let Some((n, _)) = rec
+        .iter()
+        .find(|(_, t)| matches!(t, TypeRef::SelfType))
+    {
+        return Ok(n.clone());
+    }
+    // After `$self` substitution the receiver is no longer `SelfType`, but the field is
+    // still conventionally named `self` — prefer that over lexicographic-first keys like `b`.
+    if rec.contains_key("self") {
+        return Ok("self".to_string());
+    }
+    rec.keys()
+        .next()
+        .cloned()
+        .context("interface method must declare at least one argument")
 }
 
 fn infer_expr_type(

@@ -10,37 +10,35 @@ net-error:
     unsupported: $str
 
 connect:
-  $function:
-    args:
-      target: $str
-      grant: $security.net-connect-grant
-    return:
-      $result.result:
-        t: $void
-        e: $net-error
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: net_connect
-          args:
-            - $args.target
-            - $args.grant
+  $function: $str
+  args:
+    grant: $security.net-connect-grant
+  return:
+    $result.result:
+      t: $void
+      e: $net-error
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: net_connect
+        args:
+          - $args.subject
+          - $args.grant
 
 listen:
-  $function:
-    args:
-      target: $str
-      grant: $security.net-listen-grant
-    return:
-      $result.result:
-        t: $void
-        e: $net-error
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: net_listen
-          args:
-            - $args.target
-            - $args.grant
+  $function: $str
+  args:
+    grant: $security.net-listen-grant
+  return:
+    $result.result:
+      t: $void
+      e: $net-error
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: net_listen
+        args:
+          - $args.subject
+          - $args.grant
