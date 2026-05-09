@@ -1,9 +1,9 @@
 //! Vibra compiler CLI. See [DRAFT.md](../DRAFT.md).
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
-use vibra::{execute, load, lower, runtime};
+use vibra::{execute, load, lower, project, runtime};
 
 #[derive(Parser)]
 #[command(name = "vibra", version, about = "Vibra language toolchain")]
@@ -14,6 +14,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Create a new Vibra project.
+    Init {
+        /// Project directory name to create.
+        name: PathBuf,
+        /// Project template to scaffold.
+        #[arg(long, value_enum, default_value_t = TemplateArg::Bin)]
+        template: TemplateArg,
+    },
+    /// Clone/fetch pinned git dependencies into dep/.
+    Sync {
+        /// Project directory or project.vibra path.
+        path: Option<PathBuf>,
+    },
+    /// Validate a Vibra project manifest, dependencies, targets, and imports.
+    Check {
+        /// Project directory or project.vibra path.
+        path: Option<PathBuf>,
+    },
     /// Parse, compile (MVP), and run a `.vibra` module via embedded Wasmer.
     Run {
         /// Entry module path (e.g. examples/hello.vibra).
@@ -60,9 +78,40 @@ enum Command {
     },
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum TemplateArg {
+    Bin,
+    Lib,
+    Workspace,
+}
+
+impl From<TemplateArg> for project::InitTemplate {
+    fn from(value: TemplateArg) -> Self {
+        match value {
+            TemplateArg::Bin => project::InitTemplate::Bin,
+            TemplateArg::Lib => project::InitTemplate::Lib,
+            TemplateArg::Workspace => project::InitTemplate::Workspace,
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Init { name, template } => {
+            project::init_project(&name, template.into())?;
+            println!("created {}", name.display());
+        }
+        Command::Sync { path } => {
+            let path = path.unwrap_or_else(|| PathBuf::from("."));
+            project::sync_project(&path)?;
+            println!("synced {}", path.display());
+        }
+        Command::Check { path } => {
+            let path = path.unwrap_or_else(|| PathBuf::from("."));
+            project::check_project(&path)?;
+            println!("checked {}", path.display());
+        }
         Command::Run {
             path,
             preopen,

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/project-manifest.schema.json",
+  "title": "VibraProjectManifest",
+  "type": "object",
+  "required": ["manifest-version", "package", "targets"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest-version": { "const": 1 },
+    "package": {
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/kebabName" },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": ["libs"],
+          "properties": {
+            "libs": { "minItems": 1 }
+          }
+        },
+        {
+          "required": ["bins"],
+          "properties": {
+            "bins": { "minItems": 1 }
+          }
+        }
+      ],
+      "properties": {
+        "libs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/target" }
+        },
+        "bins": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/target" }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/kebabName" },
+      "additionalProperties": { "$ref": "#/$defs/dependency" }
+    }
+  },
+  "$defs": {
+    "kebabName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "allOf": [
+        { "not": { "pattern": "^([A-Za-z]:|/|\\\\)" } },
+        { "not": { "pattern": "(^|[/\\\\])\\.\\.?($|[/\\\\])" } }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "required": ["name", "root", "entry"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/kebabName" },
+        "root": { "$ref": "#/$defs/relativePath" },
+        "entry": {
+          "allOf": [
+            { "$ref": "#/$defs/relativePath" },
+            { "pattern": "\\.vibra(\\.yaml)?$" }
+          ]
+        }
+      }
+    },
+    "dependency": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["path"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["git", "rev"],
+          "additionalProperties": false,
+          "properties": {
+            "git": { "type": "string", "minLength": 1 },
+            "rev": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{7,40}$"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

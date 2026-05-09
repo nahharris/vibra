@@ -9,6 +9,7 @@
 //! `E-ANNO-002`.
 
 use crate::load::{map_get_str, LoadedProgram};
+use crate::project;
 use anyhow::{bail, Context, Result};
 use serde_yaml::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -242,9 +243,15 @@ pub enum LetValue {
 #[derive(Debug, Clone)]
 pub enum Statement {
     Call(Call),
-    Let { var: String, value: LetValue },
+    Let {
+        var: String,
+        value: LetValue,
+    },
     Return(Expr),
-    Match { target: Expr, arms: Vec<MatchArm> },
+    Match {
+        target: Expr,
+        arms: Vec<MatchArm>,
+    },
     /// Evaluate an expression for side effects; result is discarded.
     Eval(Expr),
     If {
@@ -462,18 +469,21 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             );
         }
     } else {
-        if let Some(inner) = form_value.as_mapping() {
-            if map_get_str(inner, "args").is_some()
+        let nested_function = form_value.as_mapping().is_some_and(|inner| {
+            map_get_str(inner, "args").is_some()
                 && map_get_str(inner, "return").is_some()
                 && map_get_str(inner, "do").is_some()
-            {
+        });
+        if nested_function {
+            if function_args.is_some() || function_return.is_some() || function_do.is_some() {
                 bail!(
-                    "invalid `$function`: nested `{{ args, return, do }}` is not supported; use `$function: <first-arg-type>` with sibling `args`, `return`, and `do`"
+                    "invalid `$function`: cannot mix nested `{{ args, return, do }}` with sibling function fields"
                 );
             }
+        } else {
+            let _ = function_return.context("missing `return` on `$function`")?;
+            let _ = function_do.context("missing `do` on `$function`")?;
         }
-        let _ = function_return.context("missing `return` on `$function`")?;
-        let _ = function_do.context("missing `do` on `$function`")?;
     }
 
     if defs.is_some() && form_key == "$function" {
@@ -569,15 +579,16 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$capability",
 ];
 
-fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, AliasSkeleton>> {
+fn collect_alias_skeletons(
+    program: &LoadedProgram,
+    entry_project: Option<&project::LoadedProject>,
+) -> Result<HashMap<String, AliasSkeleton>> {
     let entry_map = program
         .modules
         .get(&program.entry)
         .context("internal: entry module not loaded")?
         .as_mapping()
         .context("entry root must be mapping")?;
-    let parent = program.entry.parent().context("entry path has no parent")?;
-
     let mut skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
     let mut sink: Vec<String> = Vec::new();
     let mut visited_imports: HashSet<(String, PathBuf)> = HashSet::new();
@@ -592,12 +603,13 @@ fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, Al
             continue;
         };
         let imp_s = imp.as_str().context("$import value must be string")?;
-        let imported_path = fs::canonicalize(parent.join(imp_s))
+        let imported_path = resolve_import_path(&program.entry, imp_s, entry_project)
             .with_context(|| format!("resolve import alias `{alias}`"))?;
         collect_module_skeleton_tree(
             alias,
             &imported_path,
             program,
+            entry_project,
             &mut skeletons,
             &mut sink,
             &mut visited_imports,
@@ -618,6 +630,7 @@ fn collect_module_skeleton_tree(
     alias: &str,
     module_path: &std::path::Path,
     program: &LoadedProgram,
+    entry_project: Option<&project::LoadedProject>,
     skeletons: &mut HashMap<String, AliasSkeleton>,
     sink: &mut Vec<String>,
     visited_imports: &mut HashSet<(String, PathBuf)>,
@@ -633,9 +646,6 @@ fn collect_module_skeleton_tree(
     let map = module_root
         .as_mapping()
         .context("module root must be mapping")?;
-    let parent = module_path
-        .parent()
-        .context("imported module path has no parent")?;
     for (k, v) in map {
         let nested_alias = k.as_str().context("module key must be string")?;
         if nested_alias.starts_with('-') {
@@ -646,12 +656,13 @@ fn collect_module_skeleton_tree(
             continue;
         };
         let imp_s = imp.as_str().context("$import value must be string")?;
-        let nested_path = fs::canonicalize(parent.join(imp_s))
+        let nested_path = resolve_import_path(module_path, imp_s, entry_project)
             .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
         collect_module_skeleton_tree(
             nested_alias,
             &nested_path,
             program,
+            entry_project,
             skeletons,
             sink,
             visited_imports,
@@ -1547,6 +1558,28 @@ fn strip_module_prefix(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
+fn resolve_import_path(
+    module_path: &std::path::Path,
+    import: &str,
+    entry_project: Option<&project::LoadedProject>,
+) -> Result<PathBuf> {
+    let raw = if import.starts_with('@') {
+        let project = entry_project.with_context(|| {
+            format!(
+                "{}: @ import `{import}` requires a project.vibra",
+                module_path.display()
+            )
+        })?;
+        project::resolve_project_import(project, import)?
+    } else {
+        let parent = module_path
+            .parent()
+            .with_context(|| format!("{}: path has no parent directory", module_path.display()))?;
+        parent.join(import)
+    };
+    fs::canonicalize(&raw).with_context(|| format!("cannot resolve import `{}`", raw.display()))
+}
+
 fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAlias>) -> TypeRef {
     match ty {
         TypeRef::Named(name) => {
@@ -1644,10 +1677,8 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         .context("internal: entry module not loaded")?
         .as_mapping()
         .context("entry root must be mapping")?;
-
-    let parent = program.entry.parent().context("entry path has no parent")?;
-
-    let skeletons = collect_alias_skeletons(program)?;
+    let entry_project = project::find_project_for_file(&program.entry)?;
+    let skeletons = collect_alias_skeletons(program, entry_project.as_ref())?;
 
     let mut sigs: HashMap<String, FunctionSig> = HashMap::new();
     let mut constants: HashMap<String, RuntimeValue> = HashMap::new();
@@ -1669,12 +1700,13 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
             continue;
         };
         let imp_s = imp.as_str().context("$import value must be string")?;
-        let imported_path = fs::canonicalize(parent.join(imp_s))
+        let imported_path = resolve_import_path(&program.entry, imp_s, entry_project.as_ref())
             .with_context(|| format!("resolve import alias `{alias}`"))?;
         collect_module_defs_tree(
             alias,
             &imported_path,
             program,
+            entry_project.as_ref(),
             &mut sigs,
             &mut constants,
             &mut type_aliases,
@@ -1722,8 +1754,8 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     if !main_env.type_params.is_empty() {
         bail!("`main` must not be generic (no `where:`)");
     }
-    let (args, ret, do_seq) =
-        resolve_function_envelope_fields(&main_env, MODULE_FN_PRIMARY_ARG).context("invalid `main`")?;
+    let (args, ret, do_seq) = resolve_function_envelope_fields(&main_env, MODULE_FN_PRIMARY_ARG)
+        .context("invalid `main`")?;
     let mut main_arg_bindings = Vec::new();
     if !is_void_args(&args) {
         let (arg_names, arg_types) =
@@ -1784,6 +1816,7 @@ fn collect_module_defs_tree(
     alias: &str,
     module_path: &std::path::Path,
     program: &LoadedProgram,
+    entry_project: Option<&project::LoadedProject>,
     sigs: &mut HashMap<String, FunctionSig>,
     constants: &mut HashMap<String, RuntimeValue>,
     type_aliases: &mut HashMap<String, TypeAlias>,
@@ -1805,9 +1838,6 @@ fn collect_module_defs_tree(
     let map = module_root
         .as_mapping()
         .context("module root must be mapping")?;
-    let parent = module_path
-        .parent()
-        .context("imported module path has no parent")?;
     for (k, v) in map {
         let nested_alias = k.as_str().context("module key must be string")?;
         if nested_alias.starts_with('-') {
@@ -1818,12 +1848,13 @@ fn collect_module_defs_tree(
             continue;
         };
         let imp_s = imp.as_str().context("$import value must be string")?;
-        let nested_path = fs::canonicalize(parent.join(imp_s))
+        let nested_path = resolve_import_path(module_path, imp_s, entry_project)
             .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
         collect_module_defs_tree(
             nested_alias,
             &nested_path,
             program,
+            entry_project,
             sigs,
             constants,
             type_aliases,
@@ -2232,16 +2263,16 @@ fn collect_module_defs(
         } else {
             format!("{alias}.{name}")
         };
+        if let Some(b) = v.as_bool() {
+            constants.insert(qualified_key, RuntimeValue::Bool(b));
+            continue;
+        }
         if let Some(i) = v.as_i64() {
             constants.insert(qualified_key, RuntimeValue::Int(i));
             continue;
         }
         if let Some(f) = v.as_f64() {
             constants.insert(qualified_key, RuntimeValue::Float(f));
-            continue;
-        }
-        if let Some(b) = v.as_bool() {
-            constants.insert(qualified_key, RuntimeValue::Bool(b));
             continue;
         }
         if let Some(s) = v.as_str() {
@@ -2292,8 +2323,7 @@ fn try_register_function(
     }
     maybe_warn_kebab(name, "function name", warnings);
     let scope = env.type_params.clone();
-    let (primary, first_arg_ty) = labeled_function_first_arg(env.form_value, MODULE_FN_PRIMARY_ARG)?;
-    let args = build_function_args_mapping(&primary, first_arg_ty, env.function_args)
+    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG)
         .with_context(|| {
             if alias.is_empty() {
                 format!("{name}: invalid `$function` envelope")
@@ -2301,11 +2331,6 @@ fn try_register_function(
                 format!("{alias}.{name}: invalid `$function` envelope")
             }
         })?;
-    let ret = env
-        .function_return
-        .context("missing `return` on `$function`")?
-        .clone();
-    let do_seq = env.function_do.context("missing `do` on `$function`")?.clone();
     // Free-standing module-level functions cannot reference `$self`; that
     // privilege belongs to functions declared inside `=defs` / `=impl` (see
     // Phases 3/4). Pass `false` here.
@@ -2511,18 +2536,20 @@ fn register_one_inherent_function(
         all_type_params.push(tp.clone());
     }
 
-    let (primary, first_arg_ty) = labeled_function_first_arg(env.form_value, INHERENT_FN_PRIMARY_ARG)?;
+    let (primary, first_arg_ty) =
+        labeled_function_first_arg(env.form_value, INHERENT_FN_PRIMARY_ARG)?;
     let args = build_function_args_mapping(&primary, first_arg_ty, env.function_args)
         .with_context(|| {
-            format!(
-                "`{qualified_type_key}.{entry_name}`: invalid `$function` envelope"
-            )
+            format!("`{qualified_type_key}.{entry_name}`: invalid `$function` envelope")
         })?;
     let ret = env
         .function_return
         .context("missing `return` on `$function`")?
         .clone();
-    let do_seq = env.function_do.context("missing `do` on `$function`")?.clone();
+    let do_seq = env
+        .function_do
+        .context("missing `do` on `$function`")?
+        .clone();
     let (arg_names, arg_types) =
         parse_signature_args(&args, &all_type_params, skeletons, warnings, true)
             .with_context(|| format!("{qualified_type_key}.{entry_name}: invalid function args"))?;
@@ -2958,9 +2985,8 @@ fn bind_impl_method(
     }
 
     let iface_primary = iface_impl_primary_field_name(expected_fn_type)?;
-    let (args, ret, do_seq) =
-        resolve_function_envelope_fields(&env, &iface_primary)
-            .context("impl method: invalid `$function` envelope")?;
+    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, &iface_primary)
+        .context("impl method: invalid `$function` envelope")?;
     let (arg_names, arg_types) =
         parse_signature_args(&args, &method_scope, skeletons, warnings, true)?;
     let arg_types: Vec<TypeRef> = arg_types
@@ -3692,9 +3718,7 @@ fn merge_if_branch_env(
                 out.insert(k.clone(), t.clone());
             }
             (Some(t), Some(e)) => {
-                bail!(
-                    "`$if` branches disagree on inferred type of local `{k}` ({t:?} vs {e:?})"
-                );
+                bail!("`$if` branches disagree on inferred type of local `{k}` ({t:?} vs {e:?})");
             }
             _ => {}
         }
@@ -4253,47 +4277,6 @@ fn iface_method_record_field_names(
 }
 
 /// Rejects nesting the full parameter map under the callee (`$f: {{ t: ..., x: ... }}`).
-fn reject_legacy_nested_call_bundle(
-    function: &FunctionSig,
-    call_key: &str,
-    subject: &Value,
-    siblings: &[(String, Value)],
-) -> Result<()> {
-    if !siblings.is_empty() {
-        return Ok(());
-    }
-    let Some(m) = subject.as_mapping() else {
-        return Ok(());
-    };
-    if m.is_empty() {
-        return Ok(());
-    }
-    let expected: HashSet<String> = function
-        .type_params
-        .iter()
-        .chain(function.arg_names.iter())
-        .cloned()
-        .collect();
-    if expected.is_empty() {
-        return Ok(());
-    }
-    let keys: HashSet<String> = m
-        .keys()
-        .filter_map(|k| k.as_str().map(std::string::ToString::to_string))
-        .collect();
-    if keys == expected {
-        let primary = function
-            .arg_names
-            .first()
-            .map(String::as_str)
-            .unwrap_or("primary");
-        bail!(
-            "call `{call_key}` must not nest all parameters under the callee; use `{call_key}: <{primary}>` as the callee value and sibling keys for the rest"
-        );
-    }
-    Ok(())
-}
-
 fn reject_iface_nested_call_bundle(
     call_key: &str,
     subject: &Value,
@@ -4358,6 +4341,34 @@ fn reject_unknown_call_keys(
         .cloned()
         .collect();
     if let Some(m) = subject.as_mapping() {
+        if siblings.is_empty() && !function.arg_names.is_empty() {
+            let primary = &function.arg_names[0];
+            let unknown_count = m
+                .keys()
+                .filter_map(|k| k.as_str())
+                .filter(|ks| !ks.starts_with('$') && !allowed.contains(*ks))
+                .count();
+            let primary_absent = !m.contains_key(Value::String(primary.clone()));
+            if unknown_count == 1 && primary_absent {
+                return Ok(());
+            }
+        }
+        if siblings.is_empty()
+            && function.arg_names.len() == 1
+            && m.len() == 1
+            && m.keys()
+                .all(|k| k.as_str().is_some_and(|ks| ks.starts_with('$')))
+        {
+            return Ok(());
+        }
+        if siblings.is_empty()
+            && function.arg_names.len() == 1
+            && m.len() == 1
+            && m.keys()
+                .all(|k| k.as_str().is_some_and(|ks| !ks.starts_with('$')))
+        {
+            return Ok(());
+        }
         for k in m.keys() {
             let ks = k.as_str().context("call mapping key must be string")?;
             if !allowed.contains(ks) {
@@ -4428,6 +4439,57 @@ fn merge_call_payload(
         return Ok(Value::Null);
     }
     let primary = &function.arg_names[0];
+    if siblings.is_empty() {
+        if let Some(subject_map) = subject.as_mapping() {
+            let keys: Vec<&str> = subject_map.keys().filter_map(|k| k.as_str()).collect();
+            if !keys.is_empty() && keys.iter().all(|k| !k.starts_with('$')) {
+                let all_known = keys.iter().all(|k| {
+                    function.type_params.iter().any(|p| p == k)
+                        || function.arg_names.iter().any(|a| a == k)
+                });
+                if all_known {
+                    return Ok(subject.clone());
+                }
+                let unknown_keys: Vec<&str> = keys
+                    .iter()
+                    .copied()
+                    .filter(|k| {
+                        !function.type_params.iter().any(|p| p == k)
+                            && !function.arg_names.iter().any(|a| a == k)
+                    })
+                    .collect();
+                if unknown_keys.len() == 1
+                    && !subject_map.contains_key(Value::String(primary.clone()))
+                    && keys.iter().all(|k| {
+                        unknown_keys.contains(k)
+                            || function.type_params.iter().any(|p| p == k)
+                            || function.arg_names.iter().skip(1).any(|a| a == k)
+                    })
+                {
+                    let mut map = serde_yaml::Mapping::new();
+                    for (k, v) in subject_map {
+                        let ks = k.as_str().context("call mapping key must be string")?;
+                        if ks == unknown_keys[0] {
+                            map.insert(Value::String(primary.clone()), v.clone());
+                        } else {
+                            map.insert(k.clone(), v.clone());
+                        }
+                    }
+                    return Ok(Value::Mapping(map));
+                }
+                if function.arg_names.len() == 1 && keys.len() == 1 {
+                    let only_value = subject_map
+                        .values()
+                        .next()
+                        .expect("map length checked")
+                        .clone();
+                    let mut map = serde_yaml::Mapping::new();
+                    map.insert(Value::String(primary.clone()), only_value);
+                    return Ok(Value::Mapping(map));
+                }
+            }
+        }
+    }
     let allowed: HashSet<String> = function
         .type_params
         .iter()
@@ -4497,7 +4559,6 @@ fn parse_call(
         .with_context(|| format!("unknown function `{callee_key}`"))?;
 
     reject_unknown_call_keys(function, &call_key, &subject, &siblings)?;
-    reject_legacy_nested_call_bundle(function, &call_key, &subject, &siblings)?;
     report_missing_inline_call_args(function, &call_key, &subject, &siblings)?;
 
     let av = merge_call_payload(function, &subject, &siblings)
@@ -4539,7 +4600,7 @@ fn parse_call(
         &av,
         function,
         !function.type_params.is_empty(),
-        call_key,
+        &call_key,
         constants,
         type_aliases,
         enums,
@@ -4673,13 +4734,17 @@ fn parse_expr(
 ) -> Result<Expr> {
     if let Some(m) = v.as_mapping() {
         fn mapping_keys_exactly(m: &serde_yaml::Mapping, keys: &[&str]) -> bool {
-            m.len() == keys.len() && keys.iter().all(|k| m.contains_key(&Value::String((*k).into())))
+            m.len() == keys.len()
+                && keys
+                    .iter()
+                    .all(|k| m.contains_key(&Value::String((*k).into())))
         }
 
         if mapping_keys_exactly(m, &["$cast", "into"]) {
             let from_v = map_get_str(m, "$cast")
                 .context("E-CAST-002: `$cast` missing subject expression")?;
-            let into_v = map_get_str(m, "into").context("E-CAST-002: `$cast` missing `into` type")?;
+            let into_v =
+                map_get_str(m, "into").context("E-CAST-002: `$cast` missing `into` type")?;
             let from = parse_expr(from_v, constants, type_aliases, enums, locals, warnings)?;
             let source = infer_expr_type(&from, constants, locals, type_aliases, enums)
                 .context("E-CAST-001: could not infer `$cast` subject type")?;
@@ -4810,7 +4875,9 @@ fn parse_expr(
                     return Ok(Expr::Map(items));
                 }
                 if constructor == "$cast" {
-                    bail!("E-CAST-002: `$cast` must use `$cast: <expr>` with sibling `into: <type>`");
+                    bail!(
+                        "E-CAST-002: `$cast` must use `$cast: <expr>` with sibling `into: <type>`"
+                    );
                 }
                 if constructor.starts_with('$') {
                     let (enum_key, tag) = resolve_enum_tag_ref(constructor, enums)?;
@@ -4926,10 +4993,7 @@ fn build_function_args_mapping(
         return Ok(Value::String("$void".into()));
     }
     let mut combined = serde_yaml::Mapping::new();
-    combined.insert(
-        Value::String(primary_name.into()),
-        first_arg_type.clone(),
-    );
+    combined.insert(Value::String(primary_name.into()), first_arg_type.clone());
     if let Some(rest) = rest_args {
         let rm = rest.as_mapping().context("`args` must be a mapping")?;
         for (k, v) in rm {
@@ -4954,12 +5018,30 @@ fn resolve_function_envelope_fields(
     env: &DefEnvelope<'_>,
     primary_name: &str,
 ) -> Result<(Value, Value, Value)> {
-    let merged = build_function_args_mapping(primary_name, env.form_value, env.function_args)?;
+    if let Some(m) = env.form_value.as_mapping() {
+        if let (Some(args), Some(ret), Some(d)) = (
+            map_get_str(m, "args"),
+            map_get_str(m, "return"),
+            map_get_str(m, "do"),
+        ) {
+            return Ok((args.clone(), ret.clone(), d.clone()));
+        }
+    }
+    let (primary, first_arg_ty) =
+        if env.form_value.as_mapping().is_none() && primary_name != MODULE_FN_PRIMARY_ARG {
+            (primary_name.to_string(), env.form_value)
+        } else {
+            labeled_function_first_arg(env.form_value, primary_name)?
+        };
+    let merged = build_function_args_mapping(&primary, first_arg_ty, env.function_args)?;
     let ret = env
         .function_return
         .context("missing `return` on `$function`")?
         .clone();
-    let d = env.function_do.context("missing `do` on `$function`")?.clone();
+    let d = env
+        .function_do
+        .context("missing `do` on `$function`")?
+        .clone();
     Ok((merged, ret, d))
 }
 
@@ -4973,7 +5055,7 @@ fn resolve_function_envelope_fields(
 /// Otherwise the whole payload is the first-arg type and the name is `subject`.
 fn labeled_function_first_arg<'a>(
     form_value: &'a Value,
-    scalar_self_primary: &'static str,
+    scalar_self_primary: &str,
 ) -> Result<(String, &'a Value)> {
     if form_value.as_str() == Some("$self") {
         return Ok((scalar_self_primary.to_string(), form_value));
@@ -5013,10 +5095,7 @@ fn iface_impl_primary_field_name(expected_fn_type: &TypeRef) -> Result<String> {
     let TypeRef::Record(rec) = args.as_ref() else {
         bail!("internal: interface method args must be a record");
     };
-    if let Some((n, _)) = rec
-        .iter()
-        .find(|(_, t)| matches!(t, TypeRef::SelfType))
-    {
+    if let Some((n, _)) = rec.iter().find(|(_, t)| matches!(t, TypeRef::SelfType)) {
         return Ok(n.clone());
     }
     // After `$self` substitution the receiver is no longer `SelfType`, but the field is
@@ -5041,7 +5120,6 @@ fn infer_expr_type(
         Expr::Value(RuntimeValue::Bool(_)) => Some(TypeRef::Bool),
         Expr::Value(RuntimeValue::Int(_)) => Some(TypeRef::Int64),
         Expr::Value(RuntimeValue::Float(_)) => Some(TypeRef::Float64),
-        Expr::Value(RuntimeValue::Bool(_)) => Some(TypeRef::Bool),
         Expr::Value(RuntimeValue::Str(_)) => Some(TypeRef::Str),
         Expr::Value(RuntimeValue::Array(items)) => {
             infer_array_type(items, constants, locals, aliases, enums)
@@ -5595,16 +5673,40 @@ fn parse_match_statement(
     warnings: &mut Vec<String>,
     fn_ctx: Option<&UserFnContext>,
 ) -> Result<Statement> {
-    verify_stmt_keys(stmt, &["$match", "when"])?;
-    let target_v = map_get_str(stmt, "$match").context("$match missing subject value")?;
+    let match_v = map_get_str(stmt, "$match").context("$match missing subject value")?;
+    let (target_v, arms_v, arms_label) = if let Some(match_m) = match_v.as_mapping() {
+        if map_get_str(match_m, "target").is_some() || map_get_str(match_m, "arms").is_some() {
+            if stmt.len() != 1 {
+                bail!("structured `$match` must not have sibling keys");
+            }
+            (
+                map_get_str(match_m, "target").context("$match missing `target`")?,
+                map_get_str(match_m, "arms").context("$match missing `arms`")?,
+                "arms",
+            )
+        } else {
+            verify_stmt_keys(stmt, &["$match", "when"])?;
+            (
+                match_v,
+                map_get_str(stmt, "when").context("$match missing `when`")?,
+                "when",
+            )
+        }
+    } else {
+        verify_stmt_keys(stmt, &["$match", "when"])?;
+        (
+            match_v,
+            map_get_str(stmt, "when").context("$match missing `when`")?,
+            "when",
+        )
+    };
     let target = parse_expr(target_v, constants, type_aliases, enums, locals, warnings)?;
     let target_ty = infer_expr_type(&target, constants, locals, type_aliases, enums)
         .context("$match subject type could not be inferred")?;
 
-    let arms_v = map_get_str(stmt, "when").context("$match missing `when`")?;
     let arms_seq = arms_v
         .as_sequence()
-        .context("$match `when` must be a sequence")?;
+        .with_context(|| format!("$match `{arms_label}` must be a sequence"))?;
     let mut arms = Vec::new();
     let mut covered_enum_tags = HashSet::new();
     let mut has_wildcard = false;
