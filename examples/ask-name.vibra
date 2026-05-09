@@ -3,38 +3,33 @@ io:
 security:
   $import: ../stdlib/security.vibra
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
-      - $io.print: "What is your name? "
-      - $match:
-          target: $args.grants.stdin-read
-          arms:
-            - pattern:
-                $security.grant-status.granted:
-                  $bind: stdin-grant
-              do:
-                - $let:
-                    name-result:
-                      $io.readln:
-                        grant: $stdin-grant
-                - $match:
-                    target: $name-result
-                    arms:
-                      - pattern:
-                          $result.result.ok:
-                            $bind: name
-                        do:
-                          - $io.println: $name
-                      - pattern:
-                          $result.result.err:
-                            $bind: err
-                        do:
-                          - $io.eprintln: "failed to read stdin"
-            - pattern:
-                $security.grant-status.denied:
-                  $bind: denied
-              do:
-                - $io.eprintln: "stdin grant denied"
+  $function: $security.grants
+  return: $void
+  do:
+    - $io.print: "What is your name? "
+    - $match: $args.subject.stdin-read
+      when:
+        - pattern:
+            $security.grant-status.granted:
+              $bind: stdin-grant
+          do:
+            - $let:
+                name-result:
+                  $io.readln: $stdin-grant
+            - $match: $name-result
+              when:
+                - pattern:
+                    $result.result.ok:
+                      $bind: name
+                  do:
+                    - $io.println: $name
+                - pattern:
+                    $result.result.err:
+                      $bind: err
+                  do:
+                    - $io.eprintln: "failed to read stdin"
+        - pattern:
+            $security.grant-status.denied:
+              $bind: denied
+          do:
+            - $io.eprintln: "stdin grant denied"

@@ -51,16 +51,14 @@ number:
 io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           value:
             $m.number.int: 7
-      - $match:
-          target: $value
-          arms:
+      - $match: $value
+        when:
             - pattern:
                 $m.number.int:
                   $bind: x
@@ -93,16 +91,14 @@ fn legacy_mapping_match_arms_are_rejected() {
     some: $str
     none: $void
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           value:
             $maybe.some: "x"
-      - $match:
-          target: $value
-          arms:
+      - $match: $value
+        when:
             some:
               bind: x
               do: []
@@ -115,8 +111,8 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("$match arms must be a sequence"),
-        "expected legacy mapping arms to be rejected, got: {err}"
+        err.contains("$match `when` must be a sequence"),
+        "expected legacy mapping `when` to be rejected, got: {err}"
     );
 }
 
@@ -137,18 +133,16 @@ maybe:
     some: $str
     none: $void
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           x: "outer"
       - $let:
           value:
             $maybe.some: "payload"
-      - $match:
-          target: $value
-          arms:
+      - $match: $value
+        when:
             - pattern:
                 $maybe.some:
                   $bind: payload
@@ -172,6 +166,112 @@ main:
 }
 
 #[test]
+fn if_branch_let_does_not_leak_into_other_branch_or_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
+        .unwrap();
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"io:
+  $import: "{io}"
+main:
+  $function: $void
+  return: $void
+  do:
+      - $if: true
+        then:
+          - $let:
+              x: 42
+        else:
+          - $io.println: $x
+"#,
+            io = io.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("could not infer type"),
+        "expected lowering to reject `$x` in else when only bound in then, got: {err}"
+    );
+}
+
+#[test]
+fn if_merges_locals_when_both_branches_bind_same_name_with_same_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
+        .unwrap();
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"io:
+  $import: "{io}"
+main:
+  $function: $void
+  return: $void
+  do:
+      - $if: true
+        then:
+          - $let:
+              x: "then"
+        else:
+          - $let:
+              x: "else"
+      - $io.println: $x
+"#,
+            io = io.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).expect("both branches bind x: int");
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default()).unwrap();
+}
+
+#[test]
+fn while_body_let_does_not_leak_after_loop() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
+        .unwrap();
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"io:
+  $import: "{io}"
+main:
+  $function: $void
+  return: $void
+  do:
+      - $while: false
+        do:
+          - $let:
+              x: 42
+      - $io.println: $x
+"#,
+            io = io.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("could not infer type"),
+        "expected lowering to reject `$x` after `$while` when only bound in body, got: {err}"
+    );
+}
+
+#[test]
 fn record_tuple_array_and_map_patterns_bind_values() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
@@ -184,10 +284,9 @@ fn record_tuple_array_and_map_patterns_bind_values() {
             r#"io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           value:
             $record:
@@ -199,9 +298,8 @@ main:
                 $map:
                   - key: "lang"
                     value: "vibra"
-      - $match:
-          target: $value
-          arms:
+      - $match: $value
+        when:
             - pattern:
                 $record:
                   pair:
@@ -251,25 +349,20 @@ meter:
   =impl:
     $display:
       fmt:
-        $function:
-          args:
-            x: $self
-          return: $str
-          do:
+        $function: $self
+        return: $str
+        do:
             - $return: "meter"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           distance:
-            $cast:
-              from: 7
-              to: $meter
-      - $match:
-          target: $distance
-          arms:
+            $cast: 7
+            into: $meter
+      - $match: $distance
+        when:
             - pattern:
                 $interface: $display
               do:
@@ -280,9 +373,8 @@ main:
               do:
                 - $let:
                     matched: "other"
-      - $match:
-          target: $distance
-          arms:
+      - $match: $distance
+        when:
             - pattern:
                 $newtype:
                   type: $meter
@@ -326,10 +418,9 @@ fn rejects_legacy_variants_union_syntax() {
             r#"u:
   $import: "{u}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -365,10 +456,9 @@ fn warns_for_non_kebab_case_symbols() {
     NotTag: $str
 doThing:
   $function:
-    args:
-      BadArg: $str
-    return: $void
-    do:
+    BadArg: $str
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -386,10 +476,9 @@ doThing:
 io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             m = mod_file.display().to_string().replace('\\', "/"),
@@ -435,15 +524,13 @@ fn supports_void_enum_constructor_without_payload() {
 io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           value-none: $m.option.none
-      - $match:
-          target: $value-none
-          arms:
+      - $match: $value-none
+        when:
             - pattern:
                 $m.option.none: null
               do:
@@ -477,11 +564,9 @@ fn rejects_removed_int_float_aliases() {
     std::fs::write(
         &bad,
         r#"takes-old-int:
-  $function:
-    args:
-      x: $int
-    return: $void
-    do:
+  $function: $int
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -497,10 +582,9 @@ fn rejects_removed_int_float_aliases() {
             r#"u:
   $import: "{u}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -531,11 +615,9 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
     std::fs::write(
         &mod_file,
         r#"accepts-int32:
-  $function:
-    args:
-      x: $int32
-    return: $void
-    do:
+  $function: $int32
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -543,11 +625,9 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
           args:
             - $const.1
 accepts-float32:
-  $function:
-    args:
-      x: $float32
-    return: $void
-    do:
+  $function: $float32
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -563,10 +643,9 @@ accepts-float32:
             r#"n:
   $import: "{n}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $n.accepts-int32: 7
       - $n.accepts-float32: 3.14
 "#,
@@ -592,11 +671,9 @@ fn newtype_decl_lowers_and_requires_explicit_cast() {
         r#"meter:
   $newtype: $int64
 take-meter:
-  $function:
-    args:
-      value: $meter
-    return: $void
-    do:
+  $function: $meter
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -604,15 +681,14 @@ take-meter:
           args:
             - $const.1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $take-meter:
-          value:
-            $cast:
-              from: 7
-              to: $meter
+  $function: $void
+  return: $void
+  do:
+      - $let:
+          v:
+            $cast: 7
+            into: $meter
+      - $take-meter: $v
 "#,
     )
     .unwrap();
@@ -639,11 +715,9 @@ fn newtype_does_not_accept_inner_type_implicitly() {
         r#"meter:
   $newtype: $int64
 take-meter:
-  $function:
-    args:
-      value: $meter
-    return: $void
-    do:
+  $function: $meter
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -651,12 +725,10 @@ take-meter:
           args:
             - $const.1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $take-meter:
-          value: 7
+  $function: $void
+  return: $void
+  do:
+      - $take-meter: 7
 "#,
     )
     .unwrap();
@@ -680,11 +752,9 @@ fn cast_rejects_cross_newtype_conversion() {
 second:
   $newtype: $int64
 take-second:
-  $function:
-    args:
-      value: $second
-    return: $void
-    do:
+  $function: $second
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -692,20 +762,18 @@ take-second:
           args:
             - $const.1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           m:
-            $cast:
-              from: 7
-              to: $meter
-      - $take-second:
-          value:
-            $cast:
-              from: $m
-              to: $second
+            $cast: 7
+            into: $meter
+      - $let:
+          s:
+            $cast: $m
+            into: $second
+      - $take-second: $s
 "#,
     )
     .unwrap();
@@ -730,18 +798,15 @@ fn fs_writable_interface_rejects_read_file() {
             r#"fs:
   $import: "{fs}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           f:
-            $cast:
-              from: 0
-              to: $fs.read-file
-      - $fs.writable.write-string:
-          self: $f
-          s: "nope"
+            $cast: 0
+            into: $fs.read-file
+      - $fs.writable.write-string: $f
+        s: "nope"
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
         ),
@@ -772,39 +837,31 @@ fn mode_safe_fs_roundtrip_runs() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
+  $function: $security.grants
+  return: $void
+  do:
       - $let:
           p:
-            $fs.path.new:
-              s: "{path}"
-      - $match:
-          target: $args.grants.fs-write
-          arms:
+            $fs.path.new: "{path}"
+      - $match: $args.subject.fs-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: write-grant
               do:
                 - $let:
                     opened-write:
-                      $fs.open-write:
-                        p: $p
-                        grant: $write-grant
-                - $match:
-                    target: $opened-write
-                    arms:
+                      $fs.open-write: $p
+                      grant: $write-grant
+                - $match: $opened-write
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: out
                         do:
-                          - $fs.writable.write-string:
-                              self: $out
-                              s: "from vibra fs"
-                          - $fs.closeable.close:
-                              self: $out
+                          - $fs.writable.write-string: $out
+                            s: "from vibra fs"
+                          - $fs.closeable.close: $out
                       - pattern:
                           $result.result.err:
                             $bind: err
@@ -813,31 +870,26 @@ main:
                 $security.grant-status.denied:
                   $bind: write-denied
               do: []
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+      - $match: $args.subject.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: read-grant
               do:
                 - $let:
                     opened-read:
-                      $fs.open-read:
-                        p: $p
-                        grant: $read-grant
-                - $match:
-                    target: $opened-read
-                    arms:
+                      $fs.open-read: $p
+                      grant: $read-grant
+                - $match: $opened-read
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: input
                         do:
                           - $let:
                               text:
-                                $fs.readable.read-string:
-                                  self: $input
-                          - $fs.closeable.close:
-                              self: $input
+                                $fs.readable.read-string: $input
+                          - $fs.closeable.close: $input
                       - pattern:
                           $result.result.err:
                             $bind: err2
@@ -878,15 +930,13 @@ fn capability_values_cannot_be_created_with_cast() {
         r#"secret:
   $capability: fs-read
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           forged:
-            $cast:
-              from: "not a grant"
-              to: $secret
+            $cast: "not a grant"
+            into: $secret
 "#,
     )
     .unwrap();
@@ -913,18 +963,15 @@ fn fs_open_read_requires_read_grant_argument() {
             r#"fs:
   $import: "{fs}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           p:
-            $fs.path.new:
-              s: "{path}"
+            $fs.path.new: "{path}"
       - $let:
           opened:
-            $fs.open-read:
-              p: $p
+            $fs.open-read: $p
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             path = data.display().to_string().replace('\\', "/"),
@@ -957,27 +1004,22 @@ fn fs_access_is_denied_without_any_runtime_grant() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
+  $function: $security.grants
+  return: $void
+  do:
       - $let:
           p:
-            $fs.path.new:
-              s: "{path}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+            $fs.path.new: "{path}"
+      - $match: $args.subject.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: grant
               do:
                 - $let:
                     opened:
-                      $fs.open-read:
-                        p: $p
-                        grant: $grant
+                      $fs.open-read: $p
+                      grant: $grant
             - pattern:
                 $security.grant-status.denied:
                   $bind: reason
@@ -1017,27 +1059,22 @@ fn fs_grant_rejects_sibling_prefix_escape() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
+  $function: $security.grants
+  return: $void
+  do:
       - $let:
           p:
-            $fs.path.new:
-              s: "{path}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+            $fs.path.new: "{path}"
+      - $match: $args.subject.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: grant
               do:
                 - $let:
                     opened:
-                      $fs.open-read:
-                        p: $p
-                        grant: $grant
+                      $fs.open-read: $p
+                      grant: $grant
             - pattern:
                 $security.grant-status.denied:
                   $bind: reason
@@ -1090,43 +1127,35 @@ fn fs_narrow_read_grant_limits_delegated_scope() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
+  $function: $security.grants
+  return: $void
+  do:
       - $let:
           allow-root:
-            $fs.path.new:
-              s: "{allowed}"
+            $fs.path.new: "{allowed}"
       - $let:
           denied-file:
-            $fs.path.new:
-              s: "{denied_file}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+            $fs.path.new: "{denied_file}"
+      - $match: $args.subject.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: read-grant
               do:
                 - $let:
                     narrowed:
-                      $fs.narrow-read:
-                        grant: $read-grant
-                        p: $allow-root
-                - $match:
-                    target: $narrowed
-                    arms:
+                      $fs.narrow-read: $read-grant
+                      p: $allow-root
+                - $match: $narrowed
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: narrow-grant
                         do:
                           - $let:
                               opened:
-                                $fs.open-read:
-                                  p: $denied-file
-                                  grant: $narrow-grant
+                                $fs.open-read: $denied-file
+                                grant: $narrow-grant
                       - pattern:
                           $result.result.err:
                             $bind: narrow-err
@@ -1180,14 +1209,11 @@ fn denied_grant_reason_uses_import_alias() {
             r#"sec:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $sec.grants
-    return: $void
-    do:
-      - $match:
-          target: $args.grants.stdin-read
-          arms:
+  $function: $sec.grants
+  return: $void
+  do:
+      - $match: $args.subject.stdin-read
+        when:
             - pattern:
                 $sec.grant-status.denied:
                   $sec.denial-reason.not-granted: null
@@ -1226,34 +1252,27 @@ fn fs_write_grant_allows_nonexistent_configured_scope() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
+  $function: $security.grants
+  return: $void
+  do:
       - $let:
           dir-path:
-            $fs.path.new:
-              s: "{allowed}"
+            $fs.path.new: "{allowed}"
       - $let:
           file-path:
-            $fs.path.new:
-              s: "{file}"
-      - $match:
-          target: $args.grants.fs-write
-          arms:
+            $fs.path.new: "{file}"
+      - $match: $args.subject.fs-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: write-grant
               do:
                 - $let:
                     made:
-                      $fs.create-dir-all:
-                        p: $dir-path
-                        grant: $write-grant
-                - $match:
-                    target: $made
-                    arms:
+                      $fs.create-dir-all: $dir-path
+                      grant: $write-grant
+                - $match: $made
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1263,13 +1282,11 @@ main:
                         do: []
                 - $let:
                     written:
-                      $fs.write-string-all:
-                        p: $file-path
-                        s: "hello"
-                        grant: $write-grant
-                - $match:
-                    target: $written
-                    arms:
+                      $fs.write-string-all: $file-path
+                      s: "hello"
+                      grant: $write-grant
+                - $match: $written
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1325,46 +1342,37 @@ fn fs_narrow_write_grant_allows_nonexistent_descendant_scope() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
+  $function: $security.grants
+  return: $void
+  do:
       - $let:
           narrow-root:
-            $fs.path.new:
-              s: "{narrowed_dir}"
+            $fs.path.new: "{narrowed_dir}"
       - $let:
           file-path:
-            $fs.path.new:
-              s: "{file}"
-      - $match:
-          target: $args.grants.fs-write
-          arms:
+            $fs.path.new: "{file}"
+      - $match: $args.subject.fs-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: write-grant
               do:
                 - $let:
                     narrowed:
-                      $fs.narrow-write:
-                        grant: $write-grant
-                        p: $narrow-root
-                - $match:
-                    target: $narrowed
-                    arms:
+                      $fs.narrow-write: $write-grant
+                      p: $narrow-root
+                - $match: $narrowed
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: narrow-grant
                         do:
                           - $let:
                               made:
-                                $fs.create-dir-all:
-                                  p: $narrow-root
-                                  grant: $narrow-grant
-                          - $match:
-                              target: $made
-                              arms:
+                                $fs.create-dir-all: $narrow-root
+                                grant: $narrow-grant
+                          - $match: $made
+                            when:
                                 - pattern:
                                     $result.result.ok: null
                                   do: []
@@ -1374,13 +1382,11 @@ main:
                                   do: []
                           - $let:
                               written:
-                                $fs.write-string-all:
-                                  p: $file-path
-                                  s: "hello"
-                                  grant: $narrow-grant
-                          - $match:
-                              target: $written
-                              arms:
+                                $fs.write-string-all: $file-path
+                                s: "hello"
+                                grant: $narrow-grant
+                          - $match: $written
+                            when:
                                 - pattern:
                                     $result.result.ok: null
                                   do: []
@@ -1436,27 +1442,22 @@ fn env_set_invalid_name_returns_err_result() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
-      - $match:
-          target: $args.grants.env-write
-          arms:
+  $function: $security.grants
+  return: $void
+  do:
+      - $match: $args.subject.env-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: env-grant
               do:
                 - $let:
                     set-result:
-                      $env.set:
-                        name: "BAD=NAME"
-                        value: "value"
-                        grant: $env-grant
-                - $match:
-                    target: $set-result
-                    arms:
+                      $env.set: "BAD=NAME"
+                      value: "value"
+                      grant: $env-grant
+                - $match: $set-result
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1505,10 +1506,9 @@ fn duplicate_nested_imports_are_idempotent() {
 fs:
   $import: "{fs}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -1544,34 +1544,27 @@ fn path_level_fs_apis_return_matchable_results() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
+  $function: $security.grants
+  return: $void
+  do:
       - $let:
           dir-path:
-            $fs.path.new:
-              s: "{work_dir}"
+            $fs.path.new: "{work_dir}"
       - $let:
           file-path:
-            $fs.path.new:
-              s: "{data}"
-      - $match:
-          target: $args.grants.fs-write
-          arms:
+            $fs.path.new: "{data}"
+      - $match: $args.subject.fs-write
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: write-grant
               do:
                 - $let:
                     made:
-                      $fs.create-dir-all:
-                        p: $dir-path
-                        grant: $write-grant
-                - $match:
-                    target: $made
-                    arms:
+                      $fs.create-dir-all: $dir-path
+                      grant: $write-grant
+                - $match: $made
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1581,13 +1574,11 @@ main:
                         do: []
                 - $let:
                     written:
-                      $fs.write-string-all:
-                        p: $file-path
-                        s: "hello"
-                        grant: $write-grant
-                - $match:
-                    target: $written
-                    arms:
+                      $fs.write-string-all: $file-path
+                      s: "hello"
+                      grant: $write-grant
+                - $match: $written
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1597,13 +1588,11 @@ main:
                         do: []
                 - $let:
                     appended:
-                      $fs.append-string:
-                        p: $file-path
-                        s: " world"
-                        grant: $write-grant
-                - $match:
-                    target: $appended
-                    arms:
+                      $fs.append-string: $file-path
+                      s: " world"
+                      grant: $write-grant
+                - $match: $appended
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1611,21 +1600,18 @@ main:
                           $result.result.err:
                             $bind: appended-err
                         do: []
-                - $match:
-                    target: $args.grants.fs-read
-                    arms:
+                - $match: $args.subject.fs-read
+                  when:
                       - pattern:
                           $security.grant-status.granted:
                             $bind: read-grant
                         do:
                           - $let:
                               read:
-                                $fs.read-to-string:
-                                  p: $file-path
-                                  grant: $read-grant
-                          - $match:
-                              target: $read
-                              arms:
+                                $fs.read-to-string: $file-path
+                                grant: $read-grant
+                          - $match: $read
+                            when:
                                 - pattern:
                                     $result.result.ok:
                                       $bind: read-ok
@@ -1636,12 +1622,10 @@ main:
                                   do: []
                           - $let:
                               stat:
-                                $fs.metadata:
-                                  p: $file-path
-                                  grant: $read-grant
-                          - $match:
-                              target: $stat
-                              arms:
+                                $fs.metadata: $file-path
+                                grant: $read-grant
+                          - $match: $stat
+                            when:
                                 - pattern:
                                     $result.result.ok:
                                       $bind: stat-ok
@@ -1652,12 +1636,10 @@ main:
                                   do: []
                           - $let:
                               canon:
-                                $fs.canonicalize:
-                                  p: $file-path
-                                  grant: $read-grant
-                          - $match:
-                              target: $canon
-                              arms:
+                                $fs.canonicalize: $file-path
+                                grant: $read-grant
+                          - $match: $canon
+                            when:
                                 - pattern:
                                     $result.result.ok:
                                       $bind: canon-ok
@@ -1668,12 +1650,10 @@ main:
                                   do: []
                           - $let:
                               entries:
-                                $fs.read-dir:
-                                  p: $dir-path
-                                  grant: $read-grant
-                          - $match:
-                              target: $entries
-                              arms:
+                                $fs.read-dir: $dir-path
+                                grant: $read-grant
+                          - $match: $entries
+                            when:
                                 - pattern:
                                     $result.result.ok:
                                       $bind: entries-ok
@@ -1688,12 +1668,10 @@ main:
                         do: []
                 - $let:
                     removed-file:
-                      $fs.remove-file:
-                        p: $file-path
-                        grant: $write-grant
-                - $match:
-                    target: $removed-file
-                    arms:
+                      $fs.remove-file: $file-path
+                      grant: $write-grant
+                - $match: $removed-file
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1703,12 +1681,10 @@ main:
                         do: []
                 - $let:
                     removed-dir:
-                      $fs.remove-dir:
-                        p: $dir-path
-                        grant: $write-grant
-                - $match:
-                    target: $removed-dir
-                    arms:
+                      $fs.remove-dir: $dir-path
+                      grant: $write-grant
+                - $match: $removed-dir
+                  when:
                       - pattern:
                           $result.result.ok: null
                         do: []
@@ -1760,30 +1736,24 @@ fn path_level_fs_errors_return_err_results() {
 security:
   $import: "{security}"
 main:
-  $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
+  $function: $security.grants
+  return: $void
+  do:
       - $let:
           missing-path:
-            $fs.path.new:
-              s: "{missing}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
+            $fs.path.new: "{missing}"
+      - $match: $args.subject.fs-read
+        when:
             - pattern:
                 $security.grant-status.granted:
                   $bind: read-grant
               do:
                 - $let:
                     read:
-                      $fs.read-to-string:
-                        p: $missing-path
-                        grant: $read-grant
-                - $match:
-                    target: $read
-                    arms:
+                      $fs.read-to-string: $missing-path
+                      grant: $read-grant
+                - $match: $read
+                  when:
                       - pattern:
                           $result.result.ok:
                             $bind: read-ok
@@ -1843,25 +1813,20 @@ io:
   $import: "{io}"
 use-option:
   $function:
-    args:
-      value:
-        $m.option:
-          t: $int64
-    return: $void
-    do:
+    $m.option:
+      t: $int64
+  return: $void
+  do:
       - $io.println: "using option"
 expect-int:
-  $function:
-    args:
-      value: $int64
-    return: $void
-    do:
+  $function: $int64
+  return: $void
+  do:
       - $io.println: "x"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $use-option: 7
       - $use-option: null
       - $expect-int: null
@@ -1906,16 +1871,14 @@ fn result_where_ok_and_err_type_params() {
 io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           r-ok:
             $m.result.ok: 99
-      - $match:
-          target: $r-ok
-          arms:
+      - $match: $r-ok
+        when:
             - pattern:
                 $m.result.ok:
                   $bind: x
@@ -1929,9 +1892,8 @@ main:
       - $let:
           r-err:
             $m.result.err: "fail"
-      - $match:
-          target: $r-err
-          arms:
+      - $match: $r-err
+        when:
             - pattern:
                 $m.result.ok:
                   $bind: x2
@@ -1996,10 +1958,9 @@ fn where_only_generic_names_no_unscoped_uppercase_fallback() {
 io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           v:
             $m.opt.some: 7
@@ -2018,10 +1979,9 @@ main:
 io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           v:
             $m.opt.some: 7
@@ -2059,10 +2019,9 @@ fn zero_arg_call_accepts_null_payload() {
             r#"io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.flush: null
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2091,10 +2050,9 @@ fn zero_arg_call_rejects_void_payload_literal() {
             r#"io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.flush: $void
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2103,7 +2061,7 @@ main:
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err().to_string();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         err.contains("zero-arg call payload must be `null`"),
         "unexpected error: {err}"
@@ -2122,23 +2080,19 @@ fn generic_user_fn_identity_returns_value() {
             r#"io:
   $import: "{io}"
 identity:
-  $function:
-    args:
-      x: $t
-    return: $t
-    do:
-      - $return: $args.x
+  $function: $t
+  return: $t
+  do:
+      - $return: $args.subject
   =where: {{t: []}}
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           n:
-            $identity:
-              t: $int64
-              x: 7
+            $identity: 7
+            t: $int64
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2162,20 +2116,16 @@ fn generic_call_requires_explicit_type_args() {
             r#"io:
   $import: "{io}"
 identity:
-  $function:
-    args:
-      x: $t
-    return: $t
-    do:
-      - $return: $args.x
+  $function: $t
+  return: $t
+  do:
+      - $return: $args.subject
   =where: {{t: []}}
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $identity:
-          x: 7
+  $function: $void
+  return: $void
+  do:
+      - $identity: 7
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2201,22 +2151,18 @@ fn generic_call_rejects_unknown_keys() {
             r#"io:
   $import: "{io}"
 identity:
-  $function:
-    args:
-      x: $t
-    return: $t
-    do:
-      - $return: $args.x
+  $function: $t
+  return: $t
+  do:
+      - $return: $args.subject
   =where: {{t: []}}
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $identity:
-          t: $int64
-          x: 7
-          q: 1
+  $function: $void
+  return: $void
+  do:
+      - $identity: 7
+        t: $int64
+        q: 1
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2225,7 +2171,7 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = vibra::lower::lower_program(&prog).unwrap_err().to_string();
     assert!(
-        err.contains("unexpected key `q`"),
+        err.contains("unexpected key `q`") || err.contains("unexpected argument or type parameter `q`"),
         "unexpected error: {err}"
     );
 }
@@ -2506,21 +2452,17 @@ fn generic_call_value_arg_must_unify_with_substituted_type() {
             r#"io:
   $import: "{io}"
 identity:
-  $function:
-    args:
-      x: $t
-    return: $t
-    do:
-      - $return: $args.x
+  $function: $t
+  return: $t
+  do:
+      - $return: $args.subject
   =where: {{t: []}}
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $identity:
-          t: $int64
-          x: "hi"
+  $function: $void
+  return: $void
+  do:
+      - $identity: "hi"
+        t: $int64
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2542,17 +2484,14 @@ fn user_fn_non_void_return_requires_return_statement() {
             r#"io:
   $import: "{io}"
 bad:
-  $function:
-    args:
-      x: $int64
-    return: $int64
-    do:
+  $function: $int64
+  return: $int64
+  do:
       - $io.println: "nope"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "x"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2577,12 +2516,10 @@ fn user_fn_imported_with_user_body_runs() {
     std::fs::write(
         &helper,
         r#"echo-int:
-  $function:
-    args:
-      x: $int64
-    return: $int64
-    do:
-      - $return: $args.x
+  $function: $int64
+  return: $int64
+  do:
+      - $return: $args.subject
 "#,
     )
     .unwrap();
@@ -2594,14 +2531,12 @@ fn user_fn_imported_with_user_body_runs() {
 io:
   $import: "{io}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           v:
-            $h.echo-int:
-              x: 42
+            $h.echo-int: 42
       - $io.println: "z"
 "#,
             h = helper.display().to_string().replace('\\', "/"),
@@ -2623,10 +2558,9 @@ fn generic_stdlib_wasm_wrapper_lowers() {
         &lib,
         r#"flush-generic:
   $function:
-    args:
-      _: $t
-    return: $void
-    do:
+    _: $t
+  return: $void
+  do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
@@ -2643,13 +2577,11 @@ fn generic_stdlib_wasm_wrapper_lowers() {
             r#"lg:
   $import: "{lg}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $lg.flush-generic:
-          t: $int64
-          _: 0
+  $function: $void
+  return: $void
+  do:
+      - $lg.flush-generic: 0
+        t: $int64
 "#,
             lg = lib.display().to_string().replace('\\', "/"),
         ),
@@ -2680,10 +2612,9 @@ box:
   =where:
     t: [$int64]
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2715,10 +2646,9 @@ display:
             x: $self
         return: $str
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2749,10 +2679,9 @@ node:
   $record:
     next: $self
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2780,16 +2709,14 @@ fn self_type_is_rejected_in_free_standing_function_signature() {
   $import: "{io}"
 identity:
   $function:
-    args:
-      x: $self
-    return: $self
-    do:
+    x: $self
+  return: $self
+  do:
       - $return: $args.x
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2828,10 +2755,9 @@ holder:
                 x: $self
             return: $str
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2862,10 +2788,9 @@ pair:
   $tuple: [$a, $b]
   where: {{a: [], b: []}}
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2895,10 +2820,9 @@ greeting:
   $literal: "hi"
   doc: "the greeting"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2925,17 +2849,15 @@ fn unknown_annotation_key_is_rejected() {
             r#"io:
   $import: "{io}"
 foo:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "x"
   bogus: 1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -2965,19 +2887,16 @@ greeting:
     A literal type pinning the greeting string.
 echo:
   $function:
-    args:
-      msg: $str
-    return: $void
-    do:
+    msg: $str
+  return: $void
+  do:
       - $io.println: $args.msg
   =doc: "Echo a message to stdout."
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $echo:
-          msg: "hi"
+  $function: $void
+  return: $void
+  do:
+      - $echo: "hi"
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3025,19 +2944,16 @@ io:
   $import: "{io}"
 take:
   $function:
-    args:
-      p:
-        $m.pair:
-          a: $int64
-          b: $str
-    return: $void
-    do:
+    $m.pair:
+      a: $int64
+      b: $str
+  return: $void
+  do:
       - $io.println: "ok"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             m = modpath,
@@ -3101,17 +3017,14 @@ fn record_type_alias_lowers_and_is_usable_in_signature() {
             r#"io:
   $import: "{io}"
 take-vec:
-  $function:
-    args:
-      v: $io.ciovec
-    return: $void
-    do:
+  $function: $io.ciovec
+  return: $void
+  do:
       - $io.println: "ok"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -3146,19 +3059,16 @@ pair:
   =where: {{a: [], b: []}}
 take:
   $function:
-    args:
-      p:
-        $pair:
-          a: $int64
-          b: $str
-    return: $void
-    do:
+    $pair:
+      a: $int64
+      b: $str
+  return: $void
+  do:
       - $io.println: "ok"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -3190,19 +3100,16 @@ dict:
   =where: {{k: [], v: []}}
 take:
   $function:
-    args:
-      d:
-        $dict:
-          k: $str
-          v: $int64
-    return: $void
-    do:
+    $dict:
+      k: $str
+      v: $int64
+  return: $void
+  do:
       - $io.println: "ok"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -3234,10 +3141,9 @@ container:
     value: $t
   =where: {{t: []}}
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -3268,17 +3174,14 @@ pair:
   $tuple: [$a, $b]
   =where: {{a: [], b: []}}
 take:
-  $function:
-    args:
-      p: $pair
-    return: $void
-    do:
+  $function: $pair
+  return: $void
+  do:
       - $io.println: "ok"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -3306,18 +3209,15 @@ pair:
   =where: {{a: [], b: []}}
 take:
   $function:
-    args:
-      p:
-        $pair:
-          a: $int64
-    return: $void
-    do:
+    $pair:
+      a: $int64
+  return: $void
+  do:
       - $io.println: "ok"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -3348,26 +3248,23 @@ box:
   =where: {{t: []}}
 take-int-box:
   $function:
-    args:
-      b:
-        $box:
-          t: $int64
-    return: $void
-    do:
+    $box:
+      t: $int64
+  return: $void
+  do:
       - $io.println: "ok"
 make-str-box:
-  $function:
-    args: $void
-    return:
-      $box:
-        t: $str
-    do:
-      - $return: $args.value
+  $function: $void
+  return:
+    $box:
+      t: $str
+  do:
+      - $return:
+          value: "s"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           sb: {{$make-str-box: null}}
       - $take-int-box: $sb
@@ -3395,16 +3292,14 @@ fn forall_keyword_is_no_longer_recognised() {
     types: [t]
     in:
       $function:
-        args:
-          x: $t
-        return: $t
-        do:
+        x: $t
+      return: $t
+      do:
           - $return: $args.x
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -3425,10 +3320,9 @@ fn list_and_dict_keywords_are_no_longer_recognised() {
         r#"my-list:
   $list: $int64
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -3438,10 +3332,9 @@ main:
   $dict:
     a: $int64
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -3477,11 +3370,9 @@ fn defs_inherent_op_on_non_generic_type_registers_with_self_substituted() {
     value: $int64
   =defs:
     identity:
-      $function:
-        args:
-          self: $self
-        return: $self
-        do:
+      $function: $self
+      return: $self
+      do:
           - $return: $args.self
 "#,
     )
@@ -3492,10 +3383,9 @@ fn defs_inherent_op_on_non_generic_type_registers_with_self_substituted() {
             r#"m:
   $import: "{m}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
             m = model.display().to_string().replace('\\', "/"),
         ),
@@ -3541,11 +3431,9 @@ fn defs_inherent_op_on_generic_type_substitutes_self_with_instantiation() {
   =where: {t: [], e: []}
   =defs:
     passthrough:
-      $function:
-        args:
-          self: $self
-        return: $self
-        do:
+      $function: $self
+      return: $self
+      do:
           - $return: $args.self
 "#,
     )
@@ -3556,10 +3444,9 @@ fn defs_inherent_op_on_generic_type_substitutes_self_with_instantiation() {
             r#"r:
   $import: "{m}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
             m = model.display().to_string().replace('\\', "/"),
         ),
@@ -3594,16 +3481,14 @@ fn defs_on_a_function_definition_is_rejected_with_e_defs_001() {
     std::fs::write(
         &entry,
         r#"main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
   =defs:
     nope:
-      $function:
-        args: $void
-        return: $void
-        do: []
+      $function: $void
+      return: $void
+      do: []
 "#,
     )
     .unwrap();
@@ -3640,10 +3525,9 @@ fn defs_entry_that_is_not_a_function_is_rejected_with_e_defs_001() {
             r#"m:
   $import: "{m}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
             m = model.display().to_string().replace('\\', "/"),
         ),
@@ -3687,33 +3571,28 @@ box:
   =impl:
     $display:
       fmt:
-        $function:
-          args:
-            x: $self
-          return: $str
-          do:
+        $function: $self
+        return: $str
+        do:
             - $return: "boxed"
 identity-displayable:
   $function:
-    args:
-      x: $t
-    return: $t
-    do:
+    x: $t
+  return: $t
+  do:
       - $return: $args.x
   =where:
     t: [$display]
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           b: { $box.boxed: 1 }
       - $let:
           c:
-            $identity-displayable:
-              t: $box
-              x: $b
+            $identity-displayable: $b
+            t: $box
 "#,
     )
     .unwrap();
@@ -3741,23 +3620,20 @@ fn where_bound_violation_at_call_site_is_rejected_with_e_bound_001() {
         return: $str
 identity-displayable:
   $function:
-    args:
-      x: $t
-    return: $t
-    do:
+    x: $t
+  return: $t
+  do:
       - $return: $args.x
   =where:
     t: [$display]
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           v:
-            $identity-displayable:
-              t: $int64
-              x: 7
+            $identity-displayable: 7
+            t: $int64
 "#,
     )
     .unwrap();
@@ -3800,10 +3676,9 @@ holds-bag:
       $bag:
         t: $int64
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -3845,34 +3720,29 @@ half-impl:
   =impl:
     $display:
       fmt:
-        $function:
-          args:
-            x: $self
-          return: $str
-          do:
+        $function: $self
+        return: $str
+        do:
             - $return: "half"
 both-iface:
   $function:
-    args:
-      x: $t
-    return: $t
-    do:
+    x: $t
+  return: $t
+  do:
       - $return: $args.x
   =where:
     t:
       - $intersect: [$display, $debug]
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           v: { $half-impl.wrap: 1 }
       - $let:
           r:
-            $both-iface:
-              t: $half-impl
-              x: $v
+            $both-iface: $v
+            t: $half-impl
 "#,
     )
     .unwrap();
@@ -3903,32 +3773,28 @@ fn where_bound_chain_requires_caller_to_declare_bound() {
         return: $str
 needs-display:
   $function:
-    args:
-      x: $t
-    return: $t
-    do:
+    x: $t
+  return: $t
+  do:
       - $return: $args.x
   =where:
     t: [$display]
 forwarder:
   $function:
-    args:
-      x: $u
-    return: $u
-    do:
+    x: $u
+  return: $u
+  do:
       - $let:
           y:
-            $needs-display:
-              t: $u
-              x: $args.x
+            $needs-display: $args.x
+            t: $u
       - $return: $y
   =where:
     u: []
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -3944,7 +3810,7 @@ main:
 // Phase 6: interface-qualified call dispatch (`$iface.method: { ... }`).
 // ---------------------------------------------------------------------------
 
-/// `$display.fmt: { x: $b }` resolves to the impl method registered for
+/// `$display.fmt: $b` resolves to the impl method registered for
 /// `box`'s `=impl: { $display: ... }` block. The lowered `Statement::Call`
 /// must point at the impl's sig key (here `box.display.fmt`).
 #[test]
@@ -3967,21 +3833,18 @@ box:
   =impl:
     $display:
       fmt:
-        $function:
-          args:
-            x: $self
-          return: $str
-          do:
+        $function: $self
+        return: $str
+        do:
             - $return: "boxed"
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
           b: { $box.boxed: 1 }
       - $let:
-          s: { $display.fmt: { x: $b } }
+          s: { $display.fmt: $b }
 "#,
     )
     .unwrap();
@@ -4021,19 +3884,16 @@ box:
   =impl:
     $from-iface:
       from:
-        $function:
-          args:
-            x: $int64
-          return: $void
-          do:
+        $function: $int64
+        return: $void
+        do:
             - $let:
                 unused: $args.x
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $from-iface.from: { x: 5 }
+  $function: $void
+  return: $void
+  do:
+      - $from-iface.from: 5
 "#,
     )
     .unwrap();
@@ -4063,12 +3923,11 @@ fn iface_qualified_call_unimplemented_type_is_rejected_with_e_bound_001() {
             x: $self
         return: $str
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $let:
-          s: { $display.fmt: { x: 7 } }
+          s: { $display.fmt: 7 }
 "#,
     )
     .unwrap();
@@ -4099,20 +3958,18 @@ fn iface_qualified_call_on_generic_value_is_rejected_with_e_dispatch_001() {
         return: $str
 fmt-via-bound:
   $function:
-    args:
-      x: $t
-    return: $str
-    do:
+    x: $t
+  return: $str
+  do:
       - $let:
-          s: { $display.fmt: { x: $args.x } }
+          s: { $display.fmt: $args.x }
       - $return: $s
   =where:
     t: [$display]
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4151,17 +4008,14 @@ box:
   =impl:
     $display:
       fmt:
-        $function:
-          args:
-            x: $self
-          return: $str
-          do:
+        $function: $self
+        return: $str
+        do:
             - $return: "boxed"
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4220,19 +4074,17 @@ box:
   =defs:
     show:
       $function:
-        args:
-          x: $self
-        return: $str
-        do:
+        x: $self
+      return: $str
+      do:
           - $return: "shown"
   =impl:
     $display:
       fmt: $box.show
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4259,10 +4111,9 @@ fn impl_on_a_function_definition_is_rejected_with_e_impl_001() {
     std::fs::write(
         &entry,
         r#"main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
   =impl:
     $display:
       fmt: $whatever
@@ -4292,10 +4143,9 @@ fn impl_unknown_interface_alias_is_rejected_with_e_impl_002() {
     $no-such-iface:
       fmt: $whatever
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4335,17 +4185,14 @@ box:
   =impl:
     $display:
       fmt:
-        $function:
-          args:
-            x: $self
-          return: $str
-          do:
+        $function: $self
+        return: $str
+        do:
             - $return: "ok"
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4380,18 +4227,15 @@ box:
   =impl:
     $display:
       fmt:
-        $function:
-          args:
-            x: $self
-          return: $str
-          do:
+        $function: $self
+        return: $str
+        do:
             - $return: "ok"
       bonus-stuff: 1
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4426,17 +4270,14 @@ box:
   =impl:
     $display:
       fmt:
-        $function:
-          args:
-            x: $self
-          return: $int64
-          do:
+        $function: $self
+        return: $int64
+        do:
             - $return: 1
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4476,11 +4317,9 @@ box:
     $from-iface:
       t: $int64
       from:
-        $function:
-          args:
-            x: $t
-          return: $int64
-          do:
+        $function: $t
+        return: $int64
+        do:
             - $wasm:
                 import:
                   module: wasi_snapshot_preview1
@@ -4488,10 +4327,9 @@ box:
                 args:
                   - $args.x
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4558,10 +4396,9 @@ box:
     $display:
       fmt: $no.such.function
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
     )
     .unwrap();
@@ -4589,11 +4426,9 @@ fn defs_inherent_op_cannot_shadow_enclosing_type_param() {
   =where: {t: []}
   =defs:
     bad:
-      $function:
-        args:
-          self: $self
-        return: $self
-        do:
+      $function: $self
+      return: $self
+      do:
           - $return: $args.self
       =where: {t: []}
 "#,
@@ -4605,10 +4440,9 @@ fn defs_inherent_op_cannot_shadow_enclosing_type_param() {
             r#"m:
   $import: "{m}"
 main:
-  $function:
-    args: $void
-    return: $void
-    do: []
+  $function: $void
+  return: $void
+  do: []
 "#,
             m = model.display().to_string().replace('\\', "/"),
         ),

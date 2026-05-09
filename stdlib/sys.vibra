@@ -2,14 +2,12 @@ security:
   $import: ./security.vibra
 
 info:
-  $function:
-    args:
-      grant: $security.system-info-grant
-    return: $str
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: system_info
-          args:
-            - $args.grant
+  $function: $security.system-info-grant
+  return: $str
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: system_info
+        args:
+          - $args.subject
