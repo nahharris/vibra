@@ -2410,7 +2410,7 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("unexpected key `typo`"),
+        err.contains("unexpected key `typo` in call `$join-ish`"),
         "expected unexpected key rejection, got: {err}"
     );
 }
@@ -2448,7 +2448,7 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("unexpected key `typo`"),
+        err.contains("unexpected key `typo` in call `$take-text`"),
         "expected unexpected key rejection, got: {err}"
     );
 }

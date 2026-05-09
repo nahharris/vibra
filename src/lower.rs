@@ -3851,6 +3851,7 @@ fn parse_call(
         av,
         function,
         !function.type_params.is_empty(),
+        call_key,
         constants,
         type_aliases,
         enums,
@@ -3891,6 +3892,7 @@ fn parse_call_args(
     av: &Value,
     function: &FunctionSig,
     generic_call: bool,
+    call_key: &str,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
     enums: &HashMap<String, EnumDef>,
@@ -3944,10 +3946,11 @@ fn parse_call_args(
         .as_mapping()
         .context("expected mapping arguments for this call")?;
     if !generic_call {
+        let allowed: HashSet<&str> = arg_names.iter().map(String::as_str).collect();
         for k in map.keys() {
             let ks = k.as_str().context("call argument key must be string")?;
-            if !arg_names.iter().any(|n| n == ks) {
-                bail!("unexpected key `{ks}` in call `{}`", function.symbol);
+            if !allowed.contains(ks) {
+                bail!("unexpected key `{ks}` in call `{call_key}`");
             }
         }
     }
