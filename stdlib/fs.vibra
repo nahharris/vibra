@@ -1,183 +1,712 @@
-# Stdlib: filesystem — WASI preview1 names and numeric constants (see https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md).
+bytes-lib:
+  $import: ./bytes.vibra
 
-# `oflags` (path_open)
-oflag-creat: 1
-oflag-directory: 2
-oflag-excl: 4
-oflag-trunc: 8
+result:
+  $import: ./result.vibra
 
-# `fdflags`
-fdflag-append: 1
-fdflag-dsync: 2
-fdflag-nonblock: 4
-fdflag-rsync: 8
-fdflag-sync: 16
+path:
+  $newtype: $str
+  =defs:
+    new:
+      $function:
+        args:
+          s: $str
+        return: $self
+        do:
+          - $wasm:
+              import:
+                module: wasi_snapshot_preview1
+                name: path_new
+              args:
+                - $args.s
+    join:
+      $function:
+        args:
+          self: $self
+          segment: $str
+        return: $self
+        do:
+          - $wasm:
+              import:
+                module: wasi_snapshot_preview1
+                name: path_join
+              args:
+                - $args.self
+                - $args.segment
+    parent:
+      $function:
+        args:
+          self: $self
+        return:
+          $option: $self
+        do:
+          - $wasm:
+              import:
+                module: wasi_snapshot_preview1
+                name: path_parent
+              args:
+                - $args.self
+    extension:
+      $function:
+        args:
+          self: $self
+        return:
+          $option: $str
+        do:
+          - $wasm:
+              import:
+                module: wasi_snapshot_preview1
+                name: path_extension
+              args:
+                - $args.self
 
-# `lookupflags` (path_open)
-lookup-symlink-follow: 1
+fs-error:
+  $enum:
+    not-found: $void
+    permission-denied: $void
+    already-exists: $void
+    is-dir: $void
+    not-dir: $void
+    invalid-path: $void
+    io: $str
 
-open-path:
-  $function:
-    args:
-      path: $str
-      oflags: $int64
-      fdflags: $int64
-    return: $int64
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: path_open
-          args:
-            - $args.path
-            - $args.oflags
-            - $args.fdflags
+readable:
+  $interface:
+    read-string:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+        return:
+          $result.result:
+            t: $str
+            e: $fs-error
+    read-bytes:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+        return:
+          $result.result:
+            t: $bytes-lib.bytes
+            e: $fs-error
 
-create-file:
-  $function:
-    args:
-      path: $str
-    return: $str
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: path_open
-          args:
-            - $args.path
-            - $const.1
-            - $const.0
+writable:
+  $interface:
+    write-string:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+            s: $str
+        return:
+          $result.result:
+            t: $void
+            e: $fs-error
+    write-bytes:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+            b: $bytes-lib.bytes
+        return:
+          $result.result:
+            t: $void
+            e: $fs-error
+    flush:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+        return:
+          $result.result:
+            t: $void
+            e: $fs-error
+
+appendable:
+  $interface:
+    append-string:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+            s: $str
+        return:
+          $result.result:
+            t: $void
+            e: $fs-error
+    append-bytes:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+            b: $bytes-lib.bytes
+        return:
+          $result.result:
+            t: $void
+            e: $fs-error
+
+closeable:
+  $interface:
+    close:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+        return:
+          $result.result:
+            t: $void
+            e: $fs-error
 
 read-file:
-  $function:
-    args:
-      path: $str
-    return: $str
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: path_open
+  $newtype: $uint64
+  =impl:
+    $readable:
+      read-string:
+        $function:
           args:
-            - $args.path
+            self: $self
+          return:
+            $result.result:
+              t: $str
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_read
+                args:
+                  - $args.self
+      read-bytes:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $bytes-lib.bytes
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_read
+                args:
+                  - $args.self
+    $closeable:
+      close:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_close
+                args:
+                  - $args.self
 
 write-file:
-  $function:
-    args:
-      path: $str
-      contents: $str
-    return: $void
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: path_open
+  $newtype: $uint64
+  =impl:
+    $writable:
+      write-string:
+        $function:
           args:
-            - $args.path
-            - $args.contents
+            self: $self
+            s: $str
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_write
+                args:
+                  - $args.self
+                  - $args.s
+      write-bytes:
+        $function:
+          args:
+            self: $self
+            b: $bytes-lib.bytes
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_write
+                args:
+                  - $args.self
+                  - $args.b
+      flush:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_sync
+                args:
+                  - $args.self
+    $closeable:
+      close:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_close
+                args:
+                  - $args.self
 
 append-file:
+  $newtype: $uint64
+  =impl:
+    $writable:
+      write-string:
+        $function:
+          args:
+            self: $self
+            s: $str
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_write
+                args:
+                  - $args.self
+                  - $args.s
+      write-bytes:
+        $function:
+          args:
+            self: $self
+            b: $bytes-lib.bytes
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_write
+                args:
+                  - $args.self
+                  - $args.b
+      flush:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_sync
+                args:
+                  - $args.self
+    $appendable:
+      append-string:
+        $function:
+          args:
+            self: $self
+            s: $str
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_write
+                args:
+                  - $args.self
+                  - $args.s
+      append-bytes:
+        $function:
+          args:
+            self: $self
+            b: $bytes-lib.bytes
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_write
+                args:
+                  - $args.self
+                  - $args.b
+    $closeable:
+      close:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_close
+                args:
+                  - $args.self
+
+read-write-file:
+  $newtype: $uint64
+  =impl:
+    $readable:
+      read-string:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $str
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_read
+                args:
+                  - $args.self
+      read-bytes:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $bytes-lib.bytes
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_read
+                args:
+                  - $args.self
+    $writable:
+      write-string:
+        $function:
+          args:
+            self: $self
+            s: $str
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_write
+                args:
+                  - $args.self
+                  - $args.s
+      write-bytes:
+        $function:
+          args:
+            self: $self
+            b: $bytes-lib.bytes
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_write
+                args:
+                  - $args.self
+                  - $args.b
+      flush:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_sync
+                args:
+                  - $args.self
+    $closeable:
+      close:
+        $function:
+          args:
+            self: $self
+          return:
+            $result.result:
+              t: $void
+              e: $fs-error
+          do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_close
+                args:
+                  - $args.self
+
+open-read:
   $function:
     args:
-      path: $str
-      contents: $str
-    return: $void
+      p: $path
+    return:
+      $result.result:
+        t: $read-file
+        e: $fs-error
     do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
             name: path_open
           args:
-            - $args.path
-            - $args.contents
+            - $args.p
 
-remove-file:
+open-write:
   $function:
     args:
-      path: $str
-    return: $void
+      p: $path
+    return:
+      $result.result:
+        t: $write-file
+        e: $fs-error
     do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
-            name: path_unlink_file
+            name: path_open
           args:
-            - $args.path
+            - $args.p
 
-remove-dir:
+open-append:
   $function:
     args:
-      path: $str
-    return: $void
+      p: $path
+    return:
+      $result.result:
+        t: $append-file
+        e: $fs-error
     do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
-            name: path_remove_directory
+            name: path_open
           args:
-            - $args.path
+            - $args.p
+
+open-read-write:
+  $function:
+    args:
+      p: $path
+    return:
+      $result.result:
+        t: $read-write-file
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_open
+          args:
+            - $args.p
+
+read-to-string:
+  $function:
+    args:
+      p: $path
+    return:
+      $result.result:
+        t: $str
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: read_to_string
+          args:
+            - $args.p
+
+write-string-all:
+  $function:
+    args:
+      p: $path
+      s: $str
+    return:
+      $result.result:
+        t: $void
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: write_string_all
+          args:
+            - $args.p
+            - $args.s
+
+append-string:
+  $function:
+    args:
+      p: $path
+      s: $str
+    return:
+      $result.result:
+        t: $void
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: append_string
+          args:
+            - $args.p
+            - $args.s
+
+exists:
+  $function:
+    args:
+      p: $path
+    return: $bool
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_filestat_get
+          args:
+            - $args.p
 
 create-dir-all:
   $function:
     args:
-      path: $str
-    return: $void
+      p: $path
+    return:
+      $result.result:
+        t: $void
+        e: $fs-error
     do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
             name: path_create_directory
           args:
-            - $args.path
+            - $args.p
+
+remove-file:
+  $function:
+    args:
+      p: $path
+    return:
+      $result.result:
+        t: $void
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_unlink_file
+          args:
+            - $args.p
+
+remove-dir:
+  $function:
+    args:
+      p: $path
+    return:
+      $result.result:
+        t: $void
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_remove_directory
+          args:
+            - $args.p
 
 read-dir:
   $function:
     args:
-      path: $str
-    return: $str
+      p: $path
+    return:
+      $result.result:
+        t:
+          $array: $path
+        e: $fs-error
     do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
             name: fd_readdir
           args:
-            - $args.path
-
-exists:
-  $function:
-    args:
-      path: $str
-    return: $int64
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: path_filestat_get
-          args:
-            - $args.path
-
-canonicalize:
-  $function:
-    args:
-      path: $str
-    return: $str
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: path_filestat_get
-          args:
-            - $args.path
+            - $args.p
 
 metadata:
   $function:
     args:
-      path: $str
-    return: $str
+      p: $path
+    return:
+      $result.result:
+        t: $str
+        e: $fs-error
     do:
       - $wasm:
           import:
             module: wasi_snapshot_preview1
             name: path_filestat_get
           args:
-            - $args.path
+            - $args.p
+
+canonicalize:
+  $function:
+    args:
+      p: $path
+    return:
+      $result.result:
+        t: $path
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: path_filestat_get
+          args:
+            - $args.p

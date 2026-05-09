@@ -38,10 +38,9 @@ fn load_recursive(
     }
     stack.push(path.to_path_buf());
 
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
-    let v: Value = serde_yaml::from_str(&text)
-        .with_context(|| format!("YAML parse {}", path.display()))?;
+    let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let v: Value =
+        serde_yaml::from_str(&text).with_context(|| format!("YAML parse {}", path.display()))?;
     let map = v
         .as_mapping()
         .with_context(|| format!("{}: root must be a mapping", path.display()))?;
@@ -52,15 +51,16 @@ fn load_recursive(
 
     let mut imports = Vec::new();
     for (k, val) in map {
-        let key = key_as_str(k).with_context(|| format!("{}: keys must be strings", path.display()))?;
+        let key =
+            key_as_str(k).with_context(|| format!("{}: keys must be strings", path.display()))?;
         if key.starts_with('-') {
             continue;
         }
         if let Some(sub) = val.as_mapping() {
             if let Some(imp) = map_get_str(sub, "$import") {
-                let s = imp
-                    .as_str()
-                    .with_context(|| format!("{}: $import must be a string path", path.display()))?;
+                let s = imp.as_str().with_context(|| {
+                    format!("{}: $import must be a string path", path.display())
+                })?;
                 let resolved = parent.join(s);
                 let resolved = fs::canonicalize(&resolved).with_context(|| {
                     format!(
@@ -90,5 +90,5 @@ fn key_as_str(k: &Value) -> Result<&str> {
 }
 
 pub fn map_get_str<'a>(map: &'a serde_yaml::Mapping, key: &str) -> Option<&'a Value> {
-    map.get(&Value::String(key.into()))
+    map.get(Value::String(key.into()))
 }

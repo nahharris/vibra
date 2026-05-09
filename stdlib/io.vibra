@@ -1,136 +1,142 @@
-# Stdlib: stdio via WASI preview1 (`wasi_snapshot_preview1`). The MVP compiler emits `fd_write` to fd 1 for hello/`println`.
+fs:
+  $import: ./fs.vibra
 
-stdin-fd: 0
-stdout-fd: 1
-stderr-fd: 2
-
-ciovec:
-  $record:
-    ptr: $int64
-    len: $int64
-
-write-raw:
+stdin:
   $function:
-    args:
-      fd: $int64
-      bytes: $str
-    return: $int64
+    args: $void
+    return: $fs.read-file
     do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_write
-          args:
-            - $args.fd
-            - $args.bytes
+      - $return:
+          $cast:
+            from: 0
+            to: $fs.read-file
 
-write-all:
+stdout:
   $function:
-    args:
-      fd: $int64
-      bytes: $str
-    return: $int64
+    args: $void
+    return: $fs.write-file
     do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_write
-          args:
-            - $args.fd
-            - $args.bytes
+      - $return:
+          $cast:
+            from: 1
+            to: $fs.write-file
+
+stderr:
+  $function:
+    args: $void
+    return: $fs.write-file
+    do:
+      - $return:
+          $cast:
+            from: 2
+            to: $fs.write-file
 
 print:
   $function:
     args:
-      msg: $str
-    return: $void
+      s: $str
+    return:
+      $result.result:
+        t: $void
+        e: $fs.fs-error
     do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_write
-          args:
-            - $const.1
-            - $args.msg
+      - $let:
+          out:
+            $io.stdout: null
+      - $let:
+          result:
+            $fs.writable.write-string:
+              self: $out
+              s: $args.s
+      - $return: $result
 
 println:
   $function:
     args:
-      msg: $str
-    return: $void
+      s: $str
+    return:
+      $result.result:
+        t: $void
+        e: $fs.fs-error
     do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_write
-          args:
-            - $const.1
-            - $args.msg
+      - $let:
+          first:
+            $io.print:
+              s: $args.s
+      - $let:
+          second:
+            $io.print:
+              s: "\n"
+      - $return: $second
 
 eprint:
   $function:
     args:
-      msg: $str
-    return: $void
+      s: $str
+    return:
+      $result.result:
+        t: $void
+        e: $fs.fs-error
     do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_write
-          args:
-            - $const.2
-            - $args.msg
+      - $let:
+          err:
+            $io.stderr: null
+      - $let:
+          result:
+            $fs.writable.write-string:
+              self: $err
+              s: $args.s
+      - $return: $result
 
 eprintln:
   $function:
     args:
-      msg: $str
-    return: $void
+      s: $str
+    return:
+      $result.result:
+        t: $void
+        e: $fs.fs-error
     do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_write
-          args:
-            - $const.2
-            - $args.msg
+      - $let:
+          first:
+            $io.eprint:
+              s: $args.s
+      - $let:
+          second:
+            $io.eprint:
+              s: "\n"
+      - $return: $second
 
-flush-stdout:
+readln:
   $function:
     args: $void
-    return: $void
+    return:
+      $result.result:
+        t: $str
+        e: $fs.fs-error
     do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+      - $let:
+          input:
+            $io.stdin: null
+      - $let:
+          result:
+            $fs.readable.read-string:
+              self: $input
+      - $return: $result
 
-read-raw:
+flush:
   $function:
-    args:
-      fd: $int64
-      len: $int64
-    return: $str
+    args: $void
+    return:
+      $result.result:
+        t: $void
+        e: $fs.fs-error
     do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_read
-          args:
-            - $args.fd
-            - $args.len
-
-read-line:
-  $function:
-    args:
-      fd: $int64
-    return: $str
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_read
-          args:
-            - $args.fd
+      - $let:
+          out:
+            $io.stdout: null
+      - $let:
+          result:
+            $fs.writable.flush:
+              self: $out
+      - $return: $result

@@ -9,7 +9,10 @@ fn import_cycle_is_rejected() {
     std::fs::write(&b, "io:\n  $import: ./a.vibra\n").unwrap();
     let err = vibra::load::load_program(&a).unwrap_err();
     let s = err.to_string();
-    assert!(s.contains("cycle") || s.contains("E-MOD-003"), "unexpected error: {s}");
+    assert!(
+        s.contains("cycle") || s.contains("E-MOD-003"),
+        "unexpected error: {s}"
+    );
 }
 
 #[test]
@@ -101,7 +104,13 @@ main:
   $function:
     args: $void
     return: $void
-    do: []
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
 "#,
             u = bad.display().to_string().replace('\\', "/"),
         ),
@@ -109,10 +118,7 @@ main:
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         err.contains("legacy `variants` union syntax was removed"),
         "unexpected error: {err}"
@@ -170,7 +176,10 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let lowered = vibra::lower::lower_program(&prog).unwrap();
     assert!(
-        lowered.warnings.iter().any(|w| w.contains("non-kebab-case")),
+        lowered
+            .warnings
+            .iter()
+            .any(|w| w.contains("non-kebab-case")),
         "expected at least one kebab-case warning, got {:?}",
         lowered.warnings
     );
@@ -264,7 +273,13 @@ main:
   $function:
     args: $void
     return: $void
-    do: []
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
 "#,
             u = bad.display().to_string().replace('\\', "/"),
         ),
@@ -342,6 +357,258 @@ main:
 }
 
 #[test]
+fn newtype_decl_lowers_and_requires_explicit_cast() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"meter:
+  $newtype: $int64
+take-meter:
+  $function:
+    args:
+      value: $meter
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $take-meter:
+          value:
+            $cast:
+              from: 7
+              to: $meter
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered =
+        vibra::lower::lower_program(&prog).expect("$newtype plus explicit $cast should lower");
+    let sig = lowered
+        .functions
+        .get("take-meter")
+        .expect("take-meter registered");
+    assert_eq!(
+        sig.arg_types[0],
+        vibra::lower::TypeRef::Named("meter".to_string())
+    );
+}
+
+#[test]
+fn newtype_does_not_accept_inner_type_implicitly() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"meter:
+  $newtype: $int64
+take-meter:
+  $function:
+    args:
+      value: $meter
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $take-meter:
+          value: 7
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-NEWTYPE-001"),
+        "expected implicit inner -> newtype coercion to be rejected, got: {err}"
+    );
+}
+
+#[test]
+fn cast_rejects_cross_newtype_conversion() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"meter:
+  $newtype: $int64
+second:
+  $newtype: $int64
+take-second:
+  $function:
+    args:
+      value: $second
+    return: $void
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: fd_sync
+          args:
+            - $const.1
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          m:
+            $cast:
+              from: 7
+              to: $meter
+      - $take-second:
+          value:
+            $cast:
+              from: $m
+              to: $second
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-CAST-001"),
+        "expected cross-newtype cast rejection, got: {err}"
+    );
+}
+
+#[test]
+fn fs_writable_interface_rejects_read_file() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          f:
+            $cast:
+              from: 0
+              to: $fs.read-file
+      - $fs.writable.write-string:
+          self: $f
+          s: "nope"
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-BOUND-001"),
+        "expected writable dispatch on read-file to be rejected, got: {err}"
+    );
+}
+
+#[test]
+fn mode_safe_fs_roundtrip_runs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let data = dir.path().join("hello.txt");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          p:
+            $fs.path.new:
+              s: "{path}"
+      - $let:
+          opened-write:
+            $fs.open-write:
+              p: $p
+      - $match:
+          target: $opened-write
+          arms:
+            ok:
+              bind: out
+              do:
+                - $fs.writable.write-string:
+                    self: $out
+                    s: "from vibra fs"
+                - $fs.closeable.close:
+                    self: $out
+            err:
+              bind: err
+              do: []
+      - $let:
+          opened-read:
+            $fs.open-read:
+              p: $p
+      - $match:
+          target: $opened-read
+          arms:
+            ok:
+              bind: input
+              do:
+                - $let:
+                    text:
+                      $fs.readable.read-string:
+                        self: $input
+                - $fs.closeable.close:
+                    self: $input
+            err:
+              bind: err2
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            path = data.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).expect("mode-safe fs program should lower");
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            preopen_host_dirs: vec![dir.path().to_path_buf()],
+        },
+    )
+    .expect("mode-safe fs roundtrip should run");
+    assert_eq!(std::fs::read_to_string(data).unwrap(), "from vibra fs");
+}
+
+#[test]
 fn option_where_union_allows_t_or_void_and_disallows_reverse_coercion() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.vibra");
@@ -379,9 +646,7 @@ expect-int:
       value: $int64
     return: $void
     do:
-      - $io.write-raw:
-          fd: $args.value
-          bytes: "x"
+      - $io.println: "x"
 main:
   $function:
     args: $void
@@ -444,9 +709,7 @@ main:
             ok:
               bind: x
               do:
-                - $io.write-raw:
-                    fd: $x
-                    bytes: "ok"
+                - $io.println: "ok"
             err:
               bind: y
               do:
@@ -460,9 +723,7 @@ main:
             ok:
               bind: x2
               do:
-                - $io.write-raw:
-                    fd: $x2
-                    bytes: "no"
+                - $io.println: "no"
             err:
               bind: y2
               do:
@@ -588,7 +849,7 @@ main:
     args: $void
     return: $void
     do:
-      - $io.flush-stdout: null
+      - $io.flush: null
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -620,7 +881,7 @@ main:
     args: $void
     return: $void
     do:
-      - $io.flush-stdout: $void
+      - $io.flush: $void
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -664,9 +925,7 @@ main:
             $identity:
               t: $int64
               x: 7
-      - $io.write-raw:
-          fd: $n
-          bytes: "ok"
+      - $io.println: "ok"
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -865,9 +1124,7 @@ main:
           v:
             $h.echo-int:
               x: 42
-      - $io.write-raw:
-          fd: $v
-          bytes: "z"
+      - $io.println: "z"
 "#,
             h = helper.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -956,14 +1213,8 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
-    assert!(
-        err.contains("E-WHERE-002"),
-        "unexpected error: {err}"
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(err.contains("E-WHERE-002"), "unexpected error: {err}");
 }
 
 #[test]
@@ -1031,10 +1282,7 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         err.contains("E-SELF-001"),
         "expected E-SELF-001 for `$self` in top-level record field, got: {err}"
@@ -1071,10 +1319,7 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         err.contains("E-SELF-001"),
         "expected E-SELF-001 for `$self` in free-standing function args, got: {err}"
@@ -1150,10 +1395,7 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         err.contains("E-ANNO-002") && err.contains("=where"),
         "expected E-ANNO-002 with `=where` migration hint, got: {err}"
@@ -1186,10 +1428,7 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         err.contains("E-ANNO-002") && err.contains("=doc"),
         "expected E-ANNO-002 with `=doc` migration hint, got: {err}"
@@ -1226,14 +1465,8 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
-    assert!(
-        err.contains("E-ANNO-001"),
-        "unexpected error: {err}"
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(err.contains("E-ANNO-001"), "unexpected error: {err}");
 }
 
 #[test]
@@ -1274,14 +1507,8 @@ main:
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
     let lowered = vibra::lower::lower_program(&prog).unwrap();
-    let echo = lowered
-        .functions
-        .get("echo")
-        .expect("echo registered");
-    assert_eq!(
-        echo.doc.as_deref(),
-        Some("Echo a message to stdout.")
-    );
+    let echo = lowered.functions.get("echo").expect("echo registered");
+    assert_eq!(echo.doc.as_deref(), Some("Echo a message to stdout."));
 }
 
 #[test]
@@ -1349,12 +1576,12 @@ main:
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
     let lowered_ab = vibra::lower::lower_program(&prog).unwrap();
-    let take_ab = lowered_ab
-        .functions
-        .get("take")
-        .expect("take registered");
+    let take_ab = lowered_ab.functions.get("take").expect("take registered");
     let vibra::lower::TypeRef::Instantiated { type_args, .. } = &take_ab.arg_types[0] else {
-        panic!("expected instantiated tuple alias, got {:?}", take_ab.arg_types[0]);
+        panic!(
+            "expected instantiated tuple alias, got {:?}",
+            take_ab.arg_types[0]
+        );
     };
     assert_eq!(type_args.len(), 2);
     assert_eq!(type_args[0], vibra::lower::TypeRef::Int64);
@@ -1370,12 +1597,12 @@ main:
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
     let lowered_ba = vibra::lower::lower_program(&prog).unwrap();
-    let take_ba = lowered_ba
-        .functions
-        .get("take")
-        .expect("take registered");
+    let take_ba = lowered_ba.functions.get("take").expect("take registered");
     let vibra::lower::TypeRef::Instantiated { type_args, .. } = &take_ba.arg_types[0] else {
-        panic!("expected instantiated tuple alias, got {:?}", take_ba.arg_types[0]);
+        panic!(
+            "expected instantiated tuple alias, got {:?}",
+            take_ba.arg_types[0]
+        );
     };
     assert_eq!(type_args.len(), 2);
     assert_eq!(type_args[0], vibra::lower::TypeRef::Str);
@@ -1581,14 +1808,8 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
-    assert!(
-        err.contains("E-GEN-001"),
-        "unexpected error: {err}"
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(err.contains("E-GEN-001"), "unexpected error: {err}");
 }
 
 #[test]
@@ -1626,14 +1847,8 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::lower::lower_program(&prog).unwrap_err()
-    );
-    assert!(
-        err.contains("E-GEN-002"),
-        "unexpected error: {err}"
-    );
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(err.contains("E-GEN-002"), "unexpected error: {err}");
 }
 
 #[test]
@@ -1809,8 +2024,8 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog)
-        .expect("non-generic =defs program should lower");
+    let lowered =
+        vibra::lower::lower_program(&prog).expect("non-generic =defs program should lower");
     let dump = format!("{:?}", lowered);
     // The inherent op is registered under `m.box.identity` (sig key shape
     // matches what `parse_qualified_call`'s first-dot split will produce).
@@ -1873,8 +2088,7 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog)
-        .expect("generic =defs program should lower");
+    let lowered = vibra::lower::lower_program(&prog).expect("generic =defs program should lower");
     let dump = format!("{:?}", lowered);
     assert!(
         dump.contains("r.result.passthrough"),
@@ -2474,8 +2688,7 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog)
-        .expect("basic =impl should lower");
+    let lowered = vibra::lower::lower_program(&prog).expect("basic =impl should lower");
     let dump = format!("{:?}", lowered);
     assert!(
         dump.contains("box.display.fmt"),
@@ -2546,8 +2759,7 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog)
-        .expect("=impl with method-ref should lower");
+    let lowered = vibra::lower::lower_program(&prog).expect("=impl with method-ref should lower");
     let key = vibra::lower::ImplKey {
         implementing_type: "box".to_string(),
         interface: "display".to_string(),
@@ -2806,8 +3018,7 @@ main:
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog)
-        .expect("parametric `=impl` should lower");
+    let lowered = vibra::lower::lower_program(&prog).expect("parametric `=impl` should lower");
     let key = vibra::lower::ImplKey {
         implementing_type: "box".to_string(),
         interface: "from-iface".to_string(),
@@ -2835,7 +3046,11 @@ main:
         .functions
         .get("box.from-iface.from")
         .expect("sig missing");
-    assert!(sig.type_params.is_empty(), "sig should have no free type-params; got {:?}", sig.type_params);
+    assert!(
+        sig.type_params.is_empty(),
+        "sig should have no free type-params; got {:?}",
+        sig.type_params
+    );
     assert!(
         matches!(sig.arg_types[0], vibra::lower::TypeRef::Int64),
         "expected substituted arg type Int64; got {:?}",

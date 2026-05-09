@@ -7,18 +7,62 @@ use crate::lower::{
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
+    let mut files = FileTable::default();
     for stmt in &program.statements {
-        if exec_statement(stmt, program, &mut env, config)?.is_some() {
+        if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
             bail!("unexpected `$return` at top level");
         }
     }
     Ok(())
+}
+
+enum FileHandle {
+    Stdin,
+    Stdout,
+    Stderr,
+    File(File),
+}
+
+struct FileTable {
+    next: u64,
+    handles: HashMap<u64, FileHandle>,
+}
+
+impl Default for FileTable {
+    fn default() -> Self {
+        let mut handles = HashMap::new();
+        handles.insert(0, FileHandle::Stdin);
+        handles.insert(1, FileHandle::Stdout);
+        handles.insert(2, FileHandle::Stderr);
+        Self { next: 3, handles }
+    }
+}
+
+impl FileTable {
+    fn insert(&mut self, file: File) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::File(file));
+        id
+    }
+
+    fn get_mut(&mut self, id: u64) -> Result<&mut FileHandle> {
+        self.handles
+            .get_mut(&id)
+            .with_context(|| format!("invalid file handle `{id}`"))
+    }
+
+    fn close(&mut self, id: u64) {
+        if id > 2 {
+            self.handles.remove(&id);
+        }
+    }
 }
 
 fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<RuntimeValue> {
@@ -28,6 +72,7 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
             .get(v)
             .cloned()
             .with_context(|| format!("unknown variable `${v}`")),
+        Expr::Cast { from, .. } => eval_expr(from, env),
         Expr::EnumConstructor {
             enum_key,
             tag,
@@ -52,12 +97,13 @@ fn exec_statement(
     stmt: &Statement,
     program: &LoweredProgram,
     env: &mut HashMap<String, RuntimeValue>,
+    files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<Option<RuntimeValue>> {
     match stmt {
         Statement::Return(expr) => Ok(Some(eval_expr(expr, env)?)),
         Statement::Call(call) => {
-            let _ = exec_call(call, program, env, config)?;
+            let _ = exec_call(call, program, env, files, config)?;
             Ok(None)
         }
         Statement::Let {
@@ -65,7 +111,7 @@ fn exec_statement(
             value: binding,
         } => {
             let value = match binding {
-                LetValue::Call(c) => exec_call(c, program, env, config)?,
+                LetValue::Call(c) => exec_call(c, program, env, files, config)?,
                 LetValue::Expr(e) => eval_expr(e, env)?,
             };
             env.insert(var.clone(), value);
@@ -99,7 +145,7 @@ fn exec_statement(
                     .with_context(|| format!("tag `{tag}` had no payload for binding"))?;
                 scoped.insert(bind_name.clone(), payload_value);
             }
-            if let Some(v) = run_block(&arm.body, program, &mut scoped, config)? {
+            if let Some(v) = run_block(&arm.body, program, &mut scoped, files, config)? {
                 return Ok(Some(v));
             }
             for (k, v) in scoped {
@@ -114,10 +160,11 @@ fn run_block(
     stmts: &[Statement],
     program: &LoweredProgram,
     env: &mut HashMap<String, RuntimeValue>,
+    files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<Option<RuntimeValue>> {
     for stmt in stmts {
-        if let Some(v) = exec_statement(stmt, program, env, config)? {
+        if let Some(v) = exec_statement(stmt, program, env, files, config)? {
             return Ok(Some(v));
         }
     }
@@ -139,6 +186,11 @@ fn eval_i64(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<i64> {
         },
         other => bail!("expected integer, got {other:?}"),
     }
+}
+
+fn eval_handle(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<u64> {
+    let raw = eval_i64(expr, env)?;
+    u64::try_from(raw).context("file handle < 0")
 }
 
 fn eval_string(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<String> {
@@ -187,13 +239,76 @@ fn wrap_domain_int(domain: &str, value: i64) -> RuntimeValue {
     }
 }
 
+fn result_enum_key(sig: &crate::lower::FunctionSig) -> String {
+    match &sig.return_type {
+        TypeRef::Instantiated { base, .. } => base.clone(),
+        TypeRef::Named(name) => name.clone(),
+        other => format!("{other:?}"),
+    }
+}
+
+fn result_ok(sig: &crate::lower::FunctionSig, value: RuntimeValue) -> RuntimeValue {
+    RuntimeValue::Enum {
+        enum_key: result_enum_key(sig),
+        tag: "ok".to_string(),
+        payload: Some(Box::new(value)),
+    }
+}
+
+fn result_err(
+    sig: &crate::lower::FunctionSig,
+    error_tag: &str,
+    message: Option<String>,
+) -> RuntimeValue {
+    let fs_error_key = match &sig.return_type {
+        TypeRef::Instantiated { type_args, .. } if type_args.len() >= 2 => match &type_args[1] {
+            TypeRef::Named(name) => name.clone(),
+            other => format!("{other:?}"),
+        },
+        _ => "fs-error".to_string(),
+    };
+    let payload = message.map(RuntimeValue::Str).map(Box::new);
+    RuntimeValue::Enum {
+        enum_key: result_enum_key(sig),
+        tag: "err".to_string(),
+        payload: Some(Box::new(RuntimeValue::Enum {
+            enum_key: fs_error_key,
+            tag: error_tag.to_string(),
+            payload,
+        })),
+    }
+}
+
+fn fs_result<T>(
+    sig: &crate::lower::FunctionSig,
+    op: impl FnOnce() -> std::io::Result<T>,
+    ok: impl FnOnce(T) -> RuntimeValue,
+) -> RuntimeValue {
+    match op() {
+        Ok(value) => result_ok(sig, ok(value)),
+        Err(err) => {
+            let tag = match err.kind() {
+                std::io::ErrorKind::NotFound => "not-found",
+                std::io::ErrorKind::PermissionDenied => "permission-denied",
+                std::io::ErrorKind::AlreadyExists => "already-exists",
+                std::io::ErrorKind::InvalidInput => "invalid-path",
+                _ => "io",
+            };
+            result_err(sig, tag, Some(err.to_string()))
+        }
+    }
+}
+
 fn forwarded_args(
     call: &Call,
     sig: &crate::lower::FunctionSig,
     env: &HashMap<String, RuntimeValue>,
 ) -> Result<Vec<RuntimeValue>> {
     let FunctionBody::Wasm { wasm_args, .. } = &sig.body else {
-        bail!("internal: forwarded_args on non-wasm function `{}`", sig.symbol);
+        bail!(
+            "internal: forwarded_args on non-wasm function `{}`",
+            sig.symbol
+        );
     };
     let mut named: HashMap<&str, RuntimeValue> = HashMap::new();
     for (idx, name) in sig.arg_names.iter().enumerate() {
@@ -253,6 +368,7 @@ fn exec_call(
     call: &Call,
     program: &LoweredProgram,
     env: &HashMap<String, RuntimeValue>,
+    files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
     let sig = program
@@ -268,7 +384,7 @@ fn exec_call(
                 fn_env.insert(name.clone(), val.clone());
                 fn_env.insert(format!("args.{name}"), val);
             }
-            if let Some(v) = run_block(statements, program, &mut fn_env, config)? {
+            if let Some(v) = run_block(statements, program, &mut fn_env, files, config)? {
                 return Ok(v);
             }
             if sig.return_type != TypeRef::Void {
@@ -316,7 +432,9 @@ fn exec_call(
                         bail!("read-line currently supports stdin fd 0 only");
                     }
                     let mut line = String::new();
-                    std::io::stdin().read_line(&mut line).context("stdin read_line")?;
+                    std::io::stdin()
+                        .read_line(&mut line)
+                        .context("stdin read_line")?;
                     if line.ends_with('\n') {
                         line.pop();
                         if line.ends_with('\r') {
@@ -333,7 +451,9 @@ fn exec_call(
                     }
                     let mut buf = vec![0u8; usize::try_from(len).context("len < 0")?];
                     let n = std::io::stdin().read(&mut buf).context("stdin read")?;
-                    Ok(RuntimeValue::Str(String::from_utf8_lossy(&buf[..n]).to_string()))
+                    Ok(RuntimeValue::Str(
+                        String::from_utf8_lossy(&buf[..n]).to_string(),
+                    ))
                 }
                 "write-raw" | "write-all" => {
                     let fd = eval_i64(&call.args[0], env)?;
@@ -345,7 +465,190 @@ fn exec_call(
                         print!("{bytes}");
                         std::io::stdout().flush().ok();
                     }
-                    Ok(RuntimeValue::Int(i64::try_from(bytes.len()).unwrap_or(i64::MAX)))
+                    Ok(RuntimeValue::Int(
+                        i64::try_from(bytes.len()).unwrap_or(i64::MAX),
+                    ))
+                }
+
+                "path.new" => {
+                    let path = eval_string(&call.args[0], env)?;
+                    Ok(RuntimeValue::Str(path))
+                }
+                "open-read" => {
+                    let path = eval_domain_string(&call.args[0], env, "path")?;
+                    let p = resolve_preopen(&path, config)?;
+                    Ok(fs_result(
+                        sig,
+                        || fs::OpenOptions::new().read(true).open(p),
+                        |file| {
+                            RuntimeValue::Int(i64::try_from(files.insert(file)).unwrap_or(i64::MAX))
+                        },
+                    ))
+                }
+                "open-write" => {
+                    let path = eval_domain_string(&call.args[0], env, "path")?;
+                    let p = resolve_preopen(&path, config)?;
+                    Ok(fs_result(
+                        sig,
+                        || {
+                            fs::OpenOptions::new()
+                                .create(true)
+                                .truncate(true)
+                                .write(true)
+                                .open(p)
+                        },
+                        |file| {
+                            RuntimeValue::Int(i64::try_from(files.insert(file)).unwrap_or(i64::MAX))
+                        },
+                    ))
+                }
+                "open-append" => {
+                    let path = eval_domain_string(&call.args[0], env, "path")?;
+                    let p = resolve_preopen(&path, config)?;
+                    Ok(fs_result(
+                        sig,
+                        || fs::OpenOptions::new().create(true).append(true).open(p),
+                        |file| {
+                            RuntimeValue::Int(i64::try_from(files.insert(file)).unwrap_or(i64::MAX))
+                        },
+                    ))
+                }
+                "open-read-write" => {
+                    let path = eval_domain_string(&call.args[0], env, "path")?;
+                    let p = resolve_preopen(&path, config)?;
+                    Ok(fs_result(
+                        sig,
+                        || {
+                            fs::OpenOptions::new()
+                                .create(true)
+                                .truncate(false)
+                                .read(true)
+                                .write(true)
+                                .open(p)
+                        },
+                        |file| {
+                            RuntimeValue::Int(i64::try_from(files.insert(file)).unwrap_or(i64::MAX))
+                        },
+                    ))
+                }
+                "readln" => {
+                    let mut line = String::new();
+                    match std::io::stdin().read_line(&mut line) {
+                        Ok(_) => {
+                            if line.ends_with('\n') {
+                                line.pop();
+                                if line.ends_with('\r') {
+                                    line.pop();
+                                }
+                            }
+                            Ok(result_ok(sig, RuntimeValue::Str(line)))
+                        }
+                        Err(err) => Ok(result_err(sig, "io", Some(err.to_string()))),
+                    }
+                }
+                s if s.ends_with(".readable.read-string") => {
+                    let handle = eval_handle(&call.args[0], env)?;
+                    let value = match files.get_mut(handle)? {
+                        FileHandle::Stdin => {
+                            let mut line = String::new();
+                            std::io::stdin().read_line(&mut line).map(|_| {
+                                if line.ends_with('\n') {
+                                    line.pop();
+                                    if line.ends_with('\r') {
+                                        line.pop();
+                                    }
+                                }
+                                line
+                            })
+                        }
+                        FileHandle::File(file) => {
+                            let mut s = String::new();
+                            file.read_to_string(&mut s).map(|_| s)
+                        }
+                        FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "handle is not readable",
+                        )),
+                    };
+                    Ok(fs_result(sig, || value, RuntimeValue::Str))
+                }
+                s if s.ends_with(".readable.read-bytes") => {
+                    let handle = eval_handle(&call.args[0], env)?;
+                    let value = match files.get_mut(handle)? {
+                        FileHandle::Stdin => {
+                            let mut s = String::new();
+                            std::io::stdin().read_to_string(&mut s).map(|_| s)
+                        }
+                        FileHandle::File(file) => {
+                            let mut buf = Vec::new();
+                            file.read_to_end(&mut buf)
+                                .map(|_| String::from_utf8_lossy(&buf).to_string())
+                        }
+                        FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "handle is not readable",
+                        )),
+                    };
+                    Ok(fs_result(sig, || value, RuntimeValue::Str))
+                }
+                s if s.ends_with(".writable.write-string")
+                    || s.ends_with(".appendable.append-string") =>
+                {
+                    let handle = eval_handle(&call.args[0], env)?;
+                    let contents = eval_string(&call.args[1], env)?;
+                    let result = match files.get_mut(handle)? {
+                        FileHandle::Stdout => {
+                            print!("{contents}");
+                            std::io::stdout().flush()
+                        }
+                        FileHandle::Stderr => {
+                            eprint!("{contents}");
+                            std::io::stderr().flush()
+                        }
+                        FileHandle::File(file) => file.write_all(contents.as_bytes()),
+                        FileHandle::Stdin => Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "handle is not writable",
+                        )),
+                    };
+                    Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
+                }
+                s if s.ends_with(".writable.write-bytes")
+                    || s.ends_with(".appendable.append-bytes") =>
+                {
+                    let handle = eval_handle(&call.args[0], env)?;
+                    let contents = eval_string(&call.args[1], env)?;
+                    let result = match files.get_mut(handle)? {
+                        FileHandle::Stdout => {
+                            print!("{contents}");
+                            std::io::stdout().flush()
+                        }
+                        FileHandle::Stderr => {
+                            eprint!("{contents}");
+                            std::io::stderr().flush()
+                        }
+                        FileHandle::File(file) => file.write_all(contents.as_bytes()),
+                        FileHandle::Stdin => Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "handle is not writable",
+                        )),
+                    };
+                    Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
+                }
+                s if s.ends_with(".writable.flush") => {
+                    let handle = eval_handle(&call.args[0], env)?;
+                    let result = match files.get_mut(handle)? {
+                        FileHandle::Stdout => std::io::stdout().flush(),
+                        FileHandle::Stderr => std::io::stderr().flush(),
+                        FileHandle::File(file) => file.flush(),
+                        FileHandle::Stdin => Ok(()),
+                    };
+                    Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
+                }
+                s if s.ends_with(".closeable.close") => {
+                    let handle = eval_handle(&call.args[0], env)?;
+                    files.close(handle);
+                    Ok(result_ok(sig, RuntimeValue::Void))
                 }
 
                 "create-dir-all" => {
@@ -424,6 +727,7 @@ fn exec_call(
                     let p = resolve_preopen(&path, config)?;
                     let _ = fs::OpenOptions::new()
                         .create(true)
+                        .truncate(false)
                         .read(true)
                         .write(true)
                         .open(p)

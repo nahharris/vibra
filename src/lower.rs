@@ -37,6 +37,10 @@ pub enum RuntimeValue {
 pub enum Expr {
     Value(RuntimeValue),
     VarRef(String),
+    Cast {
+        from: Box<Expr>,
+        target: TypeRef,
+    },
     EnumConstructor {
         enum_key: String,
         tag: String,
@@ -83,6 +87,12 @@ pub enum TypeRef {
     Void,
     /// Reference to a registered type alias by qualified name (e.g. `m.pair`).
     Named(String),
+    /// A nominal wrapper around `inner`. The `name` is populated when the
+    /// top-level alias is registered and is the type identity for equality.
+    Newtype {
+        name: String,
+        inner: Box<TypeRef>,
+    },
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
     /// A use of a generic type alias with explicit type arguments. `type_args`
@@ -182,7 +192,10 @@ pub enum LetValue {
 #[derive(Debug, Clone)]
 pub enum Statement {
     Call(Call),
-    Let { var: String, value: LetValue },
+    Let {
+        var: String,
+        value: LetValue,
+    },
     Return(Expr),
     Match {
         target: Expr,
@@ -274,13 +287,8 @@ struct DefEnvelope<'a> {
 /// `$` or `=` is rejected with `E-ANNO-002` (legacy un-prefixed annotation).
 const KNOWN_ANNOTATIONS: &[&str] = &["=where", "=doc", "=defs", "=impl"];
 
-fn parse_def_envelope<'a>(
-    v: &'a Value,
-    warnings: &mut Vec<String>,
-) -> Result<DefEnvelope<'a>> {
-    let m = v
-        .as_mapping()
-        .context("definition must be a mapping")?;
+fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<DefEnvelope<'a>> {
+    let m = v.as_mapping().context("definition must be a mapping")?;
 
     let mut form_key: Option<String> = None;
     let mut form_value: Option<&'a Value> = None;
@@ -291,9 +299,7 @@ fn parse_def_envelope<'a>(
     let mut impls: Option<&'a serde_yaml::Mapping> = None;
 
     for (k, val) in m {
-        let ks = k
-            .as_str()
-            .context("definition key must be a string")?;
+        let ks = k.as_str().context("definition key must be a string")?;
         if ks.starts_with('$') {
             if form_key.is_some() {
                 bail!(
@@ -312,9 +318,9 @@ fn parse_def_envelope<'a>(
             }
             defs = Some(dm);
         } else if ks == "=impl" {
-            let im = val
-                .as_mapping()
-                .context("E-IMPL-001: `=impl` must be a mapping of `$iface: <impl-payload>` entries")?;
+            let im = val.as_mapping().context(
+                "E-IMPL-001: `=impl` must be a mapping of `$iface: <impl-payload>` entries",
+            )?;
             if impls.is_some() {
                 bail!("definition declares `=impl` more than once");
             }
@@ -324,9 +330,7 @@ fn parse_def_envelope<'a>(
                 .as_mapping()
                 .context("`=where` must be a mapping of type-parameter name to bound list")?;
             for (wk, wv) in wm {
-                let name = wk
-                    .as_str()
-                    .context("`=where` keys must be strings")?;
+                let name = wk.as_str().context("`=where` keys must be strings")?;
                 maybe_warn_kebab(name, "type parameter", warnings);
                 let bounds_seq = wv
                     .as_sequence()
@@ -374,9 +378,7 @@ fn parse_def_envelope<'a>(
         );
     }
     if defs.is_some() && form_key == "$import" {
-        bail!(
-            "E-DEFS-001: `=defs` is only valid alongside a type definition, not on a `$import`"
-        );
+        bail!("E-DEFS-001: `=defs` is only valid alongside a type definition, not on a `$import`");
     }
     if impls.is_some() && form_key == "$function" {
         bail!(
@@ -384,9 +386,7 @@ fn parse_def_envelope<'a>(
         );
     }
     if impls.is_some() && form_key == "$import" {
-        bail!(
-            "E-IMPL-001: `=impl` is only valid alongside a type definition, not on a `$import`"
-        );
+        bail!("E-IMPL-001: `=impl` is only valid alongside a type definition, not on a `$import`");
     }
 
     Ok(DefEnvelope {
@@ -447,6 +447,7 @@ struct AliasSkeleton {
 }
 
 const BUILTIN_TYPE_FORMS: &[&str] = &[
+    "$newtype",
     "$record",
     "$tuple",
     "$array",
@@ -467,10 +468,7 @@ fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, Al
         .context("internal: entry module not loaded")?
         .as_mapping()
         .context("entry root must be mapping")?;
-    let parent = program
-        .entry
-        .parent()
-        .context("entry path has no parent")?;
+    let parent = program.entry.parent().context("entry path has no parent")?;
 
     let mut skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
     let mut sink: Vec<String> = Vec::new();
@@ -484,21 +482,54 @@ fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, Al
         let Some(imp) = map_get_str(sub, "$import") else {
             continue;
         };
-        let imp_s = imp
-            .as_str()
-            .context("$import value must be string")?;
+        let imp_s = imp.as_str().context("$import value must be string")?;
         let imported_path = fs::canonicalize(parent.join(imp_s))
             .with_context(|| format!("resolve import alias `{alias}`"))?;
-        let imported = program
-            .modules
-            .get(&imported_path)
-            .with_context(|| format!("imported module missing from graph `{alias}`"))?;
-        collect_module_skeletons(alias, imported, &mut skeletons, &mut sink)?;
+        collect_module_skeleton_tree(alias, &imported_path, program, &mut skeletons, &mut sink)?;
     }
 
-    collect_module_skeletons("", program.modules.get(&program.entry).unwrap(), &mut skeletons, &mut sink)?;
+    collect_module_skeletons(
+        "",
+        program.modules.get(&program.entry).unwrap(),
+        &mut skeletons,
+        &mut sink,
+    )?;
 
     Ok(skeletons)
+}
+
+fn collect_module_skeleton_tree(
+    alias: &str,
+    module_path: &std::path::Path,
+    program: &LoadedProgram,
+    skeletons: &mut HashMap<String, AliasSkeleton>,
+    sink: &mut Vec<String>,
+) -> Result<()> {
+    let module_root = program
+        .modules
+        .get(module_path)
+        .with_context(|| format!("imported module missing from graph `{alias}`"))?;
+    let map = module_root
+        .as_mapping()
+        .context("module root must be mapping")?;
+    let parent = module_path
+        .parent()
+        .context("imported module path has no parent")?;
+    for (k, v) in map {
+        let nested_alias = k.as_str().context("module key must be string")?;
+        if nested_alias.starts_with('-') {
+            continue;
+        }
+        let Some(sub) = v.as_mapping() else { continue };
+        let Some(imp) = map_get_str(sub, "$import") else {
+            continue;
+        };
+        let imp_s = imp.as_str().context("$import value must be string")?;
+        let nested_path = fs::canonicalize(parent.join(imp_s))
+            .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
+        collect_module_skeleton_tree(nested_alias, &nested_path, program, skeletons, sink)?;
+    }
+    collect_module_skeletons(alias, module_root, skeletons, sink)
 }
 
 fn collect_module_skeletons(
@@ -563,7 +594,14 @@ fn parse_type_ref(
                         m.len()
                     );
                 }
-                return parse_type_constructor(form, form_v, scope, skeletons, warnings, self_allowed);
+                return parse_type_constructor(
+                    form,
+                    form_v,
+                    scope,
+                    skeletons,
+                    warnings,
+                    self_allowed,
+                );
             }
         }
         if m.len() == 1 {
@@ -574,8 +612,14 @@ fn parse_type_ref(
                     bail!("type alias reference must have a name after `$`");
                 }
                 maybe_warn_kebab_qualified(name, "type reference", warnings);
-                let type_args =
-                    parse_instantiation_args(name, type_args_v, scope, skeletons, warnings, self_allowed)?;
+                let type_args = parse_instantiation_args(
+                    name,
+                    type_args_v,
+                    scope,
+                    skeletons,
+                    warnings,
+                    self_allowed,
+                )?;
                 return Ok(TypeRef::Instantiated {
                     base: name.to_string(),
                     type_args,
@@ -654,6 +698,19 @@ fn parse_type_constructor(
     self_allowed: bool,
 ) -> Result<TypeRef> {
     match form {
+        "$newtype" => {
+            if let Some(m) = v.as_mapping() {
+                if m.len() != 1 || map_get_str(m, "$newtype").is_some() {
+                    bail!("E-NEWTYPE-002: `$newtype` body must be exactly one type expression");
+                }
+            }
+            let inner = parse_type_ref(v, scope, skeletons, warnings, self_allowed)
+                .context("E-NEWTYPE-002: invalid `$newtype` inner type")?;
+            Ok(TypeRef::Newtype {
+                name: String::new(),
+                inner: Box::new(inner),
+            })
+        }
         "$record" => {
             let m = v
                 .as_mapping()
@@ -676,12 +733,22 @@ fn parse_type_constructor(
                 .context("`$tuple` must be an array of type expressions")?;
             let mut items = Vec::with_capacity(s.len());
             for it in s {
-                items.push(parse_type_ref(it, scope, skeletons, warnings, self_allowed)?);
+                items.push(parse_type_ref(
+                    it,
+                    scope,
+                    skeletons,
+                    warnings,
+                    self_allowed,
+                )?);
             }
             Ok(TypeRef::Tuple(items))
         }
         "$array" => Ok(TypeRef::Array(Box::new(parse_type_ref(
-            v, scope, skeletons, warnings, self_allowed,
+            v,
+            scope,
+            skeletons,
+            warnings,
+            self_allowed,
         )?))),
         "$map" => {
             let m = v
@@ -696,8 +763,20 @@ fn parse_type_constructor(
             let key = map_get_str(m, "key").context("$map missing `key`")?;
             let value = map_get_str(m, "value").context("$map missing `value`")?;
             Ok(TypeRef::Map {
-                key: Box::new(parse_type_ref(key, scope, skeletons, warnings, self_allowed)?),
-                value: Box::new(parse_type_ref(value, scope, skeletons, warnings, self_allowed)?),
+                key: Box::new(parse_type_ref(
+                    key,
+                    scope,
+                    skeletons,
+                    warnings,
+                    self_allowed,
+                )?),
+                value: Box::new(parse_type_ref(
+                    value,
+                    scope,
+                    skeletons,
+                    warnings,
+                    self_allowed,
+                )?),
             })
         }
         "$option" => {
@@ -713,7 +792,13 @@ fn parse_type_constructor(
             }
             let mut items = Vec::with_capacity(s.len());
             for it in s {
-                items.push(parse_type_ref(it, scope, skeletons, warnings, self_allowed)?);
+                items.push(parse_type_ref(
+                    it,
+                    scope,
+                    skeletons,
+                    warnings,
+                    self_allowed,
+                )?);
             }
             Ok(TypeRef::Intersect(items))
         }
@@ -750,8 +835,20 @@ fn parse_type_constructor(
             let args = map_get_str(m, "args").context("$fn-type missing `args`")?;
             let ret = map_get_str(m, "return").context("$fn-type missing `return`")?;
             Ok(TypeRef::FnType {
-                args: Box::new(parse_type_ref(args, scope, skeletons, warnings, self_allowed)?),
-                return_type: Box::new(parse_type_ref(ret, scope, skeletons, warnings, self_allowed)?),
+                args: Box::new(parse_type_ref(
+                    args,
+                    scope,
+                    skeletons,
+                    warnings,
+                    self_allowed,
+                )?),
+                return_type: Box::new(parse_type_ref(
+                    ret,
+                    scope,
+                    skeletons,
+                    warnings,
+                    self_allowed,
+                )?),
             })
         }
         "$literal" => {
@@ -773,7 +870,11 @@ fn parse_type_constructor(
         }
         "$union" => parse_union_type(v, scope, skeletons, warnings, self_allowed),
         "$enum" => Ok(TypeRef::Enum(parse_enum_tags(
-            v, scope, skeletons, warnings, self_allowed,
+            v,
+            scope,
+            skeletons,
+            warnings,
+            self_allowed,
         )?)),
         _ => unreachable!("unknown builtin type form `{form}`"),
     }
@@ -791,15 +892,19 @@ fn parse_instantiation_args(
 ) -> Result<Vec<TypeRef>> {
     let skel = skeletons
         .get(base)
+        .or_else(|| {
+            skeletons
+                .iter()
+                .find(|(k, _)| strip_module_prefix(k) == strip_module_prefix(base))
+                .map(|(_, v)| v)
+        })
         .with_context(|| format!("E-GEN-002: unknown type alias `${base}` in instantiation"))?;
     if skel.type_params.is_empty() {
-        bail!(
-            "E-GEN-002: type alias `${base}` is non-generic; do not pass type arguments"
-        );
+        bail!("E-GEN-002: type alias `${base}` is non-generic; do not pass type arguments");
     }
-    let m = v
-        .as_mapping()
-        .with_context(|| format!("instantiation of `${base}` must be a mapping of `tparam: type`"))?;
+    let m = v.as_mapping().with_context(|| {
+        format!("instantiation of `${base}` must be a mapping of `tparam: type`")
+    })?;
     let allowed: HashSet<&str> = skel.type_params.iter().map(String::as_str).collect();
     for (k, _) in m {
         let ks = k.as_str().context("instantiation key must be string")?;
@@ -812,14 +917,16 @@ fn parse_instantiation_args(
     }
     let mut out = Vec::with_capacity(skel.type_params.len());
     for tp in &skel.type_params {
-        let tv = m
-            .get(Value::String(tp.clone()))
-            .with_context(|| {
-                format!(
-                    "E-GEN-002: missing type argument `{tp}` in instantiation of `${base}`"
-                )
-            })?;
-        out.push(parse_type_ref(tv, scope, skeletons, warnings, self_allowed)?);
+        let tv = m.get(Value::String(tp.clone())).with_context(|| {
+            format!("E-GEN-002: missing type argument `{tp}` in instantiation of `${base}`")
+        })?;
+        out.push(parse_type_ref(
+            tv,
+            scope,
+            skeletons,
+            warnings,
+            self_allowed,
+        )?);
     }
     Ok(out)
 }
@@ -846,7 +953,13 @@ fn parse_union_type(
     }
     let mut out = Vec::with_capacity(items.len());
     for item in items {
-        out.push(parse_type_ref(item, scope, skeletons, warnings, self_allowed)?);
+        out.push(parse_type_ref(
+            item,
+            scope,
+            skeletons,
+            warnings,
+            self_allowed,
+        )?);
     }
     Ok(TypeRef::Union(out))
 }
@@ -884,9 +997,9 @@ fn parse_enum_tags(
 fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
     match ty {
         TypeRef::SelfType => self_ty.clone(),
-        TypeRef::Union(items) => TypeRef::Union(
-            items.iter().map(|t| substitute_self(t, self_ty)).collect(),
-        ),
+        TypeRef::Union(items) => {
+            TypeRef::Union(items.iter().map(|t| substitute_self(t, self_ty)).collect())
+        }
         TypeRef::Enum(tags) => TypeRef::Enum(
             tags.iter()
                 .map(|(k, v)| (k.clone(), substitute_self(v, self_ty)))
@@ -898,9 +1011,9 @@ fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
                 .map(|(k, v)| (k.clone(), substitute_self(v, self_ty)))
                 .collect(),
         ),
-        TypeRef::Tuple(items) => TypeRef::Tuple(
-            items.iter().map(|t| substitute_self(t, self_ty)).collect(),
-        ),
+        TypeRef::Tuple(items) => {
+            TypeRef::Tuple(items.iter().map(|t| substitute_self(t, self_ty)).collect())
+        }
         TypeRef::Array(inner) => TypeRef::Array(Box::new(substitute_self(inner, self_ty))),
         TypeRef::Map { key, value } => TypeRef::Map {
             key: Box::new(substitute_self(key, self_ty)),
@@ -912,9 +1025,9 @@ fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
                 .map(|(k, v)| (k.clone(), substitute_self(v, self_ty)))
                 .collect(),
         ),
-        TypeRef::Intersect(items) => TypeRef::Intersect(
-            items.iter().map(|t| substitute_self(t, self_ty)).collect(),
-        ),
+        TypeRef::Intersect(items) => {
+            TypeRef::Intersect(items.iter().map(|t| substitute_self(t, self_ty)).collect())
+        }
         TypeRef::FnType { args, return_type } => TypeRef::FnType {
             args: Box::new(substitute_self(args, self_ty)),
             return_type: Box::new(substitute_self(return_type, self_ty)),
@@ -926,6 +1039,10 @@ fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
                 .map(|t| substitute_self(t, self_ty))
                 .collect(),
         },
+        TypeRef::Newtype { name, inner } => TypeRef::Newtype {
+            name: name.clone(),
+            inner: Box::new(substitute_self(inner, self_ty)),
+        },
         _ => ty.clone(),
     }
 }
@@ -933,12 +1050,9 @@ fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
 fn substitute_type(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> TypeRef {
     match ty {
         TypeRef::Generic(n) => subst.get(n.as_str()).cloned().unwrap_or_else(|| ty.clone()),
-        TypeRef::Union(items) => TypeRef::Union(
-            items
-                .iter()
-                .map(|t| substitute_type(t, subst))
-                .collect(),
-        ),
+        TypeRef::Union(items) => {
+            TypeRef::Union(items.iter().map(|t| substitute_type(t, subst)).collect())
+        }
         TypeRef::Enum(tags) => TypeRef::Enum(
             tags.iter()
                 .map(|(k, v)| (k.clone(), substitute_type(v, subst)))
@@ -950,12 +1064,9 @@ fn substitute_type(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> TypeRef {
                 .map(|(k, v)| (k.clone(), substitute_type(v, subst)))
                 .collect(),
         ),
-        TypeRef::Tuple(items) => TypeRef::Tuple(
-            items
-                .iter()
-                .map(|t| substitute_type(t, subst))
-                .collect(),
-        ),
+        TypeRef::Tuple(items) => {
+            TypeRef::Tuple(items.iter().map(|t| substitute_type(t, subst)).collect())
+        }
         TypeRef::Array(inner) => TypeRef::Array(Box::new(substitute_type(inner, subst))),
         TypeRef::Map { key, value } => TypeRef::Map {
             key: Box::new(substitute_type(key, subst)),
@@ -967,12 +1078,9 @@ fn substitute_type(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> TypeRef {
                 .map(|(k, v)| (k.clone(), substitute_type(v, subst)))
                 .collect(),
         ),
-        TypeRef::Intersect(items) => TypeRef::Intersect(
-            items
-                .iter()
-                .map(|t| substitute_type(t, subst))
-                .collect(),
-        ),
+        TypeRef::Intersect(items) => {
+            TypeRef::Intersect(items.iter().map(|t| substitute_type(t, subst)).collect())
+        }
         TypeRef::FnType { args, return_type } => TypeRef::FnType {
             args: Box::new(substitute_type(args, subst)),
             return_type: Box::new(substitute_type(return_type, subst)),
@@ -984,6 +1092,10 @@ fn substitute_type(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> TypeRef {
                 .map(|t| substitute_type(t, subst))
                 .collect(),
         },
+        TypeRef::Newtype { name, inner } => TypeRef::Newtype {
+            name: name.clone(),
+            inner: Box::new(substitute_type(inner, subst)),
+        },
         _ => ty.clone(),
     }
 }
@@ -992,6 +1104,9 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
     match ty {
         TypeRef::Named(name) => {
             if let Some(al) = aliases.get(name) {
+                if matches!(al.body, TypeRef::Newtype { .. }) {
+                    return ty.clone();
+                }
                 if al.type_params.is_empty() {
                     return normalize_type_ref(&al.body, aliases);
                 }
@@ -1004,6 +1119,12 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
                 .map(|t| normalize_type_ref(t, aliases))
                 .collect();
             if let Some(al) = aliases.get(base) {
+                if matches!(al.body, TypeRef::Newtype { .. }) {
+                    return TypeRef::Instantiated {
+                        base: base.clone(),
+                        type_args: normalized_args,
+                    };
+                }
                 if al.type_params.len() == normalized_args.len() {
                     let subst: HashMap<String, TypeRef> = al
                         .type_params
@@ -1063,6 +1184,10 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
             args: Box::new(normalize_type_ref(args, aliases)),
             return_type: Box::new(normalize_type_ref(return_type, aliases)),
         },
+        TypeRef::Newtype { name, inner } => TypeRef::Newtype {
+            name: name.clone(),
+            inner: Box::new(normalize_type_ref(inner, aliases)),
+        },
         _ => ty.clone(),
     }
 }
@@ -1116,9 +1241,7 @@ fn unify_types(
                 .zip(a2.iter())
                 .all(|(e, a)| unify_types(e, a, aliases, bindings))
         }
-        (TypeRef::Union(opts), a) => opts
-            .iter()
-            .any(|c| unify_types(c, a, aliases, bindings)),
+        (TypeRef::Union(opts), a) => opts.iter().any(|c| unify_types(c, a, aliases, bindings)),
         (TypeRef::Record(ef), TypeRef::Record(af)) => ef.iter().all(|(name, t)| {
             af.get(name)
                 .is_some_and(|a| unify_types(t, a, aliases, bindings))
@@ -1138,19 +1261,12 @@ fn unify_types(
                     .all(|(et, at)| unify_types(et, at, aliases, bindings))
         }
         (TypeRef::Array(et), TypeRef::Array(at)) => unify_types(et, at, aliases, bindings),
-        (
-            TypeRef::Map {
-                key: ek,
-                value: ev,
-            },
-            TypeRef::Map {
-                key: ak,
-                value: av,
-            },
-        ) => unify_types(ek, ak, aliases, bindings) && unify_types(ev, av, aliases, bindings),
-        (TypeRef::Intersect(parts), a) => parts
-            .iter()
-            .all(|p| unify_types(p, a, aliases, bindings)),
+        (TypeRef::Map { key: ek, value: ev }, TypeRef::Map { key: ak, value: av }) => {
+            unify_types(ek, ak, aliases, bindings) && unify_types(ev, av, aliases, bindings)
+        }
+        (TypeRef::Intersect(parts), a) => {
+            parts.iter().all(|p| unify_types(p, a, aliases, bindings))
+        }
         (
             TypeRef::FnType {
                 args: ea,
@@ -1209,15 +1325,66 @@ fn type_compatible(
     unify_types(expected, actual, aliases, &mut bindings)
 }
 
+fn newtype_inner<'a>(
+    ty: &'a TypeRef,
+    aliases: &'a HashMap<String, TypeAlias>,
+) -> Option<&'a TypeRef> {
+    match ty {
+        TypeRef::Named(name) => aliases.get(name).and_then(|alias| match &alias.body {
+            TypeRef::Newtype { inner, .. } => Some(inner.as_ref()),
+            _ => None,
+        }),
+        TypeRef::Instantiated { base, .. } => {
+            aliases.get(base).and_then(|alias| match &alias.body {
+                TypeRef::Newtype { inner, .. } => Some(inner.as_ref()),
+                _ => None,
+            })
+        }
+        TypeRef::Newtype { inner, .. } => Some(inner.as_ref()),
+        _ => None,
+    }
+}
+
+fn crosses_newtype_boundary(
+    expected: &TypeRef,
+    actual: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    let expected_inner = newtype_inner(expected, aliases);
+    let actual_inner = newtype_inner(actual, aliases);
+    match (expected_inner, actual_inner) {
+        (Some(inner), None) => type_compatible(inner, actual, aliases),
+        (None, Some(inner)) => type_compatible(expected, inner, aliases),
+        _ => false,
+    }
+}
+
+fn valid_cast_path(
+    source: &TypeRef,
+    target: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    if type_compatible(target, source, aliases) {
+        return true;
+    }
+    if let Some(inner) = newtype_inner(target, aliases) {
+        if type_compatible(inner, source, aliases) {
+            return true;
+        }
+    }
+    if let Some(inner) = newtype_inner(source, aliases) {
+        if type_compatible(target, inner, aliases) {
+            return true;
+        }
+    }
+    false
+}
+
 fn strip_module_prefix(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
-fn qualify_named_type(
-    alias: &str,
-    ty: TypeRef,
-    aliases: &HashMap<String, TypeAlias>,
-) -> TypeRef {
+fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAlias>) -> TypeRef {
     match ty {
         TypeRef::Named(name) => {
             if name.contains('.') || alias.is_empty() {
@@ -1250,6 +1417,10 @@ fn qualify_named_type(
                     .collect(),
             }
         }
+        TypeRef::Newtype { name, inner } => TypeRef::Newtype {
+            name,
+            inner: Box::new(qualify_named_type(alias, *inner, aliases)),
+        },
         TypeRef::Union(items) => TypeRef::Union(
             items
                 .into_iter()
@@ -1273,7 +1444,9 @@ fn qualify_named_type(
                 .map(|t| qualify_named_type(alias, t, aliases))
                 .collect(),
         ),
-        TypeRef::Array(inner) => TypeRef::Array(Box::new(qualify_named_type(alias, *inner, aliases))),
+        TypeRef::Array(inner) => {
+            TypeRef::Array(Box::new(qualify_named_type(alias, *inner, aliases)))
+        }
         TypeRef::Map { key, value } => TypeRef::Map {
             key: Box::new(qualify_named_type(alias, *key, aliases)),
             value: Box::new(qualify_named_type(alias, *value, aliases)),
@@ -1308,10 +1481,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         .as_mapping()
         .context("entry root must be mapping")?;
 
-    let parent = program
-        .entry
-        .parent()
-        .context("entry path has no parent")?;
+    let parent = program.entry.parent().context("entry path has no parent")?;
 
     let skeletons = collect_alias_skeletons(program)?;
 
@@ -1336,13 +1506,10 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         let imp_s = imp.as_str().context("$import value must be string")?;
         let imported_path = fs::canonicalize(parent.join(imp_s))
             .with_context(|| format!("resolve import alias `{alias}`"))?;
-        let imported = program
-            .modules
-            .get(&imported_path)
-            .with_context(|| format!("imported module missing from graph `{alias}`"))?;
-        collect_module_defs(
+        collect_module_defs_tree(
             alias,
-            imported,
+            &imported_path,
+            program,
             &mut sigs,
             &mut constants,
             &mut type_aliases,
@@ -1381,8 +1548,8 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     )?;
 
     let main = map_get_str(entry_map, "main").context("missing top-level `main`")?;
-    let main_env =
-        parse_def_envelope(main, &mut warnings).context("`main` must be a `$function` definition")?;
+    let main_env = parse_def_envelope(main, &mut warnings)
+        .context("`main` must be a `$function` definition")?;
     if main_env.form_key != "$function" {
         bail!("`main` must be a `$function`");
     }
@@ -1440,6 +1607,70 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         impls,
         warnings,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_module_defs_tree(
+    alias: &str,
+    module_path: &std::path::Path,
+    program: &LoadedProgram,
+    sigs: &mut HashMap<String, FunctionSig>,
+    constants: &mut HashMap<String, RuntimeValue>,
+    type_aliases: &mut HashMap<String, TypeAlias>,
+    enums: &mut HashMap<String, EnumDef>,
+    impls: &mut HashMap<ImplKey, ImplBody>,
+    pending_user_bodies: &mut Vec<(String, Vec<Value>)>,
+    skeletons: &HashMap<String, AliasSkeleton>,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let module_root = program
+        .modules
+        .get(module_path)
+        .with_context(|| format!("imported module missing from graph `{alias}`"))?;
+    let map = module_root
+        .as_mapping()
+        .context("module root must be mapping")?;
+    let parent = module_path
+        .parent()
+        .context("imported module path has no parent")?;
+    for (k, v) in map {
+        let nested_alias = k.as_str().context("module key must be string")?;
+        if nested_alias.starts_with('-') {
+            continue;
+        }
+        let Some(sub) = v.as_mapping() else { continue };
+        let Some(imp) = map_get_str(sub, "$import") else {
+            continue;
+        };
+        let imp_s = imp.as_str().context("$import value must be string")?;
+        let nested_path = fs::canonicalize(parent.join(imp_s))
+            .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
+        collect_module_defs_tree(
+            nested_alias,
+            &nested_path,
+            program,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            pending_user_bodies,
+            skeletons,
+            warnings,
+        )?;
+    }
+    collect_module_defs(
+        alias,
+        module_root,
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        pending_user_bodies,
+        skeletons,
+        warnings,
+    )
 }
 
 fn substituted_return_type(sig: &FunctionSig, type_args: &[TypeRef]) -> TypeRef {
@@ -1628,11 +1859,17 @@ fn collect_module_defs(
                 format!("invalid type definition `{alias}.{name}`")
             }
         })?;
-        let body = qualify_named_type(alias, body, type_aliases);
         let qualified_key = if alias.is_empty() {
             name.to_string()
         } else {
             format!("{alias}.{name}")
+        };
+        let body = match qualify_named_type(alias, body, type_aliases) {
+            TypeRef::Newtype { inner, .. } => TypeRef::Newtype {
+                name: qualified_key.clone(),
+                inner,
+            },
+            other => other,
         };
         let raw_bounds = resolve_def_envelope_bounds(&env, skeletons, warnings)?;
         let resolved_bounds = qualify_bounds(alias, raw_bounds, type_aliases);
@@ -1671,7 +1908,9 @@ fn collect_module_defs(
         if name.starts_with('-') {
             continue;
         }
-        let Some(def_map) = v.as_mapping() else { continue };
+        let Some(def_map) = v.as_mapping() else {
+            continue;
+        };
         if map_get_str(def_map, "$import").is_some() {
             continue;
         }
@@ -1713,7 +1952,9 @@ fn collect_module_defs(
         if name.starts_with('-') {
             continue;
         }
-        let Some(def_map) = v.as_mapping() else { continue };
+        let Some(def_map) = v.as_mapping() else {
+            continue;
+        };
         if map_get_str(def_map, "$import").is_some() {
             continue;
         }
@@ -1814,22 +2055,19 @@ fn try_register_function(
     }
     maybe_warn_kebab(name, "function name", warnings);
     let scope = env.type_params.clone();
-    let body = env
-        .form_value
-        .as_mapping()
-        .with_context(|| {
-            if alias.is_empty() {
-                format!("`{name}` function body must be mapping")
-            } else {
-                format!("`{alias}.{name}` function body must be mapping")
-            }
-        })?;
+    let body = env.form_value.as_mapping().with_context(|| {
+        if alias.is_empty() {
+            format!("`{name}` function body must be mapping")
+        } else {
+            format!("`{alias}.{name}` function body must be mapping")
+        }
+    })?;
     let args = map_get_str(body, "args").context("function missing args")?;
     // Free-standing module-level functions cannot reference `$self`; that
     // privilege belongs to functions declared inside `=defs` / `=impl` (see
     // Phases 3/4). Pass `false` here.
-    let (arg_names, arg_types) =
-        parse_signature_args(args, &scope, skeletons, warnings, false).with_context(|| {
+    let (arg_names, arg_types) = parse_signature_args(args, &scope, skeletons, warnings, false)
+        .with_context(|| {
             if alias.is_empty() {
                 format!("{name}: invalid function args")
             } else {
@@ -1873,7 +2111,9 @@ fn try_register_function(
         let (import, wasm_args) = extract_wasm_body(&steps[0])?;
         FunctionBody::Wasm { import, wasm_args }
     } else {
-        FunctionBody::User { statements: Vec::new() }
+        FunctionBody::User {
+            statements: Vec::new(),
+        }
     };
     let raw_bounds = resolve_def_envelope_bounds(&env, skeletons, warnings)?;
     let resolved_bounds = qualify_bounds(alias, raw_bounds, type_aliases);
@@ -1914,7 +2154,9 @@ fn extract_wasm_body(step: &Value) -> Result<(ImportTarget, Vec<WasmArgSpec>)> {
     let wasm = map_get_str(stmt, "$wasm").context("function do must contain $wasm")?;
     let wm = wasm.as_mapping().context("$wasm body must be mapping")?;
     let import = map_get_str(wm, "import").context("$wasm missing import")?;
-    let im = import.as_mapping().context("$wasm.import must be mapping")?;
+    let im = import
+        .as_mapping()
+        .context("$wasm.import must be mapping")?;
     let module = map_get_str(im, "module")
         .context("$wasm.import missing module")?
         .as_str()
@@ -2003,9 +2245,8 @@ fn register_one_inherent_function(
     skeletons: &HashMap<String, AliasSkeleton>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
-    let env = parse_def_envelope(v, warnings).with_context(|| {
-        format!("invalid inherent op `{qualified_type_key}.{entry_name}`")
-    })?;
+    let env = parse_def_envelope(v, warnings)
+        .with_context(|| format!("invalid inherent op `{qualified_type_key}.{entry_name}`"))?;
     if env.form_key != "$function" {
         bail!(
             "E-DEFS-001: inherent op `{qualified_type_key}.{entry_name}` must be a `$function`, got `{}`",
@@ -2029,10 +2270,9 @@ fn register_one_inherent_function(
         all_type_params.push(tp.clone());
     }
 
-    let body = env
-        .form_value
-        .as_mapping()
-        .with_context(|| format!("`{qualified_type_key}.{entry_name}` function body must be mapping"))?;
+    let body = env.form_value.as_mapping().with_context(|| {
+        format!("`{qualified_type_key}.{entry_name}` function body must be mapping")
+    })?;
     let args = map_get_str(body, "args").context("function missing args")?;
     let (arg_names, arg_types) =
         parse_signature_args(args, &all_type_params, skeletons, warnings, true)
@@ -2044,7 +2284,9 @@ fn register_one_inherent_function(
         .collect();
     let ret = map_get_str(body, "return").context("function missing return")?;
     let return_type = parse_type_ref(ret, &all_type_params, skeletons, warnings, true)
-        .with_context(|| format!("{qualified_type_key}.{entry_name}: invalid function return type"))?;
+        .with_context(|| {
+            format!("{qualified_type_key}.{entry_name}: invalid function return type")
+        })?;
     let return_type = qualify_named_type(module_alias, return_type, type_aliases);
     let return_type = substitute_self(&return_type, self_ty);
 
@@ -2075,16 +2317,16 @@ fn register_one_inherent_function(
     };
 
     if sigs.contains_key(&sig_key) {
-        bail!(
-            "E-DEFS-001: inherent op `{sig_key}` collides with an existing function name"
-        );
+        bail!("E-DEFS-001: inherent op `{sig_key}` collides with an existing function name");
     }
 
     let body_kind = if is_wasm_only {
         let (import, wasm_args) = extract_wasm_body(&steps[0])?;
         FunctionBody::Wasm { import, wasm_args }
     } else {
-        FunctionBody::User { statements: Vec::new() }
+        FunctionBody::User {
+            statements: Vec::new(),
+        }
     };
     let raw_local_bounds = resolve_def_envelope_bounds(&env, skeletons, warnings)?;
     let local_bounds = qualify_bounds(module_alias, raw_local_bounds, type_aliases);
@@ -2127,9 +2369,9 @@ fn resolve_iface_alias<'a>(
     module_alias: &str,
     type_aliases: &'a HashMap<String, TypeAlias>,
 ) -> Result<(String, &'a TypeAlias)> {
-    let stripped = iface_alias_str
-        .strip_prefix('$')
-        .with_context(|| format!("E-IMPL-002: interface key `{iface_alias_str}` must start with `$`"))?;
+    let stripped = iface_alias_str.strip_prefix('$').with_context(|| {
+        format!("E-IMPL-002: interface key `{iface_alias_str}` must start with `$`")
+    })?;
     let candidates: [String; 2] = if stripped.contains('.') || module_alias.is_empty() {
         [stripped.to_string(), String::new()]
     } else {
@@ -2204,9 +2446,7 @@ fn register_impls_block(
             warnings,
         )
         .with_context(|| {
-            format!(
-                "invalid impl of `{iface_qualified}` for `{qualified_type_key}`"
-            )
+            format!("invalid impl of `{iface_qualified}` for `{qualified_type_key}`")
         })?;
     }
     Ok(())
@@ -2242,9 +2482,7 @@ fn register_one_impl(
             .as_mapping()
             .context("`=where` must be a mapping of type-parameter name to bound list")?;
         for (wk, wv) in wm {
-            let name = wk
-                .as_str()
-                .context("`=where` keys must be strings")?;
+            let name = wk.as_str().context("`=where` keys must be strings")?;
             maybe_warn_kebab(name, "type parameter", warnings);
             let bounds = wv.as_sequence().with_context(|| {
                 format!("`=where` value for `{name}` must be an array of bounds (use `[]` for unbounded)")
@@ -2281,8 +2519,10 @@ fn register_one_impl(
                     "E-IMPL-003: missing binding for interface type parameter `{iface_param}` in `=impl: {iface_alias_str}`"
                 )
             })?;
-        let ty = parse_type_ref(v, &all_type_params, skeletons, warnings, false)
-            .with_context(|| format!("invalid binding for `{iface_param}` in `=impl: {iface_alias_str}`"))?;
+        let ty =
+            parse_type_ref(v, &all_type_params, skeletons, warnings, false).with_context(|| {
+                format!("invalid binding for `{iface_param}` in `=impl: {iface_alias_str}`")
+            })?;
         let ty = qualify_named_type(module_alias, ty, type_aliases);
         iface_subst.insert(iface_param.clone(), ty.clone());
         iface_args_in_order.push(ty);
@@ -2295,9 +2535,7 @@ fn register_one_impl(
     let iface_method_set: std::collections::HashSet<&str> =
         iface_methods.keys().map(|s| s.as_str()).collect();
     for (k, _) in payload {
-        let ks = k
-            .as_str()
-            .context("payload key must be string")?;
+        let ks = k.as_str().context("payload key must be string")?;
         if ks == "=where" {
             continue;
         }
@@ -2332,10 +2570,7 @@ fn register_one_impl(
             })?;
 
         // Substitute iface type-args and `$self` into the expected fn-type.
-        let expected = substitute_self(
-            &substitute_type(expected_fn_type, &iface_subst),
-            self_ty,
-        );
+        let expected = substitute_self(&substitute_type(expected_fn_type, &iface_subst), self_ty);
 
         let binding = bind_impl_method(
             module_alias,
@@ -2368,9 +2603,7 @@ fn register_one_impl(
         interface: iface_qualified.to_string(),
     };
     if impls.contains_key(&key) {
-        bail!(
-            "duplicate `=impl` of `{iface_qualified}` for `{qualified_type_key}`"
-        );
+        bail!("duplicate `=impl` of `{iface_qualified}` for `{qualified_type_key}`");
     }
     impls.insert(
         key,
@@ -2425,9 +2658,7 @@ fn bind_impl_method(
             }
         }
         let sig = found.with_context(|| {
-            format!(
-                "E-IMPL-006: impl method `{method_name}` references unknown function `{s}`"
-            )
+            format!("E-IMPL-006: impl method `{method_name}` references unknown function `{s}`")
         })?;
         let sig_key = found_key.expect("set together with found");
 
@@ -2443,9 +2674,8 @@ fn bind_impl_method(
     }
 
     // Fresh `$function` envelope path.
-    let env = parse_def_envelope(v, warnings).with_context(|| {
-        format!("invalid `$function` envelope for impl method `{method_name}`")
-    })?;
+    let env = parse_def_envelope(v, warnings)
+        .with_context(|| format!("invalid `$function` envelope for impl method `{method_name}`"))?;
     if env.form_key != "$function" {
         bail!(
             "E-IMPL-001: impl method `{method_name}` must be a `$function` envelope or a `$ref` string, got `{}`",
@@ -2453,9 +2683,7 @@ fn bind_impl_method(
         );
     }
     if env.defs.is_some() || env.impls.is_some() {
-        bail!(
-            "E-IMPL-001: impl method `{method_name}` cannot itself carry `=defs` or `=impl`"
-        );
+        bail!("E-IMPL-001: impl method `{method_name}` cannot itself carry `=defs` or `=impl`");
     }
 
     // The *registered* sig type_params are only those actually free in the
@@ -2465,9 +2693,7 @@ fn bind_impl_method(
     let mut sig_type_params: Vec<String> = impl_scope.to_vec();
     for tp in &env.type_params {
         if sig_type_params.contains(tp) {
-            bail!(
-                "impl method `{method_name}` redeclares type parameter `{tp}` already in scope"
-            );
+            bail!("impl method `{method_name}` redeclares type parameter `{tp}` already in scope");
         }
         sig_type_params.push(tp.clone());
     }
@@ -2545,7 +2771,9 @@ fn bind_impl_method(
         let (import, wasm_args) = extract_wasm_body(&steps[0])?;
         FunctionBody::Wasm { import, wasm_args }
     } else {
-        FunctionBody::User { statements: Vec::new() }
+        FunctionBody::User {
+            statements: Vec::new(),
+        }
     };
 
     // Bounds for the impl method: synthesised by stitching together
@@ -2560,7 +2788,9 @@ fn bind_impl_method(
         .unwrap_or_default();
     let mut sig_bounds: Vec<Vec<TypeRef>> = Vec::with_capacity(sig_type_params.len());
     sig_bounds.extend(enclosing_bounds);
-    let impl_local_count = impl_scope.len().saturating_sub(enclosing_type_params_len(self_ty));
+    let impl_local_count = impl_scope
+        .len()
+        .saturating_sub(enclosing_type_params_len(self_ty));
     for _ in 0..impl_local_count {
         sig_bounds.push(Vec::new());
     }
@@ -2776,11 +3006,15 @@ fn check_typeref_bounds(
         TypeRef::Instantiated { base, type_args } => {
             if let Some(ta) = type_aliases.get(base) {
                 for (i, tp) in ta.type_params.iter().enumerate() {
-                    let Some(bound_list) = ta.type_param_bounds.get(i) else { continue };
+                    let Some(bound_list) = ta.type_param_bounds.get(i) else {
+                        continue;
+                    };
                     if bound_list.is_empty() {
                         continue;
                     }
-                    let Some(arg) = type_args.get(i) else { continue };
+                    let Some(arg) = type_args.get(i) else {
+                        continue;
+                    };
                     for required in bound_list {
                         if !type_satisfies_bound(
                             arg,
@@ -2809,7 +3043,7 @@ fn check_typeref_bounds(
             }
         }
         TypeRef::Record(fields) | TypeRef::Enum(fields) | TypeRef::Interface(fields) => {
-            for (_, t) in fields {
+            for t in fields.values() {
                 check_typeref_bounds(
                     t,
                     type_aliases,
@@ -2945,15 +3179,7 @@ fn validate_all_instantiation_bounds(
             )?;
         }
     }
-    check_statements_call_bounds(
-        main_statements,
-        sigs,
-        type_aliases,
-        impls,
-        &[],
-        &[],
-        "main",
-    )?;
+    check_statements_call_bounds(main_statements, sigs, type_aliases, impls, &[], &[], "main")?;
     Ok(())
 }
 
@@ -3018,16 +3244,22 @@ fn check_call_bounds(
     enclosing_bounds: &[Vec<TypeRef>],
     context: &str,
 ) -> Result<()> {
-    let Some(sig) = sigs.get(&call.callee_key) else { return Ok(()) };
+    let Some(sig) = sigs.get(&call.callee_key) else {
+        return Ok(());
+    };
     if sig.type_params.is_empty() || call.type_args.is_empty() {
         return Ok(());
     }
     for (i, tp) in sig.type_params.iter().enumerate() {
-        let Some(bound_list) = sig.type_param_bounds.get(i) else { continue };
+        let Some(bound_list) = sig.type_param_bounds.get(i) else {
+            continue;
+        };
         if bound_list.is_empty() {
             continue;
         }
-        let Some(arg) = call.type_args.get(i) else { continue };
+        let Some(arg) = call.type_args.get(i) else {
+            continue;
+        };
         for required in bound_list {
             if !type_satisfies_bound(
                 arg,
@@ -3125,7 +3357,16 @@ fn lower_statement(
             .to_string();
         maybe_warn_kebab(&var, "local variable", warnings);
         if looks_like_call(vv, sigs) || looks_like_iface_call(vv, type_aliases) {
-            let call = parse_call(vv, sigs, constants, type_aliases, enums, impls, locals, warnings)?;
+            let call = parse_call(
+                vv,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                warnings,
+            )?;
             let sig = sigs
                 .get(&call.callee_key)
                 .context("internal: missing callee after parse_call")?;
@@ -3169,6 +3410,13 @@ fn lower_statement(
         let actual = infer_expr_type(&expr, constants, locals, type_aliases, enums)
             .context("could not infer type for `$return` expression")?;
         if !type_compatible(&ctx.return_type, &actual, type_aliases) {
+            if crosses_newtype_boundary(&ctx.return_type, &actual, type_aliases) {
+                bail!(
+                    "E-NEWTYPE-001: implicit coercion between `$newtype` and its inner type is forbidden in `$return`; use `$cast` (expected {:?}, got {:?})",
+                    ctx.return_type,
+                    actual
+                );
+            }
             bail!(
                 "`$return` type mismatch: expected {:?}, got {:?}",
                 ctx.return_type,
@@ -3177,7 +3425,16 @@ fn lower_statement(
         }
         Ok(Statement::Return(expr))
     } else {
-        let call = parse_call(step, sigs, constants, type_aliases, enums, impls, locals, warnings)?;
+        let call = parse_call(
+            step,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            warnings,
+        )?;
         Ok(Statement::Call(call))
     }
 }
@@ -3187,14 +3444,22 @@ fn lower_statement(
 /// resolves to a registered interface alias? Used by `lower_statement` to
 /// route `$let` values through `parse_call` rather than `parse_expr`.
 fn looks_like_iface_call(v: &Value, type_aliases: &HashMap<String, TypeAlias>) -> bool {
-    let Some(m) = v.as_mapping() else { return false };
+    let Some(m) = v.as_mapping() else {
+        return false;
+    };
     if m.len() != 1 {
         return false;
     }
-    let Some((k, _)) = m.iter().next() else { return false };
+    let Some((k, _)) = m.iter().next() else {
+        return false;
+    };
     let Some(s) = k.as_str() else { return false };
-    let Some(stripped) = s.strip_prefix('$') else { return false };
-    let Some((iface_path, _method)) = stripped.rsplit_once('.') else { return false };
+    let Some(stripped) = s.strip_prefix('$') else {
+        return false;
+    };
+    let Some((iface_path, _method)) = stripped.rsplit_once('.') else {
+        return false;
+    };
     type_aliases
         .get(iface_path)
         .map(|ta| matches!(ta.body, TypeRef::Interface(_)))
@@ -3308,17 +3573,16 @@ fn try_resolve_iface_call(
         implementing_type: implementing.clone(),
         interface: iface_qualified.clone(),
     };
-    let impl_body = impls.get(&impl_key).with_context(|| {
-        format!(
+    let impl_body =
+        impls.get(&impl_key).with_context(|| {
+            format!(
             "E-BOUND-001: type `{implementing}` does not implement interface `{iface_qualified}` \
              (no `=impl: {{ ${} }}` block found); cannot dispatch `{call_key}`",
             iface_qualified.rsplit('.').next().unwrap_or(&iface_qualified)
         )
-    })?;
+        })?;
     let binding = impl_body.methods.get(method).with_context(|| {
-        format!(
-            "internal: impl `{implementing} : {iface_qualified}` is missing method `{method}`"
-        )
+        format!("internal: impl `{implementing} : {iface_qualified}` is missing method `{method}`")
     })?;
     let sig_key = match binding {
         ImplMethodBinding::Fresh(sk) | ImplMethodBinding::Ref(sk) => sk.clone(),
@@ -3366,7 +3630,15 @@ fn parse_call(
         Err(direct_err) => {
             // Phase 6: fall back to interface-qualified dispatch.
             try_resolve_iface_call(
-                call_key, av, sigs, constants, type_aliases, enums, impls, locals, warnings,
+                call_key,
+                av,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                warnings,
             )
             .with_context(|| format!("{direct_err}"))?
         }
@@ -3378,9 +3650,9 @@ fn parse_call(
     let mut type_args: Vec<TypeRef> = Vec::new();
     let mut subst: HashMap<String, TypeRef> = HashMap::new();
     if !function.type_params.is_empty() {
-        let map = av.as_mapping().context(
-            "generic function call requires a mapping payload with type arguments",
-        )?;
+        let map = av
+            .as_mapping()
+            .context("generic function call requires a mapping payload with type arguments")?;
         let empty_skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
         for tp in &function.type_params {
             let tv = map
@@ -3423,6 +3695,14 @@ fn parse_call(
             continue;
         };
         if !type_compatible(&expected, &actual, type_aliases) {
+            if crosses_newtype_boundary(&expected, &actual, type_aliases) {
+                bail!(
+                    "E-NEWTYPE-001: implicit coercion between `$newtype` and its inner type is forbidden in call `{call_key}` arg `{}`; use `$cast` (expected {:?}, got {:?})",
+                    function.arg_names[idx],
+                    expected,
+                    actual
+                );
+            }
             bail!(
                 "type mismatch in call `{call_key}` arg `{}`: expected {:?}, got {:?}",
                 function.arg_names[idx],
@@ -3525,6 +3805,37 @@ fn parse_expr(
         if m.len() == 1 {
             let (k, payload_v) = m.iter().next().expect("one key");
             if let Some(constructor) = k.as_str() {
+                if constructor == "$cast" {
+                    let cast = payload_v
+                        .as_mapping()
+                        .context("E-CAST-002: `$cast` payload must be a mapping")?;
+                    if cast.len() != 2 {
+                        bail!("E-CAST-002: `$cast` payload must contain exactly `from` and `to`");
+                    }
+                    let from_v =
+                        map_get_str(cast, "from").context("E-CAST-002: `$cast` missing `from`")?;
+                    let to_v =
+                        map_get_str(cast, "to").context("E-CAST-002: `$cast` missing `to`")?;
+                    let from =
+                        parse_expr(from_v, constants, type_aliases, enums, locals, warnings)?;
+                    let source = infer_expr_type(&from, constants, locals, type_aliases, enums)
+                        .context("E-CAST-001: could not infer `$cast.from` type")?;
+                    let empty_skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
+                    let target = parse_type_ref(to_v, &[], &empty_skeletons, warnings, false)
+                        .context("E-CAST-002: invalid `$cast.to` type")?;
+                    let target = qualify_named_type("", target, type_aliases);
+                    if !valid_cast_path(&source, &target, type_aliases) {
+                        bail!(
+                            "E-CAST-001: no valid cast path from {:?} to {:?}",
+                            source,
+                            target
+                        );
+                    }
+                    return Ok(Expr::Cast {
+                        from: Box::new(from),
+                        target,
+                    });
+                }
                 if constructor.starts_with('$') {
                     let (enum_key, tag) = resolve_enum_tag_ref(constructor, enums)?;
                     maybe_warn_kebab(&tag, "enum tag", warnings);
@@ -3554,13 +3865,9 @@ fn parse_expr(
                             locals,
                             warnings,
                         )?;
-                        if let Some(actual_ty) = infer_expr_type(
-                            &payload_expr,
-                            constants,
-                            locals,
-                            type_aliases,
-                            enums,
-                        ) {
+                        if let Some(actual_ty) =
+                            infer_expr_type(&payload_expr, constants, locals, type_aliases, enums)
+                        {
                             if !type_compatible(payload_ty, &actual_ty, type_aliases) {
                                 bail!(
                                     "constructor `{constructor}` payload type mismatch: expected {:?}, got {:?}",
@@ -3593,12 +3900,13 @@ fn parse_expr(
         if let Some(var) = s.strip_prefix('$') {
             maybe_warn_kebab_qualified(var, "symbol reference", warnings);
             if let Ok((enum_key, tag)) = resolve_enum_tag_ref(s, enums) {
-                let enum_def = enums.get(&enum_key).with_context(|| {
-                    format!("unknown enum `{enum_key}` in constructor `{s}`")
-                })?;
-                let payload_ty = enum_def.tags.get(tag.as_str()).with_context(|| {
-                    format!("unknown enum tag `{tag}` for enum `{enum_key}`")
-                })?;
+                let enum_def = enums
+                    .get(&enum_key)
+                    .with_context(|| format!("unknown enum `{enum_key}` in constructor `{s}`"))?;
+                let payload_ty = enum_def
+                    .tags
+                    .get(tag.as_str())
+                    .with_context(|| format!("unknown enum tag `{tag}` for enum `{enum_key}`"))?;
                 if *payload_ty == TypeRef::Void {
                     return Ok(Expr::EnumConstructor {
                         enum_key,
@@ -3637,15 +3945,10 @@ fn infer_expr_type(
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
         Expr::VarRef(v) => locals.get(v).cloned().or_else(|| {
             constants.get(v).and_then(|rv| {
-                infer_expr_type(
-                    &Expr::Value(rv.clone()),
-                    constants,
-                    locals,
-                    aliases,
-                    enums,
-                )
+                infer_expr_type(&Expr::Value(rv.clone()), constants, locals, aliases, enums)
             })
         }),
+        Expr::Cast { target, .. } => Some(target.clone()),
         Expr::EnumConstructor {
             enum_key,
             tag,
@@ -3750,8 +4053,8 @@ fn parse_match_statement(
             scoped_locals.insert(bind_name.clone(), bind_ty);
         }
 
-        let do_v = map_get_str(arm_map, "do")
-            .with_context(|| format!("$match arm `{tag}` missing do"))?;
+        let do_v =
+            map_get_str(arm_map, "do").with_context(|| format!("$match arm `{tag}` missing do"))?;
         let do_seq = do_v
             .as_sequence()
             .with_context(|| format!("$match arm `{tag}` do must be sequence"))?;

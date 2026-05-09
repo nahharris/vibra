@@ -7,7 +7,16 @@ main:
     do:
       - $io.print: "What is your name? "
       - $let:
-          name:
-            $io.read-line:
-              $io.stdin-fd
-      - $io.println: $name
+          name-result:
+            $io.readln: null
+      - $match:
+          target: $name-result
+          arms:
+            ok:
+              bind: name
+              do:
+                - $io.println: $name
+            err:
+              bind: err
+              do:
+                - $io.eprintln: "failed to read stdin"

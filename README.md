@@ -28,13 +28,14 @@ This parses the entry `.vibra` file, resolves `$import` **relative to that fileâ
 - Explicit annotations are required on function signatures (`args` + `return`)
 - Algebraic unions are supported in lowering with direct syntax (`$union: [...]`, `$enum: {...}`, constructors, `$match`)
 - Generic functions and types declare type parameters via the `=where` annotation; call sites pass type params as keys alongside value args (e.g. `{ $f: { t: $int64, x: 7 } }`)
+- `$newtype` creates nominal wrappers that require explicit `$cast` to cross to/from the inner type; transparent aliases still coerce implicitly
 - `=where` bounds (`t: [$some-iface, ...]`) are checked nominally against `=impl` blocks at call sites and type-position instantiations (`E-BOUND-001`)
 - Inherent operations on a type live under its `=defs` annotation; explicit interface implementations live under `=impl` and use the reserved `$self` type to refer to the implementing type
 - Interface methods can be invoked **type-qualified** (`$type.iface.method: { ... }`) or, when the method has a `$self`-typed argument, **interface-qualified** (`$iface.method: { x: $val, ... }`) -- the compiler dispatches on the static type of the `$self` argument
 - Rust-inspired unions available:
   - [stdlib/option.vibra](stdlib/option.vibra)
   - [stdlib/result.vibra](stdlib/result.vibra)
-- `io`/`fs` APIs currently use raw primitives (`$int64` and `$str`) while the type system is still early
+- `io`/`fs` APIs use nominal `path`, `bytes`, and file-mode types, with `readable`/`writable`/`appendable`/`closeable` interfaces to reject invalid file-mode operations
 - Kebab-case is recommended for every symbol; non-kebab symbols emit warnings
 
 ## Examples

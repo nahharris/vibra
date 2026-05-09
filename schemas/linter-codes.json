@@ -113,6 +113,26 @@
       "summary": "Generic alias instantiation is malformed (unknown alias, missing param, unknown param name, or arity mismatch)"
     },
     {
+      "code": "E-NEWTYPE-001",
+      "severity": "error",
+      "summary": "Implicit coercion between a `$newtype` and its inner type is forbidden; use `$cast`"
+    },
+    {
+      "code": "E-NEWTYPE-002",
+      "severity": "error",
+      "summary": "Malformed `$newtype` definition body"
+    },
+    {
+      "code": "E-CAST-001",
+      "severity": "error",
+      "summary": "`$cast` has no valid v1 cast path between source and target types"
+    },
+    {
+      "code": "E-CAST-002",
+      "severity": "error",
+      "summary": "Malformed `$cast` payload; expected `{ from: <expr>, to: <type> }`"
+    },
+    {
       "code": "E-SELF-001",
       "severity": "error",
       "summary": "Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation"

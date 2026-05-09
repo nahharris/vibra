@@ -7,14 +7,57 @@ main:
     args: $void
     return: $void
     do:
-      - $fs.create-dir-all:
-          "tmp"
-      - $fs.write-file:
-          path:
-            "tmp/hello.txt"
-          contents: "from vibra fs"
       - $let:
-          text:
-            $fs.read-file:
-              "tmp/hello.txt"
-      - $io.println: $text
+          path:
+            $fs.path.new:
+              s: "tmp/hello.txt"
+      - $let:
+          opened-write:
+            $fs.open-write:
+              p: $path
+      - $match:
+          target: $opened-write
+          arms:
+            ok:
+              bind: out
+              do:
+                - $fs.writable.write-string:
+                    self: $out
+                    s: "from vibra fs"
+                - $fs.closeable.close:
+                    self: $out
+            err:
+              bind: write-err
+              do:
+                - $io.eprintln: "failed to open file for writing"
+      - $let:
+          opened-read:
+            $fs.open-read:
+              p: $path
+      - $match:
+          target: $opened-read
+          arms:
+            ok:
+              bind: input
+              do:
+                - $let:
+                    text-result:
+                      $fs.readable.read-string:
+                        self: $input
+                - $match:
+                    target: $text-result
+                    arms:
+                      ok:
+                        bind: text
+                        do:
+                          - $io.println: $text
+                      err:
+                        bind: read-err
+                        do:
+                          - $io.eprintln: "failed to read file"
+                - $fs.closeable.close:
+                    self: $input
+            err:
+              bind: open-err
+              do:
+                - $io.eprintln: "failed to open file for reading"

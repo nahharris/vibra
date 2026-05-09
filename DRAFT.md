@@ -147,6 +147,18 @@ $if:
   else: $args.b
 ```
 
+### `$cast`
+
+Explicitly converts a value across a permitted type boundary.
+
+```yaml
+$cast:
+  from: $args.raw
+  to: $path
+```
+
+In v1, casts are allowed only for identity casts (`T -> T`) and for the two directions between a `$newtype` and its declared inner type. All other casts are invalid (`E-CAST-001`). `$cast` is a type-system operation only; the runtime representation is unchanged.
+
 ### `$do`
 
 ```yaml
@@ -178,6 +190,7 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 | Form | Meaning |
 |------|---------|
 | `$literal` | Literal type: `{ $literal: "ok" }` |
+| `$newtype` | Nominal wrapper: `{ $newtype: T }`. Unlike transparent aliases, a `$newtype` is distinct from `T` and crosses to/from `T` only through `$cast`. |
 | `$record` | Concrete product: `{ $record: { f: T, ... } }` |
 | `$map` | Homogeneous map: `{ $map: { key: K, value: V } }` |
 | `$tuple` | Tuple of types: `{ $tuple: [$t1, $t2] }` — **type positions only** |
@@ -188,7 +201,9 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 | `$interface` | **Go-like structural interface:** `{ $interface: { name: T, ... } }` — each member is a **type**; function members use **`$fn-type`**. Inside the body the reserved `$self` type stands for the implementing type. |
 | `$fn-type` | `{ $fn-type: { args: { $record: ... }, return: R } }` — **one** function type constructor |
 
-**Generics — `=where` annotation (v1):** Generic type parameters are declared at the **module-symbol level** via the `=where` annotation (see §13). The mapping's key order defines the positional order of type parameters. A bound list is a sequence of interface references (`$some-iface`, `$mod.iface`, or `$intersect` of those); the substituted type at every call site and type-position instantiation must have an explicit `=impl` block for each iface in the list (`E-BOUND-001`). Empty list `[]` means unbounded. `=where` is valid alongside any type-form key (`$enum`, `$union`, `$record`, `$tuple`, `$array`, `$map`, `$intersect`, `$interface`, `$fn-type`, `$literal`) **and** alongside `$function`. Type-parameter names are in scope for the form value (function `args` / `return` / `do:` body, or the type expression body).
+**Aliases vs newtypes.** Top-level type definitions using the structural constructors (`$record`, `$tuple`, `$array`, `$map`, `$union`, `$enum`, `$interface`, `$intersect`, `$fn-type`, `$literal`) remain transparent aliases: a value of the alias body can flow where the alias is expected, and vice versa, subject to normal compatibility rules. A top-level definition using `$newtype` is nominal: the alias name is the type identity, not the body. Implicit coercion between a newtype and its inner type is rejected (`E-NEWTYPE-001`); use `$cast` explicitly. Numeric and other non-newtype casts are out of scope for v1.
+
+**Generics — `=where` annotation (v1):** Generic type parameters are declared at the **module-symbol level** via the `=where` annotation (see §13). The mapping's key order defines the positional order of type parameters. A bound list is a sequence of interface references (`$some-iface`, `$mod.iface`, or `$intersect` of those); the substituted type at every call site and type-position instantiation must have an explicit `=impl` block for each iface in the list (`E-BOUND-001`). Empty list `[]` means unbounded. `=where` is valid alongside any type-form key (`$newtype`, `$enum`, `$union`, `$record`, `$tuple`, `$array`, `$map`, `$intersect`, `$interface`, `$fn-type`, `$literal`) **and** alongside `$function`. Type-parameter names are in scope for the form value (function `args` / `return` / `do:` body, or the type expression body).
 
 **Use-site instantiation (v1):** Every reference to a **generic type alias** at a type position must be an explicit instantiation: `{ $alias: { tparam: T, ... } }`. A bare `$alias` reference for a generic alias is an error (`E-GEN-001`). Non-generic aliases continue to be referenced as bare `$alias`. Mismatched arity, unknown parameter names, or missing parameters at instantiation are `E-GEN-002`.
 
@@ -231,8 +246,8 @@ Structural satisfaction is **not enough** to clear a `=where` bound or be a disp
 **Host-reserved** keys (expand before user macros where applicable):
 
 - **Module system:** `$import` (compile-time only, appears only under import alias mapping).
-- **Core:** `$function`, `$let`, `$if`, `$do`, `$macro`, `$wasm`, `$return`, `$as` (type ascription for `$let`).
-- **Types:** primitive symbols and `$record`, `$array`, `$fn-type`, `$interface`, `$union`, `$option`, etc.
+- **Core:** `$function`, `$let`, `$if`, `$do`, `$macro`, `$wasm`, `$return`, `$as` (type ascription for `$let`), `$cast`.
+- **Types:** primitive symbols and `$newtype`, `$record`, `$array`, `$fn-type`, `$interface`, `$union`, `$option`, etc.
 
 **Effectful** IO and host calls should live in **`stdlib`** modules implemented atop **`$wasm`**, e.g. `io.println`, not as unlimited new host opcodes.
 
@@ -335,6 +350,10 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 | `E-DOC-001` | error | `=doc` annotation must be a string scalar. |
 | `E-GEN-001` | error | Bare reference to a generic type alias requires explicit instantiation. |
 | `E-GEN-002` | error | Generic alias instantiation is malformed (unknown alias / param, missing param, arity mismatch). |
+| `E-NEWTYPE-001` | error | Implicit coercion between a `$newtype` and its inner type is forbidden; use `$cast`. |
+| `E-NEWTYPE-002` | error | Malformed `$newtype` definition body. |
+| `E-CAST-001` | error | `$cast` has no valid v1 cast path between source and target types. |
+| `E-CAST-002` | error | Malformed `$cast` payload; expected `{from: <expr>, to: <type>}`. |
 | `E-SELF-001` | error | Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation. |
 | `E-DEFS-001` | error | Invalid `=defs` annotation (placed on a non-type definition, entry is not a `$function`, or duplicate name). |
 | `E-IMPL-001` | error | Invalid `=impl` annotation (non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a `$ref` string). |
@@ -496,7 +515,7 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
 - **No-arg function convention:** use `args: $void` (not empty mapping).
 - **Unions:** use direct arrays, e.g. `integer: { $union: [$int64, $int32, $int16, $int8] }`.
 - **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
-- **Early stdlib typing:** io/fs currently use raw primitives (`$int64` and `$str`) instead of nominal wrapper types.
+- **Typed io/fs:** `stdlib/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
 - **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is `$union: [$void, $t]` with `=where: {t: []}`; `stdlib/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`, used at value sites via `$match`.
 - **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
 
