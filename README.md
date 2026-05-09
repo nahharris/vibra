@@ -18,6 +18,34 @@ vibra run examples/hello.vibra
 
 This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
 
+## Projects
+
+`project.vibra` is the canonical project manifest. New projects can be scaffolded with:
+
+```sh
+vibra init hello
+vibra init hello --template lib
+vibra init hello --template workspace
+```
+
+`vibra init` creates `project.vibra`, target source files under `src/`, and a local stdlib copy under `dep/std`. Imports remain relative by default; imports beginning with `@` resolve through project targets or dependencies:
+
+```yaml
+io:
+  $import: "@std/io.vibra"
+core:
+  $import: "@core/lib.vibra"
+```
+
+Use `vibra sync` to clone/fetch pinned git dependencies into `dep/<name>`, and `vibra check` to validate the manifest, targets, dependencies, and `@` imports:
+
+```sh
+vibra sync hello
+vibra check hello
+```
+
+See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
+
 **Permissions and grants:** privileged stdlib APIs take explicit grant arguments. The runtime mints grants from CLI consent flags and exposes them through `main` when it declares `args: { grants: $security.grants }`. Each grant field is matchable as `granted` or `denied`, so programs can degrade behavior when access is unavailable. Default policy is deny for privileged actions; stdout/stderr output remains baseline for CLI usability.
 
 ```sh

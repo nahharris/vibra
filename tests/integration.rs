@@ -2171,7 +2171,8 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = vibra::lower::lower_program(&prog).unwrap_err().to_string();
     assert!(
-        err.contains("unexpected key `q`") || err.contains("unexpected argument or type parameter `q`"),
+        err.contains("unexpected key `q`")
+            || err.contains("unexpected argument or type parameter `q`"),
         "unexpected error: {err}"
     );
 }
@@ -4454,5 +4455,283 @@ main:
     assert!(
         msg.contains("redeclares type parameter"),
         "expected shadowing of enclosing type param to be rejected, got: {msg}"
+    );
+}
+
+fn vibra_cmd() -> std::process::Command {
+    std::process::Command::new(env!("CARGO_BIN_EXE_vibra"))
+}
+
+fn path_str(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
+#[test]
+fn project_init_bin_template_creates_valid_project() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let output = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["init", "hello"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let project = dir.path().join("hello");
+    let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
+    let main = std::fs::read_to_string(project.join("src/hello/main.vibra")).unwrap();
+    assert!(manifest.contains("manifest-version: 1"));
+    assert!(main.contains("@std/io.vibra"));
+    assert!(project.join("src/hello/main.vibra").exists());
+    assert!(project.join("dep/std/io.vibra").exists());
+
+    let check = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["check", "hello"])
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let run = vibra_cmd()
+        .current_dir(&project)
+        .args(["run", "src/hello/main.vibra"])
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+#[test]
+fn project_init_lib_and_workspace_templates_check() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, template, expected_entry) in [
+        ("mylib", "lib", "src/mylib/lib.vibra"),
+        ("myapp", "workspace", "src/core/lib.vibra"),
+    ] {
+        let init = vibra_cmd()
+            .current_dir(dir.path())
+            .args(["init", name, "--template", template])
+            .output()
+            .unwrap();
+        assert!(
+            init.status.success(),
+            "{template} init failed: {}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+        assert!(dir.path().join(name).join(expected_entry).exists());
+
+        let check = vibra_cmd()
+            .current_dir(dir.path())
+            .args(["check", name])
+            .output()
+            .unwrap();
+        assert!(
+            check.status.success(),
+            "{template} check failed: {}",
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
+}
+
+#[test]
+fn project_check_rejects_invalid_manifest_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("bad");
+    std::fs::create_dir_all(project.join("src/a")).unwrap();
+    std::fs::write(
+        project.join("src/a/main.vibra"),
+        "main:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        r#"manifest-version: 1
+package:
+  name: bad
+  version: 0.1.0
+targets:
+  libs:
+    - name: dup
+      root: src/a
+      entry: main.vibra
+  bins:
+    - name: dup
+      root: /tmp/outside
+      entry: main.vibra
+dependencies:
+  remote:
+    git: https://example.com/remote.git
+"#,
+    )
+    .unwrap();
+
+    let check = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["check", "bad"])
+        .output()
+        .unwrap();
+    assert!(!check.status.success());
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(
+        stderr.contains("duplicate target or dependency name `dup`")
+            || stderr.contains("must be relative")
+            || stderr.contains("git dependency `remote` must pin `rev`"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn project_check_resolves_local_dependency_without_copying_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let dep = dir.path().join("local-utils");
+    std::fs::create_dir_all(&dep).unwrap();
+    std::fs::write(dep.join("util.vibra"), "answer: 42\n").unwrap();
+
+    let project = dir.path().join("app");
+    std::fs::create_dir_all(project.join("src/app")).unwrap();
+    std::fs::write(
+        project.join("src/app/main.vibra"),
+        "utils:\n  $import: \"@local-utils/util.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        format!(
+            r#"manifest-version: 1
+package:
+  name: app
+  version: 0.1.0
+targets:
+  bins:
+    - name: app
+      root: src/app
+      entry: main.vibra
+dependencies:
+  local-utils:
+    path: {}
+"#,
+            path_str(&dep)
+        ),
+    )
+    .unwrap();
+
+    let check = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["check", "app"])
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(!project.join("dep/local-utils").exists());
+}
+
+#[test]
+fn project_sync_clones_git_dependency_at_pinned_rev() {
+    let dir = tempfile::tempdir().unwrap();
+    let remote = dir.path().join("remote-math");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::write(remote.join("math.vibra"), "pi: 3\n").unwrap();
+    assert!(std::process::Command::new("git")
+        .current_dir(&remote)
+        .args(["init"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(std::process::Command::new("git")
+        .current_dir(&remote)
+        .args(["add", "."])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(std::process::Command::new("git")
+        .current_dir(&remote)
+        .args([
+            "-c",
+            "user.name=Vibra Test",
+            "-c",
+            "user.email=vibra@example.test",
+            "commit",
+            "-m",
+            "seed",
+        ])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let rev = std::process::Command::new("git")
+        .current_dir(&remote)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(rev.status.success());
+    let rev = String::from_utf8(rev.stdout).unwrap().trim().to_string();
+
+    let project = dir.path().join("app");
+    std::fs::create_dir_all(project.join("src/app")).unwrap();
+    std::fs::write(
+        project.join("src/app/main.vibra"),
+        "math:\n  $import: \"@math/math.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        format!(
+            r#"manifest-version: 1
+package:
+  name: app
+  version: 0.1.0
+targets:
+  bins:
+    - name: app
+      root: src/app
+      entry: main.vibra
+dependencies:
+  math:
+    git: {}
+    rev: {}
+"#,
+            path_str(&remote),
+            rev
+        ),
+    )
+    .unwrap();
+
+    let sync = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["sync", "app"])
+        .output()
+        .unwrap();
+    assert!(
+        sync.status.success(),
+        "sync failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+    assert!(project.join("dep/math/math.vibra").exists());
+
+    let check = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["check", "app"])
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
     );
 }

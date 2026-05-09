@@ -1,5 +1,6 @@
-//! Load `.vibra` modules and resolve `$import` relative to each file (Python-like).
+//! Load `.vibra` modules and resolve `$import` relative to each file or project namespace.
 
+use crate::project;
 use anyhow::{bail, Context, Result};
 use serde_yaml::Value;
 use std::collections::HashMap;
@@ -16,14 +17,16 @@ pub struct LoadedProgram {
 pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
     let entry = fs::canonicalize(entry)
         .with_context(|| format!("cannot open entry module {}", entry.display()))?;
+    let project = project::find_project_for_file(&entry)?;
     let mut modules = HashMap::new();
     let mut stack = Vec::new();
-    load_recursive(&entry, &mut modules, &mut stack)?;
+    load_recursive(&entry, project.as_ref(), &mut modules, &mut stack)?;
     Ok(LoadedProgram { entry, modules })
 }
 
 fn load_recursive(
     path: &Path,
+    project: Option<&project::LoadedProject>,
     modules: &mut HashMap<PathBuf, Value>,
     stack: &mut Vec<PathBuf>,
 ) -> Result<()> {
@@ -61,7 +64,17 @@ fn load_recursive(
                 let s = imp.as_str().with_context(|| {
                     format!("{}: $import must be a string path", path.display())
                 })?;
-                let resolved = parent.join(s);
+                let resolved = if s.starts_with('@') {
+                    let project = project.with_context(|| {
+                        format!(
+                            "{}: @ import `{s}` requires a project.vibra",
+                            path.display()
+                        )
+                    })?;
+                    project::resolve_project_import(project, s)?
+                } else {
+                    parent.join(s)
+                };
                 let resolved = fs::canonicalize(&resolved).with_context(|| {
                     format!(
                         "{}: cannot resolve import `{}` (from field `{}`)",
@@ -76,7 +89,7 @@ fn load_recursive(
     }
 
     for imp in imports {
-        load_recursive(&imp, modules, stack)?;
+        load_recursive(&imp, project, modules, stack)?;
     }
 
     modules.insert(path.to_path_buf(), v);
