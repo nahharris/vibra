@@ -27,6 +27,13 @@ pub enum RuntimeValue {
     Float(f64),
     Str(String),
     Array(Vec<RuntimeValue>),
+    Record(BTreeMap<String, RuntimeValue>),
+    Tuple(Vec<RuntimeValue>),
+    Map(Vec<(RuntimeValue, RuntimeValue)>),
+    Typed {
+        type_ref: TypeRef,
+        value: Box<RuntimeValue>,
+    },
     Enum {
         enum_key: String,
         tag: String,
@@ -48,6 +55,10 @@ pub enum Expr {
         tag: String,
         payload: Option<Box<Expr>>,
     },
+    Record(BTreeMap<String, Expr>),
+    Tuple(Vec<Expr>),
+    Array(Vec<Expr>),
+    Map(Vec<(Expr, Expr)>),
 }
 
 #[derive(Debug, Clone)]
@@ -180,9 +191,29 @@ pub struct Call {
 
 #[derive(Debug, Clone)]
 pub struct MatchArm {
-    pub tag: String,
-    pub bind: Option<String>,
+    pub pattern: Pattern,
     pub body: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    Wildcard,
+    Bind(String),
+    Literal(RuntimeValue),
+    Enum {
+        enum_key: String,
+        tag: String,
+        payload: Option<Box<Pattern>>,
+    },
+    Record(BTreeMap<String, Pattern>),
+    Tuple(Vec<Pattern>),
+    Array(Vec<Pattern>),
+    Map(Vec<(Pattern, Pattern)>),
+    Newtype {
+        type_ref: TypeRef,
+        inner: Box<Pattern>,
+    },
+    Interface(TypeRef),
 }
 
 #[derive(Debug, Clone)]
@@ -194,16 +225,9 @@ pub enum LetValue {
 #[derive(Debug, Clone)]
 pub enum Statement {
     Call(Call),
-    Let {
-        var: String,
-        value: LetValue,
-    },
+    Let { var: String, value: LetValue },
     Return(Expr),
-    Match {
-        target: Expr,
-        enum_key: String,
-        arms: Vec<MatchArm>,
-    },
+    Match { target: Expr, arms: Vec<MatchArm> },
 }
 
 #[derive(Debug, Clone)]
@@ -3835,6 +3859,76 @@ fn parse_expr(
         if m.len() == 1 {
             let (k, payload_v) = m.iter().next().expect("one key");
             if let Some(constructor) = k.as_str() {
+                if constructor == "$record" {
+                    let payload = payload_v
+                        .as_mapping()
+                        .context("`$record` value must be a mapping")?;
+                    let mut fields = BTreeMap::new();
+                    for (fk, fv) in payload {
+                        let name = fk.as_str().context("$record value key must be string")?;
+                        maybe_warn_kebab(name, "record field", warnings);
+                        let expr =
+                            parse_expr(fv, constants, type_aliases, enums, locals, warnings)?;
+                        if fields.insert(name.to_string(), expr).is_some() {
+                            bail!("duplicate $record value field `{name}`");
+                        }
+                    }
+                    return Ok(Expr::Record(fields));
+                }
+                if constructor == "$tuple" {
+                    let payload = payload_v
+                        .as_sequence()
+                        .context("`$tuple` value must be a sequence")?;
+                    let mut items = Vec::with_capacity(payload.len());
+                    for item in payload {
+                        items.push(parse_expr(
+                            item,
+                            constants,
+                            type_aliases,
+                            enums,
+                            locals,
+                            warnings,
+                        )?);
+                    }
+                    return Ok(Expr::Tuple(items));
+                }
+                if constructor == "$array" {
+                    let payload = payload_v
+                        .as_sequence()
+                        .context("`$array` value must be a sequence")?;
+                    let mut items = Vec::with_capacity(payload.len());
+                    for item in payload {
+                        items.push(parse_expr(
+                            item,
+                            constants,
+                            type_aliases,
+                            enums,
+                            locals,
+                            warnings,
+                        )?);
+                    }
+                    return Ok(Expr::Array(items));
+                }
+                if constructor == "$map" {
+                    let payload = payload_v
+                        .as_sequence()
+                        .context("`$map` value must be a sequence of `{key, value}` entries")?;
+                    let mut items = Vec::with_capacity(payload.len());
+                    for entry in payload {
+                        let entry_m = entry
+                            .as_mapping()
+                            .context("$map value entries must be mappings")?;
+                        let key_v =
+                            map_get_str(entry_m, "key").context("$map entry missing key")?;
+                        let value_v =
+                            map_get_str(entry_m, "value").context("$map entry missing value")?;
+                        items.push((
+                            parse_expr(key_v, constants, type_aliases, enums, locals, warnings)?,
+                            parse_expr(value_v, constants, type_aliases, enums, locals, warnings)?,
+                        ));
+                    }
+                    return Ok(Expr::Map(items));
+                }
                 if constructor == "$cast" {
                     let cast = payload_v
                         .as_mapping()
@@ -3971,7 +4065,26 @@ fn infer_expr_type(
         Expr::Value(RuntimeValue::Int(_)) => Some(TypeRef::Int64),
         Expr::Value(RuntimeValue::Float(_)) => Some(TypeRef::Float64),
         Expr::Value(RuntimeValue::Str(_)) => Some(TypeRef::Str),
-        Expr::Value(RuntimeValue::Array(_)) => None,
+        Expr::Value(RuntimeValue::Array(items)) => {
+            infer_array_type(items, constants, locals, aliases, enums)
+        }
+        Expr::Value(RuntimeValue::Record(fields)) => fields
+            .iter()
+            .map(|(k, v)| {
+                infer_expr_type(&Expr::Value(v.clone()), constants, locals, aliases, enums)
+                    .map(|t| (k.clone(), t))
+            })
+            .collect::<Option<BTreeMap<_, _>>>()
+            .map(TypeRef::Record),
+        Expr::Value(RuntimeValue::Tuple(items)) => items
+            .iter()
+            .map(|v| infer_expr_type(&Expr::Value(v.clone()), constants, locals, aliases, enums))
+            .collect::<Option<Vec<_>>>()
+            .map(TypeRef::Tuple),
+        Expr::Value(RuntimeValue::Map(items)) => {
+            infer_map_type(items, constants, locals, aliases, enums)
+        }
+        Expr::Value(RuntimeValue::Typed { type_ref, .. }) => Some(type_ref.clone()),
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
         Expr::VarRef(v) => locals.get(v).cloned().or_else(|| {
@@ -3980,6 +4093,20 @@ fn infer_expr_type(
             })
         }),
         Expr::Cast { target, .. } => Some(target.clone()),
+        Expr::Record(fields) => fields
+            .iter()
+            .map(|(k, v)| {
+                infer_expr_type(v, constants, locals, aliases, enums).map(|t| (k.clone(), t))
+            })
+            .collect::<Option<BTreeMap<_, _>>>()
+            .map(TypeRef::Record),
+        Expr::Tuple(items) => items
+            .iter()
+            .map(|v| infer_expr_type(v, constants, locals, aliases, enums))
+            .collect::<Option<Vec<_>>>()
+            .map(TypeRef::Tuple),
+        Expr::Array(items) => infer_expr_array_type(items, constants, locals, aliases, enums),
+        Expr::Map(items) => infer_expr_map_type(items, constants, locals, aliases, enums),
         Expr::EnumConstructor {
             enum_key,
             tag,
@@ -4000,6 +4127,457 @@ fn infer_expr_type(
     }
 }
 
+fn infer_array_type(
+    items: &[RuntimeValue],
+    constants: &HashMap<String, RuntimeValue>,
+    locals: &HashMap<String, TypeRef>,
+    aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+) -> Option<TypeRef> {
+    let first = items.first()?;
+    let first_ty = infer_expr_type(
+        &Expr::Value(first.clone()),
+        constants,
+        locals,
+        aliases,
+        enums,
+    )?;
+    for item in &items[1..] {
+        let ty = infer_expr_type(
+            &Expr::Value(item.clone()),
+            constants,
+            locals,
+            aliases,
+            enums,
+        )?;
+        if !type_compatible(&first_ty, &ty, aliases) {
+            return None;
+        }
+    }
+    Some(TypeRef::Array(Box::new(first_ty)))
+}
+
+fn infer_expr_array_type(
+    items: &[Expr],
+    constants: &HashMap<String, RuntimeValue>,
+    locals: &HashMap<String, TypeRef>,
+    aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+) -> Option<TypeRef> {
+    let first = items.first()?;
+    let first_ty = infer_expr_type(first, constants, locals, aliases, enums)?;
+    for item in &items[1..] {
+        let ty = infer_expr_type(item, constants, locals, aliases, enums)?;
+        if !type_compatible(&first_ty, &ty, aliases) {
+            return None;
+        }
+    }
+    Some(TypeRef::Array(Box::new(first_ty)))
+}
+
+fn infer_map_type(
+    items: &[(RuntimeValue, RuntimeValue)],
+    constants: &HashMap<String, RuntimeValue>,
+    locals: &HashMap<String, TypeRef>,
+    aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+) -> Option<TypeRef> {
+    let (first_k, first_v) = items.first()?;
+    let key_ty = infer_expr_type(
+        &Expr::Value(first_k.clone()),
+        constants,
+        locals,
+        aliases,
+        enums,
+    )?;
+    let value_ty = infer_expr_type(
+        &Expr::Value(first_v.clone()),
+        constants,
+        locals,
+        aliases,
+        enums,
+    )?;
+    for (k, v) in &items[1..] {
+        let kt = infer_expr_type(&Expr::Value(k.clone()), constants, locals, aliases, enums)?;
+        let vt = infer_expr_type(&Expr::Value(v.clone()), constants, locals, aliases, enums)?;
+        if !type_compatible(&key_ty, &kt, aliases) || !type_compatible(&value_ty, &vt, aliases) {
+            return None;
+        }
+    }
+    Some(TypeRef::Map {
+        key: Box::new(key_ty),
+        value: Box::new(value_ty),
+    })
+}
+
+fn infer_expr_map_type(
+    items: &[(Expr, Expr)],
+    constants: &HashMap<String, RuntimeValue>,
+    locals: &HashMap<String, TypeRef>,
+    aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+) -> Option<TypeRef> {
+    let (first_k, first_v) = items.first()?;
+    let key_ty = infer_expr_type(first_k, constants, locals, aliases, enums)?;
+    let value_ty = infer_expr_type(first_v, constants, locals, aliases, enums)?;
+    for (k, v) in &items[1..] {
+        let kt = infer_expr_type(k, constants, locals, aliases, enums)?;
+        let vt = infer_expr_type(v, constants, locals, aliases, enums)?;
+        if !type_compatible(&key_ty, &kt, aliases) || !type_compatible(&value_ty, &vt, aliases) {
+            return None;
+        }
+    }
+    Some(TypeRef::Map {
+        key: Box::new(key_ty),
+        value: Box::new(value_ty),
+    })
+}
+
+fn parse_pattern(
+    v: &Value,
+    type_aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+    warnings: &mut Vec<String>,
+) -> Result<Pattern> {
+    if let Some(m) = v.as_mapping() {
+        if m.len() != 1 {
+            bail!("pattern mapping must contain exactly one key");
+        }
+        let (k, payload_v) = m.iter().next().expect("one key");
+        let key = k.as_str().context("pattern key must be string")?;
+        match key {
+            "$wildcard" => return Ok(Pattern::Wildcard),
+            "$bind" => {
+                let name = payload_v.as_str().context("$bind pattern expects a name")?;
+                maybe_warn_kebab(name, "pattern bind", warnings);
+                return Ok(Pattern::Bind(name.to_string()));
+            }
+            "$record" => {
+                let fields_v = payload_v
+                    .as_mapping()
+                    .context("$record pattern must be mapping")?;
+                let mut fields = BTreeMap::new();
+                for (fk, fv) in fields_v {
+                    let name = fk.as_str().context("$record pattern key must be string")?;
+                    maybe_warn_kebab(name, "record pattern field", warnings);
+                    let pat = parse_pattern(fv, type_aliases, enums, warnings)?;
+                    if fields.insert(name.to_string(), pat).is_some() {
+                        bail!("duplicate $record pattern field `{name}`");
+                    }
+                }
+                return Ok(Pattern::Record(fields));
+            }
+            "$tuple" => {
+                let items_v = payload_v
+                    .as_sequence()
+                    .context("$tuple pattern must be sequence")?;
+                return Ok(Pattern::Tuple(
+                    items_v
+                        .iter()
+                        .map(|item| parse_pattern(item, type_aliases, enums, warnings))
+                        .collect::<Result<Vec<_>>>()?,
+                ));
+            }
+            "$array" => {
+                let items_v = payload_v
+                    .as_sequence()
+                    .context("$array pattern must be sequence")?;
+                return Ok(Pattern::Array(
+                    items_v
+                        .iter()
+                        .map(|item| parse_pattern(item, type_aliases, enums, warnings))
+                        .collect::<Result<Vec<_>>>()?,
+                ));
+            }
+            "$map" => {
+                let entries_v = payload_v
+                    .as_sequence()
+                    .context("$map pattern must be a sequence of `{key, value}` entries")?;
+                let mut entries = Vec::with_capacity(entries_v.len());
+                for entry_v in entries_v {
+                    let entry = entry_v
+                        .as_mapping()
+                        .context("$map pattern entry must be mapping")?;
+                    let key_v =
+                        map_get_str(entry, "key").context("$map pattern entry missing key")?;
+                    let value_v =
+                        map_get_str(entry, "value").context("$map pattern entry missing value")?;
+                    entries.push((
+                        parse_pattern(key_v, type_aliases, enums, warnings)?,
+                        parse_pattern(value_v, type_aliases, enums, warnings)?,
+                    ));
+                }
+                return Ok(Pattern::Map(entries));
+            }
+            "$newtype" => {
+                let m = payload_v
+                    .as_mapping()
+                    .context("$newtype pattern must be mapping")?;
+                let type_v = map_get_str(m, "type").context("$newtype pattern missing type")?;
+                let inner_v = map_get_str(m, "inner").context("$newtype pattern missing inner")?;
+                let empty_skeletons = HashMap::new();
+                let type_ref = parse_type_ref(type_v, &[], &empty_skeletons, warnings, false)?;
+                return Ok(Pattern::Newtype {
+                    type_ref: qualify_named_type("", type_ref, type_aliases),
+                    inner: Box::new(parse_pattern(inner_v, type_aliases, enums, warnings)?),
+                });
+            }
+            "$interface" => {
+                let empty_skeletons = HashMap::new();
+                let type_ref = parse_type_ref(payload_v, &[], &empty_skeletons, warnings, false)?;
+                return Ok(Pattern::Interface(qualify_named_type(
+                    "",
+                    type_ref,
+                    type_aliases,
+                )));
+            }
+            _ if key.starts_with('$') => {
+                let (enum_key, tag) = resolve_enum_tag_ref(key, enums)?;
+                maybe_warn_kebab(&tag, "enum pattern tag", warnings);
+                let payload = if payload_v.is_null() {
+                    None
+                } else {
+                    Some(Box::new(parse_pattern(
+                        payload_v,
+                        type_aliases,
+                        enums,
+                        warnings,
+                    )?))
+                };
+                return Ok(Pattern::Enum {
+                    enum_key,
+                    tag,
+                    payload,
+                });
+            }
+            _ => bail!("unknown pattern form `{key}`"),
+        }
+    }
+    if v.is_null() {
+        return Ok(Pattern::Literal(RuntimeValue::Void));
+    }
+    if let Some(i) = v.as_i64() {
+        return Ok(Pattern::Literal(RuntimeValue::Int(i)));
+    }
+    if let Some(f) = v.as_f64() {
+        return Ok(Pattern::Literal(RuntimeValue::Float(f)));
+    }
+    if let Some(s) = v.as_str() {
+        return Ok(Pattern::Literal(RuntimeValue::Str(s.to_string())));
+    }
+    bail!("unsupported pattern")
+}
+
+fn enum_target_def<'a>(
+    target_ty: &TypeRef,
+    enums: &'a HashMap<String, EnumDef>,
+) -> Option<(String, &'a EnumDef)> {
+    let enum_key = match target_ty {
+        TypeRef::Instantiated { base, .. } | TypeRef::Named(base) => base,
+        _ => return None,
+    };
+    enums
+        .get(enum_key)
+        .or_else(|| {
+            enums
+                .iter()
+                .find(|(k, _)| strip_module_prefix(k) == strip_module_prefix(enum_key))
+                .map(|(_, v)| v)
+        })
+        .map(|def| (enum_key.clone(), def))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_pattern(
+    pattern: &Pattern,
+    target_ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+    locals: &mut HashMap<String, TypeRef>,
+    covered_enum_tags: &mut HashSet<String>,
+    has_wildcard: &mut bool,
+) -> Result<()> {
+    match pattern {
+        Pattern::Wildcard => {
+            *has_wildcard = true;
+            Ok(())
+        }
+        Pattern::Bind(name) => {
+            locals.insert(name.clone(), target_ty.clone());
+            Ok(())
+        }
+        Pattern::Literal(value) => {
+            let lit_ty = infer_expr_type(
+                &Expr::Value(value.clone()),
+                &HashMap::new(),
+                &HashMap::new(),
+                aliases,
+                enums,
+            )
+            .context("could not infer literal pattern type")?;
+            if type_compatible(target_ty, &lit_ty, aliases) {
+                Ok(())
+            } else {
+                bail!("literal pattern type mismatch: target {target_ty:?}, pattern {lit_ty:?}")
+            }
+        }
+        Pattern::Enum {
+            enum_key,
+            tag,
+            payload,
+        } => {
+            let TypeRef::Instantiated { base, type_args } = target_ty else {
+                bail!("enum pattern requires instantiated enum target, got {target_ty:?}");
+            };
+            if strip_module_prefix(base) != strip_module_prefix(enum_key) {
+                bail!("enum pattern `{enum_key}.{tag}` does not match target `{base}`");
+            }
+            let enum_def = enums
+                .get(enum_key)
+                .or_else(|| enums.get(base))
+                .with_context(|| format!("unknown enum `{enum_key}` in pattern"))?;
+            let payload_ty = enum_def
+                .tags
+                .get(tag)
+                .with_context(|| format!("unknown enum tag `{tag}`"))?;
+            covered_enum_tags.insert(tag.clone());
+            let mut subst = HashMap::new();
+            for (p, a) in enum_def.type_params.iter().zip(type_args.iter()) {
+                subst.insert(p.clone(), a.clone());
+            }
+            let payload_ty = substitute_type(payload_ty, &subst);
+            match (payload_ty == TypeRef::Void, payload) {
+                (true, None) => Ok(()),
+                (true, Some(_)) => bail!("enum pattern `{tag}` has payload for `$void` tag"),
+                (false, None) => bail!("enum pattern `{tag}` must include payload pattern"),
+                (false, Some(p)) => validate_pattern(
+                    p,
+                    &payload_ty,
+                    aliases,
+                    enums,
+                    locals,
+                    covered_enum_tags,
+                    has_wildcard,
+                ),
+            }
+        }
+        Pattern::Record(fields) => {
+            let target_n = normalize_type_ref(target_ty, aliases);
+            let TypeRef::Record(target_fields) = target_n else {
+                bail!("$record pattern requires record target, got {target_ty:?}");
+            };
+            for (name, pat) in fields {
+                let field_ty = target_fields
+                    .get(name)
+                    .with_context(|| format!("record target has no field `{name}`"))?;
+                validate_pattern(
+                    pat,
+                    field_ty,
+                    aliases,
+                    enums,
+                    locals,
+                    covered_enum_tags,
+                    has_wildcard,
+                )?;
+            }
+            Ok(())
+        }
+        Pattern::Tuple(items) => {
+            let target_n = normalize_type_ref(target_ty, aliases);
+            let TypeRef::Tuple(target_items) = target_n else {
+                bail!("$tuple pattern requires tuple target, got {target_ty:?}");
+            };
+            if items.len() != target_items.len() {
+                bail!("$tuple pattern length mismatch");
+            }
+            for (pat, item_ty) in items.iter().zip(target_items.iter()) {
+                validate_pattern(
+                    pat,
+                    item_ty,
+                    aliases,
+                    enums,
+                    locals,
+                    covered_enum_tags,
+                    has_wildcard,
+                )?;
+            }
+            Ok(())
+        }
+        Pattern::Array(items) => {
+            let target_n = normalize_type_ref(target_ty, aliases);
+            let TypeRef::Array(item_ty) = target_n else {
+                bail!("$array pattern requires array target, got {target_ty:?}");
+            };
+            for pat in items {
+                validate_pattern(
+                    pat,
+                    &item_ty,
+                    aliases,
+                    enums,
+                    locals,
+                    covered_enum_tags,
+                    has_wildcard,
+                )?;
+            }
+            Ok(())
+        }
+        Pattern::Map(entries) => {
+            let target_n = normalize_type_ref(target_ty, aliases);
+            let TypeRef::Map { key, value } = target_n else {
+                bail!("$map pattern requires map target, got {target_ty:?}");
+            };
+            for (kp, vp) in entries {
+                validate_pattern(
+                    kp,
+                    &key,
+                    aliases,
+                    enums,
+                    locals,
+                    covered_enum_tags,
+                    has_wildcard,
+                )?;
+                validate_pattern(
+                    vp,
+                    &value,
+                    aliases,
+                    enums,
+                    locals,
+                    covered_enum_tags,
+                    has_wildcard,
+                )?;
+            }
+            Ok(())
+        }
+        Pattern::Newtype { type_ref, inner } => {
+            if !type_compatible(type_ref, target_ty, aliases) {
+                bail!("$newtype pattern type mismatch: target {target_ty:?}, pattern {type_ref:?}");
+            }
+            let inner_ty = newtype_inner(type_ref, aliases)
+                .cloned()
+                .context("$newtype pattern type is not a newtype")?;
+            validate_pattern(
+                inner,
+                &inner_ty,
+                aliases,
+                enums,
+                locals,
+                covered_enum_tags,
+                has_wildcard,
+            )
+        }
+        Pattern::Interface(iface) => {
+            if !is_interface_bound(iface, aliases) {
+                bail!("$interface pattern requires an interface type, got {iface:?}");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn is_literal_singleton_pattern(pattern: &Pattern, _target_ty: &TypeRef) -> bool {
+    matches!(pattern, Pattern::Literal(_))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parse_match_statement(
     match_body: &Value,
@@ -4016,79 +4594,33 @@ fn parse_match_statement(
     let target_v = map_get_str(m, "target").context("$match missing target")?;
     let target = parse_expr(target_v, constants, type_aliases, enums, locals, warnings)?;
     let target_ty = infer_expr_type(&target, constants, locals, type_aliases, enums)
-        .context("$match target type could not be inferred; provide enum variable context")?;
-    let TypeRef::Instantiated {
-        base: enum_key,
-        type_args,
-    } = target_ty
-    else {
-        bail!("$match target must be an instantiated enum type, got {target_ty:?}");
-    };
-    let enum_def = enums
-        .get(&enum_key)
-        .or_else(|| {
-            enums
-                .iter()
-                .find(|(k, _)| strip_module_prefix(k) == strip_module_prefix(&enum_key))
-                .map(|(_, v)| v)
-        })
-        .with_context(|| format!("$match target `{enum_key}` is not a known enum"))?;
-
-    if enum_def.type_params.len() != type_args.len() {
-        bail!(
-            "internal: enum `{enum_key}` type arg count {} does not match params {}",
-            type_args.len(),
-            enum_def.type_params.len()
-        );
-    }
-    let mut subst: HashMap<String, TypeRef> = HashMap::new();
-    for (p, a) in enum_def.type_params.iter().zip(type_args.iter()) {
-        subst.insert(p.clone(), a.clone());
-    }
+        .context("$match target type could not be inferred")?;
 
     let arms_v = map_get_str(m, "arms").context("$match missing arms")?;
-    let arms_m = arms_v.as_mapping().context("$match arms must be mapping")?;
-    let mut seen = HashMap::new();
+    let arms_seq = arms_v
+        .as_sequence()
+        .context("$match arms must be a sequence")?;
     let mut arms = Vec::new();
-    for (k, v) in arms_m {
-        let tag = k.as_str().context("$match arm key must be string")?;
-        maybe_warn_kebab(tag, "match arm tag", warnings);
-        let payload_ty = enum_def
-            .tags
-            .get(tag)
-            .with_context(|| format!("unknown tag `{tag}` for enum `{enum_key}`"))?;
-        if seen.insert(tag.to_string(), true).is_some() {
-            bail!("duplicate $match arm for tag `{tag}`");
-        }
-
-        let arm_map = v
-            .as_mapping()
-            .with_context(|| format!("$match arm `{tag}` must be mapping"))?;
-        let bind = map_get_str(arm_map, "bind")
-            .and_then(Value::as_str)
-            .map(ToString::to_string);
-        if let Some(bind_name) = &bind {
-            maybe_warn_kebab(bind_name, "match bind", warnings);
-        }
-
-        if *payload_ty == TypeRef::Void && bind.is_some() {
-            bail!("$match arm `{tag}` cannot bind payload (tag has `$void` payload)");
-        }
-        if *payload_ty != TypeRef::Void && bind.is_none() {
-            bail!("$match arm `{tag}` must bind payload");
-        }
-
+    let mut covered_enum_tags = HashSet::new();
+    let mut has_wildcard = false;
+    for arm_v in arms_seq {
+        let arm_map = arm_v.as_mapping().context("$match arm must be mapping")?;
+        let pattern_v = map_get_str(arm_map, "pattern").context("$match arm missing pattern")?;
+        let do_v = map_get_str(arm_map, "do").context("$match arm missing do")?;
+        let pattern = parse_pattern(pattern_v, type_aliases, enums, warnings)?;
         let mut scoped_locals = locals.clone();
-        if let Some(bind_name) = &bind {
-            let bind_ty = substitute_type(payload_ty, &subst);
-            scoped_locals.insert(bind_name.clone(), bind_ty);
-        }
-
-        let do_v =
-            map_get_str(arm_map, "do").with_context(|| format!("$match arm `{tag}` missing do"))?;
+        validate_pattern(
+            &pattern,
+            &target_ty,
+            type_aliases,
+            enums,
+            &mut scoped_locals,
+            &mut covered_enum_tags,
+            &mut has_wildcard,
+        )?;
         let do_seq = do_v
             .as_sequence()
-            .with_context(|| format!("$match arm `{tag}` do must be sequence"))?;
+            .context("$match arm do must be sequence")?;
         let mut body = Vec::new();
         for step in do_seq {
             body.push(lower_statement(
@@ -4103,24 +4635,22 @@ fn parse_match_statement(
                 fn_ctx,
             )?);
         }
-        arms.push(MatchArm {
-            tag: tag.to_string(),
-            bind,
-            body,
-        });
+        arms.push(MatchArm { pattern, body });
     }
 
-    for tag in enum_def.tags.keys() {
-        if !seen.contains_key(tag) {
-            bail!("$match for enum `{enum_key}` missing arm for tag `{tag}`");
+    if !has_wildcard {
+        if let Some((enum_key, enum_def)) = enum_target_def(&target_ty, enums) {
+            for tag in enum_def.tags.keys() {
+                if !covered_enum_tags.contains(tag) {
+                    bail!("$match for enum `{enum_key}` missing arm for tag `{tag}`");
+                }
+            }
+        } else if arms.len() != 1 || !is_literal_singleton_pattern(&arms[0].pattern, &target_ty) {
+            bail!("$match over open-ended type `{target_ty:?}` requires a wildcard arm");
         }
     }
 
-    Ok(Statement::Match {
-        target,
-        enum_key,
-        arms,
-    })
+    Ok(Statement::Match { target, arms })
 }
 
 fn parse_qualified_call(call: &str) -> Result<(&str, &str)> {
