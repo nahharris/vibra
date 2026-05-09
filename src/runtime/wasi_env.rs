@@ -11,8 +11,23 @@ pub struct RunConfig {
     /// Extra argv entries after `program_name` (MVP: often empty).
     pub argv: Vec<String>,
     /// Host directories preopened at the WASI virtual root (`/`).
-    /// When empty, no extra host directories are exposed (stdio still works). Use this for `stdlib/fs` paths.
+    /// Deprecated compatibility field. These paths also seed read/write grants
+    /// for the embedded interpreter until callers migrate to explicit grants.
     pub preopen_host_dirs: Vec<PathBuf>,
+    /// Directories readable by grant-aware filesystem APIs.
+    pub allow_read: Vec<PathBuf>,
+    /// Directories writable by grant-aware filesystem APIs.
+    pub allow_write: Vec<PathBuf>,
+    /// Allow reading from stdin. Stdout/stderr writes remain baseline.
+    pub allow_stdin: bool,
+    pub allow_env: Vec<String>,
+    pub allow_env_write: Vec<String>,
+    pub allow_net: Vec<String>,
+    pub allow_net_listen: Vec<String>,
+    pub allow_run: Vec<String>,
+    pub allow_clock: bool,
+    pub allow_random: bool,
+    pub allow_system_info: bool,
 }
 
 impl Default for RunConfig {
@@ -21,6 +36,17 @@ impl Default for RunConfig {
             program_name: "vibra".to_string(),
             argv: Vec::new(),
             preopen_host_dirs: Vec::new(),
+            allow_read: Vec::new(),
+            allow_write: Vec::new(),
+            allow_stdin: false,
+            allow_env: Vec::new(),
+            allow_env_write: Vec::new(),
+            allow_net: Vec::new(),
+            allow_net_listen: Vec::new(),
+            allow_run: Vec::new(),
+            allow_clock: false,
+            allow_random: false,
+            allow_system_info: false,
         }
     }
 }

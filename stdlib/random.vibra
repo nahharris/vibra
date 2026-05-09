@@ -1,0 +1,20 @@
+security:
+  $import: ./security.vibra
+
+bytes-lib:
+  $import: ./bytes.vibra
+
+bytes:
+  $function:
+    args:
+      len: $uint64
+      grant: $security.random-grant
+    return: $bytes-lib.bytes
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: random_get
+          args:
+            - $args.len
+            - $args.grant

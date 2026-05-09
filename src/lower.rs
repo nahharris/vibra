@@ -34,12 +34,19 @@ pub enum RuntimeValue {
         type_ref: TypeRef,
         value: Box<RuntimeValue>,
     },
+    Capability(CapabilityGrant),
     Enum {
         enum_key: String,
         tag: String,
         payload: Option<Box<RuntimeValue>>,
     },
     Void,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CapabilityGrant {
+    pub type_key: String,
+    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +112,10 @@ pub enum TypeRef {
     Newtype {
         name: String,
         inner: Box<TypeRef>,
+    },
+    Capability {
+        name: String,
+        kind: String,
     },
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
@@ -279,6 +290,7 @@ pub enum ImplMethodBinding {
 #[derive(Debug, Clone)]
 pub struct LoweredProgram {
     pub statements: Vec<Statement>,
+    pub main_arg_bindings: Vec<(String, TypeRef)>,
     pub constants: HashMap<String, RuntimeValue>,
     pub functions: HashMap<String, FunctionSig>,
     pub impls: HashMap<ImplKey, ImplBody>,
@@ -485,6 +497,7 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$literal",
     "$union",
     "$enum",
+    "$capability",
 ];
 
 fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, AliasSkeleton>> {
@@ -755,6 +768,15 @@ fn parse_type_constructor(
             Ok(TypeRef::Newtype {
                 name: String::new(),
                 inner: Box::new(inner),
+            })
+        }
+        "$capability" => {
+            let kind = v
+                .as_str()
+                .context("E-CAP-001: `$capability` body must be a string kind")?;
+            Ok(TypeRef::Capability {
+                name: String::new(),
+                kind: kind.to_string(),
             })
         }
         "$record" => {
@@ -1089,6 +1111,7 @@ fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
             name: name.clone(),
             inner: Box::new(substitute_self(inner, self_ty)),
         },
+        TypeRef::Capability { .. } => ty.clone(),
         _ => ty.clone(),
     }
 }
@@ -1142,6 +1165,7 @@ fn substitute_type(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> TypeRef {
             name: name.clone(),
             inner: Box::new(substitute_type(inner, subst)),
         },
+        TypeRef::Capability { .. } => ty.clone(),
         _ => ty.clone(),
     }
 }
@@ -1150,7 +1174,10 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
     match ty {
         TypeRef::Named(name) => {
             if let Some(al) = aliases.get(name) {
-                if matches!(al.body, TypeRef::Newtype { .. }) {
+                if matches!(
+                    al.body,
+                    TypeRef::Newtype { .. } | TypeRef::Capability { .. }
+                ) {
                     return ty.clone();
                 }
                 if al.type_params.is_empty() {
@@ -1165,7 +1192,10 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
                 .map(|t| normalize_type_ref(t, aliases))
                 .collect();
             if let Some(al) = aliases.get(base) {
-                if matches!(al.body, TypeRef::Newtype { .. }) {
+                if matches!(
+                    al.body,
+                    TypeRef::Newtype { .. } | TypeRef::Capability { .. }
+                ) {
                     return TypeRef::Instantiated {
                         base: base.clone(),
                         type_args: normalized_args,
@@ -1234,6 +1264,7 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
             name: name.clone(),
             inner: Box::new(normalize_type_ref(inner, aliases)),
         },
+        TypeRef::Capability { .. } => ty.clone(),
         _ => ty.clone(),
     }
 }
@@ -1391,6 +1422,20 @@ fn newtype_inner<'a>(
     }
 }
 
+fn capability_alias<'a>(
+    ty: &'a TypeRef,
+    aliases: &'a HashMap<String, TypeAlias>,
+) -> Option<&'a str> {
+    match ty {
+        TypeRef::Named(name) => aliases.get(name).and_then(|alias| match &alias.body {
+            TypeRef::Capability { .. } => Some(name.as_str()),
+            _ => None,
+        }),
+        TypeRef::Capability { name, .. } if !name.is_empty() => Some(name.as_str()),
+        _ => None,
+    }
+}
+
 fn crosses_newtype_boundary(
     expected: &TypeRef,
     actual: &TypeRef,
@@ -1410,6 +1455,9 @@ fn valid_cast_path(
     target: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
+    if capability_alias(target, aliases).is_some() || matches!(target, TypeRef::Capability { .. }) {
+        return false;
+    }
     if type_compatible(target, source, aliases) {
         return true;
     }
@@ -1467,6 +1515,7 @@ fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAl
             name,
             inner: Box::new(qualify_named_type(alias, *inner, aliases)),
         },
+        TypeRef::Capability { name, kind } => TypeRef::Capability { name, kind },
         TypeRef::Union(items) => TypeRef::Union(
             items
                 .into_iter()
@@ -1610,12 +1659,19 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         .context("`$function` body must be mapping")?;
 
     let args = map_get_str(fn_body, "args").context("missing `args` on main")?;
+    let mut main_arg_bindings = Vec::new();
     if !is_void_args(args) {
-        let args_map = args
-            .as_mapping()
-            .context("`args` must be `$void` or an empty mapping for main")?;
-        if !args_map.is_empty() {
-            bail!("main must have no args (`args: $void`)");
+        let (arg_names, arg_types) =
+            parse_signature_args(args, &[], &skeletons, &mut warnings, false)
+                .context("invalid `main` args")?;
+        for (name, ty) in arg_names.into_iter().zip(arg_types.into_iter()) {
+            let ty = qualify_named_type("", ty, &type_aliases);
+            seed_arg_type_bindings(
+                &format!("args.{name}"),
+                &ty,
+                &type_aliases,
+                &mut main_arg_bindings,
+            );
         }
     }
     let ret = map_get_str(fn_body, "return").context("missing `return` on main")?;
@@ -1627,6 +1683,9 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     let steps = do_seq.as_sequence().context("`do` must be sequence")?;
     let mut statements = Vec::new();
     let mut locals = HashMap::new();
+    for (name, ty) in &main_arg_bindings {
+        locals.insert(name.clone(), ty.clone());
+    }
     for step in steps {
         statements.push(lower_statement(
             step,
@@ -1650,6 +1709,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
 
     Ok(LoweredProgram {
         statements,
+        main_arg_bindings,
         constants,
         functions: sigs,
         impls,
@@ -1847,6 +1907,51 @@ fn instantiated_type_for_constructor(
     })
 }
 
+fn seed_arg_type_bindings(
+    name: &str,
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+    out: &mut Vec<(String, TypeRef)>,
+) {
+    out.push((name.to_string(), ty.clone()));
+    if let Some(fields) = record_fields_for_type(ty, aliases) {
+        for (field, field_ty) in fields {
+            seed_arg_type_bindings(&format!("{name}.{field}"), &field_ty, aliases, out);
+        }
+    }
+}
+
+fn record_fields_for_type(
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> Option<BTreeMap<String, TypeRef>> {
+    match ty {
+        TypeRef::Record(fields) => Some(fields.clone()),
+        TypeRef::Named(name) => aliases.get(name).and_then(|alias| match &alias.body {
+            TypeRef::Record(fields) => Some(fields.clone()),
+            _ => None,
+        }),
+        TypeRef::Instantiated { base, type_args } => aliases.get(base).and_then(|alias| {
+            let TypeRef::Record(fields) = &alias.body else {
+                return None;
+            };
+            let subst: HashMap<String, TypeRef> = alias
+                .type_params
+                .iter()
+                .cloned()
+                .zip(type_args.iter().cloned())
+                .collect();
+            Some(
+                fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), substitute_type(v, &subst)))
+                    .collect(),
+            )
+        }),
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn collect_module_defs(
     alias: &str,
@@ -1922,6 +2027,10 @@ fn collect_module_defs(
             TypeRef::Newtype { inner, .. } => TypeRef::Newtype {
                 name: qualified_key.clone(),
                 inner,
+            },
+            TypeRef::Capability { kind, .. } => TypeRef::Capability {
+                name: qualified_key.clone(),
+                kind,
             },
             other => other,
         };
@@ -3948,6 +4057,11 @@ fn parse_expr(
                     let target = parse_type_ref(to_v, &[], &empty_skeletons, warnings, false)
                         .context("E-CAST-002: invalid `$cast.to` type")?;
                     let target = qualify_named_type("", target, type_aliases);
+                    if capability_alias(&target, type_aliases).is_some()
+                        || matches!(target, TypeRef::Capability { .. })
+                    {
+                        bail!("E-CAP-001: capability values are runtime-minted and cannot be created with `$cast`");
+                    }
                     if !valid_cast_path(&source, &target, type_aliases) {
                         bail!(
                             "E-CAST-001: no valid cast path from {:?} to {:?}",
@@ -4024,21 +4138,19 @@ fn parse_expr(
         if let Some(var) = s.strip_prefix('$') {
             maybe_warn_kebab_qualified(var, "symbol reference", warnings);
             if let Ok((enum_key, tag)) = resolve_enum_tag_ref(s, enums) {
-                let enum_def = enums
-                    .get(&enum_key)
-                    .with_context(|| format!("unknown enum `{enum_key}` in constructor `{s}`"))?;
-                let payload_ty = enum_def
-                    .tags
-                    .get(tag.as_str())
-                    .with_context(|| format!("unknown enum tag `{tag}` for enum `{enum_key}`"))?;
-                if *payload_ty == TypeRef::Void {
-                    return Ok(Expr::EnumConstructor {
-                        enum_key,
-                        tag,
-                        payload: None,
-                    });
+                if let Some(enum_def) = enums.get(&enum_key) {
+                    let payload_ty = enum_def.tags.get(tag.as_str()).with_context(|| {
+                        format!("unknown enum tag `{tag}` for enum `{enum_key}`")
+                    })?;
+                    if *payload_ty == TypeRef::Void {
+                        return Ok(Expr::EnumConstructor {
+                            enum_key,
+                            tag,
+                            payload: None,
+                        });
+                    }
+                    bail!("constructor `{s}` requires payload; use mapping form `{{{s}: ...}}`");
                 }
-                bail!("constructor `{s}` requires payload; use mapping form `{{{s}: ...}}`");
             }
             if let Some(c) = constants.get(var) {
                 return Ok(Expr::Value(c.clone()));
@@ -4085,6 +4197,9 @@ fn infer_expr_type(
             infer_map_type(items, constants, locals, aliases, enums)
         }
         Expr::Value(RuntimeValue::Typed { type_ref, .. }) => Some(type_ref.clone()),
+        Expr::Value(RuntimeValue::Capability(grant)) => {
+            Some(TypeRef::Named(grant.type_key.clone()))
+        }
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
         Expr::VarRef(v) => locals.get(v).cloned().or_else(|| {

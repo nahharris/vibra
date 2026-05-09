@@ -133,6 +133,11 @@
       "summary": "Malformed `$cast` payload; expected `{ from: <expr>, to: <type> }`"
     },
     {
+      "code": "E-CAP-001",
+      "severity": "error",
+      "summary": "Capability types are runtime-minted authority values and cannot be created with `$cast` or literals"
+    },
+    {
       "code": "E-SELF-001",
       "severity": "error",
       "summary": "Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation"

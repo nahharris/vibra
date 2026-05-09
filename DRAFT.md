@@ -192,7 +192,7 @@ $cast:
   to: $path
 ```
 
-In v1, casts are allowed only for identity casts (`T -> T`) and for the two directions between a `$newtype` and its declared inner type. All other casts are invalid (`E-CAST-001`). `$cast` attaches runtime type metadata so `$newtype` and nominal `$interface` patterns can test the value later; primitive host operations still consume the inner representation.
+In v1, casts are allowed only for identity casts (`T -> T`) and for the two directions between a `$newtype` and its declared inner type. All other casts are invalid (`E-CAST-001`). `$cast` attaches runtime type metadata so `$newtype` and nominal `$interface` patterns can test the value later; primitive host operations still consume the inner representation. `$cast` cannot target `$capability` types or aliases whose body is `$capability` (`E-CAP-001`).
 
 ### `$do`
 
@@ -226,6 +226,7 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 |------|---------|
 | `$literal` | Literal type: `{ $literal: "ok" }` |
 | `$newtype` | Nominal wrapper: `{ $newtype: T }`. Unlike transparent aliases, a `$newtype` is distinct from `T` and crosses to/from `T` only through `$cast`. |
+| `$capability` | Opaque runtime-minted authority type: `{ $capability: fs-read }`. User code cannot construct capability values with `$cast` or literals. |
 | `$record` | Concrete product: `{ $record: { f: T, ... } }` |
 | `$map` | Homogeneous map: `{ $map: { key: K, value: V } }` |
 | `$tuple` | Tuple of types: `{ $tuple: [$t1, $t2] }` — **type positions only** |
@@ -355,6 +356,10 @@ Current compiler behavior validates stdlib signatures and forwards call-site arg
 
 The embedded runner uses **wasmer-wasix** (requires a Tokio 1.x runtime). **Preopened directories** map host paths into the guest; stdio does not require preopens.
 
+**Security grants:** Privileged stdlib APIs require explicit runtime-minted grant arguments. `main` may declare `args: { grants: $security.grants }`; every grant field is a `grant-status<T>` enum with `granted` and `denied` arms, allowing fallback behavior when access is absent. The core host domains are filesystem read/write, stdin read, environment read/write, network connect/listen, subprocess run, clock, randomness, and system information. Filesystem grants are scoped by canonical path ancestry, so sibling string-prefix escapes are invalid. Grants may be attenuated before delegation; `fs.narrow-read` and `fs.narrow-write` derive child grants scoped to a subpath and cannot widen authority. CLI consent uses Deno-style flags such as `--allow-read=PATH`, `--allow-write=PATH`, `--allow-env=NAME`, `--allow-net=HOST[:PORT]`, `--allow-run=COMMAND`, `--allow-stdin`, `--allow-clock`, `--allow-random`, `--allow-sys-info`, and `--allow-all`.
+
+**Known escape hatch:** arbitrary `$wasm` declarations remain accepted in this slice. The grant model applies to grant-aware stdlib APIs, not to untrusted modules that define their own `$wasm` shims. Future work should make `$wasm` trusted-stdlib-only or require explicit unsafe/trust policy.
+
 **`$wasm` encoding (pick one per build):**
 
 - **A)** **Structured list** of opcodes + locals + types (preferred for tooling), or
@@ -389,6 +394,7 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 | `E-NEWTYPE-002` | error | Malformed `$newtype` definition body. |
 | `E-CAST-001` | error | `$cast` has no valid v1 cast path between source and target types. |
 | `E-CAST-002` | error | Malformed `$cast` payload; expected `{from: <expr>, to: <type>}`. |
+| `E-CAP-001` | error | Capability values are runtime-minted and cannot be created with `$cast` or literals. |
 | `E-SELF-001` | error | Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation. |
 | `E-DEFS-001` | error | Invalid `=defs` annotation (placed on a non-type definition, entry is not a `$function`, or duplicate name). |
 | `E-IMPL-001` | error | Invalid `=impl` annotation (non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a `$ref` string). |
@@ -551,6 +557,7 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
 - **Unions:** use direct arrays, e.g. `integer: { $union: [$int64, $int32, $int16, $int8] }`.
 - **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
 - **Typed io/fs:** `stdlib/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
+- **Security grants:** `stdlib/security.vibra` declares `$capability` grant types and the `grants` record passed to `main`. Grant-aware host modules include `fs`, `env`, `net`, `process`, `time`, `random`, and `sys`.
 - **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is `$union: [$void, $t]` with `=where: {t: []}`; `stdlib/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`, used at value sites via `$match`.
 - **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
 

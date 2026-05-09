@@ -1,7 +1,11 @@
-//! Filesystem policy: preopened host directories and future sandbox knobs.
+//! Filesystem policy: explicit read/write grants and legacy preopen compatibility.
 //!
-//! [`super::RunConfig::preopen_host_dirs`](crate::runtime::RunConfig) controls which host paths are
-//! visible under the WASI virtual root. The default is **none** (MVP `println` only needs stdio);
-//! add entries when running programs that use `stdlib/fs` or other preopened paths.
+//! [`super::RunConfig::allow_read`](crate::runtime::RunConfig) and
+//! [`super::RunConfig::allow_write`](crate::runtime::RunConfig) seed runtime-minted
+//! filesystem grants exposed through `stdlib/security.vibra`. The default is
+//! **none** (stdout/stderr do not require grants). Legacy
+//! `preopen_host_dirs` entries seed both read and write grants for compatibility.
 //!
-//! **MVP:** no extra checks beyond wasmer-wasix; absolute paths and `..` follow WASI host behavior.
+//! Runtime authorization canonicalizes the nearest existing path ancestor and
+//! checks real path ancestry, so a grant for `root` does not authorize sibling
+//! paths such as `root2`.

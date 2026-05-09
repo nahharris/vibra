@@ -760,9 +760,153 @@ main:
 fn mode_safe_fs_roundtrip_runs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     let data = dir.path().join("hello.txt");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $security.grants
+    return: $void
+    do:
+      - $let:
+          p:
+            $fs.path.new:
+              s: "{path}"
+      - $match:
+          target: $args.grants.fs-write
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: write-grant
+              do:
+                - $let:
+                    opened-write:
+                      $fs.open-write:
+                        p: $p
+                        grant: $write-grant
+                - $match:
+                    target: $opened-write
+                    arms:
+                      - pattern:
+                          $result.result.ok:
+                            $bind: out
+                        do:
+                          - $fs.writable.write-string:
+                              self: $out
+                              s: "from vibra fs"
+                          - $fs.closeable.close:
+                              self: $out
+                      - pattern:
+                          $result.result.err:
+                            $bind: err
+                        do: []
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: write-denied
+              do: []
+      - $match:
+          target: $args.grants.fs-read
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: read-grant
+              do:
+                - $let:
+                    opened-read:
+                      $fs.open-read:
+                        p: $p
+                        grant: $read-grant
+                - $match:
+                    target: $opened-read
+                    arms:
+                      - pattern:
+                          $result.result.ok:
+                            $bind: input
+                        do:
+                          - $let:
+                              text:
+                                $fs.readable.read-string:
+                                  self: $input
+                          - $fs.closeable.close:
+                              self: $input
+                      - pattern:
+                          $result.result.err:
+                            $bind: err2
+                        do: []
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: read-denied
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+            path = data.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).expect("mode-safe fs program should lower");
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            preopen_host_dirs: vec![dir.path().to_path_buf()],
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("mode-safe fs roundtrip should run");
+    assert_eq!(std::fs::read_to_string(data).unwrap(), "from vibra fs");
+}
+
+#[test]
+fn capability_values_cannot_be_created_with_cast() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"secret:
+  $capability: fs-read
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          forged:
+            $cast:
+              from: "not a grant"
+              to: $secret
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-CAP-001"),
+        "expected capability cast rejection, got: {err}"
+    );
+}
+
+#[test]
+fn fs_open_read_requires_read_grant_argument() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let data = dir.path().join("data.txt");
+    std::fs::write(&data, "hello").unwrap();
     std::fs::write(
         &entry,
         format!(
@@ -778,46 +922,9 @@ main:
             $fs.path.new:
               s: "{path}"
       - $let:
-          opened-write:
-            $fs.open-write:
-              p: $p
-      - $match:
-          target: $opened-write
-          arms:
-            - pattern:
-                $result.result.ok:
-                  $bind: out
-              do:
-                - $fs.writable.write-string:
-                    self: $out
-                    s: "from vibra fs"
-                - $fs.closeable.close:
-                    self: $out
-            - pattern:
-                $result.result.err:
-                  $bind: err
-              do: []
-      - $let:
-          opened-read:
+          opened:
             $fs.open-read:
               p: $p
-      - $match:
-          target: $opened-read
-          arms:
-            - pattern:
-                $result.result.ok:
-                  $bind: input
-              do:
-                - $let:
-                    text:
-                      $fs.readable.read-string:
-                        self: $input
-                - $fs.closeable.close:
-                    self: $input
-            - pattern:
-                $result.result.err:
-                  $bind: err2
-              do: []
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             path = data.display().to_string().replace('\\', "/"),
@@ -826,17 +933,238 @@ main:
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).expect("mode-safe fs program should lower");
-    vibra::execute::run_lowered(
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("missing value argument `grant`"),
+        "expected missing grant argument rejection, got: {err}"
+    );
+}
+
+#[test]
+fn fs_access_is_denied_without_any_runtime_grant() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let data = dir.path().join("data.txt");
+    std::fs::write(&data, "hello").unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $security.grants
+    return: $void
+    do:
+      - $let:
+          p:
+            $fs.path.new:
+              s: "{path}"
+      - $match:
+          target: $args.grants.fs-read
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: grant
+              do:
+                - $let:
+                    opened:
+                      $fs.open-read:
+                        p: $p
+                        grant: $grant
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: reason
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+            path = data.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+        .expect("denied grant path should be matchable and skip privileged fs access");
+}
+
+#[test]
+fn fs_grant_rejects_sibling_prefix_escape() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let allowed = dir.path().join("root");
+    let sibling = dir.path().join("root2");
+    std::fs::create_dir_all(&allowed).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    let target = sibling.join("escape.txt");
+    std::fs::write(&target, "secret").unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $security.grants
+    return: $void
+    do:
+      - $let:
+          p:
+            $fs.path.new:
+              s: "{path}"
+      - $match:
+          target: $args.grants.fs-read
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: grant
+              do:
+                - $let:
+                    opened:
+                      $fs.open-read:
+                        p: $p
+                        grant: $grant
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: reason
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+            path = target.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let err = vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            preopen_host_dirs: vec![allowed],
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("outside configured grants"),
+        "expected sibling escape denial, got: {msg}"
+    );
+}
+
+#[test]
+fn fs_narrow_read_grant_limits_delegated_scope() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let allowed = dir.path().join("allowed");
+    let denied = dir.path().join("denied");
+    std::fs::create_dir_all(&allowed).unwrap();
+    std::fs::create_dir_all(&denied).unwrap();
+    std::fs::write(allowed.join("ok.txt"), "ok").unwrap();
+    std::fs::write(denied.join("no.txt"), "no").unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function:
+    args:
+      grants: $security.grants
+    return: $void
+    do:
+      - $let:
+          allow-root:
+            $fs.path.new:
+              s: "{allowed}"
+      - $let:
+          denied-file:
+            $fs.path.new:
+              s: "{denied_file}"
+      - $match:
+          target: $args.grants.fs-read
+          arms:
+            - pattern:
+                $security.grant-status.granted:
+                  $bind: read-grant
+              do:
+                - $let:
+                    narrowed:
+                      $fs.narrow-read:
+                        grant: $read-grant
+                        p: $allow-root
+                - $match:
+                    target: $narrowed
+                    arms:
+                      - pattern:
+                          $result.result.ok:
+                            $bind: narrow-grant
+                        do:
+                          - $let:
+                              opened:
+                                $fs.open-read:
+                                  p: $denied-file
+                                  grant: $narrow-grant
+                      - pattern:
+                          $result.result.err:
+                            $bind: narrow-err
+                        do: []
+            - pattern:
+                $security.grant-status.denied:
+                  $bind: read-denied
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+            allowed = allowed.display().to_string().replace('\\', "/"),
+            denied_file = denied
+                .join("no.txt")
+                .display()
+                .to_string()
+                .replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let err = vibra::execute::run_lowered(
         &lowered,
         &vibra::runtime::RunConfig {
             program_name: "vibra-test".to_string(),
             argv: Vec::new(),
             preopen_host_dirs: vec![dir.path().to_path_buf()],
+            ..vibra::runtime::RunConfig::default()
         },
     )
-    .expect("mode-safe fs roundtrip should run");
-    assert_eq!(std::fs::read_to_string(data).unwrap(), "from vibra fs");
+    .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("outside configured grants"),
+        "expected narrowed grant to reject delegated escape, got: {msg}"
+    );
 }
 
 #[test]
@@ -880,6 +1208,7 @@ main:
 fn path_level_fs_apis_return_matchable_results() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     let work_dir = dir.path().join("work");
@@ -890,9 +1219,12 @@ fn path_level_fs_apis_return_matchable_results() {
         format!(
             r#"fs:
   $import: "{fs}"
+security:
+  $import: "{security}"
 main:
   $function:
-    args: $void
+    args:
+      grants: $security.grants
     return: $void
     do:
       - $let:
@@ -903,140 +1235,172 @@ main:
           file-path:
             $fs.path.new:
               s: "{data}"
-      - $let:
-          made:
-            $fs.create-dir-all:
-              p: $dir-path
       - $match:
-          target: $made
+          target: $args.grants.fs-write
           arms:
             - pattern:
-                $result.result.ok: null
-              do: []
+                $security.grant-status.granted:
+                  $bind: write-grant
+              do:
+                - $let:
+                    made:
+                      $fs.create-dir-all:
+                        p: $dir-path
+                        grant: $write-grant
+                - $match:
+                    target: $made
+                    arms:
+                      - pattern:
+                          $result.result.ok: null
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: made-err
+                        do: []
+                - $let:
+                    written:
+                      $fs.write-string-all:
+                        p: $file-path
+                        s: "hello"
+                        grant: $write-grant
+                - $match:
+                    target: $written
+                    arms:
+                      - pattern:
+                          $result.result.ok: null
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: written-err
+                        do: []
+                - $let:
+                    appended:
+                      $fs.append-string:
+                        p: $file-path
+                        s: " world"
+                        grant: $write-grant
+                - $match:
+                    target: $appended
+                    arms:
+                      - pattern:
+                          $result.result.ok: null
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: appended-err
+                        do: []
+                - $match:
+                    target: $args.grants.fs-read
+                    arms:
+                      - pattern:
+                          $security.grant-status.granted:
+                            $bind: read-grant
+                        do:
+                          - $let:
+                              read:
+                                $fs.read-to-string:
+                                  p: $file-path
+                                  grant: $read-grant
+                          - $match:
+                              target: $read
+                              arms:
+                                - pattern:
+                                    $result.result.ok:
+                                      $bind: read-ok
+                                  do: []
+                                - pattern:
+                                    $result.result.err:
+                                      $bind: read-err
+                                  do: []
+                          - $let:
+                              stat:
+                                $fs.metadata:
+                                  p: $file-path
+                                  grant: $read-grant
+                          - $match:
+                              target: $stat
+                              arms:
+                                - pattern:
+                                    $result.result.ok:
+                                      $bind: stat-ok
+                                  do: []
+                                - pattern:
+                                    $result.result.err:
+                                      $bind: stat-err
+                                  do: []
+                          - $let:
+                              canon:
+                                $fs.canonicalize:
+                                  p: $file-path
+                                  grant: $read-grant
+                          - $match:
+                              target: $canon
+                              arms:
+                                - pattern:
+                                    $result.result.ok:
+                                      $bind: canon-ok
+                                  do: []
+                                - pattern:
+                                    $result.result.err:
+                                      $bind: canon-err
+                                  do: []
+                          - $let:
+                              entries:
+                                $fs.read-dir:
+                                  p: $dir-path
+                                  grant: $read-grant
+                          - $match:
+                              target: $entries
+                              arms:
+                                - pattern:
+                                    $result.result.ok:
+                                      $bind: entries-ok
+                                  do: []
+                                - pattern:
+                                    $result.result.err:
+                                      $bind: entries-err
+                                  do: []
+                      - pattern:
+                          $security.grant-status.denied:
+                            $bind: read-denied
+                        do: []
+                - $let:
+                    removed-file:
+                      $fs.remove-file:
+                        p: $file-path
+                        grant: $write-grant
+                - $match:
+                    target: $removed-file
+                    arms:
+                      - pattern:
+                          $result.result.ok: null
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: removed-file-err
+                        do: []
+                - $let:
+                    removed-dir:
+                      $fs.remove-dir:
+                        p: $dir-path
+                        grant: $write-grant
+                - $match:
+                    target: $removed-dir
+                    arms:
+                      - pattern:
+                          $result.result.ok: null
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: removed-dir-err
+                        do: []
             - pattern:
-                $result.result.err:
-                  $bind: made-err
-              do: []
-      - $let:
-          written:
-            $fs.write-string-all:
-              p: $file-path
-              s: "hello"
-      - $match:
-          target: $written
-          arms:
-            - pattern:
-                $result.result.ok: null
-              do: []
-            - pattern:
-                $result.result.err:
-                  $bind: written-err
-              do: []
-      - $let:
-          appended:
-            $fs.append-string:
-              p: $file-path
-              s: " world"
-      - $match:
-          target: $appended
-          arms:
-            - pattern:
-                $result.result.ok: null
-              do: []
-            - pattern:
-                $result.result.err:
-                  $bind: appended-err
-              do: []
-      - $let:
-          read:
-            $fs.read-to-string:
-              p: $file-path
-      - $match:
-          target: $read
-          arms:
-            - pattern:
-                $result.result.ok:
-                  $bind: read-ok
-              do: []
-            - pattern:
-                $result.result.err:
-                  $bind: read-err
-              do: []
-      - $let:
-          stat:
-            $fs.metadata:
-              p: $file-path
-      - $match:
-          target: $stat
-          arms:
-            - pattern:
-                $result.result.ok:
-                  $bind: stat-ok
-              do: []
-            - pattern:
-                $result.result.err:
-                  $bind: stat-err
-              do: []
-      - $let:
-          canon:
-            $fs.canonicalize:
-              p: $file-path
-      - $match:
-          target: $canon
-          arms:
-            - pattern:
-                $result.result.ok:
-                  $bind: canon-ok
-              do: []
-            - pattern:
-                $result.result.err:
-                  $bind: canon-err
-              do: []
-      - $let:
-          entries:
-            $fs.read-dir:
-              p: $dir-path
-      - $match:
-          target: $entries
-          arms:
-            - pattern:
-                $result.result.ok:
-                  $bind: entries-ok
-              do: []
-            - pattern:
-                $result.result.err:
-                  $bind: entries-err
-              do: []
-      - $let:
-          removed-file:
-            $fs.remove-file:
-              p: $file-path
-      - $match:
-          target: $removed-file
-          arms:
-            - pattern:
-                $result.result.ok: null
-              do: []
-            - pattern:
-                $result.result.err:
-                  $bind: removed-file-err
-              do: []
-      - $let:
-          removed-dir:
-            $fs.remove-dir:
-              p: $dir-path
-      - $match:
-          target: $removed-dir
-          arms:
-            - pattern:
-                $result.result.ok: null
-              do: []
-            - pattern:
-                $result.result.err:
-                  $bind: removed-dir-err
+                $security.grant-status.denied:
+                  $bind: write-denied
               do: []
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
             work_dir = work_dir.display().to_string().replace('\\', "/"),
             data = data.display().to_string().replace('\\', "/"),
         ),
@@ -1051,6 +1415,7 @@ main:
             program_name: "vibra-test".to_string(),
             argv: Vec::new(),
             preopen_host_dirs: vec![dir.path().to_path_buf()],
+            ..vibra::runtime::RunConfig::default()
         },
     )
     .expect("path-level fs APIs should return matchable result values");
@@ -1060,6 +1425,7 @@ main:
 fn path_level_fs_errors_return_err_results() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     let missing = dir.path().join("missing.txt");
@@ -1069,32 +1435,48 @@ fn path_level_fs_errors_return_err_results() {
         format!(
             r#"fs:
   $import: "{fs}"
+security:
+  $import: "{security}"
 main:
   $function:
-    args: $void
+    args:
+      grants: $security.grants
     return: $void
     do:
       - $let:
           missing-path:
             $fs.path.new:
               s: "{missing}"
-      - $let:
-          read:
-            $fs.read-to-string:
-              p: $missing-path
       - $match:
-          target: $read
+          target: $args.grants.fs-read
           arms:
             - pattern:
-                $result.result.ok:
-                  $bind: read-ok
-              do: []
+                $security.grant-status.granted:
+                  $bind: read-grant
+              do:
+                - $let:
+                    read:
+                      $fs.read-to-string:
+                        p: $missing-path
+                        grant: $read-grant
+                - $match:
+                    target: $read
+                    arms:
+                      - pattern:
+                          $result.result.ok:
+                            $bind: read-ok
+                        do: []
+                      - pattern:
+                          $result.result.err:
+                            $bind: read-err
+                        do: []
             - pattern:
-                $result.result.err:
-                  $bind: read-err
+                $security.grant-status.denied:
+                  $bind: read-denied
               do: []
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
             missing = missing.display().to_string().replace('\\', "/"),
         ),
     )
@@ -1108,6 +1490,7 @@ main:
             program_name: "vibra-test".to_string(),
             argv: Vec::new(),
             preopen_host_dirs: vec![dir.path().to_path_buf()],
+            ..vibra::runtime::RunConfig::default()
         },
     )
     .expect("path-level fs errors should be returned as result.err values");

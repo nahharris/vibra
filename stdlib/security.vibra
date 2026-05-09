@@ -1,0 +1,80 @@
+denial-reason:
+  $enum:
+    not-granted: $void
+    denied-by-user: $void
+    out-of-scope: $void
+
+grant-status:
+  $enum:
+    granted: $t
+    denied: $denial-reason
+  =where: {t: []}
+
+fs-read-grant:
+  $capability: fs-read
+
+fs-write-grant:
+  $capability: fs-write
+
+stdin-read-grant:
+  $capability: stdin-read
+
+env-read-grant:
+  $capability: env-read
+
+env-write-grant:
+  $capability: env-write
+
+net-connect-grant:
+  $capability: net-connect
+
+net-listen-grant:
+  $capability: net-listen
+
+process-run-grant:
+  $capability: process-run
+
+clock-grant:
+  $capability: clock
+
+random-grant:
+  $capability: random
+
+system-info-grant:
+  $capability: system-info
+
+grants:
+  $record:
+    fs-read:
+      $grant-status:
+        t: $fs-read-grant
+    fs-write:
+      $grant-status:
+        t: $fs-write-grant
+    stdin-read:
+      $grant-status:
+        t: $stdin-read-grant
+    env-read:
+      $grant-status:
+        t: $env-read-grant
+    env-write:
+      $grant-status:
+        t: $env-write-grant
+    net-connect:
+      $grant-status:
+        t: $net-connect-grant
+    net-listen:
+      $grant-status:
+        t: $net-listen-grant
+    process-run:
+      $grant-status:
+        t: $process-run-grant
+    clock:
+      $grant-status:
+        t: $clock-grant
+    random:
+      $grant-status:
+        t: $random-grant
+    system-info:
+      $grant-status:
+        t: $system-info-grant
