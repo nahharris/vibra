@@ -1,0 +1,8 @@
+from:
+    $interface:
+        from: 
+            $fn-type:
+                args: $t
+                return: $self
+    =where: 
+        t: []

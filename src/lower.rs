@@ -13,6 +13,7 @@ use anyhow::{bail, Context, Result};
 use serde_yaml::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
+use std::path::PathBuf;
 
 /// While lowering a user-defined function body, validates `$return` against this type.
 #[derive(Debug, Clone)]
@@ -25,6 +26,7 @@ pub enum RuntimeValue {
     Int(i64),
     Float(f64),
     Str(String),
+    Array(Vec<RuntimeValue>),
     Enum {
         enum_key: String,
         tag: String,
@@ -472,6 +474,7 @@ fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, Al
 
     let mut skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
     let mut sink: Vec<String> = Vec::new();
+    let mut visited_imports: HashSet<(String, PathBuf)> = HashSet::new();
 
     for (k, v) in entry_map {
         let alias = k.as_str().context("module keys must be strings")?;
@@ -485,7 +488,14 @@ fn collect_alias_skeletons(program: &LoadedProgram) -> Result<HashMap<String, Al
         let imp_s = imp.as_str().context("$import value must be string")?;
         let imported_path = fs::canonicalize(parent.join(imp_s))
             .with_context(|| format!("resolve import alias `{alias}`"))?;
-        collect_module_skeleton_tree(alias, &imported_path, program, &mut skeletons, &mut sink)?;
+        collect_module_skeleton_tree(
+            alias,
+            &imported_path,
+            program,
+            &mut skeletons,
+            &mut sink,
+            &mut visited_imports,
+        )?;
     }
 
     collect_module_skeletons(
@@ -504,7 +514,12 @@ fn collect_module_skeleton_tree(
     program: &LoadedProgram,
     skeletons: &mut HashMap<String, AliasSkeleton>,
     sink: &mut Vec<String>,
+    visited_imports: &mut HashSet<(String, PathBuf)>,
 ) -> Result<()> {
+    if !visited_imports.insert((alias.to_string(), module_path.to_path_buf())) {
+        return Ok(());
+    }
+
     let module_root = program
         .modules
         .get(module_path)
@@ -527,7 +542,14 @@ fn collect_module_skeleton_tree(
         let imp_s = imp.as_str().context("$import value must be string")?;
         let nested_path = fs::canonicalize(parent.join(imp_s))
             .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
-        collect_module_skeleton_tree(nested_alias, &nested_path, program, skeletons, sink)?;
+        collect_module_skeleton_tree(
+            nested_alias,
+            &nested_path,
+            program,
+            skeletons,
+            sink,
+            visited_imports,
+        )?;
     }
     collect_module_skeletons(alias, module_root, skeletons, sink)
 }
@@ -1492,6 +1514,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     let mut impls: HashMap<ImplKey, ImplBody> = HashMap::new();
     let mut warnings = Vec::new();
     let mut pending_user_bodies: Vec<(String, Vec<Value>)> = Vec::new();
+    let mut visited_import_defs: HashSet<(String, PathBuf)> = HashSet::new();
 
     for (k, v) in entry_map {
         let alias = k.as_str().context("module keys must be strings")?;
@@ -1518,6 +1541,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
             &mut pending_user_bodies,
             &skeletons,
             &mut warnings,
+            &mut visited_import_defs,
         )?;
     }
 
@@ -1622,7 +1646,12 @@ fn collect_module_defs_tree(
     pending_user_bodies: &mut Vec<(String, Vec<Value>)>,
     skeletons: &HashMap<String, AliasSkeleton>,
     warnings: &mut Vec<String>,
+    visited_import_defs: &mut HashSet<(String, PathBuf)>,
 ) -> Result<()> {
+    if !visited_import_defs.insert((alias.to_string(), module_path.to_path_buf())) {
+        return Ok(());
+    }
+
     let module_root = program
         .modules
         .get(module_path)
@@ -1657,6 +1686,7 @@ fn collect_module_defs_tree(
             pending_user_bodies,
             skeletons,
             warnings,
+            visited_import_defs,
         )?;
     }
     collect_module_defs(
@@ -3941,6 +3971,7 @@ fn infer_expr_type(
         Expr::Value(RuntimeValue::Int(_)) => Some(TypeRef::Int64),
         Expr::Value(RuntimeValue::Float(_)) => Some(TypeRef::Float64),
         Expr::Value(RuntimeValue::Str(_)) => Some(TypeRef::Str),
+        Expr::Value(RuntimeValue::Array(_)) => None,
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
         Expr::VarRef(v) => locals.get(v).cloned().or_else(|| {

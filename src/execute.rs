@@ -654,20 +654,29 @@ fn exec_call(
                 "create-dir-all" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
                     let p = resolve_preopen(&path, config)?;
-                    fs::create_dir_all(p).context("create-dir-all")?;
-                    Ok(RuntimeValue::Void)
+                    Ok(fs_result(
+                        sig,
+                        || fs::create_dir_all(p),
+                        |_| RuntimeValue::Void,
+                    ))
                 }
                 "remove-file" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
                     let p = resolve_preopen(&path, config)?;
-                    fs::remove_file(p).context("remove-file")?;
-                    Ok(RuntimeValue::Void)
+                    Ok(fs_result(
+                        sig,
+                        || fs::remove_file(p),
+                        |_| RuntimeValue::Void,
+                    ))
                 }
                 "remove-dir" => {
-                    let path = eval_domain_string(&call.args[0], env, "dir")?;
+                    let path = eval_domain_string(&call.args[0], env, "path")?;
                     let p = resolve_preopen(&path, config)?;
-                    fs::remove_dir_all(p).context("remove-dir")?;
-                    Ok(RuntimeValue::Void)
+                    Ok(fs_result(
+                        sig,
+                        || fs::remove_dir_all(p),
+                        |_| RuntimeValue::Void,
+                    ))
                 }
                 "exists" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
@@ -677,44 +686,48 @@ fn exec_call(
                 "canonicalize" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
                     let p = resolve_preopen(&path, config)?;
-                    let c = p.canonicalize().context("canonicalize")?;
-                    Ok(wrap_domain_string("path", c.display().to_string()))
+                    Ok(fs_result(
+                        sig,
+                        || p.canonicalize(),
+                        |c| wrap_domain_string("path", c.display().to_string()),
+                    ))
                 }
                 "metadata" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
                     let p = resolve_preopen(&path, config)?;
-                    let md = fs::metadata(p).context("metadata")?;
-                    Ok(RuntimeValue::Str(format!(
-                        "size={},is_dir={}",
-                        md.len(),
-                        md.is_dir()
-                    )))
+                    Ok(fs_result(
+                        sig,
+                        || fs::metadata(p),
+                        |md| RuntimeValue::Str(format!("size={},is_dir={}", md.len(), md.is_dir())),
+                    ))
                 }
-                "read-file" => {
+                "read-to-string" | "read-file" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
                     let p = resolve_preopen(&path, config)?;
-                    let s = fs::read_to_string(p).context("read-file")?;
-                    Ok(RuntimeValue::Str(s))
+                    Ok(fs_result(sig, || fs::read_to_string(p), RuntimeValue::Str))
                 }
-                "write-file" => {
+                "write-string-all" | "write-file" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
                     let contents = eval_string(&call.args[1], env)?;
                     let p = resolve_preopen(&path, config)?;
-                    fs::write(p, contents).context("write-file")?;
-                    Ok(RuntimeValue::Void)
+                    Ok(fs_result(
+                        sig,
+                        || fs::write(p, contents),
+                        |_| RuntimeValue::Void,
+                    ))
                 }
-                "append-file" => {
+                "append-string" | "append-file" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
                     let contents = eval_string(&call.args[1], env)?;
                     let p = resolve_preopen(&path, config)?;
-                    let mut f = fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(p)
-                        .context("append-file open")?;
-                    f.write_all(contents.as_bytes())
-                        .context("append-file write")?;
-                    Ok(RuntimeValue::Void)
+                    Ok(fs_result(
+                        sig,
+                        || {
+                            let mut f = fs::OpenOptions::new().create(true).append(true).open(p)?;
+                            f.write_all(contents.as_bytes())
+                        },
+                        |_| RuntimeValue::Void,
+                    ))
                 }
                 "create-file" => {
                     let path = eval_domain_string(&call.args[0], env, "Path")?;
@@ -735,14 +748,24 @@ fn exec_call(
                     Ok(wrap_domain_int("fd", 1))
                 }
                 "read-dir" => {
-                    let path = eval_domain_string(&call.args[0], env, "dir")?;
+                    let path = eval_domain_string(&call.args[0], env, "path")?;
                     let p = resolve_preopen(&path, config)?;
-                    let mut names = Vec::new();
-                    for e in fs::read_dir(p).context("read-dir")? {
-                        let e = e.context("read-dir entry")?;
-                        names.push(e.file_name().to_string_lossy().to_string());
-                    }
-                    Ok(RuntimeValue::Str(names.join("\n")))
+                    Ok(fs_result(
+                        sig,
+                        || {
+                            let mut names = Vec::new();
+                            for entry in fs::read_dir(p)? {
+                                let entry = entry?;
+                                names.push(entry.file_name().to_string_lossy().to_string());
+                            }
+                            Ok(names)
+                        },
+                        |names| {
+                            RuntimeValue::Array(
+                                names.into_iter().map(RuntimeValue::Str).collect::<Vec<_>>(),
+                            )
+                        },
+                    ))
                 }
                 _ => {
                     bail!(

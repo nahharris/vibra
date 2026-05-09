@@ -609,6 +609,265 @@ main:
 }
 
 #[test]
+fn duplicate_nested_imports_are_idempotent() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"io:
+  $import: "{io}"
+fs:
+  $import: "{fs}"
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $io.println: "ok"
+"#,
+            io = io.display().to_string().replace('\\', "/"),
+            fs = fs.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog);
+    assert!(
+        lowered.is_ok(),
+        "duplicate nested imports should not collide: {:?}",
+        lowered.err()
+    );
+}
+
+#[test]
+fn path_level_fs_apis_return_matchable_results() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let work_dir = dir.path().join("work");
+    let data = work_dir.join("data.txt");
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          dir-path:
+            $fs.path.new:
+              s: "{work_dir}"
+      - $let:
+          file-path:
+            $fs.path.new:
+              s: "{data}"
+      - $let:
+          made:
+            $fs.create-dir-all:
+              p: $dir-path
+      - $match:
+          target: $made
+          arms:
+            ok:
+              bind: made-ok
+              do: []
+            err:
+              bind: made-err
+              do: []
+      - $let:
+          written:
+            $fs.write-string-all:
+              p: $file-path
+              s: "hello"
+      - $match:
+          target: $written
+          arms:
+            ok:
+              bind: written-ok
+              do: []
+            err:
+              bind: written-err
+              do: []
+      - $let:
+          appended:
+            $fs.append-string:
+              p: $file-path
+              s: " world"
+      - $match:
+          target: $appended
+          arms:
+            ok:
+              bind: appended-ok
+              do: []
+            err:
+              bind: appended-err
+              do: []
+      - $let:
+          read:
+            $fs.read-to-string:
+              p: $file-path
+      - $match:
+          target: $read
+          arms:
+            ok:
+              bind: read-ok
+              do: []
+            err:
+              bind: read-err
+              do: []
+      - $let:
+          stat:
+            $fs.metadata:
+              p: $file-path
+      - $match:
+          target: $stat
+          arms:
+            ok:
+              bind: stat-ok
+              do: []
+            err:
+              bind: stat-err
+              do: []
+      - $let:
+          canon:
+            $fs.canonicalize:
+              p: $file-path
+      - $match:
+          target: $canon
+          arms:
+            ok:
+              bind: canon-ok
+              do: []
+            err:
+              bind: canon-err
+              do: []
+      - $let:
+          entries:
+            $fs.read-dir:
+              p: $dir-path
+      - $match:
+          target: $entries
+          arms:
+            ok:
+              bind: entries-ok
+              do: []
+            err:
+              bind: entries-err
+              do: []
+      - $let:
+          removed-file:
+            $fs.remove-file:
+              p: $file-path
+      - $match:
+          target: $removed-file
+          arms:
+            ok:
+              bind: removed-file-ok
+              do: []
+            err:
+              bind: removed-file-err
+              do: []
+      - $let:
+          removed-dir:
+            $fs.remove-dir:
+              p: $dir-path
+      - $match:
+          target: $removed-dir
+          arms:
+            ok:
+              bind: removed-dir-ok
+              do: []
+            err:
+              bind: removed-dir-err
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            work_dir = work_dir.display().to_string().replace('\\', "/"),
+            data = data.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            preopen_host_dirs: vec![dir.path().to_path_buf()],
+        },
+    )
+    .expect("path-level fs APIs should return matchable result values");
+}
+
+#[test]
+fn path_level_fs_errors_return_err_results() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let missing = dir.path().join("missing.txt");
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          missing-path:
+            $fs.path.new:
+              s: "{missing}"
+      - $let:
+          read:
+            $fs.read-to-string:
+              p: $missing-path
+      - $match:
+          target: $read
+          arms:
+            ok:
+              bind: read-ok
+              do: []
+            err:
+              bind: read-err
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            missing = missing.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            preopen_host_dirs: vec![dir.path().to_path_buf()],
+        },
+    )
+    .expect("path-level fs errors should be returned as result.err values");
+}
+
+#[test]
 fn option_where_union_allows_t_or_void_and_disallows_reverse_coercion() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.vibra");
