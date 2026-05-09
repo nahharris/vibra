@@ -147,6 +147,41 @@ $if:
   else: $args.b
 ```
 
+### Value constructors
+
+Composite values use explicit forms in expression context:
+
+```yaml
+$record: { name: "Ada", age: 37 }
+$tuple: ["ok", 1]
+$array: ["a", "b"]
+$map:
+  - key: "lang"
+    value: "vibra"
+```
+
+### `$match`
+
+`$match` uses one canonical ordered arm sequence. Each arm has `pattern` and `do`.
+
+```yaml
+$match:
+  target: $result
+  arms:
+    - pattern:
+        $result.result.ok:
+          $bind: value
+      do:
+        - $io.println: $value
+    - pattern:
+        $result.result.err:
+          $bind: err
+      do:
+        - $io.eprintln: "failed"
+```
+
+Pattern forms are scalar literals, enum-constructor patterns, `$record`, `$tuple`, `$array`, `$map`, `$newtype`, `$interface`, `{ $bind: name }`, and `{ $wildcard: null }`. Matches must be total: enum matches cover all tags or include wildcard; open-ended targets such as strings, numbers, records, arrays, and maps require wildcard unless a single literal target is trivially exhaustive. Bindings introduced in an arm are scoped to that arm and do not leak after the match. Runtime interface patterns use nominal `=impl` satisfaction.
+
 ### `$cast`
 
 Explicitly converts a value across a permitted type boundary.
@@ -157,7 +192,7 @@ $cast:
   to: $path
 ```
 
-In v1, casts are allowed only for identity casts (`T -> T`) and for the two directions between a `$newtype` and its declared inner type. All other casts are invalid (`E-CAST-001`). `$cast` is a type-system operation only; the runtime representation is unchanged.
+In v1, casts are allowed only for identity casts (`T -> T`) and for the two directions between a `$newtype` and its declared inner type. All other casts are invalid (`E-CAST-001`). `$cast` attaches runtime type metadata so `$newtype` and nominal `$interface` patterns can test the value later; primitive host operations still consume the inner representation.
 
 ### `$do`
 

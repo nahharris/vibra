@@ -1,7 +1,7 @@
 //! Execute lowered Vibra programs with stdlib io/fs support.
 
 use crate::lower::{
-    Call, Expr, FunctionBody, LetValue, LoweredProgram, RuntimeValue, Statement, TypeRef,
+    Call, Expr, FunctionBody, LetValue, LoweredProgram, Pattern, RuntimeValue, Statement, TypeRef,
     WasmArgSpec,
 };
 use crate::runtime::RunConfig;
@@ -72,7 +72,10 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
             .get(v)
             .cloned()
             .with_context(|| format!("unknown variable `${v}`")),
-        Expr::Cast { from, .. } => eval_expr(from, env),
+        Expr::Cast { from, target } => Ok(RuntimeValue::Typed {
+            type_ref: target.clone(),
+            value: Box::new(eval_expr(from, env)?),
+        }),
         Expr::EnumConstructor {
             enum_key,
             tag,
@@ -89,6 +92,26 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
                 payload: payload_value,
             })
         }
+        Expr::Record(fields) => fields
+            .iter()
+            .map(|(name, expr)| Ok((name.clone(), eval_expr(expr, env)?)))
+            .collect::<Result<std::collections::BTreeMap<_, _>>>()
+            .map(RuntimeValue::Record),
+        Expr::Tuple(items) => items
+            .iter()
+            .map(|expr| eval_expr(expr, env))
+            .collect::<Result<Vec<_>>>()
+            .map(RuntimeValue::Tuple),
+        Expr::Array(items) => items
+            .iter()
+            .map(|expr| eval_expr(expr, env))
+            .collect::<Result<Vec<_>>>()
+            .map(RuntimeValue::Array),
+        Expr::Map(items) => items
+            .iter()
+            .map(|(k, v)| Ok((eval_expr(k, env)?, eval_expr(v, env)?)))
+            .collect::<Result<Vec<_>>>()
+            .map(RuntimeValue::Map),
     }
 }
 
@@ -117,43 +140,184 @@ fn exec_statement(
             env.insert(var.clone(), value);
             Ok(None)
         }
-        Statement::Match {
-            target,
-            enum_key,
-            arms,
-        } => {
+        Statement::Match { target, arms } => {
             let value = eval_expr(target, env)?;
-            let RuntimeValue::Enum {
-                enum_key: actual_enum,
-                tag,
-                payload,
-            } = value
-            else {
-                bail!("$match target did not evaluate to enum value");
-            };
-            if &actual_enum != enum_key {
-                bail!("$match target enum mismatch: expected `{enum_key}`, got `{actual_enum}`");
+            for arm in arms {
+                let mut scoped = env.clone();
+                if pattern_matches(&arm.pattern, &value, program, &mut scoped)? {
+                    if let Some(v) = run_block(&arm.body, program, &mut scoped, files, config)? {
+                        return Ok(Some(v));
+                    }
+                    return Ok(None);
+                }
             }
-            let arm = arms
-                .iter()
-                .find(|a| a.tag == tag)
-                .with_context(|| format!("missing runtime $match arm for tag `{tag}`"))?;
-            let mut scoped = env.clone();
-            if let Some(bind_name) = &arm.bind {
-                let payload_value = payload
-                    .map(|p| *p)
-                    .with_context(|| format!("tag `{tag}` had no payload for binding"))?;
-                scoped.insert(bind_name.clone(), payload_value);
-            }
-            if let Some(v) = run_block(&arm.body, program, &mut scoped, files, config)? {
-                return Ok(Some(v));
-            }
-            for (k, v) in scoped {
-                env.insert(k, v);
-            }
-            Ok(None)
+            bail!("non-exhaustive $match reached runtime with value `{value:?}`")
         }
     }
+}
+
+fn pattern_matches(
+    pattern: &Pattern,
+    value: &RuntimeValue,
+    program: &LoweredProgram,
+    env: &mut HashMap<String, RuntimeValue>,
+) -> Result<bool> {
+    match pattern {
+        Pattern::Wildcard => Ok(true),
+        Pattern::Bind(name) => {
+            env.insert(name.clone(), strip_type_tag(value.clone()));
+            Ok(true)
+        }
+        Pattern::Literal(expected) => Ok(runtime_value_eq(expected, value)),
+        Pattern::Enum {
+            enum_key,
+            tag,
+            payload,
+        } => {
+            let RuntimeValue::Enum {
+                enum_key: actual_enum,
+                tag: actual_tag,
+                payload: actual_payload,
+            } = untyped(value)
+            else {
+                return Ok(false);
+            };
+            if actual_enum != enum_key || actual_tag != tag {
+                return Ok(false);
+            }
+            match (payload, actual_payload.as_deref()) {
+                (None, None) => Ok(true),
+                (None, Some(RuntimeValue::Void)) => Ok(true),
+                (Some(p), Some(v)) => pattern_matches(p, v, program, env),
+                _ => Ok(false),
+            }
+        }
+        Pattern::Record(fields) => {
+            let RuntimeValue::Record(actual) = untyped(value) else {
+                return Ok(false);
+            };
+            for (name, pat) in fields {
+                let Some(v) = actual.get(name) else {
+                    return Ok(false);
+                };
+                if !pattern_matches(pat, v, program, env)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        Pattern::Tuple(items) => {
+            let RuntimeValue::Tuple(actual) = untyped(value) else {
+                return Ok(false);
+            };
+            if actual.len() != items.len() {
+                return Ok(false);
+            }
+            for (pat, v) in items.iter().zip(actual.iter()) {
+                if !pattern_matches(pat, v, program, env)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        Pattern::Array(items) => {
+            let RuntimeValue::Array(actual) = untyped(value) else {
+                return Ok(false);
+            };
+            if actual.len() != items.len() {
+                return Ok(false);
+            }
+            for (pat, v) in items.iter().zip(actual.iter()) {
+                if !pattern_matches(pat, v, program, env)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        Pattern::Map(entries) => {
+            let RuntimeValue::Map(actual) = untyped(value) else {
+                return Ok(false);
+            };
+            for (kp, vp) in entries {
+                let mut found = false;
+                for (ak, av) in actual {
+                    let mut key_env = env.clone();
+                    if pattern_matches(kp, ak, program, &mut key_env)?
+                        && pattern_matches(vp, av, program, &mut key_env)?
+                    {
+                        *env = key_env;
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        Pattern::Newtype { type_ref, inner } => {
+            let RuntimeValue::Typed {
+                type_ref: actual_ty,
+                value,
+            } = value
+            else {
+                return Ok(false);
+            };
+            if actual_ty != type_ref {
+                return Ok(false);
+            }
+            pattern_matches(inner, value, program, env)
+        }
+        Pattern::Interface(iface) => {
+            let Some(actual_ty) = runtime_type(value) else {
+                return Ok(false);
+            };
+            let (TypeRef::Named(type_name)
+            | TypeRef::Instantiated {
+                base: type_name, ..
+            }) = actual_ty
+            else {
+                return Ok(false);
+            };
+            let (TypeRef::Named(iface_name)
+            | TypeRef::Instantiated {
+                base: iface_name, ..
+            }) = iface
+            else {
+                return Ok(false);
+            };
+            Ok(program
+                .impls
+                .keys()
+                .any(|k| k.implementing_type == *type_name && k.interface == *iface_name))
+        }
+    }
+}
+
+fn runtime_type(value: &RuntimeValue) -> Option<&TypeRef> {
+    match value {
+        RuntimeValue::Typed { type_ref, .. } => Some(type_ref),
+        _ => None,
+    }
+}
+
+fn untyped(value: &RuntimeValue) -> &RuntimeValue {
+    match value {
+        RuntimeValue::Typed { value, .. } => value,
+        _ => value,
+    }
+}
+
+fn strip_type_tag(value: RuntimeValue) -> RuntimeValue {
+    match value {
+        RuntimeValue::Typed { value, .. } => *value,
+        other => other,
+    }
+}
+
+fn runtime_value_eq(expected: &RuntimeValue, actual: &RuntimeValue) -> bool {
+    expected == untyped(actual)
 }
 
 fn run_block(
@@ -174,6 +338,11 @@ fn run_block(
 fn eval_i64(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<i64> {
     match eval_expr(expr, env)? {
         RuntimeValue::Int(i) => Ok(i),
+        RuntimeValue::Typed { value, .. } => match *value {
+            RuntimeValue::Int(i) => Ok(i),
+            RuntimeValue::Float(_) => bail!("expected integer, got float"),
+            other => bail!("expected integer, got {other:?}"),
+        },
         RuntimeValue::Float(_) => bail!("expected integer, got float"),
         RuntimeValue::Enum {
             enum_key,
@@ -196,6 +365,10 @@ fn eval_handle(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<u64> 
 fn eval_string(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<String> {
     match eval_expr(expr, env)? {
         RuntimeValue::Str(s) => Ok(s),
+        RuntimeValue::Typed { value, .. } => match *value {
+            RuntimeValue::Str(s) => Ok(s),
+            other => bail!("expected string, got {other:?}"),
+        },
         other => bail!("expected string, got {other:?}"),
     }
 }
@@ -207,6 +380,10 @@ fn eval_domain_string(
 ) -> Result<String> {
     match eval_expr(expr, env)? {
         RuntimeValue::Str(s) => Ok(s),
+        RuntimeValue::Typed { value, .. } => match *value {
+            RuntimeValue::Str(s) => Ok(s),
+            other => bail!("expected {domain} payload string, got {other:?}"),
+        },
         RuntimeValue::Enum {
             enum_key,
             payload: Some(payload),

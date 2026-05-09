@@ -61,11 +61,13 @@ main:
       - $match:
           target: $value
           arms:
-            int:
-              bind: x
+            - pattern:
+                $m.number.int:
+                  $bind: x
               do:
                 - $io.println: "int"
-            none:
+            - pattern:
+                $m.number.none: null
               do:
                 - $io.println: "none"
 "#,
@@ -77,6 +79,229 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let lowered = vibra::lower::lower_program(&prog);
     assert!(lowered.is_ok(), "expected enum + match program to lower");
+}
+
+#[test]
+fn legacy_mapping_match_arms_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        r#"maybe:
+  $enum:
+    some: $str
+    none: $void
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          value:
+            $maybe.some: "x"
+      - $match:
+          target: $value
+          arms:
+            some:
+              bind: x
+              do: []
+            none:
+              do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("$match arms must be a sequence"),
+        "expected legacy mapping arms to be rejected, got: {err}"
+    );
+}
+
+#[test]
+fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
+        .unwrap();
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"io:
+  $import: "{io}"
+maybe:
+  $enum:
+    some: $str
+    none: $void
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          x: "outer"
+      - $let:
+          value:
+            $maybe.some: "payload"
+      - $match:
+          target: $value
+          arms:
+            - pattern:
+                $maybe.some:
+                  $bind: payload
+              do:
+                - $let:
+                    x: 42
+            - pattern:
+                $maybe.none: null
+              do: []
+      - $io.println: $x
+"#,
+            io = io.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+        .expect("outer x should remain a string after the match arm");
+}
+
+#[test]
+fn record_tuple_array_and_map_patterns_bind_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
+        .unwrap();
+
+    std::fs::write(
+        &entry,
+        format!(
+            r#"io:
+  $import: "{io}"
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          value:
+            $record:
+              pair:
+                $tuple: [7, "seven"]
+              tags:
+                $array: ["a", "b"]
+              table:
+                $map:
+                  - key: "lang"
+                    value: "vibra"
+      - $match:
+          target: $value
+          arms:
+            - pattern:
+                $record:
+                  pair:
+                    $tuple:
+                      - {{ $bind: n }}
+                      - {{ $bind: word }}
+                  tags:
+                    $array:
+                      - "a"
+                      - {{ $wildcard: null }}
+                  table:
+                    $map:
+                      - key: "lang"
+                        value: {{ $bind: language }}
+              do:
+                - $io.println: $word
+                - $io.println: $language
+"#,
+            io = io.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+        .expect("composite pattern should bind nested values");
+}
+
+#[test]
+fn newtype_and_nominal_interface_patterns_match_runtime_type_tags() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        r#"display:
+  $interface:
+    fmt:
+      $fn-type:
+        args:
+          $record:
+            x: $self
+        return: $str
+meter:
+  $newtype: $int64
+  =impl:
+    $display:
+      fmt:
+        $function:
+          args:
+            x: $self
+          return: $str
+          do:
+            - $return: "meter"
+main:
+  $function:
+    args: $void
+    return: $void
+    do:
+      - $let:
+          distance:
+            $cast:
+              from: 7
+              to: $meter
+      - $match:
+          target: $distance
+          arms:
+            - pattern:
+                $interface: $display
+              do:
+                - $let:
+                    matched: "display"
+            - pattern:
+                $wildcard: null
+              do:
+                - $let:
+                    matched: "other"
+      - $match:
+          target: $distance
+          arms:
+            - pattern:
+                $newtype:
+                  type: $meter
+                  inner:
+                    $bind: raw
+              do:
+                - $let:
+                    seen: $raw
+            - pattern:
+                $wildcard: null
+              do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+        .expect("newtype/interface patterns should use runtime type tags");
 }
 
 #[test]
@@ -219,11 +444,13 @@ main:
       - $match:
           target: $value-none
           arms:
-            none:
+            - pattern:
+                $m.option.none: null
               do:
                 - $io.println: "none"
-            some:
-              bind: text
+            - pattern:
+                $m.option.some:
+                  $bind: text
               do:
                 - $io.println: $text
 "#,
@@ -557,16 +784,18 @@ main:
       - $match:
           target: $opened-write
           arms:
-            ok:
-              bind: out
+            - pattern:
+                $result.result.ok:
+                  $bind: out
               do:
                 - $fs.writable.write-string:
                     self: $out
                     s: "from vibra fs"
                 - $fs.closeable.close:
                     self: $out
-            err:
-              bind: err
+            - pattern:
+                $result.result.err:
+                  $bind: err
               do: []
       - $let:
           opened-read:
@@ -575,8 +804,9 @@ main:
       - $match:
           target: $opened-read
           arms:
-            ok:
-              bind: input
+            - pattern:
+                $result.result.ok:
+                  $bind: input
               do:
                 - $let:
                     text:
@@ -584,8 +814,9 @@ main:
                         self: $input
                 - $fs.closeable.close:
                     self: $input
-            err:
-              bind: err2
+            - pattern:
+                $result.result.err:
+                  $bind: err2
               do: []
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
@@ -679,11 +910,12 @@ main:
       - $match:
           target: $made
           arms:
-            ok:
-              bind: made-ok
+            - pattern:
+                $result.result.ok: null
               do: []
-            err:
-              bind: made-err
+            - pattern:
+                $result.result.err:
+                  $bind: made-err
               do: []
       - $let:
           written:
@@ -693,11 +925,12 @@ main:
       - $match:
           target: $written
           arms:
-            ok:
-              bind: written-ok
+            - pattern:
+                $result.result.ok: null
               do: []
-            err:
-              bind: written-err
+            - pattern:
+                $result.result.err:
+                  $bind: written-err
               do: []
       - $let:
           appended:
@@ -707,11 +940,12 @@ main:
       - $match:
           target: $appended
           arms:
-            ok:
-              bind: appended-ok
+            - pattern:
+                $result.result.ok: null
               do: []
-            err:
-              bind: appended-err
+            - pattern:
+                $result.result.err:
+                  $bind: appended-err
               do: []
       - $let:
           read:
@@ -720,11 +954,13 @@ main:
       - $match:
           target: $read
           arms:
-            ok:
-              bind: read-ok
+            - pattern:
+                $result.result.ok:
+                  $bind: read-ok
               do: []
-            err:
-              bind: read-err
+            - pattern:
+                $result.result.err:
+                  $bind: read-err
               do: []
       - $let:
           stat:
@@ -733,11 +969,13 @@ main:
       - $match:
           target: $stat
           arms:
-            ok:
-              bind: stat-ok
+            - pattern:
+                $result.result.ok:
+                  $bind: stat-ok
               do: []
-            err:
-              bind: stat-err
+            - pattern:
+                $result.result.err:
+                  $bind: stat-err
               do: []
       - $let:
           canon:
@@ -746,11 +984,13 @@ main:
       - $match:
           target: $canon
           arms:
-            ok:
-              bind: canon-ok
+            - pattern:
+                $result.result.ok:
+                  $bind: canon-ok
               do: []
-            err:
-              bind: canon-err
+            - pattern:
+                $result.result.err:
+                  $bind: canon-err
               do: []
       - $let:
           entries:
@@ -759,11 +999,13 @@ main:
       - $match:
           target: $entries
           arms:
-            ok:
-              bind: entries-ok
+            - pattern:
+                $result.result.ok:
+                  $bind: entries-ok
               do: []
-            err:
-              bind: entries-err
+            - pattern:
+                $result.result.err:
+                  $bind: entries-err
               do: []
       - $let:
           removed-file:
@@ -772,11 +1014,12 @@ main:
       - $match:
           target: $removed-file
           arms:
-            ok:
-              bind: removed-file-ok
+            - pattern:
+                $result.result.ok: null
               do: []
-            err:
-              bind: removed-file-err
+            - pattern:
+                $result.result.err:
+                  $bind: removed-file-err
               do: []
       - $let:
           removed-dir:
@@ -785,11 +1028,12 @@ main:
       - $match:
           target: $removed-dir
           arms:
-            ok:
-              bind: removed-dir-ok
+            - pattern:
+                $result.result.ok: null
               do: []
-            err:
-              bind: removed-dir-err
+            - pattern:
+                $result.result.err:
+                  $bind: removed-dir-err
               do: []
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
@@ -841,11 +1085,13 @@ main:
       - $match:
           target: $read
           arms:
-            ok:
-              bind: read-ok
+            - pattern:
+                $result.result.ok:
+                  $bind: read-ok
               do: []
-            err:
-              bind: read-err
+            - pattern:
+                $result.result.err:
+                  $bind: read-err
               do: []
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
@@ -965,12 +1211,14 @@ main:
       - $match:
           target: $r-ok
           arms:
-            ok:
-              bind: x
+            - pattern:
+                $m.result.ok:
+                  $bind: x
               do:
                 - $io.println: "ok"
-            err:
-              bind: y
+            - pattern:
+                $m.result.err:
+                  $bind: y
               do:
                 - $io.println: $y
       - $let:
@@ -979,12 +1227,14 @@ main:
       - $match:
           target: $r-err
           arms:
-            ok:
-              bind: x2
+            - pattern:
+                $m.result.ok:
+                  $bind: x2
               do:
                 - $io.println: "no"
-            err:
-              bind: y2
+            - pattern:
+                $m.result.err:
+                  $bind: y2
               do:
                 - $io.println: $y2
 "#,

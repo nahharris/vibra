@@ -18,16 +18,18 @@ main:
       - $match:
           target: $opened-write
           arms:
-            ok:
-              bind: out
+            - pattern:
+                $result.result.ok:
+                  $bind: out
               do:
                 - $fs.writable.write-string:
                     self: $out
                     s: "from vibra fs"
                 - $fs.closeable.close:
                     self: $out
-            err:
-              bind: write-err
+            - pattern:
+                $result.result.err:
+                  $bind: write-err
               do:
                 - $io.eprintln: "failed to open file for writing"
       - $let:
@@ -37,8 +39,9 @@ main:
       - $match:
           target: $opened-read
           arms:
-            ok:
-              bind: input
+            - pattern:
+                $result.result.ok:
+                  $bind: input
               do:
                 - $let:
                     text-result:
@@ -47,17 +50,20 @@ main:
                 - $match:
                     target: $text-result
                     arms:
-                      ok:
-                        bind: text
+                      - pattern:
+                          $result.result.ok:
+                            $bind: text
                         do:
                           - $io.println: $text
-                      err:
-                        bind: read-err
+                      - pattern:
+                          $result.result.err:
+                            $bind: read-err
                         do:
                           - $io.eprintln: "failed to read file"
                 - $fs.closeable.close:
                     self: $input
-            err:
-              bind: open-err
+            - pattern:
+                $result.result.err:
+                  $bind: open-err
               do:
                 - $io.eprintln: "failed to open file for reading"

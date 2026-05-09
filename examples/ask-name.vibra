@@ -12,11 +12,13 @@ main:
       - $match:
           target: $name-result
           arms:
-            ok:
-              bind: name
+            - pattern:
+                $result.result.ok:
+                  $bind: name
               do:
                 - $io.println: $name
-            err:
-              bind: err
+            - pattern:
+                $result.result.err:
+                  $bind: err
               do:
                 - $io.eprintln: "failed to read stdin"
