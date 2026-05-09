@@ -23,6 +23,7 @@ pub struct UserFnContext {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeValue {
+    Bool(bool),
     Int(i64),
     Float(f64),
     Str(String),
@@ -2170,6 +2171,10 @@ fn collect_module_defs(
             constants.insert(qualified_key, RuntimeValue::Float(f));
             continue;
         }
+        if let Some(b) = v.as_bool() {
+            constants.insert(qualified_key, RuntimeValue::Bool(b));
+            continue;
+        }
         if let Some(s) = v.as_str() {
             constants.insert(qualified_key, RuntimeValue::Str(s.to_string()));
             continue;
@@ -3846,6 +3851,7 @@ fn parse_call(
         av,
         function,
         !function.type_params.is_empty(),
+        call_key,
         constants,
         type_aliases,
         enums,
@@ -3886,6 +3892,7 @@ fn parse_call_args(
     av: &Value,
     function: &FunctionSig,
     generic_call: bool,
+    call_key: &str,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
     enums: &HashMap<String, EnumDef>,
@@ -3938,6 +3945,15 @@ fn parse_call_args(
     let map = av
         .as_mapping()
         .context("expected mapping arguments for this call")?;
+    if !generic_call {
+        let allowed: HashSet<&str> = arg_names.iter().map(String::as_str).collect();
+        for k in map.keys() {
+            let ks = k.as_str().context("call argument key must be string")?;
+            if !allowed.contains(ks) {
+                bail!("unexpected key `{ks}` in call `{call_key}`");
+            }
+        }
+    }
     let mut out = Vec::with_capacity(arg_names.len());
     for n in arg_names {
         let v = map
@@ -4134,6 +4150,9 @@ fn parse_expr(
     if let Some(f) = v.as_f64() {
         return Ok(Expr::Value(RuntimeValue::Float(f)));
     }
+    if let Some(b) = v.as_bool() {
+        return Ok(Expr::Value(RuntimeValue::Bool(b)));
+    }
     if let Some(s) = v.as_str() {
         if let Some(var) = s.strip_prefix('$') {
             maybe_warn_kebab_qualified(var, "symbol reference", warnings);
@@ -4174,6 +4193,7 @@ fn infer_expr_type(
     enums: &HashMap<String, EnumDef>,
 ) -> Option<TypeRef> {
     match expr {
+        Expr::Value(RuntimeValue::Bool(_)) => Some(TypeRef::Bool),
         Expr::Value(RuntimeValue::Int(_)) => Some(TypeRef::Int64),
         Expr::Value(RuntimeValue::Float(_)) => Some(TypeRef::Float64),
         Expr::Value(RuntimeValue::Str(_)) => Some(TypeRef::Str),
@@ -4470,6 +4490,9 @@ fn parse_pattern(
     }
     if v.is_null() {
         return Ok(Pattern::Literal(RuntimeValue::Void));
+    }
+    if let Some(b) = v.as_bool() {
+        return Ok(Pattern::Literal(RuntimeValue::Bool(b)));
     }
     if let Some(i) = v.as_i64() {
         return Ok(Pattern::Literal(RuntimeValue::Int(i)));

@@ -1134,7 +1134,7 @@ fn exec_call(
                     let path = eval_domain_string(&call.args[0], env, "path")?;
                     let grant = eval_capability(&call.args[1], env)?;
                     let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
-                    Ok(RuntimeValue::Int(if p.exists() { 1 } else { 0 }))
+                    Ok(RuntimeValue::Bool(p.exists()))
                 }
                 "canonicalize" => {
                     let path = eval_domain_string(&call.args[0], env, "path")?;
