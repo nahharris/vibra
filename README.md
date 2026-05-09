@@ -16,9 +16,18 @@ cargo run -- run examples/hello.vibra
 vibra run examples/hello.vibra
 ```
 
-This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is now explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
+This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
 
-**Preopens:** by default the embedded runner does **not** preopen host directories (stdio is enough for hello). Programs that use [`stdlib/fs.vibra`](stdlib/fs.vibra) need at least one preopened path; configure [`RunConfig::preopen_host_dirs`](src/runtime/wasi_env.rs) when embedding, or add CLI flags when the compiler exposes them.
+**Permissions and grants:** privileged stdlib APIs take explicit grant arguments. The runtime mints grants from CLI consent flags and exposes them through `main` when it declares `args: { grants: $security.grants }`. Each grant field is matchable as `granted` or `denied`, so programs can degrade behavior when access is unavailable. Default policy is deny for privileged actions; stdout/stderr output remains baseline for CLI usability.
+
+```sh
+vibra run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
+```
+
+Filesystem grants use canonical ancestry checks; `--allow-read path/root` does not authorize a sibling like `path/root2`. The legacy `--preopen` flag remains as a compatibility alias that seeds both read and write filesystem grants for the embedded interpreter.
+Grants can also be attenuated before delegation; for example `fs.narrow-read` and `fs.narrow-write` derive child grants scoped to a subpath without widening the original authority.
+
+**Known escape hatch:** arbitrary `$wasm` declarations are still accepted. The grant model currently applies to grant-aware stdlib APIs, not to untrusted modules that define their own `$wasm` shims. Future work should make `$wasm` trusted-stdlib-only or require an explicit unsafe/trust policy.
 
 **Current subset:** entry module defines `main` with `args: $void`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns and ordered `$match` sequence arms with explicit `pattern:` entries). Entry and imported modules may also define **user functions** (`do:` with `$let` / `$match` / `$return`) and **generic functions** (`$function` with the `=where` annotation declaring type parameters and bounds); generic calls pass explicit type arguments in the same mapping as value arguments (see [DRAFT.md](DRAFT.md)). `io` and `fs` functions declared in [stdlib/io.vibra](stdlib/io.vibra) and [stdlib/fs.vibra](stdlib/fs.vibra) are executable via the runtime execution backend.
 
@@ -45,8 +54,8 @@ This parses the entry `.vibra` file, resolves `$import` **relative to that file�
 # Interactive stdin path
 cargo run -- run examples/ask-name.vibra
 
-# Filesystem roundtrip (requires preopen)
-cargo run -- run examples/fs-roundtrip.vibra --preopen .
+# Filesystem roundtrip (requires grants)
+cargo run -- run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
 ```
 
 ## Build & test

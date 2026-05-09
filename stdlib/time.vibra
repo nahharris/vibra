@@ -1,0 +1,15 @@
+security:
+  $import: ./security.vibra
+
+now-unix-millis:
+  $function:
+    args:
+      grant: $security.clock-grant
+    return: $uint64
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: clock_time_get
+          args:
+            - $args.grant

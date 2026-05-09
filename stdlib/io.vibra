@@ -1,9 +1,12 @@
 fs:
   $import: ./fs.vibra
+security:
+  $import: ./security.vibra
 
 stdin:
   $function:
-    args: $void
+    args:
+      grant: $security.stdin-read-grant
     return: $fs.read-file
     do:
       - $return:
@@ -109,7 +112,8 @@ eprintln:
 
 readln:
   $function:
-    args: $void
+    args:
+      grant: $security.stdin-read-grant
     return:
       $result.result:
         t: $str
@@ -117,7 +121,8 @@ readln:
     do:
       - $let:
           input:
-            $io.stdin: null
+            $io.stdin:
+              grant: $args.grant
       - $let:
           result:
             $fs.readable.read-string:

@@ -4,6 +4,9 @@ bytes-lib:
 result:
   $import: ./result.vibra
 
+security:
+  $import: ./security.vibra
+
 path:
   $newtype: $str
   =defs:
@@ -489,6 +492,7 @@ open-read:
   $function:
     args:
       p: $path
+      grant: $security.fs-read-grant
     return:
       $result.result:
         t: $read-file
@@ -500,11 +504,13 @@ open-read:
             name: path_open
           args:
             - $args.p
+            - $args.grant
 
 open-write:
   $function:
     args:
       p: $path
+      grant: $security.fs-write-grant
     return:
       $result.result:
         t: $write-file
@@ -516,11 +522,13 @@ open-write:
             name: path_open
           args:
             - $args.p
+            - $args.grant
 
 open-append:
   $function:
     args:
       p: $path
+      grant: $security.fs-write-grant
     return:
       $result.result:
         t: $append-file
@@ -532,11 +540,14 @@ open-append:
             name: path_open
           args:
             - $args.p
+            - $args.grant
 
 open-read-write:
   $function:
     args:
       p: $path
+      read-grant: $security.fs-read-grant
+      write-grant: $security.fs-write-grant
     return:
       $result.result:
         t: $read-write-file
@@ -548,11 +559,50 @@ open-read-write:
             name: path_open
           args:
             - $args.p
+            - $args.read-grant
+            - $args.write-grant
+
+narrow-read:
+  $function:
+    args:
+      grant: $security.fs-read-grant
+      p: $path
+    return:
+      $result.result:
+        t: $security.fs-read-grant
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: grant_narrow_read
+          args:
+            - $args.grant
+            - $args.p
+
+narrow-write:
+  $function:
+    args:
+      grant: $security.fs-write-grant
+      p: $path
+    return:
+      $result.result:
+        t: $security.fs-write-grant
+        e: $fs-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: grant_narrow_write
+          args:
+            - $args.grant
+            - $args.p
 
 read-to-string:
   $function:
     args:
       p: $path
+      grant: $security.fs-read-grant
     return:
       $result.result:
         t: $str
@@ -564,12 +614,14 @@ read-to-string:
             name: read_to_string
           args:
             - $args.p
+            - $args.grant
 
 write-string-all:
   $function:
     args:
       p: $path
       s: $str
+      grant: $security.fs-write-grant
     return:
       $result.result:
         t: $void
@@ -582,12 +634,14 @@ write-string-all:
           args:
             - $args.p
             - $args.s
+            - $args.grant
 
 append-string:
   $function:
     args:
       p: $path
       s: $str
+      grant: $security.fs-write-grant
     return:
       $result.result:
         t: $void
@@ -600,11 +654,13 @@ append-string:
           args:
             - $args.p
             - $args.s
+            - $args.grant
 
 exists:
   $function:
     args:
       p: $path
+      grant: $security.fs-read-grant
     return: $bool
     do:
       - $wasm:
@@ -613,11 +669,13 @@ exists:
             name: path_filestat_get
           args:
             - $args.p
+            - $args.grant
 
 create-dir-all:
   $function:
     args:
       p: $path
+      grant: $security.fs-write-grant
     return:
       $result.result:
         t: $void
@@ -629,11 +687,13 @@ create-dir-all:
             name: path_create_directory
           args:
             - $args.p
+            - $args.grant
 
 remove-file:
   $function:
     args:
       p: $path
+      grant: $security.fs-write-grant
     return:
       $result.result:
         t: $void
@@ -645,11 +705,13 @@ remove-file:
             name: path_unlink_file
           args:
             - $args.p
+            - $args.grant
 
 remove-dir:
   $function:
     args:
       p: $path
+      grant: $security.fs-write-grant
     return:
       $result.result:
         t: $void
@@ -661,11 +723,13 @@ remove-dir:
             name: path_remove_directory
           args:
             - $args.p
+            - $args.grant
 
 read-dir:
   $function:
     args:
       p: $path
+      grant: $security.fs-read-grant
     return:
       $result.result:
         t:
@@ -678,11 +742,13 @@ read-dir:
             name: fd_readdir
           args:
             - $args.p
+            - $args.grant
 
 metadata:
   $function:
     args:
       p: $path
+      grant: $security.fs-read-grant
     return:
       $result.result:
         t: $str
@@ -694,11 +760,13 @@ metadata:
             name: path_filestat_get
           args:
             - $args.p
+            - $args.grant
 
 canonicalize:
   $function:
     args:
       p: $path
+      grant: $security.fs-read-grant
     return:
       $result.result:
         t: $path
@@ -710,3 +778,4 @@ canonicalize:
             name: path_filestat_get
           args:
             - $args.p
+            - $args.grant

@@ -1,0 +1,28 @@
+security:
+  $import: ./security.vibra
+
+result:
+  $import: ./result.vibra
+
+process-error:
+  $enum:
+    permission-denied: $void
+    unsupported: $str
+
+run:
+  $function:
+    args:
+      command: $str
+      grant: $security.process-run-grant
+    return:
+      $result.result:
+        t: $void
+        e: $process-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: process_run
+          args:
+            - $args.command
+            - $args.grant

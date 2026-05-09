@@ -1,0 +1,46 @@
+security:
+  $import: ./security.vibra
+
+result:
+  $import: ./result.vibra
+
+net-error:
+  $enum:
+    permission-denied: $void
+    unsupported: $str
+
+connect:
+  $function:
+    args:
+      target: $str
+      grant: $security.net-connect-grant
+    return:
+      $result.result:
+        t: $void
+        e: $net-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: net_connect
+          args:
+            - $args.target
+            - $args.grant
+
+listen:
+  $function:
+    args:
+      target: $str
+      grant: $security.net-listen-grant
+    return:
+      $result.result:
+        t: $void
+        e: $net-error
+    do:
+      - $wasm:
+          import:
+            module: wasi_snapshot_preview1
+            name: net_listen
+          args:
+            - $args.target
+            - $args.grant
