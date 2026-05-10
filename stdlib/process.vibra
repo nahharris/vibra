@@ -11,8 +11,8 @@ process-error:
 
 run:
   $function: $str
-  args:
-    grant: $security.process-run-grant
+  grants:
+    process-run: $security.grant.mandatory
   return:
     $result.result:
       t: $void
@@ -24,4 +24,3 @@ run:
           name: process_run
         args:
           - $args.subject
-          - $args.grant

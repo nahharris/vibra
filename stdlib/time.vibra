@@ -2,7 +2,9 @@ security:
   $import: ./security.vibra
 
 now-unix-millis:
-  $function: $security.clock-grant
+  $function: $void
+  grants:
+    clock: $security.grant.mandatory
   return: $uint64
   do:
     - $wasm:
@@ -10,4 +12,4 @@ now-unix-millis:
           module: wasi_snapshot_preview1
           name: clock_time_get
         args:
-          - $args.subject
+          - $const.0

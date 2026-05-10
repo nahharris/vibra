@@ -453,8 +453,8 @@ read-write-file:
 
 open-read:
   $function: $path
-  args:
-    grant: $security.fs-read-grant
+  grants:
+    fs-read: $security.grant.mandatory
   return:
     $result.result:
       t: $read-file
@@ -466,12 +466,11 @@ open-read:
           name: path_open
         args:
           - $args.subject
-          - $args.grant
 
 open-write:
   $function: $path
-  args:
-    grant: $security.fs-write-grant
+  grants:
+    fs-write: $security.grant.mandatory
   return:
     $result.result:
       t: $write-file
@@ -483,12 +482,11 @@ open-write:
           name: path_open
         args:
           - $args.subject
-          - $args.grant
 
 open-append:
   $function: $path
-  args:
-    grant: $security.fs-write-grant
+  grants:
+    fs-write: $security.grant.mandatory
   return:
     $result.result:
       t: $append-file
@@ -500,13 +498,12 @@ open-append:
           name: path_open
         args:
           - $args.subject
-          - $args.grant
 
 open-read-write:
   $function: $path
-  args:
-    read-grant: $security.fs-read-grant
-    write-grant: $security.fs-write-grant
+  grants:
+    fs-read: $security.grant.mandatory
+    fs-write: $security.grant.mandatory
   return:
     $result.result:
       t: $read-write-file
@@ -518,47 +515,11 @@ open-read-write:
           name: path_open
         args:
           - $args.subject
-          - $args.read-grant
-          - $args.write-grant
-
-narrow-read:
-  $function: $security.fs-read-grant
-  args:
-    p: $path
-  return:
-    $result.result:
-      t: $security.fs-read-grant
-      e: $fs-error
-  do:
-    - $wasm:
-        import:
-          module: wasi_snapshot_preview1
-          name: grant_narrow_read
-        args:
-          - $args.subject
-          - $args.p
-
-narrow-write:
-  $function: $security.fs-write-grant
-  args:
-    p: $path
-  return:
-    $result.result:
-      t: $security.fs-write-grant
-      e: $fs-error
-  do:
-    - $wasm:
-        import:
-          module: wasi_snapshot_preview1
-          name: grant_narrow_write
-        args:
-          - $args.subject
-          - $args.p
 
 read-to-string:
   $function: $path
-  args:
-    grant: $security.fs-read-grant
+  grants:
+    fs-read: $security.grant.mandatory
   return:
     $result.result:
       t: $str
@@ -570,13 +531,13 @@ read-to-string:
           name: read_to_string
         args:
           - $args.subject
-          - $args.grant
 
 write-string-all:
   $function: $path
   args:
     s: $str
-    grant: $security.fs-write-grant
+  grants:
+    fs-write: $security.grant.mandatory
   return:
     $result.result:
       t: $void
@@ -589,13 +550,13 @@ write-string-all:
         args:
           - $args.subject
           - $args.s
-          - $args.grant
 
 append-string:
   $function: $path
   args:
     s: $str
-    grant: $security.fs-write-grant
+  grants:
+    fs-write: $security.grant.mandatory
   return:
     $result.result:
       t: $void
@@ -608,12 +569,11 @@ append-string:
         args:
           - $args.subject
           - $args.s
-          - $args.grant
 
 exists:
   $function: $path
-  args:
-    grant: $security.fs-read-grant
+  grants:
+    fs-read: $security.grant.mandatory
   return: $bool
   do:
     - $wasm:
@@ -622,12 +582,11 @@ exists:
           name: path_filestat_get
         args:
           - $args.subject
-          - $args.grant
 
 create-dir-all:
   $function: $path
-  args:
-    grant: $security.fs-write-grant
+  grants:
+    fs-write: $security.grant.mandatory
   return:
     $result.result:
       t: $void
@@ -639,12 +598,11 @@ create-dir-all:
           name: path_create_directory
         args:
           - $args.subject
-          - $args.grant
 
 remove-file:
   $function: $path
-  args:
-    grant: $security.fs-write-grant
+  grants:
+    fs-write: $security.grant.mandatory
   return:
     $result.result:
       t: $void
@@ -656,12 +614,11 @@ remove-file:
           name: path_unlink_file
         args:
           - $args.subject
-          - $args.grant
 
 remove-dir:
   $function: $path
-  args:
-    grant: $security.fs-write-grant
+  grants:
+    fs-write: $security.grant.mandatory
   return:
     $result.result:
       t: $void
@@ -673,12 +630,11 @@ remove-dir:
           name: path_remove_directory
         args:
           - $args.subject
-          - $args.grant
 
 read-dir:
   $function: $path
-  args:
-    grant: $security.fs-read-grant
+  grants:
+    fs-read: $security.grant.mandatory
   return:
     $result.result:
       t:
@@ -691,12 +647,11 @@ read-dir:
           name: fd_readdir
         args:
           - $args.subject
-          - $args.grant
 
 metadata:
   $function: $path
-  args:
-    grant: $security.fs-read-grant
+  grants:
+    fs-read: $security.grant.mandatory
   return:
     $result.result:
       t: $str
@@ -708,12 +663,11 @@ metadata:
           name: path_filestat_get
         args:
           - $args.subject
-          - $args.grant
 
 canonicalize:
   $function: $path
-  args:
-    grant: $security.fs-read-grant
+  grants:
+    fs-read: $security.grant.mandatory
   return:
     $result.result:
       t: $path
@@ -725,4 +679,3 @@ canonicalize:
           name: path_filestat_get
         args:
           - $args.subject
-          - $args.grant
