@@ -20,8 +20,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct UserFnContext {
     pub return_type: TypeRef,
-    /// Module alias where this function is defined (`""` = entry). Used to resolve
-    /// module-private calls like `$-helper` inside imported modules.
+    /// Full import path of the defining module (`""` = entry). Resolves private `-` calls,
+    /// nested import aliases (e.g. `$util.id` → `a.util.id`), and iface/type qualification.
     pub home_module: String,
 }
 
@@ -686,8 +686,9 @@ fn collect_module_skeleton_tree(
         let imp_s = imp.as_str().context("$import value must be string")?;
         let nested_path = resolve_import_path(module_path, imp_s, entry_project)
             .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
+        let full_nested = join_module_prefix(alias, nested_alias);
         collect_module_skeleton_tree(
-            nested_alias,
+            &full_nested,
             &nested_path,
             program,
             entry_project,
@@ -726,6 +727,9 @@ fn collect_module_skeletons(
         } else {
             format!("{alias}.{name}")
         };
+        if skeletons.contains_key(&key) {
+            bail!("duplicate type symbol `{key}` (skeleton pass)");
+        }
         skeletons.insert(
             key,
             AliasSkeleton {
@@ -1605,31 +1609,47 @@ fn resolve_import_path(
     fs::canonicalize(&raw).with_context(|| format!("cannot resolve import `{}`", raw.display()))
 }
 
+/// Build the logical module prefix for nested `$import` keys (`a` + `util` → `a.util`).
+fn join_module_prefix(parent: &str, child: &str) -> String {
+    if parent.is_empty() {
+        child.to_string()
+    } else {
+        format!("{parent}.{child}")
+    }
+}
+
+/// Prefer `{alias}.{name}` when that key exists in `aliases`, so nested imports like
+/// `$fs.read-file` inside module `io` resolve to `io.fs.read-file` (and `a.io.fs.read-file`
+/// when `io` is mounted under `a`). If the prefix misses, accept `name` when it is already
+/// a registered key (fully-qualified reference). Otherwise keep `name` unqualified.
+fn qualify_type_name_key(
+    alias: &str,
+    name: String,
+    aliases: &HashMap<String, TypeAlias>,
+) -> String {
+    if !alias.is_empty() {
+        let qual = format!("{alias}.{name}");
+        if aliases.contains_key(&qual) {
+            return qual;
+        }
+        // `io.vibra` uses `$result.*` for types that live under the nested `fs` import
+        // (`io.fs.result.*`). Prefer that before falling back to a stray global `result.*`.
+        let via_fs = format!("{alias}.fs.{name}");
+        if aliases.contains_key(&via_fs) {
+            return via_fs;
+        }
+    }
+    if aliases.contains_key(&name) {
+        return name;
+    }
+    name
+}
+
 fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAlias>) -> TypeRef {
     match ty {
-        TypeRef::Named(name) => {
-            if name.contains('.') || alias.is_empty() {
-                TypeRef::Named(name)
-            } else {
-                let qual = format!("{alias}.{name}");
-                if aliases.contains_key(&qual) {
-                    TypeRef::Named(qual)
-                } else {
-                    TypeRef::Named(name)
-                }
-            }
-        }
+        TypeRef::Named(name) => TypeRef::Named(qualify_type_name_key(alias, name, aliases)),
         TypeRef::Instantiated { base, type_args } => {
-            let new_base = if base.contains('.') || alias.is_empty() {
-                base
-            } else {
-                let qual = format!("{alias}.{base}");
-                if aliases.contains_key(&qual) {
-                    qual
-                } else {
-                    base
-                }
-            };
+            let new_base = qualify_type_name_key(alias, base, aliases);
             TypeRef::Instantiated {
                 base: new_base,
                 type_args: type_args
@@ -2119,8 +2139,9 @@ fn collect_module_defs_tree(
         let imp_s = imp.as_str().context("$import value must be string")?;
         let nested_path = resolve_import_path(module_path, imp_s, entry_project)
             .with_context(|| format!("resolve nested import alias `{nested_alias}`"))?;
+        let full_nested = join_module_prefix(alias, nested_alias);
         collect_module_defs_tree(
-            nested_alias,
+            &full_nested,
             &nested_path,
             program,
             entry_project,
@@ -2414,11 +2435,17 @@ fn collect_module_defs(
             body: body.clone(),
             doc: env.doc.clone(),
         };
+        if type_aliases.contains_key(&qualified_key) {
+            bail!("duplicate type definition `{qualified_key}`");
+        }
         type_aliases.insert(qualified_key.clone(), alias_def);
         if env.form_key == "$enum" {
             let TypeRef::Enum(tags) = body else {
                 bail!("internal: $enum body did not produce TypeRef::Enum");
             };
+            if enums.contains_key(&qualified_key) {
+                bail!("duplicate enum `{qualified_key}`");
+            }
             enums.insert(
                 qualified_key,
                 EnumDef {
@@ -2524,18 +2551,30 @@ fn collect_module_defs(
             format!("{alias}.{name}")
         };
         if let Some(b) = v.as_bool() {
+            if constants.contains_key(&qualified_key) {
+                bail!("duplicate constant `{qualified_key}`");
+            }
             constants.insert(qualified_key, RuntimeValue::Bool(b));
             continue;
         }
         if let Some(i) = v.as_i64() {
+            if constants.contains_key(&qualified_key) {
+                bail!("duplicate constant `{qualified_key}`");
+            }
             constants.insert(qualified_key, RuntimeValue::Int(i));
             continue;
         }
         if let Some(f) = v.as_f64() {
+            if constants.contains_key(&qualified_key) {
+                bail!("duplicate constant `{qualified_key}`");
+            }
             constants.insert(qualified_key, RuntimeValue::Float(f));
             continue;
         }
         if let Some(s) = v.as_str() {
+            if constants.contains_key(&qualified_key) {
+                bail!("duplicate constant `{qualified_key}`");
+            }
             constants.insert(qualified_key, RuntimeValue::Str(s.to_string()));
             continue;
         }
@@ -2645,6 +2684,9 @@ fn try_register_function(
     };
     let raw_bounds = resolve_def_envelope_bounds(&env, skeletons, warnings)?;
     let resolved_bounds = qualify_bounds(alias, raw_bounds, type_aliases);
+    if sigs.contains_key(&sig_key) {
+        bail!("duplicate function `{sig_key}`");
+    }
     sigs.insert(
         sig_key.clone(),
         FunctionSig {
@@ -2907,11 +2949,13 @@ fn resolve_iface_alias<'a>(
     let stripped = iface_alias_str.strip_prefix('$').with_context(|| {
         format!("E-IMPL-002: interface key `{iface_alias_str}` must start with `$`")
     })?;
-    let candidates: [String; 2] = if stripped.contains('.') || module_alias.is_empty() {
-        [stripped.to_string(), String::new()]
-    } else {
-        [format!("{module_alias}.{stripped}"), stripped.to_string()]
-    };
+    // Try `{module_alias}.{stripped}` first even when `stripped` contains `.` so
+    // `$fs.writable` inside module `io` resolves to `io.fs.writable`, not a stray global `fs.writable`.
+    let mut candidates: Vec<String> = Vec::new();
+    if !module_alias.is_empty() {
+        candidates.push(format!("{module_alias}.{stripped}"));
+    }
+    candidates.push(stripped.to_string());
     for cand in candidates.iter().filter(|s| !s.is_empty()) {
         if let Some(ta) = type_aliases.get(cand) {
             return Ok((cand.clone(), ta));
@@ -3177,12 +3221,12 @@ fn bind_impl_method(
         let stripped = s
             .strip_prefix('$')
             .context("impl method ref must start with `$`")?;
-        // Walk the registry candidates: full path, or module-qualified path.
-        let candidates: [String; 2] = if stripped.contains('.') || module_alias.is_empty() {
-            [stripped.to_string(), String::new()]
-        } else {
-            [format!("{module_alias}.{stripped}"), stripped.to_string()]
-        };
+        // Walk the registry candidates: module-qualified path first, then bare path.
+        let mut candidates: Vec<String> = Vec::new();
+        if !module_alias.is_empty() {
+            candidates.push(format!("{module_alias}.{stripped}"));
+        }
+        candidates.push(stripped.to_string());
         let mut found: Option<&FunctionSig> = None;
         let mut found_key: Option<String> = None;
         for cand in candidates.iter().filter(|s| !s.is_empty()) {
@@ -4395,7 +4439,7 @@ fn lower_statement(
             .context("$let variable must be string")?
             .to_string();
         maybe_warn_kebab(&var, "local variable", warnings);
-        if looks_like_call(vv, sigs, home) || looks_like_iface_call(vv, type_aliases) {
+        if looks_like_call(vv, sigs, home) || looks_like_iface_call(vv, home, type_aliases) {
             let call = parse_call(
                 vv,
                 sigs,
@@ -4528,18 +4572,76 @@ fn lower_statement(
     }
 }
 
+/// Resolve a dotted interface path from source (`fs.writable`) using the
+/// current module scope (`io` → `io.fs.writable`), then fall back to the bare path.
+fn resolve_iface_key_for_scope(
+    iface_path: &str,
+    module_scope: &str,
+    type_aliases: &HashMap<String, TypeAlias>,
+) -> Result<String> {
+    if !module_scope.is_empty() {
+        let scoped = format!("{module_scope}.{iface_path}");
+        if type_aliases.contains_key(&scoped) {
+            return Ok(scoped);
+        }
+    }
+    if type_aliases.contains_key(iface_path) {
+        return Ok(iface_path.to_string());
+    }
+    bail!(
+        "interface path `${iface_path}` is not registered for this module scope \
+         (try `{}` or `{}`)",
+        if module_scope.is_empty() {
+            iface_path.to_string()
+        } else {
+            format!("{module_scope}.{iface_path}")
+        },
+        iface_path
+    );
+}
+
+/// When `module_scope` is `a.io` but a value is still typed as a peer key like `io.fs.*`,
+/// rewrite to `a.io.fs.*` if that nominal type exists.
+fn nominal_type_key_for_module_scope(
+    key: String,
+    module_scope: &str,
+    type_aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+) -> String {
+    if module_scope.is_empty() || key.starts_with(module_scope) {
+        return key;
+    }
+    let prefixed = format!("{module_scope}.{key}");
+    if type_aliases.contains_key(&prefixed) || enums.contains_key(&prefixed) {
+        return prefixed;
+    }
+    // Inference sometimes keeps types keyed as `io.fs.*` (peer of `io`) while the body is
+    // compiled under a mount like `a.io`; bridge to `a.io.fs.*`.
+    if let Some(rest) = key.strip_prefix("io.fs.") {
+        let bridged = format!("{module_scope}.fs.{rest}");
+        if type_aliases.contains_key(&bridged) || enums.contains_key(&bridged) {
+            return bridged;
+        }
+    }
+    key
+}
+
 /// Heuristic: does this value look like an interface-qualified call, i.e.
 /// a single-key mapping `$alias.symbol: <payload>` whose first segment
 /// resolves to a registered interface alias? Used by `lower_statement` to
 /// route `$let` values through `parse_call` rather than `parse_expr`.
-fn looks_like_iface_call(v: &Value, type_aliases: &HashMap<String, TypeAlias>) -> bool {
+fn looks_like_iface_call(
+    v: &Value,
+    home_module: &str,
+    type_aliases: &HashMap<String, TypeAlias>,
+) -> bool {
     let Some(m) = v.as_mapping() else {
         return false;
     };
     let Ok((call_key, _, _)) = split_call_envelope(m) else {
         return false;
     };
-    iface_dispatch_arg_name(&call_key, type_aliases).is_ok()
+    iface_dispatch_arg_name(&call_key, home_module, type_aliases).is_ok()
 }
 
 /// Phase 6: resolve an interface-qualified call (`$iface.method`) to the
@@ -4572,16 +4674,17 @@ fn try_resolve_iface_call(
         format!("`{call_key}` is not an interface-qualified call (no `.method` suffix)")
     })?;
 
-    let iface_def = type_aliases.get(iface_path).with_context(|| {
-        format!("`{call_key}`: interface alias `${iface_path}` is not registered")
+    let iface_qualified = resolve_iface_key_for_scope(iface_path, home_module, type_aliases)
+        .with_context(|| format!("`{call_key}`: interface dispatch"))?;
+    let iface_def = type_aliases.get(&iface_qualified).with_context(|| {
+        format!("`{call_key}`: interface alias `{iface_qualified}` is not registered")
     })?;
     let TypeRef::Interface(iface_methods) = &iface_def.body else {
         bail!(
-            "`{call_key}`: `${iface_path}` is not an interface (its body is `{:?}`)",
+            "`{call_key}`: `{iface_qualified}` is not an interface (its body is `{:?}`)",
             iface_def.body
         );
     };
-    let iface_qualified = iface_path.to_string();
     let expected = iface_methods.get(method).with_context(|| {
         format!("interface `{iface_qualified}` has no method `{method}` (called via `{call_key}`)")
     })?;
@@ -4653,6 +4756,8 @@ fn try_resolve_iface_call(
              (no nominal `=impl` block can exist for primitives, tuples, records, or unions)"
         ),
     };
+    let implementing =
+        nominal_type_key_for_module_scope(implementing, home_module, type_aliases, enums);
 
     let impl_key = ImplKey {
         implementing_type: implementing.clone(),
@@ -4685,6 +4790,23 @@ fn resolve_call_target(
         if !alias.is_empty() && symbol.starts_with('-') {
             bail!("unknown function `{call_key}`");
         }
+        // Prefer module-scoped keys before unscoped `{alias}.{symbol}` so a nested `util`
+        // does not accidentally bind to a same-named entry import.
+        if !home_module.is_empty() {
+            let scoped = format!("{home_module}.{alias}.{symbol}");
+            if sigs.contains_key(&scoped) {
+                return Ok(scoped);
+            }
+            // Stdlib modules refer to their own exports as `$io.foo` while mounted at `a.io`;
+            // resolve that to `a.io.foo`, not `a.io.io.foo`.
+            let leaf = home_module.rsplit('.').next().unwrap_or(home_module);
+            if alias == leaf {
+                let self_export = format!("{home_module}.{symbol}");
+                if sigs.contains_key(&self_export) {
+                    return Ok(self_export);
+                }
+            }
+        }
         let sig_key = format!("{alias}.{symbol}");
         if sigs.contains_key(&sig_key) {
             return Ok(sig_key);
@@ -4710,6 +4832,7 @@ fn resolve_call_target(
 /// Name of the `$self`-typed dispatch argument for an interface-qualified call.
 fn iface_dispatch_arg_name(
     call_key: &str,
+    home_module: &str,
     type_aliases: &HashMap<String, TypeAlias>,
 ) -> Result<String> {
     let stripped = call_key
@@ -4719,16 +4842,17 @@ fn iface_dispatch_arg_name(
         format!("`{call_key}` is not an interface-qualified call (no `.method` suffix)")
     })?;
 
-    let iface_def = type_aliases.get(iface_path).with_context(|| {
-        format!("`{call_key}`: interface alias `${iface_path}` is not registered")
+    let iface_qualified = resolve_iface_key_for_scope(iface_path, home_module, type_aliases)
+        .with_context(|| format!("`{call_key}`: interface dispatch"))?;
+    let iface_def = type_aliases.get(&iface_qualified).with_context(|| {
+        format!("`{call_key}`: interface alias `{iface_qualified}` is not registered")
     })?;
     let TypeRef::Interface(iface_methods) = &iface_def.body else {
         bail!(
-            "`{call_key}`: `${iface_path}` is not an interface (its body is `{:?}`)",
+            "`{call_key}`: `{iface_qualified}` is not an interface (its body is `{:?}`)",
             iface_def.body
         );
     };
-    let iface_qualified = iface_path.to_string();
     let expected = iface_methods.get(method).with_context(|| {
         format!("interface `{iface_qualified}` has no method `{method}` (called via `{call_key}`)")
     })?;
@@ -4766,9 +4890,10 @@ fn build_iface_dispatch_payload(
     call_key: &str,
     subject: &Value,
     siblings: &[(String, Value)],
+    home_module: &str,
     type_aliases: &HashMap<String, TypeAlias>,
 ) -> Result<Value> {
-    let self_name = iface_dispatch_arg_name(call_key, type_aliases)?;
+    let self_name = iface_dispatch_arg_name(call_key, home_module, type_aliases)?;
     let mut map = serde_yaml::Mapping::new();
     map.insert(Value::String(self_name), subject.clone());
     for (k, v) in siblings {
@@ -4781,6 +4906,7 @@ fn build_iface_dispatch_payload(
 /// a registered interface method.
 fn iface_method_record_field_names(
     call_key: &str,
+    home_module: &str,
     type_aliases: &HashMap<String, TypeAlias>,
 ) -> Result<Option<Vec<String>>> {
     let stripped = match call_key.strip_prefix('$') {
@@ -4791,7 +4917,11 @@ fn iface_method_record_field_names(
         Some(p) => p,
         None => return Ok(None),
     };
-    let Some(iface_def) = type_aliases.get(iface_path) else {
+    let iface_qualified = match resolve_iface_key_for_scope(iface_path, home_module, type_aliases) {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+    let Some(iface_def) = type_aliases.get(&iface_qualified) else {
         return Ok(None);
     };
     let TypeRef::Interface(iface_methods) = &iface_def.body else {
@@ -4814,12 +4944,13 @@ fn reject_iface_nested_call_bundle(
     call_key: &str,
     subject: &Value,
     siblings: &[(String, Value)],
+    home_module: &str,
     type_aliases: &HashMap<String, TypeAlias>,
 ) -> Result<()> {
     if !siblings.is_empty() {
         return Ok(());
     }
-    let Some(fields) = iface_method_record_field_names(call_key, type_aliases)? else {
+    let Some(fields) = iface_method_record_field_names(call_key, home_module, type_aliases)? else {
         return Ok(());
     };
     let Some(subm) = subject.as_mapping() else {
@@ -5081,9 +5212,21 @@ fn parse_call(
     let callee_key = match resolve_call_target(&call_key, sigs, home_module) {
         Ok(k) => k,
         Err(direct_err) => {
-            reject_iface_nested_call_bundle(&call_key, &subject, &siblings, type_aliases)?;
-            let merged = build_iface_dispatch_payload(&call_key, &subject, &siblings, type_aliases)
-                .with_context(|| format!("{direct_err}"))?;
+            reject_iface_nested_call_bundle(
+                &call_key,
+                &subject,
+                &siblings,
+                home_module,
+                type_aliases,
+            )?;
+            let merged = build_iface_dispatch_payload(
+                &call_key,
+                &subject,
+                &siblings,
+                home_module,
+                type_aliases,
+            )
+            .with_context(|| format!("{direct_err}"))?;
             try_resolve_iface_call(
                 &call_key,
                 &merged,
@@ -5297,7 +5440,9 @@ fn parse_expr(
     warnings: &mut Vec<String>,
 ) -> Result<Expr> {
     if let Some(m) = v.as_mapping() {
-        if looks_like_call(v, sigs, home_module) || looks_like_iface_call(v, type_aliases) {
+        if looks_like_call(v, sigs, home_module)
+            || looks_like_iface_call(v, home_module, type_aliases)
+        {
             let call = parse_call(
                 v,
                 sigs,
@@ -5350,7 +5495,7 @@ fn parse_expr(
             let empty_skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
             let target = parse_type_ref(into_v, &[], &empty_skeletons, warnings, false)
                 .context("E-CAST-002: invalid `$cast.into` type")?;
-            let target = qualify_named_type("", target, type_aliases);
+            let target = qualify_named_type(home_module, target, type_aliases);
             if capability_alias(&target, type_aliases).is_some()
                 || matches!(target, TypeRef::Capability { .. })
             {
@@ -5523,7 +5668,7 @@ fn parse_expr(
                     );
                 }
                 if constructor.starts_with('$') {
-                    let (enum_key, tag) = resolve_enum_tag_ref(constructor, enums)?;
+                    let (enum_key, tag) = resolve_enum_tag_ref(constructor, home_module, enums)?;
                     maybe_warn_kebab(&tag, "enum tag", warnings);
                     let enum_def = enums.get(&enum_key).with_context(|| {
                         format!("unknown enum `{enum_key}` in constructor `{constructor}`")
@@ -5592,7 +5737,7 @@ fn parse_expr(
     if let Some(s) = v.as_str() {
         if let Some(var) = s.strip_prefix('$') {
             maybe_warn_kebab_qualified(var, "symbol reference", warnings);
-            if let Ok((enum_key, tag)) = resolve_enum_tag_ref(s, enums) {
+            if let Ok((enum_key, tag)) = resolve_enum_tag_ref(s, home_module, enums) {
                 if let Some(enum_def) = enums.get(&enum_key) {
                     let payload_ty = enum_def.tags.get(tag.as_str()).with_context(|| {
                         format!("unknown enum tag `{tag}` for enum `{enum_key}`")
@@ -5962,6 +6107,7 @@ fn parse_pattern(
     v: &Value,
     type_aliases: &HashMap<String, TypeAlias>,
     enums: &HashMap<String, EnumDef>,
+    module_scope: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Pattern> {
     if let Some(m) = v.as_mapping() {
@@ -5985,7 +6131,7 @@ fn parse_pattern(
                 for (fk, fv) in fields_v {
                     let name = fk.as_str().context("$record pattern key must be string")?;
                     maybe_warn_kebab(name, "record pattern field", warnings);
-                    let pat = parse_pattern(fv, type_aliases, enums, warnings)?;
+                    let pat = parse_pattern(fv, type_aliases, enums, module_scope, warnings)?;
                     if fields.insert(name.to_string(), pat).is_some() {
                         bail!("duplicate $record pattern field `{name}`");
                     }
@@ -5999,7 +6145,9 @@ fn parse_pattern(
                 return Ok(Pattern::Tuple(
                     items_v
                         .iter()
-                        .map(|item| parse_pattern(item, type_aliases, enums, warnings))
+                        .map(|item| {
+                            parse_pattern(item, type_aliases, enums, module_scope, warnings)
+                        })
                         .collect::<Result<Vec<_>>>()?,
                 ));
             }
@@ -6010,7 +6158,9 @@ fn parse_pattern(
                 return Ok(Pattern::Array(
                     items_v
                         .iter()
-                        .map(|item| parse_pattern(item, type_aliases, enums, warnings))
+                        .map(|item| {
+                            parse_pattern(item, type_aliases, enums, module_scope, warnings)
+                        })
                         .collect::<Result<Vec<_>>>()?,
                 ));
             }
@@ -6028,8 +6178,8 @@ fn parse_pattern(
                     let value_v =
                         map_get_str(entry, "value").context("$map pattern entry missing value")?;
                     entries.push((
-                        parse_pattern(key_v, type_aliases, enums, warnings)?,
-                        parse_pattern(value_v, type_aliases, enums, warnings)?,
+                        parse_pattern(key_v, type_aliases, enums, module_scope, warnings)?,
+                        parse_pattern(value_v, type_aliases, enums, module_scope, warnings)?,
                     ));
                 }
                 return Ok(Pattern::Map(entries));
@@ -6043,21 +6193,27 @@ fn parse_pattern(
                 let empty_skeletons = HashMap::new();
                 let type_ref = parse_type_ref(type_v, &[], &empty_skeletons, warnings, false)?;
                 return Ok(Pattern::Newtype {
-                    type_ref: qualify_named_type("", type_ref, type_aliases),
-                    inner: Box::new(parse_pattern(inner_v, type_aliases, enums, warnings)?),
+                    type_ref: qualify_named_type(module_scope, type_ref, type_aliases),
+                    inner: Box::new(parse_pattern(
+                        inner_v,
+                        type_aliases,
+                        enums,
+                        module_scope,
+                        warnings,
+                    )?),
                 });
             }
             "$interface" => {
                 let empty_skeletons = HashMap::new();
                 let type_ref = parse_type_ref(payload_v, &[], &empty_skeletons, warnings, false)?;
                 return Ok(Pattern::Interface(qualify_named_type(
-                    "",
+                    module_scope,
                     type_ref,
                     type_aliases,
                 )));
             }
             _ if key.starts_with('$') => {
-                let (enum_key, tag) = resolve_enum_tag_ref(key, enums)?;
+                let (enum_key, tag) = resolve_enum_tag_ref(key, module_scope, enums)?;
                 maybe_warn_kebab(&tag, "enum pattern tag", warnings);
                 let payload = if payload_v.is_null() {
                     None
@@ -6066,6 +6222,7 @@ fn parse_pattern(
                         payload_v,
                         type_aliases,
                         enums,
+                        module_scope,
                         warnings,
                     )?))
                 };
@@ -6320,6 +6477,7 @@ fn parse_match_statement(
     warnings: &mut Vec<String>,
     fn_ctx: Option<&UserFnContext>,
 ) -> Result<Statement> {
+    let home = stmt_home_module(fn_ctx);
     let match_v = map_get_str(stmt, "$match").context("$match missing subject value")?;
     let (target_v, arms_v, arms_label) = if let Some(match_m) = match_v.as_mapping() {
         if map_get_str(match_m, "target").is_some() || map_get_str(match_m, "arms").is_some() {
@@ -6355,7 +6513,7 @@ fn parse_match_statement(
         enums,
         impls,
         locals,
-        stmt_home_module(fn_ctx),
+        home,
         warnings,
     )?;
     let target_ty = infer_expr_type(&target, constants, locals, type_aliases, enums)
@@ -6371,7 +6529,7 @@ fn parse_match_statement(
         let arm_map = arm_v.as_mapping().context("$match arm must be mapping")?;
         let pattern_v = map_get_str(arm_map, "pattern").context("$match arm missing pattern")?;
         let do_v = map_get_str(arm_map, "do").context("$match arm missing do")?;
-        let pattern = parse_pattern(pattern_v, type_aliases, enums, warnings)?;
+        let pattern = parse_pattern(pattern_v, type_aliases, enums, home, warnings)?;
         let mut scoped_locals = locals.clone();
         validate_pattern(
             &pattern,
@@ -6430,7 +6588,11 @@ fn parse_qualified_call(call: &str) -> Result<(&str, &str)> {
     Ok((a, b))
 }
 
-fn resolve_enum_tag_ref(raw: &str, enums: &HashMap<String, EnumDef>) -> Result<(String, String)> {
+fn resolve_enum_tag_ref(
+    raw: &str,
+    module_scope: &str,
+    enums: &HashMap<String, EnumDef>,
+) -> Result<(String, String)> {
     let rest = raw
         .strip_prefix('$')
         .context("constructor key must start with `$`")?;
@@ -6457,6 +6619,12 @@ fn resolve_enum_tag_ref(raw: &str, enums: &HashMap<String, EnumDef>) -> Result<(
         if enums.contains_key(enum_name) {
             return Ok((enum_name.to_string(), tag.to_string()));
         }
+        if !module_scope.is_empty() {
+            let scoped = format!("{module_scope}.{enum_name}");
+            if enums.contains_key(&scoped) {
+                return Ok((scoped, tag.to_string()));
+            }
+        }
         let matches: Vec<String> = enums
             .keys()
             .filter(|k| strip_module_prefix(k) == enum_name)
@@ -6474,11 +6642,7 @@ fn resolve_enum_tag_ref(raw: &str, enums: &HashMap<String, EnumDef>) -> Result<(
     }
 }
 
-fn looks_like_call(
-    v: &Value,
-    sigs: &HashMap<String, FunctionSig>,
-    home_module: &str,
-) -> bool {
+fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: &str) -> bool {
     let Some(m) = v.as_mapping() else {
         return false;
     };

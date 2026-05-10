@@ -303,6 +303,10 @@ fn exec_statement(
     }
 }
 
+fn strip_type_enum_suffix(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
+
 fn pattern_matches(
     pattern: &Pattern,
     value: &RuntimeValue,
@@ -329,7 +333,11 @@ fn pattern_matches(
             else {
                 return Ok(false);
             };
-            if actual_enum != enum_key || actual_tag != tag {
+            // Patterns often use `$result.result.*` while runtime values carry the mount-qualified
+            // key (e.g. `fs.result.result`); align with `validate_pattern` in the lowerer.
+            if strip_type_enum_suffix(actual_enum) != strip_type_enum_suffix(enum_key)
+                || actual_tag != tag
+            {
                 return Ok(false);
             }
             match (payload, actual_payload.as_deref()) {
