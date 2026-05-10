@@ -1755,6 +1755,128 @@ main:
     );
 }
 
+/// Issue #27: two different parent modules may each import a child under the same
+/// local key (`util`). Nested defs must not share one global `util.*` namespace.
+#[test]
+fn nested_import_same_alias_is_scoped_to_parent() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let leaf_a = dir.path().join("leaf-a.vibra");
+    let leaf_b = dir.path().join("leaf-b.vibra");
+    let mod_a = dir.path().join("a.vibra");
+    let mod_b = dir.path().join("b.vibra");
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &leaf_a,
+        r#"id:
+  $function: $void
+  return: $str
+  do:
+    - $return: "A"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &leaf_b,
+        r#"id:
+  $function: $void
+  return: $str
+  do:
+    - $return: "B"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &mod_a,
+        format!(
+            r#"util:
+  $import: "{leaf}"
+io:
+  $import: "{io}"
+call:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        x:
+          $util.id: null
+    - $io.println: $x
+"#,
+            leaf = leaf_a.display().to_string().replace('\\', "/"),
+            io = io.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &mod_b,
+        format!(
+            r#"util:
+  $import: "{leaf}"
+io:
+  $import: "{io}"
+call:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        x:
+          $util.id: null
+    - $io.println: $x
+"#,
+            leaf = leaf_b.display().to_string().replace('\\', "/"),
+            io = io.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"a:
+  $import: "{a}"
+b:
+  $import: "{b}"
+io:
+  $import: "{io}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $a.call: null
+    - $b.call: null
+"#,
+            a = mod_a.display().to_string().replace('\\', "/"),
+            b = mod_b.display().to_string().replace('\\', "/"),
+            io = io.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered =
+        vibra::lower::lower_program(&prog).expect("nested same-alias imports should lower");
+    assert!(
+        lowered.functions.contains_key("a.util.id"),
+        "expected nested fn under a.util.* (issue #27); util-related keys: {:?}",
+        lowered
+            .functions
+            .keys()
+            .filter(|k| k.contains("util"))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        lowered.functions.contains_key("b.util.id"),
+        "expected nested fn under b.util.* (issue #27); util-related keys: {:?}",
+        lowered
+            .functions
+            .keys()
+            .filter(|k| k.contains("util"))
+            .collect::<Vec<_>>()
+    );
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default()).unwrap();
+}
+
 #[test]
 fn path_level_fs_apis_return_matchable_results() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
