@@ -3871,30 +3871,16 @@ fn check_expr_call_bounds(
     context: &str,
 ) -> Result<()> {
     match expr {
-        Expr::Call { call, .. } => {
-            check_call_bounds(
-                call,
-                sigs,
-                type_aliases,
-                impls,
-                enclosing_params,
-                enclosing_bounds,
-                referrer_owner,
-                context,
-            )?;
-            for arg in &call.args {
-                check_expr_call_bounds(
-                    arg,
-                    sigs,
-                    type_aliases,
-                    impls,
-                    enclosing_params,
-                    enclosing_bounds,
-                    referrer_owner,
-                    context,
-                )?;
-            }
-        }
+        Expr::Call { call, .. } => check_call_and_arg_bounds(
+            call,
+            sigs,
+            type_aliases,
+            impls,
+            enclosing_params,
+            enclosing_bounds,
+            referrer_owner,
+            context,
+        )?,
         Expr::Cast { from, .. } => check_expr_call_bounds(
             from,
             sigs,
@@ -4012,6 +3998,41 @@ fn check_expr_call_bounds(
     Ok(())
 }
 
+fn check_call_and_arg_bounds(
+    call: &Call,
+    sigs: &HashMap<String, FunctionSig>,
+    type_aliases: &HashMap<String, TypeAlias>,
+    impls: &HashMap<ImplKey, ImplBody>,
+    enclosing_params: &[String],
+    enclosing_bounds: &[Vec<TypeRef>],
+    referrer_owner: &str,
+    context: &str,
+) -> Result<()> {
+    check_call_bounds(
+        call,
+        sigs,
+        type_aliases,
+        impls,
+        enclosing_params,
+        enclosing_bounds,
+        referrer_owner,
+        context,
+    )?;
+    for arg in &call.args {
+        check_expr_call_bounds(
+            arg,
+            sigs,
+            type_aliases,
+            impls,
+            enclosing_params,
+            enclosing_bounds,
+            referrer_owner,
+            context,
+        )?;
+    }
+    Ok(())
+}
+
 fn check_statements_call_bounds(
     statements: &[Statement],
     sigs: &HashMap<String, FunctionSig>,
@@ -4024,7 +4045,7 @@ fn check_statements_call_bounds(
 ) -> Result<()> {
     for stmt in statements {
         match stmt {
-            Statement::Call(call) => check_call_bounds(
+            Statement::Call(call) => check_call_and_arg_bounds(
                 call,
                 sigs,
                 type_aliases,
@@ -4034,20 +4055,28 @@ fn check_statements_call_bounds(
                 referrer_owner,
                 context,
             )?,
-            Statement::Let { value, .. } => {
-                if let LetValue::Call(call) = value {
-                    check_call_bounds(
-                        call,
-                        sigs,
-                        type_aliases,
-                        impls,
-                        enclosing_params,
-                        enclosing_bounds,
-                        referrer_owner,
-                        context,
-                    )?;
-                }
-            }
+            Statement::Let { value, .. } => match value {
+                LetValue::Call(call) => check_call_and_arg_bounds(
+                    call,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?,
+                LetValue::Expr(expr) => check_expr_call_bounds(
+                    expr,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?,
+            },
             Statement::Match { arms, .. } => {
                 for arm in arms {
                     check_statements_call_bounds(

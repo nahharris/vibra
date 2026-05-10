@@ -3997,6 +3997,191 @@ main:
     );
 }
 
+#[test]
+fn let_expr_nested_generic_bound_violations_are_rejected_with_e_bound_001() {
+    fn program_with_let_expr(expr: &str) -> String {
+        let indented_expr = expr
+            .lines()
+            .map(|line| format!("            {line}\n"))
+            .collect::<String>();
+
+        format!(
+            r#"display:
+  $interface:
+    fmt:
+      $fn-type:
+        args:
+          $record:
+            x: $self
+        return: $str
+needs-display:
+  $function:
+    x: $t
+  return: $t
+  do:
+      - $return: $args.x
+  =where:
+    t: [$display]
+main:
+  $function: $void
+  return: $void
+  do:
+      - $let:
+          result:
+{indented_expr}"#
+        )
+    }
+
+    let cases = [
+        (
+            "record field",
+            r#"$record:
+  y:
+    $needs-display: 1
+    t: $int64"#,
+        ),
+        (
+            "array item",
+            r#"$array:
+  - $needs-display: 1
+    t: $int64"#,
+        ),
+        (
+            "map key",
+            r#"$map:
+  - key:
+      $needs-display: 1
+      t: $int64
+    value: bad"#,
+        ),
+        (
+            "map value",
+            r#"$map:
+  - key: bad
+    value:
+      $needs-display: 1
+      t: $int64"#,
+        ),
+        (
+            "cast subject",
+            r#"$cast:
+  $needs-display: 1
+  t: $int64
+into: $int64"#,
+        ),
+        (
+            "if branch",
+            r#"$if: true
+then:
+  $needs-display: 1
+  t: $int64
+else: 0"#,
+        ),
+    ];
+
+    for (case, expr) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(&entry, program_with_let_expr(expr)).unwrap();
+
+        let prog = vibra::load::load_program(&entry).unwrap();
+        let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+        assert!(
+            err.contains("E-BOUND-001"),
+            "expected E-BOUND-001 for nested generic call in {case}; got: {err}"
+        );
+    }
+}
+
+#[test]
+fn call_argument_nested_generic_bound_violations_are_rejected_with_e_bound_001() {
+    fn program_with_main_statement(statement: &str) -> String {
+        let indented_statement = statement
+            .lines()
+            .map(|line| format!("      {line}\n"))
+            .collect::<String>();
+
+        format!(
+            r#"display:
+  $interface:
+    fmt:
+      $fn-type:
+        args:
+          $record:
+            x: $self
+        return: $str
+needs-display:
+  $function:
+    x: $t
+  return: $t
+  do:
+      - $return: $args.x
+  =where:
+    t: [$display]
+takes-record:
+  $function:
+    rec:
+      $record:
+        y: $int64
+  return: $void
+  do:
+      - $let:
+          ignored: 0
+wrap-record:
+  $function:
+    rec:
+      $record:
+        y: $int64
+  return:
+    $record:
+      y: $int64
+  do:
+      - $return: $args.rec
+main:
+  $function: $void
+  return: $void
+  do:
+{indented_statement}"#
+        )
+    }
+
+    let cases = [
+        (
+            "statement call argument",
+            r#"  - $takes-record:
+      rec:
+        $record:
+          y:
+            $needs-display: 1
+            t: $int64"#,
+        ),
+        (
+            "let call argument",
+            r#"  - $let:
+      result:
+        $wrap-record:
+          rec:
+            $record:
+              y:
+                $needs-display: 1
+                t: $int64"#,
+        ),
+    ];
+
+    for (case, statement) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(&entry, program_with_main_statement(statement)).unwrap();
+
+        let prog = vibra::load::load_program(&entry).unwrap();
+        let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+        assert!(
+            err.contains("E-BOUND-001"),
+            "expected E-BOUND-001 for nested generic call in {case}; got: {err}"
+        );
+    }
+}
+
 /// A type-position instantiation of a generic alias with a bound also
 /// triggers bound-checking. Here `bag` declares `t: [$display]`; using
 /// `$bag: { t: $int64 }` as a return-type annotation on another alias is
