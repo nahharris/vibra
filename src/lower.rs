@@ -4034,20 +4034,28 @@ fn check_statements_call_bounds(
                 referrer_owner,
                 context,
             )?,
-            Statement::Let { value, .. } => {
-                if let LetValue::Call(call) = value {
-                    check_call_bounds(
-                        call,
-                        sigs,
-                        type_aliases,
-                        impls,
-                        enclosing_params,
-                        enclosing_bounds,
-                        referrer_owner,
-                        context,
-                    )?;
-                }
-            }
+            Statement::Let { value, .. } => match value {
+                LetValue::Call(call) => check_call_bounds(
+                    call,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?,
+                LetValue::Expr(expr) => check_expr_call_bounds(
+                    expr,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?,
+            },
             Statement::Match { arms, .. } => {
                 for arm in arms {
                     check_statements_call_bounds(
