@@ -84,9 +84,6 @@ fn module_imports(
     for (k, val) in map {
         let key =
             key_as_str(k).with_context(|| format!("{}: keys must be strings", path.display()))?;
-        if key.starts_with('-') {
-            continue;
-        }
         let Some(sub) = val.as_mapping() else {
             continue;
         };

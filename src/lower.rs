@@ -20,6 +20,13 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct UserFnContext {
     pub return_type: TypeRef,
+    /// Module alias where this function is defined (`""` = entry). Used to resolve
+    /// module-private calls like `$-helper` inside imported modules.
+    pub home_module: String,
+}
+
+fn stmt_home_module(fn_ctx: Option<&UserFnContext>) -> &str {
+    fn_ctx.map(|c| c.home_module.as_str()).unwrap_or("")
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -622,9 +629,6 @@ fn collect_alias_skeletons(
 
     for (k, v) in entry_map {
         let alias = k.as_str().context("module keys must be strings")?;
-        if alias.starts_with('-') {
-            continue;
-        }
         let Some(sub) = v.as_mapping() else { continue };
         let Some(imp) = map_get_str(sub, "$import") else {
             continue;
@@ -675,9 +679,6 @@ fn collect_module_skeleton_tree(
         .context("module root must be mapping")?;
     for (k, v) in map {
         let nested_alias = k.as_str().context("module key must be string")?;
-        if nested_alias.starts_with('-') {
-            continue;
-        }
         let Some(sub) = v.as_mapping() else { continue };
         let Some(imp) = map_get_str(sub, "$import") else {
             continue;
@@ -709,9 +710,6 @@ fn collect_module_skeletons(
         .context("module root must be mapping")?;
     for (k, v) in map {
         let name = k.as_str().context("module key must be string")?;
-        if name.starts_with('-') {
-            continue;
-        }
         let Some(_) = v.as_mapping() else { continue };
         let env = match parse_def_envelope(v, sink) {
             Ok(e) => e,
@@ -1718,10 +1716,9 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
 
     for (k, v) in entry_map {
         let alias = k.as_str().context("module keys must be strings")?;
-        if alias.starts_with('-') {
-            continue;
+        if !alias.starts_with('-') {
+            maybe_warn_kebab(alias, "import alias", &mut warnings);
         }
-        maybe_warn_kebab(alias, "import alias", &mut warnings);
         let Some(sub) = v.as_mapping() else { continue };
         let Some(imp) = map_get_str(sub, "$import") else {
             continue;
@@ -1859,10 +1856,9 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
 
     for (k, v) in entry_map {
         let alias = k.as_str().context("module keys must be strings")?;
-        if alias.starts_with('-') {
-            continue;
+        if !alias.starts_with('-') {
+            maybe_warn_kebab(alias, "import alias", &mut warnings);
         }
-        maybe_warn_kebab(alias, "import alias", &mut warnings);
         let Some(sub) = v.as_mapping() else { continue };
         let Some(imp) = map_get_str(sub, "$import") else {
             continue;
@@ -2000,10 +1996,9 @@ pub fn lower_exec_expr(
 
     for (k, v) in entry_map {
         let alias = k.as_str().context("module keys must be strings")?;
-        if alias.starts_with('-') {
-            continue;
+        if !alias.starts_with('-') {
+            maybe_warn_kebab(alias, "import alias", &mut warnings);
         }
-        maybe_warn_kebab(alias, "import alias", &mut warnings);
         let Some(sub) = v.as_mapping() else { continue };
         let Some(imp) = map_get_str(sub, "$import") else {
             continue;
@@ -2063,6 +2058,7 @@ pub fn lower_exec_expr(
         &enums,
         &impls,
         &locals,
+        "",
         &mut warnings,
     )?;
     let expr_ty = infer_expr_type(&expr, &constants, &locals, &type_aliases, &enums)
@@ -2116,9 +2112,6 @@ fn collect_module_defs_tree(
         .context("module root must be mapping")?;
     for (k, v) in map {
         let nested_alias = k.as_str().context("module key must be string")?;
-        if nested_alias.starts_with('-') {
-            continue;
-        }
         let Some(sub) = v.as_mapping() else { continue };
         let Some(imp) = map_get_str(sub, "$import") else {
             continue;
@@ -2189,6 +2182,7 @@ fn lower_pending_user_functions(
         }
         let fn_ctx = UserFnContext {
             return_type: sig.return_type.clone(),
+            home_module: sig.alias.clone(),
         };
         let mut statements = Vec::with_capacity(steps.len());
         for step in &steps {
@@ -2348,10 +2342,9 @@ fn collect_module_defs(
 
     for (k, v) in map {
         let name = k.as_str().context("module key must be string")?;
-        if name.starts_with('-') {
-            continue;
+        if !name.starts_with('-') {
+            maybe_warn_kebab(name, "top-level symbol", warnings);
         }
-        maybe_warn_kebab(name, "top-level symbol", warnings);
         let Some(_) = v.as_mapping() else { continue };
         if let Some(def_map) = v.as_mapping() {
             if map_get_str(def_map, "$import").is_some() {
@@ -2445,9 +2438,6 @@ fn collect_module_defs(
     // keeps the first pass purely structural.
     for (k, v) in map {
         let name = k.as_str().context("module key must be string")?;
-        if name.starts_with('-') {
-            continue;
-        }
         let Some(def_map) = v.as_mapping() else {
             continue;
         };
@@ -2489,9 +2479,6 @@ fn collect_module_defs(
     // already-registered inherent ops via `$ref` strings.
     for (k, v) in map {
         let name = k.as_str().context("module key must be string")?;
-        if name.starts_with('-') {
-            continue;
-        }
         let Some(def_map) = v.as_mapping() else {
             continue;
         };
@@ -2531,9 +2518,6 @@ fn collect_module_defs(
 
     for (k, v) in map {
         let name = k.as_str().context("module key must be string")?;
-        if name.starts_with('-') {
-            continue;
-        }
         let qualified_key = if alias.is_empty() {
             name.to_string()
         } else {
@@ -2597,7 +2581,9 @@ fn try_register_function(
     if env.form_key != "$function" {
         return Ok(());
     }
-    maybe_warn_kebab(name, "function name", warnings);
+    if !name.starts_with('-') {
+        maybe_warn_kebab(name, "function name", warnings);
+    }
     let scope = env.type_params.clone();
     let (args, ret, do_seq) = resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG)
         .with_context(|| {
@@ -4131,6 +4117,7 @@ fn lower_branch_to_body(
         enums,
         impls,
         locals,
+        stmt_home_module(fn_ctx),
         warnings,
     )?)])
 }
@@ -4156,6 +4143,7 @@ fn parse_if_statement(
         enums,
         impls,
         locals,
+        stmt_home_module(fn_ctx),
         warnings,
     )?;
     let cond_ty = infer_expr_type(&cond, constants, locals, type_aliases, enums)
@@ -4219,6 +4207,7 @@ fn parse_while_statement(
         enums,
         impls,
         locals,
+        stmt_home_module(fn_ctx),
         warnings,
     )?;
     let cond_ty = infer_expr_type(&cond, constants, locals, type_aliases, enums)
@@ -4263,6 +4252,7 @@ fn lower_statement(
     fn_ctx: Option<&UserFnContext>,
 ) -> Result<Statement> {
     let stmt = step.as_mapping().context("statement must be a mapping")?;
+    let home = stmt_home_module(fn_ctx);
 
     if map_get_str(stmt, "$let").is_some() {
         if stmt.len() != 1 {
@@ -4279,7 +4269,7 @@ fn lower_statement(
             .context("$let variable must be string")?
             .to_string();
         maybe_warn_kebab(&var, "local variable", warnings);
-        if looks_like_call(vv, sigs) || looks_like_iface_call(vv, type_aliases) {
+        if looks_like_call(vv, sigs, home) || looks_like_iface_call(vv, type_aliases) {
             let call = parse_call(
                 vv,
                 sigs,
@@ -4288,6 +4278,7 @@ fn lower_statement(
                 enums,
                 impls,
                 locals,
+                home,
                 warnings,
             )?;
             let sig = sigs
@@ -4311,6 +4302,7 @@ fn lower_statement(
                 enums,
                 impls,
                 locals,
+                home,
                 warnings,
             )?;
             let expr_ty = infer_expr_type(&expr, constants, locals, type_aliases, enums)
@@ -4338,6 +4330,7 @@ fn lower_statement(
             enums,
             impls,
             locals,
+            home,
             warnings,
         )?;
         let actual = infer_expr_type(&expr, constants, locals, type_aliases, enums)
@@ -4402,6 +4395,7 @@ fn lower_statement(
             enums,
             impls,
             locals,
+            home,
             warnings,
         )?;
         Ok(Statement::Call(call))
@@ -4441,6 +4435,7 @@ fn try_resolve_iface_call(
     enums: &HashMap<String, EnumDef>,
     impls: &HashMap<ImplKey, ImplBody>,
     locals: &HashMap<String, TypeRef>,
+    home_module: &str,
     warnings: &mut Vec<String>,
 ) -> Result<String> {
     let _ = sigs;
@@ -4511,6 +4506,7 @@ fn try_resolve_iface_call(
         enums,
         impls,
         locals,
+        home_module,
         warnings,
     )
     .with_context(|| format!("could not parse dispatch arg `{self_arg_name}` of `{call_key}`"))?;
@@ -4553,8 +4549,16 @@ fn try_resolve_iface_call(
     Ok(sig_key)
 }
 
-fn resolve_call_target(call_key: &str, sigs: &HashMap<String, FunctionSig>) -> Result<String> {
+fn resolve_call_target(
+    call_key: &str,
+    sigs: &HashMap<String, FunctionSig>,
+    home_module: &str,
+) -> Result<String> {
     if let Ok((alias, symbol)) = parse_qualified_call(call_key) {
+        // Importers must not reach into another module's `-` private namespace.
+        if !alias.is_empty() && symbol.starts_with('-') {
+            bail!("unknown function `{call_key}`");
+        }
         let sig_key = format!("{alias}.{symbol}");
         if sigs.contains_key(&sig_key) {
             return Ok(sig_key);
@@ -4563,8 +4567,16 @@ fn resolve_call_target(call_key: &str, sigs: &HashMap<String, FunctionSig>) -> R
     let rest = call_key
         .strip_prefix('$')
         .context("call key must start with `$`")?;
-    if !rest.contains('.') && sigs.contains_key(rest) && sigs[rest].alias.is_empty() {
-        return Ok(rest.to_string());
+    if !rest.contains('.') {
+        if !home_module.is_empty() && rest.starts_with('-') {
+            let q = format!("{home_module}.{rest}");
+            if sigs.contains_key(&q) {
+                return Ok(q);
+            }
+        }
+        if sigs.contains_key(rest) && sigs[rest].alias.is_empty() {
+            return Ok(rest.to_string());
+        }
     }
     bail!("unknown function `{call_key}`")
 }
@@ -4933,13 +4945,14 @@ fn parse_call(
     enums: &HashMap<String, EnumDef>,
     impls: &HashMap<ImplKey, ImplBody>,
     locals: &HashMap<String, TypeRef>,
+    home_module: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Call> {
     let m = call_mapping_value
         .as_mapping()
         .context("call must be mapping")?;
     let (call_key, subject, siblings) = split_call_envelope(m)?;
-    let callee_key = match resolve_call_target(&call_key, sigs) {
+    let callee_key = match resolve_call_target(&call_key, sigs, home_module) {
         Ok(k) => k,
         Err(direct_err) => {
             reject_iface_nested_call_bundle(&call_key, &subject, &siblings, type_aliases)?;
@@ -4954,6 +4967,7 @@ fn parse_call(
                 enums,
                 impls,
                 locals,
+                home_module,
                 warnings,
             )
             .with_context(|| format!("{direct_err}"))?
@@ -5012,6 +5026,7 @@ fn parse_call(
         enums,
         impls,
         locals,
+        home_module,
         warnings,
     )?;
     for (idx, expr) in args.iter().enumerate() {
@@ -5058,6 +5073,7 @@ fn parse_call_args(
     enums: &HashMap<String, EnumDef>,
     impls: &HashMap<ImplKey, ImplBody>,
     locals: &HashMap<String, TypeRef>,
+    home_module: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<Expr>> {
     let arg_names = &function.arg_names;
@@ -5081,6 +5097,7 @@ fn parse_call_args(
             enums,
             impls,
             locals,
+            home_module,
             warnings,
         )?]);
     }
@@ -5102,6 +5119,7 @@ fn parse_call_args(
                     enums,
                     impls,
                     locals,
+                    home_module,
                     warnings,
                 )?]);
             }
@@ -5133,6 +5151,7 @@ fn parse_call_args(
             enums,
             impls,
             locals,
+            home_module,
             warnings,
         )?);
     }
@@ -5148,10 +5167,11 @@ fn parse_expr(
     enums: &HashMap<String, EnumDef>,
     impls: &HashMap<ImplKey, ImplBody>,
     locals: &HashMap<String, TypeRef>,
+    home_module: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Expr> {
     if let Some(m) = v.as_mapping() {
-        if looks_like_call(v, sigs) || looks_like_iface_call(v, type_aliases) {
+        if looks_like_call(v, sigs, home_module) || looks_like_iface_call(v, type_aliases) {
             let call = parse_call(
                 v,
                 sigs,
@@ -5160,6 +5180,7 @@ fn parse_expr(
                 enums,
                 impls,
                 locals,
+                home_module,
                 warnings,
             )?;
             let sig = sigs
@@ -5195,6 +5216,7 @@ fn parse_expr(
                 enums,
                 impls,
                 locals,
+                home_module,
                 warnings,
             )?;
             let source = infer_expr_type(&from, constants, locals, type_aliases, enums)
@@ -5229,6 +5251,7 @@ fn parse_expr(
                 enums,
                 impls,
                 locals,
+                home_module,
                 warnings,
             )?;
             let then_e = parse_expr(
@@ -5239,6 +5262,7 @@ fn parse_expr(
                 enums,
                 impls,
                 locals,
+                home_module,
                 warnings,
             )?;
             let else_e = parse_expr(
@@ -5249,6 +5273,7 @@ fn parse_expr(
                 enums,
                 impls,
                 locals,
+                home_module,
                 warnings,
             )?;
             return Ok(Expr::If {
@@ -5277,6 +5302,7 @@ fn parse_expr(
                             enums,
                             impls,
                             locals,
+                            home_module,
                             warnings,
                         )?;
                         if fields.insert(name.to_string(), expr).is_some() {
@@ -5299,6 +5325,7 @@ fn parse_expr(
                             enums,
                             impls,
                             locals,
+                            home_module,
                             warnings,
                         )?);
                     }
@@ -5318,6 +5345,7 @@ fn parse_expr(
                             enums,
                             impls,
                             locals,
+                            home_module,
                             warnings,
                         )?);
                     }
@@ -5345,6 +5373,7 @@ fn parse_expr(
                                 enums,
                                 impls,
                                 locals,
+                                home_module,
                                 warnings,
                             )?,
                             parse_expr(
@@ -5355,6 +5384,7 @@ fn parse_expr(
                                 enums,
                                 impls,
                                 locals,
+                                home_module,
                                 warnings,
                             )?,
                         ));
@@ -5395,6 +5425,7 @@ fn parse_expr(
                             enums,
                             impls,
                             locals,
+                            home_module,
                             warnings,
                         )?;
                         if let Some(actual_ty) =
@@ -6198,6 +6229,7 @@ fn parse_match_statement(
         enums,
         impls,
         locals,
+        stmt_home_module(fn_ctx),
         warnings,
     )?;
     let target_ty = infer_expr_type(&target, constants, locals, type_aliases, enums)
@@ -6312,14 +6344,18 @@ fn resolve_enum_tag_ref(raw: &str, enums: &HashMap<String, EnumDef>) -> Result<(
     }
 }
 
-fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>) -> bool {
+fn looks_like_call(
+    v: &Value,
+    sigs: &HashMap<String, FunctionSig>,
+    home_module: &str,
+) -> bool {
     let Some(m) = v.as_mapping() else {
         return false;
     };
     let Ok((call_key, _, _)) = split_call_envelope(m) else {
         return false;
     };
-    resolve_call_target(&call_key, sigs).is_ok()
+    resolve_call_target(&call_key, sigs, home_module).is_ok()
 }
 
 fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {

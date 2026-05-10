@@ -16,6 +16,150 @@ fn import_cycle_is_rejected() {
 }
 
 #[test]
+fn private_module_symbol_is_reachable_locally() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"-main-helper:
+  $function: $void
+  return: $void
+  do:
+    - $return: null
+main:
+  $function: $void
+  return: $void
+  do:
+    - $-main-helper: null
+"#,
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog);
+    assert!(
+        lowered.is_ok(),
+        "expected private helper to lower: {:?}",
+        lowered.err()
+    );
+}
+
+#[test]
+fn private_import_alias_is_usable_locally() {
+    let dir = tempfile::tempdir().unwrap();
+    let helper = dir.path().join("helper.vibra");
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &helper,
+        r#"noop:
+  $function: $void
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: fd_sync
+        args:
+          - $const.1
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"-h:
+  $import: "{h}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $-h.noop: null
+"#,
+            h = helper.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).unwrap();
+}
+
+#[test]
+fn imported_module_private_helper_works_internally() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.vibra");
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &lib,
+        r#"-priv:
+  $function: $void
+  return: $void
+  do:
+    - $return: null
+pub-entry:
+  $function: $void
+  return: $void
+  do:
+    - $-priv: null
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"m:
+  $import: "{m}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $m.pub-entry: null
+"#,
+            m = lib.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).unwrap();
+}
+
+#[test]
+fn importer_cannot_reference_private_symbol_on_imported_module() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.vibra");
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &lib,
+        r#"-priv:
+  $function: $void
+  return: $void
+  do:
+    - $return: null
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"m:
+  $import: "{m}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $m.-priv: null
+"#,
+            m = lib.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("unknown function") && err.contains("$m.-priv"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn hello_example_compiles_and_runs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let p = root.join("examples/hello.vibra");
