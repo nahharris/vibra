@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 use vibra::lower::{RuntimeValue, TypeRef};
-use vibra::{execute, load, lower, project, runtime, test_runner};
+use vibra::{execute, load, lower, project, runtime, test_runner, tooling};
 
 #[derive(Parser)]
 #[command(name = "vibra", version, about = "Vibra language toolchain")]
@@ -35,6 +35,40 @@ enum Command {
     Check {
         /// Project directory or project.vibra path.
         path: Option<PathBuf>,
+    },
+    /// Check or rewrite canonical Vibra/YAML formatting.
+    Fmt {
+        /// Files, directories, or globs to format. Defaults to the current directory.
+        path: Vec<PathBuf>,
+        /// Rewrite changed files in place.
+        #[arg(long)]
+        write: bool,
+        /// Structured output format.
+        #[arg(long, value_enum, default_value_t = ToolOutputArg::Yaml)]
+        output: ToolOutputArg,
+        /// Include verbose file details.
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Emit Vibra diagnostics for source files.
+    Lint {
+        /// Files, directories, or globs to lint. Defaults to the current directory.
+        path: Vec<PathBuf>,
+        /// Structured output format.
+        #[arg(long, value_enum, default_value_t = LintFormatArg::Yaml)]
+        format: LintFormatArg,
+        /// Diagnostic category to include. Repeat to include multiple categories.
+        #[arg(long = "category", value_enum)]
+        category: Vec<LintCategoryArg>,
+        /// Minimum diagnostic severity to include.
+        #[arg(long, value_enum)]
+        severity: Option<LintSeverityArg>,
+        /// Treat warnings as CI failures.
+        #[arg(long = "deny-warnings")]
+        deny_warnings: bool,
+        /// Include verbose file details.
+        #[arg(long)]
+        verbose: bool,
     },
     /// Parse, compile (MVP), and run a `.vibra` module via embedded Wasmer.
     Run {
@@ -245,6 +279,34 @@ enum ReportArg {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
+enum ToolOutputArg {
+    Yaml,
+    Json,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum LintFormatArg {
+    Yaml,
+    Json,
+    Sarif,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum LintCategoryArg {
+    Style,
+    Syntax,
+    Compile,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum LintSeverityArg {
+    Error,
+    Warning,
+    Info,
+    Hint,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
 enum ExecFormatArg {
     Raw,
     Yaml,
@@ -269,6 +331,46 @@ impl From<TemplateArg> for project::InitTemplate {
     }
 }
 
+impl From<ToolOutputArg> for tooling::ToolOutputFormat {
+    fn from(value: ToolOutputArg) -> Self {
+        match value {
+            ToolOutputArg::Yaml => tooling::ToolOutputFormat::Yaml,
+            ToolOutputArg::Json => tooling::ToolOutputFormat::Json,
+        }
+    }
+}
+
+impl From<LintFormatArg> for tooling::LintOutputFormat {
+    fn from(value: LintFormatArg) -> Self {
+        match value {
+            LintFormatArg::Yaml => tooling::LintOutputFormat::Yaml,
+            LintFormatArg::Json => tooling::LintOutputFormat::Json,
+            LintFormatArg::Sarif => tooling::LintOutputFormat::Sarif,
+        }
+    }
+}
+
+impl From<LintCategoryArg> for tooling::Category {
+    fn from(value: LintCategoryArg) -> Self {
+        match value {
+            LintCategoryArg::Style => tooling::Category::Style,
+            LintCategoryArg::Syntax => tooling::Category::Syntax,
+            LintCategoryArg::Compile => tooling::Category::Compile,
+        }
+    }
+}
+
+impl From<LintSeverityArg> for tooling::Severity {
+    fn from(value: LintSeverityArg) -> Self {
+        match value {
+            LintSeverityArg::Error => tooling::Severity::Error,
+            LintSeverityArg::Warning => tooling::Severity::Warning,
+            LintSeverityArg::Info => tooling::Severity::Info,
+            LintSeverityArg::Hint => tooling::Severity::Hint,
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -285,6 +387,42 @@ fn main() -> Result<()> {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
             project::check_project(&path)?;
             println!("checked {}", path.display());
+        }
+        Command::Fmt {
+            path,
+            write,
+            output,
+            verbose,
+        } => {
+            let ok = tooling::run_fmt(tooling::FmtOptions {
+                inputs: path,
+                write,
+                output: output.into(),
+                verbose,
+            })?;
+            if !ok {
+                std::process::exit(1);
+            }
+        }
+        Command::Lint {
+            path,
+            format,
+            category,
+            severity,
+            deny_warnings,
+            verbose,
+        } => {
+            let ok = tooling::run_lint(tooling::LintOptions {
+                inputs: path,
+                format: format.into(),
+                categories: category.into_iter().map(Into::into).collect(),
+                severity: severity.map(Into::into),
+                deny_warnings,
+                verbose,
+            })?;
+            if !ok {
+                std::process::exit(1);
+            }
         }
         Command::Run {
             path,

@@ -63,6 +63,11 @@
       "summary": "Variance / subtyping audit marker"
     },
     {
+      "code": "W-STYLE-001",
+      "severity": "warning",
+      "summary": "Symbol-like key is not kebab-case"
+    },
+    {
       "code": "E-WASM-001",
       "severity": "error",
       "summary": "$wasm encoding does not match active compiler WASM mode"

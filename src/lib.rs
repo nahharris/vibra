@@ -8,3 +8,4 @@ pub mod lower;
 pub mod project;
 pub mod runtime;
 pub mod test_runner;
+pub mod tooling;
