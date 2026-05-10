@@ -3646,6 +3646,73 @@ fn check_typeref_bounds(
     Ok(())
 }
 
+/// First path segment of a qualified symbol key, or "" for entry-level symbols
+/// (`main`, `-priv`, etc.).
+fn symbol_owner_module_prefix(sym_key: &str) -> &str {
+    sym_key.split_once('.').map(|(a, _)| a).unwrap_or("")
+}
+
+/// True for names like `m.-priv` / `m.-t`: a *public* import alias followed by
+/// a module-private (`-`‑prefixed) symbol. Such paths must not be referenced
+/// from outside that imported module.
+fn qualified_type_leaks_imported_module_private(name: &str) -> bool {
+    let Some((prefix, rest)) = name.split_once('.') else {
+        return false;
+    };
+    !prefix.is_empty() && !prefix.starts_with('-') && rest.starts_with('-')
+}
+
+fn check_typeref_module_private_access(
+    ty: &TypeRef,
+    owner_prefix: &str,
+    context: &str,
+) -> Result<()> {
+    let check_name = |n: &str| -> Result<()> {
+        if qualified_type_leaks_imported_module_private(n) {
+            let victim = n.split_once('.').map(|(a, _)| a).unwrap();
+            if owner_prefix != victim {
+                bail!("unknown type `{n}` in `{context}`");
+            }
+        }
+        Ok(())
+    };
+    match ty {
+        TypeRef::Named(n) => check_name(n),
+        TypeRef::Instantiated { base, type_args } => {
+            check_name(base)?;
+            for arg in type_args {
+                check_typeref_module_private_access(arg, owner_prefix, context)?;
+            }
+            Ok(())
+        }
+        TypeRef::Record(fields) | TypeRef::Enum(fields) | TypeRef::Interface(fields) => {
+            for t in fields.values() {
+                check_typeref_module_private_access(t, owner_prefix, context)?;
+            }
+            Ok(())
+        }
+        TypeRef::Tuple(items) | TypeRef::Union(items) | TypeRef::Intersect(items) => {
+            for t in items {
+                check_typeref_module_private_access(t, owner_prefix, context)?;
+            }
+            Ok(())
+        }
+        TypeRef::Array(inner) => check_typeref_module_private_access(inner, owner_prefix, context),
+        TypeRef::Map { key, value } => {
+            check_typeref_module_private_access(key, owner_prefix, context)?;
+            check_typeref_module_private_access(value, owner_prefix, context)
+        }
+        TypeRef::FnType { args, return_type } => {
+            check_typeref_module_private_access(args, owner_prefix, context)?;
+            check_typeref_module_private_access(return_type, owner_prefix, context)
+        }
+        TypeRef::Newtype { inner, .. } => {
+            check_typeref_module_private_access(inner, owner_prefix, context)
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Final post-hoc validation sweep over every registered symbol's type
 /// expressions and every lowered call's `type_args`. Catches both
 /// type-position bound violations and call-site violations in one pass.
@@ -3657,6 +3724,13 @@ fn validate_all_instantiation_bounds(
     main_statements: &[Statement],
 ) -> Result<()> {
     for (key, ta) in type_aliases {
+        let owner = symbol_owner_module_prefix(key);
+        check_typeref_module_private_access(&ta.body, owner, key)?;
+        for bounds_list in &ta.type_param_bounds {
+            for b in bounds_list {
+                check_typeref_module_private_access(b, owner, key)?;
+            }
+        }
         check_typeref_bounds(
             &ta.body,
             type_aliases,
@@ -3667,24 +3741,34 @@ fn validate_all_instantiation_bounds(
         )?;
     }
     for (key, sig) in sigs {
+        let owner = symbol_owner_module_prefix(key);
+        for bounds_list in &sig.type_param_bounds {
+            for b in bounds_list {
+                check_typeref_module_private_access(b, owner, key)?;
+            }
+        }
         for (i, at) in sig.arg_types.iter().enumerate() {
             let arg_name = &sig.arg_names[i];
+            let ctx = format!("{key} (arg `{arg_name}`)");
+            check_typeref_module_private_access(at, owner, &ctx)?;
             check_typeref_bounds(
                 at,
                 type_aliases,
                 impls,
                 &sig.type_params,
                 &sig.type_param_bounds,
-                &format!("{key} (arg `{arg_name}`)"),
+                &ctx,
             )?;
         }
+        let ret_ctx = format!("{key} (return)");
+        check_typeref_module_private_access(&sig.return_type, owner, &ret_ctx)?;
         check_typeref_bounds(
             &sig.return_type,
             type_aliases,
             impls,
             &sig.type_params,
             &sig.type_param_bounds,
-            &format!("{key} (return)"),
+            &ret_ctx,
         )?;
         if let FunctionBody::User { statements } = &sig.body {
             check_statements_call_bounds(
@@ -3694,23 +3778,41 @@ fn validate_all_instantiation_bounds(
                 impls,
                 &sig.type_params,
                 &sig.type_param_bounds,
+                owner,
                 key,
             )?;
         }
     }
     for (key, ed) in enums {
+        let owner = symbol_owner_module_prefix(key);
+        for bounds_list in &ed.type_param_bounds {
+            for b in bounds_list {
+                check_typeref_module_private_access(b, owner, key)?;
+            }
+        }
         for (tag, t) in &ed.tags {
+            let ctx = format!("{key}.{tag}");
+            check_typeref_module_private_access(t, owner, &ctx)?;
             check_typeref_bounds(
                 t,
                 type_aliases,
                 impls,
                 &ed.type_params,
                 &ed.type_param_bounds,
-                &format!("{key}.{tag}"),
+                &ctx,
             )?;
         }
     }
-    check_statements_call_bounds(main_statements, sigs, type_aliases, impls, &[], &[], "main")?;
+    check_statements_call_bounds(
+        main_statements,
+        sigs,
+        type_aliases,
+        impls,
+        &[],
+        &[],
+        "",
+        "main",
+    )?;
     Ok(())
 }
 
@@ -3721,6 +3823,7 @@ fn check_expr_call_bounds(
     impls: &HashMap<ImplKey, ImplBody>,
     enclosing_params: &[String],
     enclosing_bounds: &[Vec<TypeRef>],
+    referrer_owner: &str,
     context: &str,
 ) -> Result<()> {
     match expr {
@@ -3732,6 +3835,7 @@ fn check_expr_call_bounds(
                 impls,
                 enclosing_params,
                 enclosing_bounds,
+                referrer_owner,
                 context,
             )?;
             for arg in &call.args {
@@ -3742,6 +3846,7 @@ fn check_expr_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
             }
@@ -3753,6 +3858,7 @@ fn check_expr_call_bounds(
             impls,
             enclosing_params,
             enclosing_bounds,
+            referrer_owner,
             context,
         )?,
         Expr::Record(fields) => {
@@ -3764,6 +3870,7 @@ fn check_expr_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
             }
@@ -3777,6 +3884,7 @@ fn check_expr_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
             }
@@ -3790,6 +3898,7 @@ fn check_expr_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
                 check_expr_call_bounds(
@@ -3799,6 +3908,7 @@ fn check_expr_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
             }
@@ -3812,6 +3922,7 @@ fn check_expr_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
             }
@@ -3828,6 +3939,7 @@ fn check_expr_call_bounds(
                 impls,
                 enclosing_params,
                 enclosing_bounds,
+                referrer_owner,
                 context,
             )?;
             check_expr_call_bounds(
@@ -3837,6 +3949,7 @@ fn check_expr_call_bounds(
                 impls,
                 enclosing_params,
                 enclosing_bounds,
+                referrer_owner,
                 context,
             )?;
             check_expr_call_bounds(
@@ -3846,6 +3959,7 @@ fn check_expr_call_bounds(
                 impls,
                 enclosing_params,
                 enclosing_bounds,
+                referrer_owner,
                 context,
             )?;
         }
@@ -3861,6 +3975,7 @@ fn check_statements_call_bounds(
     impls: &HashMap<ImplKey, ImplBody>,
     enclosing_params: &[String],
     enclosing_bounds: &[Vec<TypeRef>],
+    referrer_owner: &str,
     context: &str,
 ) -> Result<()> {
     for stmt in statements {
@@ -3872,6 +3987,7 @@ fn check_statements_call_bounds(
                 impls,
                 enclosing_params,
                 enclosing_bounds,
+                referrer_owner,
                 context,
             )?,
             Statement::Let { value, .. } => {
@@ -3883,6 +3999,7 @@ fn check_statements_call_bounds(
                         impls,
                         enclosing_params,
                         enclosing_bounds,
+                        referrer_owner,
                         context,
                     )?;
                 }
@@ -3896,6 +4013,7 @@ fn check_statements_call_bounds(
                         impls,
                         enclosing_params,
                         enclosing_bounds,
+                        referrer_owner,
                         context,
                     )?;
                 }
@@ -3908,6 +4026,7 @@ fn check_statements_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
             }
@@ -3923,6 +4042,7 @@ fn check_statements_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
                 check_statements_call_bounds(
@@ -3932,6 +4052,7 @@ fn check_statements_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
             }
@@ -3943,6 +4064,7 @@ fn check_statements_call_bounds(
                     impls,
                     enclosing_params,
                     enclosing_bounds,
+                    referrer_owner,
                     context,
                 )?;
             }
@@ -3958,8 +4080,12 @@ fn check_call_bounds(
     impls: &HashMap<ImplKey, ImplBody>,
     enclosing_params: &[String],
     enclosing_bounds: &[Vec<TypeRef>],
+    referrer_owner: &str,
     context: &str,
 ) -> Result<()> {
+    for ta in &call.type_args {
+        check_typeref_module_private_access(ta, referrer_owner, context)?;
+    }
     let Some(sig) = sigs.get(&call.callee_key) else {
         return Ok(());
     };
@@ -6316,7 +6442,11 @@ fn resolve_enum_tag_ref(raw: &str, enums: &HashMap<String, EnumDef>) -> Result<(
         if alias.is_empty() || enum_name.is_empty() || tag.is_empty() {
             bail!("invalid constructor `{raw}`");
         }
-        return Ok((format!("{alias}.{enum_name}"), tag.to_string()));
+        let enum_key = format!("{alias}.{enum_name}");
+        if qualified_type_leaks_imported_module_private(&enum_key) {
+            bail!("unknown enum reference `{enum_key}` in `{raw}`");
+        }
+        return Ok((enum_key, tag.to_string()));
     }
     if parts.len() == 2 {
         let enum_name = parts[0];
@@ -6369,6 +6499,9 @@ fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {
 fn maybe_warn_kebab_qualified(name: &str, context: &str, warnings: &mut Vec<String>) {
     for segment in name.split('.') {
         if segment.is_empty() {
+            continue;
+        }
+        if segment.starts_with('-') {
             continue;
         }
         maybe_warn_kebab(segment, context, warnings);

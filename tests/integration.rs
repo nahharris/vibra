@@ -160,6 +160,91 @@ main:
 }
 
 #[test]
+fn importer_cannot_reference_private_type_on_imported_module() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.vibra");
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &lib,
+        r#"-priv-t:
+  $record:
+    x: $int32
+pub-nop:
+  $function: $void
+  return: $void
+  do:
+    - $return: null
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"m:
+  $import: "{m}"
+use-ty:
+  $function:
+    subject: $m.-priv-t
+  return: $void
+  do:
+    - $return: null
+main:
+  $function: $void
+  return: $void
+  do:
+    - $m.pub-nop: null
+"#,
+            m = lib.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("unknown type") && err.contains("m.-priv-t"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn importer_cannot_use_private_enum_constructor_on_imported_module() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.vibra");
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &lib,
+        r#"-priv-e:
+  $enum:
+    a: $void
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"m:
+  $import: "{m}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        value:
+          $m.-priv-e.a: null
+"#,
+            m = lib.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("unknown enum reference") && err.contains("m.-priv-e"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn hello_example_compiles_and_runs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let p = root.join("examples/hello.vibra");
