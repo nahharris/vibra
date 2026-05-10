@@ -3,6 +3,7 @@
 A vibe-coding-first programming language: **YAML** surface (strict subset), **static typing**, functional core, compiles to **WebAssembly**.
 
 - **Specification:** [DRAFT.md](DRAFT.md)
+- **Philosophy:** [PHILOSOPHY.md](PHILOSOPHY.md)
 - **Schemas (tooling / LSP):** [schemas/](schemas/)
 - **Examples:** [examples/](examples/)
 
