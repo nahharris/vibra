@@ -115,7 +115,6 @@ pub struct FmtOptions {
     pub inputs: Vec<PathBuf>,
     pub write: bool,
     pub output: ToolOutputFormat,
-    pub verbose: bool,
 }
 
 #[derive(Debug)]
@@ -125,7 +124,6 @@ pub struct LintOptions {
     pub categories: Vec<Category>,
     pub severity: Option<Severity>,
     pub deny_warnings: bool,
-    pub verbose: bool,
 }
 
 pub fn run_fmt(options: FmtOptions) -> Result<bool> {
@@ -287,7 +285,7 @@ fn sarif_report(report: &LintReport) -> serde_json::Value {
         rules.entry(diagnostic.code.clone()).or_insert_with(|| {
             json!({
                 "id": diagnostic.code,
-                "shortDescription": { "text": diagnostic.message },
+                "shortDescription": { "text": rule_summary(&diagnostic.code) },
             })
         });
     }
@@ -338,6 +336,38 @@ fn sarif_level(severity: Severity) -> &'static str {
     }
 }
 
+fn rule_summary(code: &str) -> &'static str {
+    match code {
+        "W-STYLE-001" => "Symbol-like key is not kebab-case",
+        "E-YAML-001" => "YAML parse or strict-subset violation",
+        "E-COMPILE-001" => "Vibra compile diagnostic",
+        "E-MOD-003" => "Import cycle detected",
+        "E-ANNO-001" => "Unknown annotation key on a top-level definition",
+        "E-ANNO-002" => "Legacy un-prefixed annotation key",
+        "E-WHERE-002" => "`=where` bound list element does not resolve to an interface",
+        "E-BOUND-001" => "Generic or interface bound is not satisfied",
+        "E-CALL-IFACE-NOSELF" => "Interface-qualified call cannot dispatch without `$self`",
+        "E-DISPATCH-001" => "Interface-qualified dispatch on generic static type is unsupported",
+        "E-DOC-001" => "`=doc` annotation must be a string scalar",
+        "E-GEN-001" => "Generic type alias requires explicit instantiation",
+        "E-GEN-002" => "Generic alias instantiation is malformed",
+        "E-NEWTYPE-001" => "Implicit newtype coercion is forbidden",
+        "E-NEWTYPE-002" => "Malformed `$newtype` definition body",
+        "E-CAST-001" => "`$cast` has no valid v1 cast path",
+        "E-CAST-002" => "Malformed `$cast` payload",
+        "E-CAP-001" => "Capability values cannot be created from source",
+        "E-SELF-001" => "Reserved `$self` type used outside allowed positions",
+        "E-DEFS-001" => "Invalid `=defs` annotation",
+        "E-IMPL-001" => "Invalid `=impl` annotation",
+        "E-IMPL-002" => "`=impl` interface key does not resolve to an interface",
+        "E-IMPL-003" => "`=impl` block is missing a required binding",
+        "E-IMPL-004" => "`=impl` payload contains an unexpected key",
+        "E-IMPL-005" => "`=impl` method signature does not match interface declaration",
+        "E-IMPL-006" => "`=impl` method reference does not resolve",
+        _ => "Vibra diagnostic",
+    }
+}
+
 fn active_categories(categories: &[Category]) -> BTreeSet<Category> {
     if categories.is_empty() {
         return [Category::Style, Category::Syntax, Category::Compile]
@@ -370,7 +400,6 @@ fn yaml_diagnostic(path: &Path, err: &serde_yaml::Error) -> Diagnostic {
 
 fn style_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let mut offset = 0;
     for (line_index, line) in source.lines().enumerate() {
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
@@ -383,7 +412,7 @@ fn style_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
                             "non-kebab-case top-level symbol: `{key}` (recommended: kebab-case)"
                         ),
                         severity: Severity::Warning,
-                        span: span_for_text(path, line_index, column, key.len(), offset + column),
+                        span: span_for_text(path, line_index, column, key.len()),
                         related: None,
                         fix: None,
                         category: Category::Style,
@@ -391,7 +420,6 @@ fn style_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
                 }
             }
         }
-        offset += line.len() + 1;
     }
     diagnostics
 }
@@ -497,21 +525,21 @@ fn is_kebab_case(name: &str) -> bool {
 }
 
 fn point_span(path: &Path, line: usize, column: usize) -> Span {
-    span_for_text(path, line, column, 1, column)
+    span_for_text(path, line, column, 1)
 }
 
-fn span_for_text(path: &Path, line: usize, column: usize, len: usize, offset: usize) -> Span {
+fn span_for_text(path: &Path, line: usize, column: usize, len: usize) -> Span {
     Span {
         uri: file_uri(path),
         start: Position {
             line,
             column,
-            offset: Some(offset),
+            offset: None,
         },
         end: Position {
             line,
             column: column + len.max(1),
-            offset: Some(offset + len.max(1)),
+            offset: None,
         },
     }
 }
@@ -592,7 +620,20 @@ fn file_uri(path: &Path) -> String {
     if !s.starts_with('/') {
         s = format!("/{s}");
     }
-    format!("file://{}", s.replace(' ', "%20"))
+    format!("file://{}", percent_encode_uri_path(&s))
+}
+
+fn percent_encode_uri_path(path: &str) -> String {
+    let mut out = String::new();
+    for byte in path.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                out.push(char::from(*byte))
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
 }
 
 #[derive(Debug, Default)]

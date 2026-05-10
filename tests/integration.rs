@@ -5235,6 +5235,10 @@ fn vibra_lint_defaults_to_yaml_and_reports_kebab_case_locations() {
     assert!(stdout.contains("code: W-STYLE-001"), "stdout: {stdout}");
     assert!(stdout.contains("line: 0"), "stdout: {stdout}");
     assert!(stdout.contains("column: 0"), "stdout: {stdout}");
+    assert!(
+        !stdout.contains("offset:"),
+        "offset should be omitted when not guaranteed: {stdout}"
+    );
 }
 
 #[test]
@@ -5323,6 +5327,16 @@ fn vibra_lint_json_and_sarif_outputs_are_explicit() {
     let report: serde_json::Value = serde_json::from_slice(&sarif.stdout).unwrap();
     assert_eq!(report["version"], "2.1.0");
     assert_eq!(report["runs"][0]["results"][0]["ruleId"], "W-STYLE-001");
+    assert_eq!(
+        report["runs"][0]["tool"]["driver"]["rules"][0]["shortDescription"]["text"],
+        "Symbol-like key is not kebab-case"
+    );
+    assert!(
+        !report["runs"][0]["tool"]["driver"]["rules"][0]["shortDescription"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("BadName")
+    );
 }
 
 #[test]
@@ -5357,4 +5371,23 @@ fn vibra_lint_reports_parse_and_compile_errors_as_structured_yaml() {
         stdout.contains("severity: error"),
         "expected compile error diagnostic: {stdout}"
     );
+}
+
+#[test]
+fn vibra_lint_percent_encodes_file_uris() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("bad#name%25.vibra");
+    std::fs::write(&source, "BadName: 1\n").unwrap();
+
+    let output = vibra_cmd()
+        .args(["lint", &path_str(&source), "--category", "style"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "lint failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("bad%23name%2525.vibra"), "stdout: {stdout}");
 }

@@ -46,9 +46,6 @@ enum Command {
         /// Structured output format.
         #[arg(long, value_enum, default_value_t = ToolOutputArg::Yaml)]
         output: ToolOutputArg,
-        /// Include verbose file details.
-        #[arg(long)]
-        verbose: bool,
     },
     /// Emit Vibra diagnostics for source files.
     Lint {
@@ -66,9 +63,6 @@ enum Command {
         /// Treat warnings as CI failures.
         #[arg(long = "deny-warnings")]
         deny_warnings: bool,
-        /// Include verbose file details.
-        #[arg(long)]
-        verbose: bool,
     },
     /// Parse, compile (MVP), and run a `.vibra` module via embedded Wasmer.
     Run {
@@ -392,13 +386,11 @@ fn main() -> Result<()> {
             path,
             write,
             output,
-            verbose,
         } => {
             let ok = tooling::run_fmt(tooling::FmtOptions {
                 inputs: path,
                 write,
                 output: output.into(),
-                verbose,
             })?;
             if !ok {
                 std::process::exit(1);
@@ -410,7 +402,6 @@ fn main() -> Result<()> {
             category,
             severity,
             deny_warnings,
-            verbose,
         } => {
             let ok = tooling::run_lint(tooling::LintOptions {
                 inputs: path,
@@ -418,7 +409,6 @@ fn main() -> Result<()> {
                 categories: category.into_iter().map(Into::into).collect(),
                 severity: severity.map(Into::into),
                 deny_warnings,
-                verbose,
             })?;
             if !ok {
                 std::process::exit(1);
