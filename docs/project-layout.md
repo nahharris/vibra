@@ -54,6 +54,31 @@ hello/
 
 `vibra init hello --template lib` creates `src/hello/lib.vibra`. `vibra init hello --template workspace` creates `src/core/lib.vibra` and `src/hello/main.vibra`.
 
+## Tests
+
+Project tests live under `tests/` by convention. `vibra test` recursively
+discovers `.vibra` files there and runs each top-level `$test` declaration.
+Test files may contain several tests and do not need a `main` function.
+
+```yaml
+test:
+  $import: "@std/test.vibra"
+
+opens-file:
+  $test:
+    do:
+      - $test.assert: true
+```
+
+Use `--filter`, `--jobs`, `--timeout-ms`, `--fail-fast`, and
+`--report yaml --report-file <path>` to control runner behavior. Permission
+flags are the same as `vibra run` and apply to each test case.
+
+Files named `foo.*.vibra` are module parts for `foo.vibra` when the base file
+exists. For example, `math.test.vibra` shares the same module scope as
+`math.vibra`, which makes it a useful convention for unit tests without adding
+special test-file semantics.
+
 ## Imports
 
 Relative imports keep file-relative behavior:

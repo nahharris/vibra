@@ -55,6 +55,10 @@ pub struct CapabilityGrant {
 pub enum Expr {
     Value(RuntimeValue),
     VarRef(String),
+    Call {
+        call: Box<Call>,
+        return_type: TypeRef,
+    },
     Cast {
         from: Box<Expr>,
         target: TypeRef,
@@ -321,6 +325,18 @@ pub struct LoweredProgram {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LoweredTestCase {
+    pub name: String,
+    pub program: LoweredProgram,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoweredExec {
+    pub expr: Expr,
+    pub program: LoweredProgram,
+}
+
 // ===== Annotation envelope =====
 
 /// Envelope around a top-level symbol's value: one `$`-form key plus optional
@@ -461,14 +477,14 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let form_key = form_key.context("definition must have one `$`-form key")?;
     let form_value = form_value.expect("set together with form_key");
 
-    if form_key != "$function" {
+    if form_key != "$function" && form_key != "$test" {
         if function_args.is_some() || function_return.is_some() || function_do.is_some() {
             bail!(
-                "keys `args`, `return`, and `do` are only valid on `$function` definitions (got `{}`)",
+                "keys `args`, `return`, and `do` are only valid on `$function` or `$test` definitions (got `{}`)",
                 form_key
             );
         }
-    } else {
+    } else if form_key == "$function" {
         let nested_function = form_value.as_mapping().is_some_and(|inner| {
             map_get_str(inner, "args").is_some()
                 && map_get_str(inner, "return").is_some()
@@ -484,19 +500,30 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             let _ = function_return.context("missing `return` on `$function`")?;
             let _ = function_do.context("missing `do` on `$function`")?;
         }
+    } else {
+        if function_args.is_some() || function_return.is_some() || function_do.is_some() {
+            bail!("`$test` must use nested syntax `$test: {{ do: [...] }}`");
+        }
+        let tm = form_value
+            .as_mapping()
+            .context("`$test` value must be a mapping with `do`")?;
+        if tm.len() != 1 || map_get_str(tm, "do").is_none() {
+            bail!("`$test` value must contain only `do`");
+        }
+        let _ = map_get_str(tm, "do").context("missing `do` on `$test`")?;
     }
 
-    if defs.is_some() && form_key == "$function" {
+    if defs.is_some() && (form_key == "$function" || form_key == "$test") {
         bail!(
-            "E-DEFS-001: `=defs` is only valid alongside a type definition, not on a `$function`"
+            "E-DEFS-001: `=defs` is only valid alongside a type definition, not on an executable definition"
         );
     }
     if defs.is_some() && form_key == "$import" {
         bail!("E-DEFS-001: `=defs` is only valid alongside a type definition, not on a `$import`");
     }
-    if impls.is_some() && form_key == "$function" {
+    if impls.is_some() && (form_key == "$function" || form_key == "$test") {
         bail!(
-            "E-IMPL-001: `=impl` is only valid alongside a type definition, not on a `$function`"
+            "E-IMPL-001: `=impl` is only valid alongside a type definition, not on an executable definition"
         );
     }
     if impls.is_some() && form_key == "$import" {
@@ -690,7 +717,7 @@ fn collect_module_skeletons(
             Ok(e) => e,
             Err(_) => continue,
         };
-        if env.form_key == "$function" || env.form_key == "$import" {
+        if env.form_key == "$function" || env.form_key == "$test" || env.form_key == "$import" {
             continue;
         }
         if !BUILTIN_TYPE_FORMS.contains(&env.form_key.as_str()) {
@@ -1811,6 +1838,255 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     })
 }
 
+pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
+    let entry_map = program
+        .modules
+        .get(&program.entry)
+        .context("internal: entry module not loaded")?
+        .as_mapping()
+        .context("entry root must be mapping")?;
+    let entry_project = project::find_project_for_file(&program.entry)?;
+    let skeletons = collect_alias_skeletons(program, entry_project.as_ref())?;
+
+    let mut sigs: HashMap<String, FunctionSig> = HashMap::new();
+    let mut constants: HashMap<String, RuntimeValue> = HashMap::new();
+    let mut type_aliases: HashMap<String, TypeAlias> = HashMap::new();
+    let mut enums: HashMap<String, EnumDef> = HashMap::new();
+    let mut impls: HashMap<ImplKey, ImplBody> = HashMap::new();
+    let mut warnings = Vec::new();
+    let mut pending_user_bodies: Vec<(String, Vec<Value>)> = Vec::new();
+    let mut visited_import_defs: HashSet<(String, PathBuf)> = HashSet::new();
+
+    for (k, v) in entry_map {
+        let alias = k.as_str().context("module keys must be strings")?;
+        if alias.starts_with('-') {
+            continue;
+        }
+        maybe_warn_kebab(alias, "import alias", &mut warnings);
+        let Some(sub) = v.as_mapping() else { continue };
+        let Some(imp) = map_get_str(sub, "$import") else {
+            continue;
+        };
+        let imp_s = imp.as_str().context("$import value must be string")?;
+        let imported_path = resolve_import_path(&program.entry, imp_s, entry_project.as_ref())
+            .with_context(|| format!("resolve import alias `{alias}`"))?;
+        collect_module_defs_tree(
+            alias,
+            &imported_path,
+            program,
+            entry_project.as_ref(),
+            &mut sigs,
+            &mut constants,
+            &mut type_aliases,
+            &mut enums,
+            &mut impls,
+            &mut pending_user_bodies,
+            &skeletons,
+            &mut warnings,
+            &mut visited_import_defs,
+        )?;
+    }
+
+    collect_module_defs(
+        "",
+        program
+            .modules
+            .get(&program.entry)
+            .context("entry not loaded")?,
+        &mut sigs,
+        &mut constants,
+        &mut type_aliases,
+        &mut enums,
+        &mut impls,
+        &mut pending_user_bodies,
+        &skeletons,
+        &mut warnings,
+    )?;
+
+    lower_pending_user_functions(
+        &mut pending_user_bodies,
+        &mut sigs,
+        &constants,
+        &type_aliases,
+        &enums,
+        &impls,
+        &mut warnings,
+    )?;
+
+    let mut tests = Vec::new();
+    for (k, v) in entry_map {
+        let name = k.as_str().context("module keys must be strings")?;
+        if name.starts_with('-') {
+            continue;
+        }
+        let Some(_) = v.as_mapping() else { continue };
+        let env = parse_def_envelope(v, &mut warnings)
+            .with_context(|| format!("invalid definition `{name}`"))?;
+        if env.form_key != "$test" {
+            continue;
+        }
+        maybe_warn_kebab(name, "test name", &mut warnings);
+        if !env.type_params.is_empty() {
+            bail!("`$test` `{name}` must not declare `=where`");
+        }
+        let tm = env
+            .form_value
+            .as_mapping()
+            .context("`$test` value must be a mapping with `do`")?;
+        let steps = map_get_str(tm, "do")
+            .context("missing `do` on `$test`")?
+            .as_sequence()
+            .context("`$test.do` must be sequence")?;
+        let mut locals = HashMap::new();
+        let mut statements = Vec::new();
+        for step in steps {
+            statements.push(lower_statement(
+                step,
+                &sigs,
+                &constants,
+                &type_aliases,
+                &enums,
+                &impls,
+                &mut locals,
+                &mut warnings,
+                None,
+            )?);
+        }
+        validate_all_where_bounds(&type_aliases, &sigs, &enums)?;
+        validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
+        tests.push(LoweredTestCase {
+            name: name.to_string(),
+            program: LoweredProgram {
+                statements,
+                main_arg_bindings: Vec::new(),
+                constants: constants.clone(),
+                functions: sigs.clone(),
+                impls: impls.clone(),
+                warnings: warnings.clone(),
+            },
+        });
+    }
+    if tests.is_empty() {
+        bail!(
+            "no `$test` declarations found in {}",
+            program.entry.display()
+        );
+    }
+    Ok(tests)
+}
+
+pub fn lower_exec_expr(
+    program: &LoadedProgram,
+    expr_value: &Value,
+    local_types: &HashMap<String, TypeRef>,
+) -> Result<LoweredExec> {
+    let entry_map = program
+        .modules
+        .get(&program.entry)
+        .context("internal: entry module not loaded")?
+        .as_mapping()
+        .context("entry root must be mapping")?;
+    let entry_project = project::find_project_for_file(&program.entry)?;
+    let skeletons = collect_alias_skeletons(program, entry_project.as_ref())?;
+
+    let mut sigs: HashMap<String, FunctionSig> = HashMap::new();
+    let mut constants: HashMap<String, RuntimeValue> = HashMap::new();
+    let mut type_aliases: HashMap<String, TypeAlias> = HashMap::new();
+    let mut enums: HashMap<String, EnumDef> = HashMap::new();
+    let mut impls: HashMap<ImplKey, ImplBody> = HashMap::new();
+    let mut warnings = Vec::new();
+    let mut pending_user_bodies: Vec<(String, Vec<Value>)> = Vec::new();
+    let mut visited_import_defs: HashSet<(String, PathBuf)> = HashSet::new();
+
+    for (k, v) in entry_map {
+        let alias = k.as_str().context("module keys must be strings")?;
+        if alias.starts_with('-') {
+            continue;
+        }
+        maybe_warn_kebab(alias, "import alias", &mut warnings);
+        let Some(sub) = v.as_mapping() else { continue };
+        let Some(imp) = map_get_str(sub, "$import") else {
+            continue;
+        };
+        let imp_s = imp.as_str().context("$import value must be string")?;
+        let imported_path = resolve_import_path(&program.entry, imp_s, entry_project.as_ref())
+            .with_context(|| format!("resolve import alias `{alias}`"))?;
+        collect_module_defs_tree(
+            alias,
+            &imported_path,
+            program,
+            entry_project.as_ref(),
+            &mut sigs,
+            &mut constants,
+            &mut type_aliases,
+            &mut enums,
+            &mut impls,
+            &mut pending_user_bodies,
+            &skeletons,
+            &mut warnings,
+            &mut visited_import_defs,
+        )?;
+    }
+
+    collect_module_defs(
+        "",
+        program
+            .modules
+            .get(&program.entry)
+            .context("entry not loaded")?,
+        &mut sigs,
+        &mut constants,
+        &mut type_aliases,
+        &mut enums,
+        &mut impls,
+        &mut pending_user_bodies,
+        &skeletons,
+        &mut warnings,
+    )?;
+
+    lower_pending_user_functions(
+        &mut pending_user_bodies,
+        &mut sigs,
+        &constants,
+        &type_aliases,
+        &enums,
+        &impls,
+        &mut warnings,
+    )?;
+
+    let locals = local_types.clone();
+    let expr = parse_expr(
+        expr_value,
+        &sigs,
+        &constants,
+        &type_aliases,
+        &enums,
+        &impls,
+        &locals,
+        &mut warnings,
+    )?;
+    let expr_ty = infer_expr_type(&expr, &constants, &locals, &type_aliases, &enums)
+        .context("could not infer type for exec expression")?;
+    if expr_ty == TypeRef::Void {
+        bail!("void function call cannot be used as an expression");
+    }
+    let statement = Statement::Eval(expr.clone());
+    validate_all_where_bounds(&type_aliases, &sigs, &enums)?;
+    validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &[statement])?;
+
+    Ok(LoweredExec {
+        expr,
+        program: LoweredProgram {
+            statements: Vec::new(),
+            main_arg_bindings: Vec::new(),
+            constants,
+            functions: sigs,
+            impls,
+            warnings,
+        },
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn collect_module_defs_tree(
     alias: &str,
@@ -2089,7 +2365,7 @@ fn collect_module_defs(
                 format!("invalid definition `{alias}.{name}`")
             }
         })?;
-        if env.form_key == "$function" || env.form_key == "$import" {
+        if env.form_key == "$function" || env.form_key == "$test" || env.form_key == "$import" {
             continue;
         }
         if !BUILTIN_TYPE_FORMS.contains(&env.form_key.as_str()) {
@@ -2185,7 +2461,7 @@ fn collect_module_defs(
                 format!("invalid definition `{alias}.{name}`")
             }
         })?;
-        if env.form_key == "$function" || env.form_key == "$import" {
+        if env.form_key == "$function" || env.form_key == "$test" || env.form_key == "$import" {
             continue;
         }
         let Some(defs_map) = env.defs else { continue };
@@ -2229,7 +2505,7 @@ fn collect_module_defs(
                 format!("invalid definition `{alias}.{name}`")
             }
         })?;
-        if env.form_key == "$function" || env.form_key == "$import" {
+        if env.form_key == "$function" || env.form_key == "$test" || env.form_key == "$import" {
             continue;
         }
         let Some(impls_map) = env.impls else { continue };
@@ -3462,6 +3738,98 @@ fn check_expr_call_bounds(
     context: &str,
 ) -> Result<()> {
     match expr {
+        Expr::Call { call, .. } => {
+            check_call_bounds(
+                call,
+                sigs,
+                type_aliases,
+                impls,
+                enclosing_params,
+                enclosing_bounds,
+                context,
+            )?;
+            for arg in &call.args {
+                check_expr_call_bounds(
+                    arg,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    context,
+                )?;
+            }
+        }
+        Expr::Cast { from, .. } => check_expr_call_bounds(
+            from,
+            sigs,
+            type_aliases,
+            impls,
+            enclosing_params,
+            enclosing_bounds,
+            context,
+        )?,
+        Expr::Record(fields) => {
+            for value in fields.values() {
+                check_expr_call_bounds(
+                    value,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    context,
+                )?;
+            }
+        }
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                check_expr_call_bounds(
+                    item,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    context,
+                )?;
+            }
+        }
+        Expr::Map(items) => {
+            for (key, value) in items {
+                check_expr_call_bounds(
+                    key,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    context,
+                )?;
+                check_expr_call_bounds(
+                    value,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    context,
+                )?;
+            }
+        }
+        Expr::EnumConstructor { payload, .. } => {
+            if let Some(payload) = payload {
+                check_expr_call_bounds(
+                    payload,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    context,
+                )?;
+            }
+        }
         Expr::If {
             cond,
             then_e,
@@ -3495,7 +3863,7 @@ fn check_expr_call_bounds(
                 context,
             )?;
         }
-        _ => {}
+        Expr::Value(_) | Expr::VarRef(_) => {}
     }
     Ok(())
 }
@@ -3757,9 +4125,11 @@ fn lower_branch_to_body(
     }
     Ok(vec![Statement::Eval(parse_expr(
         v,
+        sigs,
         constants,
         type_aliases,
         enums,
+        impls,
         locals,
         warnings,
     )?)])
@@ -3780,9 +4150,11 @@ fn parse_if_statement(
     verify_stmt_keys(stmt, &["$if", "then", "else"])?;
     let cond = parse_expr(
         map_get_str(stmt, "$if").context("$if missing condition")?,
+        sigs,
         constants,
         type_aliases,
         enums,
+        impls,
         locals,
         warnings,
     )?;
@@ -3841,9 +4213,11 @@ fn parse_while_statement(
     verify_stmt_keys(stmt, &["$while", "do"])?;
     let cond = parse_expr(
         map_get_str(stmt, "$while").context("$while missing condition")?,
+        sigs,
         constants,
         type_aliases,
         enums,
+        impls,
         locals,
         warnings,
     )?;
@@ -3876,6 +4250,7 @@ fn parse_while_statement(
     Ok(Statement::While { cond, body })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lower_statement(
     step: &Value,
     sigs: &HashMap<String, FunctionSig>,
@@ -3928,7 +4303,16 @@ fn lower_statement(
                 value: LetValue::Call(call),
             })
         } else {
-            let expr = parse_expr(vv, constants, type_aliases, enums, locals, warnings)?;
+            let expr = parse_expr(
+                vv,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                warnings,
+            )?;
             let expr_ty = infer_expr_type(&expr, constants, locals, type_aliases, enums)
                 .context("could not infer type for $let expression")?;
             if expr_ty == TypeRef::Void {
@@ -3946,7 +4330,16 @@ fn lower_statement(
         }
         let ctx = fn_ctx.context("`$return` is only valid inside user-defined functions")?;
         let ret_v = map_get_str(stmt, "$return").expect("checked");
-        let expr = parse_expr(ret_v, constants, type_aliases, enums, locals, warnings)?;
+        let expr = parse_expr(
+            ret_v,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            warnings,
+        )?;
         let actual = infer_expr_type(&expr, constants, locals, type_aliases, enums)
             .context("could not infer type for `$return` expression")?;
         if !type_compatible(&ctx.return_type, &actual, type_aliases) {
@@ -4110,10 +4503,17 @@ fn try_resolve_iface_call(
             )
         })?;
 
-    let dispatch_expr = parse_expr(dispatch_v, constants, type_aliases, enums, locals, warnings)
-        .with_context(|| {
-            format!("could not parse dispatch arg `{self_arg_name}` of `{call_key}`")
-        })?;
+    let dispatch_expr = parse_expr(
+        dispatch_v,
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        locals,
+        warnings,
+    )
+    .with_context(|| format!("could not parse dispatch arg `{self_arg_name}` of `{call_key}`"))?;
     let dispatch_ty = infer_expr_type(&dispatch_expr, constants, locals, type_aliases, enums)
         .with_context(|| {
             format!("could not infer type of dispatch arg `{self_arg_name}` of `{call_key}`")
@@ -4268,12 +4668,7 @@ fn iface_method_record_field_names(
     let TypeRef::Record(args_record) = args.as_ref() else {
         return Ok(None);
     };
-    Ok(Some(
-        args_record
-            .iter()
-            .map(|(n, _)| n.clone())
-            .collect::<Vec<_>>(),
-    ))
+    Ok(Some(args_record.keys().cloned().collect::<Vec<_>>()))
 }
 
 /// Rejects nesting the full parameter map under the callee (`$f: {{ t: ..., x: ... }}`).
@@ -4308,7 +4703,9 @@ fn reject_iface_nested_call_bundle(
     Ok(())
 }
 
-fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<(String, Value, Vec<(String, Value)>)> {
+type CallEnvelope = (String, Value, Vec<(String, Value)>);
+
+fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<CallEnvelope> {
     let mut callee: Option<(String, Value)> = None;
     let mut siblings: Vec<(String, Value)> = Vec::new();
     for (k, v) in m {
@@ -4341,6 +4738,14 @@ fn reject_unknown_call_keys(
         .cloned()
         .collect();
     if let Some(m) = subject.as_mapping() {
+        if split_call_envelope(m).is_ok() {
+            return Ok(());
+        }
+        if m.keys()
+            .all(|k| k.as_str().is_some_and(|ks| ks.starts_with('$')))
+        {
+            return Ok(());
+        }
         if siblings.is_empty() && !function.arg_names.is_empty() {
             let primary = &function.arg_names[0];
             let unknown_count = m
@@ -4412,12 +4817,12 @@ fn report_missing_inline_call_args(
         return Ok(());
     }
     for tp in &function.type_params {
-        if !m.contains_key(&Value::String(tp.clone())) {
+        if !m.contains_key(Value::String(tp.clone())) {
             bail!("missing type argument `{tp}` in call `{call_key}`");
         }
     }
     for n in &function.arg_names {
-        if !m.contains_key(&Value::String(n.clone())) {
+        if !m.contains_key(Value::String(n.clone())) {
             bail!("missing value argument `{n}` in call `{call_key}`");
         }
     }
@@ -4601,9 +5006,11 @@ fn parse_call(
         function,
         !function.type_params.is_empty(),
         &call_key,
+        sigs,
         constants,
         type_aliases,
         enums,
+        impls,
         locals,
         warnings,
     )?;
@@ -4645,9 +5052,11 @@ fn parse_call_args(
     function: &FunctionSig,
     generic_call: bool,
     call_key: &str,
+    sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
     enums: &HashMap<String, EnumDef>,
+    impls: &HashMap<ImplKey, ImplBody>,
     locals: &HashMap<String, TypeRef>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<Expr>> {
@@ -4666,9 +5075,11 @@ fn parse_call_args(
     if !generic_call && arg_names.len() == 1 && !av.is_mapping() {
         return Ok(vec![parse_expr(
             av,
+            sigs,
             constants,
             type_aliases,
             enums,
+            impls,
             locals,
             warnings,
         )?]);
@@ -4685,9 +5096,11 @@ fn parse_call_args(
             if only_key_constructor {
                 return Ok(vec![parse_expr(
                     av,
+                    sigs,
                     constants,
                     type_aliases,
                     enums,
+                    impls,
                     locals,
                     warnings,
                 )?]);
@@ -4714,9 +5127,11 @@ fn parse_call_args(
         maybe_warn_kebab(n, "argument key", warnings);
         out.push(parse_expr(
             v,
+            sigs,
             constants,
             type_aliases,
             enums,
+            impls,
             locals,
             warnings,
         )?);
@@ -4724,20 +5139,47 @@ fn parse_call_args(
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_expr(
     v: &Value,
+    sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
     enums: &HashMap<String, EnumDef>,
+    impls: &HashMap<ImplKey, ImplBody>,
     locals: &HashMap<String, TypeRef>,
     warnings: &mut Vec<String>,
 ) -> Result<Expr> {
     if let Some(m) = v.as_mapping() {
+        if looks_like_call(v, sigs) || looks_like_iface_call(v, type_aliases) {
+            let call = parse_call(
+                v,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                warnings,
+            )?;
+            let sig = sigs
+                .get(&call.callee_key)
+                .context("internal: missing callee after expression parse_call")?;
+            let return_type = substituted_return_type(sig, &call.type_args);
+            if return_type == TypeRef::Void {
+                bail!("void function call cannot be used as an expression");
+            }
+            return Ok(Expr::Call {
+                call: Box::new(call),
+                return_type,
+            });
+        }
+
         fn mapping_keys_exactly(m: &serde_yaml::Mapping, keys: &[&str]) -> bool {
             m.len() == keys.len()
                 && keys
                     .iter()
-                    .all(|k| m.contains_key(&Value::String((*k).into())))
+                    .all(|k| m.contains_key(Value::String((*k).into())))
         }
 
         if mapping_keys_exactly(m, &["$cast", "into"]) {
@@ -4745,7 +5187,16 @@ fn parse_expr(
                 .context("E-CAST-002: `$cast` missing subject expression")?;
             let into_v =
                 map_get_str(m, "into").context("E-CAST-002: `$cast` missing `into` type")?;
-            let from = parse_expr(from_v, constants, type_aliases, enums, locals, warnings)?;
+            let from = parse_expr(
+                from_v,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                warnings,
+            )?;
             let source = infer_expr_type(&from, constants, locals, type_aliases, enums)
                 .context("E-CAST-001: could not infer `$cast` subject type")?;
             let empty_skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
@@ -4772,25 +5223,31 @@ fn parse_expr(
         if mapping_keys_exactly(m, &["$if", "then", "else"]) {
             let cond = parse_expr(
                 map_get_str(m, "$if").context("$if missing condition")?,
+                sigs,
                 constants,
                 type_aliases,
                 enums,
+                impls,
                 locals,
                 warnings,
             )?;
             let then_e = parse_expr(
                 map_get_str(m, "then").context("$if missing `then`")?,
+                sigs,
                 constants,
                 type_aliases,
                 enums,
+                impls,
                 locals,
                 warnings,
             )?;
             let else_e = parse_expr(
                 map_get_str(m, "else").context("$if missing `else`")?,
+                sigs,
                 constants,
                 type_aliases,
                 enums,
+                impls,
                 locals,
                 warnings,
             )?;
@@ -4812,8 +5269,16 @@ fn parse_expr(
                     for (fk, fv) in payload {
                         let name = fk.as_str().context("$record value key must be string")?;
                         maybe_warn_kebab(name, "record field", warnings);
-                        let expr =
-                            parse_expr(fv, constants, type_aliases, enums, locals, warnings)?;
+                        let expr = parse_expr(
+                            fv,
+                            sigs,
+                            constants,
+                            type_aliases,
+                            enums,
+                            impls,
+                            locals,
+                            warnings,
+                        )?;
                         if fields.insert(name.to_string(), expr).is_some() {
                             bail!("duplicate $record value field `{name}`");
                         }
@@ -4828,9 +5293,11 @@ fn parse_expr(
                     for item in payload {
                         items.push(parse_expr(
                             item,
+                            sigs,
                             constants,
                             type_aliases,
                             enums,
+                            impls,
                             locals,
                             warnings,
                         )?);
@@ -4845,9 +5312,11 @@ fn parse_expr(
                     for item in payload {
                         items.push(parse_expr(
                             item,
+                            sigs,
                             constants,
                             type_aliases,
                             enums,
+                            impls,
                             locals,
                             warnings,
                         )?);
@@ -4868,8 +5337,26 @@ fn parse_expr(
                         let value_v =
                             map_get_str(entry_m, "value").context("$map entry missing value")?;
                         items.push((
-                            parse_expr(key_v, constants, type_aliases, enums, locals, warnings)?,
-                            parse_expr(value_v, constants, type_aliases, enums, locals, warnings)?,
+                            parse_expr(
+                                key_v,
+                                sigs,
+                                constants,
+                                type_aliases,
+                                enums,
+                                impls,
+                                locals,
+                                warnings,
+                            )?,
+                            parse_expr(
+                                value_v,
+                                sigs,
+                                constants,
+                                type_aliases,
+                                enums,
+                                impls,
+                                locals,
+                                warnings,
+                            )?,
                         ));
                     }
                     return Ok(Expr::Map(items));
@@ -4902,9 +5389,11 @@ fn parse_expr(
                     } else {
                         let payload_expr = parse_expr(
                             payload_v,
+                            sigs,
                             constants,
                             type_aliases,
                             enums,
+                            impls,
                             locals,
                             warnings,
                         )?;
@@ -5151,6 +5640,7 @@ fn infer_expr_type(
                 infer_expr_type(&Expr::Value(rv.clone()), constants, locals, aliases, enums)
             })
         }),
+        Expr::Call { return_type, .. } => Some(return_type.clone()),
         Expr::Cast { target, .. } => Some(target.clone()),
         Expr::Record(fields) => fields
             .iter()
@@ -5700,7 +6190,16 @@ fn parse_match_statement(
             "when",
         )
     };
-    let target = parse_expr(target_v, constants, type_aliases, enums, locals, warnings)?;
+    let target = parse_expr(
+        target_v,
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        locals,
+        warnings,
+    )?;
     let target_ty = infer_expr_type(&target, constants, locals, type_aliases, enums)
         .context("$match subject type could not be inferred")?;
 

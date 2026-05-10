@@ -4770,3 +4770,370 @@ dependencies:
         String::from_utf8_lossy(&check.stderr)
     );
 }
+
+#[test]
+fn vibra_test_runs_top_level_test_declarations_without_main() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("app");
+    let tests_dir = project.join("tests");
+    std::fs::create_dir_all(&tests_dir).unwrap();
+    std::fs::write(
+        tests_dir.join("basic.vibra"),
+        r#"test:
+  $import: "@std/test.vibra"
+passes:
+  $test:
+    do:
+      - $test.assert: true
+also-passes:
+  $test:
+    do:
+      - $test.assert: true
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        r#"manifest-version: 1
+package:
+  name: app
+  version: 0.1.0
+targets:
+  bins:
+    - name: app
+      root: tests
+      entry: basic.vibra
+dependencies:
+  std:
+    path: dep/std
+"#,
+    )
+    .unwrap();
+    copy_stdlib(&project.join("dep/std"));
+
+    let output = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["test", "app"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "test failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("2 passed"), "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn vibra_test_reports_assertion_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("app");
+    let tests_dir = project.join("tests");
+    std::fs::create_dir_all(&tests_dir).unwrap();
+    std::fs::write(
+        tests_dir.join("fails.vibra"),
+        r#"test:
+  $import: "@std/test.vibra"
+fails:
+  $test:
+    do:
+      - $test.assert: false
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        r#"manifest-version: 1
+package:
+  name: app
+  version: 0.1.0
+targets:
+  bins:
+    - name: app
+      root: tests
+      entry: fails.vibra
+dependencies:
+  std:
+    path: dep/std
+"#,
+    )
+    .unwrap();
+    copy_stdlib(&project.join("dep/std"));
+
+    let output = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["test", "app"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("1 failed") || stderr.contains("assertion failed"),
+        "unexpected stdout={stdout} stderr={stderr}"
+    );
+}
+
+#[test]
+fn vibra_test_writes_yaml_report_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("app");
+    let tests_dir = project.join("tests");
+    let report = dir.path().join("report.yaml");
+    std::fs::create_dir_all(&tests_dir).unwrap();
+    std::fs::write(
+        tests_dir.join("basic.vibra"),
+        r#"test:
+  $import: "@std/test.vibra"
+passes:
+  $test:
+    do:
+      - $test.assert: true
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        r#"manifest-version: 1
+package:
+  name: app
+  version: 0.1.0
+targets:
+  bins:
+    - name: app
+      root: tests
+      entry: basic.vibra
+dependencies:
+  std:
+    path: dep/std
+"#,
+    )
+    .unwrap();
+    copy_stdlib(&project.join("dep/std"));
+
+    let output = vibra_cmd()
+        .current_dir(dir.path())
+        .args([
+            "test",
+            "app",
+            "--report",
+            "yaml",
+            "--report-file",
+            &path_str(&report),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "test failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let yaml = std::fs::read_to_string(report).unwrap();
+    assert!(yaml.contains("total: 1"), "unexpected yaml: {yaml}");
+    assert!(yaml.contains("passed: 1"), "unexpected yaml: {yaml}");
+    assert!(yaml.contains("status: passed"), "unexpected yaml: {yaml}");
+}
+
+#[test]
+fn module_part_test_file_shares_base_module_definitions() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("app");
+    let tests_dir = project.join("tests");
+    std::fs::create_dir_all(&tests_dir).unwrap();
+    std::fs::write(
+        tests_dir.join("math.vibra"),
+        r#"is-ready:
+  $function: $void
+  return: $bool
+  do:
+    - $return: true
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        tests_dir.join("math.test.vibra"),
+        r#"test:
+  $import: "@std/test.vibra"
+uses-base-function:
+  $test:
+    do:
+      - $let:
+          ready:
+            $is-ready: null
+      - $test.assert: $ready
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        r#"manifest-version: 1
+package:
+  name: app
+  version: 0.1.0
+targets:
+  bins:
+    - name: app
+      root: tests
+      entry: math.vibra
+dependencies:
+  std:
+    path: dep/std
+"#,
+    )
+    .unwrap();
+    copy_stdlib(&project.join("dep/std"));
+
+    let output = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["test", "app", "--filter", "uses-base-function"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "test failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn copy_stdlib(dest: &Path) {
+    std::fs::create_dir_all(dest).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), dest.join(entry.file_name())).unwrap();
+    }
+}
+
+#[test]
+fn vibra_exec_prints_raw_string_expression() {
+    let output = vibra_cmd()
+        .args(["exec", "\"hello\"", "--format", "raw"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "exec failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "hello");
+}
+
+#[test]
+fn vibra_exec_reads_arg_file_and_gets_code_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.vibra");
+    std::fs::write(
+        &source,
+        r#"io:
+  $import: ./io.vibra
+main:
+  $function: $void
+  return: $void
+  do:
+    - $io.println: "Hello"
+"#,
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args([
+            "exec",
+            "{$code.get: {$code.parse: $src}, path: \"/main/do/0/$io.println\"}",
+            "--arg-file",
+            &format!("src={}", path_str(&source)),
+            "--format",
+            "raw",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "exec failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "\"Hello\"");
+}
+
+#[test]
+fn vibra_exec_sets_code_path_while_preserving_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.vibra");
+    std::fs::write(
+        &source,
+        r#"# keep module comment
+io:
+  $import: ./io.vibra
+
+main:
+  $function: $void
+  return: $void
+  do:
+    # keep call comment
+    - $io.println: "Hello"
+"#,
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args([
+            "exec",
+            "{$code.emit: {$code.set: {$code.parse: $src}, path: \"/main/do/0/$io.println\", value: \"\\\"Changed\\\"\"}}",
+            "--arg-file",
+            &format!("src={}", path_str(&source)),
+            "--format",
+            "raw",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "exec failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("# keep module comment"), "output: {stdout}");
+    assert!(stdout.contains("# keep call comment"), "output: {stdout}");
+    assert!(
+        stdout.contains("$io.println: \"Changed\""),
+        "output: {stdout}"
+    );
+    assert!(
+        !stdout.contains("$io.println: \"Hello\""),
+        "output: {stdout}"
+    );
+}
+
+#[test]
+fn vibra_exec_rejects_invalid_pointer_and_non_string_raw_output() {
+    let missing = vibra_cmd()
+        .args([
+            "exec",
+            "{$code.get: {$code.parse: \"main: 1\\n\"}, path: \"/missing\"}",
+            "--format",
+            "raw",
+        ])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("JSON Pointer"),
+        "stderr: {}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+
+    let non_string = vibra_cmd()
+        .args(["exec", "42", "--format", "raw"])
+        .output()
+        .unwrap();
+    assert!(!non_string.status.success());
+    assert!(
+        String::from_utf8_lossy(&non_string.stderr).contains("raw output requires"),
+        "stderr: {}",
+        String::from_utf8_lossy(&non_string.stderr)
+    );
+}

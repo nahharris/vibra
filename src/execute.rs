@@ -1,8 +1,8 @@
 //! Execute lowered Vibra programs with stdlib io/fs support.
 
 use crate::lower::{
-    Call, CapabilityGrant, Expr, FunctionBody, LetValue, LoweredProgram, Pattern, RuntimeValue,
-    Statement, TypeRef, WasmArgSpec,
+    Call, CapabilityGrant, Expr, FunctionBody, LetValue, LoweredExec, LoweredProgram, Pattern,
+    RuntimeValue, Statement, TypeRef, WasmArgSpec,
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
@@ -22,6 +22,16 @@ pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn eval_lowered_exec(
+    exec: &LoweredExec,
+    bindings: &HashMap<String, RuntimeValue>,
+    config: &RunConfig,
+) -> Result<RuntimeValue> {
+    let env = bindings.clone();
+    let mut files = FileTable::default();
+    eval_expr(&exec.expr, &env, &exec.program, &mut files, config)
 }
 
 fn seed_main_args(
@@ -79,11 +89,11 @@ fn denial_reason_key(grant_status_key: &str) -> String {
 fn grant_scopes(grant_type: &str, config: &RunConfig) -> Vec<String> {
     let mut scopes = Vec::new();
     if grant_type.ends_with("fs-read-grant") {
-        scopes.extend(config.preopen_host_dirs.iter().map(path_scope));
-        scopes.extend(config.allow_read.iter().map(path_scope));
+        scopes.extend(config.preopen_host_dirs.iter().map(|p| path_scope(p)));
+        scopes.extend(config.allow_read.iter().map(|p| path_scope(p)));
     } else if grant_type.ends_with("fs-write-grant") {
-        scopes.extend(config.preopen_host_dirs.iter().map(path_scope));
-        scopes.extend(config.allow_write.iter().map(path_scope));
+        scopes.extend(config.preopen_host_dirs.iter().map(|p| path_scope(p)));
+        scopes.extend(config.allow_write.iter().map(|p| path_scope(p)));
     } else if grant_type.ends_with("stdin-read-grant") {
         if config.allow_stdin {
             scopes.push("*".to_string());
@@ -98,19 +108,18 @@ fn grant_scopes(grant_type: &str, config: &RunConfig) -> Vec<String> {
         scopes.extend(config.allow_net_listen.clone());
     } else if grant_type.ends_with("process-run-grant") {
         scopes.extend(config.allow_run.clone());
-    } else if grant_type.ends_with("clock-grant") && config.allow_clock {
-        scopes.push("*".to_string());
-    } else if grant_type.ends_with("random-grant") && config.allow_random {
-        scopes.push("*".to_string());
-    } else if grant_type.ends_with("system-info-grant") && config.allow_system_info {
+    } else if (grant_type.ends_with("clock-grant") && config.allow_clock)
+        || (grant_type.ends_with("random-grant") && config.allow_random)
+        || (grant_type.ends_with("system-info-grant") && config.allow_system_info)
+    {
         scopes.push("*".to_string());
     }
     scopes
 }
 
-fn path_scope(p: &PathBuf) -> String {
+fn path_scope(p: &Path) -> String {
     normalize_absolute_path(p)
-        .unwrap_or_else(|_| p.clone())
+        .unwrap_or_else(|_| p.to_path_buf())
         .display()
         .to_string()
 }
@@ -158,16 +167,23 @@ impl FileTable {
     }
 }
 
-fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<RuntimeValue> {
+fn eval_expr(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<RuntimeValue> {
     match expr {
         Expr::Value(v) => Ok(v.clone()),
         Expr::VarRef(v) => env
             .get(v)
             .cloned()
             .with_context(|| format!("unknown variable `${v}`")),
+        Expr::Call { call, .. } => exec_call(call, program, env, files, config),
         Expr::Cast { from, target } => Ok(RuntimeValue::Typed {
             type_ref: target.clone(),
-            value: Box::new(eval_expr(from, env)?),
+            value: Box::new(eval_expr(from, env, program, files, config)?),
         }),
         Expr::EnumConstructor {
             enum_key,
@@ -176,7 +192,7 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
         } => {
             let payload_value = payload
                 .as_ref()
-                .map(|p| eval_expr(p, env))
+                .map(|p| eval_expr(p, env, program, files, config))
                 .transpose()?
                 .map(Box::new);
             Ok(RuntimeValue::Enum {
@@ -187,31 +203,36 @@ fn eval_expr(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Runtime
         }
         Expr::Record(fields) => fields
             .iter()
-            .map(|(name, expr)| Ok((name.clone(), eval_expr(expr, env)?)))
+            .map(|(name, expr)| Ok((name.clone(), eval_expr(expr, env, program, files, config)?)))
             .collect::<Result<std::collections::BTreeMap<_, _>>>()
             .map(RuntimeValue::Record),
         Expr::Tuple(items) => items
             .iter()
-            .map(|expr| eval_expr(expr, env))
+            .map(|expr| eval_expr(expr, env, program, files, config))
             .collect::<Result<Vec<_>>>()
             .map(RuntimeValue::Tuple),
         Expr::Array(items) => items
             .iter()
-            .map(|expr| eval_expr(expr, env))
+            .map(|expr| eval_expr(expr, env, program, files, config))
             .collect::<Result<Vec<_>>>()
             .map(RuntimeValue::Array),
         Expr::Map(items) => items
             .iter()
-            .map(|(k, v)| Ok((eval_expr(k, env)?, eval_expr(v, env)?)))
+            .map(|(k, v)| {
+                Ok((
+                    eval_expr(k, env, program, files, config)?,
+                    eval_expr(v, env, program, files, config)?,
+                ))
+            })
             .collect::<Result<Vec<_>>>()
             .map(RuntimeValue::Map),
         Expr::If {
             cond,
             then_e,
             else_e,
-        } => match eval_expr(cond, env)? {
-            RuntimeValue::Bool(true) => eval_expr(then_e, env),
-            RuntimeValue::Bool(false) => eval_expr(else_e, env),
+        } => match eval_expr(cond, env, program, files, config)? {
+            RuntimeValue::Bool(true) => eval_expr(then_e, env, program, files, config),
+            RuntimeValue::Bool(false) => eval_expr(else_e, env, program, files, config),
             other => bail!("`$if` condition must be `$bool`, got {other:?}"),
         },
     }
@@ -226,7 +247,7 @@ fn exec_statement(
     config: &RunConfig,
 ) -> Result<Option<RuntimeValue>> {
     match stmt {
-        Statement::Return(expr) => Ok(Some(eval_expr(expr, env)?)),
+        Statement::Return(expr) => Ok(Some(eval_expr(expr, env, program, files, config)?)),
         Statement::Call(call) => {
             let _ = exec_call(call, program, env, files, config)?;
             Ok(None)
@@ -237,13 +258,13 @@ fn exec_statement(
         } => {
             let value = match binding {
                 LetValue::Call(c) => exec_call(c, program, env, files, config)?,
-                LetValue::Expr(e) => eval_expr(e, env)?,
+                LetValue::Expr(e) => eval_expr(e, env, program, files, config)?,
             };
             env.insert(var.clone(), value);
             Ok(None)
         }
         Statement::Match { target, arms } => {
-            let value = eval_expr(target, env)?;
+            let value = eval_expr(target, env, program, files, config)?;
             for arm in arms {
                 let mut scoped = env.clone();
                 if pattern_matches(&arm.pattern, &value, program, &mut scoped)? {
@@ -256,20 +277,20 @@ fn exec_statement(
             bail!("non-exhaustive $match reached runtime with value `{value:?}`")
         }
         Statement::Eval(expr) => {
-            eval_expr(expr, env)?;
+            eval_expr(expr, env, program, files, config)?;
             Ok(None)
         }
         Statement::If {
             cond,
             then_body,
             else_body,
-        } => match eval_expr(cond, env)? {
+        } => match eval_expr(cond, env, program, files, config)? {
             RuntimeValue::Bool(true) => run_block(then_body, program, env, files, config),
             RuntimeValue::Bool(false) => run_block(else_body, program, env, files, config),
             other => bail!("`$if` condition must be `$bool`, got {other:?}"),
         },
         Statement::While { cond, body } => loop {
-            match eval_expr(cond, env)? {
+            match eval_expr(cond, env, program, files, config)? {
                 RuntimeValue::Bool(true) => {
                     if let Some(v) = run_block(body, program, env, files, config)? {
                         return Ok(Some(v));
@@ -461,8 +482,14 @@ fn run_block(
     Ok(None)
 }
 
-fn eval_i64(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<i64> {
-    match eval_expr(expr, env)? {
+fn eval_i64(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<i64> {
+    match eval_expr(expr, env, program, files, config)? {
         RuntimeValue::Int(i) => Ok(i),
         RuntimeValue::Typed { value, .. } => match *value {
             RuntimeValue::Int(i) => Ok(i),
@@ -483,13 +510,25 @@ fn eval_i64(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<i64> {
     }
 }
 
-fn eval_handle(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<u64> {
-    let raw = eval_i64(expr, env)?;
+fn eval_handle(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<u64> {
+    let raw = eval_i64(expr, env, program, files, config)?;
     u64::try_from(raw).context("file handle < 0")
 }
 
-fn eval_string(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<String> {
-    match eval_expr(expr, env)? {
+fn eval_string(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<String> {
+    match eval_expr(expr, env, program, files, config)? {
         RuntimeValue::Str(s) => Ok(s),
         RuntimeValue::Typed { value, .. } => match *value {
             RuntimeValue::Str(s) => Ok(s),
@@ -499,8 +538,31 @@ fn eval_string(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<Strin
     }
 }
 
-fn eval_capability(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<CapabilityGrant> {
-    match eval_expr(expr, env)? {
+fn eval_bool(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<bool> {
+    match eval_expr(expr, env, program, files, config)? {
+        RuntimeValue::Bool(b) => Ok(b),
+        RuntimeValue::Typed { value, .. } => match *value {
+            RuntimeValue::Bool(b) => Ok(b),
+            other => bail!("expected bool, got {other:?}"),
+        },
+        other => bail!("expected bool, got {other:?}"),
+    }
+}
+
+fn eval_capability(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<CapabilityGrant> {
+    match eval_expr(expr, env, program, files, config)? {
         RuntimeValue::Capability(grant) => Ok(grant),
         other => bail!("expected capability grant, got {other:?}"),
     }
@@ -509,9 +571,12 @@ fn eval_capability(expr: &Expr, env: &HashMap<String, RuntimeValue>) -> Result<C
 fn eval_domain_string(
     expr: &Expr,
     env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
     domain: &str,
 ) -> Result<String> {
-    match eval_expr(expr, env)? {
+    match eval_expr(expr, env, program, files, config)? {
         RuntimeValue::Str(s) => Ok(s),
         RuntimeValue::Typed { value, .. } => match *value {
             RuntimeValue::Str(s) => Ok(s),
@@ -613,6 +678,9 @@ fn forwarded_args(
     call: &Call,
     sig: &crate::lower::FunctionSig,
     env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
 ) -> Result<Vec<RuntimeValue>> {
     let FunctionBody::Wasm { wasm_args, .. } = &sig.body else {
         bail!(
@@ -622,7 +690,10 @@ fn forwarded_args(
     };
     let mut named: HashMap<&str, RuntimeValue> = HashMap::new();
     for (idx, name) in sig.arg_names.iter().enumerate() {
-        named.insert(name.as_str(), eval_expr(&call.args[idx], env)?);
+        named.insert(
+            name.as_str(),
+            eval_expr(&call.args[idx], env, program, files, config)?,
+        );
     }
 
     let mut out = Vec::new();
@@ -770,7 +841,7 @@ fn exec_call(
         FunctionBody::User { statements } => {
             let mut fn_env: HashMap<String, RuntimeValue> = HashMap::new();
             for (idx, name) in sig.arg_names.iter().enumerate() {
-                let val = eval_expr(&call.args[idx], env)?;
+                let val = eval_expr(&call.args[idx], env, program, files, config)?;
                 fn_env.insert(name.clone(), val.clone());
                 fn_env.insert(format!("args.{name}"), val);
             }
@@ -786,29 +857,98 @@ fn exec_call(
             Ok(RuntimeValue::Void)
         }
         FunctionBody::Wasm { import, .. } => {
-            let _forwarded = forwarded_args(call, sig, env)?;
+            let _forwarded = forwarded_args(call, sig, env, program, files, config)?;
             let sym = sig.symbol.as_str();
+
+            if import.module == "vibra_test" {
+                return match import.name.as_str() {
+                    "assert" => {
+                        if eval_bool(&call.args[0], env, program, files, config)? {
+                            Ok(RuntimeValue::Void)
+                        } else {
+                            bail!("assertion failed")
+                        }
+                    }
+                    "fail" => bail!(
+                        "{}",
+                        eval_string(&call.args[0], env, program, files, config)?
+                    ),
+                    other => bail!("unsupported vibra_test import `{other}`"),
+                };
+            }
+
+            if import.module == "vibra_code" {
+                return match import.name.as_str() {
+                    "parse" => {
+                        let source = eval_string(&call.args[0], env, program, files, config)?;
+                        let doc = crate::code_doc::parse(&source)?;
+                        Ok(RuntimeValue::Typed {
+                            type_ref: sig.return_type.clone(),
+                            value: Box::new(RuntimeValue::Str(doc)),
+                        })
+                    }
+                    "emit" => {
+                        let doc = eval_string(&call.args[0], env, program, files, config)?;
+                        Ok(RuntimeValue::Str(crate::code_doc::emit(&doc)?))
+                    }
+                    "get" => {
+                        let doc = eval_string(&call.args[0], env, program, files, config)?;
+                        let path = eval_string(&call.args[1], env, program, files, config)?;
+                        Ok(RuntimeValue::Str(crate::code_doc::get(&doc, &path)?))
+                    }
+                    "set" => {
+                        let doc = eval_string(&call.args[0], env, program, files, config)?;
+                        let path = eval_string(&call.args[1], env, program, files, config)?;
+                        let value = eval_string(&call.args[2], env, program, files, config)?;
+                        let doc = crate::code_doc::set(&doc, &path, &value)?;
+                        Ok(RuntimeValue::Typed {
+                            type_ref: sig.return_type.clone(),
+                            value: Box::new(RuntimeValue::Str(doc)),
+                        })
+                    }
+                    "remove" => {
+                        let doc = eval_string(&call.args[0], env, program, files, config)?;
+                        let path = eval_string(&call.args[1], env, program, files, config)?;
+                        let doc = crate::code_doc::remove(&doc, &path)?;
+                        Ok(RuntimeValue::Typed {
+                            type_ref: sig.return_type.clone(),
+                            value: Box::new(RuntimeValue::Str(doc)),
+                        })
+                    }
+                    "append" => {
+                        let doc = eval_string(&call.args[0], env, program, files, config)?;
+                        let path = eval_string(&call.args[1], env, program, files, config)?;
+                        let value = eval_string(&call.args[2], env, program, files, config)?;
+                        let doc = crate::code_doc::append(&doc, &path, &value)?;
+                        Ok(RuntimeValue::Typed {
+                            type_ref: sig.return_type.clone(),
+                            value: Box::new(RuntimeValue::Str(doc)),
+                        })
+                    }
+                    other => bail!("unsupported vibra_code import `{other}`"),
+                };
+            }
 
             match sym {
                 "print" => {
-                    let msg = eval_string(&call.args[0], env)?;
+                    let msg = eval_string(&call.args[0], env, program, files, config)?;
                     print!("{msg}");
                     std::io::stdout().flush().ok();
                     Ok(RuntimeValue::Void)
                 }
                 "println" => {
-                    let msg = eval_string(&call.args[0], env)?;
+                    let msg = eval_string(&call.args[0], env, program, files, config)?;
                     println!("{msg}");
                     Ok(RuntimeValue::Void)
                 }
                 "eprint" => {
-                    let msg = eval_string(&call.args[0], env)?;
+                    let msg = eval_string(&call.args[0], env, program, files, config)?;
                     eprint!("{msg}");
                     std::io::stderr().flush().ok();
                     Ok(RuntimeValue::Void)
                 }
                 "eprintln" => {
-                    let msg = eval_string(&call.args[0], env)?;
+                    let msg = eval_string(&call.args[0], env, program, files, config)?;
                     eprintln!("{msg}");
                     Ok(RuntimeValue::Void)
                 }
@@ -817,7 +957,7 @@ fn exec_call(
                     Ok(RuntimeValue::Void)
                 }
                 "read-line" => {
-                    let fd = eval_i64(&call.args[0], env)?;
+                    let fd = eval_i64(&call.args[0], env, program, files, config)?;
                     if fd != 0 {
                         bail!("read-line currently supports stdin fd 0 only");
                     }
@@ -834,8 +974,8 @@ fn exec_call(
                     Ok(RuntimeValue::Str(line))
                 }
                 "read-raw" => {
-                    let fd = eval_i64(&call.args[0], env)?;
-                    let len = eval_i64(&call.args[1], env)?;
+                    let fd = eval_i64(&call.args[0], env, program, files, config)?;
+                    let len = eval_i64(&call.args[1], env, program, files, config)?;
                     if fd != 0 {
                         bail!("read-raw currently supports stdin fd 0 only");
                     }
@@ -846,8 +986,8 @@ fn exec_call(
                     ))
                 }
                 "write-raw" | "write-all" => {
-                    let fd = eval_i64(&call.args[0], env)?;
-                    let bytes = eval_string(&call.args[1], env)?;
+                    let fd = eval_i64(&call.args[0], env, program, files, config)?;
+                    let bytes = eval_string(&call.args[1], env, program, files, config)?;
                     if fd == 2 {
                         eprint!("{bytes}");
                         std::io::stderr().flush().ok();
@@ -861,12 +1001,13 @@ fn exec_call(
                 }
 
                 "path.new" => {
-                    let path = eval_string(&call.args[0], env)?;
+                    let path = eval_string(&call.args[0], env, program, files, config)?;
                     Ok(RuntimeValue::Str(path))
                 }
                 "open-read" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
                     Ok(fs_result(
                         sig,
@@ -877,8 +1018,9 @@ fn exec_call(
                     ))
                 }
                 "open-write" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     Ok(fs_result(
                         sig,
@@ -895,8 +1037,9 @@ fn exec_call(
                     ))
                 }
                 "open-append" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     Ok(fs_result(
                         sig,
@@ -907,9 +1050,10 @@ fn exec_call(
                     ))
                 }
                 "open-read-write" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let read_grant = eval_capability(&call.args[1], env)?;
-                    let write_grant = eval_capability(&call.args[2], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let read_grant = eval_capability(&call.args[1], env, program, files, config)?;
+                    let write_grant = eval_capability(&call.args[2], env, program, files, config)?;
                     let _ = resolve_granted_path(&path, &read_grant, "fs-read-grant")?;
                     let p = resolve_granted_path(&path, &write_grant, "fs-write-grant")?;
                     Ok(fs_result(
@@ -928,19 +1072,21 @@ fn exec_call(
                     ))
                 }
                 "narrow-read" => {
-                    let grant = eval_capability(&call.args[0], env)?;
-                    let path = eval_domain_string(&call.args[1], env, "path")?;
+                    let grant = eval_capability(&call.args[0], env, program, files, config)?;
+                    let path =
+                        eval_domain_string(&call.args[1], env, program, files, config, "path")?;
                     let narrowed = narrow_path_grant(&grant, &path, "fs-read-grant")?;
                     Ok(result_ok(sig, RuntimeValue::Capability(narrowed)))
                 }
                 "narrow-write" => {
-                    let grant = eval_capability(&call.args[0], env)?;
-                    let path = eval_domain_string(&call.args[1], env, "path")?;
+                    let grant = eval_capability(&call.args[0], env, program, files, config)?;
+                    let path =
+                        eval_domain_string(&call.args[1], env, program, files, config, "path")?;
                     let narrowed = narrow_path_grant(&grant, &path, "fs-write-grant")?;
                     Ok(result_ok(sig, RuntimeValue::Capability(narrowed)))
                 }
                 "readln" => {
-                    let grant = eval_capability(&call.args[0], env)?;
+                    let grant = eval_capability(&call.args[0], env, program, files, config)?;
                     ensure_scope(&grant, "stdin-read-grant", "*")?;
                     let mut line = String::new();
                     match std::io::stdin().read_line(&mut line) {
@@ -957,15 +1103,15 @@ fn exec_call(
                     }
                 }
                 "get" if sig.alias.ends_with("env") => {
-                    let name = eval_string(&call.args[0], env)?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let name = eval_string(&call.args[0], env, program, files, config)?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     ensure_scope(&grant, "env-read-grant", &name)?;
                     Ok(fs_result(sig, || env_get(&name), RuntimeValue::Str))
                 }
                 "set" if sig.alias.ends_with("env") => {
-                    let name = eval_string(&call.args[0], env)?;
-                    let value = eval_string(&call.args[1], env)?;
-                    let grant = eval_capability(&call.args[2], env)?;
+                    let name = eval_string(&call.args[0], env, program, files, config)?;
+                    let value = eval_string(&call.args[1], env, program, files, config)?;
+                    let grant = eval_capability(&call.args[2], env, program, files, config)?;
                     ensure_scope(&grant, "env-write-grant", &name)?;
                     if !is_valid_env_name(&name) {
                         return Ok(result_err(sig, "invalid-name", None));
@@ -974,8 +1120,8 @@ fn exec_call(
                     Ok(result_ok(sig, RuntimeValue::Void))
                 }
                 "connect" if sig.alias.ends_with("net") => {
-                    let target = eval_string(&call.args[0], env)?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let target = eval_string(&call.args[0], env, program, files, config)?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     ensure_scope(&grant, "net-connect-grant", &target)?;
                     Ok(result_err(
                         sig,
@@ -984,8 +1130,8 @@ fn exec_call(
                     ))
                 }
                 "listen" if sig.alias.ends_with("net") => {
-                    let target = eval_string(&call.args[0], env)?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let target = eval_string(&call.args[0], env, program, files, config)?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     ensure_scope(&grant, "net-listen-grant", &target)?;
                     Ok(result_err(
                         sig,
@@ -994,8 +1140,8 @@ fn exec_call(
                     ))
                 }
                 "run" if sig.alias.ends_with("process") => {
-                    let command = eval_string(&call.args[0], env)?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let command = eval_string(&call.args[0], env, program, files, config)?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     ensure_scope(&grant, "process-run-grant", &command)?;
                     Ok(result_err(
                         sig,
@@ -1004,7 +1150,7 @@ fn exec_call(
                     ))
                 }
                 "now-unix-millis" => {
-                    let grant = eval_capability(&call.args[0], env)?;
+                    let grant = eval_capability(&call.args[0], env, program, files, config)?;
                     ensure_scope(&grant, "clock-grant", "*")?;
                     let millis = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -1013,14 +1159,14 @@ fn exec_call(
                     Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)))
                 }
                 "bytes" if sig.alias.ends_with("random") => {
-                    let len = eval_i64(&call.args[0], env)?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let len = eval_i64(&call.args[0], env, program, files, config)?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     ensure_scope(&grant, "random-grant", "*")?;
                     let len = usize::try_from(len).context("random len < 0")?;
                     Ok(RuntimeValue::Array(vec![RuntimeValue::Int(0); len]))
                 }
                 "info" if sig.alias.ends_with("sys") => {
-                    let grant = eval_capability(&call.args[0], env)?;
+                    let grant = eval_capability(&call.args[0], env, program, files, config)?;
                     ensure_scope(&grant, "system-info-grant", "*")?;
                     Ok(RuntimeValue::Str(format!(
                         "{}-{}",
@@ -1029,7 +1175,7 @@ fn exec_call(
                     )))
                 }
                 s if s.ends_with(".readable.read-string") => {
-                    let handle = eval_handle(&call.args[0], env)?;
+                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let value = match files.get_mut(handle)? {
                         FileHandle::Stdin => {
                             let mut line = String::new();
@@ -1055,7 +1201,7 @@ fn exec_call(
                     Ok(fs_result(sig, || value, RuntimeValue::Str))
                 }
                 s if s.ends_with(".readable.read-bytes") => {
-                    let handle = eval_handle(&call.args[0], env)?;
+                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let value = match files.get_mut(handle)? {
                         FileHandle::Stdin => {
                             let mut s = String::new();
@@ -1076,8 +1222,8 @@ fn exec_call(
                 s if s.ends_with(".writable.write-string")
                     || s.ends_with(".appendable.append-string") =>
                 {
-                    let handle = eval_handle(&call.args[0], env)?;
-                    let contents = eval_string(&call.args[1], env)?;
+                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
+                    let contents = eval_string(&call.args[1], env, program, files, config)?;
                     let result = match files.get_mut(handle)? {
                         FileHandle::Stdout => {
                             print!("{contents}");
@@ -1098,8 +1244,8 @@ fn exec_call(
                 s if s.ends_with(".writable.write-bytes")
                     || s.ends_with(".appendable.append-bytes") =>
                 {
-                    let handle = eval_handle(&call.args[0], env)?;
-                    let contents = eval_string(&call.args[1], env)?;
+                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
+                    let contents = eval_string(&call.args[1], env, program, files, config)?;
                     let result = match files.get_mut(handle)? {
                         FileHandle::Stdout => {
                             print!("{contents}");
@@ -1118,7 +1264,7 @@ fn exec_call(
                     Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
                 }
                 s if s.ends_with(".writable.flush") => {
-                    let handle = eval_handle(&call.args[0], env)?;
+                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let result = match files.get_mut(handle)? {
                         FileHandle::Stdout => std::io::stdout().flush(),
                         FileHandle::Stderr => std::io::stderr().flush(),
@@ -1128,14 +1274,15 @@ fn exec_call(
                     Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
                 }
                 s if s.ends_with(".closeable.close") => {
-                    let handle = eval_handle(&call.args[0], env)?;
+                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     files.close(handle);
                     Ok(result_ok(sig, RuntimeValue::Void))
                 }
 
                 "create-dir-all" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     Ok(fs_result(
                         sig,
@@ -1144,8 +1291,9 @@ fn exec_call(
                     ))
                 }
                 "remove-file" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     Ok(fs_result(
                         sig,
@@ -1154,8 +1302,9 @@ fn exec_call(
                     ))
                 }
                 "remove-dir" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     Ok(fs_result(
                         sig,
@@ -1164,14 +1313,16 @@ fn exec_call(
                     ))
                 }
                 "exists" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
                     Ok(RuntimeValue::Bool(p.exists()))
                 }
                 "canonicalize" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
                     Ok(fs_result(
                         sig,
@@ -1180,8 +1331,9 @@ fn exec_call(
                     ))
                 }
                 "metadata" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
                     Ok(fs_result(
                         sig,
@@ -1190,15 +1342,17 @@ fn exec_call(
                     ))
                 }
                 "read-to-string" | "read-file" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
                     Ok(fs_result(sig, || fs::read_to_string(p), RuntimeValue::Str))
                 }
                 "write-string-all" | "write-file" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let contents = eval_string(&call.args[1], env)?;
-                    let grant = eval_capability(&call.args[2], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let contents = eval_string(&call.args[1], env, program, files, config)?;
+                    let grant = eval_capability(&call.args[2], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     Ok(fs_result(
                         sig,
@@ -1207,9 +1361,10 @@ fn exec_call(
                     ))
                 }
                 "append-string" | "append-file" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let contents = eval_string(&call.args[1], env)?;
-                    let grant = eval_capability(&call.args[2], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let contents = eval_string(&call.args[1], env, program, files, config)?;
+                    let grant = eval_capability(&call.args[2], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     Ok(fs_result(
                         sig,
@@ -1221,15 +1376,17 @@ fn exec_call(
                     ))
                 }
                 "create-file" => {
-                    let path = eval_domain_string(&call.args[0], env, "Path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "Path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     let _ = fs::File::create(p).context("create-file")?;
                     Ok(wrap_domain_string("file", path))
                 }
                 "open-path" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
                     let _ = fs::OpenOptions::new()
                         .create(true)
@@ -1241,8 +1398,9 @@ fn exec_call(
                     Ok(wrap_domain_int("fd", 1))
                 }
                 "read-dir" => {
-                    let path = eval_domain_string(&call.args[0], env, "path")?;
-                    let grant = eval_capability(&call.args[1], env)?;
+                    let path =
+                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
+                    let grant = eval_capability(&call.args[1], env, program, files, config)?;
                     let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
                     Ok(fs_result(
                         sig,

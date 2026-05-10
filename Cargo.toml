@@ -23,6 +23,7 @@ wasm-encoder = "0.240"
 wasmer = "4.4"
 wasmer-wasix = { version = "0.28.0", default-features = false, features = ["sys-default"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+yaml-edit = "0.2.1"
 
 [dev-dependencies]
 tempfile = "3.14"
