@@ -5137,3 +5137,257 @@ fn vibra_exec_rejects_invalid_pointer_and_non_string_raw_output() {
         String::from_utf8_lossy(&non_string.stderr)
     );
 }
+
+#[test]
+fn vibra_fmt_defaults_to_yaml_check_mode_and_write_is_explicit() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("messy.vibra");
+    let original = "main:\n    $function: $void\n    return: $void\n    do: []\n";
+    std::fs::write(&source, original).unwrap();
+
+    let check = vibra_cmd()
+        .args(["fmt", &path_str(&source)])
+        .output()
+        .unwrap();
+    assert!(!check.status.success(), "fmt check should fail for drift");
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(stdout.contains("files:"), "expected yaml output: {stdout}");
+    assert!(
+        stdout.contains("summary:"),
+        "expected yaml summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("status: changed"),
+        "expected changed status: {stdout}"
+    );
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), original);
+
+    let write = vibra_cmd()
+        .args(["fmt", &path_str(&source), "--write"])
+        .output()
+        .unwrap();
+    assert!(
+        write.status.success(),
+        "fmt --write failed: {}",
+        String::from_utf8_lossy(&write.stderr)
+    );
+    assert_ne!(std::fs::read_to_string(&source).unwrap(), original);
+
+    let recheck = vibra_cmd()
+        .args(["fmt", &path_str(&source)])
+        .output()
+        .unwrap();
+    assert!(
+        recheck.status.success(),
+        "formatted file should pass check: {}",
+        String::from_utf8_lossy(&recheck.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&recheck.stdout);
+    assert!(
+        stdout.contains("status: unchanged"),
+        "expected unchanged status: {stdout}"
+    );
+}
+
+#[test]
+fn vibra_fmt_json_output_is_explicit() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("ok.vibra");
+    std::fs::write(
+        &source,
+        "main:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args(["fmt", &path_str(&source), "--output", "json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "fmt json failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report.get("files").is_some(), "json report: {report}");
+    assert!(report.get("summary").is_some(), "json report: {report}");
+}
+
+#[test]
+fn vibra_lint_defaults_to_yaml_and_reports_kebab_case_locations() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("style.vibra");
+    std::fs::write(&source, "BadName: 1\n").unwrap();
+
+    let output = vibra_cmd()
+        .args(["lint", &path_str(&source), "--category", "style"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "warning-only lint should pass without --deny-warnings"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("diagnostics:"),
+        "default lint output should be yaml: {stdout}"
+    );
+    assert!(stdout.contains("code: W-STYLE-001"), "stdout: {stdout}");
+    assert!(stdout.contains("line: 0"), "stdout: {stdout}");
+    assert!(stdout.contains("column: 0"), "stdout: {stdout}");
+    assert!(
+        !stdout.contains("offset:"),
+        "offset should be omitted when not guaranteed: {stdout}"
+    );
+}
+
+#[test]
+fn vibra_lint_suppression_and_deny_warnings_are_respected() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("style.vibra");
+    std::fs::write(
+        &source,
+        "# vibra-lint-disable-next-line W-STYLE-001\nBadName: 1\nOtherBad: 2\n",
+    )
+    .unwrap();
+
+    let suppressed = vibra_cmd()
+        .args(["lint", &path_str(&source), "--category", "style"])
+        .output()
+        .unwrap();
+    assert!(
+        suppressed.status.success(),
+        "lint failed: {}",
+        String::from_utf8_lossy(&suppressed.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&suppressed.stdout);
+    assert!(
+        !stdout.contains("BadName"),
+        "suppressed diagnostic leaked: {stdout}"
+    );
+    assert!(
+        stdout.contains("OtherBad"),
+        "unsuppressed diagnostic missing: {stdout}"
+    );
+
+    let denied = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "style",
+            "--deny-warnings",
+        ])
+        .output()
+        .unwrap();
+    assert!(!denied.status.success(), "--deny-warnings should fail");
+}
+
+#[test]
+fn vibra_lint_json_and_sarif_outputs_are_explicit() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("style.vibra");
+    std::fs::write(&source, "BadName: 1\n").unwrap();
+
+    let json = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "style",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        json.status.success(),
+        "json lint failed: {}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(report["diagnostics"][0]["code"], "W-STYLE-001");
+
+    let sarif = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "style",
+            "--format",
+            "sarif",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        sarif.status.success(),
+        "sarif lint failed: {}",
+        String::from_utf8_lossy(&sarif.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&sarif.stdout).unwrap();
+    assert_eq!(report["version"], "2.1.0");
+    assert_eq!(report["runs"][0]["results"][0]["ruleId"], "W-STYLE-001");
+    assert_eq!(
+        report["runs"][0]["tool"]["driver"]["rules"][0]["shortDescription"]["text"],
+        "Symbol-like key is not kebab-case"
+    );
+    assert!(
+        !report["runs"][0]["tool"]["driver"]["rules"][0]["shortDescription"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("BadName")
+    );
+}
+
+#[test]
+fn vibra_lint_reports_parse_and_compile_errors_as_structured_yaml() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad_yaml = dir.path().join("bad-yaml.vibra");
+    let bad_compile = dir.path().join("bad-compile.vibra");
+    std::fs::write(&bad_yaml, "main:\n  -\n    nope: [\n").unwrap();
+    std::fs::write(
+        &bad_compile,
+        "main:\n  $function: $void\n  return: $void\n  do:\n    - $missing: null\n",
+    )
+    .unwrap();
+
+    let syntax = vibra_cmd()
+        .args(["lint", &path_str(&bad_yaml), "--category", "syntax"])
+        .output()
+        .unwrap();
+    assert!(!syntax.status.success());
+    let stdout = String::from_utf8_lossy(&syntax.stdout);
+    assert!(stdout.contains("code: E-YAML-001"), "stdout: {stdout}");
+    assert!(stdout.contains("line:"), "stdout: {stdout}");
+
+    let compile = vibra_cmd()
+        .args(["lint", &path_str(&bad_compile), "--category", "compile"])
+        .output()
+        .unwrap();
+    assert!(!compile.status.success());
+    let stdout = String::from_utf8_lossy(&compile.stdout);
+    assert!(stdout.contains("diagnostics:"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("severity: error"),
+        "expected compile error diagnostic: {stdout}"
+    );
+}
+
+#[test]
+fn vibra_lint_percent_encodes_file_uris() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("bad#name%25.vibra");
+    std::fs::write(&source, "BadName: 1\n").unwrap();
+
+    let output = vibra_cmd()
+        .args(["lint", &path_str(&source), "--category", "style"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "lint failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("bad%23name%2525.vibra"), "stdout: {stdout}");
+}

@@ -29,6 +29,32 @@ vibra exec '{$code.get: {$code.parse: $src}, path: "/main/do/0/$io.println"}' --
 
 Use `--arg name=value` for string bindings, `--arg-file name=path` for file contents, and `--import alias=path` for additional modules. Code paths use JSON Pointer strings; `code.set`, `code.remove`, and `code.append` return a new document string and preserve comments/formatting where the editor can attach them.
 
+## Format and lint
+
+`vibra fmt` and `vibra lint` are YAML-first tooling commands. Their default output is structured YAML for vibe-coding workflows; JSON and SARIF are opt-in compatibility formats for external automation.
+
+```sh
+vibra fmt                 # check every .vibra/.vibra.yaml file under .
+vibra fmt src --write     # rewrite changed files in place
+vibra fmt src --output json
+
+vibra lint
+vibra lint src --category style
+vibra lint src --format json
+vibra lint src --format sarif
+vibra lint src --deny-warnings
+```
+
+`vibra fmt` is check-only by default. It exits `0` when all files are canonical, exits `1` when check mode finds formatting drift, and only mutates files with `--write`.
+
+`vibra lint` emits diagnostics with stable codes, severity, and spans matching [schemas/diagnostic.schema.json](schemas/diagnostic.schema.json). Warning-only lint runs exit `0` unless `--deny-warnings` is set. Errors always fail. Suppress individual rules with comments:
+
+```yaml
+# vibra-lint-disable-next-line W-STYLE-001
+BadName: 1
+OtherBad: 2 # vibra-lint-disable-line W-STYLE-001
+```
+
 ## Projects
 
 `project.vibra` is the canonical project manifest. New projects can be scaffolded with:
