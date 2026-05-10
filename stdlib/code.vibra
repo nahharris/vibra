@@ -1,0 +1,84 @@
+document:
+  $newtype: $str
+
+parse:
+  $function: $str
+  return: $document
+  do:
+    - $wasm:
+        import:
+          module: vibra_code
+          name: parse
+        args:
+          - $args.subject
+
+emit:
+  $function: $document
+  return: $str
+  do:
+    - $wasm:
+        import:
+          module: vibra_code
+          name: emit
+        args:
+          - $args.subject
+
+get:
+  $function: $document
+  args:
+    path: $str
+  return: $str
+  do:
+    - $wasm:
+        import:
+          module: vibra_code
+          name: get
+        args:
+          - $args.subject
+          - $args.path
+
+set:
+  $function: $document
+  args:
+    path: $str
+    value: $str
+  return: $document
+  do:
+    - $wasm:
+        import:
+          module: vibra_code
+          name: set
+        args:
+          - $args.subject
+          - $args.path
+          - $args.value
+
+remove:
+  $function: $document
+  args:
+    path: $str
+  return: $document
+  do:
+    - $wasm:
+        import:
+          module: vibra_code
+          name: remove
+        args:
+          - $args.subject
+          - $args.path
+
+append:
+  $function: $document
+  args:
+    path: $str
+    value: $str
+  return: $document
+  do:
+    - $wasm:
+        import:
+          module: vibra_code
+          name: append
+        args:
+          - $args.subject
+          - $args.path
+          - $args.value

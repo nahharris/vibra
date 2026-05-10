@@ -1,0 +1,21 @@
+assert:
+  $function: $bool
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: vibra_test
+          name: assert
+        args:
+          - $args.subject
+
+fail:
+  $function: $str
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: vibra_test
+          name: fail
+        args:
+          - $args.subject

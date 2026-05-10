@@ -18,6 +18,17 @@ vibra run examples/hello.vibra
 
 This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
 
+## Exec
+
+`vibra exec` evaluates one inline Vibra expression and writes the result to stdout. It auto-imports [stdlib/code.vibra](stdlib/code.vibra) as `code`, so tooling can parse and rewrite Vibra source without patch files:
+
+```sh
+vibra exec '"hello"' --format raw
+vibra exec '{$code.get: {$code.parse: $src}, path: "/main/do/0/$io.println"}' --arg-file src=examples/hello.vibra --format raw
+```
+
+Use `--arg name=value` for string bindings, `--arg-file name=path` for file contents, and `--import alias=path` for additional modules. Code paths use JSON Pointer strings; `code.set`, `code.remove`, and `code.append` return a new document string and preserve comments/formatting where the editor can attach them.
+
 ## Projects
 
 `project.vibra` is the canonical project manifest. New projects can be scaffolded with:
@@ -85,6 +96,37 @@ cargo run -- run examples/ask-name.vibra
 # Filesystem roundtrip (requires grants)
 cargo run -- run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
 ```
+
+## Tests
+
+`vibra test` discovers `.vibra` files under `tests/` and runs each top-level
+`$test` declaration as an isolated test case. Test modules do not need `main`.
+
+```yaml
+test:
+  $import: "@std/test.vibra"
+
+truth:
+  $test:
+    do:
+      - $test.assert: true
+```
+
+```sh
+vibra test
+vibra test --filter truth
+vibra test --jobs 4 --timeout-ms 30000 --fail-fast
+vibra test --report yaml --report-file report.yaml
+```
+
+Runtime permission flags match `vibra run`; pass `--allow-read`,
+`--allow-write`, `--allow-env`, or `--allow-all` to grant test code access to
+privileged stdlib APIs.
+
+Files named `foo.*.vibra` are loaded as parts of the same module as
+`foo.vibra` when `foo.vibra` exists. A common convention is to place unit
+tests beside the module in `foo.test.vibra`; the suffix is only a naming
+convention and does not carry special semantics.
 
 ## Build & test
 

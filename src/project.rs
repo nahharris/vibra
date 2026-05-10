@@ -380,7 +380,7 @@ fn sync_git_dependency(url: &str, rev: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-fn locate_stdlib_source() -> Result<PathBuf> {
+pub fn locate_stdlib_source() -> Result<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             for ancestor in parent.ancestors() {
