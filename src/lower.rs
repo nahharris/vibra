@@ -4790,10 +4790,8 @@ fn resolve_call_target(
         if !alias.is_empty() && symbol.starts_with('-') {
             bail!("unknown function `{call_key}`");
         }
-        let sig_key = format!("{alias}.{symbol}");
-        if sigs.contains_key(&sig_key) {
-            return Ok(sig_key);
-        }
+        // Prefer module-scoped keys before unscoped `{alias}.{symbol}` so a nested `util`
+        // does not accidentally bind to a same-named entry import.
         if !home_module.is_empty() {
             let scoped = format!("{home_module}.{alias}.{symbol}");
             if sigs.contains_key(&scoped) {
@@ -4808,6 +4806,10 @@ fn resolve_call_target(
                     return Ok(self_export);
                 }
             }
+        }
+        let sig_key = format!("{alias}.{symbol}");
+        if sigs.contains_key(&sig_key) {
+            return Ok(sig_key);
         }
     }
     let rest = call_key
@@ -6191,7 +6193,7 @@ fn parse_pattern(
                 let empty_skeletons = HashMap::new();
                 let type_ref = parse_type_ref(type_v, &[], &empty_skeletons, warnings, false)?;
                 return Ok(Pattern::Newtype {
-                    type_ref: qualify_named_type("", type_ref, type_aliases),
+                    type_ref: qualify_named_type(module_scope, type_ref, type_aliases),
                     inner: Box::new(parse_pattern(
                         inner_v,
                         type_aliases,
@@ -6205,7 +6207,7 @@ fn parse_pattern(
                 let empty_skeletons = HashMap::new();
                 let type_ref = parse_type_ref(payload_v, &[], &empty_skeletons, warnings, false)?;
                 return Ok(Pattern::Interface(qualify_named_type(
-                    "",
+                    module_scope,
                     type_ref,
                     type_aliases,
                 )));
