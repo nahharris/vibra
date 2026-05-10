@@ -278,11 +278,8 @@ fn validate_module_imports(
     };
     let parent = path.parent().context("module path has no parent")?;
     for (key, value) in map {
-        let Some(key) = key.as_str() else {
+        if key.as_str().is_none() {
             bail!("{}: module keys must be strings", path.display());
-        };
-        if key.starts_with('-') {
-            continue;
         }
         let Some(import) = value
             .as_mapping()
