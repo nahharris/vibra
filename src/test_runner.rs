@@ -5,6 +5,7 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::collections::{HashSet, VecDeque};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -120,7 +121,9 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
         tests,
     };
 
-    print_human_report(&report);
+    if options.report == ReportFormat::Human {
+        print_human_report(&report);
+    }
     if options.report == ReportFormat::Yaml || options.report_file.is_some() {
         let yaml = serde_yaml::to_string(&report)?;
         if let Some(path) = &options.report_file {
@@ -248,11 +251,14 @@ fn run_one_child(
     let mut child = cmd
         .spawn()
         .with_context(|| format!("spawn test `{}` from {}", item.name, item.path.display()))?;
+    let mut stdout_pipe = child.stdout.take().context("child stdout was not piped")?;
+    let mut stderr_pipe = child.stderr.take().context("child stderr was not piped")?;
     loop {
         if let Some(status) = child.try_wait()? {
-            let output = child.wait_with_output()?;
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            stdout_pipe.read_to_string(&mut stdout)?;
+            stderr_pipe.read_to_string(&mut stderr)?;
             let passed = status.success();
             return Ok(TestResult {
                 name: item.name.clone(),
@@ -267,15 +273,19 @@ fn run_one_child(
         }
         if started.elapsed() >= timeout {
             let _ = child.kill();
-            let output = child.wait_with_output()?;
+            let _ = child.wait();
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            let _ = stdout_pipe.read_to_string(&mut stdout);
+            let _ = stderr_pipe.read_to_string(&mut stderr);
             return Ok(TestResult {
                 name: item.name.clone(),
                 index: item.index,
                 path: item.display_path.clone(),
                 status: "timed_out".to_string(),
                 duration_ms: started.elapsed().as_millis(),
-                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                stdout,
+                stderr,
                 message: format!("timed out after {} ms", timeout.as_millis()),
             });
         }

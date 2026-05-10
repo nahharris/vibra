@@ -470,10 +470,12 @@ fn exec_bindings(
     let mut types = HashMap::new();
     for raw in args {
         let (name, value) = split_name_value(&raw, "--arg")?;
+        validate_exec_binding_name(name)?;
         insert_exec_binding(name, value.to_string(), &mut values, &mut types)?;
     }
     for raw in arg_files {
         let (name, path) = split_name_value(&raw, "--arg-file")?;
+        validate_exec_binding_name(name)?;
         let value = std::fs::read_to_string(path)
             .with_context(|| format!("read --arg-file `{name}` from `{path}`"))?;
         insert_exec_binding(name, value, &mut values, &mut types)?;
@@ -485,17 +487,16 @@ fn split_name_value<'a>(raw: &'a str, flag: &str) -> Result<(&'a str, &'a str)> 
     let (name, value) = raw
         .split_once('=')
         .with_context(|| format!("{flag} expects `name=value`"))?;
-    validate_exec_name(name)?;
     Ok((name, value))
 }
 
-fn validate_exec_name(name: &str) -> Result<()> {
+fn validate_exec_binding_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("exec binding name must not be empty");
     }
-    if name.starts_with('$') || name.contains('.') {
+    if name.contains('$') || name.contains('.') {
         bail!(
-            "exec binding `{name}` must be referenced as `${name}` and cannot contain `$` or `.`"
+            "exec binding name `{name}` must be referenced as `${name}` and cannot contain `$` or `.`"
         );
     }
     Ok(())
@@ -523,9 +524,20 @@ fn exec_root(imports: Vec<String>) -> Result<Mapping> {
     insert_import(&mut root, "code", &path_str(&code))?;
     for raw in imports {
         let (alias, path) = split_name_value(&raw, "--import")?;
+        validate_exec_import_alias(alias)?;
         insert_import(&mut root, alias, path)?;
     }
     Ok(root)
+}
+
+fn validate_exec_import_alias(alias: &str) -> Result<()> {
+    if alias.is_empty() {
+        bail!("exec import alias must not be empty");
+    }
+    if alias.contains('$') || alias.contains('.') {
+        bail!("exec import alias `{alias}` cannot contain `$` or `.`");
+    }
+    Ok(())
 }
 
 fn insert_import(root: &mut Mapping, alias: &str, path: &str) -> Result<()> {

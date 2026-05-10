@@ -161,7 +161,7 @@ fn pointer_segments(pointer: &str) -> Result<Vec<String>> {
 }
 
 fn is_root_pointer(pointer: &str) -> bool {
-    pointer.is_empty() || pointer == "/"
+    pointer.is_empty()
 }
 
 fn unescape_segment(segment: &str) -> Result<String> {
