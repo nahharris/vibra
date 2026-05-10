@@ -44,6 +44,12 @@
     },
     {
       "type": "object",
+      "required": ["$capability"],
+      "additionalProperties": false,
+      "properties": { "$capability": { "type": "string" } }
+    },
+    {
+      "type": "object",
       "required": ["$record"],
       "additionalProperties": false,
       "properties": {

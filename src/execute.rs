@@ -605,12 +605,12 @@ fn eval_grant_token(
     env: &HashMap<String, RuntimeValue>,
     _program: &LoweredProgram,
     _files: &mut FileTable,
-    config: &RunConfig,
+    _config: &RunConfig,
 ) -> Result<GrantToken> {
     match env.get(&format!("grants.{name}")).cloned() {
         Some(RuntimeValue::GrantToken(grant)) => Ok(grant),
         Some(other) => bail!("expected grant token `{name}`, got {other:?}"),
-        None => Ok(grant_token_value(name, config)),
+        None => bail!("grant `{name}` is not available in this scope"),
     }
 }
 

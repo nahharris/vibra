@@ -5107,7 +5107,7 @@ fn parse_grant_ref(s: &str) -> Result<String> {
     let Some(name) = s.strip_prefix("$grants.") else {
         bail!("grant references must use `$grants.<kebab-name>`");
     };
-    if name.is_empty() || name.contains('.') {
+    if !is_kebab_case(name) {
         bail!("grant references must use `$grants.<kebab-name>`");
     }
     Ok(name.to_string())
@@ -5968,6 +5968,11 @@ fn resolve_function_envelope_fields(
             map_get_str(m, "return"),
             map_get_str(m, "do"),
         ) {
+            if map_get_str(m, "grants").is_some() {
+                bail!(
+                    "`grants` must be a sibling of `$function`, not nested inside `$function: {{ args, return, do }}`"
+                );
+            }
             if record_has_grants_arg(args) {
                 bail!(
                     "grant arguments moved out of `args`; declare function `grants:` and access them as `$grants.<name>`"
@@ -6030,7 +6035,7 @@ fn parse_grant_decls(v: Option<&Value>) -> Result<Vec<GrantDecl>> {
     let mut seen = HashSet::new();
     for (k, v) in m {
         let name = k.as_str().context("grant name must be string")?.to_string();
-        if name.contains('.') {
+        if !is_kebab_case(&name) {
             bail!("grant names must be kebab-case, got `{name}`");
         }
         if !seen.insert(name.clone()) {

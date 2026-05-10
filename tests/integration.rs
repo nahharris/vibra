@@ -96,6 +96,221 @@ main:
 }
 
 #[test]
+fn mandatory_grant_forwarded_but_denied_fails_before_callee_runs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data.txt");
+    std::fs::write(&data, "secret").unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function: $void
+  grants:
+    fs-read: $security.grant.mandatory
+  return: $void
+  do:
+    - $let:
+        path:
+          $fs.path.new: "{path}"
+    - $let:
+        text:
+          $fs.read-to-string: $path
+          =grants:
+            - $grants.fs-read
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+            path = data.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let err = format!(
+        "{:#}",
+        vibra::execute::run_lowered(
+            &lowered,
+            &vibra::runtime::RunConfig {
+                program_name: "vibra-test".to_string(),
+                argv: Vec::new(),
+                ..vibra::runtime::RunConfig::default()
+            },
+        )
+        .unwrap_err()
+    );
+    assert!(
+        err.contains("mandatory grant `fs-read` was not granted"),
+        "expected denied mandatory grant preflight failure, got: {err}"
+    );
+}
+
+#[test]
+fn grant_forwarding_requires_token_in_scope() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data.txt");
+    std::fs::write(&data, "secret").unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        path:
+          $fs.path.new: "{path}"
+    - $let:
+        text:
+          $fs.read-to-string: $path
+          =grants:
+            - $grants.fs-read
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            path = data.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let err = format!(
+        "{:#}",
+        vibra::execute::run_lowered(
+            &lowered,
+            &vibra::runtime::RunConfig {
+                program_name: "vibra-test".to_string(),
+                argv: Vec::new(),
+                allow_read: vec![dir.path().to_path_buf()],
+                ..vibra::runtime::RunConfig::default()
+            },
+        )
+        .unwrap_err()
+    );
+    assert!(
+        err.contains("grant `fs-read` is not available in this scope"),
+        "expected unavailable grant token rejection, got: {err}"
+    );
+}
+
+#[test]
+fn nested_function_grants_are_rejected() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"security:
+  $import: "{security}"
+main:
+  $function:
+    args: $void
+    grants:
+      fs-read: $security.grant.mandatory
+    return: $void
+    do: []
+"#,
+            security = security.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("`grants` must be a sibling of `$function`"),
+        "expected nested grants rejection, got: {err}"
+    );
+}
+
+#[test]
+fn grant_names_must_be_kebab_case() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"security:
+  $import: "{security}"
+main:
+  $function: $void
+  grants:
+    fs_read: $security.grant.optional
+  return: $void
+  do: []
+"#,
+            security = security.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("grant names must be kebab-case"),
+        "expected grant declaration kebab-case rejection, got: {err}"
+    );
+}
+
+#[test]
+fn grant_forwarding_refs_must_be_kebab_case() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+security:
+  $import: "{security}"
+main:
+  $function: $void
+  grants:
+    fs-read: $security.grant.optional
+  return: $void
+  do:
+    - $let:
+        path:
+          $fs.path.new: "x"
+    - $fs.read-to-string: $path
+      =grants:
+        - $grants.fs_read
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            security = security.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("grant references must use `$grants.<kebab-name>`"),
+        "expected grant forwarding kebab-case rejection, got: {err}"
+    );
+}
+
+#[test]
 fn dotted_grant_reference_is_rejected() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
