@@ -5,80 +5,73 @@ fs:
 security:
   $import: ../stdlib/security.vibra
 main:
-  $function: $security.grants
+  $function: $void
+  grants:
+    fs-write: $security.grant.optional
+    fs-read: $security.grant.optional
   return: $void
   do:
     - $let:
         path:
           $fs.path.new: "tmp/hello.txt"
-    - $match: $args.subject.fs-write
-      when:
-        - pattern:
-            $security.grant-status.granted:
-              $bind: write-grant
-          do:
-            - $let:
-                opened-write:
-                  $fs.open-write: $path
-                  grant: $write-grant
-            - $match: $opened-write
-              when:
-                - pattern:
-                    $result.result.ok:
-                      $bind: out
-                  do:
-                    - $fs.writable.write-string: $out
-                      s: "from vibra fs"
-                    - $fs.closeable.close: $out
-                - pattern:
-                    $result.result.err:
-                      $bind: write-err
-                  do:
-                    - $io.eprintln: "failed to open file for writing"
-        - pattern:
-            $security.grant-status.denied:
-              $bind: write-denied
-          do:
-            - $io.eprintln: "write grant denied"
-    - $match: $args.subject.fs-read
-      when:
-        - pattern:
-            $security.grant-status.granted:
-              $bind: read-grant
-          do:
-            - $let:
-                opened-read:
-                  $fs.open-read: $path
-                  grant: $read-grant
-            - $match: $opened-read
-              when:
-                - pattern:
-                    $result.result.ok:
-                      $bind: input
-                  do:
-                    - $let:
-                        text-result:
-                          $fs.readable.read-string: $input
-                    - $match: $text-result
-                      when:
-                        - pattern:
-                            $result.result.ok:
-                              $bind: text
-                          do:
-                            - $io.println: $text
-                        - pattern:
-                            $result.result.err:
-                              $bind: read-err
-                          do:
-                            - $io.eprintln: "failed to read file"
-                    - $fs.closeable.close: $input
-                - pattern:
-                    $result.result.err:
-                      $bind: open-err
-                  do:
-                    - $io.eprintln: "failed to open file for reading"
-        - pattern:
-            $security.grant-status.denied:
-              $bind: read-denied
-          do:
-            - $io.eprintln: "read grant denied"
+    - $if:
+        $security.granted: $grants.fs-write
+      then:
+        - $let:
+            opened-write:
+              $fs.open-write: $path
+              =grants:
+                - $grants.fs-write
+        - $match: $opened-write
+          when:
+            - pattern:
+                $result.result.ok:
+                  $bind: out
+              do:
+                - $fs.writable.write-string: $out
+                  s: "from vibra fs"
+                - $fs.closeable.close: $out
+            - pattern:
+                $result.result.err:
+                  $bind: write-err
+              do:
+                - $io.eprintln: "failed to open file for writing"
+      else:
+        - $io.eprintln: "write grant denied"
+    - $if:
+        $security.granted: $grants.fs-read
+      then:
+        - $let:
+            opened-read:
+              $fs.open-read: $path
+              =grants:
+                - $grants.fs-read
+        - $match: $opened-read
+          when:
+            - pattern:
+                $result.result.ok:
+                  $bind: input
+              do:
+                - $let:
+                    text-result:
+                      $fs.readable.read-string: $input
+                - $match: $text-result
+                  when:
+                    - pattern:
+                        $result.result.ok:
+                          $bind: text
+                      do:
+                        - $io.println: $text
+                    - pattern:
+                        $result.result.err:
+                          $bind: read-err
+                      do:
+                        - $io.eprintln: "failed to read file"
+                - $fs.closeable.close: $input
+            - pattern:
+                $result.result.err:
+                  $bind: open-err
+              do:
+                - $io.eprintln: "failed to open file for reading"
+      else:
+        - $io.eprintln: "read grant denied"

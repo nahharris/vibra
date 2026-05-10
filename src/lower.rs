@@ -44,6 +44,7 @@ pub enum RuntimeValue {
         value: Box<RuntimeValue>,
     },
     Capability(CapabilityGrant),
+    GrantToken(GrantToken),
     Enum {
         enum_key: String,
         tag: String,
@@ -55,6 +56,12 @@ pub enum RuntimeValue {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityGrant {
     pub type_key: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GrantToken {
+    pub name: String,
     pub scopes: Vec<String>,
 }
 
@@ -135,6 +142,7 @@ pub enum TypeRef {
         name: String,
         kind: String,
     },
+    GrantToken,
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
     /// A use of a generic type alias with explicit type arguments. `type_args`
@@ -205,6 +213,8 @@ pub struct FunctionSig {
     pub type_param_bounds: Vec<Vec<TypeRef>>,
     pub arg_names: Vec<String>,
     pub arg_types: Vec<TypeRef>,
+    pub primary_arg_name: Option<String>,
+    pub grant_decls: Vec<GrantDecl>,
     pub return_type: TypeRef,
     pub body: FunctionBody,
     /// Compile-time documentation string from the symbol's `=doc` annotation.
@@ -216,6 +226,19 @@ pub struct Call {
     pub callee_key: String,
     pub type_args: Vec<TypeRef>,
     pub args: Vec<Expr>,
+    pub grant_args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GrantRequirement {
+    Mandatory,
+    Optional,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantDecl {
+    pub name: String,
+    pub requirement: GrantRequirement,
 }
 
 #[derive(Debug, Clone)]
@@ -326,6 +349,7 @@ pub enum ImplMethodBinding {
 pub struct LoweredProgram {
     pub statements: Vec<Statement>,
     pub main_arg_bindings: Vec<(String, TypeRef)>,
+    pub main_grant_decls: Vec<GrantDecl>,
     pub constants: HashMap<String, RuntimeValue>,
     pub functions: HashMap<String, FunctionSig>,
     pub impls: HashMap<ImplKey, ImplBody>,
@@ -367,6 +391,7 @@ struct DefEnvelope<'a> {
     impls: Option<&'a serde_yaml::Mapping>,
     /// `$function`-only siblings: optional extra `args` mapping, required `return` / `do`.
     function_args: Option<&'a Value>,
+    function_grants: Option<&'a Value>,
     function_return: Option<&'a Value>,
     function_do: Option<&'a Value>,
 }
@@ -392,6 +417,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut defs: Option<&'a serde_yaml::Mapping> = None;
     let mut impls: Option<&'a serde_yaml::Mapping> = None;
     let mut function_args: Option<&'a Value> = None;
+    let mut function_grants: Option<&'a Value> = None;
     let mut function_return: Option<&'a Value> = None;
     let mut function_do: Option<&'a Value> = None;
 
@@ -454,6 +480,11 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 bail!("duplicate `args` key on definition");
             }
             function_args = Some(val);
+        } else if ks == "grants" {
+            if function_grants.is_some() {
+                bail!("duplicate `grants` key on definition");
+            }
+            function_grants = Some(val);
         } else if ks == "return" {
             if function_return.is_some() {
                 bail!("duplicate `return` key on definition");
@@ -485,9 +516,13 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let form_value = form_value.expect("set together with form_key");
 
     if form_key != "$function" && form_key != "$test" {
-        if function_args.is_some() || function_return.is_some() || function_do.is_some() {
+        if function_args.is_some()
+            || function_grants.is_some()
+            || function_return.is_some()
+            || function_do.is_some()
+        {
             bail!(
-                "keys `args`, `return`, and `do` are only valid on `$function` or `$test` definitions (got `{}`)",
+                "keys `args`, `grants`, `return`, and `do` are only valid on `$function` or `$test` definitions (got `{}`)",
                 form_key
             );
         }
@@ -498,7 +533,11 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 && map_get_str(inner, "do").is_some()
         });
         if nested_function {
-            if function_args.is_some() || function_return.is_some() || function_do.is_some() {
+            if function_args.is_some()
+                || function_grants.is_some()
+                || function_return.is_some()
+                || function_do.is_some()
+            {
                 bail!(
                     "invalid `$function`: cannot mix nested `{{ args, return, do }}` with sibling function fields"
                 );
@@ -508,7 +547,11 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             let _ = function_do.context("missing `do` on `$function`")?;
         }
     } else {
-        if function_args.is_some() || function_return.is_some() || function_do.is_some() {
+        if function_args.is_some()
+            || function_grants.is_some()
+            || function_return.is_some()
+            || function_do.is_some()
+        {
             bail!("`$test` must use nested syntax `$test: {{ do: [...] }}`");
         }
         let tm = form_value
@@ -546,6 +589,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         defs,
         impls,
         function_args,
+        function_grants,
         function_return,
         function_do,
     })
@@ -611,6 +655,7 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$union",
     "$enum",
     "$capability",
+    "$grant-token",
 ];
 
 fn collect_alias_skeletons(
@@ -821,6 +866,7 @@ fn parse_type_ref(
         "float32" => TypeRef::Float32,
         "float64" => TypeRef::Float64,
         "void" => TypeRef::Void,
+        "grant-token" => TypeRef::GrantToken,
         "self" => {
             if !self_allowed {
                 bail!(
@@ -888,6 +934,7 @@ fn parse_type_constructor(
                 kind: kind.to_string(),
             })
         }
+        "$grant-token" => Ok(TypeRef::GrantToken),
         "$record" => {
             let m = v
                 .as_mapping()
@@ -1798,21 +1845,32 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     if !main_env.type_params.is_empty() {
         bail!("`main` must not be generic (no `where:`)");
     }
-    let (args, ret, do_seq) = resolve_function_envelope_fields(&main_env, MODULE_FN_PRIMARY_ARG)
-        .context("invalid `main`")?;
+    let (args, ret, do_seq, main_primary_arg, main_grant_decls) =
+        resolve_function_envelope_fields(&main_env, MODULE_FN_PRIMARY_ARG)
+            .context("invalid `main`")?;
     let mut main_arg_bindings = Vec::new();
     if !is_void_args(&args) {
         let (arg_names, arg_types) =
             parse_signature_args(&args, &[], &skeletons, &mut warnings, false)
                 .context("invalid `main` args")?;
-        for (name, ty) in arg_names.into_iter().zip(arg_types.into_iter()) {
+        for (idx, (name, ty)) in arg_names.into_iter().zip(arg_types.into_iter()).enumerate() {
             let ty = qualify_named_type("", ty, &type_aliases);
-            seed_arg_type_bindings(
-                &format!("args.{name}"),
-                &ty,
-                &type_aliases,
-                &mut main_arg_bindings,
-            );
+            if main_primary_arg.as_ref() == Some(&name) && idx == 0 {
+                main_arg_bindings.push((name.clone(), ty.clone()));
+                seed_arg_type_bindings(
+                    &format!("args.{name}"),
+                    &ty,
+                    &type_aliases,
+                    &mut main_arg_bindings,
+                );
+            } else {
+                seed_arg_type_bindings(
+                    &format!("args.{name}"),
+                    &ty,
+                    &type_aliases,
+                    &mut main_arg_bindings,
+                );
+            }
         }
     }
     if ret.as_str() != Some("$void") {
@@ -1823,6 +1881,9 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     let mut locals = HashMap::new();
     for (name, ty) in &main_arg_bindings {
         locals.insert(name.clone(), ty.clone());
+    }
+    for grant in &main_grant_decls {
+        locals.insert(format!("grants.{}", grant.name), TypeRef::GrantToken);
     }
     for step in steps {
         statements.push(lower_statement(
@@ -1848,6 +1909,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     Ok(LoweredProgram {
         statements,
         main_arg_bindings,
+        main_grant_decls,
         constants,
         functions: sigs,
         impls,
@@ -1975,6 +2037,7 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
             program: LoweredProgram {
                 statements,
                 main_arg_bindings: Vec::new(),
+                main_grant_decls: Vec::new(),
                 constants: constants.clone(),
                 functions: sigs.clone(),
                 impls: impls.clone(),
@@ -2095,6 +2158,7 @@ pub fn lower_exec_expr(
         program: LoweredProgram {
             statements: Vec::new(),
             main_arg_bindings: Vec::new(),
+            main_grant_decls: Vec::new(),
             constants,
             functions: sigs,
             impls,
@@ -2197,9 +2261,16 @@ fn lower_pending_user_functions(
             bail!("internal: pending body for non-user function `{key}`");
         };
         let mut locals: HashMap<String, TypeRef> = HashMap::new();
-        for (n, t) in sig.arg_names.iter().zip(sig.arg_types.iter()) {
-            locals.insert(n.clone(), t.clone());
-            locals.insert(format!("args.{n}"), t.clone());
+        for (idx, (n, t)) in sig.arg_names.iter().zip(sig.arg_types.iter()).enumerate() {
+            if sig.primary_arg_name.as_ref() == Some(n) && idx == 0 {
+                locals.insert(n.clone(), t.clone());
+                locals.insert(format!("args.{n}"), t.clone());
+            } else {
+                locals.insert(format!("args.{n}"), t.clone());
+            }
+        }
+        for grant in &sig.grant_decls {
+            locals.insert(format!("grants.{}", grant.name), TypeRef::GrantToken);
         }
         let fn_ctx = UserFnContext {
             return_type: sig.return_type.clone(),
@@ -2624,8 +2695,8 @@ fn try_register_function(
         maybe_warn_kebab(name, "function name", warnings);
     }
     let scope = env.type_params.clone();
-    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG)
-        .with_context(|| {
+    let (args, ret, do_seq, primary_arg_name, grant_decls) =
+        resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG).with_context(|| {
             if alias.is_empty() {
                 format!("{name}: invalid `$function` envelope")
             } else {
@@ -2696,6 +2767,8 @@ fn try_register_function(
             type_param_bounds: resolved_bounds,
             arg_names,
             arg_types,
+            primary_arg_name,
+            grant_decls,
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -2840,20 +2913,10 @@ fn register_one_inherent_function(
         all_type_params.push(tp.clone());
     }
 
-    let (primary, first_arg_ty) =
-        labeled_function_first_arg(env.form_value, INHERENT_FN_PRIMARY_ARG)?;
-    let args = build_function_args_mapping(&primary, first_arg_ty, env.function_args)
-        .with_context(|| {
+    let (args, ret, do_seq, primary_arg_name, grant_decls) =
+        resolve_function_envelope_fields(&env, INHERENT_FN_PRIMARY_ARG).with_context(|| {
             format!("`{qualified_type_key}.{entry_name}`: invalid `$function` envelope")
         })?;
-    let ret = env
-        .function_return
-        .context("missing `return` on `$function`")?
-        .clone();
-    let do_seq = env
-        .function_do
-        .context("missing `do` on `$function`")?
-        .clone();
     let (arg_names, arg_types) =
         parse_signature_args(&args, &all_type_params, skeletons, warnings, true)
             .with_context(|| format!("{qualified_type_key}.{entry_name}: invalid function args"))?;
@@ -2925,6 +2988,8 @@ fn register_one_inherent_function(
             type_param_bounds: full_bounds,
             arg_names,
             arg_types,
+            primary_arg_name,
+            grant_decls,
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -3291,8 +3356,9 @@ fn bind_impl_method(
     }
 
     let iface_primary = iface_impl_primary_field_name(expected_fn_type)?;
-    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, &iface_primary)
-        .context("impl method: invalid `$function` envelope")?;
+    let (args, ret, do_seq, primary_arg_name, grant_decls) =
+        resolve_function_envelope_fields(&env, &iface_primary)
+            .context("impl method: invalid `$function` envelope")?;
     let (arg_names, arg_types) =
         parse_signature_args(&args, &method_scope, skeletons, warnings, true)?;
     let arg_types: Vec<TypeRef> = arg_types
@@ -3382,6 +3448,8 @@ fn bind_impl_method(
             type_param_bounds: sig_bounds,
             arg_names,
             arg_types,
+            primary_arg_name,
+            grant_decls,
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -4667,7 +4735,7 @@ fn looks_like_iface_call(
     let Some(m) = v.as_mapping() else {
         return false;
     };
-    let Ok((call_key, _, _)) = split_call_envelope(m) else {
+    let Ok((call_key, _, _, _)) = split_call_envelope(m) else {
         return false;
     };
     iface_dispatch_arg_name(&call_key, home_module, type_aliases).is_ok()
@@ -5001,11 +5069,12 @@ fn reject_iface_nested_call_bundle(
     Ok(())
 }
 
-type CallEnvelope = (String, Value, Vec<(String, Value)>);
+type CallEnvelope = (String, Value, Vec<(String, Value)>, Vec<String>);
 
 fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<CallEnvelope> {
     let mut callee: Option<(String, Value)> = None;
     let mut siblings: Vec<(String, Value)> = Vec::new();
+    let mut grants: Vec<String> = Vec::new();
     for (k, v) in m {
         let ks = k.as_str().context("call mapping key must be string")?;
         if ks.starts_with('$') {
@@ -5014,13 +5083,34 @@ fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<CallEnvelope> {
             }
             callee = Some((ks.to_string(), v.clone()));
         } else if ks.starts_with('=') {
-            bail!("unexpected `=` key in call site (annotations are definition-only)");
+            if ks != "=grants" {
+                bail!("unexpected `=` key `{ks}` in call site (only `=grants` is supported)");
+            }
+            let seq = v
+                .as_sequence()
+                .context("`=grants` must be a sequence of `$grants.<kebab-name>` references")?;
+            for item in seq {
+                let s = item
+                    .as_str()
+                    .context("`=grants` entries must be `$grants.<kebab-name>` references")?;
+                grants.push(parse_grant_ref(s)?);
+            }
         } else {
             siblings.push((ks.to_string(), v.clone()));
         }
     }
     let (call_key, subject) = callee.context("call missing `$callee` key")?;
-    Ok((call_key, subject, siblings))
+    Ok((call_key, subject, siblings, grants))
+}
+
+fn parse_grant_ref(s: &str) -> Result<String> {
+    let Some(name) = s.strip_prefix("$grants.") else {
+        bail!("grant references must use `$grants.<kebab-name>`");
+    };
+    if !is_kebab_case(name) {
+        bail!("grant references must use `$grants.<kebab-name>`");
+    }
+    Ok(name.to_string())
 }
 
 fn reject_unknown_call_keys(
@@ -5237,7 +5327,7 @@ fn parse_call(
     let m = call_mapping_value
         .as_mapping()
         .context("call must be mapping")?;
-    let (call_key, subject, siblings) = split_call_envelope(m)?;
+    let (call_key, subject, siblings, grant_args) = split_call_envelope(m)?;
     let callee_key = match resolve_call_target(&call_key, sigs, home_module) {
         Ok(k) => k,
         Err(direct_err) => {
@@ -5352,10 +5442,12 @@ fn parse_call(
             );
         }
     }
+    validate_call_grants(function, &grant_args, &call_key)?;
     Ok(Call {
         callee_key,
         type_args,
         args,
+        grant_args,
     })
 }
 
@@ -5454,6 +5546,33 @@ fn parse_call_args(
         )?);
     }
     Ok(out)
+}
+
+fn validate_call_grants(
+    function: &FunctionSig,
+    grant_args: &[String],
+    call_key: &str,
+) -> Result<()> {
+    let mut seen = HashSet::new();
+    for grant in grant_args {
+        if !seen.insert(grant.as_str()) {
+            bail!("duplicate grant `{grant}` in `=grants` for call `{call_key}`");
+        }
+        if !function.grant_decls.iter().any(|d| d.name == *grant) {
+            bail!("unknown grant `{grant}` in `=grants` for call `{call_key}`");
+        }
+    }
+    for decl in &function.grant_decls {
+        if decl.requirement == GrantRequirement::Mandatory
+            && !grant_args.iter().any(|g| g == &decl.name)
+        {
+            bail!(
+                "missing mandatory grant `{}` in `=grants` for call `{call_key}`",
+                decl.name
+            );
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5766,6 +5885,11 @@ fn parse_expr(
     if let Some(s) = v.as_str() {
         if let Some(var) = s.strip_prefix('$') {
             maybe_warn_kebab_qualified(var, "symbol reference", warnings);
+            if let Some(grant_name) = var.strip_prefix("grants.") {
+                if grant_name.is_empty() || grant_name.contains('.') {
+                    bail!("grant references must use `$grants.<kebab-name>`");
+                }
+            }
             if let Ok((enum_key, tag)) = resolve_enum_tag_ref(s, home_module, enums) {
                 if let Some(enum_def) = enums.get(&enum_key) {
                     let payload_ty = enum_def.tags.get(tag.as_str()).with_context(|| {
@@ -5837,14 +5961,24 @@ fn build_function_args_mapping(
 fn resolve_function_envelope_fields(
     env: &DefEnvelope<'_>,
     primary_name: &str,
-) -> Result<(Value, Value, Value)> {
+) -> Result<(Value, Value, Value, Option<String>, Vec<GrantDecl>)> {
     if let Some(m) = env.form_value.as_mapping() {
         if let (Some(args), Some(ret), Some(d)) = (
             map_get_str(m, "args"),
             map_get_str(m, "return"),
             map_get_str(m, "do"),
         ) {
-            return Ok((args.clone(), ret.clone(), d.clone()));
+            if map_get_str(m, "grants").is_some() {
+                bail!(
+                    "`grants` must be a sibling of `$function`, not nested inside `$function: {{ args, return, do }}`"
+                );
+            }
+            if record_has_grants_arg(args) {
+                bail!(
+                    "grant arguments moved out of `args`; declare function `grants:` and access them as `$grants.<name>`"
+                );
+            }
+            return Ok((args.clone(), ret.clone(), d.clone(), None, Vec::new()));
         }
     }
     let (primary, first_arg_ty) =
@@ -5862,7 +5996,66 @@ fn resolve_function_envelope_fields(
         .function_do
         .context("missing `do` on `$function`")?
         .clone();
-    Ok((merged, ret, d))
+    if record_has_grants_arg(&merged) {
+        bail!(
+            "grant arguments moved out of `args`; declare function `grants:` and access them as `$grants.<name>`"
+        );
+    }
+    let primary_arg = labeled_function_named_primary(env.form_value).then_some(primary);
+    let grant_decls = parse_grant_decls(env.function_grants)?;
+    Ok((merged, ret, d, primary_arg, grant_decls))
+}
+
+fn labeled_function_named_primary(form_value: &Value) -> bool {
+    let Some(m) = form_value.as_mapping() else {
+        return false;
+    };
+    if m.len() != 1 {
+        return false;
+    }
+    m.keys()
+        .next()
+        .and_then(|k| k.as_str())
+        .is_some_and(|key| !key.starts_with('$'))
+}
+
+fn record_has_grants_arg(v: &Value) -> bool {
+    v.as_mapping()
+        .is_some_and(|m| m.contains_key(Value::String("grants".to_string())))
+}
+
+fn parse_grant_decls(v: Option<&Value>) -> Result<Vec<GrantDecl>> {
+    let Some(v) = v else {
+        return Ok(Vec::new());
+    };
+    let m = v.as_mapping().context(
+        "`grants` must be a mapping of grant name -> $security.grant.mandatory|optional",
+    )?;
+    let mut out = Vec::with_capacity(m.len());
+    let mut seen = HashSet::new();
+    for (k, v) in m {
+        let name = k.as_str().context("grant name must be string")?.to_string();
+        if !is_kebab_case(&name) {
+            bail!("grant names must be kebab-case, got `{name}`");
+        }
+        if !seen.insert(name.clone()) {
+            bail!("duplicate grant `{name}`");
+        }
+        let s = v
+            .as_str()
+            .with_context(|| format!("grant `{name}` requirement must be a scalar enum tag"))?;
+        let requirement = if s.ends_with(".mandatory") || s == "$security.grant.mandatory" {
+            GrantRequirement::Mandatory
+        } else if s.ends_with(".optional") || s == "$security.grant.optional" {
+            GrantRequirement::Optional
+        } else {
+            bail!(
+                "grant `{name}` must be `$security.grant.mandatory` or `$security.grant.optional`"
+            );
+        };
+        out.push(GrantDecl { name, requirement });
+    }
+    Ok(out)
 }
 
 /// Peel the first parameter from labeled `$function: …` surface syntax.
@@ -5964,6 +6157,7 @@ fn infer_expr_type(
         Expr::Value(RuntimeValue::Capability(grant)) => {
             Some(TypeRef::Named(grant.type_key.clone()))
         }
+        Expr::Value(RuntimeValue::GrantToken(_)) => Some(TypeRef::GrantToken),
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
         Expr::VarRef(v) => locals.get(v).cloned().or_else(|| {
@@ -6675,7 +6869,7 @@ fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: 
     let Some(m) = v.as_mapping() else {
         return false;
     };
-    let Ok((call_key, _, _)) = split_call_envelope(m) else {
+    let Ok((call_key, _, _, _)) = split_call_envelope(m) else {
         return false;
     };
     resolve_call_target(&call_key, sigs, home_module).is_ok()

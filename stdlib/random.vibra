@@ -6,8 +6,8 @@ bytes-lib:
 
 bytes:
   $function: $uint64
-  args:
-    grant: $security.random-grant
+  grants:
+    random: $security.grant.mandatory
   return: $bytes-lib.bytes
   do:
     - $wasm:
@@ -16,4 +16,3 @@ bytes:
           name: random_get
         args:
           - $args.subject
-          - $args.grant

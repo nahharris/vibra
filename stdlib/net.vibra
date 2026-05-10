@@ -11,8 +11,8 @@ net-error:
 
 connect:
   $function: $str
-  args:
-    grant: $security.net-connect-grant
+  grants:
+    net-connect: $security.grant.mandatory
   return:
     $result.result:
       t: $void
@@ -24,12 +24,11 @@ connect:
           name: net_connect
         args:
           - $args.subject
-          - $args.grant
 
 listen:
   $function: $str
-  args:
-    grant: $security.net-listen-grant
+  grants:
+    net-listen: $security.grant.mandatory
   return:
     $result.result:
       t: $void
@@ -41,4 +40,3 @@ listen:
           name: net_listen
         args:
           - $args.subject
-          - $args.grant

@@ -3,33 +3,31 @@ io:
 security:
   $import: ../stdlib/security.vibra
 main:
-  $function: $security.grants
+  $function: $void
+  grants:
+    stdin-read: $security.grant.optional
   return: $void
   do:
     - $io.print: "What is your name? "
-    - $match: $args.subject.stdin-read
-      when:
-        - pattern:
-            $security.grant-status.granted:
-              $bind: stdin-grant
-          do:
-            - $let:
-                name-result:
-                  $io.readln: $stdin-grant
-            - $match: $name-result
-              when:
-                - pattern:
-                    $result.result.ok:
-                      $bind: name
-                  do:
-                    - $io.println: $name
-                - pattern:
-                    $result.result.err:
-                      $bind: err
-                  do:
-                    - $io.eprintln: "failed to read stdin"
-        - pattern:
-            $security.grant-status.denied:
-              $bind: denied
-          do:
-            - $io.eprintln: "stdin grant denied"
+    - $if:
+        $security.granted: $grants.stdin-read
+      then:
+        - $let:
+            name-result:
+              $io.readln: null
+              =grants:
+                - $grants.stdin-read
+        - $match: $name-result
+          when:
+            - pattern:
+                $result.result.ok:
+                  $bind: name
+              do:
+                - $io.println: $name
+            - pattern:
+                $result.result.err:
+                  $bind: err
+              do:
+                - $io.eprintln: "failed to read stdin"
+      else:
+        - $io.eprintln: "stdin grant denied"
