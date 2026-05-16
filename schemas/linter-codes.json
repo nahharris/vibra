@@ -135,7 +135,7 @@
     {
       "code": "E-CAST-002",
       "severity": "error",
-      "summary": "Malformed `$cast` payload; expected `{ from: <expr>, to: <type> }`"
+      "summary": "Malformed `$cast` payload; expected `$cast: <expr>` with sibling `into: <type>`"
     },
     {
       "code": "E-CAP-001",

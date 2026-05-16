@@ -1614,9 +1614,6 @@ fn valid_cast_path(
     if capability_alias(target, aliases).is_some() || matches!(target, TypeRef::Capability { .. }) {
         return false;
     }
-    if type_compatible(target, source, aliases) {
-        return true;
-    }
     if let Some(inner) = newtype_inner(target, aliases) {
         if type_compatible(inner, source, aliases) {
             return true;

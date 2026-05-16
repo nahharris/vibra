@@ -184,15 +184,14 @@ Pattern forms are scalar literals, enum-constructor patterns, `$record`, `$tuple
 
 ### `$cast`
 
-Explicitly converts a value across a permitted type boundary.
+Explicitly crosses a `$newtype` boundary.
 
 ```yaml
-$cast:
-  from: $args.raw
-  to: $path
+$cast: $args.raw
+into: $path
 ```
 
-In v1, casts are allowed only for identity casts (`T -> T`) and for the two directions between a `$newtype` and its declared inner type. All other casts are invalid (`E-CAST-001`). `$cast` attaches runtime type metadata so `$newtype` and nominal `$interface` patterns can test the value later; primitive host operations still consume the inner representation. `$cast` cannot target `$capability` types or aliases whose body is `$capability` (`E-CAP-001`).
+In v1, casts are allowed only for the two directions between a `$newtype` and its declared inner type. Transparent aliases already coerce implicitly, and other semantic conversions must be expressed through explicit conversion interfaces such as `$from.from` or `$into.into`. All other casts are invalid (`E-CAST-001`). `$cast` attaches runtime type metadata so `$newtype` and nominal `$interface` patterns can test the value later; primitive host operations still consume the inner representation. `$cast` cannot target `$capability` types or aliases whose body is `$capability` (`E-CAP-001`).
 
 ### `$do`
 
@@ -393,7 +392,7 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 | `E-NEWTYPE-001` | error | Implicit coercion between a `$newtype` and its inner type is forbidden; use `$cast`. |
 | `E-NEWTYPE-002` | error | Malformed `$newtype` definition body. |
 | `E-CAST-001` | error | `$cast` has no valid v1 cast path between source and target types. |
-| `E-CAST-002` | error | Malformed `$cast` payload; expected `{from: <expr>, to: <type>}`. |
+| `E-CAST-002` | error | Malformed `$cast` payload; expected `$cast: <expr>` with sibling `into: <type>`. |
 | `E-CAP-001` | error | Capability values are runtime-minted and cannot be created with `$cast` or literals. |
 | `E-SELF-001` | error | Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation. |
 | `E-DEFS-001` | error | Invalid `=defs` annotation (placed on a non-type definition, entry is not a `$function`, or duplicate name). |

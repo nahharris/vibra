@@ -1280,6 +1280,61 @@ main:
 }
 
 #[test]
+fn cast_rejects_legacy_nested_payload_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"meter:
+  $newtype: $int64
+main:
+  $function: $void
+  return: $void
+  do:
+      - $let:
+          v:
+            $cast:
+              from: 7
+              to: $meter
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-CAST-002"),
+        "expected nested `$cast` payload to be rejected, got: {err}"
+    );
+}
+
+#[test]
+fn cast_rejects_identity_conversion() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+      - $let:
+          v:
+            $cast: 7
+            into: $int64
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-CAST-001"),
+        "expected identity `$cast` to be rejected, got: {err}"
+    );
+}
+
+#[test]
 fn newtype_does_not_accept_inner_type_implicitly() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
@@ -4377,6 +4432,8 @@ needs-display:
       - $return: $args.x
   =where:
     t: [$display]
+meter:
+  $newtype: $int64
 main:
   $function: $void
   return: $void
@@ -4422,7 +4479,7 @@ main:
             r#"$cast:
   $needs-display: 1
   t: $int64
-into: $int64"#,
+into: $meter"#,
         ),
         (
             "if branch",
@@ -5383,6 +5440,56 @@ main:
         "expected substituted arg type Int64; got {:?}",
         sig.arg_types[0]
     );
+}
+
+#[test]
+fn into_interface_registers_target_type_param() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"into-iface:
+  $interface:
+    into:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+        return: $t
+  =where: {t: []}
+box:
+  $record:
+    value: $int64
+  =impl:
+    $into-iface:
+      t: $int64
+      into:
+        $function: $self
+        return: $t
+        do:
+            - $wasm:
+                import:
+                  module: wasi_snapshot_preview1
+                  name: fd_sync
+                args:
+                  - $const.1
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).expect("parametric `into` impl should lower");
+    let key = vibra::lower::ImplKey {
+        implementing_type: "box".to_string(),
+        interface: "into-iface".to_string(),
+    };
+    let body = lowered.impls.get(&key).expect("impl entry missing");
+    assert_eq!(body.interface_args.len(), 1);
+    assert!(matches!(body.interface_args[0], vibra::lower::TypeRef::Int64));
 }
 
 /// Method-as-ref to an unknown function is rejected.
