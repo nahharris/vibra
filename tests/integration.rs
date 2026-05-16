@@ -5182,6 +5182,125 @@ main:
     );
 }
 
+#[test]
+fn impl_method_return_type_can_be_covariant() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"display:
+  $interface:
+    fmt:
+      $fn-type:
+        args:
+          $record:
+            x: $self
+        return:
+          $union: [$void, $str]
+box:
+  $record:
+    value: $int64
+  =impl:
+    $display:
+      fmt:
+        $function: $self
+        return: $str
+        do:
+            - $return: "boxed"
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("narrower impl return should satisfy iface");
+}
+
+#[test]
+fn impl_method_argument_types_remain_invariant() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"display:
+  $interface:
+    fmt:
+      $fn-type:
+        args:
+          $record:
+            x:
+              $union: [$void, $str]
+        return: $str
+box:
+  $record:
+    value: $int64
+  =impl:
+    $display:
+      fmt:
+        $function:
+          x: $str
+        return: $str
+        do:
+            - $return: "boxed"
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("E-IMPL-005"),
+        "expected E-IMPL-005 for non-invariant args; got: {msg}"
+    );
+}
+
+#[test]
+fn impl_method_return_type_cannot_be_wider_than_interface() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"display:
+  $interface:
+    fmt:
+      $fn-type:
+        args:
+          $record:
+            x: $self
+        return: $str
+box:
+  $record:
+    value: $int64
+  =impl:
+    $display:
+      fmt:
+        $function: $self
+        return:
+          $union: [$void, $str]
+        do:
+            - $return: "boxed"
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("E-IMPL-005"),
+        "expected E-IMPL-005 for wider impl return; got: {msg}"
+    );
+}
+
 /// A parametric interface `from { t -> ... }` should accept a concrete
 /// binding `t: $int64` and substitute it correctly into the method
 /// signature. The function body uses a `$wasm` import so we exercise the

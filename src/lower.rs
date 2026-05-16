@@ -3493,17 +3493,40 @@ fn record_from_named_args(arg_names: &[String], arg_types: &[TypeRef]) -> TypeRe
 }
 
 /// Two function signatures match for the purposes of `=impl` checking iff
-/// `unify_types` succeeds in *both* directions with no free generics. We
-/// thread an empty `bindings` map: any leftover generics on either side
-/// cause a mismatch.
+/// their arguments match invariantly while the concrete impl return can flow
+/// into the interface-declared return type.
 fn signatures_match(
     expected: &TypeRef,
     actual: &TypeRef,
     type_aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
+    let (
+        TypeRef::FnType {
+            args: expected_args,
+            return_type: expected_return,
+        },
+        TypeRef::FnType {
+            args: actual_args,
+            return_type: actual_return,
+        },
+    ) = (expected, actual)
+    else {
+        return false;
+    };
+
     let mut bindings: HashMap<String, TypeRef> = HashMap::new();
-    unify_types(expected, actual, type_aliases, &mut bindings)
-        && unify_types(actual, expected, type_aliases, &mut bindings)
+    if !unify_types(expected_args, actual_args, type_aliases, &mut bindings) {
+        return false;
+    }
+
+    let mut reverse_bindings = bindings.clone();
+    unify_types(actual_args, expected_args, type_aliases, &mut reverse_bindings)
+        && unify_types(
+            expected_return,
+            actual_return,
+            type_aliases,
+            &mut bindings,
+        )
 }
 
 // ===== Phase 5: bound resolution and validation =====
