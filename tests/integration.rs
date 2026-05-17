@@ -1685,6 +1685,178 @@ main:
 }
 
 #[test]
+fn policy_narrow_rejects_sibling_directory_prefix_escape() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    let sibling = dir.path().join("root2");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"root-policy:
+  $policy:
+    fs-read:
+      - requirement: mandatory
+        scopes:
+          - dir: "{root}"
+sibling-policy:
+  $policy:
+    fs-read:
+      - requirement: mandatory
+        scopes:
+          - file: "{sibling}/file.txt"
+main:
+  $function: $void
+  args:
+    policy: $root-policy
+  return: $void
+  do:
+    - $let:
+        widened:
+          $policy.narrow: $args.policy
+          into: $sibling-policy
+"#,
+            root = root.display().to_string().replace('\\', "/"),
+            sibling = sibling.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("policy narrowing cannot widen authority"),
+        "expected sibling escape rejection, got: {err}"
+    );
+}
+
+#[test]
+fn policy_narrow_named_alias_executes_with_concrete_policy_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"root-policy:
+  $policy:
+    fs-read:
+      - requirement: mandatory
+        scopes:
+          - dir: .
+read-policy:
+  $policy:
+    fs-read:
+      - requirement: mandatory
+        scopes:
+          - file: ./config.yaml
+main:
+  $function: $void
+  args:
+    policy: $root-policy
+  return: $void
+  do:
+    - $let:
+        narrowed:
+          $policy.narrow: $args.policy
+          into: $read-policy
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            approved_policy: Some(vibra::lower::PolicyType {
+                domains: std::collections::BTreeMap::from([(
+                    "fs-read".to_string(),
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::GrantRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Dir(".".to_string())],
+                    }],
+                )]),
+            }),
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("named policy aliases should narrow at runtime");
+}
+
+#[test]
+fn main_injection_uses_declared_policy_not_broader_approval() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let allowed = dir.path().join("allowed");
+    let outside = dir.path().join("outside");
+    std::fs::create_dir_all(&allowed).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let secret = outside.join("secret.txt");
+    std::fs::write(&secret, "secret").unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+main:
+  $function: $void
+  args:
+    policy:
+      $policy:
+        fs-read:
+          - requirement: mandatory
+            scopes:
+              - dir: "{allowed}"
+  return: $void
+  do:
+    - $let:
+        path:
+          $fs.path.new: "{secret}"
+    - $let:
+        text:
+          $fs.read-to-string: $path
+          policy: $args.policy
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            allowed = allowed.display().to_string().replace('\\', "/"),
+            secret = secret.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let err = format!(
+        "{:#}",
+        vibra::execute::run_lowered(
+            &lowered,
+            &vibra::runtime::RunConfig {
+                approved_policy: Some(vibra::lower::PolicyType {
+                    domains: std::collections::BTreeMap::from([(
+                        "fs-read".to_string(),
+                        vec![vibra::lower::PolicyGroup {
+                            requirement: vibra::lower::GrantRequirement::Mandatory,
+                            scopes: vec![vibra::lower::PolicyScope::Dir(
+                                dir.path().display().to_string().replace('\\', "/"),
+                            )],
+                        }],
+                    )]),
+                }),
+                ..vibra::runtime::RunConfig::default()
+            },
+        )
+        .unwrap_err()
+    );
+    assert!(
+        err.contains("outside approved policy"),
+        "expected injected policy to be narrowed to main declaration, got: {err}"
+    );
+}
+
+#[test]
 fn legacy_function_grants_are_rejected_after_policy_redesign() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();

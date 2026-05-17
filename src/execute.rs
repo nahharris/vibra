@@ -43,13 +43,18 @@ fn seed_main_args(
         if let Some(value) = grant_status_value(ty, config) {
             env.insert(name.clone(), value);
         } else if is_policy_binding(name) {
-            let policy = config
+            let approved = config
                 .approved_policy
                 .clone()
                 .context("mandatory policy coverage is missing")?;
+            let requested = policy_type_from_type_ref(ty)
+                .context("main policy argument must have a concrete `$policy` type")?;
+            if !runtime_policy_covers(&approved, &requested) {
+                bail!("mandatory policy coverage is missing");
+            }
             env.insert(
                 name.clone(),
-                RuntimeValue::Policy(PolicyValue { policy }),
+                RuntimeValue::Policy(PolicyValue { policy: requested }),
             );
         }
     }
@@ -60,6 +65,60 @@ fn seed_main_args(
         );
     }
     Ok(())
+}
+
+fn policy_type_from_type_ref(ty: &TypeRef) -> Option<PolicyType> {
+    match ty {
+        TypeRef::Policy(policy) => Some(policy.clone()),
+        _ => None,
+    }
+}
+
+fn runtime_policy_covers(source: &PolicyType, target: &PolicyType) -> bool {
+    target.domains.iter().all(|(domain, target_groups)| {
+        let Some(source_groups) = source.domains.get(domain) else {
+            return false;
+        };
+        target_groups.iter().all(|target_group| {
+            source_groups.iter().any(|source_group| {
+                source_group.scopes.iter().any(|s| matches!(s, crate::lower::PolicyScope::Any))
+                    || target_group.scopes.iter().all(|target_scope| {
+                        source_group.scopes.iter().any(|source_scope| {
+                            runtime_scope_covers(source_scope, target_scope)
+                        })
+                    })
+            })
+        })
+    })
+}
+
+fn runtime_scope_covers(
+    source: &crate::lower::PolicyScope,
+    target: &crate::lower::PolicyScope,
+) -> bool {
+    match (source, target) {
+        (crate::lower::PolicyScope::Any, _) => true,
+        (crate::lower::PolicyScope::Dir(a), crate::lower::PolicyScope::Dir(b))
+        | (crate::lower::PolicyScope::Dir(a), crate::lower::PolicyScope::File(b)) => {
+            normalize_absolute_path(Path::new(b))
+                .ok()
+                .is_some_and(|target| {
+                    normalize_absolute_path(Path::new(a))
+                        .ok()
+                        .is_some_and(|source| target.starts_with(source))
+                })
+        }
+        (crate::lower::PolicyScope::File(a), crate::lower::PolicyScope::File(b)) => {
+            normalize_absolute_path(Path::new(a)).ok()
+                == normalize_absolute_path(Path::new(b)).ok()
+        }
+        (crate::lower::PolicyScope::Exact(a), crate::lower::PolicyScope::Exact(b)) => a == b,
+        (crate::lower::PolicyScope::Prefix(a), crate::lower::PolicyScope::Exact(b))
+        | (crate::lower::PolicyScope::Prefix(a), crate::lower::PolicyScope::Prefix(b)) => {
+            b.starts_with(a)
+        }
+        _ => false,
+    }
 }
 
 fn is_policy_binding(name: &str) -> bool {

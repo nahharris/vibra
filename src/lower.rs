@@ -14,7 +14,7 @@ use anyhow::{bail, Context, Result};
 use serde_yaml::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// While lowering a user-defined function body, validates `$return` against this type.
 #[derive(Debug, Clone)]
@@ -1778,14 +1778,32 @@ fn policy_group_covers(source: &PolicyGroup, target: &PolicyGroup) -> bool {
 fn policy_scope_covers(source: &PolicyScope, target: &PolicyScope) -> bool {
     match (source, target) {
         (PolicyScope::Any, _) => true,
-        (PolicyScope::Dir(a), PolicyScope::Dir(b)) => b.starts_with(a),
-        (PolicyScope::Dir(a), PolicyScope::File(b)) => b.starts_with(a),
+        (PolicyScope::Dir(a), PolicyScope::Dir(b)) => path_scope_covers(a, b),
+        (PolicyScope::Dir(a), PolicyScope::File(b)) => path_scope_covers(a, b),
         (PolicyScope::File(a), PolicyScope::File(b)) => a == b,
         (PolicyScope::Exact(a), PolicyScope::Exact(b)) => a == b,
         (PolicyScope::Prefix(a), PolicyScope::Exact(b)) => b.starts_with(a),
         (PolicyScope::Prefix(a), PolicyScope::Prefix(b)) => b.starts_with(a),
         _ => false,
     }
+}
+
+fn path_scope_covers(source: &str, target: &str) -> bool {
+    normalize_policy_path(target).starts_with(normalize_policy_path(source))
+}
+
+fn normalize_policy_path(path: &str) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in Path::new(path).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn strip_module_prefix(name: &str) -> &str {
@@ -2016,6 +2034,10 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
                 .context("invalid `main` args")?;
         for (idx, (name, ty)) in arg_names.into_iter().zip(arg_types.into_iter()).enumerate() {
             let ty = qualify_named_type("", ty, &type_aliases);
+            let ty = policy_body(&ty, &type_aliases)
+                .cloned()
+                .map(TypeRef::Policy)
+                .unwrap_or(ty);
             if main_primary_arg.as_ref() == Some(&name) && idx == 0 {
                 main_arg_bindings.push((name.clone(), ty.clone()));
                 seed_arg_type_bindings(
@@ -5881,6 +5903,10 @@ fn parse_expr(
             if !policy_type_is_subset(&source, &target, type_aliases) {
                 bail!("policy narrowing cannot widen authority");
             }
+            let target = policy_body(&target, type_aliases)
+                .cloned()
+                .map(TypeRef::Policy)
+                .unwrap_or(target);
             return Ok(Expr::PolicyNarrow {
                 from: Box::new(from),
                 target,
