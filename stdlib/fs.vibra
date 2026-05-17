@@ -518,8 +518,12 @@ open-read-write:
 
 read-to-string:
   $function: $path
-  grants:
-    fs-read: $security.grant.mandatory
+  args:
+    policy:
+      $policy:
+        fs-read:
+          - requirement: mandatory
+            scopes: any
   return:
     $result.result:
       t: $str

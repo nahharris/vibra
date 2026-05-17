@@ -769,6 +769,9 @@ fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
             );
             Value::Mapping(map)
         }
+        RuntimeValue::Policy(policy) => {
+            Value::String(format!("{:?}", policy.policy))
+        }
         RuntimeValue::Enum {
             enum_key,
             tag,

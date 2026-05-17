@@ -84,14 +84,13 @@ vibra check hello
 
 See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
 
-**Permissions and grants:** privileged stdlib APIs declare grant slots separately from normal arguments and callers forward them with the `=grants` annotation. The runtime mints grant tokens from CLI consent flags and exposes them through `main` when it declares a sibling `grants:` map. Optional grants can be tested with `$security.granted`; missing or denied mandatory grants fail before the callee runs. Default policy is deny for privileged actions; stdout/stderr output remains baseline for CLI usability.
+**Policies:** authority is moving to unforgeable `$policy` values passed as normal function arguments. `main` receives the root policy value from the runtime, code explicitly narrows it with `$policy.narrow`, and privileged APIs consume the narrowed value through ordinary args. The current branch is migrating the stdlib from the previous grant side channel to this model.
 
 ```sh
 vibra run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
 ```
 
-Filesystem grants use canonical ancestry checks; `--allow-read path/root` does not authorize a sibling like `path/root2`. The legacy `--preopen` flag remains as a compatibility alias that seeds both read and write filesystem grants for the embedded interpreter.
-Grant names are kebab-case keys such as `$grants.fs-read`, and calls forward them as `=grants: [$grants.fs-read]`.
+Filesystem policy checks use canonical ancestry: a `dir` scope for `path/root` does not authorize a sibling such as `path/root2`.
 
 **Known escape hatch:** arbitrary `$wasm` declarations are still accepted. The grant model currently applies to grant-aware stdlib APIs, not to untrusted modules that define their own `$wasm` shims. Future work should make `$wasm` trusted-stdlib-only or require an explicit unsafe/trust policy.
 

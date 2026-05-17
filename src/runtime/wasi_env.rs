@@ -1,6 +1,7 @@
 //! Build [`WasiEnvBuilder`](wasmer_wasix::WasiEnvBuilder): stdio inheritance, argv, preopened dirs.
 
 use std::path::PathBuf;
+use crate::lower::PolicyType;
 use wasmer_wasix::{WasiEnv, WasiEnvBuilder, WasiStateCreationError};
 
 /// Configuration for [`super::run_module`](crate::runtime::run_module).
@@ -28,6 +29,7 @@ pub struct RunConfig {
     pub allow_clock: bool,
     pub allow_random: bool,
     pub allow_system_info: bool,
+    pub approved_policy: Option<PolicyType>,
 }
 
 impl Default for RunConfig {
@@ -47,6 +49,7 @@ impl Default for RunConfig {
             allow_clock: false,
             allow_random: false,
             allow_system_info: false,
+            approved_policy: None,
         }
     }
 }

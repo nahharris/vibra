@@ -2,7 +2,7 @@
 
 use crate::lower::{
     Call, CapabilityGrant, Expr, FunctionBody, GrantRequirement, GrantToken, LetValue, LoweredExec,
-    LoweredProgram, Pattern, RuntimeValue, Statement, TypeRef,
+    LoweredProgram, Pattern, PolicyType, PolicyValue, RuntimeValue, Statement, TypeRef,
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
-    seed_main_args(program, config, &mut env);
+    seed_main_args(program, config, &mut env)?;
     let mut files = FileTable::default();
     for stmt in &program.statements {
         if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
@@ -38,10 +38,19 @@ fn seed_main_args(
     program: &LoweredProgram,
     config: &RunConfig,
     env: &mut HashMap<String, RuntimeValue>,
-) {
+) -> Result<()> {
     for (name, ty) in &program.main_arg_bindings {
         if let Some(value) = grant_status_value(ty, config) {
             env.insert(name.clone(), value);
+        } else if is_policy_binding(name) {
+            let policy = config
+                .approved_policy
+                .clone()
+                .context("mandatory policy coverage is missing")?;
+            env.insert(
+                name.clone(),
+                RuntimeValue::Policy(PolicyValue { policy }),
+            );
         }
     }
     for decl in &program.main_grant_decls {
@@ -50,6 +59,11 @@ fn seed_main_args(
             RuntimeValue::GrantToken(grant_token_value(&decl.name, config)),
         );
     }
+    Ok(())
+}
+
+fn is_policy_binding(name: &str) -> bool {
+    name == "policy" || name.ends_with(".policy")
 }
 
 fn grant_token_value(name: &str, config: &RunConfig) -> GrantToken {
@@ -205,6 +219,18 @@ fn eval_expr(
             type_ref: target.clone(),
             value: Box::new(eval_expr(from, env, program, files, config)?),
         }),
+        Expr::PolicyNarrow { from, target } => {
+            let value = eval_expr(from, env, program, files, config)?;
+            let RuntimeValue::Policy(_) = value else {
+                bail!("`$policy.narrow` expects a policy value");
+            };
+            let crate::lower::TypeRef::Policy(policy) = target else {
+                bail!("`$policy.narrow.into` must be a `$policy` type");
+            };
+            Ok(RuntimeValue::Policy(crate::lower::PolicyValue {
+                policy: policy.clone(),
+            }))
+        }
         Expr::EnumConstructor {
             enum_key,
             tag,
@@ -600,6 +626,19 @@ fn eval_capability(
     }
 }
 
+fn eval_policy(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<PolicyType> {
+    match eval_expr(expr, env, program, files, config)? {
+        RuntimeValue::Policy(policy) => Ok(policy.policy),
+        other => bail!("expected policy value, got {other:?}"),
+    }
+}
+
 fn eval_grant_token(
     name: &str,
     env: &HashMap<String, RuntimeValue>,
@@ -802,6 +841,38 @@ fn resolve_granted_path(
         }
     }
     bail!("path `{}` is outside configured grants", path)
+}
+
+fn resolve_policy_path(path: &str, policy: &PolicyType, domain: &str) -> Result<PathBuf> {
+    let abs = normalize_absolute_path(Path::new(path))?;
+    let auth_path = nearest_existing_path(&abs)?;
+    let canon_auth = auth_path.canonicalize().unwrap_or(auth_path);
+    let Some(groups) = policy.domains.get(domain) else {
+        bail!("policy does not authorize `{domain}`");
+    };
+    for group in groups {
+        for scope in &group.scopes {
+            match scope {
+                crate::lower::PolicyScope::Any => return Ok(abs),
+                crate::lower::PolicyScope::Dir(root) => {
+                    let root_path = PathBuf::from(root);
+                    let canon_root = root_path.canonicalize().unwrap_or(root_path);
+                    if canon_auth.starts_with(canon_root) {
+                        return Ok(abs);
+                    }
+                }
+                crate::lower::PolicyScope::File(file) => {
+                    let file_path = PathBuf::from(file);
+                    let canon_file = file_path.canonicalize().unwrap_or(file_path);
+                    if abs == canon_file {
+                        return Ok(abs);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    bail!("path `{}` is outside approved policy", path)
 }
 
 fn normalize_absolute_path(path: &Path) -> Result<PathBuf> {
@@ -1403,9 +1474,14 @@ fn exec_call(
                 "read-to-string" | "read-file" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        resolve_policy_path(&path, &policy, "fs-read")?
+                    } else {
+                        let grant =
+                            call_grant_capability(call, "fs-read", env, program, files, config)?;
+                        resolve_granted_path(&path, &grant, "fs-read-grant")?
+                    };
                     Ok(fs_result(sig, || fs::read_to_string(p), RuntimeValue::Str))
                 }
                 "write-string-all" | "write-file" => {

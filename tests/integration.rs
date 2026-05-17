@@ -1,6 +1,7 @@
 use std::path::Path;
 
 #[test]
+#[ignore = "removed by policy value model"]
 fn function_grants_side_channel_allows_primary_args_and_grant_forwarding() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
@@ -63,6 +64,7 @@ main:
 }
 
 #[test]
+#[ignore = "removed by policy value model"]
 fn missing_mandatory_grant_forwarding_is_rejected() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
@@ -96,6 +98,7 @@ main:
 }
 
 #[test]
+#[ignore = "removed by policy value model"]
 fn mandatory_grant_forwarded_but_denied_fails_before_callee_runs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
@@ -154,6 +157,7 @@ main:
 }
 
 #[test]
+#[ignore = "removed by policy value model"]
 fn grant_forwarding_requires_token_in_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
@@ -270,6 +274,7 @@ main:
 }
 
 #[test]
+#[ignore = "removed by policy value model"]
 fn grant_forwarding_refs_must_be_kebab_case() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
@@ -311,6 +316,7 @@ main:
 }
 
 #[test]
+#[ignore = "removed by policy value model"]
 fn dotted_grant_reference_is_rejected() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
@@ -1551,6 +1557,7 @@ main:
 }
 
 #[test]
+#[ignore = "removed by policy value model"]
 fn capability_values_cannot_be_created_with_cast() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
@@ -1575,6 +1582,243 @@ main:
     assert!(
         err.contains("E-CAP-001"),
         "expected capability cast rejection, got: {err}"
+    );
+}
+
+#[test]
+fn capability_type_constructor_is_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"secret:
+  $capability: fs-read
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("unknown form `$capability`"),
+        "expected removed capability diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn policy_type_alias_lowers_and_can_be_used_in_signature() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"read-policy:
+  $policy:
+    fs-read:
+      - requirement: mandatory
+        scopes:
+          - dir: .
+uses-policy:
+  $function: $void
+  args:
+    policy: $read-policy
+  return: $void
+  do:
+    - $let:
+        ok: true
+main:
+  $function: $void
+  args:
+    policy: $read-policy
+  return: $void
+  do:
+    - $uses-policy: $args.policy
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("policy type alias should lower");
+}
+
+#[test]
+fn policy_narrow_rejects_widening() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"narrow-policy:
+  $policy:
+    fs-read:
+      - requirement: mandatory
+        scopes:
+          - file: ./config/app.yaml
+wide-policy:
+  $policy:
+    fs-read:
+      - requirement: mandatory
+        scopes:
+          - dir: .
+main:
+  $function: $void
+  args:
+    policy: $narrow-policy
+  return: $void
+  do:
+    - $let:
+        widened:
+          $policy.narrow: $args.policy
+          into: $wide-policy
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("policy narrowing cannot widen authority"),
+        "expected widening rejection, got: {err}"
+    );
+}
+
+#[test]
+fn legacy_function_grants_are_rejected_after_policy_redesign() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"security:
+  $import: "{security}"
+main:
+  $function: $void
+  grants:
+    fs-read: $security.grant.optional
+  return: $void
+  do: []
+"#,
+            security = security.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("function `grants` were removed; use `$policy` arguments"),
+        "expected migration diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn main_policy_argument_is_injected_and_authorizes_fs_read() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data.txt");
+    std::fs::write(&data, "secret").unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+main:
+  $function: $void
+  args:
+    policy:
+      $policy:
+        fs-read:
+          - requirement: mandatory
+            scopes:
+              - dir: "{dir}"
+  return: $void
+  do:
+    - $let:
+        path:
+          $fs.path.new: "{path}"
+    - $let:
+        text:
+          $fs.read-to-string: $path
+          policy: $args.policy
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            dir = dir.path().display().to_string().replace('\\', "/"),
+            path = data.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            approved_policy: Some(vibra::lower::PolicyType {
+                domains: std::collections::BTreeMap::from([(
+                    "fs-read".to_string(),
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::GrantRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Dir(
+                            dir.path().display().to_string().replace('\\', "/"),
+                        )],
+                    }],
+                )]),
+            }),
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("approved policy should authorize fs read");
+}
+
+#[test]
+fn main_mandatory_policy_requires_full_coverage_before_body_runs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+main:
+  $function: $void
+  args:
+    policy:
+      $policy:
+        fs-read:
+          - requirement: mandatory
+            scopes:
+              - dir: "{dir}"
+  return: $void
+  do:
+    - $let:
+        path:
+          $fs.path.new: "{path}"
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            dir = dir.path().display().to_string().replace('\\', "/"),
+            path = dir.path().join("data.txt").display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let err = format!(
+        "{:#}",
+        vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+            .unwrap_err()
+    );
+    assert!(
+        err.contains("mandatory policy coverage is missing"),
+        "expected mandatory policy preflight failure, got: {err}"
     );
 }
 
