@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/type-expr.schema.json",
   "title": "VibraTypeExpr",
-  "description": "JSON encoding of a Vibra type after YAML parse (surrogate for LLM tooling). Generic parameters are declared at module-symbol level via the `=where` annotation; a use site of a generic alias must instantiate via `{ $alias: { tparam: T, ... } }`. Inline generic types are not expressible. `$newtype` defines a nominal wrapper around one inner type and requires explicit `$cast` to cross the boundary. `$grant-token` is an internal runtime-minted authority token used by the security stdlib. `$self` is a reserved type usable only inside an `$interface` body (existential placeholder) or inside a type's `=defs` / `=impl` annotation (resolves to the enclosing type).",
+  "description": "JSON encoding of a Vibra type after YAML parse (surrogate for LLM tooling). Generic parameters are declared at module-symbol level via the `=where` annotation; a use site of a generic alias must instantiate via `{ $alias: { tparam: T, ... } }`. Inline generic types are not expressible. `$newtype` defines a nominal wrapper around one inner type and requires explicit `$cast` to cross the boundary. `$policy` defines an unforgeable authority type whose values are injected by the runtime and may only be narrowed. `$grant-token` is an internal compatibility type during migration. `$self` is a reserved type usable only inside an `$interface` body (existential placeholder) or inside a type's `=defs` / `=impl` annotation (resolves to the enclosing type).",
   "oneOf": [
     {
       "type": "string",
@@ -44,9 +44,9 @@
     },
     {
       "type": "object",
-      "required": ["$capability"],
+      "required": ["$policy"],
       "additionalProperties": false,
-      "properties": { "$capability": { "type": "string" } }
+      "properties": { "$policy": { "type": "object" } }
     },
     {
       "type": "object",

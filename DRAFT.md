@@ -225,7 +225,7 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 |------|---------|
 | `$literal` | Literal type: `{ $literal: "ok" }` |
 | `$newtype` | Nominal wrapper: `{ $newtype: T }`. Unlike transparent aliases, a `$newtype` is distinct from `T` and crosses to/from `T` only through `$cast`. |
-| `$capability` | Opaque runtime-minted authority type: `{ $capability: fs-read }`. User code cannot construct capability values with `$cast` or literals. |
+| `$policy` | Opaque runtime-injected authority type. User code cannot mint policy values and may only attenuate them through explicit narrowing. |
 | `$record` | Concrete product: `{ $record: { f: T, ... } }` |
 | `$map` | Homogeneous map: `{ $map: { key: K, value: V } }` |
 | `$tuple` | Tuple of types: `{ $tuple: [$t1, $t2] }` — **type positions only** |
@@ -355,7 +355,7 @@ Current compiler behavior validates stdlib signatures and forwards call-site arg
 
 The embedded runner uses **wasmer-wasix** (requires a Tokio 1.x runtime). **Preopened directories** map host paths into the guest; stdio does not require preopens.
 
-**Security grants:** Privileged stdlib APIs declare grant slots with sibling `grants:` metadata and callers forward tokens with call-site `=grants: [...]`. `main` may declare grants such as `fs-read: $security.grant.optional`; code reads them as `$grants.fs-read` and can test optional grants with `$security.granted`. Mandatory grants fail before the callee runs when denied or missing. The core host domains are filesystem read/write, stdin read, environment read/write, network connect/listen, subprocess run, clock, randomness, and system information. Filesystem grants are scoped by canonical path ancestry, so sibling string-prefix escapes are invalid. CLI consent uses Deno-style flags such as `--allow-read=PATH`, `--allow-write=PATH`, `--allow-env=NAME`, `--allow-net=HOST[:PORT]`, `--allow-run=COMMAND`, `--allow-stdin`, `--allow-clock`, `--allow-random`, `--allow-sys-info`, and `--allow-all`.
+**Security policies:** Privileged code receives unforgeable `$policy` values as ordinary arguments. `main` owns the root requested policy, helpers may only receive explicitly narrowed subpolicies, and runtime checks dynamic targets against the policy value at the point of use. Policy groups may mix mandatory and optional scopes per domain. Filesystem scopes use canonical ancestry checks so sibling string-prefix escapes are invalid.
 
 **Known escape hatch:** arbitrary `$wasm` declarations remain accepted in this slice. The grant model applies to grant-aware stdlib APIs, not to untrusted modules that define their own `$wasm` shims. Future work should make `$wasm` trusted-stdlib-only or require explicit unsafe/trust policy.
 
@@ -556,7 +556,7 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
 - **Unions:** use direct arrays, e.g. `integer: { $union: [$int64, $int32, $int16, $int8] }`.
 - **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
 - **Typed io/fs:** `stdlib/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
-- **Security grants:** `stdlib/security.vibra` declares `$capability` grant types and the `grants` record passed to `main`. Grant-aware host modules include `fs`, `env`, `net`, `process`, `time`, `random`, and `sys`.
+- **Security policies:** privileged host modules consume `$policy` values; supported domains include `fs`, `env`, `net`, `process`, `time`, `random`, and `sys`.
 - **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is `$union: [$void, $t]` with `=where: {t: []}`; `stdlib/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`, used at value sites via `$match`.
 - **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
 

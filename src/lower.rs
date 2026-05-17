@@ -14,7 +14,7 @@ use anyhow::{bail, Context, Result};
 use serde_yaml::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// While lowering a user-defined function body, validates `$return` against this type.
 #[derive(Debug, Clone)]
@@ -45,6 +45,7 @@ pub enum RuntimeValue {
     },
     Capability(CapabilityGrant),
     GrantToken(GrantToken),
+    Policy(PolicyValue),
     Enum {
         enum_key: String,
         tag: String,
@@ -54,15 +55,20 @@ pub enum RuntimeValue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct GrantToken {
+    pub name: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityGrant {
     pub type_key: String,
     pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GrantToken {
-    pub name: String,
-    pub scopes: Vec<String>,
+pub struct PolicyValue {
+    pub policy: PolicyType,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +80,10 @@ pub enum Expr {
         return_type: TypeRef,
     },
     Cast {
+        from: Box<Expr>,
+        target: TypeRef,
+    },
+    PolicyNarrow {
         from: Box<Expr>,
         target: TypeRef,
     },
@@ -142,6 +152,7 @@ pub enum TypeRef {
         name: String,
         kind: String,
     },
+    Policy(PolicyType),
     GrantToken,
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
@@ -239,6 +250,26 @@ pub enum GrantRequirement {
 pub struct GrantDecl {
     pub name: String,
     pub requirement: GrantRequirement,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyType {
+    pub domains: BTreeMap<String, Vec<PolicyGroup>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyGroup {
+    pub requirement: GrantRequirement,
+    pub scopes: Vec<PolicyScope>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PolicyScope {
+    Any,
+    File(String),
+    Dir(String),
+    Exact(String),
+    Prefix(String),
 }
 
 #[derive(Debug, Clone)]
@@ -654,7 +685,7 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$literal",
     "$union",
     "$enum",
-    "$capability",
+    "$policy",
     "$grant-token",
 ];
 
@@ -925,15 +956,7 @@ fn parse_type_constructor(
                 inner: Box::new(inner),
             })
         }
-        "$capability" => {
-            let kind = v
-                .as_str()
-                .context("E-CAP-001: `$capability` body must be a string kind")?;
-            Ok(TypeRef::Capability {
-                name: String::new(),
-                kind: kind.to_string(),
-            })
-        }
+        "$policy" => Ok(TypeRef::Policy(parse_policy_type(v)?)),
         "$grant-token" => Ok(TypeRef::GrantToken),
         "$record" => {
             let m = v
@@ -1102,6 +1125,79 @@ fn parse_type_constructor(
         )?)),
         _ => unreachable!("unknown builtin type form `{form}`"),
     }
+}
+
+fn parse_policy_type(v: &Value) -> Result<PolicyType> {
+    let domains = v
+        .as_mapping()
+        .context("`$policy` must be a mapping of domain -> groups")?;
+    let mut out = BTreeMap::new();
+    for (domain, groups_v) in domains {
+        let domain = domain
+            .as_str()
+            .context("`$policy` domain names must be strings")?
+            .to_string();
+        let groups = groups_v
+            .as_sequence()
+            .with_context(|| format!("`$policy.{domain}` must be a sequence"))?;
+        let mut parsed_groups = Vec::with_capacity(groups.len());
+        for group_v in groups {
+            let group = group_v
+                .as_mapping()
+                .with_context(|| format!("`$policy.{domain}` entries must be mappings"))?;
+            let requirement = match map_get_str(group, "requirement").and_then(Value::as_str) {
+                Some("mandatory") => GrantRequirement::Mandatory,
+                Some("optional") => GrantRequirement::Optional,
+                _ => bail!(
+                    "`$policy.{domain}` requirement must be `mandatory` or `optional`"
+                ),
+            };
+            let scopes_v = map_get_str(group, "scopes")
+                .with_context(|| format!("`$policy.{domain}` entry missing `scopes`"))?;
+            let scopes = parse_policy_scopes(&domain, scopes_v)?;
+            parsed_groups.push(PolicyGroup {
+                requirement,
+                scopes,
+            });
+        }
+        out.insert(domain, parsed_groups);
+    }
+    Ok(PolicyType { domains: out })
+}
+
+fn parse_policy_scopes(domain: &str, v: &Value) -> Result<Vec<PolicyScope>> {
+    if v.as_str() == Some("any") {
+        return Ok(vec![PolicyScope::Any]);
+    }
+    let scopes = v
+        .as_sequence()
+        .with_context(|| format!("`$policy.{domain}.scopes` must be `any` or a sequence"))?;
+    let mut out = Vec::with_capacity(scopes.len());
+    for scope_v in scopes {
+        let scope = scope_v
+            .as_mapping()
+            .with_context(|| format!("`$policy.{domain}` scope must be a mapping"))?;
+        if scope.len() != 1 {
+            bail!("`$policy.{domain}` scope must contain exactly one selector");
+        }
+        let (k, v) = scope.iter().next().expect("checked one entry");
+        let key = k
+            .as_str()
+            .with_context(|| format!("`$policy.{domain}` scope key must be a string"))?;
+        let value = v
+            .as_str()
+            .with_context(|| format!("`$policy.{domain}.{key}` must be a string"))?
+            .to_string();
+        let parsed = match key {
+            "file" => PolicyScope::File(value),
+            "dir" => PolicyScope::Dir(value),
+            "exact" => PolicyScope::Exact(value),
+            "prefix" => PolicyScope::Prefix(value),
+            _ => bail!("unsupported `$policy.{domain}` scope selector `{key}`"),
+        };
+        out.push(parsed);
+    }
+    Ok(out)
 }
 
 /// Parse a `{ tparam: $T, ... }` mapping at a type-position alias use site,
@@ -1454,6 +1550,9 @@ fn unify_types(
     }
 
     match (&expected_n, &actual_n) {
+        (TypeRef::Policy(_), TypeRef::Policy(_)) => {
+            policy_type_is_subset(&actual_n, &expected_n, aliases)
+        }
         (TypeRef::Literal(le), TypeRef::Literal(la)) => le == la,
         (e, TypeRef::Literal(la)) => literal_fits_primitive(la, e),
         (TypeRef::Literal(_), _) => false,
@@ -1554,6 +1653,9 @@ fn type_compatible(
     actual: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
+    if policy_body(expected, aliases).is_some() && policy_body(actual, aliases).is_some() {
+        return policy_type_is_subset(expected, actual, aliases);
+    }
     let mut bindings = HashMap::new();
     unify_types(expected, actual, aliases, &mut bindings)
 }
@@ -1611,7 +1713,9 @@ fn valid_cast_path(
     target: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
-    if capability_alias(target, aliases).is_some() || matches!(target, TypeRef::Capability { .. }) {
+    if capability_alias(target, aliases).is_some()
+        || matches!(target, TypeRef::Capability { .. } | TypeRef::Policy(_))
+    {
         return false;
     }
     if let Some(inner) = newtype_inner(target, aliases) {
@@ -1625,6 +1729,81 @@ fn valid_cast_path(
         }
     }
     false
+}
+
+fn policy_body<'a>(ty: &'a TypeRef, aliases: &'a HashMap<String, TypeAlias>) -> Option<&'a PolicyType> {
+    match ty {
+        TypeRef::Policy(policy) => Some(policy),
+        TypeRef::Named(name) => aliases.get(name).and_then(|alias| match &alias.body {
+            TypeRef::Policy(policy) => Some(policy),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+fn policy_type_is_subset(
+    source: &TypeRef,
+    target: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    let Some(source) = policy_body(source, aliases) else {
+        return false;
+    };
+    let Some(target) = policy_body(target, aliases) else {
+        return false;
+    };
+    target.domains.iter().all(|(domain, target_groups)| {
+        let Some(source_groups) = source.domains.get(domain) else {
+            return false;
+        };
+        target_groups.iter().all(|target_group| {
+            source_groups.iter().any(|source_group| {
+                policy_group_covers(source_group, target_group)
+            })
+        })
+    })
+}
+
+fn policy_group_covers(source: &PolicyGroup, target: &PolicyGroup) -> bool {
+    source.scopes.iter().any(|s| matches!(s, PolicyScope::Any))
+        || target.scopes.iter().all(|target_scope| {
+            source
+                .scopes
+                .iter()
+                .any(|source_scope| policy_scope_covers(source_scope, target_scope))
+        })
+}
+
+fn policy_scope_covers(source: &PolicyScope, target: &PolicyScope) -> bool {
+    match (source, target) {
+        (PolicyScope::Any, _) => true,
+        (PolicyScope::Dir(a), PolicyScope::Dir(b)) => path_scope_covers(a, b),
+        (PolicyScope::Dir(a), PolicyScope::File(b)) => path_scope_covers(a, b),
+        (PolicyScope::File(a), PolicyScope::File(b)) => a == b,
+        (PolicyScope::Exact(a), PolicyScope::Exact(b)) => a == b,
+        (PolicyScope::Prefix(a), PolicyScope::Exact(b)) => b.starts_with(a),
+        (PolicyScope::Prefix(a), PolicyScope::Prefix(b)) => b.starts_with(a),
+        _ => false,
+    }
+}
+
+fn path_scope_covers(source: &str, target: &str) -> bool {
+    normalize_policy_path(target).starts_with(normalize_policy_path(source))
+}
+
+fn normalize_policy_path(path: &str) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in Path::new(path).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn strip_module_prefix(name: &str) -> &str {
@@ -1845,6 +2024,9 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     let (args, ret, do_seq, main_primary_arg, main_grant_decls) =
         resolve_function_envelope_fields(&main_env, MODULE_FN_PRIMARY_ARG)
             .context("invalid `main`")?;
+    if !main_grant_decls.is_empty() {
+        bail!("function `grants` were removed; use `$policy` arguments");
+    }
     let mut main_arg_bindings = Vec::new();
     if !is_void_args(&args) {
         let (arg_names, arg_types) =
@@ -1852,6 +2034,10 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
                 .context("invalid `main` args")?;
         for (idx, (name, ty)) in arg_names.into_iter().zip(arg_types.into_iter()).enumerate() {
             let ty = qualify_named_type("", ty, &type_aliases);
+            let ty = policy_body(&ty, &type_aliases)
+                .cloned()
+                .map(TypeRef::Policy)
+                .unwrap_or(ty);
             if main_primary_arg.as_ref() == Some(&name) && idx == 0 {
                 main_arg_bindings.push((name.clone(), ty.clone()));
                 seed_arg_type_bindings(
@@ -3979,6 +4165,16 @@ fn check_expr_call_bounds(
             referrer_owner,
             context,
         )?,
+        Expr::PolicyNarrow { from, .. } => check_expr_call_bounds(
+            from,
+            sigs,
+            type_aliases,
+            impls,
+            enclosing_params,
+            enclosing_bounds,
+            referrer_owner,
+            context,
+        )?,
         Expr::Record(fields) => {
             for value in fields.values() {
                 check_expr_call_bounds(
@@ -5681,6 +5877,41 @@ fn parse_expr(
                 target,
             });
         }
+        if mapping_keys_exactly(m, &["$policy.narrow", "into"]) {
+            let from = parse_expr(
+                map_get_str(m, "$policy.narrow").context("`$policy.narrow` missing subject")?,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                home_module,
+                warnings,
+            )?;
+            let source = infer_expr_type(&from, constants, locals, type_aliases, enums)
+                .context("could not infer `$policy.narrow` subject type")?;
+            let empty_skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
+            let target = parse_type_ref(
+                map_get_str(m, "into").context("`$policy.narrow` missing `into` type")?,
+                &[],
+                &empty_skeletons,
+                warnings,
+                false,
+            )?;
+            let target = qualify_named_type(home_module, target, type_aliases);
+            if !policy_type_is_subset(&source, &target, type_aliases) {
+                bail!("policy narrowing cannot widen authority");
+            }
+            let target = policy_body(&target, type_aliases)
+                .cloned()
+                .map(TypeRef::Policy)
+                .unwrap_or(target);
+            return Ok(Expr::PolicyNarrow {
+                from: Box::new(from),
+                target,
+            });
+        }
         if mapping_keys_exactly(m, &["$if", "then", "else"]) {
             let cond = parse_expr(
                 map_get_str(m, "$if").context("$if missing condition")?,
@@ -5951,7 +6182,7 @@ fn build_function_args_mapping(
                 .as_mapping()
                 .context("`args` on `$function: $void` must be a mapping")?;
             if !rm.is_empty() {
-                bail!("`$function: $void` cannot declare non-empty `args`");
+                return Ok(Value::Mapping(rm.clone()));
             }
         }
         return Ok(Value::String("$void".into()));
@@ -6177,6 +6408,7 @@ fn infer_expr_type(
         Expr::Value(RuntimeValue::Capability(grant)) => {
             Some(TypeRef::Named(grant.type_key.clone()))
         }
+        Expr::Value(RuntimeValue::Policy(value)) => Some(TypeRef::Policy(value.policy.clone())),
         Expr::Value(RuntimeValue::GrantToken(_)) => Some(TypeRef::GrantToken),
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
@@ -6187,6 +6419,7 @@ fn infer_expr_type(
         }),
         Expr::Call { return_type, .. } => Some(return_type.clone()),
         Expr::Cast { target, .. } => Some(target.clone()),
+        Expr::PolicyNarrow { target, .. } => Some(target.clone()),
         Expr::Record(fields) => fields
             .iter()
             .map(|(k, v)| {
