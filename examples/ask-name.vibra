@@ -1,5 +1,7 @@
 io:
   $import: ../stdlib/io.vibra
+result:
+  $import: ../stdlib/result.vibra
 security:
   $import: ../stdlib/security.vibra
 main:

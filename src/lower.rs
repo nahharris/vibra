@@ -1849,12 +1849,6 @@ fn qualify_type_name_key(
         if aliases.contains_key(&qual) {
             return qual;
         }
-        // `io.vibra` uses `$result.*` for types that live under the nested `fs` import
-        // (`io.fs.result.*`). Prefer that before falling back to a stray global `result.*`.
-        let via_fs = format!("{alias}.fs.{name}");
-        if aliases.contains_key(&via_fs) {
-            return via_fs;
-        }
     }
     if aliases.contains_key(&name) {
         return name;
