@@ -1208,6 +1208,27 @@ fn parse_policy_scopes(domain: &str, v: &Value) -> Result<Vec<PolicyScope>> {
 
 /// Parse a `{ tparam: $T, ... }` mapping at a type-position alias use site,
 /// resolving the named arguments into the alias's declared positional order.
+fn unique_skeleton_match<'a>(
+    skeletons: &'a HashMap<String, AliasSkeleton>,
+    base: &str,
+    matches: impl Fn(&str) -> bool,
+) -> Result<Option<&'a AliasSkeleton>> {
+    let mut keys: Vec<&str> = skeletons
+        .keys()
+        .map(String::as_str)
+        .filter(|key| matches(key))
+        .collect();
+    keys.sort_unstable();
+    match keys.as_slice() {
+        [] => Ok(None),
+        [key] => Ok(skeletons.get(*key)),
+        candidates => bail!(
+            "E-GEN-002: ambiguous type alias `${base}`; qualify one of [{}]",
+            candidates.join(", ")
+        ),
+    }
+}
+
 fn parse_instantiation_args(
     base: &str,
     v: &Value,
@@ -1216,22 +1237,18 @@ fn parse_instantiation_args(
     warnings: &mut Vec<String>,
     self_allowed: bool,
 ) -> Result<Vec<TypeRef>> {
-    let skel = skeletons
-        .get(base)
-        .or_else(|| {
-            let qualified_suffix = format!(".{base}");
-            skeletons
-                .iter()
-                .find(|(key, _)| key.ends_with(&qualified_suffix))
-                .map(|(_, value)| value)
-        })
-        .or_else(|| {
-            skeletons
-                .iter()
-                .find(|(k, _)| strip_module_prefix(k) == strip_module_prefix(base))
-                .map(|(_, v)| v)
-        })
-        .with_context(|| format!("E-GEN-002: unknown type alias `${base}` in instantiation"))?;
+    let skel = if let Some(skel) = skeletons.get(base) {
+        skel
+    } else if let Some(skel) =
+        unique_skeleton_match(skeletons, base, |key| key.ends_with(&format!(".{base}")))?
+    {
+        skel
+    } else {
+        unique_skeleton_match(skeletons, base, |key| {
+            strip_module_prefix(key) == strip_module_prefix(base)
+        })?
+        .with_context(|| format!("E-GEN-002: unknown type alias `${base}` in instantiation"))?
+    };
     if skel.type_params.is_empty() {
         bail!("E-GEN-002: type alias `${base}` is non-generic; do not pass type arguments");
     }
