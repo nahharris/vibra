@@ -75,6 +75,7 @@ These rules are **mandatory** for conforming Vibra v1 source. Tooling **must** f
 | E-ONE-004 | **Sequencing** elsewhere: use **`$do`** with a block sequence of expressions; last item’s value is the result. |
 | E-ONE-005 | **Conditionals:** only **`$if`** with keys **`is`**, **`then`**, **`else`** (all required). Branches must unify to the same type. |
 | E-ONE-006 | **String interpolation** in user code: **forbidden** unless a single stdlib macro documents it; prefer explicit concat (or a single blessed `$format` when defined). |
+| E-ONE-007 | **`$match`:** use **`$match: <expr>`** with sibling **`when:`** arms; structured **`$match: { target, arms }`** is non-canonical. |
 
 **Reference inside function body:** Use **`$args.field`** for argument fields (record args).
 
@@ -162,12 +163,11 @@ $map:
 
 ### `$match`
 
-`$match` uses one canonical ordered arm sequence. Each arm has `pattern` and `do`.
+`$match` uses one canonical ordered arm sequence: the target expression is the `$match` value, and sibling `when:` contains the ordered arms. Each arm has `pattern` and `do`.
 
 ```yaml
-$match:
-  target: $result
-  arms:
+- $match: $result
+  when:
     - pattern:
         $result.result.ok:
           $bind: value
@@ -571,3 +571,4 @@ The following early-draft forms were removed and have **no compatibility path**:
 - **`$dict`** — use `$record` or `$map`.
 - **Tuple-typed `args:`** — use a named record (`args: { name: T, ... }`).
 - **Legacy `variants:`** under `$union` — use `$union: [...]` or `$enum: { ... }`.
+- **Structured `$match: { target, arms }`** — use `$match: <expr>` with sibling `when:` arms.

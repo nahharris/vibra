@@ -53,6 +53,11 @@
       "summary": "String interpolation not allowed except blessed stdlib forms"
     },
     {
+      "code": "E-ONE-007",
+      "severity": "error",
+      "summary": "Structured `$match: { target, arms }` form is not canonical; use `$match: <expr>` with sibling `when:` arms"
+    },
+    {
       "code": "E-MOD-003",
       "severity": "error",
       "summary": "Import cycle detected"
