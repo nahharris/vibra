@@ -6245,9 +6245,8 @@ fn parse_grant_decls(v: Option<&Value>) -> Result<Vec<GrantDecl>> {
 /// When the payload is the scalar `$self`, the parameter name is `scalar_self_primary`
 /// (`self` for `=defs`, `subject` for module-level functions).
 ///
-/// A mapping with exactly one key that does not start with `$` is treated as
-/// `{ <param-name>: <type> }`. A singleton `$record` mapping peels to its sole field.
-/// Otherwise the whole payload is the first-arg type and the name is `subject`.
+/// For non-`$void`/`$self`, `$function` must be a mapping with exactly one key that does not start with `$`,
+/// treated as `{ <param-name>: <type> }`.
 fn canonical_function_first_arg<'a>(
     form_value: &'a Value,
     scalar_self_primary: &str,
