@@ -84,6 +84,8 @@ vibra check hello
 
 See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
 
+Functions use canonical labeled declarations: `$function: $void` for zero arguments, `$function: $self` for a method receiver, or a singleton labeled mapping for the primary argument. Additional arguments use sibling `args:`, and function bodies reference every argument through `$args.<name>`.
+
 **Policies:** authority is moving to unforgeable `$policy` values passed as normal function arguments. `main` receives the root policy value from the runtime, code explicitly narrows it with `$policy.narrow`, and privileged APIs consume the narrowed value through ordinary args. The current branch is migrating the stdlib from the previous grant side channel to this model.
 
 ```sh

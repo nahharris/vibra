@@ -25,7 +25,7 @@
     {
       "code": "E-ONE-001",
       "severity": "error",
-      "summary": "$function args must use named record, not tuple, in user modules"
+      "summary": "$function must use canonical labeled shorthand; implicit subject, nested envelopes, and $void plus args are forbidden"
     },
     {
       "code": "E-ONE-002",

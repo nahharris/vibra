@@ -5,7 +5,8 @@ bytes-lib:
   $import: ./bytes.vibra
 
 bytes:
-  $function: $uint64
+  $function:
+    input: $uint64
   grants:
     random: $security.grant.mandatory
   return: $bytes-lib.bytes
@@ -15,4 +16,4 @@ bytes:
           module: wasi_snapshot_preview1
           name: random_get
         args:
-          - $args.subject
+          - $args.input

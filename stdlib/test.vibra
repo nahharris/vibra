@@ -1,5 +1,6 @@
 assert:
-  $function: $bool
+  $function:
+    input: $bool
   return: $void
   do:
     - $wasm:
@@ -7,10 +8,11 @@ assert:
           module: vibra_test
           name: assert
         args:
-          - $args.subject
+          - $args.input
 
 fail:
-  $function: $str
+  $function:
+    input: $str
   return: $void
   do:
     - $wasm:
@@ -18,4 +20,4 @@ fail:
           module: vibra_test
           name: fail
         args:
-          - $args.subject
+          - $args.input

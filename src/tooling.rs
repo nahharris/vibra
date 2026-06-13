@@ -341,6 +341,7 @@ fn rule_summary(code: &str) -> &'static str {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-COMPILE-001" => "Vibra compile diagnostic",
+        "E-ONE-001" => "Function declaration is not canonical labeled shorthand",
         "E-MOD-003" => "Import cycle detected",
         "E-ONE-007" => "Structured `$match` form is not canonical",
         "E-ANNO-001" => "Unknown annotation key on a top-level definition",

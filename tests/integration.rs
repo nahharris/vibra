@@ -226,8 +226,8 @@ main:
     args: $void
     grants:
       fs-read: $security.grant.mandatory
-    return: $void
-    do: []
+  return: $void
+  do: []
 "#,
             security = security.display().to_string().replace('\\', "/"),
         ),
@@ -237,8 +237,56 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("`grants` must be a sibling of `$function`"),
-        "expected nested grants rejection, got: {err}"
+        err.contains("E-ONE-001"),
+        "expected non-canonical nested function rejection, got: {err}"
+    );
+}
+
+#[test]
+fn implicit_subject_function_is_rejected_with_e_one_001() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        "identity:\n  $function: $str\n  return: $str\n  do:\n    - $return: $args.subject\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(err.contains("E-ONE-001"), "unexpected error: {err}");
+}
+
+#[test]
+fn void_function_with_sibling_args_is_rejected_with_e_one_001() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        "identity:\n  $function: $void\n  args:\n    value: $str\n  return: $str\n  do:\n    - $return: $args.value\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(err.contains("E-ONE-001"), "unexpected error: {err}");
+}
+
+#[test]
+fn labeled_primary_is_only_available_through_args_namespace() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        "identity:\n  $function:\n    value: $str\n  return: $str\n  do:\n    - $return: $value\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("could not infer type for `$return` expression"),
+        "unexpected error: {err}"
     );
 }
 
@@ -1183,7 +1231,8 @@ fn rejects_removed_int_float_aliases() {
     std::fs::write(
         &bad,
         r#"takes-old-int:
-  $function: $int
+  $function:
+    input: $int
   return: $void
   do:
       - $wasm:
@@ -1234,7 +1283,8 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
     std::fs::write(
         &mod_file,
         r#"accepts-int32:
-  $function: $int32
+  $function:
+    input: $int32
   return: $void
   do:
       - $wasm:
@@ -1244,7 +1294,8 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
           args:
             - $const.1
 accepts-float32:
-  $function: $float32
+  $function:
+    input: $float32
   return: $void
   do:
       - $wasm:
@@ -1290,7 +1341,8 @@ fn newtype_decl_lowers_and_requires_explicit_cast() {
         r#"meter:
   $newtype: $int64
 take-meter:
-  $function: $meter
+  $function:
+    input: $meter
   return: $void
   do:
       - $wasm:
@@ -1389,7 +1441,8 @@ fn newtype_does_not_accept_inner_type_implicitly() {
         r#"meter:
   $newtype: $int64
 take-meter:
-  $function: $meter
+  $function:
+    input: $meter
   return: $void
   do:
       - $wasm:
@@ -1426,7 +1479,8 @@ fn cast_rejects_cross_newtype_conversion() {
 second:
   $newtype: $int64
 take-second:
-  $function: $second
+  $function:
+    input: $second
   return: $void
   do:
       - $wasm:
@@ -1512,13 +1566,14 @@ fn mode_safe_fs_roundtrip_runs() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
       - $let:
           p:
             $fs.path.new: "{path}"
-      - $match: $args.subject.fs-write
+      - $match: $args.input.fs-write
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -1545,7 +1600,7 @@ main:
                 $security.grant-status.denied:
                   $bind: write-denied
               do: []
-      - $match: $args.subject.fs-read
+      - $match: $args.input.fs-read
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -1662,16 +1717,14 @@ fn policy_type_alias_lowers_and_can_be_used_in_signature() {
         scopes:
           - dir: .
 uses-policy:
-  $function: $void
-  args:
+  $function:
     policy: $read-policy
   return: $void
   do:
     - $let:
         ok: true
 main:
-  $function: $void
-  args:
+  $function:
     policy: $read-policy
   return: $void
   do:
@@ -1703,8 +1756,7 @@ wide-policy:
         scopes:
           - dir: .
 main:
-  $function: $void
-  args:
+  $function:
     policy: $narrow-policy
   return: $void
   do:
@@ -1748,8 +1800,7 @@ sibling-policy:
         scopes:
           - file: "{sibling}/file.txt"
 main:
-  $function: $void
-  args:
+  $function:
     policy: $root-policy
   return: $void
   do:
@@ -1791,8 +1842,7 @@ read-policy:
         scopes:
           - file: ./config.yaml
 main:
-  $function: $void
-  args:
+  $function:
     policy: $root-policy
   return: $void
   do:
@@ -1842,8 +1892,7 @@ fn main_injection_uses_declared_policy_not_broader_approval() {
             r#"fs:
   $import: "{fs}"
 main:
-  $function: $void
-  args:
+  $function:
     policy:
       $policy:
         fs-read:
@@ -1941,8 +1990,7 @@ fn main_policy_argument_is_injected_and_authorizes_fs_read() {
             r#"fs:
   $import: "{fs}"
 main:
-  $function: $void
-  args:
+  $function:
     policy:
       $policy:
         fs-read:
@@ -2000,8 +2048,7 @@ fn main_mandatory_policy_requires_full_coverage_before_body_runs() {
             r#"fs:
   $import: "{fs}"
 main:
-  $function: $void
-  args:
+  $function:
     policy:
       $policy:
         fs-read:
@@ -2016,7 +2063,12 @@ main:
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             dir = dir.path().display().to_string().replace('\\', "/"),
-            path = dir.path().join("data.txt").display().to_string().replace('\\', "/"),
+            path = dir
+                .path()
+                .join("data.txt")
+                .display()
+                .to_string()
+                .replace('\\', "/"),
         ),
     )
     .unwrap();
@@ -2025,8 +2077,7 @@ main:
     let lowered = vibra::lower::lower_program(&prog).unwrap();
     let err = format!(
         "{:#}",
-        vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
-            .unwrap_err()
+        vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default()).unwrap_err()
     );
     assert!(
         err.contains("mandatory policy coverage is missing"),
@@ -2090,13 +2141,14 @@ fn fs_access_is_denied_without_any_runtime_grant() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
       - $let:
           p:
             $fs.path.new: "{path}"
-      - $match: $args.subject.fs-read
+      - $match: $args.input.fs-read
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -2146,13 +2198,14 @@ fn fs_grant_rejects_sibling_prefix_escape() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
       - $let:
           p:
             $fs.path.new: "{path}"
-      - $match: $args.subject.fs-read
+      - $match: $args.input.fs-read
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -2215,7 +2268,8 @@ fn fs_narrow_read_grant_limits_delegated_scope() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
       - $let:
@@ -2224,7 +2278,7 @@ main:
       - $let:
           denied-file:
             $fs.path.new: "{denied_file}"
-      - $match: $args.subject.fs-read
+      - $match: $args.input.fs-read
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -2298,10 +2352,11 @@ fn denied_grant_reason_uses_import_alias() {
             r#"sec:
   $import: "{security}"
 main:
-  $function: $sec.grants
+  $function:
+    input: $sec.grants
   return: $void
   do:
-      - $match: $args.subject.stdin-read
+      - $match: $args.input.stdin-read
         when:
             - pattern:
                 $sec.grant-status.denied:
@@ -2342,7 +2397,8 @@ fn fs_write_grant_allows_nonexistent_configured_scope() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
       - $let:
@@ -2351,7 +2407,7 @@ main:
       - $let:
           file-path:
             $fs.path.new: "{file}"
-      - $match: $args.subject.fs-write
+      - $match: $args.input.fs-write
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -2433,7 +2489,8 @@ fn fs_narrow_write_grant_allows_nonexistent_descendant_scope() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
       - $let:
@@ -2442,7 +2499,7 @@ main:
       - $let:
           file-path:
             $fs.path.new: "{file}"
-      - $match: $args.subject.fs-write
+      - $match: $args.input.fs-write
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -2534,10 +2591,11 @@ fn env_set_invalid_name_returns_err_result() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
-      - $match: $args.subject.env-write
+      - $match: $args.input.env-write
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -2759,7 +2817,8 @@ fn path_level_fs_apis_return_matchable_results() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
       - $let:
@@ -2768,7 +2827,7 @@ main:
       - $let:
           file-path:
             $fs.path.new: "{data}"
-      - $match: $args.subject.fs-write
+      - $match: $args.input.fs-write
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -2815,7 +2874,7 @@ main:
                           $result.result.err:
                             $bind: appended-err
                         do: []
-                - $match: $args.subject.fs-read
+                - $match: $args.input.fs-read
                   when:
                       - pattern:
                           $security.grant-status.granted:
@@ -2952,13 +3011,14 @@ fn path_level_fs_errors_return_err_results() {
 security:
   $import: "{security}"
 main:
-  $function: $security.grants
+  $function:
+    input: $security.grants
   return: $void
   do:
       - $let:
           missing-path:
             $fs.path.new: "{missing}"
-      - $match: $args.subject.fs-read
+      - $match: $args.input.fs-read
         when:
             - pattern:
                 $security.grant-status.granted:
@@ -3029,13 +3089,15 @@ io:
   $import: "{io}"
 use-option:
   $function:
-    $m.option:
-      t: $int64
+    input:
+      $m.option:
+        t: $int64
   return: $void
   do:
       - $io.println: "using option"
 expect-int:
-  $function: $int64
+  $function:
+    input: $int64
   return: $void
   do:
       - $io.println: "x"
@@ -3296,10 +3358,11 @@ fn generic_user_fn_identity_returns_value() {
             r#"io:
   $import: "{io}"
 identity:
-  $function: $t
+  $function:
+    input: $t
   return: $t
   do:
-      - $return: $args.subject
+      - $return: $args.input
   =where: {{t: []}}
 main:
   $function: $void
@@ -3332,10 +3395,11 @@ fn generic_call_requires_explicit_type_args() {
             r#"io:
   $import: "{io}"
 identity:
-  $function: $t
+  $function:
+    input: $t
   return: $t
   do:
-      - $return: $args.subject
+      - $return: $args.input
   =where: {{t: []}}
 main:
   $function: $void
@@ -3367,10 +3431,11 @@ fn generic_call_rejects_unknown_keys() {
             r#"io:
   $import: "{io}"
 identity:
-  $function: $t
+  $function:
+    input: $t
   return: $t
   do:
-      - $return: $args.subject
+      - $return: $args.input
   =where: {{t: []}}
 main:
   $function: $void
@@ -3401,21 +3466,19 @@ fn bool_literals_are_compatible_with_bool_args() {
         &entry,
         r#"accepts-bool:
   $function:
-    args:
-      x: $bool
-    return: $void
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+    x: $bool
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: fd_sync
+        args:
+          - $const.1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $accepts-bool:
           x: true
       - $accepts-bool:
@@ -3440,21 +3503,19 @@ fn bool_literal_is_rejected_for_non_bool_arg() {
         &entry,
         r#"accepts-int:
   $function:
-    args:
-      x: $int64
-    return: $void
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+    x: $int64
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: fd_sync
+        args:
+          - $const.1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $accepts-int:
           x: true
 "#,
@@ -3488,33 +3549,32 @@ security:
   $import: "{security}"
 main:
   $function:
-    args:
-      grants: $security.grants
-    return: $void
-    do:
-      - $let:
-          p:
-            $fs.path.new:
-              s: "{path}"
-      - $match: $args.grants.fs-read
-        when:
-          - pattern:
-              $security.grant-status.granted:
-                $bind: read-grant
-            do:
-              - $let:
-                  exists:
-                    $fs.exists:
-                      p: $p
-                      grant: $read-grant
-              - $match: $exists
-                when:
-                  - pattern: true
-                    do: []
-          - pattern:
-              $security.grant-status.denied:
-                $bind: denied
-            do: []
+    grants: $security.grants
+  return: $void
+  do:
+    - $let:
+        p:
+          $fs.path.new:
+            s: "{path}"
+    - $match: $args.grants.fs-read
+      when:
+        - pattern:
+            $security.grant-status.granted:
+              $bind: read-grant
+          do:
+            - $let:
+                exists:
+                  $fs.exists:
+                    p: $p
+                    grant: $read-grant
+            - $match: $exists
+              when:
+                - pattern: true
+                  do: []
+        - pattern:
+            $security.grant-status.denied:
+              $bind: denied
+          do: []
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             security = security.display().to_string().replace('\\', "/"),
@@ -3545,22 +3605,21 @@ fn non_generic_multi_arg_call_rejects_unknown_key() {
         &entry,
         r#"join-ish:
   $function:
-    args:
-      left: $str
-      right: $str
-    return: $void
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+    left: $str
+  args:
+    right: $str
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: fd_sync
+        args:
+          - $const.1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $join-ish:
           left: "a"
           right: "b"
@@ -3585,21 +3644,19 @@ fn non_generic_single_arg_named_call_rejects_unknown_key() {
         &entry,
         r#"take-text:
   $function:
-    args:
-      x: $str
-    return: $void
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+    x: $str
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: fd_sync
+        args:
+          - $const.1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $take-text:
           x: "ok"
           typo: "ignored"
@@ -3627,21 +3684,19 @@ fn single_arg_constructor_shorthand_still_lowers() {
     none: $void
 take-maybe:
   $function:
-    args:
-      x: $maybe
-    return: $void
-    do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+    x: $maybe
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: wasi_snapshot_preview1
+          name: fd_sync
+        args:
+          - $const.1
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
+  $function: $void
+  return: $void
+  do:
       - $take-maybe:
           $maybe.some: "value"
 "#,
@@ -3668,10 +3723,11 @@ fn generic_call_value_arg_must_unify_with_substituted_type() {
             r#"io:
   $import: "{io}"
 identity:
-  $function: $t
+  $function:
+    input: $t
   return: $t
   do:
-      - $return: $args.subject
+      - $return: $args.input
   =where: {{t: []}}
 main:
   $function: $void
@@ -3700,7 +3756,8 @@ fn user_fn_non_void_return_requires_return_statement() {
             r#"io:
   $import: "{io}"
 bad:
-  $function: $int64
+  $function:
+    input: $int64
   return: $int64
   do:
       - $io.println: "nope"
@@ -3732,10 +3789,11 @@ fn user_fn_imported_with_user_body_runs() {
     std::fs::write(
         &helper,
         r#"echo-int:
-  $function: $int64
+  $function:
+    input: $int64
   return: $int64
   do:
-      - $return: $args.subject
+      - $return: $args.input
 "#,
     )
     .unwrap();
@@ -4160,9 +4218,10 @@ io:
   $import: "{io}"
 take:
   $function:
-    $m.pair:
-      a: $int64
-      b: $str
+    input:
+      $m.pair:
+        a: $int64
+        b: $str
   return: $void
   do:
       - $io.println: "ok"
@@ -4233,7 +4292,8 @@ fn record_type_alias_lowers_and_is_usable_in_signature() {
             r#"io:
   $import: "{io}"
 take-vec:
-  $function: $io.ciovec
+  $function:
+    input: $io.ciovec
   return: $void
   do:
       - $io.println: "ok"
@@ -4275,9 +4335,10 @@ pair:
   =where: {{a: [], b: []}}
 take:
   $function:
-    $pair:
-      a: $int64
-      b: $str
+    input:
+      $pair:
+        a: $int64
+        b: $str
   return: $void
   do:
       - $io.println: "ok"
@@ -4316,9 +4377,10 @@ dict:
   =where: {{k: [], v: []}}
 take:
   $function:
-    $dict:
-      k: $str
-      v: $int64
+    input:
+      $dict:
+        k: $str
+        v: $int64
   return: $void
   do:
       - $io.println: "ok"
@@ -4390,7 +4452,8 @@ pair:
   $tuple: [$a, $b]
   =where: {{a: [], b: []}}
 take:
-  $function: $pair
+  $function:
+    input: $pair
   return: $void
   do:
       - $io.println: "ok"
@@ -4425,8 +4488,9 @@ pair:
   =where: {{a: [], b: []}}
 take:
   $function:
-    $pair:
-      a: $int64
+    input:
+      $pair:
+        a: $int64
   return: $void
   do:
       - $io.println: "ok"
@@ -4464,8 +4528,9 @@ box:
   =where: {{t: []}}
 take-int-box:
   $function:
-    $box:
-      t: $int64
+    input:
+      $box:
+        t: $int64
   return: $void
   do:
       - $io.println: "ok"
@@ -4796,7 +4861,7 @@ identity-displayable:
     x: $t
   return: $t
   do:
-      - $return: $x
+      - $return: $args.x
   =where:
     t: [$display]
 main:
@@ -5002,7 +5067,7 @@ wrap-record:
     $record:
       y: $int64
   do:
-      - $return: $rec
+      - $return: $args.rec
 main:
   $function: $void
   return: $void
@@ -5287,7 +5352,8 @@ box:
   =impl:
     $from-iface:
       from:
-        $function: $int64
+        $function:
+          x: $int64
         return: $void
         do:
             - $let:
@@ -5839,7 +5905,8 @@ box:
     $from-iface:
       t: $int64
       from:
-        $function: $t
+        $function:
+          x: $t
         return: $int64
         do:
             - $wasm:
@@ -5943,7 +6010,10 @@ main:
     };
     let body = lowered.impls.get(&key).expect("impl entry missing");
     assert_eq!(body.interface_args.len(), 1);
-    assert!(matches!(body.interface_args[0], vibra::lower::TypeRef::Int64));
+    assert!(matches!(
+        body.interface_args[0],
+        vibra::lower::TypeRef::Int64
+    ));
 }
 
 /// Method-as-ref to an unknown function is rejected.

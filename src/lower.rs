@@ -224,7 +224,6 @@ pub struct FunctionSig {
     pub type_param_bounds: Vec<Vec<TypeRef>>,
     pub arg_names: Vec<String>,
     pub arg_types: Vec<TypeRef>,
-    pub primary_arg_name: Option<String>,
     pub grant_decls: Vec<GrantDecl>,
     pub return_type: TypeRef,
     pub body: FunctionBody,
@@ -564,15 +563,9 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 && map_get_str(inner, "do").is_some()
         });
         if nested_function {
-            if function_args.is_some()
-                || function_grants.is_some()
-                || function_return.is_some()
-                || function_do.is_some()
-            {
-                bail!(
-                    "invalid `$function`: cannot mix nested `{{ args, return, do }}` with sibling function fields"
-                );
-            }
+            bail!(
+                "E-ONE-001: `$function` must use labeled shorthand with sibling `return` and `do`; nested `{{ args, return, do }}` envelopes are not canonical"
+            );
         } else {
             let _ = function_return.context("missing `return` on `$function`")?;
             let _ = function_do.context("missing `do` on `$function`")?;
@@ -1148,9 +1141,7 @@ fn parse_policy_type(v: &Value) -> Result<PolicyType> {
             let requirement = match map_get_str(group, "requirement").and_then(Value::as_str) {
                 Some("mandatory") => GrantRequirement::Mandatory,
                 Some("optional") => GrantRequirement::Optional,
-                _ => bail!(
-                    "`$policy.{domain}` requirement must be `mandatory` or `optional`"
-                ),
+                _ => bail!("`$policy.{domain}` requirement must be `mandatory` or `optional`"),
             };
             let scopes_v = map_get_str(group, "scopes")
                 .with_context(|| format!("`$policy.{domain}` entry missing `scopes`"))?;
@@ -1731,7 +1722,10 @@ fn valid_cast_path(
     false
 }
 
-fn policy_body<'a>(ty: &'a TypeRef, aliases: &'a HashMap<String, TypeAlias>) -> Option<&'a PolicyType> {
+fn policy_body<'a>(
+    ty: &'a TypeRef,
+    aliases: &'a HashMap<String, TypeAlias>,
+) -> Option<&'a PolicyType> {
     match ty {
         TypeRef::Policy(policy) => Some(policy),
         TypeRef::Named(name) => aliases.get(name).and_then(|alias| match &alias.body {
@@ -1758,9 +1752,9 @@ fn policy_type_is_subset(
             return false;
         };
         target_groups.iter().all(|target_group| {
-            source_groups.iter().any(|source_group| {
-                policy_group_covers(source_group, target_group)
-            })
+            source_groups
+                .iter()
+                .any(|source_group| policy_group_covers(source_group, target_group))
         })
     })
 }
@@ -2021,7 +2015,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     if !main_env.type_params.is_empty() {
         bail!("`main` must not be generic (no `where:`)");
     }
-    let (args, ret, do_seq, main_primary_arg, main_grant_decls) =
+    let (args, ret, do_seq, main_grant_decls) =
         resolve_function_envelope_fields(&main_env, MODULE_FN_PRIMARY_ARG)
             .context("invalid `main`")?;
     if !main_grant_decls.is_empty() {
@@ -2032,28 +2026,18 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         let (arg_names, arg_types) =
             parse_signature_args(&args, &[], &skeletons, &mut warnings, false)
                 .context("invalid `main` args")?;
-        for (idx, (name, ty)) in arg_names.into_iter().zip(arg_types.into_iter()).enumerate() {
+        for (name, ty) in arg_names.into_iter().zip(arg_types.into_iter()) {
             let ty = qualify_named_type("", ty, &type_aliases);
             let ty = policy_body(&ty, &type_aliases)
                 .cloned()
                 .map(TypeRef::Policy)
                 .unwrap_or(ty);
-            if main_primary_arg.as_ref() == Some(&name) && idx == 0 {
-                main_arg_bindings.push((name.clone(), ty.clone()));
-                seed_arg_type_bindings(
-                    &format!("args.{name}"),
-                    &ty,
-                    &type_aliases,
-                    &mut main_arg_bindings,
-                );
-            } else {
-                seed_arg_type_bindings(
-                    &format!("args.{name}"),
-                    &ty,
-                    &type_aliases,
-                    &mut main_arg_bindings,
-                );
-            }
+            seed_arg_type_bindings(
+                &format!("args.{name}"),
+                &ty,
+                &type_aliases,
+                &mut main_arg_bindings,
+            );
         }
     }
     if ret.as_str() != Some("$void") {
@@ -2444,13 +2428,8 @@ fn lower_pending_user_functions(
             bail!("internal: pending body for non-user function `{key}`");
         };
         let mut locals: HashMap<String, TypeRef> = HashMap::new();
-        for (idx, (n, t)) in sig.arg_names.iter().zip(sig.arg_types.iter()).enumerate() {
-            if sig.primary_arg_name.as_ref() == Some(n) && idx == 0 {
-                locals.insert(n.clone(), t.clone());
-                locals.insert(format!("args.{n}"), t.clone());
-            } else {
-                locals.insert(format!("args.{n}"), t.clone());
-            }
+        for (n, t) in sig.arg_names.iter().zip(sig.arg_types.iter()) {
+            locals.insert(format!("args.{n}"), t.clone());
         }
         for grant in &sig.grant_decls {
             locals.insert(format!("grants.{}", grant.name), TypeRef::GrantToken);
@@ -2878,7 +2857,7 @@ fn try_register_function(
         maybe_warn_kebab(name, "function name", warnings);
     }
     let scope = env.type_params.clone();
-    let (args, ret, do_seq, primary_arg_name, grant_decls) =
+    let (args, ret, do_seq, grant_decls) =
         resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG).with_context(|| {
             if alias.is_empty() {
                 format!("{name}: invalid `$function` envelope")
@@ -2950,7 +2929,6 @@ fn try_register_function(
             type_param_bounds: resolved_bounds,
             arg_names,
             arg_types,
-            primary_arg_name,
             grant_decls,
             return_type,
             body: body_kind,
@@ -3096,7 +3074,7 @@ fn register_one_inherent_function(
         all_type_params.push(tp.clone());
     }
 
-    let (args, ret, do_seq, primary_arg_name, grant_decls) =
+    let (args, ret, do_seq, grant_decls) =
         resolve_function_envelope_fields(&env, INHERENT_FN_PRIMARY_ARG).with_context(|| {
             format!("`{qualified_type_key}.{entry_name}`: invalid `$function` envelope")
         })?;
@@ -3171,7 +3149,6 @@ fn register_one_inherent_function(
             type_param_bounds: full_bounds,
             arg_names,
             arg_types,
-            primary_arg_name,
             grant_decls,
             return_type,
             body: body_kind,
@@ -3539,9 +3516,8 @@ fn bind_impl_method(
     }
 
     let iface_primary = iface_impl_primary_field_name(expected_fn_type)?;
-    let (args, ret, do_seq, primary_arg_name, grant_decls) =
-        resolve_function_envelope_fields(&env, &iface_primary)
-            .context("impl method: invalid `$function` envelope")?;
+    let (args, ret, do_seq, grant_decls) = resolve_function_envelope_fields(&env, &iface_primary)
+        .context("impl method: invalid `$function` envelope")?;
     let (arg_names, arg_types) =
         parse_signature_args(&args, &method_scope, skeletons, warnings, true)?;
     let arg_types: Vec<TypeRef> = arg_types
@@ -3631,7 +3607,6 @@ fn bind_impl_method(
             type_param_bounds: sig_bounds,
             arg_names,
             arg_types,
-            primary_arg_name,
             grant_decls,
             return_type,
             body: body_kind,
@@ -3703,13 +3678,12 @@ fn signatures_match(
     }
 
     let mut reverse_bindings = bindings.clone();
-    unify_types(actual_args, expected_args, type_aliases, &mut reverse_bindings)
-        && unify_types(
-            expected_return,
-            actual_return,
-            type_aliases,
-            &mut bindings,
-        )
+    unify_types(
+        actual_args,
+        expected_args,
+        type_aliases,
+        &mut reverse_bindings,
+    ) && unify_types(expected_return, actual_return, type_aliases, &mut bindings)
 }
 
 // ===== Phase 5: bound resolution and validation =====
@@ -6177,13 +6151,8 @@ fn build_function_args_mapping(
     rest_args: Option<&Value>,
 ) -> Result<Value> {
     if is_void_args(first_arg_type) {
-        if let Some(rest) = rest_args {
-            let rm = rest
-                .as_mapping()
-                .context("`args` on `$function: $void` must be a mapping")?;
-            if !rm.is_empty() {
-                return Ok(Value::Mapping(rm.clone()));
-            }
+        if rest_args.is_some() {
+            bail!("E-ONE-001: `$function: $void` is only valid for a true zero-argument function");
         }
         return Ok(Value::String("$void".into()));
     }
@@ -6212,32 +6181,8 @@ fn build_function_args_mapping(
 fn resolve_function_envelope_fields(
     env: &DefEnvelope<'_>,
     primary_name: &str,
-) -> Result<(Value, Value, Value, Option<String>, Vec<GrantDecl>)> {
-    if let Some(m) = env.form_value.as_mapping() {
-        if let (Some(args), Some(ret), Some(d)) = (
-            map_get_str(m, "args"),
-            map_get_str(m, "return"),
-            map_get_str(m, "do"),
-        ) {
-            if map_get_str(m, "grants").is_some() {
-                bail!(
-                    "`grants` must be a sibling of `$function`, not nested inside `$function: {{ args, return, do }}`"
-                );
-            }
-            if record_has_grants_arg(args) {
-                bail!(
-                    "grant arguments moved out of `args`; declare function `grants:` and access them as `$grants.<name>`"
-                );
-            }
-            return Ok((args.clone(), ret.clone(), d.clone(), None, Vec::new()));
-        }
-    }
-    let (primary, first_arg_ty) =
-        if env.form_value.as_mapping().is_none() && primary_name != MODULE_FN_PRIMARY_ARG {
-            (primary_name.to_string(), env.form_value)
-        } else {
-            labeled_function_first_arg(env.form_value, primary_name)?
-        };
+) -> Result<(Value, Value, Value, Vec<GrantDecl>)> {
+    let (primary, first_arg_ty) = canonical_function_first_arg(env.form_value, primary_name)?;
     let merged = build_function_args_mapping(&primary, first_arg_ty, env.function_args)?;
     let ret = env
         .function_return
@@ -6252,22 +6197,8 @@ fn resolve_function_envelope_fields(
             "grant arguments moved out of `args`; declare function `grants:` and access them as `$grants.<name>`"
         );
     }
-    let primary_arg = labeled_function_named_primary(env.form_value).then_some(primary);
     let grant_decls = parse_grant_decls(env.function_grants)?;
-    Ok((merged, ret, d, primary_arg, grant_decls))
-}
-
-fn labeled_function_named_primary(form_value: &Value) -> bool {
-    let Some(m) = form_value.as_mapping() else {
-        return false;
-    };
-    if m.len() != 1 {
-        return false;
-    }
-    m.keys()
-        .next()
-        .and_then(|k| k.as_str())
-        .is_some_and(|key| !key.starts_with('$'))
+    Ok((merged, ret, d, grant_decls))
 }
 
 fn record_has_grants_arg(v: &Value) -> bool {
@@ -6317,37 +6248,30 @@ fn parse_grant_decls(v: Option<&Value>) -> Result<Vec<GrantDecl>> {
 /// A mapping with exactly one key that does not start with `$` is treated as
 /// `{ <param-name>: <type> }`. A singleton `$record` mapping peels to its sole field.
 /// Otherwise the whole payload is the first-arg type and the name is `subject`.
-fn labeled_function_first_arg<'a>(
+fn canonical_function_first_arg<'a>(
     form_value: &'a Value,
     scalar_self_primary: &str,
 ) -> Result<(String, &'a Value)> {
+    if is_void_args(form_value) {
+        return Ok((String::new(), form_value));
+    }
     if form_value.as_str() == Some("$self") {
         return Ok((scalar_self_primary.to_string(), form_value));
     }
-    let Some(m) = form_value.as_mapping() else {
-        return Ok((MODULE_FN_PRIMARY_ARG.to_string(), form_value));
-    };
-    if m.len() == 1 {
-        let (k, v) = m.iter().next().expect("len checked");
-        let key = k
-            .as_str()
-            .context("`$function` mapping key must be a string")?;
-        if key == "$record" {
-            let inner = v
-                .as_mapping()
-                .context("`$record` value under `$function` must be a mapping")?;
-            if inner.len() == 1 {
-                let (ik, iv) = inner.iter().next().expect("len checked");
-                let iname = ik
-                    .as_str()
-                    .context("record field name under `$function` must be a string")?;
-                return Ok((iname.to_string(), iv));
-            }
-        } else if !key.starts_with('$') {
-            return Ok((key.to_string(), v));
-        }
+    let m = form_value
+        .as_mapping()
+        .context("E-ONE-001: non-zero `$function` must declare one labeled primary argument")?;
+    if m.len() != 1 {
+        bail!("E-ONE-001: `$function` must declare exactly one labeled primary argument");
     }
-    Ok((MODULE_FN_PRIMARY_ARG.to_string(), form_value))
+    let (k, v) = m.iter().next().expect("len checked");
+    let key = k
+        .as_str()
+        .context("E-ONE-001: `$function` primary argument name must be a string")?;
+    if key.starts_with('$') {
+        bail!("E-ONE-001: `$function` primary argument must use a label, not `{key}`");
+    }
+    Ok((key.to_string(), v))
 }
 
 /// Primary parameter name for an `=impl` `$function` envelope: the `$self` field if present,

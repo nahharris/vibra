@@ -2,12 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/module-surface.schema.json",
   "title": "VibraModuleSurface",
-  "description": "Loose schema for a parsed module root mapping (post-YAML). Module-level keys are symbol names (kebab-case, optional leading `-` for module-private). A symbol's value is either a scalar (constant) or a definition envelope: a mapping with exactly one `$`-form key (`$function`, `$import`, or one of the type constructors in type-expr.schema.json, including `$newtype`, `$policy`, and `$grant-token`) plus zero or more `=`-prefixed annotation siblings (`=where`, `=doc`, `=defs`, `=impl`).",
+  "description": "Schema for a parsed module root mapping (post-YAML). Module-level keys are symbol names (kebab-case, optional leading `-` for module-private). Function definitions use function.schema.json; other symbols remain loosely described here.",
   "type": "object",
   "propertyNames": {
     "pattern": "^-?[a-z][a-z0-9]*(-[a-z0-9]+)*$"
   },
   "additionalProperties": {
-    "description": "Symbol definition: scalar (constant), or a mapping whose keys each match `^\\$[A-Za-z][A-Za-z0-9.\\-]*$` (form / type-form key) or `^=[a-z][a-z0-9]*(-[a-z0-9]+)*$` (annotation). Bare un-prefixed keys like `where`/`doc` are rejected (`E-ANNO-002`)."
+    "if": {
+      "type": "object",
+      "required": ["$function"]
+    },
+    "then": {
+      "$ref": "function.schema.json"
+    },
+    "else": {
+      "description": "Non-function symbol definition. Bare un-prefixed annotation keys like `where` and `doc` are rejected (`E-ANNO-002`)."
+    }
   }
 }

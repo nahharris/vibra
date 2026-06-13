@@ -81,11 +81,15 @@ fn runtime_policy_covers(source: &PolicyType, target: &PolicyType) -> bool {
         };
         target_groups.iter().all(|target_group| {
             source_groups.iter().any(|source_group| {
-                source_group.scopes.iter().any(|s| matches!(s, crate::lower::PolicyScope::Any))
+                source_group
+                    .scopes
+                    .iter()
+                    .any(|s| matches!(s, crate::lower::PolicyScope::Any))
                     || target_group.scopes.iter().all(|target_scope| {
-                        source_group.scopes.iter().any(|source_scope| {
-                            runtime_scope_covers(source_scope, target_scope)
-                        })
+                        source_group
+                            .scopes
+                            .iter()
+                            .any(|source_scope| runtime_scope_covers(source_scope, target_scope))
                     })
             })
         })
@@ -109,8 +113,7 @@ fn runtime_scope_covers(
                 })
         }
         (crate::lower::PolicyScope::File(a), crate::lower::PolicyScope::File(b)) => {
-            normalize_absolute_path(Path::new(a)).ok()
-                == normalize_absolute_path(Path::new(b)).ok()
+            normalize_absolute_path(Path::new(a)).ok() == normalize_absolute_path(Path::new(b)).ok()
         }
         (crate::lower::PolicyScope::Exact(a), crate::lower::PolicyScope::Exact(b)) => a == b,
         (crate::lower::PolicyScope::Prefix(a), crate::lower::PolicyScope::Exact(b))
@@ -1016,12 +1019,7 @@ fn exec_call(
             let mut fn_env: HashMap<String, RuntimeValue> = HashMap::new();
             for (idx, name) in sig.arg_names.iter().enumerate() {
                 let val = eval_expr(&call.args[idx], env, program, files, config)?;
-                if sig.primary_arg_name.as_ref() == Some(name) && idx == 0 {
-                    fn_env.insert(name.clone(), val.clone());
-                    fn_env.insert(format!("args.{name}"), val);
-                } else {
-                    fn_env.insert(format!("args.{name}"), val);
-                }
+                fn_env.insert(format!("args.{name}"), val);
             }
             for (name, value) in bind_call_grants(call, sig, env, program, files, config)? {
                 fn_env.insert(name, value);

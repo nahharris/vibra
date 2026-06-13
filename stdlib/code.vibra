@@ -2,7 +2,8 @@ document:
   $newtype: $str
 
 parse:
-  $function: $str
+  $function:
+    input: $str
   return: $document
   do:
     - $wasm:
@@ -10,10 +11,11 @@ parse:
           module: vibra_code
           name: parse
         args:
-          - $args.subject
+          - $args.input
 
 emit:
-  $function: $document
+  $function:
+    input: $document
   return: $str
   do:
     - $wasm:
@@ -21,10 +23,11 @@ emit:
           module: vibra_code
           name: emit
         args:
-          - $args.subject
+          - $args.input
 
 get:
-  $function: $document
+  $function:
+    input: $document
   args:
     path: $str
   return: $str
@@ -34,11 +37,12 @@ get:
           module: vibra_code
           name: get
         args:
-          - $args.subject
+          - $args.input
           - $args.path
 
 set:
-  $function: $document
+  $function:
+    input: $document
   args:
     path: $str
     value: $str
@@ -49,12 +53,13 @@ set:
           module: vibra_code
           name: set
         args:
-          - $args.subject
+          - $args.input
           - $args.path
           - $args.value
 
 remove:
-  $function: $document
+  $function:
+    input: $document
   args:
     path: $str
   return: $document
@@ -64,11 +69,12 @@ remove:
           module: vibra_code
           name: remove
         args:
-          - $args.subject
+          - $args.input
           - $args.path
 
 append:
-  $function: $document
+  $function:
+    input: $document
   args:
     path: $str
     value: $str
@@ -79,6 +85,6 @@ append:
           module: vibra_code
           name: append
         args:
-          - $args.subject
+          - $args.input
           - $args.path
           - $args.value

@@ -28,7 +28,8 @@ bytes:
               - $args.start
               - $args.end
     from-str:
-      $function: $str
+      $function:
+        input: $str
       return: $self
       do:
         - $wasm:
@@ -36,7 +37,7 @@ bytes:
               module: wasi_snapshot_preview1
               name: bytes_from_str
             args:
-              - $args.subject
+              - $args.input
     to-str:
       $function: $self
       return: $str
