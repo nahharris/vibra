@@ -57,6 +57,7 @@ main:
 ```
 
 - **Qualified calls:** **`$alias.symbol`** resolves to public `symbol` in the module bound to `alias`. Same **invocation** shape as `$println` (mapping or scalar argument per callee).
+- **Direct imports:** Every imported alias referenced by a module must be declared in that module. Imports are not re-exported or inherited transitively (`E-MOD-004`).
 - **Module identity:** Compiler resolves paths to a canonical file URL or path; **cycles** in the import graph are **errors** (`E-MOD-003`).
 
 ---
@@ -378,6 +379,7 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 
 | Code | Severity | Summary |
 |------|----------|---------|
+| `E-MOD-004` | error | A module references an import alias that it does not declare directly. Imports are not re-exported transitively. |
 | `E-ANNO-001` | error | Unknown annotation key on a definition (recognised `=`-prefixed annotations: `=doc`, `=where`, `=defs`, `=impl`). |
 | `E-ANNO-002` | error | Legacy un-prefixed annotation key (`where:`, `doc:`); v1 annotations must use the `=` prefix (rename to `=where`, `=doc`). |
 | `E-WHERE-002` | error | `=where` bound list element does not resolve to an interface (or `$intersect` of interfaces). |

@@ -63,6 +63,11 @@
       "summary": "Import cycle detected"
     },
     {
+      "code": "E-MOD-004",
+      "severity": "error",
+      "summary": "A module references an import alias that it does not declare directly"
+    },
+    {
       "code": "E-TY-VARIANCE",
       "severity": "warning",
       "summary": "Variance / subtyping audit marker"

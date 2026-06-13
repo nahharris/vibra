@@ -2799,6 +2799,222 @@ main:
 }
 
 #[test]
+fn imported_module_cannot_use_entry_import_alias_transitively() {
+    let dir = tempfile::tempdir().unwrap();
+    let leaf = dir.path().join("leaf.vibra");
+    let helper = dir.path().join("helper.vibra");
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &leaf,
+        r#"value:
+  $function: $void
+  return: $str
+  do:
+    - $return: "hidden"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &helper,
+        r#"call:
+  $function: $void
+  return: $str
+  do:
+    - $return:
+        $leaf.value: null
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"leaf:
+  $import: "{leaf}"
+helper:
+  $import: "{helper}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $helper.call: null
+"#,
+            leaf = leaf.display().to_string().replace('\\', "/"),
+            helper = helper.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(
+        err.contains("E-MOD-004") && err.contains("leaf"),
+        "expected direct-import diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn imported_module_direct_import_alias_is_usable() {
+    let dir = tempfile::tempdir().unwrap();
+    let leaf = dir.path().join("leaf.vibra");
+    let helper = dir.path().join("helper.vibra");
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &leaf,
+        r#"value:
+  $function: $void
+  return: $str
+  do:
+    - $return: "visible"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &helper,
+        format!(
+            r#"leaf:
+  $import: "{leaf}"
+call:
+  $function: $void
+  return: $str
+  do:
+    - $return:
+        $leaf.value: null
+"#,
+            leaf = leaf.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"helper:
+  $import: "{helper}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $helper.call: null
+"#,
+            helper = helper.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("direct import alias should lower");
+}
+
+#[test]
+fn imported_module_cannot_use_transitive_type_or_enum_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let types = dir.path().join("types.vibra");
+    let helper = dir.path().join("helper.vibra");
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &types,
+        r#"outcome:
+  $enum:
+    ok: $str
+    err: $str
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &helper,
+        r#"make:
+  $function: $void
+  return: $types.outcome
+  do:
+    - $return:
+        $types.outcome.ok: "hidden"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"types:
+  $import: "{types}"
+helper:
+  $import: "{helper}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $helper.make: null
+"#,
+            types = types.display().to_string().replace('\\', "/"),
+            helper = helper.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(
+        err.contains("E-MOD-004") && err.contains("types"),
+        "expected direct-import type diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn doc_annotation_mentioning_import_alias_does_not_require_direct_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        r#"helper:
+  $function: $void
+  return: $void
+  =doc: "See $result.result for the canonical shape."
+  do:
+    - $return: null
+main:
+  $function: $void
+  return: $void
+  do:
+    - $helper: null
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("=doc text should not require imports");
+}
+
+#[test]
+fn same_module_qualified_local_symbol_is_allowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        r#"outcome:
+  $enum:
+    ok: $str
+    err: $str
+make:
+  $function: $void
+  return: $outcome
+  do:
+    - $return:
+        $outcome.ok: "local"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $make: null
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("same-module qualified refs should lower");
+}
+
+#[test]
 #[ignore = "old grant-status API removed by grant side-channel model"]
 fn path_level_fs_apis_return_matchable_results() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -7012,6 +7228,63 @@ fn vibra_lint_reports_parse_and_compile_errors_as_structured_yaml() {
         stdout.contains("severity: error"),
         "expected compile error diagnostic: {stdout}"
     );
+}
+
+#[test]
+fn vibra_lint_reports_hidden_transitive_import_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let leaf = dir.path().join("leaf.vibra");
+    let helper = dir.path().join("helper.vibra");
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &leaf,
+        r#"value:
+  $function: $void
+  return: $str
+  do:
+    - $return: "hidden"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &helper,
+        r#"call:
+  $function: $void
+  return: $str
+  do:
+    - $return:
+        $leaf.value: null
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"leaf:
+  $import: "{leaf}"
+helper:
+  $import: "{helper}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $helper.call: null
+"#,
+            leaf = leaf.display().to_string().replace('\\', "/"),
+            helper = helper.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args(["lint", &path_str(&entry), "--category", "compile"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("code: E-MOD-004"), "stdout: {stdout}");
+    assert!(stdout.contains("leaf"), "stdout: {stdout}");
 }
 
 #[test]

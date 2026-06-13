@@ -1,5 +1,7 @@
 fs:
   $import: ./fs.vibra
+result:
+  $import: ./result.vibra
 security:
   $import: ./security.vibra
 

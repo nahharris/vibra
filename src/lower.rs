@@ -564,7 +564,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         });
         if nested_function {
             bail!(
-                "E-ONE-001: `$function` must be canonical (`$function: $void`, `$function: $self`, or `$function: { <name>: <type> }` with sibling `return`/`do`); nested `{{ args, return, do }}` envelopes are not canonical"
+                "E-ONE-001: `$function` must be canonical (`$function: $void`, `$function: $self`, or `$function: {{ <name>: <type> }}` with sibling `return`/`do`); nested `{{ args, return, do }}` envelopes are not canonical"
             );
         } else {
             let _ = function_return.context("missing `return` on `$function`")?;
@@ -1848,12 +1848,6 @@ fn qualify_type_name_key(
         let qual = format!("{alias}.{name}");
         if aliases.contains_key(&qual) {
             return qual;
-        }
-        // `io.vibra` uses `$result.*` for types that live under the nested `fs` import
-        // (`io.fs.result.*`). Prefer that before falling back to a stray global `result.*`.
-        let via_fs = format!("{alias}.fs.{name}");
-        if aliases.contains_key(&via_fs) {
-            return via_fs;
         }
     }
     if aliases.contains_key(&name) {

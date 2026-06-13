@@ -22,6 +22,7 @@ pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
     let mut modules = HashMap::new();
     let mut stack = Vec::new();
     load_recursive(&entry, project.as_ref(), &mut modules, &mut stack)?;
+    validate_direct_import_aliases(&modules)?;
     Ok(LoadedProgram { entry, modules })
 }
 
@@ -36,7 +37,158 @@ pub fn load_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram
         load_recursive(&import, project.as_ref(), &mut modules, &mut stack)?;
     }
     modules.insert(entry.clone(), root);
+    validate_direct_import_aliases(&modules)?;
     Ok(LoadedProgram { entry, modules })
+}
+
+fn validate_direct_import_aliases(modules: &HashMap<PathBuf, Value>) -> Result<()> {
+    let known_import_aliases = modules
+        .values()
+        .filter_map(Value::as_mapping)
+        .flat_map(|map| {
+            map.iter().filter_map(|(key, value)| {
+                value
+                    .as_mapping()
+                    .and_then(|definition| map_get_str(definition, "$import"))
+                    .and_then(|_| key.as_str())
+            })
+        })
+        .collect::<std::collections::HashSet<_>>();
+
+    for (path, root) in modules {
+        let map = root
+            .as_mapping()
+            .with_context(|| format!("{}: root must be a mapping", path.display()))?;
+        let direct_imports = map
+            .iter()
+            .filter_map(|(key, value)| {
+                value
+                    .as_mapping()
+                    .and_then(|definition| map_get_str(definition, "$import"))
+                    .and_then(|_| key.as_str())
+            })
+            .collect::<std::collections::HashSet<_>>();
+        // Same-module `$symbol.nested` references (e.g. local enum constructors) are
+        // allowed; only import-alias qualifiers must be declared via `$import`.
+        let local_symbols = map
+            .keys()
+            .filter_map(Value::as_str)
+            .filter(|symbol| !direct_imports.contains(symbol))
+            .collect::<std::collections::HashSet<_>>();
+        let self_alias = module_self_alias(path);
+
+        validate_value_aliases(
+            root,
+            path,
+            &known_import_aliases,
+            &direct_imports,
+            &local_symbols,
+            self_alias.as_deref(),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_value_aliases(
+    value: &Value,
+    path: &Path,
+    known_import_aliases: &std::collections::HashSet<&str>,
+    direct_imports: &std::collections::HashSet<&str>,
+    local_symbols: &std::collections::HashSet<&str>,
+    self_alias: Option<&str>,
+) -> Result<()> {
+    match value {
+        Value::Mapping(map) => {
+            for (key, value) in map {
+                if let Some(key) = key.as_str() {
+                    validate_reference_alias(
+                        key,
+                        path,
+                        known_import_aliases,
+                        direct_imports,
+                        local_symbols,
+                        self_alias,
+                    )?;
+                    // `=doc` is plain documentation text, not an expression surface.
+                    if key == "=doc" {
+                        continue;
+                    }
+                }
+                validate_value_aliases(
+                    value,
+                    path,
+                    known_import_aliases,
+                    direct_imports,
+                    local_symbols,
+                    self_alias,
+                )?;
+            }
+        }
+        Value::Sequence(items) => {
+            for item in items {
+                validate_value_aliases(
+                    item,
+                    path,
+                    known_import_aliases,
+                    direct_imports,
+                    local_symbols,
+                    self_alias,
+                )?;
+            }
+        }
+        Value::String(value) => validate_reference_alias(
+            value,
+            path,
+            known_import_aliases,
+            direct_imports,
+            local_symbols,
+            self_alias,
+        )?,
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_reference_alias(
+    reference: &str,
+    path: &Path,
+    known_import_aliases: &std::collections::HashSet<&str>,
+    direct_imports: &std::collections::HashSet<&str>,
+    local_symbols: &std::collections::HashSet<&str>,
+    self_alias: Option<&str>,
+) -> Result<()> {
+    let Some(reference) = reference.strip_prefix('$') else {
+        return Ok(());
+    };
+    let Some((alias, _)) = reference.split_once('.') else {
+        return Ok(());
+    };
+    if direct_imports.contains(alias)
+        || local_symbols.contains(alias)
+        || self_alias == Some(alias)
+        || matches!(alias, "args" | "const" | "grants" | "policy" | "self")
+        || !known_import_aliases.contains(alias)
+    {
+        return Ok(());
+    }
+    bail!(
+        "E-MOD-004: module {} uses import alias `{alias}` without declaring it directly",
+        path.display()
+    )
+}
+
+fn module_self_alias(path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    Some(
+        file_name
+            .strip_suffix(".vibra.yaml")
+            .or_else(|| file_name.strip_suffix(".vibra"))
+            .unwrap_or(file_name)
+            .split('.')
+            .next()
+            .unwrap_or(file_name)
+            .to_string(),
+    )
 }
 
 fn load_recursive(
