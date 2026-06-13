@@ -1,0 +1,60 @@
+# stdlib `option` tagged enum ({some: $t, none: $void}): construction + matching.
+test:
+  $import: ../stdlib/test.vibra
+option:
+  $import: ../stdlib/option.vibra
+
+some-carries-payload:
+  $test:
+    do:
+      - $let:
+          o:
+            $option.option.some: 7
+      - $match: $o
+        when:
+          - pattern:
+              $option.option.some:
+                $bind: v
+            do:
+              - $match: $v
+                when:
+                  - pattern: 7
+                    do:
+                      - $test.assert: true
+                  - pattern: {$wildcard: null}
+                    do:
+                      - $test.fail: "wrong some payload"
+          - pattern:
+              $option.option.none: null
+            do:
+              - $test.fail: "expected some"
+
+none-variant:
+  $test:
+    do:
+      - $let:
+          present:
+            $option.option.some: 1
+      - $match: $present
+        when:
+          - pattern:
+              $option.option.some:
+                $bind: _v
+            do:
+              - $let:
+                  absent: $option.option.none
+              - $match: $absent
+                when:
+                  - pattern:
+                      $option.option.some:
+                        $bind: _x
+                    do:
+                      - $test.fail: "expected none"
+                  - pattern:
+                      $option.option.none: null
+                    do:
+                      - $test.assert: true
+          - pattern:
+              $option.option.none: null
+            do:
+              - $test.fail: "expected some"
