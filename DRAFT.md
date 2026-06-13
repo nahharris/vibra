@@ -45,17 +45,15 @@ The **`vibra` CLI** in this repo implements a **reference subset** for bootstrap
 io:
   $import: ./io.vibra
 -main-helper:
-  $function:
-    args: {}
-    return: $void
-    do:
-      - $io.println: "internal"
+  $function: $void
+  return: $void
+  do:
+    - $io.println: "internal"
 main:
-  $function:
-    args: {}
-    return: $void
-    do:
-      - $io.println: "hello"
+  $function: $void
+  return: $void
+  do:
+    - $io.println: "hello"
 ```
 
 - **Qualified calls:** **`$alias.symbol`** resolves to public `symbol` in the module bound to `alias`. Same **invocation** shape as `$println` (mapping or scalar argument per callee).
@@ -69,7 +67,7 @@ These rules are **mandatory** for conforming Vibra v1 source. Tooling **must** f
 
 | ID | Rule |
 |----|------|
-| E-ONE-001 | **`$function` arguments** use a **named record** only: `args:` is a mapping `name: $type` or `name: expr-default` as extended later; **no** tuple `args: [$int, $int]` in user modules (stdlib may use stricter internal forms only if the spec allows a “trusted” zone). |
+| E-ONE-001 | **`$function` declarations** use canonical labeled shorthand: `$void` only for zero arguments, `$self` for a method receiver, or exactly one labeled primary argument mapping. Additional arguments belong in sibling `args:`. Nested `{ args, return, do }`, implicit scalar primary arguments, `$void` plus `args:`, and type-constructor wrapper primaries are forbidden. |
 | E-ONE-002 | **`$let`:** at most **one** bound name per `$let` mapping (single key → value, optional single type ascription form). Chain with `$do` for multiple bindings. |
 | E-ONE-003 | **`$function.do`:** value is a **block sequence** of expressions only. **Do not** wrap the body in an extra `$do` node inside `do:`. |
 | E-ONE-004 | **Sequencing** elsewhere: use **`$do`** with a block sequence of expressions; last item’s value is the result. |
@@ -96,19 +94,19 @@ For zero-arg functions (`args: $void`): a bare symbol reference like `$that-func
 
 ### `$function`
 
-Creates a function.
+Creates a function. The `$function` value declares the primary argument: `$void` for no arguments, `$self` for a method receiver, or a singleton labeled mapping. Additional arguments use sibling `args:`. Every argument is referenced through `$args.<name>`.
 
 ```yaml
 $function:
-  args:
-    x: $int64
-    y: $int64
-  return: $int64
-  do:
-    - $add: [$args.x, $args.y]
+  x: $int64
+args:
+  y: $int64
+return: $int64
+do:
+  - $add: [$args.x, $args.y]
 ```
 
-Keys: **`args`** (record type / bindings), **`return`** (type), **`do`** (block sequence of expressions).
+Keys: **`$function`** (canonical primary argument), optional **`args`** (additional named arguments), **`return`** (type), **`do`** (block sequence of expressions).
 
 ### `$let`
 
@@ -372,7 +370,7 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 
 ## 11. Tooling and diagnostics
 
-- **Schemas:** See [`schemas/`](schemas/) — `diagnostic.schema.json`, `query-response.schema.json`, `module-surface.schema.json`, `type-expr.schema.json`, `expression.schema.json`, `linter-codes.json`.
+- **Schemas:** See [`schemas/`](schemas/) — `diagnostic.schema.json`, `query-response.schema.json`, `module-surface.schema.json`, `function.schema.json`, `type-expr.schema.json`, `expression.schema.json`, `linter-codes.json`.
 - **Stable errors:** Each diagnostic has **`code`**, **`message`**, **`severity`**, **`span`**, optional **`related`**, optional **`fix`** (JSON Patch RFC 6902).
 - **LSP / `vibra query`:** Custom request **`vibra/contextAt`** (or equivalent): given `uri` + `position`, return **`QueryResponse`** (schema) with **expected keys**, **symbol**, **type**, **imports**, **macro schema** if applicable.
 
@@ -411,11 +409,10 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 io:
   $import: ./stdlib/io.vibra
 main:
-  $function:
-    args: $void
-    return: $void
-    do:
-      - $io.println: "Hello, World!"
+  $function: $void
+  return: $void
+  do:
+    - $io.println: "Hello, World!"
 ```
 
 (Early examples used bare `$println`; **normative** style is **stdlib via `$import`**, with `io` wrapping **`$wasm`** host glue per §9.)
@@ -447,11 +444,10 @@ result:
 
 identity:
   $function:
-    args:
-      x: $t
-    return: $t
-    do:
-      - $return: $args.x
+    x: $t
+  return: $t
+  do:
+    - $return: $args.x
   =where: {t: []}
   =doc: "Identity function: returns its argument unchanged."
 
@@ -485,11 +481,10 @@ box:
   =defs:
     identity:
       $function:
-        args:
-          self: $self
-        return: $self
-        do:
-          - $return: $args.self
+        self: $self
+      return: $self
+      do:
+        - $return: $args.self
 ```
 
 Calling: `$<mod>.box.identity: $b` (single-arg shorthand) or `$<mod>.box.identity: { self: $b }`. Inside the op, `$self` resolves to the enclosing type — `Named("<mod>.box")` here, or `Instantiated { base, type_args }` for generic types.
@@ -509,11 +504,10 @@ box:
   =defs:
     show:
       $function:
-        args:
-          x: $self
-        return: $str
-        do:
-          - $return: "shown"
+        x: $self
+      return: $str
+      do:
+        - $return: "shown"
   =impl:
     $display:
       fmt: $box.show               # method-as-ref to the inherent op
@@ -521,11 +515,10 @@ box:
       t: $int64                    # iface type-arg binding
       from:                         # fresh `$function` envelope
         $function:
-          args:
-            x: $t
-          return: $int64
-          do:
-            - $wasm: { ... }
+          x: $t
+        return: $int64
+        do:
+          - $wasm: { ... }
 ```
 
 Each impl populates the lowered program's `impls` table keyed by `(implementing_type, interface)`. Because `=impl` lives on the type definition, only the module that defines the type can author the impl — this is Vibra's syntactic **orphan rule**.

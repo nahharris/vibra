@@ -10,7 +10,8 @@ net-error:
     unsupported: $str
 
 connect:
-  $function: $str
+  $function:
+    input: $str
   grants:
     net-connect: $security.grant.mandatory
   return:
@@ -23,10 +24,11 @@ connect:
           module: wasi_snapshot_preview1
           name: net_connect
         args:
-          - $args.subject
+          - $args.input
 
 listen:
-  $function: $str
+  $function:
+    input: $str
   grants:
     net-listen: $security.grant.mandatory
   return:
@@ -39,4 +41,4 @@ listen:
           module: wasi_snapshot_preview1
           name: net_listen
         args:
-          - $args.subject
+          - $args.input

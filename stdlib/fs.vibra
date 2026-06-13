@@ -11,7 +11,8 @@ path:
   $newtype: $str
   =defs:
     new:
-      $function: $str
+      $function:
+        input: $str
       return: $self
       do:
         - $wasm:
@@ -19,7 +20,7 @@ path:
               module: wasi_snapshot_preview1
               name: path_new
             args:
-              - $args.subject
+              - $args.input
     join:
       $function: $self
       args:
@@ -452,7 +453,8 @@ read-write-file:
                   - $args.self
 
 open-read:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-read: $security.grant.mandatory
   return:
@@ -465,10 +467,11 @@ open-read:
           module: wasi_snapshot_preview1
           name: path_open
         args:
-          - $args.subject
+          - $args.input
 
 open-write:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-write: $security.grant.mandatory
   return:
@@ -481,10 +484,11 @@ open-write:
           module: wasi_snapshot_preview1
           name: path_open
         args:
-          - $args.subject
+          - $args.input
 
 open-append:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-write: $security.grant.mandatory
   return:
@@ -497,10 +501,11 @@ open-append:
           module: wasi_snapshot_preview1
           name: path_open
         args:
-          - $args.subject
+          - $args.input
 
 open-read-write:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-read: $security.grant.mandatory
     fs-write: $security.grant.mandatory
@@ -514,10 +519,11 @@ open-read-write:
           module: wasi_snapshot_preview1
           name: path_open
         args:
-          - $args.subject
+          - $args.input
 
 read-to-string:
-  $function: $path
+  $function:
+    input: $path
   args:
     policy:
       $policy:
@@ -534,10 +540,11 @@ read-to-string:
           module: wasi_snapshot_preview1
           name: read_to_string
         args:
-          - $args.subject
+          - $args.input
 
 write-string-all:
-  $function: $path
+  $function:
+    input: $path
   args:
     s: $str
   grants:
@@ -552,11 +559,12 @@ write-string-all:
           module: wasi_snapshot_preview1
           name: write_string_all
         args:
-          - $args.subject
+          - $args.input
           - $args.s
 
 append-string:
-  $function: $path
+  $function:
+    input: $path
   args:
     s: $str
   grants:
@@ -571,11 +579,12 @@ append-string:
           module: wasi_snapshot_preview1
           name: append_string
         args:
-          - $args.subject
+          - $args.input
           - $args.s
 
 exists:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-read: $security.grant.mandatory
   return: $bool
@@ -585,10 +594,11 @@ exists:
           module: wasi_snapshot_preview1
           name: path_filestat_get
         args:
-          - $args.subject
+          - $args.input
 
 create-dir-all:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-write: $security.grant.mandatory
   return:
@@ -601,10 +611,11 @@ create-dir-all:
           module: wasi_snapshot_preview1
           name: path_create_directory
         args:
-          - $args.subject
+          - $args.input
 
 remove-file:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-write: $security.grant.mandatory
   return:
@@ -617,10 +628,11 @@ remove-file:
           module: wasi_snapshot_preview1
           name: path_unlink_file
         args:
-          - $args.subject
+          - $args.input
 
 remove-dir:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-write: $security.grant.mandatory
   return:
@@ -633,10 +645,11 @@ remove-dir:
           module: wasi_snapshot_preview1
           name: path_remove_directory
         args:
-          - $args.subject
+          - $args.input
 
 read-dir:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-read: $security.grant.mandatory
   return:
@@ -650,10 +663,11 @@ read-dir:
           module: wasi_snapshot_preview1
           name: fd_readdir
         args:
-          - $args.subject
+          - $args.input
 
 metadata:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-read: $security.grant.mandatory
   return:
@@ -666,10 +680,11 @@ metadata:
           module: wasi_snapshot_preview1
           name: path_filestat_get
         args:
-          - $args.subject
+          - $args.input
 
 canonicalize:
-  $function: $path
+  $function:
+    input: $path
   grants:
     fs-read: $security.grant.mandatory
   return:
@@ -682,4 +697,4 @@ canonicalize:
           module: wasi_snapshot_preview1
           name: path_filestat_get
         args:
-          - $args.subject
+          - $args.input

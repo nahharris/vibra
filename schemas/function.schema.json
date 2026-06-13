@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/function.schema.json",
+  "title": "VibraFunction",
+  "description": "Canonical labeled Vibra function declaration.",
+  "type": "object",
+  "required": ["$function", "return", "do"],
+  "properties": {
+    "$function": {
+      "oneOf": [
+        { "const": "$void" },
+        { "const": "$self" },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "additionalProperties": {
+            "$ref": "type-expr.schema.json"
+          }
+        }
+      ]
+    },
+    "args": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+      },
+      "additionalProperties": {
+        "$ref": "type-expr.schema.json"
+      }
+    },
+    "return": {
+      "$ref": "type-expr.schema.json"
+    },
+    "do": {
+      "type": "array",
+      "items": {
+        "$ref": "expression.schema.json"
+      }
+    },
+    "grants": {
+      "type": "object"
+    },
+    "=doc": {
+      "type": "string"
+    },
+    "=where": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "$function": {
+            "const": "$void"
+          }
+        },
+        "required": ["$function"]
+      },
+      "then": {
+        "not": {
+          "required": ["args"]
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

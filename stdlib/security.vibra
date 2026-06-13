@@ -4,7 +4,8 @@ grant:
     optional: $void
 
 granted:
-  $function: $grant-token
+  $function:
+    input: $grant-token
   return: $bool
   do:
     - $wasm:
@@ -12,4 +13,4 @@ granted:
           module: vibra_security
           name: grant_is_granted
         args:
-          - $args.subject
+          - $args.input

@@ -10,7 +10,8 @@ process-error:
     unsupported: $str
 
 run:
-  $function: $str
+  $function:
+    input: $str
   grants:
     process-run: $security.grant.mandatory
   return:
@@ -23,4 +24,4 @@ run:
           module: wasi_snapshot_preview1
           name: process_run
         args:
-          - $args.subject
+          - $args.input

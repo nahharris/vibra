@@ -30,7 +30,8 @@ stderr:
         into: $fs.write-file
 
 print:
-  $function: $str
+  $function:
+    input: $str
   return:
     $result.result:
       t: $void
@@ -42,11 +43,12 @@ print:
     - $let:
         result:
           $fs.writable.write-string: $out
-          s: $args.subject
+          s: $args.input
     - $return: $result
 
 println:
-  $function: $str
+  $function:
+    input: $str
   return:
     $result.result:
       t: $void
@@ -54,14 +56,15 @@ println:
   do:
     - $let:
         first:
-          $io.print: $args.subject
+          $io.print: $args.input
     - $let:
         second:
           $io.print: "\n"
     - $return: $second
 
 eprint:
-  $function: $str
+  $function:
+    input: $str
   return:
     $result.result:
       t: $void
@@ -73,11 +76,12 @@ eprint:
     - $let:
         result:
           $fs.writable.write-string: $err
-          s: $args.subject
+          s: $args.input
     - $return: $result
 
 eprintln:
-  $function: $str
+  $function:
+    input: $str
   return:
     $result.result:
       t: $void
@@ -85,7 +89,7 @@ eprintln:
   do:
     - $let:
         first:
-          $io.eprint: $args.subject
+          $io.eprint: $args.input
     - $let:
         second:
           $io.eprint: "\n"
