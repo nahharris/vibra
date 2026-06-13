@@ -2959,6 +2959,62 @@ main:
 }
 
 #[test]
+fn doc_annotation_mentioning_import_alias_does_not_require_direct_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        r#"helper:
+  $function: $void
+  return: $void
+  =doc: "See $result.result for the canonical shape."
+  do:
+    - $return: null
+main:
+  $function: $void
+  return: $void
+  do:
+    - $helper: null
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("=doc text should not require imports");
+}
+
+#[test]
+fn same_module_qualified_local_symbol_is_allowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        r#"outcome:
+  $enum:
+    ok: $str
+    err: $str
+make:
+  $function: $void
+  return: $outcome
+  do:
+    - $return:
+        $outcome.ok: "local"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $make: null
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("same-module qualified refs should lower");
+}
+
+#[test]
 #[ignore = "old grant-status API removed by grant side-channel model"]
 fn path_level_fs_apis_return_matchable_results() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

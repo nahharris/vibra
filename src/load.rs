@@ -68,9 +68,12 @@ fn validate_direct_import_aliases(modules: &HashMap<PathBuf, Value>) -> Result<(
                     .and_then(|_| key.as_str())
             })
             .collect::<std::collections::HashSet<_>>();
+        // Same-module `$symbol.nested` references (e.g. local enum constructors) are
+        // allowed; only import-alias qualifiers must be declared via `$import`.
         let local_symbols = map
             .keys()
             .filter_map(Value::as_str)
+            .filter(|symbol| !direct_imports.contains(symbol))
             .collect::<std::collections::HashSet<_>>();
         let self_alias = module_self_alias(path);
 
@@ -106,6 +109,10 @@ fn validate_value_aliases(
                         local_symbols,
                         self_alias,
                     )?;
+                    // `=doc` is plain documentation text, not an expression surface.
+                    if key == "=doc" {
+                        continue;
+                    }
                 }
                 validate_value_aliases(
                     value,
