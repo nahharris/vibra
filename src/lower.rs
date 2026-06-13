@@ -6955,32 +6955,16 @@ fn parse_match_statement(
 ) -> Result<Statement> {
     let home = stmt_home_module(fn_ctx);
     let match_v = map_get_str(stmt, "$match").context("$match missing subject value")?;
-    let (target_v, arms_v, arms_label) = if let Some(match_m) = match_v.as_mapping() {
+    if let Some(match_m) = match_v.as_mapping() {
         if map_get_str(match_m, "target").is_some() || map_get_str(match_m, "arms").is_some() {
-            if stmt.len() != 1 {
-                bail!("structured `$match` must not have sibling keys");
-            }
-            (
-                map_get_str(match_m, "target").context("$match missing `target`")?,
-                map_get_str(match_m, "arms").context("$match missing `arms`")?,
-                "arms",
-            )
-        } else {
-            verify_stmt_keys(stmt, &["$match", "when"])?;
-            (
-                match_v,
-                map_get_str(stmt, "when").context("$match missing `when`")?,
-                "when",
-            )
+            bail!(
+                "E-ONE-007: structured `$match` is not canonical; use `$match: <expr>` with sibling `when:` arms"
+            );
         }
-    } else {
-        verify_stmt_keys(stmt, &["$match", "when"])?;
-        (
-            match_v,
-            map_get_str(stmt, "when").context("$match missing `when`")?,
-            "when",
-        )
-    };
+    }
+    verify_stmt_keys(stmt, &["$match", "when"])?;
+    let target_v = match_v;
+    let arms_v = map_get_str(stmt, "when").context("$match missing `when`")?;
     let target = parse_expr(
         target_v,
         sigs,
@@ -6997,7 +6981,7 @@ fn parse_match_statement(
 
     let arms_seq = arms_v
         .as_sequence()
-        .with_context(|| format!("$match `{arms_label}` must be a sequence"))?;
+        .context("$match `when` must be a sequence")?;
     let mut arms = Vec::new();
     let mut covered_enum_tags = HashSet::new();
     let mut has_wildcard = false;

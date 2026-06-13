@@ -696,6 +696,46 @@ main:
 }
 
 #[test]
+fn structured_match_form_is_rejected_with_e_one_007() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(
+        &entry,
+        r#"maybe:
+  $enum:
+    some: $str
+    none: $void
+main:
+  $function: $void
+  return: $void
+  do:
+      - $let:
+          value:
+            $maybe.some: "x"
+      - $match:
+          target: $value
+          arms:
+            - pattern:
+                $maybe.some:
+                  $bind: x
+              do: []
+            - pattern:
+                $maybe.none: null
+              do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-ONE-007"),
+        "expected structured `$match` to be rejected with E-ONE-007, got: {err}"
+    );
+}
+
+#[test]
 fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
@@ -3456,27 +3496,25 @@ main:
           p:
             $fs.path.new:
               s: "{path}"
-      - $match:
-          target: $args.grants.fs-read
-          arms:
-            - pattern:
-                $security.grant-status.granted:
-                  $bind: read-grant
-              do:
-                - $let:
-                    exists:
-                      $fs.exists:
-                        p: $p
-                        grant: $read-grant
-                - $match:
-                    target: $exists
-                    arms:
-                      - pattern: true
-                        do: []
-            - pattern:
-                $security.grant-status.denied:
-                  $bind: denied
-              do: []
+      - $match: $args.grants.fs-read
+        when:
+          - pattern:
+              $security.grant-status.granted:
+                $bind: read-grant
+            do:
+              - $let:
+                  exists:
+                    $fs.exists:
+                      p: $p
+                      grant: $read-grant
+              - $match: $exists
+                when:
+                  - pattern: true
+                    do: []
+          - pattern:
+              $security.grant-status.denied:
+                $bind: denied
+            do: []
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             security = security.display().to_string().replace('\\', "/"),
