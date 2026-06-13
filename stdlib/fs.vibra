@@ -4,6 +4,9 @@ bytes-lib:
 result:
   $import: ./result.vibra
 
+option:
+  $import: ./option.vibra
+
 security:
   $import: ./security.vibra
 
@@ -37,7 +40,8 @@ path:
     parent:
       $function: $self
       return:
-        $option: $self
+        $option.option:
+          t: $self
       do:
         - $wasm:
             import:
@@ -48,7 +52,8 @@ path:
     extension:
       $function: $self
       return:
-        $option: $str
+        $option.option:
+          t: $str
       do:
         - $wasm:
             import:

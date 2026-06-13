@@ -1,3 +1,5 @@
 option:
-  $union: [$void, $t]
+  $enum:
+    some: $t
+    none: $void
   =where: {t: []}

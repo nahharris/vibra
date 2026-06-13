@@ -671,7 +671,6 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$tuple",
     "$array",
     "$map",
-    "$option",
     "$intersect",
     "$interface",
     "$fn-type",
@@ -788,6 +787,11 @@ fn collect_module_skeletons(
         if env.form_key == "$function" || env.form_key == "$test" || env.form_key == "$import" {
             continue;
         }
+        if env.form_key == "$option" {
+            bail!(
+                "E-OPTION-001: `$option: T` was removed; import `stdlib/option.vibra` and instantiate its tagged enum alias"
+            );
+        }
         if !BUILTIN_TYPE_FORMS.contains(&env.form_key.as_str()) {
             continue;
         }
@@ -823,6 +827,14 @@ fn parse_type_ref(
     self_allowed: bool,
 ) -> Result<TypeRef> {
     if let Some(m) = v.as_mapping() {
+        if map_get_str(m, "$option").is_some()
+            && m.len() == 1
+            && !map_get_str(m, "$option").is_some_and(is_type_argument_map)
+        {
+            bail!(
+                "E-OPTION-001: `$option: T` was removed; import `stdlib/option.vibra` and instantiate its tagged enum alias"
+            );
+        }
         for &form in BUILTIN_TYPE_FORMS {
             if let Some(form_v) = map_get_str(m, form) {
                 if m.len() != 1 {
@@ -927,6 +939,13 @@ fn parse_type_ref(
     Ok(ty)
 }
 
+fn is_type_argument_map(value: &Value) -> bool {
+    value.as_mapping().is_some_and(|map| {
+        map.keys()
+            .all(|key| key.as_str().is_some_and(|name| !name.starts_with('$')))
+    })
+}
+
 fn parse_type_constructor(
     form: &str,
     v: &Value,
@@ -1018,10 +1037,6 @@ fn parse_type_constructor(
                     self_allowed,
                 )?),
             })
-        }
-        "$option" => {
-            let inner = parse_type_ref(v, scope, skeletons, warnings, self_allowed)?;
-            Ok(TypeRef::Union(vec![TypeRef::Void, inner]))
         }
         "$intersect" => {
             let s = v
@@ -1204,6 +1219,13 @@ fn parse_instantiation_args(
     let skel = skeletons
         .get(base)
         .or_else(|| {
+            let qualified_suffix = format!(".{base}");
+            skeletons
+                .iter()
+                .find(|(key, _)| key.ends_with(&qualified_suffix))
+                .map(|(_, value)| value)
+        })
+        .or_else(|| {
             skeletons
                 .iter()
                 .find(|(k, _)| strip_module_prefix(k) == strip_module_prefix(base))
@@ -1271,6 +1293,11 @@ fn parse_union_type(
             warnings,
             self_allowed,
         )?);
+    }
+    if out.iter().any(|item| *item == TypeRef::Void) {
+        bail!(
+            "E-OPTION-001: `$union` with a direct `$void` member was removed; use the tagged stdlib option enum"
+        );
     }
     Ok(TypeRef::Union(out))
 }

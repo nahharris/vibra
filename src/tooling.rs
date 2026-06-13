@@ -367,6 +367,7 @@ fn rule_summary(code: &str) -> &'static str {
         "E-IMPL-004" => "`=impl` payload contains an unexpected key",
         "E-IMPL-005" => "`=impl` method signature does not match interface declaration",
         "E-IMPL-006" => "`=impl` method reference does not resolve",
+        "E-OPTION-001" => "Noncanonical option representation",
         _ => "Vibra diagnostic",
     }
 }
@@ -432,6 +433,11 @@ fn compile_diagnostics(path: &Path) -> Vec<Diagnostic> {
         let Some(entry) = program.modules.get(&program.entry) else {
             return Ok(());
         };
+        if contains_noncanonical_option(entry) {
+            anyhow::bail!(
+                "E-OPTION-001: noncanonical option representation; use the tagged stdlib option enum"
+            );
+        }
         let Some(map) = entry.as_mapping() else {
             return Ok(());
         };
@@ -455,6 +461,38 @@ fn compile_diagnostics(path: &Path) -> Vec<Diagnostic> {
                 category: Category::Compile,
             }]
         }
+    }
+}
+
+fn contains_noncanonical_option(value: &serde_yaml::Value) -> bool {
+    match value {
+        serde_yaml::Value::Mapping(map) => {
+            if let Some(option) = map.get(serde_yaml::Value::String("$option".to_string())) {
+                if !option.as_mapping().is_some_and(|type_args| {
+                    type_args.keys().all(|key| {
+                        key.as_str()
+                            .is_some_and(|name| !name.starts_with('$'))
+                    })
+                }) {
+                    return true;
+                }
+            }
+            if let Some(union) = map.get(serde_yaml::Value::String("$union".to_string())) {
+                if union.as_sequence().is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|item| item.as_str().is_some_and(|s| s == "$void"))
+                }) {
+                    return true;
+                }
+            }
+            map.iter().any(|(key, value)| {
+                contains_noncanonical_option(key) || contains_noncanonical_option(value)
+            })
+        }
+        serde_yaml::Value::Sequence(items) => items.iter().any(contains_noncanonical_option),
+        serde_yaml::Value::Tagged(tagged) => contains_noncanonical_option(&tagged.value),
+        _ => false,
     }
 }
 
@@ -496,6 +534,7 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-IMPL-004",
         "E-IMPL-005",
         "E-IMPL-006",
+        "E-OPTION-001",
     ];
     KNOWN_CODES
         .iter()
