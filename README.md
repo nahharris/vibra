@@ -102,16 +102,30 @@ Filesystem policy checks use canonical ancestry: a `dir` scope for `path/root` d
 
 - Primitive numerics: `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`
 - Explicit annotations are required on function signatures (`args` + `return`)
-- Algebraic unions are supported in lowering with direct syntax (`$union: [...]`, `$enum: {...}`, constructors, `$match`)
+- Algebraic unions are supported in lowering with direct syntax (`$union: [...]`, `$enum: {...}`, constructors, `$match`); optional values use the tagged `stdlib/option.vibra` enum because `$option` sugar and direct `$void` union members are rejected
 - Value patterns use the single ordered-arm `$match: <expr>` plus sibling `when:` form; pattern variables are written as `{ $bind: name }`, wildcard as `{ $wildcard: null }`, and arm bindings remain local to the arm
 - Generic functions and types declare type parameters via the `=where` annotation; call sites pass type params as keys alongside value args (e.g. `{ $f: { t: $int64, x: 7 } }`)
 - `$newtype` creates nominal wrappers that require explicit `$cast` to cross to/from the inner type; transparent aliases still coerce implicitly, and other conversions use explicit `$from` / `$into` interface calls
 - `=where` bounds (`t: [$some-iface, ...]`) are checked nominally against `=impl` blocks at call sites and type-position instantiations (`E-BOUND-001`)
 - Inherent operations on a type live under its `=defs` annotation; explicit interface implementations live under `=impl` and use the reserved `$self` type to refer to the implementing type
 - Interface methods can be invoked **type-qualified** (`$type.iface.method: { ... }`) or, when the method has a `$self`-typed argument, **interface-qualified** (`$iface.method: { x: $val, ... }`) -- the compiler dispatches on the static type of the `$self` argument
-- Rust-inspired unions available:
+- Rust-inspired tagged enums available:
   - [stdlib/option.vibra](stdlib/option.vibra)
   - [stdlib/result.vibra](stdlib/result.vibra)
+
+Import option and instantiate its generic type explicitly:
+
+```yaml
+option:
+  $import: ./stdlib/option.vibra
+maybe-name:
+  $record:
+    value:
+      $option.option:
+        t: $str
+```
+
+Construct values with `$option.option.some: "name"` or `$option.option.none`.
 - `io`/`fs` APIs use nominal `path`, `bytes`, and file-mode types, with `readable`/`writable`/`appendable`/`closeable` interfaces to reject invalid file-mode operations
 - Kebab-case is recommended for every symbol; non-kebab symbols emit warnings
 

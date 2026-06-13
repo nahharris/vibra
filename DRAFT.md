@@ -230,7 +230,6 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 | `$tuple` | Tuple of types: `{ $tuple: [$t1, $t2] }` — **type positions only** |
 | `$array` | Homogeneous array type: `{ $array: T }` |
 | `$union` | `{ $union: [T1, T2, ...] }` — discriminated unions should use a **tag** field in `$record` variants |
-| `$option` | `{ $option: T }` — desugars at parse time to `{ $union: [$void, T] }` |
 | `$intersect` | `{ $intersect: [T1, T2] }` — compose interface requirements |
 | `$interface` | **Go-like structural interface:** `{ $interface: { name: T, ... } }` — each member is a **type**; function members use **`$fn-type`**. Inside the body the reserved `$self` type stands for the implementing type. |
 | `$fn-type` | `{ $fn-type: { args: { $record: ... }, return: R } }` — **one** function type constructor |
@@ -249,7 +248,7 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 
 **`$return` (user functions):** User-defined functions (non-`main`) with a non-`$void` return must terminate by **`$return: <expr>`** as the last statement of the function body, or by **`$match`** whose every arm’s `do:` ends with `$return` in the same sense. Functions with `return: $void` may omit `$return`. **`$return` is not allowed in `main`.**
 
-**Null safety (v1):** `null` is valid only for type `$void`, and is the only source-level value of `$void`. A value of type `T` can be coerced into a union containing `T` (e.g. `$union: [$void, T]`), but a union value cannot be coerced back to `T` without explicit narrowing (for tagged unions this is `$match`).
+**Null safety (v1):** `null` is valid only for type `$void`, and is the only source-level value of `$void`. Optional values use the tagged generic enum from `stdlib/option.vibra`; raw payloads and `null` do not coerce into option values. Construct `$option.option.some: <value>` or `$option.option.none`, then narrow with `$match`.
 
 ### Interface satisfaction
 
@@ -281,7 +280,7 @@ Structural satisfaction is **not enough** to clear a `=where` bound or be a disp
 
 - **Module system:** `$import` (compile-time only, appears only under import alias mapping).
 - **Core:** `$function`, `$let`, `$if`, `$do`, `$macro`, `$wasm`, `$return`, `$as` (type ascription for `$let`), `$cast`.
-- **Types:** primitive symbols and `$newtype`, `$record`, `$array`, `$fn-type`, `$interface`, `$union`, `$option`, etc.
+- **Types:** primitive symbols and `$newtype`, `$record`, `$array`, `$fn-type`, `$interface`, `$union`, `$enum`, etc.
 
 **Effectful** IO and host calls should live in **`stdlib`** modules implemented atop **`$wasm`**, e.g. `io.println`, not as unlimited new host opcodes.
 
@@ -552,7 +551,7 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
 - **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
 - **Typed io/fs:** `stdlib/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
 - **Security policies:** privileged host modules consume `$policy` values; supported domains include `fs`, `env`, `net`, `process`, `time`, `random`, and `sys`.
-- **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is `$union: [$void, $t]` with `=where: {t: []}`; `stdlib/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`, used at value sites via `$match`.
+- **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is the tagged `$enum: { some: $t, none: $void }` with `=where: {t: []}`; `stdlib/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`. Both use qualified constructors and `$match`.
 - **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
 
 ---
@@ -567,3 +566,4 @@ The following early-draft forms were removed and have **no compatibility path**:
 - **Tuple-typed `args:`** — use a named record (`args: { name: T, ... }`).
 - **Legacy `variants:`** under `$union` — use `$union: [...]` or `$enum: { ... }`.
 - **Structured `$match: { target, arms }`** — use `$match: <expr>` with sibling `when:` arms.
+- **`$option: T` and `$union` with a direct `$void` member** — import and instantiate the tagged `stdlib/option.vibra` enum. These forms are rejected with `E-OPTION-001`.

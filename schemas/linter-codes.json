@@ -191,6 +191,11 @@
       "code": "E-IMPL-006",
       "severity": "error",
       "summary": "`=impl` method binding is a `$ref` string that does not resolve to a registered function"
+    },
+    {
+      "code": "E-OPTION-001",
+      "severity": "error",
+      "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
     }
   ]
 }

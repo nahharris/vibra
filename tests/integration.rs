@@ -1218,7 +1218,8 @@ main:
     let lowered = vibra::lower::lower_program(&prog);
     assert!(
         lowered.is_ok(),
-        "expected void enum constructor without payload to lower"
+        "expected void enum constructor without payload to lower: {:?}",
+        lowered.err()
     );
 }
 
@@ -3281,7 +3282,7 @@ main:
 }
 
 #[test]
-fn option_where_union_allows_t_or_void_and_disallows_reverse_coercion() {
+fn tagged_option_rejects_raw_payload_and_null_coercions() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.vibra");
     let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
@@ -3291,7 +3292,9 @@ fn option_where_union_allows_t_or_void_and_disallows_reverse_coercion() {
     std::fs::write(
         &model,
         r#"option:
-  $union: [$void, $t]
+  $enum:
+    some: $t
+    none: $void
   =where: {t: []}
 "#,
     )
@@ -3335,8 +3338,111 @@ main:
     let lowered = vibra::lower::lower_program(&prog);
     assert!(
         lowered.is_err(),
-        "expected reverse coercion from option to int to fail and require a match/narrowing"
+        "expected raw values and null to require explicit option constructors"
     );
+}
+
+#[test]
+fn legacy_option_sugar_is_rejected_with_stable_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"legacy:
+  $option: $str
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("E-OPTION-001"),
+        "unexpected error: {err:#}"
+    );
+}
+
+#[test]
+fn legacy_option_sugar_with_mapped_inner_type_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"holder:
+  $record:
+    value:
+      $option:
+        $array: $str
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("E-OPTION-001"),
+        "unexpected error: {err:#}"
+    );
+}
+
+#[test]
+fn direct_void_union_is_rejected_with_stable_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"legacy:
+  $union: [$void, $str]
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("E-OPTION-001"),
+        "unexpected error: {err:#}"
+    );
+}
+
+#[test]
+fn generic_alias_named_option_remains_valid() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"option:
+  $enum:
+    some: $t
+    none: $void
+  =where: {t: []}
+holder:
+  $record:
+    value:
+      $option:
+        t: $str
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("generic alias named option should remain valid");
 }
 
 #[test]
@@ -5989,7 +6095,7 @@ fn impl_method_return_type_can_be_covariant() {
           $record:
             x: $self
         return:
-          $union: [$void, $str]
+          $union: [$int64, $str]
 box:
   $record:
     value: $int64
@@ -6024,7 +6130,7 @@ fn impl_method_argument_types_remain_invariant() {
         args:
           $record:
             x:
-              $union: [$void, $str]
+              $union: [$int64, $str]
         return: $str
 box:
   $record:
@@ -6075,7 +6181,7 @@ box:
       fmt:
         $function: $self
         return:
-          $union: [$void, $str]
+          $union: [$int64, $str]
         do:
             - $return: "boxed"
 main:
@@ -7285,6 +7391,22 @@ main:
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("code: E-MOD-004"), "stdout: {stdout}");
     assert!(stdout.contains("leaf"), "stdout: {stdout}");
+}
+
+#[test]
+fn vibra_lint_compile_checks_library_files_without_main() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("library.vibra");
+    std::fs::write(&source, "legacy:\n  $option: $str\n").unwrap();
+
+    let output = vibra_cmd()
+        .args(["lint", &path_str(&source), "--category", "compile"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("code: E-OPTION-001"), "stdout: {stdout}");
 }
 
 #[test]
