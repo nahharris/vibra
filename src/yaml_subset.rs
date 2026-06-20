@@ -47,16 +47,6 @@ pub fn validate_yaml_subset(source: &str) -> Vec<YamlSubsetViolation> {
                 column,
             });
         }
-        if let Some((column, scalar)) = find_ambiguous_unquoted_scalar(content) {
-            violations.push(YamlSubsetViolation {
-                code: "E-YAML-003",
-                message: format!(
-                    "ambiguous unquoted scalar `{scalar}`; use double quotes for string values"
-                ),
-                line: line_no,
-                column,
-            });
-        }
     }
     violations
 }
@@ -132,40 +122,6 @@ fn find_alias(content: &str) -> Option<usize> {
         {
             return Some(idx);
         }
-    }
-    None
-}
-
-fn find_ambiguous_unquoted_scalar(content: &str) -> Option<(usize, String)> {
-    let trimmed = content.trim_start();
-    let column = content.len() - trimmed.len();
-    let Some(colon) = trimmed.find(':') else {
-        return None;
-    };
-    let key = trimmed[..colon].trim();
-    if !key.starts_with('$') && !key.starts_with('=') {
-        return None;
-    }
-    let mut value = trimmed[colon + 1..].trim_start();
-    if value.starts_with('>') || value.starts_with('|') {
-        return None;
-    }
-    if value.starts_with('"') || value.starts_with('\'') {
-        return None;
-    }
-    if let Some(hash) = value.find('#') {
-        value = value[..hash].trim_end();
-    }
-    if value.is_empty() || value.starts_with('[') || value.starts_with('{') {
-        return None;
-    }
-    if matches!(value, "true" | "false" | "null" | "yes" | "no" | "on" | "off") {
-        return Some((column + colon + 1, value.to_string()));
-    }
-    if value.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
-        && value.chars().any(|ch| ch.is_ascii_digit())
-    {
-        return Some((column + colon + 1, value.to_string()));
     }
     None
 }

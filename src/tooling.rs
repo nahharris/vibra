@@ -171,16 +171,53 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
 
 fn format_source(source: &str) -> Result<String> {
     let prefix = extract_prefix_comments(source);
-    let doc = Document::from_str(source).context("parse Vibra code document")?;
-    let mut body = doc.to_string();
-    while body.ends_with('\n') {
-        body.pop();
+    if has_inline_comments(source) {
+        let doc = Document::from_str(source).context("parse Vibra code document")?;
+        let mut body = doc.to_string();
+        while body.ends_with('\n') {
+            body.pop();
+        }
+        return Ok(if prefix.is_empty() {
+            format!("{body}\n")
+        } else {
+            format!("{prefix}{body}\n")
+        });
     }
-    if prefix.is_empty() {
-        Ok(format!("{body}\n"))
-    } else {
-        Ok(format!("{prefix}{body}\n"))
+
+    let _ = Document::from_str(source).context("parse Vibra code document")?;
+    let value: serde_yaml::Value = serde_yaml::from_str(source).context("parse Vibra YAML")?;
+    let mut formatted = serde_yaml::to_string(&value).context("emit canonical Vibra YAML")?;
+    if !prefix.is_empty() {
+        formatted = format!("{prefix}{formatted}");
     }
+    Ok(formatted)
+}
+
+fn has_inline_comments(source: &str) -> bool {
+    source.lines().any(|line| {
+        let stripped = strip_line_comment(line);
+        !stripped.trim().starts_with('#') && line.contains('#')
+    })
+}
+
+fn strip_line_comment(line: &str) -> &str {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for (idx, ch) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_double => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '#' if !in_single && !in_double => return &line[..idx],
+            _ => {}
+        }
+    }
+    line
 }
 
 fn extract_prefix_comments(source: &str) -> String {
