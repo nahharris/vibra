@@ -8064,3 +8064,41 @@ main:
         "third open should hit the cap with `too-many-open-files`, and closing a handle should free a slot for the reopen"
     );
 }
+
+// --- Issue #53: env grants are case-sensitive on Unix ---
+
+#[test]
+fn env_read_grant_is_case_sensitive_on_unix() {
+    if cfg!(windows) {
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let env_mod = std::fs::canonicalize(root.join("stdlib/env.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    std::env::set_var("VIBRA_ISSUE53_TOKEN", "public");
+    std::env::set_var("vibra_issue53_token", "secret");
+    let output = vibra_cmd()
+        .args([
+            "exec",
+            r#"{$env.get: "vibra_issue53_token"}"#,
+            "--import",
+            &format!("env={}", path_str(&env_mod)),
+            "--import",
+            &format!("result={}", path_str(&result)),
+            "--import",
+            &format!("security={}", path_str(&security)),
+            "--allow-env=VIBRA_ISSUE53_TOKEN",
+            "--format",
+            "yaml",
+        ])
+        .output()
+        .unwrap();
+    std::env::remove_var("VIBRA_ISSUE53_TOKEN");
+    std::env::remove_var("vibra_issue53_token");
+    assert!(
+        !output.status.success(),
+        "lowercase env name must not match uppercase grant on Unix: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
