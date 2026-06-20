@@ -11,6 +11,7 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{cell::RefCell, rc::Rc};
 
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
@@ -274,8 +275,46 @@ fn eval_expr(
         Expr::Value(v) => Ok(v.clone()),
         Expr::VarRef(v) => env
             .get(v)
-            .cloned()
+            .map(read_place_value)
             .with_context(|| format!("unknown variable `${v}`")),
+        Expr::Mutable(inner) => {
+            if let Expr::VarRef(name) = inner.as_ref() {
+                if let Some(existing) = env.get(name) {
+                    match existing {
+                        RuntimeValue::Mutable(cell)
+                        | RuntimeValue::Reference {
+                            cell,
+                            mutable: true,
+                        } => return Ok(RuntimeValue::Mutable(cell.clone())),
+                        _ => {}
+                    }
+                }
+            }
+            let value = eval_expr(inner, env, program, files, config)?;
+            Ok(RuntimeValue::Mutable(Rc::new(RefCell::new(value))))
+        }
+        Expr::Reference { target, mutable } => {
+            let cell = if let Expr::VarRef(name) = target.as_ref() {
+                match env
+                    .get(name)
+                    .with_context(|| format!("unknown reference target `${name}`"))?
+                {
+                    RuntimeValue::Mutable(cell) | RuntimeValue::Reference { cell, .. } => {
+                        cell.clone()
+                    }
+                    value => Rc::new(RefCell::new(value.clone())),
+                }
+            } else {
+                match eval_expr(target, env, program, files, config)? {
+                    RuntimeValue::Mutable(cell) | RuntimeValue::Reference { cell, .. } => cell,
+                    value => Rc::new(RefCell::new(value)),
+                }
+            };
+            Ok(RuntimeValue::Reference {
+                cell,
+                mutable: *mutable,
+            })
+        }
         Expr::Call { call, .. } => exec_call(call, program, env, files, config),
         Expr::Cast { from, target } => Ok(RuntimeValue::Typed {
             type_ref: target.clone(),
@@ -371,6 +410,23 @@ fn exec_statement(
             env.insert(var.clone(), value);
             Ok(None)
         }
+        Statement::Set { var, value } => {
+            let next = eval_expr(value, env, program, files, config)?;
+            let target = env
+                .get(var)
+                .with_context(|| format!("E-SET-002: unknown `$set` target `{var}`"))?;
+            match target {
+                RuntimeValue::Mutable(cell)
+                | RuntimeValue::Reference {
+                    cell,
+                    mutable: true,
+                } => {
+                    *cell.borrow_mut() = next;
+                    Ok(None)
+                }
+                _ => bail!("E-SET-002: symbol `{var}` is not writable"),
+            }
+        }
         Statement::Match { target, arms } => {
             let value = eval_expr(target, env, program, files, config)?;
             for arm in arms {
@@ -409,6 +465,19 @@ fn exec_statement(
             }
         },
     }
+}
+
+fn read_place_value(value: &RuntimeValue) -> RuntimeValue {
+    match value {
+        RuntimeValue::Mutable(cell) | RuntimeValue::Reference { cell, .. } => {
+            read_place_value(&cell.borrow())
+        }
+        value => value.clone(),
+    }
+}
+
+pub fn materialize_runtime_value(value: RuntimeValue) -> RuntimeValue {
+    read_place_value(&value)
 }
 
 fn strip_type_enum_suffix(name: &str) -> &str {

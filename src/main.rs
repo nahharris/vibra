@@ -704,6 +704,7 @@ fn raw_exec_string(value: RuntimeValue) -> Result<String> {
 }
 
 fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
+    let value = vibra::execute::materialize_runtime_value(value);
     Ok(match value {
         RuntimeValue::Bool(b) => Value::Bool(b),
         RuntimeValue::Int(i) => Value::Number(i.into()),
@@ -769,9 +770,7 @@ fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
             );
             Value::Mapping(map)
         }
-        RuntimeValue::Policy(policy) => {
-            Value::String(format!("{:?}", policy.policy))
-        }
+        RuntimeValue::Policy(policy) => Value::String(format!("{:?}", policy.policy)),
         RuntimeValue::Enum {
             enum_key,
             tag,
@@ -790,6 +789,9 @@ fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
             Value::Mapping(map)
         }
         RuntimeValue::Void => Value::Null,
+        RuntimeValue::Mutable(_) | RuntimeValue::Reference { .. } => {
+            unreachable!("runtime place handles are materialized before rendering")
+        }
     })
 }
 

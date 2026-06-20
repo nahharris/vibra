@@ -138,6 +138,40 @@ $do:
   - $add: [$a, $b]
 ```
 
+### Mutable values and references
+
+Values are immutable and copied by default. `$mut` is an explicit expression and
+type wrapper that allocates mutable storage, while `$set` updates one existing
+writable symbol using the same singleton mapping shape as `$let`:
+
+```yaml
+- $let: {count: {$mut: 0}}
+- $let: {snapshot: $count}
+- $set: {count: 1}
+```
+
+Reading `$count` copies its current inner value, so `snapshot` remains `0`.
+`{$mut: $count}` reuses existing mutable storage; wrapping an ordinary expression
+allocates a new program-instance arena cell.
+
+`$ref` creates a transparent reference. A plain target creates a read-only
+reference, while wrapping the target in `$mut` creates or reuses writable storage:
+
+```yaml
+- $let: {reader: {$ref: $count}}
+- $let: {writer: {$ref: {$mut: $count}}}
+- $let: {temporary: {$ref: {$mut: 0}}}
+- $set: {writer: 2}
+```
+
+Reading a reference copies its pointee. `$set` through a mutable reference writes
+the pointee; no separate dereference syntax exists. The corresponding type forms
+are `{$mut: T}`, `{$ref: T}`, and `{$ref: {$mut: T}}`. Mutable values may copy
+into plain `T` positions, but creating mutable storage or references is always
+explicit. Mutable cells and references may be passed, returned, or stored in
+composites. v1 uses program-instance arena lifetime and permits aliases in its
+single-threaded execution model.
+
 ### `$if`
 
 ```yaml
@@ -279,7 +313,7 @@ Structural satisfaction is **not enough** to clear a `=where` bound or be a disp
 **Host-reserved** keys (expand before user macros where applicable):
 
 - **Module system:** `$import` (compile-time only, appears only under import alias mapping).
-- **Core:** `$function`, `$let`, `$if`, `$do`, `$macro`, `$wasm`, `$return`, `$as` (type ascription for `$let`), `$cast`.
+- **Core:** `$function`, `$let`, `$mut`, `$set`, `$ref`, `$if`, `$do`, `$macro`, `$wasm`, `$return`, `$as` (type ascription for `$let`), `$cast`.
 - **Types:** primitive symbols and `$newtype`, `$record`, `$array`, `$fn-type`, `$interface`, `$union`, `$enum`, etc.
 
 **Effectful** IO and host calls should live in **`stdlib`** modules implemented atop **`$wasm`**, e.g. `io.println`, not as unlimited new host opcodes.
@@ -344,6 +378,16 @@ Current compiler behavior validates stdlib signatures and forwards call-site arg
 
 **Memory:** **Linear memory** + **bump/arena** allocator strategy recommended for v1; no GC requirement.
 
+Plain scalar values use wasm locals or direct parameters. Strings, arrays, and
+maps use `{ptr: i32, len: i32}` descriptors; records and tuples use aligned
+field layouts; enums use an `i32` tag followed by an aligned payload. Mutable
+values that are address-taken, returned, stored in composites, or forwarded as
+references are promoted to aligned bump-arena slots. Both `mut<T>` handles and
+references are represented as `i32` addresses. `$wasm.args` forwards ordinary
+scalars directly, copied aggregates by pointer, and explicit mutable/reference
+values as their arena address. The v1 arena is reclaimed only when the program
+instance exits.
+
 **WASI imports (`wasi_snapshot_preview1`, preview1):**
 
 | Import | Signature (wasm32) | Notes |
@@ -386,6 +430,13 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 | `E-CALL-IFACE-NOSELF` | error | Interface-qualified call (`$iface.method`) targets a method with no `$self`-typed argument; use the type-qualified form. |
 | `E-DISPATCH-001` | error | Interface-qualified call's `$self` argument has a generic static type. Pending monomorphisation. |
 | `E-DOC-001` | error | `=doc` annotation must be a string scalar. |
+| `E-MUT-001` | error | Malformed `$mut` expression or type wrapper. |
+| `E-SET-001` | error | `$set` is not a singleton symbol-to-value mapping. |
+| `E-SET-002` | error | `$set` targets an unknown, immutable, or read-only symbol. |
+| `E-SET-003` | error | `$set` value is incompatible with the target pointee type. |
+| `E-REF-001` | error | Malformed `$ref` expression or type wrapper. |
+| `E-REF-002` | error | `$ref` target cannot be resolved. |
+| `E-REF-003` | error | Reference access mode is invalid for its target. |
 | `E-GEN-001` | error | Bare reference to a generic type alias requires explicit instantiation. |
 | `E-GEN-002` | error | Generic alias instantiation is malformed (unknown alias / param, missing param, arity mismatch). |
 | `E-NEWTYPE-001` | error | Implicit coercion between a `$newtype` and its inner type is forbidden; use `$cast`. |
@@ -395,12 +446,12 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 | `E-CAP-001` | error | Capability values are runtime-minted and cannot be created with `$cast` or literals. |
 | `E-SELF-001` | error | Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation. |
 | `E-DEFS-001` | error | Invalid `=defs` annotation (placed on a non-type definition, entry is not a `$function`, or duplicate name). |
-| `E-IMPL-001` | error | Invalid `=impl` annotation (non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a `$ref` string). |
+| `E-IMPL-001` | error | Invalid `=impl` annotation (non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a qualified function alias). |
 | `E-IMPL-002` | error | `=impl` keyed by an alias that does not resolve to a registered `$interface` type. |
 | `E-IMPL-003` | error | `=impl` block missing a binding for one of the interface's `=where` type-parameters or one of its methods. |
 | `E-IMPL-004` | error | `=impl` payload contains an unexpected key (not `=where`, an iface type-arg, or an iface method name). |
 | `E-IMPL-005` | error | `=impl` method signature does not match the interface declaration (after `$self` and iface type-arg substitution). |
-| `E-IMPL-006` | error | `=impl` method binding is a `$ref` string that does not resolve to a registered function. |
+| `E-IMPL-006` | error | `=impl` method alias does not resolve to a registered function. |
 
 ---
 
@@ -511,7 +562,7 @@ box:
         - $return: "shown"
   =impl:
     $display:
-      fmt: $box.show               # method-as-ref to the inherent op
+      fmt: $box.show               # direct alias to the inherent op
     $from-iface:
       t: $int64                    # iface type-arg binding
       from:                         # fresh `$function` envelope

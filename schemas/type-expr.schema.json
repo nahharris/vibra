@@ -38,6 +38,18 @@
     },
     {
       "type": "object",
+      "required": ["$mut"],
+      "additionalProperties": false,
+      "properties": { "$mut": { "$ref": "#" } }
+    },
+    {
+      "type": "object",
+      "required": ["$ref"],
+      "additionalProperties": false,
+      "properties": { "$ref": { "$ref": "#" } }
+    },
+    {
+      "type": "object",
       "required": ["$grant-token"],
       "additionalProperties": false,
       "properties": { "$grant-token": { "type": "null" } }

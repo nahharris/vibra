@@ -1,7 +1,7 @@
 //! Build [`WasiEnvBuilder`](wasmer_wasix::WasiEnvBuilder): stdio inheritance, argv, preopened dirs.
 
-use std::path::PathBuf;
 use crate::lower::PolicyType;
+use std::path::PathBuf;
 use wasmer_wasix::{WasiEnv, WasiEnvBuilder, WasiStateCreationError};
 
 /// Configuration for [`super::run_module`](crate::runtime::run_module).

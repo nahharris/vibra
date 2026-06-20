@@ -1,6 +1,181 @@
 use std::path::Path;
 
 #[test]
+fn generic_alias_instantiation_prefers_current_module_scope() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"io:
+  $import: "{}"
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+            io.display().to_string().replace('\\', "/")
+        ),
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded)
+        .expect("nested `$result.result` must resolve in the current module scope");
+}
+
+#[test]
+fn mut_ref_and_set_forms_lower() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        count: {$mut: 0}
+    - $let:
+        reader: {$ref: $count}
+    - $let:
+        writer: {$ref: {$mut: $count}}
+    - $set:
+        count: 1
+    - $set:
+        writer: 2
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&loaded).expect("mut/ref program should lower");
+    let dump = format!("{lowered:?}");
+    assert!(
+        dump.contains("Set"),
+        "expected set statements in IR: {dump}"
+    );
+    assert!(
+        dump.contains("Mutable"),
+        "expected mutable type metadata: {dump}"
+    );
+    assert!(
+        dump.contains("Reference"),
+        "expected reference expressions: {dump}"
+    );
+}
+
+#[test]
+fn set_rejects_immutable_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        count: 0
+    - $set:
+        count: 1
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(err.contains("E-SET-002"), "unexpected error: {err}");
+}
+
+#[test]
+fn set_rejects_read_only_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        count: {$mut: 0}
+    - $let:
+        reader: {$ref: $count}
+    - $set:
+        reader: 1
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(err.contains("E-SET-002"), "unexpected error: {err}");
+}
+
+#[test]
+fn mutable_and_reference_type_wrappers_parse() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"take-mut:
+  $function:
+    value: {$mut: $int64}
+  return: $int64
+  do:
+    - $return: $args.value
+take-ref:
+  $function:
+    value: {$ref: {$mut: $int64}}
+  return: $int64
+  do:
+    - $return: $args.value
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded).expect("mut/ref type wrappers should parse");
+}
+
+#[test]
+fn wasm_abi_uses_i32_addresses_for_mutable_values_and_refs() {
+    use vibra::wasm_abi::{layout_of, AbiType, StorageClass};
+
+    let scalar = layout_of(&AbiType::I64);
+    assert_eq!(scalar.size, 8);
+    assert_eq!(scalar.align, 8);
+    assert_eq!(scalar.storage, StorageClass::Direct);
+
+    let mutable = layout_of(&AbiType::Mutable(Box::new(AbiType::I64)));
+    assert_eq!(mutable.size, 4);
+    assert_eq!(mutable.align, 4);
+    assert_eq!(mutable.storage, StorageClass::ArenaAddress);
+
+    let reference = layout_of(&AbiType::Reference(Box::new(AbiType::I64)));
+    assert_eq!(reference.size, 4);
+    assert_eq!(reference.storage, StorageClass::ArenaAddress);
+}
+
+#[test]
+fn wasm_abi_aggregate_layout_is_aligned() {
+    use vibra::wasm_abi::{layout_of, AbiType, StorageClass};
+
+    let record = layout_of(&AbiType::Record(vec![AbiType::I32, AbiType::I64]));
+    assert_eq!(record.size, 16);
+    assert_eq!(record.align, 8);
+    assert_eq!(record.field_offsets, vec![0, 8]);
+    assert_eq!(record.storage, StorageClass::CopiedPointer);
+}
+
+#[test]
 #[ignore = "removed by policy value model"]
 fn function_grants_side_channel_allows_primary_args_and_grant_forwarding() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -5887,7 +6062,7 @@ main:
     };
     let body = lowered.impls.get(&key).expect("impl entry missing");
     match body.methods.get("fmt") {
-        Some(vibra::lower::ImplMethodBinding::Ref(s)) => {
+        Some(vibra::lower::ImplMethodBinding::Alias(s)) => {
             assert_eq!(s, "box.show", "ref should target the =defs op key");
         }
         other => panic!("expected Ref(\"box.show\"); got {other:?}"),
