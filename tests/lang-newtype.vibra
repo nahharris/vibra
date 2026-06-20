@@ -1,63 +1,62 @@
-# Nominal `$newtype` wrappers requiring explicit `$cast` to cross the boundary.
 test:
   $import: ../stdlib/test.vibra
-
 meters:
   $newtype: $int64
-
 label:
   $newtype: $str
-
 cast-into-newtype:
   $test:
     do:
-      - $let:
-          d:
-            $cast: 10
-            into: $meters
-      - $match: $d
-        when:
-          - pattern:
-              $newtype:
-                type: $meters
-                inner:
-                  $bind: raw
+    - $let:
+        d:
+          $cast: 10
+          into: $meters
+    - $match: $d
+      when:
+      - case:
+          $newtype:
+            type: $meters
+            inner:
+              $bind: raw
+        do:
+        - $match: $raw
+          when:
+          - case: 10
             do:
-              - $match: $raw
-                when:
-                  - pattern: 10
-                    do:
-                      - $test.assert: true
-                  - pattern: {$wildcard: null}
-                    do:
-                      - $test.fail: "wrong inner value"
-          - pattern: {$wildcard: null}
+            - $test.assert: true
+          - case:
+              $wildcard: null
             do:
-              - $test.fail: "expected meters newtype"
-
+            - $test.fail: wrong inner value
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: expected meters newtype
 cast-string-newtype:
   $test:
     do:
-      - $let:
-          l:
-            $cast: "north"
-            into: $label
-      - $match: $l
-        when:
-          - pattern:
-              $newtype:
-                type: $label
-                inner:
-                  $bind: raw
+    - $let:
+        l:
+          $cast: north
+          into: $label
+    - $match: $l
+      when:
+      - case:
+          $newtype:
+            type: $label
+            inner:
+              $bind: raw
+        do:
+        - $match: $raw
+          when:
+          - case: north
             do:
-              - $match: $raw
-                when:
-                  - pattern: "north"
-                    do:
-                      - $test.assert: true
-                  - pattern: {$wildcard: null}
-                    do:
-                      - $test.fail: "wrong inner string"
-          - pattern: {$wildcard: null}
+            - $test.assert: true
+          - case:
+              $wildcard: null
             do:
-              - $test.fail: "expected label newtype"
+            - $test.fail: wrong inner string
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: expected label newtype

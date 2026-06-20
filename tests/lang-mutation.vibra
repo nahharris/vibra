@@ -21,19 +21,19 @@ mutable-set-and-copy:
         count: 1
     - $match: $snapshot
       when:
-      - pattern: 0
+      - case: 0
         do:
         - $test.assert: true
-      - pattern:
+      - case:
           $wildcard: null
         do:
         - $test.fail: mutable read did not copy
     - $match: $count
       when:
-      - pattern: 1
+      - case: 1
         do:
         - $test.assert: true
-      - pattern:
+      - case:
           $wildcard: null
         do:
         - $test.fail: set did not update mutable binding
@@ -51,10 +51,10 @@ mutable-ref-writes-through:
         writer: 2
     - $match: $count
       when:
-      - pattern: 2
+      - case: 2
         do:
         - $test.assert: true
-      - pattern:
+      - case:
           $wildcard: null
         do:
         - $test.fail: mutable ref did not update pointee
@@ -69,10 +69,10 @@ mutable-ref-temporary:
         writer: 3
     - $match: $writer
       when:
-      - pattern: 3
+      - case: 3
         do:
         - $test.assert: true
-      - pattern:
+      - case:
           $wildcard: null
         do:
         - $test.fail: mutable temporary ref did not retain storage
@@ -85,10 +85,10 @@ mutable-argument:
             $mut: 0
     - $match: $result
       when:
-      - pattern: 4
+      - case: 4
         do:
         - $test.assert: true
-      - pattern:
+      - case:
           $wildcard: null
         do:
         - $test.fail: mutable argument was not writable

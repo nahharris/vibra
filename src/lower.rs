@@ -7200,7 +7200,11 @@ fn parse_match_statement(
     let mut has_wildcard = false;
     for arm_v in arms_seq {
         let arm_map = arm_v.as_mapping().context("$match arm must be mapping")?;
-        let pattern_v = map_get_str(arm_map, "pattern").context("$match arm missing pattern")?;
+        if map_get_str(arm_map, "pattern").is_some() {
+            bail!("E-ONE-008: `$match` arm key `pattern` was removed; use `case: <pattern>`");
+        }
+        verify_stmt_keys(arm_map, &["case", "do"])?;
+        let pattern_v = map_get_str(arm_map, "case").context("$match arm missing `case`")?;
         let do_v = map_get_str(arm_map, "do").context("$match arm missing do")?;
         let pattern = parse_pattern(pattern_v, type_aliases, enums, home, warnings)?;
         let mut scoped_locals = locals.clone();

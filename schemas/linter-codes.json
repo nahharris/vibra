@@ -93,6 +93,11 @@
       "summary": "Structured `$match: { target, arms }` form is not canonical; use `$match: <expr>` with sibling `when:` arms"
     },
     {
+      "code": "E-ONE-008",
+      "severity": "error",
+      "summary": "`$match` arms must use `case`; legacy `pattern` keys are forbidden"
+    },
+    {
       "code": "E-MOD-003",
       "severity": "error",
       "summary": "Import cycle detected"

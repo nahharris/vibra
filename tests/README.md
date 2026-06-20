@@ -52,10 +52,10 @@ literal arm plus a catch-all that fails:
 ```yaml
 - $match: $value
   when:
-    - pattern: 7
+    - case: 7
       do:
         - $test.assert: true
-    - pattern: {$wildcard: null}
+    - case: {$wildcard: null}
       do:
         - $test.fail: "expected 7"
 ```

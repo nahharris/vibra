@@ -1,15 +1,13 @@
-# Generic functions with `=where` type parameters and explicit type args.
 test:
   $import: ../stdlib/test.vibra
-
 identity:
   $function:
     subject: $t
   return: $t
   do:
-    - $return: $args.subject
-  =where: {t: []}
-
+  - $return: $args.subject
+  =where:
+    t: []
 first-of:
   $function:
     subject: $t
@@ -17,41 +15,41 @@ first-of:
     other: $u
   return: $t
   do:
-    - $return: $args.subject
-  =where: {t: [], u: []}
-
+  - $return: $args.subject
+  =where:
+    t: []
+    u: []
 identity-bool:
   $test:
     do:
-      - $let:
-          x:
-            $identity: true
-            t: $bool
-      - $test.assert: $x
-
+    - $let:
+        x:
+          $identity: true
+          t: $bool
+    - $test.assert: $x
 identity-int:
   $test:
     do:
-      - $let:
-          n:
-            $identity: 5
-            t: $int64
-      - $match: $n
-        when:
-          - pattern: 5
-            do:
-              - $test.assert: true
-          - pattern: {$wildcard: null}
-            do:
-              - $test.fail: "expected 5"
-
+    - $let:
+        n:
+          $identity: 5
+          t: $int64
+    - $match: $n
+      when:
+      - case: 5
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: expected 5
 two-type-params:
   $test:
     do:
-      - $let:
-          r:
-            $first-of: true
-            other: "ignored"
-            t: $bool
-            u: $str
-      - $test.assert: $r
+    - $let:
+        r:
+          $first-of: true
+          other: ignored
+          t: $bool
+          u: $str
+    - $test.assert: $r

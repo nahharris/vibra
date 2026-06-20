@@ -1,6 +1,54 @@
 use std::path::Path;
 
 #[test]
+fn match_arms_use_case_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $match: 0
+      when:
+        - case: 0
+          do: []
+        - case: {$wildcard: null}
+          do: []
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded).expect("`case` should be the canonical match arm key");
+}
+
+#[test]
+fn legacy_pattern_match_arm_key_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $match: 0
+      when:
+        - pattern: 0
+          do: []
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(err.contains("E-ONE-008"), "unexpected error: {err}");
+    assert!(err.contains("case"), "expected migration hint: {err}");
+}
+
+#[test]
 fn generic_alias_instantiation_prefers_current_module_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
@@ -861,12 +909,12 @@ main:
             $m.number.int: 7
       - $match: $value
         when:
-            - pattern:
+            - case:
                 $m.number.int:
                   $bind: x
               do:
                 - $io.println: "int"
-            - pattern:
+            - case:
                 $m.number.none: null
               do:
                 - $io.println: "none"
@@ -939,11 +987,11 @@ main:
       - $match:
           target: $value
           arms:
-            - pattern:
+            - case:
                 $maybe.some:
                   $bind: x
               do: []
-            - pattern:
+            - case:
                 $maybe.none: null
               do: []
 "#,
@@ -985,13 +1033,13 @@ main:
             $maybe.some: "payload"
       - $match: $value
         when:
-            - pattern:
+            - case:
                 $maybe.some:
                   $bind: payload
               do:
                 - $let:
                     x: 42
-            - pattern:
+            - case:
                 $maybe.none: null
               do: []
       - $io.println: $x
@@ -1142,7 +1190,7 @@ main:
                     value: "vibra"
       - $match: $value
         when:
-            - pattern:
+            - case:
                 $record:
                   pair:
                     $tuple:
@@ -1205,19 +1253,19 @@ main:
             into: $meter
       - $match: $distance
         when:
-            - pattern:
+            - case:
                 $interface: $display
               do:
                 - $let:
                     matched: "display"
-            - pattern:
+            - case:
                 $wildcard: null
               do:
                 - $let:
                     matched: "other"
       - $match: $distance
         when:
-            - pattern:
+            - case:
                 $newtype:
                   type: $meter
                   inner:
@@ -1225,7 +1273,7 @@ main:
               do:
                 - $let:
                     seen: $raw
-            - pattern:
+            - case:
                 $wildcard: null
               do: []
 "#,
@@ -1373,11 +1421,11 @@ main:
           value-none: $m.option.none
       - $match: $value-none
         when:
-            - pattern:
+            - case:
                 $m.option.none: null
               do:
                 - $io.println: "none"
-            - pattern:
+            - case:
                 $m.option.some:
                   $bind: text
               do:
@@ -1751,7 +1799,7 @@ main:
             $fs.path.new: "{path}"
       - $match: $args.input.fs-write
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: write-grant
               do:
@@ -1761,24 +1809,24 @@ main:
                       grant: $write-grant
                 - $match: $opened-write
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok:
                             $bind: out
                         do:
                           - $fs.writable.write-string: $out
                             s: "from vibra fs"
                           - $fs.closeable.close: $out
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: err
                         do: []
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: write-denied
               do: []
       - $match: $args.input.fs-read
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: read-grant
               do:
@@ -1788,7 +1836,7 @@ main:
                       grant: $read-grant
                 - $match: $opened-read
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok:
                             $bind: input
                         do:
@@ -1796,11 +1844,11 @@ main:
                               text:
                                 $fs.readable.read-string: $input
                           - $fs.closeable.close: $input
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: err2
                         do: []
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: read-denied
               do: []
@@ -2326,7 +2374,7 @@ main:
             $fs.path.new: "{path}"
       - $match: $args.input.fs-read
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: grant
               do:
@@ -2334,7 +2382,7 @@ main:
                     opened:
                       $fs.open-read: $p
                       grant: $grant
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: reason
               do: []
@@ -2383,7 +2431,7 @@ main:
             $fs.path.new: "{path}"
       - $match: $args.input.fs-read
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: grant
               do:
@@ -2391,7 +2439,7 @@ main:
                     opened:
                       $fs.open-read: $p
                       grant: $grant
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: reason
               do: []
@@ -2456,7 +2504,7 @@ main:
             $fs.path.new: "{denied_file}"
       - $match: $args.input.fs-read
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: read-grant
               do:
@@ -2466,7 +2514,7 @@ main:
                       p: $allow-root
                 - $match: $narrowed
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok:
                             $bind: narrow-grant
                         do:
@@ -2474,11 +2522,11 @@ main:
                               opened:
                                 $fs.open-read: $denied-file
                                 grant: $narrow-grant
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: narrow-err
                         do: []
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: read-denied
               do: []
@@ -2534,11 +2582,11 @@ main:
   do:
       - $match: $args.input.stdin-read
         when:
-            - pattern:
+            - case:
                 $sec.grant-status.denied:
                   $sec.denial-reason.not-granted: null
               do: []
-            - pattern:
+            - case:
                 $sec.grant-status.granted:
                   $bind: stdin-grant
               do: []
@@ -2585,7 +2633,7 @@ main:
             $fs.path.new: "{file}"
       - $match: $args.input.fs-write
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: write-grant
               do:
@@ -2595,10 +2643,10 @@ main:
                       grant: $write-grant
                 - $match: $made
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok: null
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: make-err
                         do: []
@@ -2609,14 +2657,14 @@ main:
                       grant: $write-grant
                 - $match: $written
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok: null
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: write-err
                         do: []
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: write-denied
               do: []
@@ -2677,7 +2725,7 @@ main:
             $fs.path.new: "{file}"
       - $match: $args.input.fs-write
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: write-grant
               do:
@@ -2687,7 +2735,7 @@ main:
                       p: $narrow-root
                 - $match: $narrowed
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok:
                             $bind: narrow-grant
                         do:
@@ -2697,10 +2745,10 @@ main:
                                 grant: $narrow-grant
                           - $match: $made
                             when:
-                                - pattern:
+                                - case:
                                     $result.result.ok: null
                                   do: []
-                                - pattern:
+                                - case:
                                     $result.result.err:
                                       $bind: make-err
                                   do: []
@@ -2711,18 +2759,18 @@ main:
                                 grant: $narrow-grant
                           - $match: $written
                             when:
-                                - pattern:
+                                - case:
                                     $result.result.ok: null
                                   do: []
-                                - pattern:
+                                - case:
                                     $result.result.err:
                                       $bind: write-err
                                   do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: narrow-err
                         do: []
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: write-denied
               do: []
@@ -2773,7 +2821,7 @@ main:
   do:
       - $match: $args.input.env-write
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: env-grant
               do:
@@ -2784,14 +2832,14 @@ main:
                       grant: $env-grant
                 - $match: $set-result
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok: null
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $env.env-error.invalid-name: null
                         do: []
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: env-denied
               do: []
@@ -3221,7 +3269,7 @@ main:
             $fs.path.new: "{data}"
       - $match: $args.input.fs-write
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: write-grant
               do:
@@ -3231,10 +3279,10 @@ main:
                       grant: $write-grant
                 - $match: $made
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok: null
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: made-err
                         do: []
@@ -3245,10 +3293,10 @@ main:
                       grant: $write-grant
                 - $match: $written
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok: null
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: written-err
                         do: []
@@ -3259,16 +3307,16 @@ main:
                       grant: $write-grant
                 - $match: $appended
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok: null
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: appended-err
                         do: []
                 - $match: $args.input.fs-read
                   when:
-                      - pattern:
+                      - case:
                           $security.grant-status.granted:
                             $bind: read-grant
                         do:
@@ -3278,11 +3326,11 @@ main:
                                 grant: $read-grant
                           - $match: $read
                             when:
-                                - pattern:
+                                - case:
                                     $result.result.ok:
                                       $bind: read-ok
                                   do: []
-                                - pattern:
+                                - case:
                                     $result.result.err:
                                       $bind: read-err
                                   do: []
@@ -3292,11 +3340,11 @@ main:
                                 grant: $read-grant
                           - $match: $stat
                             when:
-                                - pattern:
+                                - case:
                                     $result.result.ok:
                                       $bind: stat-ok
                                   do: []
-                                - pattern:
+                                - case:
                                     $result.result.err:
                                       $bind: stat-err
                                   do: []
@@ -3306,11 +3354,11 @@ main:
                                 grant: $read-grant
                           - $match: $canon
                             when:
-                                - pattern:
+                                - case:
                                     $result.result.ok:
                                       $bind: canon-ok
                                   do: []
-                                - pattern:
+                                - case:
                                     $result.result.err:
                                       $bind: canon-err
                                   do: []
@@ -3320,15 +3368,15 @@ main:
                                 grant: $read-grant
                           - $match: $entries
                             when:
-                                - pattern:
+                                - case:
                                     $result.result.ok:
                                       $bind: entries-ok
                                   do: []
-                                - pattern:
+                                - case:
                                     $result.result.err:
                                       $bind: entries-err
                                   do: []
-                      - pattern:
+                      - case:
                           $security.grant-status.denied:
                             $bind: read-denied
                         do: []
@@ -3338,10 +3386,10 @@ main:
                       grant: $write-grant
                 - $match: $removed-file
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok: null
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: removed-file-err
                         do: []
@@ -3351,14 +3399,14 @@ main:
                       grant: $write-grant
                 - $match: $removed-dir
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok: null
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: removed-dir-err
                         do: []
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: write-denied
               do: []
@@ -3412,7 +3460,7 @@ main:
             $fs.path.new: "{missing}"
       - $match: $args.input.fs-read
         when:
-            - pattern:
+            - case:
                 $security.grant-status.granted:
                   $bind: read-grant
               do:
@@ -3422,15 +3470,15 @@ main:
                       grant: $read-grant
                 - $match: $read
                   when:
-                      - pattern:
+                      - case:
                           $result.result.ok:
                             $bind: read-ok
                         do: []
-                      - pattern:
+                      - case:
                           $result.result.err:
                             $bind: read-err
                         do: []
-            - pattern:
+            - case:
                 $security.grant-status.denied:
                   $bind: read-denied
               do: []
@@ -3654,12 +3702,12 @@ main:
             $m.result.ok: 99
       - $match: $r-ok
         when:
-            - pattern:
+            - case:
                 $m.result.ok:
                   $bind: x
               do:
                 - $io.println: "ok"
-            - pattern:
+            - case:
                 $m.result.err:
                   $bind: y
               do:
@@ -3669,12 +3717,12 @@ main:
             $m.result.err: "fail"
       - $match: $r-err
         when:
-            - pattern:
+            - case:
                 $m.result.ok:
                   $bind: x2
               do:
                 - $io.println: "no"
-            - pattern:
+            - case:
                 $m.result.err:
                   $bind: y2
               do:
@@ -4055,7 +4103,7 @@ main:
             s: "{path}"
     - $match: $args.grants.fs-read
       when:
-        - pattern:
+        - case:
             $security.grant-status.granted:
               $bind: read-grant
           do:
@@ -4066,9 +4114,9 @@ main:
                     grant: $read-grant
             - $match: $exists
               when:
-                - pattern: true
+                - case: true
                   do: []
-        - pattern:
+        - case:
             $security.grant-status.denied:
               $bind: denied
           do: []

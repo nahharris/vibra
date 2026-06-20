@@ -1,97 +1,92 @@
-# Algebraic data types: enum constructors, void variants, unions, and matching.
 test:
   $import: ../stdlib/test.vibra
-
 signal:
   $enum:
     stop: $void
     go: $int64
-
 opt:
   $enum:
     none: $void
     some: $str
-
 construct-and-match-payload:
   $test:
     do:
-      - $let:
-          s:
-            $signal.go: 3
-      - $match: $s
-        when:
-          - pattern:
-              $signal.go:
-                $bind: speed
+    - $let:
+        s:
+          $signal.go: 3
+    - $match: $s
+      when:
+      - case:
+          $signal.go:
+            $bind: speed
+        do:
+        - $match: $speed
+          when:
+          - case: 3
             do:
-              - $match: $speed
-                when:
-                  - pattern: 3
-                    do:
-                      - $test.assert: true
-                  - pattern: {$wildcard: null}
-                    do:
-                      - $test.fail: "wrong payload"
-          - pattern:
-              $signal.stop: null
+            - $test.assert: true
+          - case:
+              $wildcard: null
             do:
-              - $test.fail: "expected go"
-
+            - $test.fail: wrong payload
+      - case:
+          $signal.stop: null
+        do:
+        - $test.fail: expected go
 void-variant-constructor:
   $test:
     do:
-      - $let:
-          s: $signal.stop
-      - $match: $s
-        when:
-          - pattern:
-              $signal.stop: null
-            do:
-              - $test.assert: true
-          - pattern:
-              $signal.go:
-                $bind: _speed
-            do:
-              - $test.fail: "expected stop"
-
+    - $let:
+        s: $signal.stop
+    - $match: $s
+      when:
+      - case:
+          $signal.stop: null
+        do:
+        - $test.assert: true
+      - case:
+          $signal.go:
+            $bind: _speed
+        do:
+        - $test.fail: expected stop
 option-like-some:
   $test:
     do:
-      - $let:
-          v:
-            $opt.some: "hi"
-      - $match: $v
-        when:
-          - pattern:
-              $opt.some:
-                $bind: text
+    - $let:
+        v:
+          $opt.some: hi
+    - $match: $v
+      when:
+      - case:
+          $opt.some:
+            $bind: text
+        do:
+        - $match: $text
+          when:
+          - case: hi
             do:
-              - $match: $text
-                when:
-                  - pattern: "hi"
-                    do:
-                      - $test.assert: true
-                  - pattern: {$wildcard: null}
-                    do:
-                      - $test.fail: "wrong text"
-          - pattern:
-              $opt.none: null
+            - $test.assert: true
+          - case:
+              $wildcard: null
             do:
-              - $test.fail: "expected some"
-
+            - $test.fail: wrong text
+      - case:
+          $opt.none: null
+        do:
+        - $test.fail: expected some
 option-like-none:
   $test:
     do:
-      - $let:
-          v: $opt.none
-      - $match: $v
-        when:
-          - pattern:
-              $opt.some:
-                $bind: _text
-            do:
-              - $test.fail: "expected none"
-          - pattern:
-              $opt.none: null
-            do:
-              - $test.assert: true
+    - $let:
+        v: $opt.none
+    - $match: $v
+      when:
+      - case:
+          $opt.some:
+            $bind: _text
+        do:
+        - $test.fail: expected none
+      - case:
+          $opt.none: null
+        do:
+        - $test.assert: true

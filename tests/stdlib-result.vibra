@@ -1,57 +1,56 @@
-# stdlib `result` enum: construction and matching of ok / err.
 test:
   $import: ../stdlib/test.vibra
 result:
   $import: ../stdlib/result.vibra
-
 ok-carries-payload:
   $test:
     do:
-      - $let:
-          r:
-            $result.result.ok: 99
-      - $match: $r
-        when:
-          - pattern:
-              $result.result.ok:
-                $bind: v
+    - $let:
+        r:
+          $result.result.ok: 99
+    - $match: $r
+      when:
+      - case:
+          $result.result.ok:
+            $bind: v
+        do:
+        - $match: $v
+          when:
+          - case: 99
             do:
-              - $match: $v
-                when:
-                  - pattern: 99
-                    do:
-                      - $test.assert: true
-                  - pattern: {$wildcard: null}
-                    do:
-                      - $test.fail: "wrong ok payload"
-          - pattern:
-              $result.result.err:
-                $bind: _e
+            - $test.assert: true
+          - case:
+              $wildcard: null
             do:
-              - $test.fail: "expected ok"
-
+            - $test.fail: wrong ok payload
+      - case:
+          $result.result.err:
+            $bind: _e
+        do:
+        - $test.fail: expected ok
 err-carries-payload:
   $test:
     do:
-      - $let:
-          r:
-            $result.result.err: "boom"
-      - $match: $r
-        when:
-          - pattern:
-              $result.result.ok:
-                $bind: _v
+    - $let:
+        r:
+          $result.result.err: boom
+    - $match: $r
+      when:
+      - case:
+          $result.result.ok:
+            $bind: _v
+        do:
+        - $test.fail: expected err
+      - case:
+          $result.result.err:
+            $bind: e
+        do:
+        - $match: $e
+          when:
+          - case: boom
             do:
-              - $test.fail: "expected err"
-          - pattern:
-              $result.result.err:
-                $bind: e
+            - $test.assert: true
+          - case:
+              $wildcard: null
             do:
-              - $match: $e
-                when:
-                  - pattern: "boom"
-                    do:
-                      - $test.assert: true
-                  - pattern: {$wildcard: null}
-                    do:
-                      - $test.fail: "wrong err payload"
+            - $test.fail: wrong err payload
