@@ -273,6 +273,7 @@ fn load_module_parts(module_path: &Path) -> Result<Value> {
     let mut merged = Mapping::new();
     for part in module_part_paths(module_path)? {
         let text = fs::read_to_string(&part).with_context(|| format!("read {}", part.display()))?;
+        crate::yaml_subset::validate_yaml_subset_or_err(&text, &part)?;
         let v: Value = serde_yaml::from_str(&text)
             .with_context(|| format!("YAML parse {}", part.display()))?;
         let map = v

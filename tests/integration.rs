@@ -7560,6 +7560,28 @@ fn vibra_lint_reports_parse_and_compile_errors_as_structured_yaml() {
 }
 
 #[test]
+fn vibra_lint_rejects_yaml_anchors_and_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    let anchored = dir.path().join("anchored.vibra");
+    std::fs::write(&anchored, "a: &x 1\nb: *x\n").unwrap();
+
+    let output = vibra_cmd()
+        .args(["lint", &path_str(&anchored), "--category", "syntax"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "anchors/aliases should fail lint");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("code: E-YAML-001"),
+        "expected E-YAML-001 for anchors/aliases: {stdout}"
+    );
+    assert!(
+        stdout.contains("anchor") || stdout.contains("alias"),
+        "expected anchor/alias message: {stdout}"
+    );
+}
+
+#[test]
 fn vibra_lint_reports_hidden_transitive_import_alias() {
     let dir = tempfile::tempdir().unwrap();
     let leaf = dir.path().join("leaf.vibra");
