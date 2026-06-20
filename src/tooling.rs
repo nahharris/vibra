@@ -212,7 +212,14 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let suppressions = Suppressions::parse(&source);
         let mut file_diagnostics = Vec::new();
-        let syntax_ok = if active_categories.contains(&Category::Syntax) {
+        let mut yaml_subset_ok = true;
+        if active_categories.contains(&Category::Syntax) {
+            for violation in crate::yaml_subset::validate_yaml_subset(&source) {
+                yaml_subset_ok = false;
+                file_diagnostics.push(yaml_subset_diagnostic(path, &violation));
+            }
+        }
+        let syntax_ok = if active_categories.contains(&Category::Syntax) && yaml_subset_ok {
             match serde_yaml::from_str::<serde_yaml::Value>(&source) {
                 Ok(_) => true,
                 Err(err) => {
@@ -220,8 +227,10 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
                     false
                 }
             }
-        } else {
+        } else if yaml_subset_ok {
             serde_yaml::from_str::<serde_yaml::Value>(&source).is_ok()
+        } else {
+            false
         };
 
         if syntax_ok && active_categories.contains(&Category::Style) {
@@ -431,6 +440,18 @@ fn yaml_diagnostic(path: &Path, err: &serde_yaml::Error) -> Diagnostic {
         message: err.to_string(),
         severity: Severity::Error,
         span: point_span(path, line, column),
+        related: None,
+        fix: None,
+        category: Category::Syntax,
+    }
+}
+
+fn yaml_subset_diagnostic(path: &Path, violation: &crate::yaml_subset::YamlSubsetViolation) -> Diagnostic {
+    Diagnostic {
+        code: violation.code.to_string(),
+        message: violation.message.clone(),
+        severity: Severity::Error,
+        span: point_span(path, violation.line, violation.column),
         related: None,
         fix: None,
         category: Category::Syntax,
