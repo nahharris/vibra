@@ -8157,3 +8157,37 @@ fn env_read_grant_is_case_sensitive_on_unix() {
         String::from_utf8_lossy(&output.stdout)
     );
 }
+
+// --- Issue #51: stdin reads require --allow-stdin ---
+
+#[test]
+fn forged_stdin_read_file_handle_requires_allow_stdin() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let output = vibra_cmd()
+        .args([
+            "exec",
+            &format!(
+                "{{$fs.readable.read-string: {{$cast: 0, into: $fs.read-file}}}}"
+            ),
+            "--import",
+            &format!("fs={}", path_str(&fs)),
+            "--import",
+            &format!("result={}", path_str(&result)),
+            "--format",
+            "yaml",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "forged stdin handle must fail without --allow-stdin: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("allow-stdin"),
+        "expected allow-stdin denial, got: {stderr}"
+    );
+}

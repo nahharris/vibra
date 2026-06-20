@@ -1269,6 +1269,14 @@ fn scope_matches(grant_suffix: &str, scope: &str, requested: &str) -> bool {
     }
 }
 
+fn ensure_stdin_allowed(config: &RunConfig) -> Result<()> {
+    if config.allow_stdin {
+        Ok(())
+    } else {
+        bail!("stdin read requires --allow-stdin")
+    }
+}
+
 fn env_get(name: &str) -> std::io::Result<String> {
     std::env::var(name).map_err(|err| {
         let kind = match err {
@@ -1429,6 +1437,7 @@ fn exec_call(
                     Ok(RuntimeValue::Void)
                 }
                 "read-line" => {
+                    ensure_stdin_allowed(config)?;
                     let fd = eval_i64(&call.args[0], env, program, files, config)?;
                     if fd != 0 {
                         bail!("read-line currently supports stdin fd 0 only");
@@ -1446,6 +1455,7 @@ fn exec_call(
                     Ok(RuntimeValue::Str(line))
                 }
                 "read-raw" => {
+                    ensure_stdin_allowed(config)?;
                     let fd = eval_i64(&call.args[0], env, program, files, config)?;
                     let len = eval_i64(&call.args[1], env, program, files, config)?;
                     if fd != 0 {
@@ -1693,6 +1703,7 @@ fn exec_call(
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let value = match files.get_mut(handle)? {
                         FileHandle::Stdin => {
+                            ensure_stdin_allowed(config)?;
                             let mut line = String::new();
                             std::io::stdin().read_line(&mut line).map(|_| {
                                 if line.ends_with('\n') {
@@ -1719,6 +1730,7 @@ fn exec_call(
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let value = match files.get_mut(handle)? {
                         FileHandle::Stdin => {
+                            ensure_stdin_allowed(config)?;
                             let mut s = String::new();
                             std::io::stdin().read_to_string(&mut s).map(|_| s)
                         }
