@@ -1095,6 +1095,34 @@ fn fs_result<T>(
     }
 }
 
+/// Validate a program-controlled allocation length against `RunConfig`.
+///
+/// Returns the length as a `usize` when it is non-negative and within
+/// [`RunConfig::max_alloc_len`]. On rejection returns a stable tag
+/// (`"invalid-length"` for negatives, `"too-large"` for over-cap) plus a
+/// human-readable message, so callers can surface a consistent error.
+pub fn checked_alloc_len(
+    len: i64,
+    config: &RunConfig,
+) -> std::result::Result<usize, (&'static str, String)> {
+    let len = usize::try_from(len).map_err(|_| {
+        (
+            "invalid-length",
+            format!("length {len} must not be negative"),
+        )
+    })?;
+    if len > config.max_alloc_len {
+        return Err((
+            "too-large",
+            format!(
+                "length {len} exceeds max-alloc-len of {} bytes",
+                config.max_alloc_len
+            ),
+        ));
+    }
+    Ok(len)
+}
+
 fn resolve_granted_path(
     path: &str,
     grant: &CapabilityGrant,
@@ -1393,7 +1421,9 @@ fn exec_call(
                     if fd != 0 {
                         bail!("read-raw currently supports stdin fd 0 only");
                     }
-                    let mut buf = vec![0u8; usize::try_from(len).context("len < 0")?];
+                    let len = checked_alloc_len(len, config)
+                        .map_err(|(tag, msg)| anyhow::anyhow!("read-raw {tag}: {msg}"))?;
+                    let mut buf = vec![0u8; len];
                     let n = std::io::stdin().read(&mut buf).context("stdin read")?;
                     Ok(RuntimeValue::Str(
                         String::from_utf8_lossy(&buf[..n]).to_string(),
@@ -1575,7 +1605,8 @@ fn exec_call(
                     let len = eval_i64(&call.args[0], env, program, files, config)?;
                     let grant = call_grant_capability(call, "random", env, program, files, config)?;
                     ensure_scope(&grant, "random-grant", "*")?;
-                    let len = usize::try_from(len).context("random len < 0")?;
+                    let len = checked_alloc_len(len, config)
+                        .map_err(|(tag, msg)| anyhow::anyhow!("random.bytes {tag}: {msg}"))?;
                     Ok(RuntimeValue::Array(vec![RuntimeValue::Int(0); len]))
                 }
                 "info" if sig.alias.ends_with("sys") => {

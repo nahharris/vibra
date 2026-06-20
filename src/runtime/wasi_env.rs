@@ -30,6 +30,10 @@ pub struct RunConfig {
     pub allow_random: bool,
     pub allow_system_info: bool,
     pub approved_policy: Option<PolicyType>,
+    /// Maximum byte length the runtime will allocate for a single
+    /// program-controlled buffer (e.g. `read-raw`, `random.bytes`). Guards
+    /// against user-controlled out-of-memory via unbounded length arguments.
+    pub max_alloc_len: usize,
 }
 
 impl Default for RunConfig {
@@ -50,6 +54,7 @@ impl Default for RunConfig {
             allow_random: false,
             allow_system_info: false,
             approved_policy: None,
+            max_alloc_len: 64 * 1024 * 1024,
         }
     }
 }

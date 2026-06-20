@@ -7865,3 +7865,49 @@ main:
     )
     .expect("guest should match fs-error.io rather than panic on broken pipe");
 }
+
+// --- Issue #47: cap user-controlled allocations (read-raw / random.bytes) ---
+
+#[test]
+fn checked_alloc_len_rejects_negative_length() {
+    let config = vibra::runtime::RunConfig::default();
+    let (tag, msg) = vibra::execute::checked_alloc_len(-1, &config).unwrap_err();
+    assert_eq!(tag, "invalid-length");
+    assert!(
+        msg.contains("must not be negative"),
+        "unexpected message: {msg}"
+    );
+}
+
+#[test]
+fn checked_alloc_len_rejects_over_limit_length() {
+    let config = vibra::runtime::RunConfig {
+        max_alloc_len: 8,
+        ..vibra::runtime::RunConfig::default()
+    };
+    let (tag, msg) = vibra::execute::checked_alloc_len(9, &config).unwrap_err();
+    assert_eq!(tag, "too-large");
+    assert!(
+        msg.contains("exceeds max-alloc-len"),
+        "unexpected message: {msg}"
+    );
+}
+
+#[test]
+fn checked_alloc_len_accepts_in_bounds_length() {
+    let config = vibra::runtime::RunConfig {
+        max_alloc_len: 8,
+        ..vibra::runtime::RunConfig::default()
+    };
+    assert_eq!(vibra::execute::checked_alloc_len(0, &config).unwrap(), 0);
+    assert_eq!(vibra::execute::checked_alloc_len(8, &config).unwrap(), 8);
+}
+
+// NOTE: `read-raw` and `random.bytes` are not reachable from surface `.vibra`
+// in the current codebase: their handlers gate on the legacy `=grants` grant
+// token, which can only be seeded by a `main` grants block — and `main` grants
+// blocks were removed in favor of `$policy` (see
+// `main_function_grants_are_rejected_with_policy_migration_hint`). The shared
+// allocation guard `checked_alloc_len` (exercised above) is the
+// security-critical path both handlers funnel through, so it is covered at the
+// unit level here.
