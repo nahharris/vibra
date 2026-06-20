@@ -45,5 +45,17 @@ println-returns-ok:
 eprintln-statement-runs:
   $test:
     do:
-      - $io.eprintln: "stderr from vibra test"
-      - $test.assert: true
+      - $let:
+          r:
+            $io.eprintln: "stderr from vibra test"
+      - $match: $r
+        when:
+          - pattern:
+              $result.result.ok: null
+            do:
+              - $test.assert: true
+          - pattern:
+              $result.result.err:
+                $bind: _e
+            do:
+              - $test.fail: "eprintln returned err"
