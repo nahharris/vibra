@@ -1246,11 +1246,27 @@ fn ensure_scope(grant: &CapabilityGrant, required_suffix: &str, requested: &str)
     if grant
         .scopes
         .iter()
-        .any(|scope| scope == "*" || scope.eq_ignore_ascii_case(requested))
+        .any(|scope| scope_matches(required_suffix, scope, requested))
     {
         return Ok(());
     }
     bail!("requested scope `{requested}` is outside configured grants")
+}
+
+fn scope_matches(grant_suffix: &str, scope: &str, requested: &str) -> bool {
+    if scope == "*" {
+        return true;
+    }
+    match grant_suffix {
+        "env-read-grant" | "env-write-grant" => {
+            if cfg!(windows) {
+                scope.eq_ignore_ascii_case(requested)
+            } else {
+                scope == requested
+            }
+        }
+        _ => scope.eq_ignore_ascii_case(requested),
+    }
 }
 
 fn env_get(name: &str) -> std::io::Result<String> {
