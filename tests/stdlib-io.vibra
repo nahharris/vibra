@@ -9,9 +9,20 @@ result:
 print-statement-runs:
   $test:
     do:
-      - $io.print: "stdout from vibra test"
-      - $io.println: ""
-      - $test.assert: true
+      - $let:
+          r:
+            $io.print: "stdout from vibra test"
+      - $match: $r
+        when:
+          - pattern:
+              $result.result.ok: null
+            do:
+              - $test.assert: true
+          - pattern:
+              $result.result.err:
+                $bind: _e
+            do:
+              - $test.fail: "print returned err"
 
 println-returns-ok:
   $test:
