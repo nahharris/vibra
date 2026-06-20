@@ -1,0 +1,92 @@
+# `$match` patterns: literals, wildcard, bind, and nested matches.
+test:
+  $import: ../stdlib/test.vibra
+
+literal-int-arm:
+  $test:
+    do:
+      - $let:
+          n: 3
+      - $match: $n
+        when:
+          - pattern: 1
+            do:
+              - $test.fail: "matched 1"
+          - pattern: 3
+            do:
+              - $test.assert: true
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "fell through to wildcard"
+
+literal-string-arm:
+  $test:
+    do:
+      - $let:
+          s: "b"
+      - $match: $s
+        when:
+          - pattern: "a"
+            do:
+              - $test.fail: "matched a"
+          - pattern: "b"
+            do:
+              - $test.assert: true
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "fell through"
+
+bool-arm:
+  $test:
+    do:
+      - $let:
+          flag: false
+      - $match: $flag
+        when:
+          - pattern: true
+            do:
+              - $test.fail: "matched true"
+          - pattern: false
+            do:
+              - $test.assert: true
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "fell through bool match"
+
+wildcard-catch-all:
+  $test:
+    do:
+      - $let:
+          n: 99
+      - $match: $n
+        when:
+          - pattern: 0
+            do:
+              - $test.fail: "matched 0"
+          - pattern: {$wildcard: null}
+            do:
+              - $test.assert: true
+
+bind-captures-value:
+  $test:
+    do:
+      - $let:
+          n: 8
+      - $match: $n
+        when:
+          - pattern: 7
+            do:
+              - $test.fail: "matched 7"
+          - pattern: {$bind: captured}
+            do:
+              - $match: $captured
+                when:
+                  - pattern: 8
+                    do:
+                      - $test.assert: true
+                  - pattern: {$wildcard: null}
+                    do:
+                      - $test.fail: "wrong captured value"
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "fell through to wildcard"

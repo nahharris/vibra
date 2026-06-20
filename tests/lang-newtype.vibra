@@ -1,0 +1,63 @@
+# Nominal `$newtype` wrappers requiring explicit `$cast` to cross the boundary.
+test:
+  $import: ../stdlib/test.vibra
+
+meters:
+  $newtype: $int64
+
+label:
+  $newtype: $str
+
+cast-into-newtype:
+  $test:
+    do:
+      - $let:
+          d:
+            $cast: 10
+            into: $meters
+      - $match: $d
+        when:
+          - pattern:
+              $newtype:
+                type: $meters
+                inner:
+                  $bind: raw
+            do:
+              - $match: $raw
+                when:
+                  - pattern: 10
+                    do:
+                      - $test.assert: true
+                  - pattern: {$wildcard: null}
+                    do:
+                      - $test.fail: "wrong inner value"
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "expected meters newtype"
+
+cast-string-newtype:
+  $test:
+    do:
+      - $let:
+          l:
+            $cast: "north"
+            into: $label
+      - $match: $l
+        when:
+          - pattern:
+              $newtype:
+                type: $label
+                inner:
+                  $bind: raw
+            do:
+              - $match: $raw
+                when:
+                  - pattern: "north"
+                    do:
+                      - $test.assert: true
+                  - pattern: {$wildcard: null}
+                    do:
+                      - $test.fail: "wrong inner string"
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "expected label newtype"

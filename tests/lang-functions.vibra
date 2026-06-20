@@ -1,0 +1,68 @@
+# User functions: zero-arg, single-arg, multi-arg, and nested calls.
+test:
+  $import: ../stdlib/test.vibra
+
+ready:
+  $function: $void
+  return: $bool
+  do:
+    - $return: true
+
+echo-bool:
+  $function:
+    subject: $bool
+  return: $bool
+  do:
+    - $return: $args.subject
+
+second:
+  $function:
+    a: $bool
+  args:
+    b: $bool
+  return: $bool
+  do:
+    - $return: $args.b
+
+check:
+  $function: $void
+  return: $bool
+  do:
+    - $let:
+        r:
+          $ready: null
+    - $return: $r
+
+zero-arg-call:
+  $test:
+    do:
+      - $let:
+          v:
+            $ready: null
+      - $test.assert: $v
+
+single-arg-call:
+  $test:
+    do:
+      - $let:
+          v:
+            $echo-bool: true
+      - $test.assert: $v
+
+multi-arg-call:
+  $test:
+    do:
+      - $let:
+          v:
+            $second:
+              a: false
+              b: true
+      - $test.assert: $v
+
+nested-call:
+  $test:
+    do:
+      - $let:
+          v:
+            $check: null
+      - $test.assert: $v

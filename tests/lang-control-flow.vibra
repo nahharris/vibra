@@ -1,0 +1,53 @@
+# `$if` / `$while` control flow.
+test:
+  $import: ../stdlib/test.vibra
+
+if-true-takes-then:
+  $test:
+    do:
+      - $if: true
+        then:
+          - $test.assert: true
+        else:
+          - $test.fail: "then branch was skipped"
+
+if-false-takes-else:
+  $test:
+    do:
+      - $if: false
+        then:
+          - $test.fail: "then branch ran on false"
+        else:
+          - $test.assert: true
+
+if-on-bound-condition:
+  $test:
+    do:
+      - $let:
+          flag: true
+      - $if: $flag
+        then:
+          - $test.assert: true
+        else:
+          - $test.fail: "bound true condition took else"
+
+nested-if:
+  $test:
+    do:
+      - $if: true
+        then:
+          - $if: false
+            then:
+              - $test.fail: "inner false took then"
+            else:
+              - $test.assert: true
+        else:
+          - $test.fail: "outer true took else"
+
+while-false-never-runs:
+  $test:
+    do:
+      - $while: false
+        do:
+          - $test.fail: "while body ran on false condition"
+      - $test.assert: true

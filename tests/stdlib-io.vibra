@@ -1,0 +1,61 @@
+# stdlib `io`: stdout/stderr writes (no grant required) return an ok result.
+test:
+  $import: ../stdlib/test.vibra
+io:
+  $import: ../stdlib/io.vibra
+result:
+  $import: ../stdlib/result.vibra
+
+print-statement-runs:
+  $test:
+    do:
+      - $let:
+          r:
+            $io.print: "stdout from vibra test"
+      - $match: $r
+        when:
+          - pattern:
+              $result.result.ok: null
+            do:
+              - $test.assert: true
+          - pattern:
+              $result.result.err:
+                $bind: _e
+            do:
+              - $test.fail: "print returned err"
+
+println-returns-ok:
+  $test:
+    do:
+      - $let:
+          r:
+            $io.println: "line from vibra test"
+      - $match: $r
+        when:
+          - pattern:
+              $result.result.ok: null
+            do:
+              - $test.assert: true
+          - pattern:
+              $result.result.err:
+                $bind: _e
+            do:
+              - $test.fail: "println returned err"
+
+eprintln-statement-runs:
+  $test:
+    do:
+      - $let:
+          r:
+            $io.eprintln: "stderr from vibra test"
+      - $match: $r
+        when:
+          - pattern:
+              $result.result.ok: null
+            do:
+              - $test.assert: true
+          - pattern:
+              $result.result.err:
+                $bind: _e
+            do:
+              - $test.fail: "eprintln returned err"

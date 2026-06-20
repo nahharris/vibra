@@ -1,0 +1,74 @@
+# Primitive literals, `$let` bindings, and binding scope.
+test:
+  $import: ../stdlib/test.vibra
+
+bool-literal:
+  $test:
+    do:
+      - $test.assert: true
+
+bound-bool:
+  $test:
+    do:
+      - $let:
+          flag: true
+      - $test.assert: $flag
+
+int-literal:
+  $test:
+    do:
+      - $let:
+          n: 7
+      - $match: $n
+        when:
+          - pattern: 7
+            do:
+              - $test.assert: true
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "expected 7"
+
+float-literal:
+  $test:
+    do:
+      - $let:
+          x: 1.5
+      - $match: $x
+        when:
+          - pattern: 1.5
+            do:
+              - $test.assert: true
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "expected 1.5"
+
+string-literal:
+  $test:
+    do:
+      - $let:
+          s: "hello"
+      - $match: $s
+        when:
+          - pattern: "hello"
+            do:
+              - $test.assert: true
+          - pattern: {$wildcard: null}
+            do:
+              - $test.fail: "expected hello"
+
+match-arm-binding-does-not-leak:
+  $test:
+    do:
+      - $let:
+          outer: true
+      - $let:
+          subject: 1
+      - $match: $subject
+        when:
+          - pattern: 1
+            do:
+              - $let:
+                  outer: false
+          - pattern: {$wildcard: null}
+            do: []
+      - $test.assert: $outer
