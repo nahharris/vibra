@@ -13,67 +13,67 @@ main:
     fs-read: $security.grant.optional
   return: $void
   do:
+  - $let:
+      path:
+        $fs.path.new: tmp/hello.txt
+  - $if:
+      $security.granted: $grants.fs-write
+    then:
     - $let:
-        path:
-          $fs.path.new: "tmp/hello.txt"
-    - $if:
-        $security.granted: $grants.fs-write
-      then:
+        opened-write:
+          $fs.open-write: $path
+          =grants:
+          - $grants.fs-write
+    - $match: $opened-write
+      when:
+      - case:
+          $result.result.ok:
+            $bind: out
+        do:
+        - $fs.writable.write-string: $out
+          s: from vibra fs
+        - $fs.closeable.close: $out
+      - case:
+          $result.result.err:
+            $bind: write-err
+        do:
+        - $io.eprintln: failed to open file for writing
+    else:
+    - $io.eprintln: write grant denied
+  - $if:
+      $security.granted: $grants.fs-read
+    then:
+    - $let:
+        opened-read:
+          $fs.open-read: $path
+          =grants:
+          - $grants.fs-read
+    - $match: $opened-read
+      when:
+      - case:
+          $result.result.ok:
+            $bind: input
+        do:
         - $let:
-            opened-write:
-              $fs.open-write: $path
-              =grants:
-                - $grants.fs-write
-        - $match: $opened-write
+            text-result:
+              $fs.readable.read-string: $input
+        - $match: $text-result
           when:
-            - pattern:
-                $result.result.ok:
-                  $bind: out
-              do:
-                - $fs.writable.write-string: $out
-                  s: "from vibra fs"
-                - $fs.closeable.close: $out
-            - pattern:
-                $result.result.err:
-                  $bind: write-err
-              do:
-                - $io.eprintln: "failed to open file for writing"
-      else:
-        - $io.eprintln: "write grant denied"
-    - $if:
-        $security.granted: $grants.fs-read
-      then:
-        - $let:
-            opened-read:
-              $fs.open-read: $path
-              =grants:
-                - $grants.fs-read
-        - $match: $opened-read
-          when:
-            - pattern:
-                $result.result.ok:
-                  $bind: input
-              do:
-                - $let:
-                    text-result:
-                      $fs.readable.read-string: $input
-                - $match: $text-result
-                  when:
-                    - pattern:
-                        $result.result.ok:
-                          $bind: text
-                      do:
-                        - $io.println: $text
-                    - pattern:
-                        $result.result.err:
-                          $bind: read-err
-                      do:
-                        - $io.eprintln: "failed to read file"
-                - $fs.closeable.close: $input
-            - pattern:
-                $result.result.err:
-                  $bind: open-err
-              do:
-                - $io.eprintln: "failed to open file for reading"
-      else:
-        - $io.eprintln: "read grant denied"
+          - case:
+              $result.result.ok:
+                $bind: text
+            do:
+            - $io.println: $text
+          - case:
+              $result.result.err:
+                $bind: read-err
+            do:
+            - $io.eprintln: failed to read file
+        - $fs.closeable.close: $input
+      - case:
+          $result.result.err:
+            $bind: open-err
+        do:
+        - $io.eprintln: failed to open file for reading
+    else:
+    - $io.eprintln: read grant denied

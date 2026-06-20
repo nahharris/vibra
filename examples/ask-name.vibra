@@ -10,26 +10,26 @@ main:
     stdin-read: $security.grant.optional
   return: $void
   do:
-    - $io.print: "What is your name? "
-    - $if:
-        $security.granted: $grants.stdin-read
-      then:
-        - $let:
-            name-result:
-              $io.readln: null
-              =grants:
-                - $grants.stdin-read
-        - $match: $name-result
-          when:
-            - pattern:
-                $result.result.ok:
-                  $bind: name
-              do:
-                - $io.println: $name
-            - pattern:
-                $result.result.err:
-                  $bind: err
-              do:
-                - $io.eprintln: "failed to read stdin"
-      else:
-        - $io.eprintln: "stdin grant denied"
+  - $io.print: 'What is your name? '
+  - $if:
+      $security.granted: $grants.stdin-read
+    then:
+    - $let:
+        name-result:
+          $io.readln: null
+          =grants:
+          - $grants.stdin-read
+    - $match: $name-result
+      when:
+      - case:
+          $result.result.ok:
+            $bind: name
+        do:
+        - $io.println: $name
+      - case:
+          $result.result.err:
+            $bind: err
+        do:
+        - $io.eprintln: failed to read stdin
+    else:
+    - $io.eprintln: stdin grant denied

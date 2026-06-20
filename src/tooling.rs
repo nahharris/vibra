@@ -342,9 +342,17 @@ fn rule_summary(code: &str) -> &'static str {
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-COMPILE-001" => "Vibra compile diagnostic",
         "E-ONE-001" => "Function declaration is not canonical labeled shorthand",
+        "E-MUT-001" => "Malformed `$mut` wrapper",
+        "E-SET-001" => "Malformed `$set` statement",
+        "E-SET-002" => "`$set` target is not writable",
+        "E-SET-003" => "`$set` value has the wrong type",
+        "E-REF-001" => "Malformed `$ref` wrapper",
+        "E-REF-002" => "`$ref` target cannot be resolved",
+        "E-REF-003" => "Invalid reference access mode",
         "E-MOD-003" => "Import cycle detected",
         "E-MOD-004" => "Import alias must be declared directly",
         "E-ONE-007" => "Structured `$match` form is not canonical",
+        "E-ONE-008" => "`$match` arm must use `case` instead of `pattern`",
         "E-ANNO-001" => "Unknown annotation key on a top-level definition",
         "E-ANNO-002" => "Legacy un-prefixed annotation key",
         "E-WHERE-002" => "`=where` bound list element does not resolve to an interface",
@@ -366,7 +374,7 @@ fn rule_summary(code: &str) -> &'static str {
         "E-IMPL-003" => "`=impl` block is missing a required binding",
         "E-IMPL-004" => "`=impl` payload contains an unexpected key",
         "E-IMPL-005" => "`=impl` method signature does not match interface declaration",
-        "E-IMPL-006" => "`=impl` method reference does not resolve",
+        "E-IMPL-006" => "`=impl` method alias does not resolve",
         "E-OPTION-001" => "Noncanonical option representation",
         _ => "Vibra diagnostic",
     }
@@ -469,10 +477,9 @@ fn contains_noncanonical_option(value: &serde_yaml::Value) -> bool {
         serde_yaml::Value::Mapping(map) => {
             if let Some(option) = map.get(serde_yaml::Value::String("$option".to_string())) {
                 if !option.as_mapping().is_some_and(|type_args| {
-                    type_args.keys().all(|key| {
-                        key.as_str()
-                            .is_some_and(|name| !name.starts_with('$'))
-                    })
+                    type_args
+                        .keys()
+                        .all(|key| key.as_str().is_some_and(|name| !name.starts_with('$')))
                 }) {
                     return true;
                 }
@@ -509,6 +516,7 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-ONE-005",
         "E-ONE-006",
         "E-ONE-007",
+        "E-ONE-008",
         "E-MOD-003",
         "E-MOD-004",
         "E-WASM-001",

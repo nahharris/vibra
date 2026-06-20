@@ -33,6 +33,41 @@
       "summary": "$let must bind exactly one name per invocation"
     },
     {
+      "code": "E-MUT-001",
+      "severity": "error",
+      "summary": "Malformed `$mut` expression or type wrapper"
+    },
+    {
+      "code": "E-SET-001",
+      "severity": "error",
+      "summary": "`$set` must contain exactly one existing symbol and value"
+    },
+    {
+      "code": "E-SET-002",
+      "severity": "error",
+      "summary": "`$set` target is unknown, immutable, or a read-only reference"
+    },
+    {
+      "code": "E-SET-003",
+      "severity": "error",
+      "summary": "`$set` value is incompatible with the target pointee type"
+    },
+    {
+      "code": "E-REF-001",
+      "severity": "error",
+      "summary": "Malformed `$ref` expression or type wrapper"
+    },
+    {
+      "code": "E-REF-002",
+      "severity": "error",
+      "summary": "`$ref` target cannot be resolved"
+    },
+    {
+      "code": "E-REF-003",
+      "severity": "error",
+      "summary": "Reference access mode is invalid for its target"
+    },
+    {
       "code": "E-ONE-003",
       "severity": "error",
       "summary": "$function.do must be a block sequence, not nested $do wrapper"
@@ -56,6 +91,11 @@
       "code": "E-ONE-007",
       "severity": "error",
       "summary": "Structured `$match: { target, arms }` form is not canonical; use `$match: <expr>` with sibling `when:` arms"
+    },
+    {
+      "code": "E-ONE-008",
+      "severity": "error",
+      "summary": "`$match` arms must use `case`; legacy `pattern` keys are forbidden"
     },
     {
       "code": "E-MOD-003",
@@ -165,7 +205,7 @@
     {
       "code": "E-IMPL-001",
       "severity": "error",
-      "summary": "Invalid `=impl` annotation (placed on a non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a `$ref` string)"
+      "summary": "Invalid `=impl` annotation (placed on a non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a qualified function alias)"
     },
     {
       "code": "E-IMPL-002",
@@ -190,7 +230,7 @@
     {
       "code": "E-IMPL-006",
       "severity": "error",
-      "summary": "`=impl` method binding is a `$ref` string that does not resolve to a registered function"
+      "summary": "`=impl` method alias does not resolve to a registered function"
     },
     {
       "code": "E-OPTION-001",

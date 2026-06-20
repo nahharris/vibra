@@ -1,48 +1,47 @@
-# stdlib `code`: pure (grant-free) parse / get / set over Vibra documents.
 test:
   $import: ../stdlib/test.vibra
 code:
   $import: ../stdlib/code.vibra
-
 get-scalar-value:
   $test:
     do:
-      - $let:
-          doc:
-            $code.parse: "greeting: hi"
-      - $let:
-          v:
-            $code.get: $doc
-            path: "/greeting"
-      - $match: $v
-        when:
-          - pattern: "hi"
-            do:
-              - $test.assert: true
-          - pattern: {$wildcard: null}
-            do:
-              - $test.fail: "expected hi"
-
+    - $let:
+        doc:
+          $code.parse: 'greeting: hi'
+    - $let:
+        v:
+          $code.get: $doc
+          path: /greeting
+    - $match: $v
+      when:
+      - case: hi
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: expected hi
 set-then-get-roundtrip:
   $test:
     do:
-      - $let:
-          doc:
-            $code.parse: "count: 1"
-      - $let:
-          doc2:
-            $code.set: $doc
-            path: "/count"
-            value: "2"
-      - $let:
-          v:
-            $code.get: $doc2
-            path: "/count"
-      - $match: $v
-        when:
-          - pattern: "2"
-            do:
-              - $test.assert: true
-          - pattern: {$wildcard: null}
-            do:
-              - $test.fail: "set did not update count"
+    - $let:
+        doc:
+          $code.parse: 'count: 1'
+    - $let:
+        doc2:
+          $code.set: $doc
+          path: /count
+          value: '2'
+    - $let:
+        v:
+          $code.get: $doc2
+          path: /count
+    - $match: $v
+      when:
+      - case: '2'
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: set did not update count

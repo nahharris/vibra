@@ -1,0 +1,94 @@
+test:
+  $import: ../stdlib/test.vibra
+increment:
+  $function:
+    value:
+      $mut: $int64
+  return: $int64
+  do:
+  - $set:
+      args.value: 4
+  - $return: $args.value
+mutable-set-and-copy:
+  $test:
+    do:
+    - $let:
+        count:
+          $mut: 0
+    - $let:
+        snapshot: $count
+    - $set:
+        count: 1
+    - $match: $snapshot
+      when:
+      - case: 0
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: mutable read did not copy
+    - $match: $count
+      when:
+      - case: 1
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: set did not update mutable binding
+mutable-ref-writes-through:
+  $test:
+    do:
+    - $let:
+        count:
+          $mut: 0
+    - $let:
+        writer:
+          $ref:
+            $mut: $count
+    - $set:
+        writer: 2
+    - $match: $count
+      when:
+      - case: 2
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: mutable ref did not update pointee
+mutable-ref-temporary:
+  $test:
+    do:
+    - $let:
+        writer:
+          $ref:
+            $mut: 0
+    - $set:
+        writer: 3
+    - $match: $writer
+      when:
+      - case: 3
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: mutable temporary ref did not retain storage
+mutable-argument:
+  $test:
+    do:
+    - $let:
+        result:
+          $increment:
+            $mut: 0
+    - $match: $result
+      when:
+      - case: 4
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: mutable argument was not writable

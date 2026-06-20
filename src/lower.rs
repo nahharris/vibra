@@ -12,9 +12,32 @@ use crate::load::{map_get_str, LoadedProgram};
 use crate::project;
 use anyhow::{bail, Context, Result};
 use serde_yaml::Value;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+thread_local! {
+    static TYPE_PARSE_MODULE: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+struct TypeParseModuleGuard(String);
+
+impl TypeParseModuleGuard {
+    fn enter(module: &str) -> Self {
+        let previous = TYPE_PARSE_MODULE.with(|current| current.replace(module.to_string()));
+        Self(previous)
+    }
+}
+
+impl Drop for TypeParseModuleGuard {
+    fn drop(&mut self) {
+        TYPE_PARSE_MODULE.with(|current| {
+            current.replace(std::mem::take(&mut self.0));
+        });
+    }
+}
 
 /// While lowering a user-defined function body, validates `$return` against this type.
 #[derive(Debug, Clone)]
@@ -51,6 +74,11 @@ pub enum RuntimeValue {
         tag: String,
         payload: Option<Box<RuntimeValue>>,
     },
+    Mutable(Rc<RefCell<RuntimeValue>>),
+    Reference {
+        cell: Rc<RefCell<RuntimeValue>>,
+        mutable: bool,
+    },
     Void,
 }
 
@@ -75,6 +103,11 @@ pub struct PolicyValue {
 pub enum Expr {
     Value(RuntimeValue),
     VarRef(String),
+    Mutable(Box<Expr>),
+    Reference {
+        target: Box<Expr>,
+        mutable: bool,
+    },
     Call {
         call: Box<Call>,
         return_type: TypeRef,
@@ -140,6 +173,11 @@ pub enum TypeRef {
     Float32,
     Float64,
     Void,
+    Mutable(Box<TypeRef>),
+    Reference {
+        inner: Box<TypeRef>,
+        mutable: bool,
+    },
     /// Reference to a registered type alias by qualified name (e.g. `m.pair`).
     Named(String),
     /// A nominal wrapper around `inner`. The `name` is populated when the
@@ -311,6 +349,10 @@ pub enum Statement {
         var: String,
         value: LetValue,
     },
+    Set {
+        var: String,
+        value: Expr,
+    },
     Return(Expr),
     Match {
         target: Expr,
@@ -372,7 +414,7 @@ pub enum ImplMethodBinding {
     Fresh(String),
     /// The impl re-uses an already-registered function. The string is the
     /// sig key in `functions`.
-    Ref(String),
+    Alias(String),
 }
 
 #[derive(Debug, Clone)]
@@ -666,6 +708,8 @@ struct AliasSkeleton {
 }
 
 const BUILTIN_TYPE_FORMS: &[&str] = &[
+    "$mut",
+    "$ref",
     "$newtype",
     "$record",
     "$tuple",
@@ -955,6 +999,26 @@ fn parse_type_constructor(
     self_allowed: bool,
 ) -> Result<TypeRef> {
     match form {
+        "$mut" => Ok(TypeRef::Mutable(Box::new(parse_type_ref(
+            v,
+            scope,
+            skeletons,
+            warnings,
+            self_allowed,
+        )?))),
+        "$ref" => {
+            let inner = parse_type_ref(v, scope, skeletons, warnings, self_allowed)?;
+            match inner {
+                TypeRef::Mutable(inner) => Ok(TypeRef::Reference {
+                    inner,
+                    mutable: true,
+                }),
+                inner => Ok(TypeRef::Reference {
+                    inner: Box::new(inner),
+                    mutable: false,
+                }),
+            }
+        }
         "$newtype" => {
             if let Some(m) = v.as_mapping() {
                 if m.len() != 1 || map_get_str(m, "$newtype").is_some() {
@@ -1237,7 +1301,13 @@ fn parse_instantiation_args(
     warnings: &mut Vec<String>,
     self_allowed: bool,
 ) -> Result<Vec<TypeRef>> {
+    let scoped_key = TYPE_PARSE_MODULE.with(|module| {
+        let module = module.borrow();
+        (!module.is_empty()).then(|| format!("{module}.{base}"))
+    });
     let skel = if let Some(skel) = skeletons.get(base) {
+        skel
+    } else if let Some(skel) = scoped_key.as_ref().and_then(|key| skeletons.get(key)) {
         skel
     } else if let Some(skel) =
         unique_skeleton_match(skeletons, base, |key| key.ends_with(&format!(".{base}")))?
@@ -1688,6 +1758,23 @@ fn type_compatible(
     actual: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
+    match (expected, actual) {
+        (TypeRef::Mutable(expected), TypeRef::Mutable(actual)) => {
+            return type_compatible(expected, actual, aliases)
+        }
+        (
+            TypeRef::Reference {
+                inner: expected,
+                mutable: expected_mut,
+            },
+            TypeRef::Reference {
+                inner: actual,
+                mutable: actual_mut,
+            },
+        ) => return expected_mut == actual_mut && type_compatible(expected, actual, aliases),
+        (expected, TypeRef::Mutable(actual)) => return type_compatible(expected, actual, aliases),
+        _ => {}
+    }
     if policy_body(expected, aliases).is_some() && policy_body(actual, aliases).is_some() {
         return policy_type_is_subset(expected, actual, aliases);
     }
@@ -2527,6 +2614,7 @@ fn user_body_terminates(stmts: &[Statement]) -> bool {
         Statement::Eval(_)
         | Statement::Call(_)
         | Statement::Let { .. }
+        | Statement::Set { .. }
         | Statement::While { .. } => false,
     }
 }
@@ -2628,6 +2716,7 @@ fn collect_module_defs(
     skeletons: &HashMap<String, AliasSkeleton>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
+    let _module_guard = TypeParseModuleGuard::enter(alias);
     let map = module_root
         .as_mapping()
         .context("module root must be mapping")?;
@@ -2774,7 +2863,7 @@ fn collect_module_defs(
 
     // Pass 1.6: register interface implementations from any `=impl`
     // annotations. Runs after Pass 1.5 so impl method bindings can refer to
-    // already-registered inherent ops via `$ref` strings.
+    // already-registered inherent ops via qualified function aliases.
     for (k, v) in map {
         let name = k.as_str().context("module key must be string")?;
         let Some(def_map) = v.as_mapping() else {
@@ -3512,7 +3601,7 @@ fn bind_impl_method(
                 expected_fn_type, actual
             );
         }
-        return Ok(ImplMethodBinding::Ref(sig_key));
+        return Ok(ImplMethodBinding::Alias(sig_key));
     }
 
     // Fresh `$function` envelope path.
@@ -3520,7 +3609,7 @@ fn bind_impl_method(
         .with_context(|| format!("invalid `$function` envelope for impl method `{method_name}`"))?;
     if env.form_key != "$function" {
         bail!(
-            "E-IMPL-001: impl method `{method_name}` must be a `$function` envelope or a `$ref` string, got `{}`",
+            "E-IMPL-001: impl method `{method_name}` must be a `$function` envelope or a qualified function alias, got `{}`",
             env.form_key
         );
     }
@@ -4289,6 +4378,26 @@ fn check_expr_call_bounds(
                 context,
             )?;
         }
+        Expr::Mutable(inner) => check_expr_call_bounds(
+            inner,
+            sigs,
+            type_aliases,
+            impls,
+            enclosing_params,
+            enclosing_bounds,
+            referrer_owner,
+            context,
+        )?,
+        Expr::Reference { target, .. } => check_expr_call_bounds(
+            target,
+            sigs,
+            type_aliases,
+            impls,
+            enclosing_params,
+            enclosing_bounds,
+            referrer_owner,
+            context,
+        )?,
         Expr::Value(_) | Expr::VarRef(_) => {}
     }
     Ok(())
@@ -4373,6 +4482,16 @@ fn check_statements_call_bounds(
                     context,
                 )?,
             },
+            Statement::Set { value, .. } => check_expr_call_bounds(
+                value,
+                sigs,
+                type_aliases,
+                impls,
+                enclosing_params,
+                enclosing_bounds,
+                referrer_owner,
+                context,
+            )?,
             Statement::Match { arms, .. } => {
                 for arm in arms {
                     check_statements_call_bounds(
@@ -4811,6 +4930,54 @@ fn lower_statement(
                 value: LetValue::Expr(expr),
             })
         }
+    } else if map_get_str(stmt, "$set").is_some() {
+        if stmt.len() != 1 {
+            bail!("E-SET-001: `$set` statement must contain only the `$set` key");
+        }
+        let set_v = map_get_str(stmt, "$set").expect("checked");
+        let sm = set_v
+            .as_mapping()
+            .context("E-SET-001: `$set` must be a singleton mapping")?;
+        if sm.len() != 1 {
+            bail!("E-SET-001: `$set` must update exactly one symbol");
+        }
+        let (vk, vv) = sm.iter().next().expect("set one");
+        let var = vk
+            .as_str()
+            .context("E-SET-001: `$set` target must be a symbol name")?
+            .to_string();
+        let target_ty = locals
+            .get(&var)
+            .with_context(|| format!("E-SET-002: unknown `$set` target `{var}`"))?;
+        let writable_ty = match target_ty {
+            TypeRef::Mutable(inner) => inner.as_ref(),
+            TypeRef::Reference {
+                inner,
+                mutable: true,
+            } => inner.as_ref(),
+            _ => bail!("E-SET-002: symbol `{var}` is not writable"),
+        };
+        let value = parse_expr(
+            vv,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            home,
+            warnings,
+        )?;
+        let actual = infer_expr_type(&value, constants, locals, type_aliases, enums)
+            .context("E-SET-003: could not infer assigned value type")?;
+        if !type_compatible(writable_ty, &actual, type_aliases) {
+            bail!(
+                "E-SET-003: assignment to `{var}` expects {:?}, got {:?}",
+                writable_ty,
+                actual
+            );
+        }
+        Ok(Statement::Set { var, value })
     } else if map_get_str(stmt, "$return").is_some() {
         if stmt.len() != 1 {
             bail!("`$return` statement must contain only the `$return` key");
@@ -5100,7 +5267,7 @@ fn try_resolve_iface_call(
         format!("internal: impl `{implementing} : {iface_qualified}` is missing method `{method}`")
     })?;
     let sig_key = match binding {
-        ImplMethodBinding::Fresh(sk) | ImplMethodBinding::Ref(sk) => sk.clone(),
+        ImplMethodBinding::Fresh(sk) | ImplMethodBinding::Alias(sk) => sk.clone(),
     };
     Ok(sig_key)
 }
@@ -5816,6 +5983,43 @@ fn parse_expr(
     warnings: &mut Vec<String>,
 ) -> Result<Expr> {
     if let Some(m) = v.as_mapping() {
+        if m.len() == 1 {
+            if let Some(inner_v) = map_get_str(m, "$mut") {
+                let inner = parse_expr(
+                    inner_v,
+                    sigs,
+                    constants,
+                    type_aliases,
+                    enums,
+                    impls,
+                    locals,
+                    home_module,
+                    warnings,
+                )?;
+                return Ok(Expr::Mutable(Box::new(inner)));
+            }
+            if let Some(target_v) = map_get_str(m, "$ref") {
+                let mutable = target_v.as_mapping().is_some_and(|target| {
+                    target.len() == 1 && map_get_str(target, "$mut").is_some()
+                });
+                let target = parse_expr(
+                    target_v,
+                    sigs,
+                    constants,
+                    type_aliases,
+                    enums,
+                    impls,
+                    locals,
+                    home_module,
+                    warnings,
+                )
+                .context("E-REF-001: invalid `$ref` target")?;
+                return Ok(Expr::Reference {
+                    target: Box::new(target),
+                    mutable,
+                });
+            }
+        }
         if looks_like_call(v, sigs, home_module)
             || looks_like_iface_call(v, home_module, type_aliases)
         {
@@ -6342,6 +6546,28 @@ fn infer_expr_type(
     enums: &HashMap<String, EnumDef>,
 ) -> Option<TypeRef> {
     match expr {
+        Expr::Mutable(inner) => {
+            infer_expr_type(inner, constants, locals, aliases, enums).map(|ty| match ty {
+                TypeRef::Mutable(inner) => TypeRef::Mutable(inner),
+                TypeRef::Reference {
+                    inner,
+                    mutable: true,
+                } => TypeRef::Mutable(inner),
+                ty => TypeRef::Mutable(Box::new(ty)),
+            })
+        }
+        Expr::Reference { target, mutable } => {
+            infer_expr_type(target, constants, locals, aliases, enums).map(|ty| {
+                let inner = match ty {
+                    TypeRef::Mutable(inner) | TypeRef::Reference { inner, .. } => inner,
+                    ty => Box::new(ty),
+                };
+                TypeRef::Reference {
+                    inner,
+                    mutable: *mutable,
+                }
+            })
+        }
         Expr::Value(RuntimeValue::Bool(_)) => Some(TypeRef::Bool),
         Expr::Value(RuntimeValue::Int(_)) => Some(TypeRef::Int64),
         Expr::Value(RuntimeValue::Float(_)) => Some(TypeRef::Float64),
@@ -6373,11 +6599,37 @@ fn infer_expr_type(
         Expr::Value(RuntimeValue::GrantToken(_)) => Some(TypeRef::GrantToken),
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
-        Expr::VarRef(v) => locals.get(v).cloned().or_else(|| {
-            constants.get(v).and_then(|rv| {
-                infer_expr_type(&Expr::Value(rv.clone()), constants, locals, aliases, enums)
-            })
+        Expr::Value(RuntimeValue::Mutable(cell)) => infer_expr_type(
+            &Expr::Value(cell.borrow().clone()),
+            constants,
+            locals,
+            aliases,
+            enums,
+        )
+        .map(|ty| TypeRef::Mutable(Box::new(ty))),
+        Expr::Value(RuntimeValue::Reference { cell, mutable }) => infer_expr_type(
+            &Expr::Value(cell.borrow().clone()),
+            constants,
+            locals,
+            aliases,
+            enums,
+        )
+        .map(|ty| TypeRef::Reference {
+            inner: Box::new(ty),
+            mutable: *mutable,
         }),
+        Expr::VarRef(v) => locals
+            .get(v)
+            .cloned()
+            .map(|ty| match ty {
+                TypeRef::Mutable(inner) | TypeRef::Reference { inner, .. } => *inner,
+                ty => ty,
+            })
+            .or_else(|| {
+                constants.get(v).and_then(|rv| {
+                    infer_expr_type(&Expr::Value(rv.clone()), constants, locals, aliases, enums)
+                })
+            }),
         Expr::Call { return_type, .. } => Some(return_type.clone()),
         Expr::Cast { target, .. } => Some(target.clone()),
         Expr::PolicyNarrow { target, .. } => Some(target.clone()),
@@ -6948,7 +7200,11 @@ fn parse_match_statement(
     let mut has_wildcard = false;
     for arm_v in arms_seq {
         let arm_map = arm_v.as_mapping().context("$match arm must be mapping")?;
-        let pattern_v = map_get_str(arm_map, "pattern").context("$match arm missing pattern")?;
+        if map_get_str(arm_map, "pattern").is_some() {
+            bail!("E-ONE-008: `$match` arm key `pattern` was removed; use `case: <pattern>`");
+        }
+        verify_stmt_keys(arm_map, &["case", "do"])?;
+        let pattern_v = map_get_str(arm_map, "case").context("$match arm missing `case`")?;
         let do_v = map_get_str(arm_map, "do").context("$match arm missing do")?;
         let pattern = parse_pattern(pattern_v, type_aliases, enums, home, warnings)?;
         let mut scoped_locals = locals.clone();
