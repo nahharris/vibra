@@ -7650,3 +7650,125 @@ fn vibra_lint_percent_encodes_file_uris() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("bad%23name%2525.vibra"), "stdout: {stdout}");
 }
+
+// ===== Issue #50: shared test context + single-named-test lowering =====
+
+/// Write an entry module that imports the canonical `stdlib/test.vibra` and
+/// contains `count` passing `$test` declarations plus a shared helper function
+/// every test can call. Returns the temp dir (keep it alive) and entry path.
+fn issue50_many_tests_entry(count: usize) -> (tempfile::TempDir, std::path::PathBuf) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let test_lib = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    let mut src = format!(
+        "test:\n  $import: \"{lib}\"\nthe-answer:\n  $function: $void\n  return: $int64\n  do:\n    - $return: 42\n",
+        lib = test_lib.display().to_string().replace('\\', "/"),
+    );
+    for i in 0..count {
+        src.push_str(&format!(
+            "many-{i}:\n  $test:\n    do:\n      - $let:\n          v:\n            $the-answer: null\n      - $match: $v\n        when:\n          - case: 42\n            do:\n              - $test.assert: true\n          - case:\n              $wildcard: null\n            do:\n              - $test.fail: not 42\n",
+        ));
+    }
+    std::fs::write(&entry, src).unwrap();
+    (dir, entry)
+}
+
+#[test]
+fn issue50_many_tests_lower_and_run_all() {
+    let count = 50;
+    let (_dir, entry) = issue50_many_tests_entry(count);
+    let program = vibra::load::load_program(&entry).unwrap();
+
+    // Discovery must see every test by name without lowering any body.
+    let names = vibra::lower::discover_test_names(&program).unwrap();
+    assert_eq!(names.len(), count, "discovery should find all tests");
+
+    // Each named test lowers on its own and runs green.
+    for name in &names {
+        let case = vibra::lower::lower_named_test(&program, name).unwrap();
+        assert_eq!(&case.name, name);
+        vibra::execute::run_lowered(&case.program, &vibra::runtime::RunConfig::default())
+            .unwrap_or_else(|e| panic!("test `{name}` should pass: {e:#}"));
+    }
+}
+
+#[test]
+fn issue50_named_test_matches_lower_tests() {
+    let (_dir, entry) = issue50_many_tests_entry(8);
+    let program = vibra::load::load_program(&entry).unwrap();
+
+    let all = vibra::lower::lower_tests(&program).unwrap();
+    for reference in &all {
+        let single = vibra::lower::lower_named_test(&program, &reference.name).unwrap();
+        // The single-test path must produce an equivalent program: same body,
+        // same shared context (functions/constants/impls).
+        assert_eq!(
+            format!("{:?}", single.program.statements),
+            format!("{:?}", reference.program.statements),
+            "statements differ for `{}`",
+            reference.name
+        );
+        assert_eq!(
+            single.program.functions.len(),
+            reference.program.functions.len(),
+            "function table size differs for `{}`",
+            reference.name
+        );
+        assert!(
+            single.program.functions.contains_key("the-answer"),
+            "shared helper missing from `{}`",
+            reference.name
+        );
+        // And both execute identically.
+        vibra::execute::run_lowered(&single.program, &vibra::runtime::RunConfig::default())
+            .expect("named-test run should match prior passing behavior");
+    }
+}
+
+#[test]
+fn issue50_failing_test_still_reported() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let test_lib = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"test:
+  $import: "{lib}"
+passes:
+  $test:
+    do:
+      - $test.assert: true
+fails:
+  $test:
+    do:
+      - $test.assert: false
+"#,
+            lib = test_lib.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+
+    let passing = vibra::lower::lower_named_test(&program, "passes").unwrap();
+    vibra::execute::run_lowered(&passing.program, &vibra::runtime::RunConfig::default())
+        .expect("passing test should run cleanly");
+
+    let failing = vibra::lower::lower_named_test(&program, "fails").unwrap();
+    let err = vibra::execute::run_lowered(&failing.program, &vibra::runtime::RunConfig::default())
+        .expect_err("failing test must surface an error");
+    assert!(
+        format!("{err:#}").contains("assertion failed"),
+        "unexpected error: {err:#}"
+    );
+
+    // A name that does not exist is reported clearly.
+    let missing = vibra::lower::lower_named_test(&program, "nope").unwrap_err();
+    assert!(
+        format!("{missing:#}").contains("test `nope` not found"),
+        "unexpected error: {missing:#}"
+    );
+}

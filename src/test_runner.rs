@@ -137,11 +137,7 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
 
 pub fn run_single_test(path: &Path, name: &str, config: &runtime::RunConfig) -> Result<()> {
     let program = load::load_program(path)?;
-    let tests = lower::lower_tests(&program)?;
-    let test = tests
-        .into_iter()
-        .find(|test| test.name == name)
-        .with_context(|| format!("test `{name}` not found in {}", path.display()))?;
+    let test = lower::lower_named_test(&program, name)?;
     for warning in &test.program.warnings {
         eprintln!("warning: {warning}");
     }
@@ -177,9 +173,9 @@ fn discover_tests(path: &Path, filter: Option<&str>) -> Result<Vec<TestPlanItem>
         if !seen_modules.insert(program.entry.clone()) {
             continue;
         }
-        let tests = lower::lower_tests(&program)?;
-        for test in tests {
-            let full_name = format!("{display_path}::{}", test.name);
+        let names = lower::discover_test_names(&program)?;
+        for name in names {
+            let full_name = format!("{display_path}::{name}");
             if filter.is_some_and(|f| !full_name.contains(f) && !display_path.contains(f)) {
                 continue;
             }
@@ -187,7 +183,7 @@ fn discover_tests(path: &Path, filter: Option<&str>) -> Result<Vec<TestPlanItem>
                 index: items.len(),
                 path: file.clone(),
                 display_path: display_path.clone(),
-                name: test.name,
+                name,
             });
         }
     }
