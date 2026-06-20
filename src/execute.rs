@@ -25,6 +25,33 @@ pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     Ok(())
 }
 
+/// Run a lowered program with injected guest stdout/stderr sinks.
+///
+/// This mirrors [`run_lowered`] but routes all guest standard-output writes
+/// through the provided writers instead of the process's standard streams. It
+/// exists primarily so tests (and embedders) can observe or deliberately fail
+/// guest output writes — e.g. simulating a broken pipe — without panicking.
+pub fn run_lowered_with_io(
+    program: &LoweredProgram,
+    config: &RunConfig,
+    stdout: Box<dyn Write>,
+    stderr: Box<dyn Write>,
+) -> Result<()> {
+    let mut env: HashMap<String, RuntimeValue> = HashMap::new();
+    seed_main_args(program, config, &mut env)?;
+    let mut files = FileTable {
+        stdout_sink: Some(stdout),
+        stderr_sink: Some(stderr),
+        ..FileTable::default()
+    };
+    for stmt in &program.statements {
+        if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
+            bail!("unexpected `$return` at top level");
+        }
+    }
+    Ok(())
+}
+
 pub fn eval_lowered_exec(
     exec: &LoweredExec,
     bindings: &HashMap<String, RuntimeValue>,
@@ -228,9 +255,39 @@ enum FileHandle {
     File(File),
 }
 
+#[derive(Clone, Copy)]
+enum StdStream {
+    Out,
+    Err,
+}
+
+#[derive(Clone, Copy)]
+enum HandleKind {
+    Stdin,
+    Stdout,
+    Stderr,
+    File,
+}
+
+impl FileHandle {
+    fn kind(&self) -> HandleKind {
+        match self {
+            FileHandle::Stdin => HandleKind::Stdin,
+            FileHandle::Stdout => HandleKind::Stdout,
+            FileHandle::Stderr => HandleKind::Stderr,
+            FileHandle::File(_) => HandleKind::File,
+        }
+    }
+}
+
 struct FileTable {
     next: u64,
     handles: HashMap<u64, FileHandle>,
+    /// Optional injected sinks for guest stdout/stderr. When `None`, writes go
+    /// to the process's locked standard streams. Injected sinks are primarily
+    /// used by tests to exercise write-failure paths deterministically.
+    stdout_sink: Option<Box<dyn Write>>,
+    stderr_sink: Option<Box<dyn Write>>,
 }
 
 impl Default for FileTable {
@@ -239,7 +296,12 @@ impl Default for FileTable {
         handles.insert(0, FileHandle::Stdin);
         handles.insert(1, FileHandle::Stdout);
         handles.insert(2, FileHandle::Stderr);
-        Self { next: 3, handles }
+        Self {
+            next: 3,
+            handles,
+            stdout_sink: None,
+            stderr_sink: None,
+        }
     }
 }
 
@@ -260,6 +322,98 @@ impl FileTable {
     fn close(&mut self, id: u64) {
         if id > 2 {
             self.handles.remove(&id);
+        }
+    }
+
+    /// Write `bytes` to a guest standard stream, honoring any injected sink and
+    /// otherwise the process's locked standard stream. Errors (e.g. a broken
+    /// pipe) are returned rather than panicking the way `print!`/`eprint!` do.
+    fn write_std(&mut self, stream: StdStream, bytes: &[u8]) -> std::io::Result<()> {
+        let sink = match stream {
+            StdStream::Out => &mut self.stdout_sink,
+            StdStream::Err => &mut self.stderr_sink,
+        };
+        if let Some(writer) = sink {
+            writer.write_all(bytes)?;
+            return writer.flush();
+        }
+        match stream {
+            StdStream::Out => {
+                let mut out = std::io::stdout().lock();
+                out.write_all(bytes)?;
+                out.flush()
+            }
+            StdStream::Err => {
+                let mut err = std::io::stderr().lock();
+                err.write_all(bytes)?;
+                err.flush()
+            }
+        }
+    }
+
+    fn flush_std(&mut self, stream: StdStream) -> std::io::Result<()> {
+        let sink = match stream {
+            StdStream::Out => &mut self.stdout_sink,
+            StdStream::Err => &mut self.stderr_sink,
+        };
+        if let Some(writer) = sink {
+            return writer.flush();
+        }
+        match stream {
+            StdStream::Out => std::io::stdout().lock().flush(),
+            StdStream::Err => std::io::stderr().lock().flush(),
+        }
+    }
+
+    fn write_stdout(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.write_std(StdStream::Out, bytes)
+    }
+
+    fn write_stderr(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.write_std(StdStream::Err, bytes)
+    }
+
+    fn flush_stdout(&mut self) -> std::io::Result<()> {
+        self.flush_std(StdStream::Out)
+    }
+
+    /// Write `bytes` through the handle `id`, returning an `io::Result` so the
+    /// caller can map failures into the runtime `fs-error` path. Standard
+    /// streams route through the injected-sink-aware helpers; regular files use
+    /// the underlying `File`. Stdin is reported as not writable.
+    fn write_to_handle(&mut self, id: u64, bytes: &[u8]) -> std::io::Result<()> {
+        match self.handles.get(&id).map(FileHandle::kind) {
+            Some(HandleKind::Stdout) => self.write_std(StdStream::Out, bytes),
+            Some(HandleKind::Stderr) => self.write_std(StdStream::Err, bytes),
+            Some(HandleKind::Stdin) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "handle is not writable",
+            )),
+            Some(HandleKind::File) => match self.handles.get_mut(&id) {
+                Some(FileHandle::File(file)) => file.write_all(bytes),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid file handle `{id}`"),
+            )),
+        }
+    }
+
+    /// Flush the handle `id`, returning an `io::Result` for fs-error mapping.
+    fn flush_handle(&mut self, id: u64) -> std::io::Result<()> {
+        match self.handles.get(&id).map(FileHandle::kind) {
+            Some(HandleKind::Stdout) => self.flush_std(StdStream::Out),
+            Some(HandleKind::Stderr) => self.flush_std(StdStream::Err),
+            Some(HandleKind::Stdin) => Ok(()),
+            Some(HandleKind::File) => match self.handles.get_mut(&id) {
+                Some(FileHandle::File(file)) => file.flush(),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid file handle `{id}`"),
+            )),
         }
     }
 }
@@ -1184,28 +1338,36 @@ fn exec_call(
             match sym {
                 "print" => {
                     let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    print!("{msg}");
-                    std::io::stdout().flush().ok();
+                    files
+                        .write_stdout(msg.as_bytes())
+                        .context("write to stdout")?;
                     Ok(RuntimeValue::Void)
                 }
                 "println" => {
-                    let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    println!("{msg}");
+                    let mut msg = eval_string(&call.args[0], env, program, files, config)?;
+                    msg.push('\n');
+                    files
+                        .write_stdout(msg.as_bytes())
+                        .context("write to stdout")?;
                     Ok(RuntimeValue::Void)
                 }
                 "eprint" => {
                     let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    eprint!("{msg}");
-                    std::io::stderr().flush().ok();
+                    files
+                        .write_stderr(msg.as_bytes())
+                        .context("write to stderr")?;
                     Ok(RuntimeValue::Void)
                 }
                 "eprintln" => {
-                    let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    eprintln!("{msg}");
+                    let mut msg = eval_string(&call.args[0], env, program, files, config)?;
+                    msg.push('\n');
+                    files
+                        .write_stderr(msg.as_bytes())
+                        .context("write to stderr")?;
                     Ok(RuntimeValue::Void)
                 }
                 "flush-stdout" => {
-                    std::io::stdout().flush().context("flush stdout")?;
+                    files.flush_stdout().context("flush stdout")?;
                     Ok(RuntimeValue::Void)
                 }
                 "read-line" => {
@@ -1241,11 +1403,13 @@ fn exec_call(
                     let fd = eval_i64(&call.args[0], env, program, files, config)?;
                     let bytes = eval_string(&call.args[1], env, program, files, config)?;
                     if fd == 2 {
-                        eprint!("{bytes}");
-                        std::io::stderr().flush().ok();
+                        files
+                            .write_stderr(bytes.as_bytes())
+                            .context("write to stderr")?;
                     } else {
-                        print!("{bytes}");
-                        std::io::stdout().flush().ok();
+                        files
+                            .write_stdout(bytes.as_bytes())
+                            .context("write to stdout")?;
                     }
                     Ok(RuntimeValue::Int(
                         i64::try_from(bytes.len()).unwrap_or(i64::MAX),
@@ -1474,21 +1638,8 @@ fn exec_call(
                 {
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let contents = eval_string(&call.args[1], env, program, files, config)?;
-                    let result = match files.get_mut(handle)? {
-                        FileHandle::Stdout => {
-                            print!("{contents}");
-                            std::io::stdout().flush()
-                        }
-                        FileHandle::Stderr => {
-                            eprint!("{contents}");
-                            std::io::stderr().flush()
-                        }
-                        FileHandle::File(file) => file.write_all(contents.as_bytes()),
-                        FileHandle::Stdin => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "handle is not writable",
-                        )),
-                    };
+                    files.get_mut(handle)?;
+                    let result = files.write_to_handle(handle, contents.as_bytes());
                     Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
                 }
                 s if s.ends_with(".writable.write-bytes")
@@ -1496,31 +1647,14 @@ fn exec_call(
                 {
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let contents = eval_string(&call.args[1], env, program, files, config)?;
-                    let result = match files.get_mut(handle)? {
-                        FileHandle::Stdout => {
-                            print!("{contents}");
-                            std::io::stdout().flush()
-                        }
-                        FileHandle::Stderr => {
-                            eprint!("{contents}");
-                            std::io::stderr().flush()
-                        }
-                        FileHandle::File(file) => file.write_all(contents.as_bytes()),
-                        FileHandle::Stdin => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "handle is not writable",
-                        )),
-                    };
+                    files.get_mut(handle)?;
+                    let result = files.write_to_handle(handle, contents.as_bytes());
                     Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
                 }
                 s if s.ends_with(".writable.flush") => {
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
-                    let result = match files.get_mut(handle)? {
-                        FileHandle::Stdout => std::io::stdout().flush(),
-                        FileHandle::Stderr => std::io::stderr().flush(),
-                        FileHandle::File(file) => file.flush(),
-                        FileHandle::Stdin => Ok(()),
-                    };
+                    files.get_mut(handle)?;
+                    let result = files.flush_handle(handle);
                     Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
                 }
                 s if s.ends_with(".closeable.close") => {

@@ -7772,3 +7772,96 @@ fails:
         "unexpected error: {missing:#}"
     );
 }
+
+/// A writer that always fails as if the consuming pipe had been closed.
+/// Used to prove guest stdout writes surface as a matchable `fs-error` rather
+/// than panicking the runtime (the old `print!`/`eprint!` behavior).
+struct BrokenPipeWriter;
+
+impl std::io::Write for BrokenPipeWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "broken pipe",
+        ))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "broken pipe",
+        ))
+    }
+}
+
+#[test]
+fn guest_stdout_write_failure_yields_matchable_fs_error_io() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+result:
+  $import: "{result}"
+io:
+  $import: "{io}"
+test:
+  $import: "{test}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        r:
+          $io.println: line that cannot be written
+    - $match: $r
+      when:
+        - case:
+            $result.result.ok: null
+          do:
+            - $test.fail: expected write failure but println returned ok
+        - case:
+            $result.result.err:
+              $bind: e
+          do:
+            - $match: $e
+              when:
+                - case:
+                    $fs.fs-error.io:
+                      $bind: _msg
+                  do:
+                    - $test.assert: true
+                - case: {{$wildcard: null}}
+                  do:
+                    - $test.fail: expected fs-error.io variant
+"#,
+            fs = path_str(&fs),
+            result = path_str(&result),
+            io = path_str(&io),
+            test = path_str(&test),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).expect("broken-pipe io program should lower");
+
+    // A failing stdout sink must NOT panic the runtime; instead the guest
+    // should observe a matchable `fs-error.io(...)`. The guest asserts the
+    // variant itself, so a clean `Ok(())` here proves the mapping worked.
+    vibra::execute::run_lowered_with_io(
+        &lowered,
+        &vibra::runtime::RunConfig::default(),
+        Box::new(BrokenPipeWriter),
+        Box::new(BrokenPipeWriter),
+    )
+    .expect("guest should match fs-error.io rather than panic on broken pipe");
+}
