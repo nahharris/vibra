@@ -7958,6 +7958,16 @@ fn checked_alloc_len_accepts_in_bounds_length() {
 // unit level here.
 
 #[test]
+fn random_bytes_os_rng_is_not_all_zero() {
+    let mut buf = vec![0u8; 32];
+    getrandom::getrandom(&mut buf).expect("OS randomness should be available in tests");
+    assert!(
+        buf.iter().any(|byte| *byte != 0),
+        "CSPRNG output should not be all zeros"
+    );
+}
+
+#[test]
 fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();

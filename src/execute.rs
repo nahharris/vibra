@@ -1670,7 +1670,14 @@ fn exec_call(
                     ensure_scope(&grant, "random-grant", "*")?;
                     let len = checked_alloc_len(len, config)
                         .map_err(|(tag, msg)| anyhow::anyhow!("random.bytes {tag}: {msg}"))?;
-                    Ok(RuntimeValue::Array(vec![RuntimeValue::Int(0); len]))
+                    let mut buf = vec![0u8; len];
+                    getrandom::getrandom(&mut buf)
+                        .map_err(|err| anyhow::anyhow!("random.bytes unavailable: {err}"))?;
+                    Ok(RuntimeValue::Array(
+                        buf.into_iter()
+                            .map(|byte| RuntimeValue::Int(i64::from(byte)))
+                            .collect(),
+                    ))
                 }
                 "info" if sig.alias.ends_with("sys") => {
                     let grant =
