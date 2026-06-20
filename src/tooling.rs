@@ -170,9 +170,36 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
 }
 
 fn format_source(source: &str) -> Result<String> {
-    let _ = Document::from_str(source).context("parse Vibra code document")?;
-    let value: serde_yaml::Value = serde_yaml::from_str(source).context("parse Vibra YAML")?;
-    serde_yaml::to_string(&value).context("emit canonical Vibra YAML")
+    let prefix = extract_prefix_comments(source);
+    let doc = Document::from_str(source).context("parse Vibra code document")?;
+    let mut body = doc.to_string();
+    while body.ends_with('\n') {
+        body.pop();
+    }
+    if prefix.is_empty() {
+        Ok(format!("{body}\n"))
+    } else {
+        Ok(format!("{prefix}{body}\n"))
+    }
+}
+
+fn extract_prefix_comments(source: &str) -> String {
+    let mut prefix = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            prefix.push_str(line);
+            prefix.push('\n');
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            prefix.push_str(line);
+            prefix.push('\n');
+            continue;
+        }
+        break;
+    }
+    prefix
 }
 
 pub fn run_lint(options: LintOptions) -> Result<bool> {

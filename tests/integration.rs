@@ -7376,6 +7376,29 @@ fn vibra_fmt_defaults_to_yaml_check_mode_and_write_is_explicit() {
 }
 
 #[test]
+fn vibra_fmt_write_preserves_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("commented.vibra");
+    let original = "# important intent\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
+    std::fs::write(&source, original).unwrap();
+
+    let write = vibra_cmd()
+        .args(["fmt", &path_str(&source), "--write"])
+        .output()
+        .unwrap();
+    assert!(
+        write.status.success(),
+        "fmt --write failed: {}",
+        String::from_utf8_lossy(&write.stderr)
+    );
+    let formatted = std::fs::read_to_string(&source).unwrap();
+    assert!(
+        formatted.contains("# important intent"),
+        "comment should survive fmt --write, got:\n{formatted}"
+    );
+}
+
+#[test]
 fn vibra_fmt_json_output_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("ok.vibra");
