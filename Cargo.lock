@@ -3375,6 +3375,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "getrandom 0.2.17",
  "git2",
  "glob",
  "serde",

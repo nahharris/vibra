@@ -2310,7 +2310,7 @@ main:
 }
 
 #[test]
-fn fs_open_read_requires_read_grant_argument() {
+fn fs_open_read_requires_policy_argument() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -2342,8 +2342,8 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("missing mandatory grant `fs-read`"),
-        "expected missing grant argument rejection, got: {err}"
+        err.contains("missing value argument `policy`"),
+        "expected missing policy argument rejection, got: {err}"
     );
 }
 
@@ -7376,6 +7376,29 @@ fn vibra_fmt_defaults_to_yaml_check_mode_and_write_is_explicit() {
 }
 
 #[test]
+fn vibra_fmt_write_preserves_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("commented.vibra");
+    let original = "# important intent\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
+    std::fs::write(&source, original).unwrap();
+
+    let write = vibra_cmd()
+        .args(["fmt", &path_str(&source), "--write"])
+        .output()
+        .unwrap();
+    assert!(
+        write.status.success(),
+        "fmt --write failed: {}",
+        String::from_utf8_lossy(&write.stderr)
+    );
+    let formatted = std::fs::read_to_string(&source).unwrap();
+    assert!(
+        formatted.contains("# important intent"),
+        "comment should survive fmt --write, got:\n{formatted}"
+    );
+}
+
+#[test]
 fn vibra_fmt_json_output_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("ok.vibra");
@@ -7560,6 +7583,28 @@ fn vibra_lint_reports_parse_and_compile_errors_as_structured_yaml() {
 }
 
 #[test]
+fn vibra_lint_rejects_yaml_anchors_and_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    let anchored = dir.path().join("anchored.vibra");
+    std::fs::write(&anchored, "a: &x 1\nb: *x\n").unwrap();
+
+    let output = vibra_cmd()
+        .args(["lint", &path_str(&anchored), "--category", "syntax"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "anchors/aliases should fail lint");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("code: E-YAML-001"),
+        "expected E-YAML-001 for anchors/aliases: {stdout}"
+    );
+    assert!(
+        stdout.contains("anchor") || stdout.contains("alias"),
+        "expected anchor/alias message: {stdout}"
+    );
+}
+
+#[test]
 fn vibra_lint_reports_hidden_transitive_import_alias() {
     let dir = tempfile::tempdir().unwrap();
     let leaf = dir.path().join("leaf.vibra");
@@ -7649,4 +7694,500 @@ fn vibra_lint_percent_encodes_file_uris() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("bad%23name%2525.vibra"), "stdout: {stdout}");
+}
+
+// ===== Issue #50: shared test context + single-named-test lowering =====
+
+/// Write an entry module that imports the canonical `stdlib/test.vibra` and
+/// contains `count` passing `$test` declarations plus a shared helper function
+/// every test can call. Returns the temp dir (keep it alive) and entry path.
+fn issue50_many_tests_entry(count: usize) -> (tempfile::TempDir, std::path::PathBuf) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let test_lib = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    let mut src = format!(
+        "test:\n  $import: \"{lib}\"\nthe-answer:\n  $function: $void\n  return: $int64\n  do:\n    - $return: 42\n",
+        lib = test_lib.display().to_string().replace('\\', "/"),
+    );
+    for i in 0..count {
+        src.push_str(&format!(
+            "many-{i}:\n  $test:\n    do:\n      - $let:\n          v:\n            $the-answer: null\n      - $match: $v\n        when:\n          - case: 42\n            do:\n              - $test.assert: true\n          - case:\n              $wildcard: null\n            do:\n              - $test.fail: not 42\n",
+        ));
+    }
+    std::fs::write(&entry, src).unwrap();
+    (dir, entry)
+}
+
+#[test]
+fn issue50_many_tests_lower_and_run_all() {
+    let count = 50;
+    let (_dir, entry) = issue50_many_tests_entry(count);
+    let program = vibra::load::load_program(&entry).unwrap();
+
+    // Discovery must see every test by name without lowering any body.
+    let names = vibra::lower::discover_test_names(&program).unwrap();
+    assert_eq!(names.len(), count, "discovery should find all tests");
+
+    // Each named test lowers on its own and runs green.
+    for name in &names {
+        let case = vibra::lower::lower_named_test(&program, name).unwrap();
+        assert_eq!(&case.name, name);
+        vibra::execute::run_lowered(&case.program, &vibra::runtime::RunConfig::default())
+            .unwrap_or_else(|e| panic!("test `{name}` should pass: {e:#}"));
+    }
+}
+
+#[test]
+fn issue50_named_test_matches_lower_tests() {
+    let (_dir, entry) = issue50_many_tests_entry(8);
+    let program = vibra::load::load_program(&entry).unwrap();
+
+    let all = vibra::lower::lower_tests(&program).unwrap();
+    for reference in &all {
+        let single = vibra::lower::lower_named_test(&program, &reference.name).unwrap();
+        // The single-test path must produce an equivalent program: same body,
+        // same shared context (functions/constants/impls).
+        assert_eq!(
+            format!("{:?}", single.program.statements),
+            format!("{:?}", reference.program.statements),
+            "statements differ for `{}`",
+            reference.name
+        );
+        assert_eq!(
+            single.program.functions.len(),
+            reference.program.functions.len(),
+            "function table size differs for `{}`",
+            reference.name
+        );
+        assert!(
+            single.program.functions.contains_key("the-answer"),
+            "shared helper missing from `{}`",
+            reference.name
+        );
+        // And both execute identically.
+        vibra::execute::run_lowered(&single.program, &vibra::runtime::RunConfig::default())
+            .expect("named-test run should match prior passing behavior");
+    }
+}
+
+#[test]
+fn issue50_failing_test_still_reported() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let test_lib = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"test:
+  $import: "{lib}"
+passes:
+  $test:
+    do:
+      - $test.assert: true
+fails:
+  $test:
+    do:
+      - $test.assert: false
+"#,
+            lib = test_lib.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+
+    let passing = vibra::lower::lower_named_test(&program, "passes").unwrap();
+    vibra::execute::run_lowered(&passing.program, &vibra::runtime::RunConfig::default())
+        .expect("passing test should run cleanly");
+
+    let failing = vibra::lower::lower_named_test(&program, "fails").unwrap();
+    let err = vibra::execute::run_lowered(&failing.program, &vibra::runtime::RunConfig::default())
+        .expect_err("failing test must surface an error");
+    assert!(
+        format!("{err:#}").contains("assertion failed"),
+        "unexpected error: {err:#}"
+    );
+
+    // A name that does not exist is reported clearly.
+    let missing = vibra::lower::lower_named_test(&program, "nope").unwrap_err();
+    assert!(
+        format!("{missing:#}").contains("test `nope` not found"),
+        "unexpected error: {missing:#}"
+    );
+}
+
+/// A writer that always fails as if the consuming pipe had been closed.
+/// Used to prove guest stdout writes surface as a matchable `fs-error` rather
+/// than panicking the runtime (the old `print!`/`eprint!` behavior).
+struct BrokenPipeWriter;
+
+impl std::io::Write for BrokenPipeWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "broken pipe",
+        ))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "broken pipe",
+        ))
+    }
+}
+
+#[test]
+fn guest_stdout_write_failure_yields_matchable_fs_error_io() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+result:
+  $import: "{result}"
+io:
+  $import: "{io}"
+test:
+  $import: "{test}"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        r:
+          $io.println: line that cannot be written
+    - $match: $r
+      when:
+        - case:
+            $result.result.ok: null
+          do:
+            - $test.fail: expected write failure but println returned ok
+        - case:
+            $result.result.err:
+              $bind: e
+          do:
+            - $match: $e
+              when:
+                - case:
+                    $fs.fs-error.io:
+                      $bind: _msg
+                  do:
+                    - $test.assert: true
+                - case: {{$wildcard: null}}
+                  do:
+                    - $test.fail: expected fs-error.io variant
+"#,
+            fs = path_str(&fs),
+            result = path_str(&result),
+            io = path_str(&io),
+            test = path_str(&test),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).expect("broken-pipe io program should lower");
+
+    // A failing stdout sink must NOT panic the runtime; instead the guest
+    // should observe a matchable `fs-error.io(...)`. The guest asserts the
+    // variant itself, so a clean `Ok(())` here proves the mapping worked.
+    vibra::execute::run_lowered_with_io(
+        &lowered,
+        &vibra::runtime::RunConfig::default(),
+        Box::new(BrokenPipeWriter),
+        Box::new(BrokenPipeWriter),
+    )
+    .expect("guest should match fs-error.io rather than panic on broken pipe");
+}
+
+// --- Issue #47: cap user-controlled allocations (read-raw / random.bytes) ---
+
+#[test]
+fn checked_alloc_len_rejects_negative_length() {
+    let config = vibra::runtime::RunConfig::default();
+    let (tag, msg) = vibra::execute::checked_alloc_len(-1, &config).unwrap_err();
+    assert_eq!(tag, "invalid-length");
+    assert!(
+        msg.contains("must not be negative"),
+        "unexpected message: {msg}"
+    );
+}
+
+#[test]
+fn checked_alloc_len_rejects_over_limit_length() {
+    let config = vibra::runtime::RunConfig {
+        max_alloc_len: 8,
+        ..vibra::runtime::RunConfig::default()
+    };
+    let (tag, msg) = vibra::execute::checked_alloc_len(9, &config).unwrap_err();
+    assert_eq!(tag, "too-large");
+    assert!(
+        msg.contains("exceeds max-alloc-len"),
+        "unexpected message: {msg}"
+    );
+}
+
+#[test]
+fn checked_alloc_len_accepts_in_bounds_length() {
+    let config = vibra::runtime::RunConfig {
+        max_alloc_len: 8,
+        ..vibra::runtime::RunConfig::default()
+    };
+    assert_eq!(vibra::execute::checked_alloc_len(0, &config).unwrap(), 0);
+    assert_eq!(vibra::execute::checked_alloc_len(8, &config).unwrap(), 8);
+}
+
+// NOTE: `read-raw` and `random.bytes` are not reachable from surface `.vibra`
+// in the current codebase: their handlers gate on the legacy `=grants` grant
+// token, which can only be seeded by a `main` grants block — and `main` grants
+// blocks were removed in favor of `$policy` (see
+// `main_function_grants_are_rejected_with_policy_migration_hint`). The shared
+// allocation guard `checked_alloc_len` (exercised above) is the
+// security-critical path both handlers funnel through, so it is covered at the
+// unit level here.
+
+#[test]
+fn random_bytes_os_rng_is_not_all_zero() {
+    let mut buf = vec![0u8; 32];
+    getrandom::getrandom(&mut buf).expect("OS randomness should be available in tests");
+    assert!(
+        buf.iter().any(|byte| *byte != 0),
+        "CSPRNG output should not be all zeros"
+    );
+}
+
+#[test]
+fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let a = dir.path().join("a.txt");
+    let b = dir.path().join("b.txt");
+    let c = dir.path().join("c.txt");
+
+    // With `max_open_files: 2`, opening a third concurrent handle must fail with
+    // the matchable `too-many-open-files` fs-error. Closing one handle frees a
+    // slot so the subsequent reopen succeeds; only then is "freed-slot" written
+    // to `c.txt`. If the cap were not enforced, the first open of `c` would
+    // succeed (leaving the file empty) and the assertion below would fail.
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+result:
+  $import: "{result}"
+main:
+  $function:
+    policy:
+      $policy:
+        fs-write:
+          - requirement: mandatory
+            scopes:
+              - dir: "{dir}"
+  return: $void
+  do:
+      - $let:
+          pa:
+            $fs.path.new: "{a}"
+      - $let:
+          pb:
+            $fs.path.new: "{b}"
+      - $let:
+          pc:
+            $fs.path.new: "{c}"
+      - $let:
+          oa:
+            $fs.open-write: $pa
+            policy: $args.policy
+      - $match: $oa
+        when:
+            - case:
+                $result.result.ok:
+                  $bind: ha
+              do:
+                - $let:
+                    ob:
+                      $fs.open-write: $pb
+                      policy: $args.policy
+                - $match: $ob
+                  when:
+                      - case:
+                          $result.result.ok:
+                            $bind: hb
+                        do:
+                          - $let:
+                              oc:
+                                $fs.open-write: $pc
+                                policy: $args.policy
+                          - $match: $oc
+                            when:
+                                - case:
+                                    $result.result.ok:
+                                      $bind: hc-bad
+                                  do: []
+                                - case:
+                                    $result.result.err:
+                                      $bind: oc-err
+                                  do:
+                                    - $match: $oc-err
+                                      when:
+                                          - case:
+                                              $fs.fs-error.too-many-open-files: null
+                                            do:
+                                              - $fs.closeable.close: $ha
+                                              - $let:
+                                                  oc2:
+                                                    $fs.open-write: $pc
+                                                    policy: $args.policy
+                                              - $match: $oc2
+                                                when:
+                                                    - case:
+                                                        $result.result.ok:
+                                                          $bind: hc2
+                                                      do:
+                                                        - $fs.writable.write-string: $hc2
+                                                          s: "freed-slot"
+                                                        - $fs.closeable.close: $hc2
+                                                    - case:
+                                                        $result.result.err:
+                                                          $bind: oc2-err
+                                                      do: []
+                                          - case:
+                                              $wildcard: null
+                                            do: []
+                      - case:
+                          $result.result.err:
+                            $bind: ob-err
+                        do: []
+            - case:
+                $result.result.err:
+                  $bind: oa-err
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            result = result.display().to_string().replace('\\', "/"),
+            dir = dir.path().display().to_string().replace('\\', "/"),
+            a = a.display().to_string().replace('\\', "/"),
+            b = b.display().to_string().replace('\\', "/"),
+            c = c.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered =
+        vibra::lower::lower_program(&prog).expect("open-handle-limit program should lower");
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            approved_policy: Some(vibra::lower::PolicyType {
+                domains: std::collections::BTreeMap::from([(
+                    "fs-write".to_string(),
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::GrantRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Dir(
+                            dir.path().display().to_string().replace('\\', "/"),
+                        )],
+                    }],
+                )]),
+            }),
+            max_open_files: 2,
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("open-handle-limit program should run");
+
+    assert_eq!(
+        std::fs::read_to_string(&c).unwrap(),
+        "freed-slot",
+        "third open should hit the cap with `too-many-open-files`, and closing a handle should free a slot for the reopen"
+    );
+}
+
+// --- Issue #53: env grants are case-sensitive on Unix ---
+
+#[test]
+fn env_read_grant_is_case_sensitive_on_unix() {
+    if cfg!(windows) {
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let env_mod = std::fs::canonicalize(root.join("stdlib/env.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    std::env::set_var("VIBRA_ISSUE53_TOKEN", "public");
+    std::env::set_var("vibra_issue53_token", "secret");
+    let output = vibra_cmd()
+        .args([
+            "exec",
+            r#"{$env.get: "vibra_issue53_token"}"#,
+            "--import",
+            &format!("env={}", path_str(&env_mod)),
+            "--import",
+            &format!("result={}", path_str(&result)),
+            "--import",
+            &format!("security={}", path_str(&security)),
+            "--allow-env=VIBRA_ISSUE53_TOKEN",
+            "--format",
+            "yaml",
+        ])
+        .output()
+        .unwrap();
+    std::env::remove_var("VIBRA_ISSUE53_TOKEN");
+    std::env::remove_var("vibra_issue53_token");
+    assert!(
+        !output.status.success(),
+        "lowercase env name must not match uppercase grant on Unix: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+// --- Issue #51: stdin reads require --allow-stdin ---
+
+#[test]
+fn forged_stdin_read_file_handle_requires_allow_stdin() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let output = vibra_cmd()
+        .args([
+            "exec",
+            &format!(
+                "{{$fs.readable.read-string: {{$cast: 0, into: $fs.read-file}}}}"
+            ),
+            "--import",
+            &format!("fs={}", path_str(&fs)),
+            "--import",
+            &format!("result={}", path_str(&result)),
+            "--format",
+            "yaml",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "forged stdin handle must fail without --allow-stdin: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("allow-stdin"),
+        "expected allow-stdin denial, got: {stderr}"
+    );
 }
