@@ -34,6 +34,11 @@ pub struct RunConfig {
     /// program-controlled buffer (e.g. `read-raw`, `random.bytes`). Guards
     /// against user-controlled out-of-memory via unbounded length arguments.
     pub max_alloc_len: usize,
+    /// Maximum number of concurrently open file handles the interpreter's
+    /// `FileTable` may hold (excluding the reserved stdio entries). `0` means
+    /// unlimited. Opening past this cap yields a matchable `too-many-open-files`
+    /// filesystem error instead of exhausting OS file descriptors.
+    pub max_open_files: usize,
 }
 
 impl Default for RunConfig {
@@ -55,6 +60,7 @@ impl Default for RunConfig {
             allow_system_info: false,
             approved_policy: None,
             max_alloc_len: 64 * 1024 * 1024,
+            max_open_files: 1024,
         }
     }
 }

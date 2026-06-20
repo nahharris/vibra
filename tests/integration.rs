@@ -2310,7 +2310,7 @@ main:
 }
 
 #[test]
-fn fs_open_read_requires_read_grant_argument() {
+fn fs_open_read_requires_policy_argument() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -2342,8 +2342,8 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("missing mandatory grant `fs-read`"),
-        "expected missing grant argument rejection, got: {err}"
+        err.contains("missing value argument `policy`"),
+        "expected missing policy argument rejection, got: {err}"
     );
 }
 
@@ -7911,3 +7911,156 @@ fn checked_alloc_len_accepts_in_bounds_length() {
 // allocation guard `checked_alloc_len` (exercised above) is the
 // security-critical path both handlers funnel through, so it is covered at the
 // unit level here.
+
+#[test]
+fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let a = dir.path().join("a.txt");
+    let b = dir.path().join("b.txt");
+    let c = dir.path().join("c.txt");
+
+    // With `max_open_files: 2`, opening a third concurrent handle must fail with
+    // the matchable `too-many-open-files` fs-error. Closing one handle frees a
+    // slot so the subsequent reopen succeeds; only then is "freed-slot" written
+    // to `c.txt`. If the cap were not enforced, the first open of `c` would
+    // succeed (leaving the file empty) and the assertion below would fail.
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+result:
+  $import: "{result}"
+main:
+  $function:
+    policy:
+      $policy:
+        fs-write:
+          - requirement: mandatory
+            scopes:
+              - dir: "{dir}"
+  return: $void
+  do:
+      - $let:
+          pa:
+            $fs.path.new: "{a}"
+      - $let:
+          pb:
+            $fs.path.new: "{b}"
+      - $let:
+          pc:
+            $fs.path.new: "{c}"
+      - $let:
+          oa:
+            $fs.open-write: $pa
+            policy: $args.policy
+      - $match: $oa
+        when:
+            - case:
+                $result.result.ok:
+                  $bind: ha
+              do:
+                - $let:
+                    ob:
+                      $fs.open-write: $pb
+                      policy: $args.policy
+                - $match: $ob
+                  when:
+                      - case:
+                          $result.result.ok:
+                            $bind: hb
+                        do:
+                          - $let:
+                              oc:
+                                $fs.open-write: $pc
+                                policy: $args.policy
+                          - $match: $oc
+                            when:
+                                - case:
+                                    $result.result.ok:
+                                      $bind: hc-bad
+                                  do: []
+                                - case:
+                                    $result.result.err:
+                                      $bind: oc-err
+                                  do:
+                                    - $match: $oc-err
+                                      when:
+                                          - case:
+                                              $fs.fs-error.too-many-open-files: null
+                                            do:
+                                              - $fs.closeable.close: $ha
+                                              - $let:
+                                                  oc2:
+                                                    $fs.open-write: $pc
+                                                    policy: $args.policy
+                                              - $match: $oc2
+                                                when:
+                                                    - case:
+                                                        $result.result.ok:
+                                                          $bind: hc2
+                                                      do:
+                                                        - $fs.writable.write-string: $hc2
+                                                          s: "freed-slot"
+                                                        - $fs.closeable.close: $hc2
+                                                    - case:
+                                                        $result.result.err:
+                                                          $bind: oc2-err
+                                                      do: []
+                                          - case:
+                                              $wildcard: null
+                                            do: []
+                      - case:
+                          $result.result.err:
+                            $bind: ob-err
+                        do: []
+            - case:
+                $result.result.err:
+                  $bind: oa-err
+              do: []
+"#,
+            fs = fs.display().to_string().replace('\\', "/"),
+            result = result.display().to_string().replace('\\', "/"),
+            dir = dir.path().display().to_string().replace('\\', "/"),
+            a = a.display().to_string().replace('\\', "/"),
+            b = b.display().to_string().replace('\\', "/"),
+            c = c.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered =
+        vibra::lower::lower_program(&prog).expect("open-handle-limit program should lower");
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            program_name: "vibra-test".to_string(),
+            argv: Vec::new(),
+            approved_policy: Some(vibra::lower::PolicyType {
+                domains: std::collections::BTreeMap::from([(
+                    "fs-write".to_string(),
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::GrantRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Dir(
+                            dir.path().display().to_string().replace('\\', "/"),
+                        )],
+                    }],
+                )]),
+            }),
+            max_open_files: 2,
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("open-handle-limit program should run");
+
+    assert_eq!(
+        std::fs::read_to_string(&c).unwrap(),
+        "freed-slot",
+        "third open should hit the cap with `too-many-open-files`, and closing a handle should free a slot for the reopen"
+    );
+}

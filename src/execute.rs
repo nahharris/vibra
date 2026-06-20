@@ -16,7 +16,7 @@ use std::{cell::RefCell, rc::Rc};
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     seed_main_args(program, config, &mut env)?;
-    let mut files = FileTable::default();
+    let mut files = FileTable::new(config.max_open_files);
     for stmt in &program.statements {
         if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
             bail!("unexpected `$return` at top level");
@@ -39,11 +39,9 @@ pub fn run_lowered_with_io(
 ) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     seed_main_args(program, config, &mut env)?;
-    let mut files = FileTable {
-        stdout_sink: Some(stdout),
-        stderr_sink: Some(stderr),
-        ..FileTable::default()
-    };
+    let mut files = FileTable::new(config.max_open_files);
+    files.stdout_sink = Some(stdout);
+    files.stderr_sink = Some(stderr);
     for stmt in &program.statements {
         if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
             bail!("unexpected `$return` at top level");
@@ -58,7 +56,7 @@ pub fn eval_lowered_exec(
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
     let env = bindings.clone();
-    let mut files = FileTable::default();
+    let mut files = FileTable::new(config.max_open_files);
     eval_expr(&exec.expr, &env, &exec.program, &mut files, config)
 }
 
@@ -288,10 +286,17 @@ struct FileTable {
     /// used by tests to exercise write-failure paths deterministically.
     stdout_sink: Option<Box<dyn Write>>,
     stderr_sink: Option<Box<dyn Write>>,
+    /// Maximum number of live, user-opened file handles. `0` means unlimited.
+    /// The reserved stdio entries (ids 0/1/2) are never counted against it.
+    limit: usize,
 }
 
-impl Default for FileTable {
-    fn default() -> Self {
+/// Number of reserved stdio handles (`stdin`/`stdout`/`stderr`) that always
+/// occupy the table and are never closed.
+const RESERVED_HANDLES: usize = 3;
+
+impl FileTable {
+    fn new(limit: usize) -> Self {
         let mut handles = HashMap::new();
         handles.insert(0, FileHandle::Stdin);
         handles.insert(1, FileHandle::Stdout);
@@ -301,11 +306,20 @@ impl Default for FileTable {
             handles,
             stdout_sink: None,
             stderr_sink: None,
+            limit,
         }
     }
-}
 
-impl FileTable {
+    /// Count of live user-opened file handles, excluding reserved stdio.
+    fn open_file_count(&self) -> usize {
+        self.handles.len().saturating_sub(RESERVED_HANDLES)
+    }
+
+    /// Whether opening another file would exceed the configured limit.
+    fn at_capacity(&self) -> bool {
+        self.limit != 0 && self.open_file_count() >= self.limit
+    }
+
     fn insert(&mut self, file: File) -> u64 {
         let id = self.next;
         self.next += 1;
@@ -1453,9 +1467,17 @@ fn exec_call(
                 "open-read" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        resolve_policy_path(&path, &policy, "fs-read")?
+                    } else {
+                        let grant =
+                            call_grant_capability(call, "fs-read", env, program, files, config)?;
+                        resolve_granted_path(&path, &grant, "fs-read-grant")?
+                    };
+                    if files.at_capacity() {
+                        return Ok(result_err(sig, "too-many-open-files", None));
+                    }
                     Ok(fs_result(
                         sig,
                         || fs::OpenOptions::new().read(true).open(p),
@@ -1467,9 +1489,17 @@ fn exec_call(
                 "open-write" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        resolve_policy_path(&path, &policy, "fs-write")?
+                    } else {
+                        let grant =
+                            call_grant_capability(call, "fs-write", env, program, files, config)?;
+                        resolve_granted_path(&path, &grant, "fs-write-grant")?
+                    };
+                    if files.at_capacity() {
+                        return Ok(result_err(sig, "too-many-open-files", None));
+                    }
                     Ok(fs_result(
                         sig,
                         || {
@@ -1487,9 +1517,17 @@ fn exec_call(
                 "open-append" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        resolve_policy_path(&path, &policy, "fs-write")?
+                    } else {
+                        let grant =
+                            call_grant_capability(call, "fs-write", env, program, files, config)?;
+                        resolve_granted_path(&path, &grant, "fs-write-grant")?
+                    };
+                    if files.at_capacity() {
+                        return Ok(result_err(sig, "too-many-open-files", None));
+                    }
                     Ok(fs_result(
                         sig,
                         || fs::OpenOptions::new().create(true).append(true).open(p),
@@ -1501,12 +1539,21 @@ fn exec_call(
                 "open-read-write" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let read_grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let write_grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let _ = resolve_granted_path(&path, &read_grant, "fs-read-grant")?;
-                    let p = resolve_granted_path(&path, &write_grant, "fs-write-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        let _ = resolve_policy_path(&path, &policy, "fs-read")?;
+                        resolve_policy_path(&path, &policy, "fs-write")?
+                    } else {
+                        let read_grant =
+                            call_grant_capability(call, "fs-read", env, program, files, config)?;
+                        let write_grant =
+                            call_grant_capability(call, "fs-write", env, program, files, config)?;
+                        let _ = resolve_granted_path(&path, &read_grant, "fs-read-grant")?;
+                        resolve_granted_path(&path, &write_grant, "fs-write-grant")?
+                    };
+                    if files.at_capacity() {
+                        return Ok(result_err(sig, "too-many-open-files", None));
+                    }
                     Ok(fs_result(
                         sig,
                         || {

@@ -70,6 +70,7 @@ fs-error:
     is-dir: $void
     not-dir: $void
     invalid-path: $void
+    too-many-open-files: $void
     io: $str
 
 readable:
@@ -460,8 +461,12 @@ read-write-file:
 open-read:
   $function:
     input: $path
-  grants:
-    fs-read: $security.grant.mandatory
+  args:
+    policy:
+      $policy:
+        fs-read:
+          - requirement: mandatory
+            scopes: any
   return:
     $result.result:
       t: $read-file
@@ -477,8 +482,12 @@ open-read:
 open-write:
   $function:
     input: $path
-  grants:
-    fs-write: $security.grant.mandatory
+  args:
+    policy:
+      $policy:
+        fs-write:
+          - requirement: mandatory
+            scopes: any
   return:
     $result.result:
       t: $write-file
@@ -494,8 +503,12 @@ open-write:
 open-append:
   $function:
     input: $path
-  grants:
-    fs-write: $security.grant.mandatory
+  args:
+    policy:
+      $policy:
+        fs-write:
+          - requirement: mandatory
+            scopes: any
   return:
     $result.result:
       t: $append-file
@@ -511,9 +524,15 @@ open-append:
 open-read-write:
   $function:
     input: $path
-  grants:
-    fs-read: $security.grant.mandatory
-    fs-write: $security.grant.mandatory
+  args:
+    policy:
+      $policy:
+        fs-read:
+          - requirement: mandatory
+            scopes: any
+        fs-write:
+          - requirement: mandatory
+            scopes: any
   return:
     $result.result:
       t: $read-write-file

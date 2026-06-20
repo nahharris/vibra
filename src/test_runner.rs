@@ -326,6 +326,8 @@ fn append_run_config_args(cmd: &mut Command, config: &runtime::RunConfig) {
     if config.allow_system_info {
         cmd.arg("--allow-sys-info");
     }
+    cmd.arg("--max-open-files")
+        .arg(config.max_open_files.to_string());
 }
 
 fn print_human_report(report: &TestReport) {

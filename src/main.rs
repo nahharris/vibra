@@ -107,6 +107,9 @@ enum Command {
         /// Allow every modeled non-filesystem permission and filesystem access under the current directory.
         #[arg(long = "allow-all")]
         allow_all: bool,
+        /// Maximum number of concurrently open file handles (0 = unlimited).
+        #[arg(long = "max-open-files", default_value_t = 1024)]
+        max_open_files: usize,
     },
     /// Evaluate one inline Vibra expression for tooling workflows.
     Exec {
@@ -163,6 +166,9 @@ enum Command {
         /// Allow every modeled non-filesystem permission and filesystem access under the current directory.
         #[arg(long = "allow-all")]
         allow_all: bool,
+        /// Maximum number of concurrently open file handles (0 = unlimited).
+        #[arg(long = "max-open-files", default_value_t = 1024)]
+        max_open_files: usize,
     },
     /// Discover and run `$test` declarations.
     Test {
@@ -225,6 +231,9 @@ enum Command {
         /// Allow every modeled non-filesystem permission and filesystem access under the current directory.
         #[arg(long = "allow-all")]
         allow_all: bool,
+        /// Maximum number of concurrently open file handles (0 = unlimited).
+        #[arg(long = "max-open-files", default_value_t = 1024)]
+        max_open_files: usize,
     },
     #[command(name = "__run-test", hide = true)]
     RunTest {
@@ -256,6 +265,8 @@ enum Command {
         allow_system_info: bool,
         #[arg(long = "allow-all")]
         allow_all: bool,
+        #[arg(long = "max-open-files", default_value_t = 1024)]
+        max_open_files: usize,
     },
 }
 
@@ -429,6 +440,7 @@ fn main() -> Result<()> {
             allow_random,
             allow_system_info,
             allow_all,
+            max_open_files,
         } => {
             let program = load::load_program(&path)?;
             let lowered = lower::lower_program(&program)?;
@@ -449,6 +461,7 @@ fn main() -> Result<()> {
                 allow_random,
                 allow_system_info,
                 allow_all,
+                max_open_files,
             );
             execute::run_lowered(&lowered, &config)?;
         }
@@ -471,6 +484,7 @@ fn main() -> Result<()> {
             allow_random,
             allow_system_info,
             allow_all,
+            max_open_files,
         } => {
             let (bindings, local_types) = exec_bindings(arg, arg_file)?;
             let expr_value: Value = serde_yaml::from_str(&expr).context("parse exec expression")?;
@@ -495,6 +509,7 @@ fn main() -> Result<()> {
                 allow_random,
                 allow_system_info,
                 allow_all,
+                max_open_files,
             );
             let value = execute::eval_lowered_exec(&lowered, &bindings, &config)?;
             print_exec_value(value, format)?;
@@ -520,6 +535,7 @@ fn main() -> Result<()> {
             allow_random,
             allow_system_info,
             allow_all,
+            max_open_files,
         } => {
             let config = run_config(
                 preopen,
@@ -535,6 +551,7 @@ fn main() -> Result<()> {
                 allow_random,
                 allow_system_info,
                 allow_all,
+                max_open_files,
             );
             let ok = test_runner::run_tests(test_runner::TestOptions {
                 path: path.unwrap_or_else(|| PathBuf::from(".")),
@@ -568,6 +585,7 @@ fn main() -> Result<()> {
             allow_random,
             allow_system_info,
             allow_all,
+            max_open_files,
         } => {
             let config = run_config(
                 preopen,
@@ -583,6 +601,7 @@ fn main() -> Result<()> {
                 allow_random,
                 allow_system_info,
                 allow_all,
+                max_open_files,
             );
             test_runner::run_single_test(&path, &name, &config)?;
         }
@@ -814,6 +833,7 @@ fn run_config(
     allow_random: bool,
     allow_system_info: bool,
     allow_all: bool,
+    max_open_files: usize,
 ) -> runtime::RunConfig {
     runtime::RunConfig {
         preopen_host_dirs: preopen,
@@ -856,6 +876,7 @@ fn run_config(
         allow_clock: allow_all || allow_clock,
         allow_random: allow_all || allow_random,
         allow_system_info: allow_all || allow_system_info,
+        max_open_files,
         ..runtime::RunConfig::default()
     }
 }
