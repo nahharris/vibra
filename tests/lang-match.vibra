@@ -71,15 +71,22 @@ bind-captures-value:
   $test:
     do:
       - $let:
-          n: 7
+          n: 8
       - $match: $n
         when:
           - pattern: 7
             do:
-              - $test.assert: true
+              - $test.fail: "matched 7"
           - pattern: {$bind: captured}
             do:
-              - $test.fail: "fell through to bind arm"
+              - $match: $captured
+                when:
+                  - pattern: 8
+                    do:
+                      - $test.assert: true
+                  - pattern: {$wildcard: null}
+                    do:
+                      - $test.fail: "wrong captured value"
           - pattern: {$wildcard: null}
             do:
               - $test.fail: "fell through to wildcard"
