@@ -2404,6 +2404,12 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
     Ok(tests)
 }
 
+/// Validate and lower all declarations in a library-style module without
+/// requiring either `main` or a `$test` declaration.
+pub fn lower_library(program: &LoadedProgram) -> Result<()> {
+    build_test_context(program).map(|_| ())
+}
+
 /// Lower exactly one named `$test` into a `LoweredProgram`, moving the shared
 /// context into it. No clones, and bodies of non-selected tests are never
 /// lowered. This is what each test child process uses to run a single test.

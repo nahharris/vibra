@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/code-form.schema.json",
+  "title": "VibraCodeForm",
+  "description": "Pure structural Vibra/YAML data. Mapping entries are ordered.",
+  "oneOf": [
+    { "type": "null" },
+    { "type": "boolean" },
+    { "type": "number" },
+    { "type": "string" },
+    { "type": "array", "items": { "$ref": "#" } },
+    {
+      "type": "object",
+      "additionalProperties": { "$ref": "#" }
+    }
+  ]
+}

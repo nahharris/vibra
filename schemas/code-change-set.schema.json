@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/code-change-set.schema.json",
+  "title": "VibraCodeChangeSet",
+  "type": "object",
+  "required": ["documents", "edits"],
+  "additionalProperties": false,
+  "properties": {
+    "documents": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Document path to exact source revision."
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["operation", "document", "path", "fingerprint"],
+        "properties": {
+          "operation": {
+            "enum": [
+              "replace",
+              "delete",
+              "mapping-insert",
+              "mapping-upsert",
+              "mapping-rename",
+              "sequence-insert",
+              "sequence-splice",
+              "copy",
+              "move"
+            ]
+          },
+          "document": { "type": "string" },
+          "path": { "$ref": "./code-path.schema.json" },
+          "fingerprint": { "type": "string" },
+          "value": { "$ref": "./code-form.schema.json" }
+        }
+      }
+    }
+  }
+}

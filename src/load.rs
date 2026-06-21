@@ -1,5 +1,6 @@
 //! Load `.vibra` modules and resolve `$import` relative to each file or project namespace.
 
+use crate::code::SourceDatabase;
 use crate::project;
 use anyhow::{bail, Context, Result};
 use serde_yaml::{Mapping, Value};
@@ -12,6 +13,8 @@ use std::path::{Path, PathBuf};
 pub struct LoadedProgram {
     pub entry: PathBuf,
     pub modules: HashMap<PathBuf, Value>,
+    pub sources: SourceDatabase,
+    pub module_parts: HashMap<PathBuf, Vec<PathBuf>>,
 }
 
 pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
@@ -22,8 +25,17 @@ pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
     let mut modules = HashMap::new();
     let mut stack = Vec::new();
     load_recursive(&entry, project.as_ref(), &mut modules, &mut stack)?;
+    let (sources, module_parts) = source_database_for_modules(&entry, modules.keys(), None)?;
+    let mut modules = rebuild_modules_from_sources(modules.keys(), &sources, &module_parts)?;
+    normalize_ignored_annotations(&mut modules)?;
+    let modules = crate::macro_expand::expand_program_modules(&entry, modules)?;
     validate_direct_import_aliases(&modules)?;
-    Ok(LoadedProgram { entry, modules })
+    Ok(LoadedProgram {
+        entry,
+        modules,
+        sources,
+        module_parts,
+    })
 }
 
 pub fn load_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram> {
@@ -36,9 +48,96 @@ pub fn load_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram
     for import in module_imports(&entry, &root, project.as_ref())? {
         load_recursive(&import, project.as_ref(), &mut modules, &mut stack)?;
     }
-    modules.insert(entry.clone(), root);
+    modules.insert(entry.clone(), root.clone());
+    let inline_source = serde_yaml::to_string(&root).context("serialize inline Vibra program")?;
+    let (sources, module_parts) =
+        source_database_for_modules(&entry, modules.keys(), Some((&entry, inline_source)))?;
+    let mut modules = rebuild_modules_from_sources(modules.keys(), &sources, &module_parts)?;
+    normalize_ignored_annotations(&mut modules)?;
+    let modules = crate::macro_expand::expand_program_modules(&entry, modules)?;
     validate_direct_import_aliases(&modules)?;
-    Ok(LoadedProgram { entry, modules })
+    Ok(LoadedProgram {
+        entry,
+        modules,
+        sources,
+        module_parts,
+    })
+}
+
+fn normalize_ignored_annotations(modules: &mut HashMap<PathBuf, Value>) -> Result<()> {
+    for (path, module) in modules {
+        crate::annotations::validate(module)
+            .with_context(|| format!("validate annotations in {}", path.display()))?;
+        crate::annotations::strip(module);
+    }
+    Ok(())
+}
+
+fn source_database_for_modules<'a>(
+    entry: &Path,
+    modules: impl Iterator<Item = &'a PathBuf>,
+    inline: Option<(&Path, String)>,
+) -> Result<(SourceDatabase, HashMap<PathBuf, Vec<PathBuf>>)> {
+    let mut source_pairs = Vec::new();
+    let mut module_parts = HashMap::new();
+    for module in modules {
+        if inline.as_ref().is_some_and(|(path, _)| *path == module) {
+            continue;
+        }
+        let parts = module_part_paths(module)?;
+        for part in &parts {
+            let source =
+                fs::read_to_string(part).with_context(|| format!("read {}", part.display()))?;
+            source_pairs.push((part.clone(), source));
+        }
+        module_parts.insert(module.clone(), parts);
+    }
+    if let Some((path, source)) = inline {
+        source_pairs.push((path.to_path_buf(), source));
+        module_parts.insert(path.to_path_buf(), vec![path.to_path_buf()]);
+    }
+    let root = entry
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    let sources = SourceDatabase::from_sources(root, source_pairs)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    Ok((sources, module_parts))
+}
+
+fn rebuild_modules_from_sources<'a>(
+    modules: impl Iterator<Item = &'a PathBuf>,
+    sources: &SourceDatabase,
+    module_parts: &HashMap<PathBuf, Vec<PathBuf>>,
+) -> Result<HashMap<PathBuf, Value>> {
+    let mut rebuilt = HashMap::new();
+    for module in modules {
+        let mut merged = Mapping::new();
+        let parts = module_parts
+            .get(module)
+            .with_context(|| format!("missing source origins for {}", module.display()))?;
+        for part in parts {
+            let source = sources.document(part).map_err(|error| {
+                anyhow::anyhow!("read source snapshot {}: {error}", part.display())
+            })?;
+            let value: Value = serde_yaml::from_str(source.source())
+                .with_context(|| format!("YAML parse {}", part.display()))?;
+            let mapping = value
+                .as_mapping()
+                .with_context(|| format!("{}: root must be a mapping", part.display()))?;
+            for (key, value) in mapping {
+                if merged.insert(key.clone(), value.clone()).is_some() {
+                    bail!(
+                        "{}: duplicate module key `{}` across module parts",
+                        part.display(),
+                        key_as_str(key).unwrap_or("<non-string>")
+                    );
+                }
+            }
+        }
+        rebuilt.insert(module.clone(), Value::Mapping(merged));
+    }
+    Ok(rebuilt)
 }
 
 fn validate_direct_import_aliases(modules: &HashMap<PathBuf, Value>) -> Result<()> {

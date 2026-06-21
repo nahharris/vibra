@@ -1,10 +1,12 @@
 //! Library surface for tests and future embedding.
 
-pub mod code_doc;
+pub mod annotations;
+pub mod code;
 pub mod emit;
 pub mod execute;
 pub mod load;
 pub mod lower;
+pub mod macro_expand;
 pub mod project;
 pub mod runtime;
 pub mod test_runner;

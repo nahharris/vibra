@@ -170,73 +170,11 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
 }
 
 fn format_source(source: &str) -> Result<String> {
-    let prefix = extract_prefix_comments(source);
-    if has_inline_comments(source) {
-        let doc = Document::from_str(source).context("parse Vibra code document")?;
-        let mut body = doc.to_string();
-        while body.ends_with('\n') {
-            body.pop();
-        }
-        return Ok(if prefix.is_empty() {
-            format!("{body}\n")
-        } else {
-            format!("{prefix}{body}\n")
-        });
-    }
-
+    crate::yaml_subset::validate_yaml_subset_or_err(source, Path::new("<format>"))?;
     let _ = Document::from_str(source).context("parse Vibra code document")?;
     let value: serde_yaml::Value = serde_yaml::from_str(source).context("parse Vibra YAML")?;
-    let mut formatted = serde_yaml::to_string(&value).context("emit canonical Vibra YAML")?;
-    if !prefix.is_empty() {
-        formatted = format!("{prefix}{formatted}");
-    }
-    Ok(formatted)
-}
-
-fn has_inline_comments(source: &str) -> bool {
-    source.lines().any(|line| {
-        let stripped = strip_line_comment(line);
-        !stripped.trim().starts_with('#') && line.contains('#')
-    })
-}
-
-fn strip_line_comment(line: &str) -> &str {
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut escaped = false;
-    for (idx, ch) in line.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match ch {
-            '\\' if in_double => escaped = true,
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            '#' if !in_single && !in_double => return &line[..idx],
-            _ => {}
-        }
-    }
-    line
-}
-
-fn extract_prefix_comments(source: &str) -> String {
-    let mut prefix = String::new();
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            prefix.push_str(line);
-            prefix.push('\n');
-            continue;
-        }
-        if trimmed.starts_with('#') {
-            prefix.push_str(line);
-            prefix.push('\n');
-            continue;
-        }
-        break;
-    }
-    prefix
+    crate::annotations::validate(&value)?;
+    serde_yaml::to_string(&value).context("emit canonical Vibra YAML")
 }
 
 pub fn run_lint(options: LintOptions) -> Result<bool> {
@@ -258,7 +196,13 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
         }
         let syntax_ok = if active_categories.contains(&Category::Syntax) && yaml_subset_ok {
             match serde_yaml::from_str::<serde_yaml::Value>(&source) {
-                Ok(_) => true,
+                Ok(value) => match crate::annotations::validate(&value) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        file_diagnostics.push(annotation_diagnostic(path, &source, &error));
+                        false
+                    }
+                },
                 Err(err) => {
                     file_diagnostics.push(yaml_diagnostic(path, &err));
                     false
@@ -279,7 +223,8 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
         }
 
         diagnostics.extend(file_diagnostics.into_iter().filter(|diagnostic| {
-            !suppressions.suppresses(&diagnostic.code, diagnostic.span.start.line)
+            diagnostic.severity == Severity::Error
+                || !suppressions.suppresses(&diagnostic.code, diagnostic.span.start.line)
         }));
     }
 
@@ -413,6 +358,10 @@ fn rule_summary(code: &str) -> &'static str {
     match code {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
         "E-YAML-001" => "YAML parse or strict-subset violation",
+        "E-YAML-002" => "YAML comments are forbidden",
+        "E-COMMENT-001" => "`=comment` must be a string scalar",
+        "E-LINT-001" => "Malformed or invalid `=lint` annotation",
+        "E-ANNO-003" => "Annotation has no syntax in its mapping",
         "E-COMPILE-001" => "Vibra compile diagnostic",
         "E-ONE-001" => "Function declaration is not canonical labeled shorthand",
         "E-MUT-001" => "Malformed `$mut` wrapper",
@@ -483,12 +432,43 @@ fn yaml_diagnostic(path: &Path, err: &serde_yaml::Error) -> Diagnostic {
     }
 }
 
-fn yaml_subset_diagnostic(path: &Path, violation: &crate::yaml_subset::YamlSubsetViolation) -> Diagnostic {
+fn yaml_subset_diagnostic(
+    path: &Path,
+    violation: &crate::yaml_subset::YamlSubsetViolation,
+) -> Diagnostic {
     Diagnostic {
         code: violation.code.to_string(),
         message: violation.message.clone(),
         severity: Severity::Error,
         span: point_span(path, violation.line, violation.column),
+        related: None,
+        fix: None,
+        category: Category::Syntax,
+    }
+}
+
+fn annotation_diagnostic(path: &Path, source: &str, error: &anyhow::Error) -> Diagnostic {
+    let message = error.to_string();
+    let code = message
+        .split_once(':')
+        .map(|(code, _)| code)
+        .filter(|code| code.starts_with("E-"))
+        .unwrap_or("E-ANNO-003");
+    let needle = match code {
+        "E-COMMENT-001" => "=comment",
+        "E-LINT-001" => "=lint",
+        _ => "=",
+    };
+    let (line, column) = source
+        .lines()
+        .enumerate()
+        .find_map(|(line, text)| text.find(needle).map(|column| (line, column)))
+        .unwrap_or((0, 0));
+    Diagnostic {
+        code: code.to_string(),
+        message,
+        severity: Severity::Error,
+        span: point_span(path, line, column),
         related: None,
         fix: None,
         category: Category::Syntax,
@@ -591,6 +571,10 @@ fn contains_noncanonical_option(value: &serde_yaml::Value) -> bool {
 fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
     const KNOWN_CODES: &[&str] = &[
         "E-YAML-001",
+        "E-YAML-002",
+        "E-COMMENT-001",
+        "E-LINT-001",
+        "E-ANNO-003",
         "E-YAML-002",
         "E-YAML-003",
         "E-SYN-001",
@@ -775,63 +759,77 @@ fn percent_encode_uri_path(path: &str) -> String {
 
 #[derive(Debug, Default)]
 struct Suppressions {
-    current_line: BTreeMap<usize, BTreeSet<String>>,
-    next_line: BTreeMap<usize, BTreeSet<String>>,
-    from_line: Vec<(usize, BTreeSet<String>)>,
+    subtrees: Vec<(usize, usize, BTreeSet<String>)>,
 }
 
 impl Suppressions {
     fn parse(source: &str) -> Self {
         let mut suppressions = Self::default();
-        for (line_index, line) in source.lines().enumerate() {
-            let Some(comment_start) = line.find('#') else {
+        let lines: Vec<_> = source.lines().collect();
+        for (line_index, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("=lint:") {
                 continue;
-            };
-            let comment = line[comment_start + 1..].trim();
-            if let Some(rest) = comment.strip_prefix("vibra-lint-disable-next-line") {
-                suppressions
-                    .next_line
-                    .insert(line_index + 1, parse_suppression_codes(rest));
-            } else if let Some(rest) = comment.strip_prefix("vibra-lint-disable-line") {
-                suppressions
-                    .current_line
-                    .insert(line_index, parse_suppression_codes(rest));
-            } else if let Some(rest) = comment.strip_prefix("vibra-lint-disable") {
-                suppressions
-                    .from_line
-                    .push((line_index, parse_suppression_codes(rest)));
             }
+            let annotation_indent = line.len() - trimmed.len();
+            let owner_start = if annotation_indent == 0 {
+                0
+            } else {
+                (0..line_index)
+                    .rev()
+                    .find(|index| {
+                        let candidate = lines[*index];
+                        !candidate.trim().is_empty()
+                            && candidate.len() - candidate.trim_start().len() < annotation_indent
+                    })
+                    .unwrap_or(0)
+            };
+            let owner_indent = lines[owner_start].len() - lines[owner_start].trim_start().len();
+            let owner_end = if annotation_indent == 0 {
+                lines.len()
+            } else {
+                ((line_index + 1)..lines.len())
+                    .find(|index| {
+                        let candidate = lines[*index];
+                        !candidate.trim().is_empty()
+                            && candidate.len() - candidate.trim_start().len() <= owner_indent
+                    })
+                    .unwrap_or(lines.len())
+            };
+            let lint_end = ((line_index + 1)..lines.len())
+                .find(|index| {
+                    let candidate = lines[*index];
+                    !candidate.trim().is_empty()
+                        && candidate.len() - candidate.trim_start().len() <= annotation_indent
+                })
+                .unwrap_or(lines.len());
+            let inline = trimmed.trim_start_matches("=lint:").trim();
+            let lint_source = if inline.is_empty() {
+                lines[line_index + 1..lint_end]
+                    .iter()
+                    .map(|line| {
+                        line.get((annotation_indent + 2).min(line.len())..)
+                            .unwrap_or_default()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                inline.to_string()
+            };
+            let codes = serde_yaml::from_str::<serde_yaml::Value>(&lint_source)
+                .ok()
+                .and_then(|value| crate::annotations::lint_codes(&value).ok())
+                .map(|codes| codes.into_iter().collect())
+                .unwrap_or_default();
+            suppressions.subtrees.push((owner_start, owner_end, codes));
         }
         suppressions
     }
 
     fn suppresses(&self, code: &str, line: usize) -> bool {
-        self.current_line
-            .get(&line)
-            .is_some_and(|codes| code_matches(codes, code))
-            || self
-                .next_line
-                .get(&line)
-                .is_some_and(|codes| code_matches(codes, code))
-            || self
-                .from_line
-                .iter()
-                .any(|(start, codes)| line >= *start && code_matches(codes, code))
-    }
-}
-
-fn parse_suppression_codes(raw: &str) -> BTreeSet<String> {
-    let codes: BTreeSet<String> = raw
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .filter_map(|part| {
-            let part = part.trim();
-            (!part.is_empty()).then(|| part.to_string())
-        })
-        .collect();
-    if codes.is_empty() {
-        ["all".to_string()].into_iter().collect()
-    } else {
-        codes
+        self.subtrees
+            .iter()
+            .any(|(start, end, codes)| line >= *start && line < *end && code_matches(codes, code))
     }
 }
 

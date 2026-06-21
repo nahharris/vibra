@@ -77,7 +77,7 @@ enums are exhaustive when every tag is covered.
 | `lang-newtype.vibra` | `$newtype` + `$cast` and newtype pattern matching |
 | `stdlib-result.vibra` | `result` ok/err construction and matching |
 | `stdlib-option.vibra` | `option` union coercion of value/absence |
-| `stdlib-code.vibra` | pure `code` parse / get / set document operations |
+| `stdlib-code.vibra` | typed structural paths, node lookup, forms, and lossless replacement |
 | `stdlib-io.vibra` | stdout/stderr writes and the returned `result` |
 
 ## Useful flags

@@ -7208,110 +7208,7 @@ fn vibra_exec_prints_raw_string_expression() {
 }
 
 #[test]
-fn vibra_exec_reads_arg_file_and_gets_code_path() {
-    let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("source.vibra");
-    std::fs::write(
-        &source,
-        r#"io:
-  $import: ./io.vibra
-main:
-  $function: $void
-  return: $void
-  do:
-    - $io.println: "Hello"
-"#,
-    )
-    .unwrap();
-
-    let output = vibra_cmd()
-        .args([
-            "exec",
-            "{$code.get: {$code.parse: $src}, path: \"/main/do/0/$io.println\"}",
-            "--arg-file",
-            &format!("src={}", path_str(&source)),
-            "--format",
-            "raw",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "exec failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "\"Hello\"");
-}
-
-#[test]
-fn vibra_exec_sets_code_path_while_preserving_comments() {
-    let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("source.vibra");
-    std::fs::write(
-        &source,
-        r#"# keep module comment
-io:
-  $import: ./io.vibra
-
-main:
-  $function: $void
-  return: $void
-  do:
-    # keep call comment
-    - $io.println: "Hello"
-"#,
-    )
-    .unwrap();
-
-    let output = vibra_cmd()
-        .args([
-            "exec",
-            "{$code.emit: {$code.set: {$code.parse: $src}, path: \"/main/do/0/$io.println\", value: \"\\\"Changed\\\"\"}}",
-            "--arg-file",
-            &format!("src={}", path_str(&source)),
-            "--format",
-            "raw",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "exec failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("# keep module comment"), "output: {stdout}");
-    assert!(stdout.contains("# keep call comment"), "output: {stdout}");
-    assert!(
-        stdout.contains("$io.println: \"Changed\""),
-        "output: {stdout}"
-    );
-    assert!(
-        !stdout.contains("$io.println: \"Hello\""),
-        "output: {stdout}"
-    );
-}
-
-#[test]
-fn vibra_exec_rejects_invalid_pointer_and_non_string_raw_output() {
-    let missing = vibra_cmd()
-        .args([
-            "exec",
-            "{$code.get: {$code.parse: \"main: 1\\n\"}, path: \"/missing\"}",
-            "--format",
-            "raw",
-        ])
-        .output()
-        .unwrap();
-    assert!(!missing.status.success());
-    assert!(
-        String::from_utf8_lossy(&missing.stderr).contains("JSON Pointer"),
-        "stderr: {}",
-        String::from_utf8_lossy(&missing.stderr)
-    );
-
+fn vibra_exec_rejects_non_string_raw_output() {
     let non_string = vibra_cmd()
         .args(["exec", "42", "--format", "raw"])
         .output()
@@ -7322,6 +7219,345 @@ fn vibra_exec_rejects_invalid_pointer_and_non_string_raw_output() {
         "stderr: {}",
         String::from_utf8_lossy(&non_string.stderr)
     );
+}
+
+#[test]
+fn vibra_code_inline_previews_and_write_is_explicit() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("main.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
+        .unwrap();
+    let original = format!(
+        "io:\n  $import: {}\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $io.println: Hello\n",
+        path_str(&io)
+    );
+    std::fs::write(&source, &original).unwrap();
+    let pipeline =
+        "- $code.file: main.vibra\n- $code.at: [main, do, 0, $io.println]\n- $code.replace: Changed";
+
+    let preview = vibra_cmd()
+        .args(["code", pipeline, "--workspace", &path_str(dir.path())])
+        .output()
+        .unwrap();
+    assert!(
+        preview.status.success(),
+        "code preview failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&preview.stdout),
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&preview.stdout);
+    assert!(stdout.contains("status: preview"), "output: {stdout}");
+    assert!(
+        stdout.contains("+    - $io.println: Changed"),
+        "output: {stdout}"
+    );
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), original);
+
+    let write = vibra_cmd()
+        .args([
+            "code",
+            pipeline,
+            "--workspace",
+            &path_str(dir.path()),
+            "--write",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        write.status.success(),
+        "code write failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&write.stdout),
+        String::from_utf8_lossy(&write.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&source).unwrap(),
+        format!(
+            "io:\n  $import: {}\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $io.println: Changed\n",
+            path_str(&io)
+        )
+    );
+}
+
+#[test]
+fn vibra_code_accepts_equivalent_stdin_and_file_pipelines() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("main.vibra"), "main:\n  value: hello\n").unwrap();
+    let pipeline = "- $code.file: main.vibra\n- $code.at: [main, value]\n- $code.project: form\n";
+    let pipeline_file = dir.path().join("query.vibra");
+    std::fs::write(&pipeline_file, pipeline).unwrap();
+
+    let file_output = vibra_cmd()
+        .args([
+            "code",
+            "--file",
+            &path_str(&pipeline_file),
+            "--workspace",
+            &path_str(dir.path()),
+        ])
+        .output()
+        .unwrap();
+    assert!(file_output.status.success());
+
+    let mut child = vibra_cmd()
+        .args(["code", "-", "--workspace", &path_str(dir.path())])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(pipeline.as_bytes())
+        .unwrap();
+    let stdin_output = child.wait_with_output().unwrap();
+    assert!(
+        stdin_output.status.success(),
+        "stdin code failed: {}",
+        String::from_utf8_lossy(&stdin_output.stderr)
+    );
+    assert_eq!(file_output.stdout, stdin_output.stdout);
+    assert!(String::from_utf8_lossy(&file_output.stdout).contains("hello"));
+}
+
+#[test]
+fn vibra_code_semantic_rename_updates_multiple_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("a.vibra"),
+        "helper:\n  $function: $void\n  return: $void\n  do:\n    - $let:\n        value: 1\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.vibra"),
+        "util:\n  $import: ./a.vibra\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $util.helper: null\n",
+    )
+    .unwrap();
+    let pipeline = "- $code.rename-symbol:\n    file: a.vibra\n    from: helper\n    to: assist\n";
+
+    let output = vibra_cmd()
+        .args([
+            "code",
+            pipeline,
+            "--workspace",
+            &path_str(dir.path()),
+            "--write",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "rename failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(std::fs::read_to_string(dir.path().join("a.vibra"))
+        .unwrap()
+        .contains("assist:"));
+    assert!(std::fs::read_to_string(dir.path().join("b.vibra"))
+        .unwrap()
+        .contains("$util.assist:"));
+}
+
+#[test]
+fn vibra_code_rejects_edits_that_break_compilation() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("main.vibra");
+    let original = "main:\n  $function: $void\n  return: $void\n  do: []\n";
+    std::fs::write(&source, original).unwrap();
+    let pipeline =
+        "- $code.file: main.vibra\n- $code.at: [main, $function]\n- $code.replace: broken\n";
+
+    let output = vibra_cmd()
+        .args([
+            "code",
+            pipeline,
+            "--workspace",
+            &path_str(dir.path()),
+            "--write",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("validation"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), original);
+}
+
+#[test]
+fn procedural_macro_quote_and_unquote_expand_before_lowering() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"identity:
+  $macro:
+    input: $code.expr-syntax
+  return: $code.expr-syntax
+  do:
+    - $return:
+        $quote:
+          $unquote: $args.input
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        value:
+          $identity: hello
+    - $match: $value
+      when:
+        - case: hello
+          do: []
+        - case:
+            $wildcard: null
+          do: []
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded).expect("macro invocation should expand before lowering");
+}
+
+#[test]
+fn vibra_expand_shows_hygienic_bindings_and_explicit_capture() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"bind-temp:
+  $macro:
+    input: $code.expr-syntax
+  return: $code.statement-syntax
+  do:
+    - $return:
+        $quote:
+          $let:
+            temp:
+              $unquote: $args.input
+capture-name:
+  $macro:
+    input: $code.expr-syntax
+  return: $code.expr-syntax
+  do:
+    - $return:
+        $quote:
+          $capture: $caller
+main:
+  $function: $void
+  return: $void
+  do:
+    - $bind-temp: hello
+    - $let:
+        captured:
+          $capture-name: ignored
+"#,
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args(["expand", &path_str(&entry)])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "expand failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("temp--macro-"), "expanded output: {stdout}");
+    assert!(stdout.contains("$caller"), "expanded output: {stdout}");
+    assert!(!stdout.contains("$bind-temp"), "expanded output: {stdout}");
+}
+
+#[test]
+fn recursive_macro_expansion_reports_the_depth_limit_and_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"forever:
+  $macro:
+    input: $code.expr-syntax
+  return: $code.expr-syntax
+  do:
+    - $return:
+        $quote:
+          $forever:
+            $unquote: $args.input
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        value:
+          $forever: hello
+"#,
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args(["expand", &path_str(&entry)])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("64"), "stderr: {stderr}");
+    assert!(stderr.contains("forever"), "stderr: {stderr}");
+    assert!(stderr.contains("entry.vibra"), "stderr: {stderr}");
+}
+
+#[test]
+fn imported_macro_quotes_resolve_names_in_definition_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let macros = dir.path().join("macros.vibra");
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &macros,
+        r#"helper:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        value: 1
+call-helper:
+  $macro:
+    input: $code.expr-syntax
+  return: $code.statement-syntax
+  do:
+    - $return:
+        $quote:
+          $helper: null
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        r#"m:
+  $import: ./macros.vibra
+main:
+  $function: $void
+  return: $void
+  do:
+    - $m.call-helper: ignored
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let expanded = serde_yaml::to_string(loaded.modules.get(&loaded.entry).unwrap()).unwrap();
+    assert!(expanded.contains("$m.helper"), "expanded: {expanded}");
+    vibra::lower::lower_program(&loaded).unwrap();
 }
 
 #[test]
@@ -7376,7 +7612,7 @@ fn vibra_fmt_defaults_to_yaml_check_mode_and_write_is_explicit() {
 }
 
 #[test]
-fn vibra_fmt_write_preserves_comments() {
+fn vibra_fmt_rejects_yaml_comments() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("commented.vibra");
     let original = "# important intent\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
@@ -7386,16 +7622,8 @@ fn vibra_fmt_write_preserves_comments() {
         .args(["fmt", &path_str(&source), "--write"])
         .output()
         .unwrap();
-    assert!(
-        write.status.success(),
-        "fmt --write failed: {}",
-        String::from_utf8_lossy(&write.stderr)
-    );
-    let formatted = std::fs::read_to_string(&source).unwrap();
-    assert!(
-        formatted.contains("# important intent"),
-        "comment should survive fmt --write, got:\n{formatted}"
-    );
+    assert!(!write.status.success(), "fmt must reject YAML comments");
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), original);
 }
 
 #[test]
@@ -7456,7 +7684,7 @@ fn vibra_lint_suppression_and_deny_warnings_are_respected() {
     let source = dir.path().join("style.vibra");
     std::fs::write(
         &source,
-        "# vibra-lint-disable-next-line W-STYLE-001\nBadName: 1\nOtherBad: 2\n",
+        "BadName:\n  =lint:\n    disable: [W-STYLE-001]\n  $literal: 1\nOtherBad: 2\n",
     )
     .unwrap();
 
@@ -7490,6 +7718,34 @@ fn vibra_lint_suppression_and_deny_warnings_are_respected() {
         .output()
         .unwrap();
     assert!(!denied.status.success(), "--deny-warnings should fail");
+}
+
+#[test]
+fn root_lint_annotation_suppresses_the_whole_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("style.vibra");
+    std::fs::write(
+        &source,
+        "=lint: { disable: [W-STYLE-001] }\nBadName: 1\nOtherBad: 2\n",
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "style",
+            "--deny-warnings",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "root suppression failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -8168,9 +8424,7 @@ fn forged_stdin_read_file_handle_requires_allow_stdin() {
     let output = vibra_cmd()
         .args([
             "exec",
-            &format!(
-                "{{$fs.readable.read-string: {{$cast: 0, into: $fs.read-file}}}}"
-            ),
+            &format!("{{$fs.readable.read-string: {{$cast: 0, into: $fs.read-file}}}}"),
             "--import",
             &format!("fs={}", path_str(&fs)),
             "--import",

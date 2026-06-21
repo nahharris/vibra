@@ -27,7 +27,7 @@ The **`vibra` CLI** in this repo implements a **reference subset** for bootstrap
 | Root | Exactly one **mapping** at document root (the module). |
 | Forbidden | Anchors/aliases (`&`, `*`), merge keys (`<<`), explicit tags (`!!`), `!!binary`, timestamp tags as language values. |
 | Keys | String keys only; symbol names **kebab-case** at module level (see §3). |
-| Comments | Line comments `#` allowed. Block comments are **forbidden** in v1 (`E-YAML-002`). |
+| Comments | YAML `#` comments are forbidden (`E-YAML-002`). Use an attached `=comment` annotation. |
 | Sequences | **Block sequences** (`- item`) are **canonical** for statement lists (`do:`). **Flow sequences** allowed only inside **type** positions where the spec shows `[$t1, $t2]` (tuple types). |
 | Strings | User-visible text and symbol-like content: **double-quoted** in examples; unquoted scalars that could parse as `true`/`false`/`null`/number are **errors** (`E-YAML-003`). |
 | `$` in strings | Leading `$` in a string literal: escape as **`$$`** (carries over from early draft). |
@@ -327,7 +327,15 @@ Structural satisfaction is **not enough** to clear a `=where` bound or be a disp
 
 - Declares **compile-time** expansion from surface AST → core AST.
 - **Staging:** **After parse, before typecheck** unless a single documented **typed** stage is added later.
-- **v1 recommendation:** **declarative** rewrite tables (pattern → template) in trusted `lang/`; arbitrary procedural macros optional later.
+- Uses a function-shaped declaration with one labeled syntax input, an explicit
+  syntax-category return, and a deterministic `do` body.
+- `$quote`, `$unquote`, and `$splice` compose structural syntax values.
+  Introduced bindings are hygienic; `$capture` is the explicit caller-scope
+  escape hatch.
+- Compile-time execution has no `$wasm`, policy, filesystem, environment,
+  network, clock, or randomness authority.
+- Expansion limits are 64 nested invocations, 1,000,000 evaluation steps, and
+  100,000 generated nodes. Typed/post-typecheck macros are not part of v1.
 
 ### `$wasm`
 
@@ -415,9 +423,15 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 
 ## 11. Tooling and diagnostics
 
-- **Schemas:** See [`schemas/`](schemas/) — `diagnostic.schema.json`, `query-response.schema.json`, `module-surface.schema.json`, `function.schema.json`, `type-expr.schema.json`, `expression.schema.json`, `linter-codes.json`.
+- **Schemas:** See [`schemas/`](schemas/) — including
+  `code-path.schema.json`, `code-form.schema.json`, `code-query.schema.json`,
+  `code-change-set.schema.json`, `macro.schema.json`, and the diagnostic,
+  module, function, type, and expression schemas.
 - **Stable errors:** Each diagnostic has **`code`**, **`message`**, **`severity`**, **`span`**, optional **`related`**, optional **`fix`** (JSON Patch RFC 6902).
-- **LSP / `vibra query`:** Custom request **`vibra/contextAt`** (or equivalent): given `uri` + `position`, return **`QueryResponse`** (schema) with **expected keys**, **symbol**, **type**, **imports**, **macro schema** if applicable.
+- **Structural tooling / `vibra code`:** Queries return canonical key/index
+  paths, node fingerprints, forms, source, and semantic metadata. Transactions
+  require exact document revisions and fingerprints; line/column is diagnostic
+  metadata only and is never an edit locator.
 
 **Annotation / generics codes (added with §13):**
 
@@ -474,13 +488,15 @@ main:
 
 ## 13. Annotations (`=doc`, `=where`, …)
 
-A top-level symbol's value is a **definition envelope**: a mapping with **exactly one** `$`-form key (`$function`, `$import`, or one of the type constructors in §6) and **zero or more** `=`-prefixed annotation siblings. v1 currently recognises four annotations: `=doc`, `=where`, `=defs` (inherent ops on a type), and `=impl` (explicit interface implementations).
+A top-level symbol's value is a **definition envelope**: a mapping with **exactly one** `$`-form key (`$function`, `$import`, or one of the type constructors in §6) and **zero or more** `=`-prefixed annotation siblings. In addition to semantic definition annotations, every source mapping may carry ignored `=comment` and tooling-only `=lint` annotations.
 
 > **Annotation prefix is normative.** Every annotation key starts with `=`. The pre-1.0 spelling without the prefix (`where:`, `doc:`) is **rejected** with `E-ANNO-002` (rename to `=where`, `=doc`).
 
 | Annotation | Value | Purpose |
 |------------|-------|---------|
 | `=doc` | `$str` (YAML `|` block scalar recommended for multiline markdown) | Compile-time documentation attached to the symbol. Stored on the lowered `FunctionSig` / `TypeAlias`; not yet emitted to runtime or LSP output. |
+| `=comment` | `$str` | Ignored source commentary. It must share the mapping containing the syntax it describes and is retained only by structural tooling. |
+| `=lint` | `{ disable: [CODE, ...] }` | Suppresses matching lint diagnostics for the annotated mapping and its structural descendants. `all` suppresses every lint rule; syntax/compiler errors cannot be suppressed. |
 | `=where` | `{ <name>: [<iface>, ...], ... }` | Declares ordered generic type parameters. The mapping's **key order** is the positional order of type parameters. Each list element is an interface reference (`$some-iface`, `$mod.iface`, or `$intersect` of those); the substituted type must have a nominal `=impl` for every iface listed. Empty `[]` means unbounded. |
 | `=defs` | `{ <name>: $function-envelope, ... }` | Inherent operations on the enclosing type. Each entry registers a function under the qualified key `<mod>.<type>.<name>`, callable as `$<mod>.<type>.<name>: { ... }`. Inside the function `$self` resolves to the enclosing type. Only valid alongside a type-form key (not on `$function` or `$import`). |
 | `=impl` | `{ $iface-alias: <impl-payload>, ... }` | Explicit nominal interface implementations. The payload binds the interface's `=where` type-arguments by name, supplies one method binding per interface method (either a fresh `$function` envelope or a `$qualified.name` string reference), and may declare impl-local type parameters via `=where`. Each impl populates the global impl table and registers fresh methods under `<mod>.<type>.<iface>.<method>`. |

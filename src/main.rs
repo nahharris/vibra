@@ -4,10 +4,11 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_yaml::{Mapping, Value};
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 use vibra::lower::{RuntimeValue, TypeRef};
-use vibra::{execute, load, lower, project, runtime, test_runner, tooling};
+use vibra::{code, execute, load, lower, project, runtime, test_runner, tooling};
 
 #[derive(Parser)]
 #[command(name = "vibra", version, about = "Vibra language toolchain")]
@@ -111,6 +112,11 @@ enum Command {
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
     },
+    /// Expand compile-time macros and print canonical Vibra source.
+    Expand {
+        /// Entry module to expand.
+        path: PathBuf,
+    },
     /// Evaluate one inline Vibra expression for tooling workflows.
     Exec {
         /// Inline Vibra expression encoded as YAML.
@@ -169,6 +175,27 @@ enum Command {
         /// Maximum number of concurrently open file handles (0 = unlimited).
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
+    },
+    /// Query and transactionally edit Vibra source through structural paths.
+    Code {
+        /// Inline YAML pipeline, or `-` to read the pipeline from stdin.
+        #[arg(allow_hyphen_values = true)]
+        pipeline: Option<String>,
+        /// Read a larger pipeline from this file.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Workspace root containing project-owned Vibra files.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+        /// Apply the validated transaction. Preview is the default.
+        #[arg(long)]
+        write: bool,
+        /// Run `vibra lint --deny-warnings` against the staged workspace.
+        #[arg(long)]
+        lint: bool,
+        /// Run the Vibra-language test suite against the staged workspace.
+        #[arg(long)]
+        test: bool,
     },
     /// Discover and run `$test` declarations.
     Test {
@@ -465,6 +492,14 @@ fn main() -> Result<()> {
             );
             execute::run_lowered(&lowered, &config)?;
         }
+        Command::Expand { path } => {
+            let loaded = load::load_program(&path)?;
+            let expanded = loaded
+                .modules
+                .get(&loaded.entry)
+                .context("expanded entry module is missing")?;
+            print!("{}", serde_yaml::to_string(expanded)?);
+        }
         Command::Exec {
             expr,
             arg,
@@ -513,6 +548,24 @@ fn main() -> Result<()> {
             );
             let value = execute::eval_lowered_exec(&lowered, &bindings, &config)?;
             print_exec_value(value, format)?;
+        }
+        Command::Code {
+            pipeline,
+            file,
+            workspace,
+            write,
+            lint,
+            test,
+        } => {
+            let pipeline = code_pipeline_input(pipeline, file)?;
+            let report = code::run_pipeline(code::CodeRunOptions {
+                workspace,
+                pipeline,
+                write,
+                lint,
+                test,
+            })?;
+            print!("{report}");
         }
         Command::Test {
             path,
@@ -628,6 +681,23 @@ fn exec_bindings(
         insert_exec_binding(name, value, &mut values, &mut types)?;
     }
     Ok((values, types))
+}
+
+fn code_pipeline_input(pipeline: Option<String>, file: Option<PathBuf>) -> Result<String> {
+    match (pipeline, file) {
+        (Some(_), Some(_)) => bail!("`vibra code` accepts either an inline pipeline or `--file`"),
+        (None, None) => bail!("`vibra code` requires an inline pipeline, `-`, or `--file`"),
+        (None, Some(path)) => std::fs::read_to_string(&path)
+            .with_context(|| format!("read code pipeline {}", path.display())),
+        (Some(pipeline), None) if pipeline == "-" => {
+            let mut input = String::new();
+            std::io::stdin()
+                .read_to_string(&mut input)
+                .context("read code pipeline from stdin")?;
+            Ok(input)
+        }
+        (Some(pipeline), None) => Ok(pipeline),
+    }
 }
 
 fn split_name_value<'a>(raw: &'a str, flag: &str) -> Result<(&'a str, &'a str)> {
