@@ -41,7 +41,11 @@ jobs:
       - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci-dev:linux-arm64 -Platform linux -Dev
 
   windows-amd64:
-    runs-on: windows-2022
+    # GitHub-hosted Windows runners do not ship the Docker Desktop Windows
+    # container engine. Enable this native lane only when the repository has a
+    # configured runner with that engine available.
+    if: vars.VIBRA_WINDOWS_CONTAINERS_RUNNER == 'true'
+    runs-on: [self-hosted, windows, windows-containers]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - run: '& $Env:ProgramFiles\Docker\Docker\DockerCli.exe -SwitchWindowsEngine'
