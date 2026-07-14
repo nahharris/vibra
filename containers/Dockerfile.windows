@@ -1,0 +1,45 @@
+# escape=`
+ARG WINDOWS_BUILDER_IMAGE=mcr.microsoft.com/windows/servercore:ltsc2022-amd64@sha256:c747aa0e4668af32773f6f81220fb95d49e2e55237d07fbc18a8138d1b0e4de7
+ARG WINDOWS_RUNTIME_IMAGE=mcr.microsoft.com/windows/nanoserver:ltsc2022-amd64@sha256:132929c393e0d188628033604fe7a6ec4a5fc446546d90c2226bb56ce48d4c9a
+
+FROM ${WINDOWS_BUILDER_IMAGE} AS builder
+
+SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+RUN function Assert-TrustedSignature([string]$Path, [string]$Publisher) { $signature = Get-AuthenticodeSignature -FilePath $Path; if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike "*$Publisher*") { throw "Installer signature validation failed for $Path; expected trusted publisher $Publisher." } }; `
+    Invoke-WebRequest https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe -OutFile C:\rustup-init.exe; `
+    Assert-TrustedSignature C:\rustup-init.exe 'Rust Project Developers'; `
+    & C:\rustup-init.exe -y --profile minimal --default-toolchain 1.94.1-x86_64-pc-windows-msvc; `
+    Remove-Item C:\rustup-init.exe; `
+    Invoke-WebRequest https://aka.ms/vs/17/release/vs_buildtools.exe -OutFile C:\vs_buildtools.exe; `
+    Assert-TrustedSignature C:\vs_buildtools.exe 'Microsoft Corporation'; `
+    Start-Process C:\vs_buildtools.exe -Wait -ArgumentList '--quiet', '--wait', '--norestart', '--nocache', '--installPath', 'C:\BuildTools', '--add', 'Microsoft.VisualStudio.Workload.VCTools', '--includeRecommended'; `
+    Remove-Item C:\vs_buildtools.exe; `
+    Invoke-WebRequest https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe -OutFile C:\git-installer.exe; `
+    Assert-TrustedSignature C:\git-installer.exe 'Johannes Schindelin'; `
+    Start-Process C:\git-installer.exe -Wait -ArgumentList '/VERYSILENT', '/NORESTART'; `
+    Remove-Item C:\git-installer.exe
+ENV PATH="C:\Users\ContainerAdministrator\.cargo\bin;C:\Program Files\Git\cmd;${PATH}"
+ENV RUSTFLAGS="-C target-feature=+crt-static"
+
+WORKDIR C:\src
+COPY . .
+RUN New-Item -ItemType Directory -Force C:\Vibra\bin, C:\Vibra\stdlib | Out-Null; `
+    @('@echo off', 'call "C:\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64', 'if errorlevel 1 exit /b %errorlevel%', '%*') | Set-Content C:\Vibra\devcmd.cmd -Encoding ascii; `
+    cmd /S /C "C:\Vibra\devcmd.cmd cargo build --release"; `
+    Copy-Item C:\src\target\release\vibra.exe C:\Vibra\bin\vibra.exe; `
+    Copy-Item C:\src\stdlib\* C:\Vibra\stdlib -Recurse
+
+FROM builder AS dev
+RUN cmd /S /C "C:\Vibra\devcmd.cmd cargo --version"; `
+    cmd /S /C "C:\Vibra\devcmd.cmd rustc --version"; `
+    cmd /S /C "C:\Vibra\devcmd.cmd git --version"
+WORKDIR C:\workspace
+ENTRYPOINT ["C:\\Vibra\\bin\\vibra.exe"]
+CMD ["--help"]
+
+FROM ${WINDOWS_RUNTIME_IMAGE} AS runtime
+COPY --from=builder C:\Vibra\bin C:\Vibra\bin
+COPY --from=builder C:\Vibra\stdlib C:\Vibra\stdlib
+USER ContainerUser
+ENTRYPOINT ["C:\\Vibra\\bin\\vibra.exe"]
+CMD ["--help"]

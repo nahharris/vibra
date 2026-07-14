@@ -1,0 +1,54 @@
+name: Container CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  source-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: rustup toolchain install 1.94.1
+      - run: rustup default 1.94.1
+      - run: cargo test
+      - run: cargo run -- test
+
+  linux-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: pwsh ./tests/container-layout.ps1
+      - run: pwsh ./tests/container-workflows.ps1
+      - run: docker build --file containers/Dockerfile.linux --target runtime --tag vibra-ci:linux-amd64 .
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci:linux-amd64 -Platform linux
+      - run: docker build --file containers/Dockerfile.linux --target dev --tag vibra-ci-dev:linux-amd64 .
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci-dev:linux-amd64 -Platform linux -Dev
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: pwsh ./tests/container-layout.ps1
+      - run: pwsh ./tests/container-workflows.ps1
+      - run: docker build --file containers/Dockerfile.linux --target runtime --tag vibra-ci:linux-arm64 .
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci:linux-arm64 -Platform linux
+      - run: docker build --file containers/Dockerfile.linux --target dev --tag vibra-ci-dev:linux-arm64 .
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci-dev:linux-arm64 -Platform linux -Dev
+
+  windows-amd64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: '& $Env:ProgramFiles\Docker\Docker\DockerCli.exe -SwitchWindowsEngine'
+        shell: pwsh
+      - run: pwsh ./tests/container-layout.ps1
+      - run: pwsh ./tests/container-workflows.ps1
+      - run: docker build --file containers/Dockerfile.windows --target runtime --tag vibra-ci:windows-amd64 .
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci:windows-amd64 -Platform windows
+      - run: docker build --file containers/Dockerfile.windows --target dev --tag vibra-ci-dev:windows-amd64 .
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci-dev:windows-amd64 -Platform windows -Dev

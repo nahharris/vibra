@@ -6,6 +6,7 @@ A vibe-coding-first programming language: **YAML** surface (strict subset), **st
 - **Philosophy:** [PHILOSOPHY.md](PHILOSOPHY.md)
 - **Schemas (tooling / LSP):** [schemas/](schemas/)
 - **Examples:** [examples/](examples/)
+- **[Container images](docs/containers.md)**
 
 ## Run (MVP)
 

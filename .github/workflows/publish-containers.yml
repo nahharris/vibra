@@ -1,0 +1,154 @@
+name: Publish container images
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  RUNTIME_IMAGE: ghcr.io/nahharris/vibra
+  DEV_IMAGE: ghcr.io/nahharris/vibra-dev
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - id: version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || { echo 'tag must be semantic version'; exit 1; }
+          [[ "$tag" == "$cargo_version" ]] || { echo 'tag must exactly match Cargo.toml package version'; exit 1; }
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          [[ "$tag" == *-* ]] && echo 'prerelease=true' >> "$GITHUB_OUTPUT" || echo 'prerelease=false' >> "$GITHUB_OUTPUT"
+
+  build-scan:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+            suffix: linux-amd64
+            dockerfile: containers/Dockerfile.linux
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            suffix: linux-arm64
+            dockerfile: containers/Dockerfile.linux
+          - runner: windows-2022
+            platform: windows/amd64
+            suffix: windows-amd64
+            dockerfile: containers/Dockerfile.windows
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - if: runner.os == 'Windows'
+        run: '& $Env:ProgramFiles\Docker\Docker\DockerCli.exe -SwitchWindowsEngine'
+        shell: pwsh
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db
+        with:
+          driver: ${{ runner.os == 'Windows' && 'docker' || 'docker-container' }}
+      - name: Build and push immutable staging images
+        shell: bash
+        run: |
+          for kind in runtime dev; do
+            if [[ "$kind" == runtime ]]; then image='${{ env.RUNTIME_IMAGE }}'; else image='${{ env.DEV_IMAGE }}'; fi
+            docker buildx build --platform '${{ matrix.platform }}' --file '${{ matrix.dockerfile }}' --target "$kind" --push \
+              --sbom=true --provenance=true \
+              --label org.opencontainers.image.source="${{ github.server_url }}/${{ github.repository }}" \
+              --label org.opencontainers.image.version='${{ needs.validate.outputs.version }}' \
+              --label org.opencontainers.image.revision='${{ github.sha }}' \
+              --tag "$image:staging-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.suffix }}" .
+          done
+      - name: Record immutable staging references
+        shell: bash
+        run: |
+          mkdir -p digests
+          for image in "${RUNTIME_IMAGE}" "${DEV_IMAGE}"; do
+            staged="${image}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}"
+            digest=$(docker buildx imagetools inspect "$staged" --format '{{.Manifest.Digest}}')
+            printf '%s@%s\n' "$image" "$digest" > "digests/$(basename "$image")-${{ matrix.suffix }}.txt"
+          done
+      - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        with:
+          image-ref: ${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+      - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        with:
+          image-ref: ${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+      - if: runner.os != 'Windows'
+        shell: pwsh
+        run: |
+          ./tests/container-smoke.ps1 -Image "${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux
+          ./tests/container-smoke.ps1 -Image "${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -Dev
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./tests/container-smoke.ps1 -Image "${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows
+          ./tests/container-smoke.ps1 -Image "${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -Dev
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: platform-digests-${{ matrix.suffix }}
+          path: digests/
+
+  promote:
+    needs: [validate, build-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: digests
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db
+      - name: Promote verified platform digests into multi-platform indexes
+        shell: bash
+        run: |
+          version='${{ needs.validate.outputs.version }}'
+          for image in "$RUNTIME_IMAGE" "$DEV_IMAGE"; do
+            refs=$(find digests -name "$(basename "$image")-*.txt" -exec cat {} +)
+            tags=(--tag "$image:$version")
+            if [[ '${{ needs.validate.outputs.prerelease }}' == false ]]; then
+              major_minor=${version%.*}; major=${version%%.*}
+              tags+=(--tag "$image:$version-r0" --tag "$image:$major_minor" --tag "$image:$major" --tag "$image:latest")
+            fi
+            docker buildx imagetools create "${tags[@]}" $refs
+          done
+      - id: promoted
+        shell: bash
+        run: |
+          echo "runtime=$(docker buildx imagetools inspect "$RUNTIME_IMAGE:${{ needs.validate.outputs.version }}" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
+          echo "dev=$(docker buildx imagetools inspect "$DEV_IMAGE:${{ needs.validate.outputs.version }}" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
+        with:
+          subject-name: ${{ env.RUNTIME_IMAGE }}
+          subject-digest: ${{ steps.promoted.outputs.runtime }}
+          push-to-registry: true
+      - uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
+        with:
+          subject-name: ${{ env.DEV_IMAGE }}
+          subject-digest: ${{ steps.promoted.outputs.dev }}
+          push-to-registry: true
