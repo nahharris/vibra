@@ -10,3 +10,4 @@ pub mod runtime;
 pub mod test_runner;
 pub mod tooling;
 pub mod wasm_abi;
+pub mod yaml_subset;

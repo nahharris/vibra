@@ -170,9 +170,73 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
 }
 
 fn format_source(source: &str) -> Result<String> {
+    let prefix = extract_prefix_comments(source);
+    if has_inline_comments(source) {
+        let doc = Document::from_str(source).context("parse Vibra code document")?;
+        let mut body = doc.to_string();
+        while body.ends_with('\n') {
+            body.pop();
+        }
+        return Ok(if prefix.is_empty() {
+            format!("{body}\n")
+        } else {
+            format!("{prefix}{body}\n")
+        });
+    }
+
     let _ = Document::from_str(source).context("parse Vibra code document")?;
     let value: serde_yaml::Value = serde_yaml::from_str(source).context("parse Vibra YAML")?;
-    serde_yaml::to_string(&value).context("emit canonical Vibra YAML")
+    let mut formatted = serde_yaml::to_string(&value).context("emit canonical Vibra YAML")?;
+    if !prefix.is_empty() {
+        formatted = format!("{prefix}{formatted}");
+    }
+    Ok(formatted)
+}
+
+fn has_inline_comments(source: &str) -> bool {
+    source.lines().any(|line| {
+        let stripped = strip_line_comment(line);
+        !stripped.trim().starts_with('#') && line.contains('#')
+    })
+}
+
+fn strip_line_comment(line: &str) -> &str {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for (idx, ch) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_double => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '#' if !in_single && !in_double => return &line[..idx],
+            _ => {}
+        }
+    }
+    line
+}
+
+fn extract_prefix_comments(source: &str) -> String {
+    let mut prefix = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            prefix.push_str(line);
+            prefix.push('\n');
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            prefix.push_str(line);
+            prefix.push('\n');
+            continue;
+        }
+        break;
+    }
+    prefix
 }
 
 pub fn run_lint(options: LintOptions) -> Result<bool> {
@@ -185,7 +249,14 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let suppressions = Suppressions::parse(&source);
         let mut file_diagnostics = Vec::new();
-        let syntax_ok = if active_categories.contains(&Category::Syntax) {
+        let mut yaml_subset_ok = true;
+        if active_categories.contains(&Category::Syntax) {
+            for violation in crate::yaml_subset::validate_yaml_subset(&source) {
+                yaml_subset_ok = false;
+                file_diagnostics.push(yaml_subset_diagnostic(path, &violation));
+            }
+        }
+        let syntax_ok = if active_categories.contains(&Category::Syntax) && yaml_subset_ok {
             match serde_yaml::from_str::<serde_yaml::Value>(&source) {
                 Ok(_) => true,
                 Err(err) => {
@@ -193,8 +264,10 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
                     false
                 }
             }
-        } else {
+        } else if yaml_subset_ok {
             serde_yaml::from_str::<serde_yaml::Value>(&source).is_ok()
+        } else {
+            false
         };
 
         if syntax_ok && active_categories.contains(&Category::Style) {
@@ -404,6 +477,18 @@ fn yaml_diagnostic(path: &Path, err: &serde_yaml::Error) -> Diagnostic {
         message: err.to_string(),
         severity: Severity::Error,
         span: point_span(path, line, column),
+        related: None,
+        fix: None,
+        category: Category::Syntax,
+    }
+}
+
+fn yaml_subset_diagnostic(path: &Path, violation: &crate::yaml_subset::YamlSubsetViolation) -> Diagnostic {
+    Diagnostic {
+        code: violation.code.to_string(),
+        message: violation.message.clone(),
+        severity: Severity::Error,
+        span: point_span(path, violation.line, violation.column),
         related: None,
         fix: None,
         category: Category::Syntax,

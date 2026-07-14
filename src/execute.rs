@@ -16,7 +16,32 @@ use std::{cell::RefCell, rc::Rc};
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     seed_main_args(program, config, &mut env)?;
-    let mut files = FileTable::default();
+    let mut files = FileTable::new(config.max_open_files);
+    for stmt in &program.statements {
+        if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
+            bail!("unexpected `$return` at top level");
+        }
+    }
+    Ok(())
+}
+
+/// Run a lowered program with injected guest stdout/stderr sinks.
+///
+/// This mirrors [`run_lowered`] but routes all guest standard-output writes
+/// through the provided writers instead of the process's standard streams. It
+/// exists primarily so tests (and embedders) can observe or deliberately fail
+/// guest output writes — e.g. simulating a broken pipe — without panicking.
+pub fn run_lowered_with_io(
+    program: &LoweredProgram,
+    config: &RunConfig,
+    stdout: Box<dyn Write>,
+    stderr: Box<dyn Write>,
+) -> Result<()> {
+    let mut env: HashMap<String, RuntimeValue> = HashMap::new();
+    seed_main_args(program, config, &mut env)?;
+    let mut files = FileTable::new(config.max_open_files);
+    files.stdout_sink = Some(stdout);
+    files.stderr_sink = Some(stderr);
     for stmt in &program.statements {
         if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
             bail!("unexpected `$return` at top level");
@@ -31,7 +56,7 @@ pub fn eval_lowered_exec(
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
     let env = bindings.clone();
-    let mut files = FileTable::default();
+    let mut files = FileTable::new(config.max_open_files);
     eval_expr(&exec.expr, &env, &exec.program, &mut files, config)
 }
 
@@ -228,22 +253,73 @@ enum FileHandle {
     File(File),
 }
 
+#[derive(Clone, Copy)]
+enum StdStream {
+    Out,
+    Err,
+}
+
+#[derive(Clone, Copy)]
+enum HandleKind {
+    Stdin,
+    Stdout,
+    Stderr,
+    File,
+}
+
+impl FileHandle {
+    fn kind(&self) -> HandleKind {
+        match self {
+            FileHandle::Stdin => HandleKind::Stdin,
+            FileHandle::Stdout => HandleKind::Stdout,
+            FileHandle::Stderr => HandleKind::Stderr,
+            FileHandle::File(_) => HandleKind::File,
+        }
+    }
+}
+
 struct FileTable {
     next: u64,
     handles: HashMap<u64, FileHandle>,
+    /// Optional injected sinks for guest stdout/stderr. When `None`, writes go
+    /// to the process's locked standard streams. Injected sinks are primarily
+    /// used by tests to exercise write-failure paths deterministically.
+    stdout_sink: Option<Box<dyn Write>>,
+    stderr_sink: Option<Box<dyn Write>>,
+    /// Maximum number of live, user-opened file handles. `0` means unlimited.
+    /// The reserved stdio entries (ids 0/1/2) are never counted against it.
+    limit: usize,
 }
 
-impl Default for FileTable {
-    fn default() -> Self {
+/// Number of reserved stdio handles (`stdin`/`stdout`/`stderr`) that always
+/// occupy the table and are never closed.
+const RESERVED_HANDLES: usize = 3;
+
+impl FileTable {
+    fn new(limit: usize) -> Self {
         let mut handles = HashMap::new();
         handles.insert(0, FileHandle::Stdin);
         handles.insert(1, FileHandle::Stdout);
         handles.insert(2, FileHandle::Stderr);
-        Self { next: 3, handles }
+        Self {
+            next: 3,
+            handles,
+            stdout_sink: None,
+            stderr_sink: None,
+            limit,
+        }
     }
-}
 
-impl FileTable {
+    /// Count of live user-opened file handles, excluding reserved stdio.
+    fn open_file_count(&self) -> usize {
+        self.handles.len().saturating_sub(RESERVED_HANDLES)
+    }
+
+    /// Whether opening another file would exceed the configured limit.
+    fn at_capacity(&self) -> bool {
+        self.limit != 0 && self.open_file_count() >= self.limit
+    }
+
     fn insert(&mut self, file: File) -> u64 {
         let id = self.next;
         self.next += 1;
@@ -260,6 +336,98 @@ impl FileTable {
     fn close(&mut self, id: u64) {
         if id > 2 {
             self.handles.remove(&id);
+        }
+    }
+
+    /// Write `bytes` to a guest standard stream, honoring any injected sink and
+    /// otherwise the process's locked standard stream. Errors (e.g. a broken
+    /// pipe) are returned rather than panicking the way `print!`/`eprint!` do.
+    fn write_std(&mut self, stream: StdStream, bytes: &[u8]) -> std::io::Result<()> {
+        let sink = match stream {
+            StdStream::Out => &mut self.stdout_sink,
+            StdStream::Err => &mut self.stderr_sink,
+        };
+        if let Some(writer) = sink {
+            writer.write_all(bytes)?;
+            return writer.flush();
+        }
+        match stream {
+            StdStream::Out => {
+                let mut out = std::io::stdout().lock();
+                out.write_all(bytes)?;
+                out.flush()
+            }
+            StdStream::Err => {
+                let mut err = std::io::stderr().lock();
+                err.write_all(bytes)?;
+                err.flush()
+            }
+        }
+    }
+
+    fn flush_std(&mut self, stream: StdStream) -> std::io::Result<()> {
+        let sink = match stream {
+            StdStream::Out => &mut self.stdout_sink,
+            StdStream::Err => &mut self.stderr_sink,
+        };
+        if let Some(writer) = sink {
+            return writer.flush();
+        }
+        match stream {
+            StdStream::Out => std::io::stdout().lock().flush(),
+            StdStream::Err => std::io::stderr().lock().flush(),
+        }
+    }
+
+    fn write_stdout(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.write_std(StdStream::Out, bytes)
+    }
+
+    fn write_stderr(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.write_std(StdStream::Err, bytes)
+    }
+
+    fn flush_stdout(&mut self) -> std::io::Result<()> {
+        self.flush_std(StdStream::Out)
+    }
+
+    /// Write `bytes` through the handle `id`, returning an `io::Result` so the
+    /// caller can map failures into the runtime `fs-error` path. Standard
+    /// streams route through the injected-sink-aware helpers; regular files use
+    /// the underlying `File`. Stdin is reported as not writable.
+    fn write_to_handle(&mut self, id: u64, bytes: &[u8]) -> std::io::Result<()> {
+        match self.handles.get(&id).map(FileHandle::kind) {
+            Some(HandleKind::Stdout) => self.write_std(StdStream::Out, bytes),
+            Some(HandleKind::Stderr) => self.write_std(StdStream::Err, bytes),
+            Some(HandleKind::Stdin) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "handle is not writable",
+            )),
+            Some(HandleKind::File) => match self.handles.get_mut(&id) {
+                Some(FileHandle::File(file)) => file.write_all(bytes),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid file handle `{id}`"),
+            )),
+        }
+    }
+
+    /// Flush the handle `id`, returning an `io::Result` for fs-error mapping.
+    fn flush_handle(&mut self, id: u64) -> std::io::Result<()> {
+        match self.handles.get(&id).map(FileHandle::kind) {
+            Some(HandleKind::Stdout) => self.flush_std(StdStream::Out),
+            Some(HandleKind::Stderr) => self.flush_std(StdStream::Err),
+            Some(HandleKind::Stdin) => Ok(()),
+            Some(HandleKind::File) => match self.handles.get_mut(&id) {
+                Some(FileHandle::File(file)) => file.flush(),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid file handle `{id}`"),
+            )),
         }
     }
 }
@@ -941,6 +1109,34 @@ fn fs_result<T>(
     }
 }
 
+/// Validate a program-controlled allocation length against `RunConfig`.
+///
+/// Returns the length as a `usize` when it is non-negative and within
+/// [`RunConfig::max_alloc_len`]. On rejection returns a stable tag
+/// (`"invalid-length"` for negatives, `"too-large"` for over-cap) plus a
+/// human-readable message, so callers can surface a consistent error.
+pub fn checked_alloc_len(
+    len: i64,
+    config: &RunConfig,
+) -> std::result::Result<usize, (&'static str, String)> {
+    let len = usize::try_from(len).map_err(|_| {
+        (
+            "invalid-length",
+            format!("length {len} must not be negative"),
+        )
+    })?;
+    if len > config.max_alloc_len {
+        return Err((
+            "too-large",
+            format!(
+                "length {len} exceeds max-alloc-len of {} bytes",
+                config.max_alloc_len
+            ),
+        ));
+    }
+    Ok(len)
+}
+
 fn resolve_granted_path(
     path: &str,
     grant: &CapabilityGrant,
@@ -1050,11 +1246,35 @@ fn ensure_scope(grant: &CapabilityGrant, required_suffix: &str, requested: &str)
     if grant
         .scopes
         .iter()
-        .any(|scope| scope == "*" || scope.eq_ignore_ascii_case(requested))
+        .any(|scope| scope_matches(required_suffix, scope, requested))
     {
         return Ok(());
     }
     bail!("requested scope `{requested}` is outside configured grants")
+}
+
+fn scope_matches(grant_suffix: &str, scope: &str, requested: &str) -> bool {
+    if scope == "*" {
+        return true;
+    }
+    match grant_suffix {
+        "env-read-grant" | "env-write-grant" => {
+            if cfg!(windows) {
+                scope.eq_ignore_ascii_case(requested)
+            } else {
+                scope == requested
+            }
+        }
+        _ => scope.eq_ignore_ascii_case(requested),
+    }
+}
+
+fn ensure_stdin_allowed(config: &RunConfig) -> Result<()> {
+    if config.allow_stdin {
+        Ok(())
+    } else {
+        bail!("stdin read requires --allow-stdin")
+    }
 }
 
 fn env_get(name: &str) -> std::io::Result<String> {
@@ -1184,31 +1404,40 @@ fn exec_call(
             match sym {
                 "print" => {
                     let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    print!("{msg}");
-                    std::io::stdout().flush().ok();
+                    files
+                        .write_stdout(msg.as_bytes())
+                        .context("write to stdout")?;
                     Ok(RuntimeValue::Void)
                 }
                 "println" => {
-                    let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    println!("{msg}");
+                    let mut msg = eval_string(&call.args[0], env, program, files, config)?;
+                    msg.push('\n');
+                    files
+                        .write_stdout(msg.as_bytes())
+                        .context("write to stdout")?;
                     Ok(RuntimeValue::Void)
                 }
                 "eprint" => {
                     let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    eprint!("{msg}");
-                    std::io::stderr().flush().ok();
+                    files
+                        .write_stderr(msg.as_bytes())
+                        .context("write to stderr")?;
                     Ok(RuntimeValue::Void)
                 }
                 "eprintln" => {
-                    let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    eprintln!("{msg}");
+                    let mut msg = eval_string(&call.args[0], env, program, files, config)?;
+                    msg.push('\n');
+                    files
+                        .write_stderr(msg.as_bytes())
+                        .context("write to stderr")?;
                     Ok(RuntimeValue::Void)
                 }
                 "flush-stdout" => {
-                    std::io::stdout().flush().context("flush stdout")?;
+                    files.flush_stdout().context("flush stdout")?;
                     Ok(RuntimeValue::Void)
                 }
                 "read-line" => {
+                    ensure_stdin_allowed(config)?;
                     let fd = eval_i64(&call.args[0], env, program, files, config)?;
                     if fd != 0 {
                         bail!("read-line currently supports stdin fd 0 only");
@@ -1226,12 +1455,15 @@ fn exec_call(
                     Ok(RuntimeValue::Str(line))
                 }
                 "read-raw" => {
+                    ensure_stdin_allowed(config)?;
                     let fd = eval_i64(&call.args[0], env, program, files, config)?;
                     let len = eval_i64(&call.args[1], env, program, files, config)?;
                     if fd != 0 {
                         bail!("read-raw currently supports stdin fd 0 only");
                     }
-                    let mut buf = vec![0u8; usize::try_from(len).context("len < 0")?];
+                    let len = checked_alloc_len(len, config)
+                        .map_err(|(tag, msg)| anyhow::anyhow!("read-raw {tag}: {msg}"))?;
+                    let mut buf = vec![0u8; len];
                     let n = std::io::stdin().read(&mut buf).context("stdin read")?;
                     Ok(RuntimeValue::Str(
                         String::from_utf8_lossy(&buf[..n]).to_string(),
@@ -1241,11 +1473,13 @@ fn exec_call(
                     let fd = eval_i64(&call.args[0], env, program, files, config)?;
                     let bytes = eval_string(&call.args[1], env, program, files, config)?;
                     if fd == 2 {
-                        eprint!("{bytes}");
-                        std::io::stderr().flush().ok();
+                        files
+                            .write_stderr(bytes.as_bytes())
+                            .context("write to stderr")?;
                     } else {
-                        print!("{bytes}");
-                        std::io::stdout().flush().ok();
+                        files
+                            .write_stdout(bytes.as_bytes())
+                            .context("write to stdout")?;
                     }
                     Ok(RuntimeValue::Int(
                         i64::try_from(bytes.len()).unwrap_or(i64::MAX),
@@ -1259,9 +1493,17 @@ fn exec_call(
                 "open-read" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        resolve_policy_path(&path, &policy, "fs-read")?
+                    } else {
+                        let grant =
+                            call_grant_capability(call, "fs-read", env, program, files, config)?;
+                        resolve_granted_path(&path, &grant, "fs-read-grant")?
+                    };
+                    if files.at_capacity() {
+                        return Ok(result_err(sig, "too-many-open-files", None));
+                    }
                     Ok(fs_result(
                         sig,
                         || fs::OpenOptions::new().read(true).open(p),
@@ -1273,9 +1515,17 @@ fn exec_call(
                 "open-write" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        resolve_policy_path(&path, &policy, "fs-write")?
+                    } else {
+                        let grant =
+                            call_grant_capability(call, "fs-write", env, program, files, config)?;
+                        resolve_granted_path(&path, &grant, "fs-write-grant")?
+                    };
+                    if files.at_capacity() {
+                        return Ok(result_err(sig, "too-many-open-files", None));
+                    }
                     Ok(fs_result(
                         sig,
                         || {
@@ -1293,9 +1543,17 @@ fn exec_call(
                 "open-append" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        resolve_policy_path(&path, &policy, "fs-write")?
+                    } else {
+                        let grant =
+                            call_grant_capability(call, "fs-write", env, program, files, config)?;
+                        resolve_granted_path(&path, &grant, "fs-write-grant")?
+                    };
+                    if files.at_capacity() {
+                        return Ok(result_err(sig, "too-many-open-files", None));
+                    }
                     Ok(fs_result(
                         sig,
                         || fs::OpenOptions::new().create(true).append(true).open(p),
@@ -1307,12 +1565,21 @@ fn exec_call(
                 "open-read-write" => {
                     let path =
                         eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let read_grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let write_grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let _ = resolve_granted_path(&path, &read_grant, "fs-read-grant")?;
-                    let p = resolve_granted_path(&path, &write_grant, "fs-write-grant")?;
+                    let p = if call.args.len() > 1 {
+                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
+                        let _ = resolve_policy_path(&path, &policy, "fs-read")?;
+                        resolve_policy_path(&path, &policy, "fs-write")?
+                    } else {
+                        let read_grant =
+                            call_grant_capability(call, "fs-read", env, program, files, config)?;
+                        let write_grant =
+                            call_grant_capability(call, "fs-write", env, program, files, config)?;
+                        let _ = resolve_granted_path(&path, &read_grant, "fs-read-grant")?;
+                        resolve_granted_path(&path, &write_grant, "fs-write-grant")?
+                    };
+                    if files.at_capacity() {
+                        return Ok(result_err(sig, "too-many-open-files", None));
+                    }
                     Ok(fs_result(
                         sig,
                         || {
@@ -1411,8 +1678,16 @@ fn exec_call(
                     let len = eval_i64(&call.args[0], env, program, files, config)?;
                     let grant = call_grant_capability(call, "random", env, program, files, config)?;
                     ensure_scope(&grant, "random-grant", "*")?;
-                    let len = usize::try_from(len).context("random len < 0")?;
-                    Ok(RuntimeValue::Array(vec![RuntimeValue::Int(0); len]))
+                    let len = checked_alloc_len(len, config)
+                        .map_err(|(tag, msg)| anyhow::anyhow!("random.bytes {tag}: {msg}"))?;
+                    let mut buf = vec![0u8; len];
+                    getrandom::getrandom(&mut buf)
+                        .map_err(|err| anyhow::anyhow!("random.bytes unavailable: {err}"))?;
+                    Ok(RuntimeValue::Array(
+                        buf.into_iter()
+                            .map(|byte| RuntimeValue::Int(i64::from(byte)))
+                            .collect(),
+                    ))
                 }
                 "info" if sig.alias.ends_with("sys") => {
                     let grant =
@@ -1428,6 +1703,7 @@ fn exec_call(
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let value = match files.get_mut(handle)? {
                         FileHandle::Stdin => {
+                            ensure_stdin_allowed(config)?;
                             let mut line = String::new();
                             std::io::stdin().read_line(&mut line).map(|_| {
                                 if line.ends_with('\n') {
@@ -1454,6 +1730,7 @@ fn exec_call(
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let value = match files.get_mut(handle)? {
                         FileHandle::Stdin => {
+                            ensure_stdin_allowed(config)?;
                             let mut s = String::new();
                             std::io::stdin().read_to_string(&mut s).map(|_| s)
                         }
@@ -1474,21 +1751,8 @@ fn exec_call(
                 {
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let contents = eval_string(&call.args[1], env, program, files, config)?;
-                    let result = match files.get_mut(handle)? {
-                        FileHandle::Stdout => {
-                            print!("{contents}");
-                            std::io::stdout().flush()
-                        }
-                        FileHandle::Stderr => {
-                            eprint!("{contents}");
-                            std::io::stderr().flush()
-                        }
-                        FileHandle::File(file) => file.write_all(contents.as_bytes()),
-                        FileHandle::Stdin => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "handle is not writable",
-                        )),
-                    };
+                    files.get_mut(handle)?;
+                    let result = files.write_to_handle(handle, contents.as_bytes());
                     Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
                 }
                 s if s.ends_with(".writable.write-bytes")
@@ -1496,31 +1760,14 @@ fn exec_call(
                 {
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
                     let contents = eval_string(&call.args[1], env, program, files, config)?;
-                    let result = match files.get_mut(handle)? {
-                        FileHandle::Stdout => {
-                            print!("{contents}");
-                            std::io::stdout().flush()
-                        }
-                        FileHandle::Stderr => {
-                            eprint!("{contents}");
-                            std::io::stderr().flush()
-                        }
-                        FileHandle::File(file) => file.write_all(contents.as_bytes()),
-                        FileHandle::Stdin => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "handle is not writable",
-                        )),
-                    };
+                    files.get_mut(handle)?;
+                    let result = files.write_to_handle(handle, contents.as_bytes());
                     Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
                 }
                 s if s.ends_with(".writable.flush") => {
                     let handle = eval_handle(&call.args[0], env, program, files, config)?;
-                    let result = match files.get_mut(handle)? {
-                        FileHandle::Stdout => std::io::stdout().flush(),
-                        FileHandle::Stderr => std::io::stderr().flush(),
-                        FileHandle::File(file) => file.flush(),
-                        FileHandle::Stdin => Ok(()),
-                    };
+                    files.get_mut(handle)?;
+                    let result = files.flush_handle(handle);
                     Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
                 }
                 s if s.ends_with(".closeable.close") => {

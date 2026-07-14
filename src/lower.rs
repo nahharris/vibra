@@ -2209,7 +2209,23 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     })
 }
 
-pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
+/// Shared lowering state for the `$test` declarations in a module: every
+/// constant, function, type alias, enum, and impl visible to the entry module,
+/// plus accumulated warnings. Built once per file and reused across tests so we
+/// never re-lower the world for each `$test`.
+struct TestContext {
+    sigs: HashMap<String, FunctionSig>,
+    constants: HashMap<String, RuntimeValue>,
+    type_aliases: HashMap<String, TypeAlias>,
+    enums: HashMap<String, EnumDef>,
+    impls: HashMap<ImplKey, ImplBody>,
+    warnings: Vec<String>,
+}
+
+/// Build the shared lowering context for `program`'s entry module: resolve all
+/// imports, collect every definition, and lower pending user function bodies.
+/// This is the expensive part shared by all `$test` cases.
+fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
     let entry_map = program
         .modules
         .get(&program.entry)
@@ -2283,6 +2299,76 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
         &mut warnings,
     )?;
 
+    Ok(TestContext {
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        warnings,
+    })
+}
+
+/// Lower the body (`do` steps) of a single `$test` against an already-built
+/// `TestContext`, returning its statements. Warnings produced while lowering are
+/// appended to the shared context.
+fn lower_single_test_body(
+    ctx: &mut TestContext,
+    name: &str,
+    env: &DefEnvelope,
+) -> Result<Vec<Statement>> {
+    maybe_warn_kebab(name, "test name", &mut ctx.warnings);
+    if !env.type_params.is_empty() {
+        bail!("`$test` `{name}` must not declare `=where`");
+    }
+    let tm = env
+        .form_value
+        .as_mapping()
+        .context("`$test` value must be a mapping with `do`")?;
+    let steps = map_get_str(tm, "do")
+        .context("missing `do` on `$test`")?
+        .as_sequence()
+        .context("`$test.do` must be sequence")?;
+    let mut locals = HashMap::new();
+    let mut statements = Vec::new();
+    for step in steps {
+        statements.push(lower_statement(
+            step,
+            &ctx.sigs,
+            &ctx.constants,
+            &ctx.type_aliases,
+            &ctx.enums,
+            &ctx.impls,
+            &mut locals,
+            &mut ctx.warnings,
+            None,
+        )?);
+    }
+    validate_all_where_bounds(&ctx.type_aliases, &ctx.sigs, &ctx.enums)?;
+    validate_all_instantiation_bounds(
+        &ctx.type_aliases,
+        &ctx.sigs,
+        &ctx.enums,
+        &ctx.impls,
+        &statements,
+    )?;
+    Ok(statements)
+}
+
+/// Lower every `$test` in `program` into its own `LoweredProgram`. Each case
+/// clones the shared context, so memory scales with `tests * program_size`;
+/// prefer [`lower_named_test`] (single test, no clones) when running a child
+/// and [`discover_test_names`] when only names are needed. Retained for tests
+/// and equivalence checks.
+pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
+    let mut ctx = build_test_context(program)?;
+    let entry_map = program
+        .modules
+        .get(&program.entry)
+        .context("internal: entry module not loaded")?
+        .as_mapping()
+        .context("entry root must be mapping")?;
+
     let mut tests = Vec::new();
     for (k, v) in entry_map {
         let name = k.as_str().context("module keys must be strings")?;
@@ -2290,50 +2376,22 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
             continue;
         }
         let Some(_) = v.as_mapping() else { continue };
-        let env = parse_def_envelope(v, &mut warnings)
+        let env = parse_def_envelope(v, &mut ctx.warnings)
             .with_context(|| format!("invalid definition `{name}`"))?;
         if env.form_key != "$test" {
             continue;
         }
-        maybe_warn_kebab(name, "test name", &mut warnings);
-        if !env.type_params.is_empty() {
-            bail!("`$test` `{name}` must not declare `=where`");
-        }
-        let tm = env
-            .form_value
-            .as_mapping()
-            .context("`$test` value must be a mapping with `do`")?;
-        let steps = map_get_str(tm, "do")
-            .context("missing `do` on `$test`")?
-            .as_sequence()
-            .context("`$test.do` must be sequence")?;
-        let mut locals = HashMap::new();
-        let mut statements = Vec::new();
-        for step in steps {
-            statements.push(lower_statement(
-                step,
-                &sigs,
-                &constants,
-                &type_aliases,
-                &enums,
-                &impls,
-                &mut locals,
-                &mut warnings,
-                None,
-            )?);
-        }
-        validate_all_where_bounds(&type_aliases, &sigs, &enums)?;
-        validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
+        let statements = lower_single_test_body(&mut ctx, name, &env)?;
         tests.push(LoweredTestCase {
             name: name.to_string(),
             program: LoweredProgram {
                 statements,
                 main_arg_bindings: Vec::new(),
                 main_grant_decls: Vec::new(),
-                constants: constants.clone(),
-                functions: sigs.clone(),
-                impls: impls.clone(),
-                warnings: warnings.clone(),
+                constants: ctx.constants.clone(),
+                functions: ctx.sigs.clone(),
+                impls: ctx.impls.clone(),
+                warnings: ctx.warnings.clone(),
             },
         });
     }
@@ -2344,6 +2402,98 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
         );
     }
     Ok(tests)
+}
+
+/// Lower exactly one named `$test` into a `LoweredProgram`, moving the shared
+/// context into it. No clones, and bodies of non-selected tests are never
+/// lowered. This is what each test child process uses to run a single test.
+pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTestCase> {
+    let mut ctx = build_test_context(program)?;
+    let entry_map = program
+        .modules
+        .get(&program.entry)
+        .context("internal: entry module not loaded")?
+        .as_mapping()
+        .context("entry root must be mapping")?;
+
+    let mut statements: Option<Vec<Statement>> = None;
+    for (k, v) in entry_map {
+        let candidate = k.as_str().context("module keys must be strings")?;
+        if candidate.starts_with('-') {
+            continue;
+        }
+        let Some(_) = v.as_mapping() else { continue };
+        let env = parse_def_envelope(v, &mut ctx.warnings)
+            .with_context(|| format!("invalid definition `{candidate}`"))?;
+        if env.form_key != "$test" {
+            continue;
+        }
+        if candidate != name {
+            continue;
+        }
+        statements = Some(lower_single_test_body(&mut ctx, name, &env)?);
+        break;
+    }
+
+    let statements = statements
+        .with_context(|| format!("test `{name}` not found in {}", program.entry.display()))?;
+
+    let TestContext {
+        sigs,
+        constants,
+        impls,
+        warnings,
+        ..
+    } = ctx;
+
+    Ok(LoweredTestCase {
+        name: name.to_string(),
+        program: LoweredProgram {
+            statements,
+            main_arg_bindings: Vec::new(),
+            main_grant_decls: Vec::new(),
+            constants,
+            functions: sigs,
+            impls,
+            warnings,
+        },
+    })
+}
+
+/// Scan `program`'s entry module for `$test` declarations and return their
+/// names, WITHOUT building the lowering context or lowering any test body.
+/// Lowering errors in individual tests therefore surface when that test is run
+/// in its child process rather than at discovery time.
+pub fn discover_test_names(program: &LoadedProgram) -> Result<Vec<String>> {
+    let entry_map = program
+        .modules
+        .get(&program.entry)
+        .context("internal: entry module not loaded")?
+        .as_mapping()
+        .context("entry root must be mapping")?;
+
+    let mut scratch_warnings = Vec::new();
+    let mut names = Vec::new();
+    for (k, v) in entry_map {
+        let name = k.as_str().context("module keys must be strings")?;
+        if name.starts_with('-') {
+            continue;
+        }
+        let Some(_) = v.as_mapping() else { continue };
+        let env = parse_def_envelope(v, &mut scratch_warnings)
+            .with_context(|| format!("invalid definition `{name}`"))?;
+        if env.form_key != "$test" {
+            continue;
+        }
+        names.push(name.to_string());
+    }
+    if names.is_empty() {
+        bail!(
+            "no `$test` declarations found in {}",
+            program.entry.display()
+        );
+    }
+    Ok(names)
 }
 
 pub fn lower_exec_expr(

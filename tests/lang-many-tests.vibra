@@ -1,0 +1,156 @@
+# Many `$test` declarations in one module that all share the same lowered
+# context (the `truthy` / `echo-int` helpers). Exercises issue #50: shared
+# context across tests and per-child single-test lowering.
+test:
+  $import: ../stdlib/test.vibra
+
+truthy:
+  $function: $void
+  return: $bool
+  do:
+    - $return: true
+
+echo-int:
+  $function:
+    subject: $int64
+  return: $int64
+  do:
+    - $return: $args.subject
+
+many-1:
+  $test:
+    do:
+      - $test.assert: true
+
+many-2:
+  $test:
+    do:
+      - $let:
+          flag: true
+      - $test.assert: $flag
+
+many-3:
+  $test:
+    do:
+      - $let:
+          v:
+            $truthy: null
+      - $test.assert: $v
+
+many-4:
+  $test:
+    do:
+      - $let:
+          n:
+            $echo-int:
+              subject: 4
+      - $match: $n
+        when:
+          - case: 4
+            do:
+              - $test.assert: true
+          - case:
+              $wildcard: null
+            do:
+              - $test.fail: expected 4
+
+many-5:
+  $test:
+    do:
+      - $let:
+          n:
+            $echo-int:
+              subject: 5
+      - $match: $n
+        when:
+          - case: 5
+            do:
+              - $test.assert: true
+          - case:
+              $wildcard: null
+            do:
+              - $test.fail: expected 5
+
+many-6:
+  $test:
+    do:
+      - $let:
+          s: shared-context
+      - $match: $s
+        when:
+          - case: shared-context
+            do:
+              - $test.assert: true
+          - case:
+              $wildcard: null
+            do:
+              - $test.fail: expected shared-context
+
+many-7:
+  $test:
+    do:
+      - $let:
+          x: 2.5
+      - $match: $x
+        when:
+          - case: 2.5
+            do:
+              - $test.assert: true
+          - case:
+              $wildcard: null
+            do:
+              - $test.fail: expected 2.5
+
+many-8:
+  $test:
+    do:
+      - $let:
+          v:
+            $truthy: null
+      - $test.assert: $v
+
+many-9:
+  $test:
+    do:
+      - $test.assert: true
+
+many-10:
+  $test:
+    do:
+      - $let:
+          n:
+            $echo-int:
+              subject: 10
+      - $match: $n
+        when:
+          - case: 10
+            do:
+              - $test.assert: true
+          - case:
+              $wildcard: null
+            do:
+              - $test.fail: expected 10
+
+many-11:
+  $test:
+    do:
+      - $let:
+          flag: true
+      - $test.assert: $flag
+
+many-12:
+  $test:
+    do:
+      - $let:
+          n:
+            $echo-int:
+              subject: 12
+      - $match: $n
+        when:
+          - case: 12
+            do:
+              - $test.assert: true
+          - case:
+              $wildcard: null
+            do:
+              - $test.fail: expected 12
