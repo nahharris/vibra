@@ -17,6 +17,7 @@ pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     crate::wasm_backend::run_lowered(program, config)
 }
 
+#[cfg(test)]
 pub(crate) fn run_lowered_interpreted(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     seed_main_args(program, config, &mut env)?;
@@ -36,6 +37,16 @@ pub(crate) fn run_lowered_interpreted(program: &LoweredProgram, config: &RunConf
 /// exists primarily so tests (and embedders) can observe or deliberately fail
 /// guest output writes — e.g. simulating a broken pipe — without panicking.
 pub fn run_lowered_with_io(
+    program: &LoweredProgram,
+    config: &RunConfig,
+    stdout: Box<dyn Write>,
+    stderr: Box<dyn Write>,
+) -> Result<()> {
+    crate::wasm_backend::run_lowered_with_io(program, config, stdout, stderr)
+}
+
+#[cfg(test)]
+pub(crate) fn run_lowered_interpreted_with_io(
     program: &LoweredProgram,
     config: &RunConfig,
     stdout: Box<dyn Write>,
@@ -64,7 +75,7 @@ pub fn eval_lowered_exec(
     eval_expr(&exec.expr, &env, &exec.program, &mut files, config)
 }
 
-fn seed_main_args(
+pub(crate) fn seed_main_args(
     program: &LoweredProgram,
     config: &RunConfig,
     env: &mut HashMap<String, RuntimeValue>,
@@ -282,7 +293,7 @@ impl FileHandle {
     }
 }
 
-struct FileTable {
+pub(crate) struct FileTable {
     next: u64,
     handles: HashMap<u64, FileHandle>,
     /// Optional injected sinks for guest stdout/stderr. When `None`, writes go
@@ -300,7 +311,7 @@ struct FileTable {
 const RESERVED_HANDLES: usize = 3;
 
 impl FileTable {
-    fn new(limit: usize) -> Self {
+    pub(crate) fn new(limit: usize) -> Self {
         let mut handles = HashMap::new();
         handles.insert(0, FileHandle::Stdin);
         handles.insert(1, FileHandle::Stdout);
@@ -312,6 +323,13 @@ impl FileTable {
             stderr_sink: None,
             limit,
         }
+    }
+
+    pub(crate) fn with_io(limit: usize, stdout: Box<dyn Write>, stderr: Box<dyn Write>) -> Self {
+        let mut table = Self::new(limit);
+        table.stdout_sink = Some(stdout);
+        table.stderr_sink = Some(stderr);
+        table
     }
 
     /// Count of live user-opened file handles, excluding reserved stdio.
@@ -656,7 +674,7 @@ fn strip_type_enum_suffix(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
-fn pattern_matches(
+pub(crate) fn pattern_matches(
     pattern: &Pattern,
     value: &RuntimeValue,
     program: &LoweredProgram,
@@ -1714,7 +1732,7 @@ fn is_valid_env_name(name: &str) -> bool {
     !name.is_empty() && !name.contains(['=', '\0'])
 }
 
-fn exec_call(
+pub(crate) fn exec_call(
     call: &Call,
     program: &LoweredProgram,
     env: &HashMap<String, RuntimeValue>,
