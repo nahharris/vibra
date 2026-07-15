@@ -929,24 +929,6 @@ fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
             );
             Value::Mapping(map)
         }
-        RuntimeValue::Capability(grant) => {
-            let mut map = Mapping::new();
-            map.insert(Value::String("type".into()), Value::String(grant.type_key));
-            map.insert(
-                Value::String("scopes".into()),
-                Value::Sequence(grant.scopes.into_iter().map(Value::String).collect()),
-            );
-            Value::Mapping(map)
-        }
-        RuntimeValue::GrantToken(grant) => {
-            let mut map = Mapping::new();
-            map.insert(Value::String("grant".into()), Value::String(grant.name));
-            map.insert(
-                Value::String("scopes".into()),
-                Value::Sequence(grant.scopes.into_iter().map(Value::String).collect()),
-            );
-            Value::Mapping(map)
-        }
         RuntimeValue::Policy(policy) => Value::String(format!("{:?}", policy.policy)),
         RuntimeValue::Enum {
             enum_key,

@@ -1,0 +1,921 @@
+{
+  "$id": "https://vibra-lang.org/schemas/host-abi.json",
+  "description": "Versioned Vibra host ABI registry: every host import a `$wasm` body may bind, with capability requirements",
+  "domains": [
+    "fs-read",
+    "fs-write",
+    "stdin-read",
+    "env-read",
+    "env-write",
+    "net-connect",
+    "net-listen",
+    "process-run",
+    "clock",
+    "random",
+    "system-info"
+  ],
+  "imports": [
+    {
+      "module": "vibra_v1",
+      "name": "stdin_open",
+      "params": [
+        {
+          "domains": [
+            "stdin-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "stdin-read"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "stdout_open",
+      "params": [],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "stderr_open",
+      "params": [],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fd_read",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fd_read_line",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fd_write",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fd_sync",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fd_close",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "path_new",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "path_join",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "path_parent",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "path_extension",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_open_read",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_open_write",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_open_append",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_open_read_write",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-read",
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read",
+        "fs-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_read_to_string",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_write_string_all",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_append_string",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_exists",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_create_dir_all",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_remove_file",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_remove_dir",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_read_dir",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_metadata",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_canonicalize",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "fs-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "env_get",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "env-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "env-read"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "env_set",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "env-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "env-write"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_connect",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "net-connect"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "net-connect"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_listen",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "net-listen"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "net-listen"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "process_run",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "process-run"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "process-run"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "clock_now_unix_millis",
+      "params": [
+        {
+          "domains": [
+            "clock"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "clock"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "random_bytes",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "domains": [
+            "random"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "random"
+      ]
+    },
+    {
+      "module": "vibra_v1",
+      "name": "system_info",
+      "params": [
+        {
+          "domains": [
+            "system-info"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "system-info"
+      ]
+    },
+    {
+      "module": "vibra_test",
+      "name": "assert",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_test",
+      "name": "fail",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_test",
+      "name": "assert-eq-bool",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_test",
+      "name": "assert-eq-int",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_test",
+      "name": "assert-eq-float",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_test",
+      "name": "assert-eq-str",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "parse",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "make-query",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "capture-pattern",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "emit",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "root",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "at",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "parent",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "children",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "find",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "source",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "to-form",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "render",
+      "params": [
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "replace",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "delete",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "upsert-mapping",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "insert-mapping",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "rename-key",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "insert-sequence",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "splice-sequence",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "copy",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    },
+    {
+      "module": "vibra_code",
+      "name": "move",
+      "params": [
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        },
+        {
+          "kind": "value"
+        }
+      ],
+      "required-domains": []
+    }
+  ]
+}

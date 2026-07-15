@@ -66,8 +66,6 @@ pub enum RuntimeValue {
         type_ref: TypeRef,
         value: Box<RuntimeValue>,
     },
-    Capability(CapabilityGrant),
-    GrantToken(GrantToken),
     Policy(PolicyValue),
     Enum {
         enum_key: String,
@@ -80,18 +78,6 @@ pub enum RuntimeValue {
         mutable: bool,
     },
     Void,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct GrantToken {
-    pub name: String,
-    pub scopes: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CapabilityGrant {
-    pub type_key: String,
-    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -186,12 +172,7 @@ pub enum TypeRef {
         name: String,
         inner: Box<TypeRef>,
     },
-    Capability {
-        name: String,
-        kind: String,
-    },
     Policy(PolicyType),
-    GrantToken,
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
     /// A use of a generic type alias with explicit type arguments. `type_args`
@@ -262,7 +243,6 @@ pub struct FunctionSig {
     pub type_param_bounds: Vec<Vec<TypeRef>>,
     pub arg_names: Vec<String>,
     pub arg_types: Vec<TypeRef>,
-    pub grant_decls: Vec<GrantDecl>,
     pub return_type: TypeRef,
     pub body: FunctionBody,
     /// Compile-time documentation string from the symbol's `=doc` annotation.
@@ -274,19 +254,12 @@ pub struct Call {
     pub callee_key: String,
     pub type_args: Vec<TypeRef>,
     pub args: Vec<Expr>,
-    pub grant_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GrantRequirement {
     Mandatory,
     Optional,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct GrantDecl {
-    pub name: String,
-    pub requirement: GrantRequirement,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -421,7 +394,6 @@ pub enum ImplMethodBinding {
 pub struct LoweredProgram {
     pub statements: Vec<Statement>,
     pub main_arg_bindings: Vec<(String, TypeRef)>,
-    pub main_grant_decls: Vec<GrantDecl>,
     pub constants: HashMap<String, RuntimeValue>,
     pub functions: HashMap<String, FunctionSig>,
     pub impls: HashMap<ImplKey, ImplBody>,
@@ -497,9 +469,11 @@ struct DefEnvelope<'a> {
     impls: Option<&'a serde_yaml::Mapping>,
     /// `$function`-only siblings: optional extra `args` mapping, required `return` / `do`.
     function_args: Option<&'a Value>,
-    function_grants: Option<&'a Value>,
     function_return: Option<&'a Value>,
     function_do: Option<&'a Value>,
+    /// `$test`-only sibling: a `$policy` type describing the authority the
+    /// test body receives as `$args.policy`.
+    test_policy: Option<&'a Value>,
     test_tags: Option<&'a Value>,
     test_timeout_ms: Option<&'a Value>,
     test_skip: Option<&'a Value>,
@@ -528,9 +502,9 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut defs: Option<&'a serde_yaml::Mapping> = None;
     let mut impls: Option<&'a serde_yaml::Mapping> = None;
     let mut function_args: Option<&'a Value> = None;
-    let mut function_grants: Option<&'a Value> = None;
     let mut function_return: Option<&'a Value> = None;
     let mut function_do: Option<&'a Value> = None;
+    let mut test_policy: Option<&'a Value> = None;
     let mut test_tags: Option<&'a Value> = None;
     let mut test_timeout_ms: Option<&'a Value> = None;
     let mut test_skip: Option<&'a Value> = None;
@@ -597,10 +571,14 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             }
             function_args = Some(val);
         } else if ks == "grants" {
-            if function_grants.is_some() {
-                bail!("duplicate `grants` key on definition");
+            bail!(
+                "E-SEC-001: the `grants` system was removed; declare a `$policy`-typed argument and pass the capability value explicitly"
+            );
+        } else if ks == "policy" {
+            if test_policy.is_some() {
+                bail!("E-TEST-001: duplicate `policy` key on definition");
             }
-            function_grants = Some(val);
+            test_policy = Some(val);
         } else if ks == "return" {
             if function_return.is_some() {
                 bail!("duplicate `return` key on definition");
@@ -657,17 +635,14 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let form_value = form_value.expect("set together with form_key");
 
     if form_key != "$function" && form_key != "$test" {
-        if function_args.is_some()
-            || function_grants.is_some()
-            || function_return.is_some()
-            || function_do.is_some()
-        {
+        if function_args.is_some() || function_return.is_some() || function_do.is_some() {
             bail!(
-                "keys `args`, `grants`, `return`, and `do` are only valid on `$function` or `$test` definitions (got `{}`)",
+                "keys `args`, `return`, and `do` are only valid on `$function` or `$test` definitions (got `{}`)",
                 form_key
             );
         }
-        if test_tags.is_some()
+        if test_policy.is_some()
+            || test_tags.is_some()
             || test_timeout_ms.is_some()
             || test_skip.is_some()
             || test_expect_error.is_some()
@@ -689,7 +664,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             let _ = function_return.context("missing `return` on `$function`")?;
             let _ = function_do.context("missing `do` on `$function`")?;
         }
-        if test_tags.is_some()
+        if test_policy.is_some()
+            || test_tags.is_some()
             || test_timeout_ms.is_some()
             || test_skip.is_some()
             || test_expect_error.is_some()
@@ -714,7 +690,6 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         if function_args.is_some() || function_return.is_some() {
             bail!("E-TEST-001: `args` and `return` are only valid on `$function`, not `$test`");
         }
-        let _ = parse_grant_decls(function_grants)?;
         let _ = function_do.context("E-TEST-001: missing sibling `do` on `$test`")?;
         let _ = parse_test_metadata(
             profile,
@@ -752,9 +727,9 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         defs,
         impls,
         function_args,
-        function_grants,
         function_return,
         function_do,
+        test_policy,
         test_tags,
         test_timeout_ms,
         test_skip,
@@ -1195,7 +1170,9 @@ fn parse_type_ref(
         "float32" => TypeRef::Float32,
         "float64" => TypeRef::Float64,
         "void" => TypeRef::Void,
-        "grant-token" => TypeRef::GrantToken,
+        "grant-token" => {
+            bail!("E-SEC-001: `$grant-token` was removed; use a `$policy`-typed argument")
+        }
         "self" => {
             if !self_allowed {
                 bail!(
@@ -1282,7 +1259,6 @@ fn parse_type_constructor(
             })
         }
         "$policy" => Ok(TypeRef::Policy(parse_policy_type(v)?)),
-        "$grant-token" => Ok(TypeRef::GrantToken),
         "$record" => {
             let m = v
                 .as_mapping()
@@ -1448,6 +1424,23 @@ fn parse_type_constructor(
     }
 }
 
+/// Parse a `{ $policy: <domains> }` envelope (used by `$test` `policy:`
+/// siblings, where the policy type appears as a value rather than in a type
+/// position).
+fn parse_policy_type_expr(v: &Value) -> Result<PolicyType> {
+    let m = v
+        .as_mapping()
+        .context("policy must be a `$policy` type mapping")?;
+    let (only_key, only_value) = match m.iter().collect::<Vec<_>>().as_slice() {
+        [(k, v)] => (k.as_str(), *v),
+        _ => bail!("policy must contain exactly the `$policy` key"),
+    };
+    if only_key != Some("$policy") {
+        bail!("policy must contain exactly the `$policy` key");
+    }
+    parse_policy_type(only_value)
+}
+
 fn parse_policy_type(v: &Value) -> Result<PolicyType> {
     let domains = v
         .as_mapping()
@@ -1458,6 +1451,12 @@ fn parse_policy_type(v: &Value) -> Result<PolicyType> {
             .as_str()
             .context("`$policy` domain names must be strings")?
             .to_string();
+        if !crate::host_abi::DOMAINS.contains(&domain.as_str()) {
+            bail!(
+                "unknown `$policy` domain `{domain}`; known domains are: {}",
+                crate::host_abi::DOMAINS.join(", ")
+            );
+        }
         let groups = groups_v
             .as_sequence()
             .with_context(|| format!("`$policy.{domain}` must be a sequence"))?;
@@ -1717,7 +1716,6 @@ fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
             name: name.clone(),
             inner: Box::new(substitute_self(inner, self_ty)),
         },
-        TypeRef::Capability { .. } => ty.clone(),
         _ => ty.clone(),
     }
 }
@@ -1771,7 +1769,6 @@ fn substitute_type(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> TypeRef {
             name: name.clone(),
             inner: Box::new(substitute_type(inner, subst)),
         },
-        TypeRef::Capability { .. } => ty.clone(),
         _ => ty.clone(),
     }
 }
@@ -1780,10 +1777,7 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
     match ty {
         TypeRef::Named(name) => {
             if let Some(al) = aliases.get(name) {
-                if matches!(
-                    al.body,
-                    TypeRef::Newtype { .. } | TypeRef::Capability { .. }
-                ) {
+                if matches!(al.body, TypeRef::Newtype { .. }) {
                     return ty.clone();
                 }
                 if al.type_params.is_empty() {
@@ -1798,10 +1792,7 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
                 .map(|t| normalize_type_ref(t, aliases))
                 .collect();
             if let Some(al) = aliases.get(base) {
-                if matches!(
-                    al.body,
-                    TypeRef::Newtype { .. } | TypeRef::Capability { .. }
-                ) {
+                if matches!(al.body, TypeRef::Newtype { .. }) {
                     return TypeRef::Instantiated {
                         base: base.clone(),
                         type_args: normalized_args,
@@ -1870,7 +1861,6 @@ fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> Typ
             name: name.clone(),
             inner: Box::new(normalize_type_ref(inner, aliases)),
         },
-        TypeRef::Capability { .. } => ty.clone(),
         _ => ty.clone(),
     }
 }
@@ -2051,20 +2041,6 @@ fn newtype_inner<'a>(
     }
 }
 
-fn capability_alias<'a>(
-    ty: &'a TypeRef,
-    aliases: &'a HashMap<String, TypeAlias>,
-) -> Option<&'a str> {
-    match ty {
-        TypeRef::Named(name) => aliases.get(name).and_then(|alias| match &alias.body {
-            TypeRef::Capability { .. } => Some(name.as_str()),
-            _ => None,
-        }),
-        TypeRef::Capability { name, .. } if !name.is_empty() => Some(name.as_str()),
-        _ => None,
-    }
-}
-
 fn crosses_newtype_boundary(
     expected: &TypeRef,
     actual: &TypeRef,
@@ -2084,9 +2060,7 @@ fn valid_cast_path(
     target: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
-    if capability_alias(target, aliases).is_some()
-        || matches!(target, TypeRef::Capability { .. } | TypeRef::Policy(_))
-    {
+    if policy_body(target, aliases).is_some() {
         return false;
     }
     if let Some(inner) = newtype_inner(target, aliases) {
@@ -2253,7 +2227,6 @@ fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAl
             name,
             inner: Box::new(qualify_named_type(alias, *inner, aliases)),
         },
-        TypeRef::Capability { name, kind } => TypeRef::Capability { name, kind },
         TypeRef::Union(items) => TypeRef::Union(
             items
                 .into_iter()
@@ -2389,12 +2362,8 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     if !main_env.type_params.is_empty() {
         bail!("`main` must not be generic (no `where:`)");
     }
-    let (args, ret, do_seq, main_grant_decls) =
-        resolve_function_envelope_fields(&main_env, MODULE_FN_PRIMARY_ARG)
-            .context("invalid `main`")?;
-    if !main_grant_decls.is_empty() {
-        bail!("function `grants` were removed; use `$policy` arguments");
-    }
+    let (args, ret, do_seq) = resolve_function_envelope_fields(&main_env, MODULE_FN_PRIMARY_ARG)
+        .context("invalid `main`")?;
     let mut main_arg_bindings = Vec::new();
     if !is_void_args(&args) {
         let (arg_names, arg_types) =
@@ -2423,9 +2392,6 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     for (name, ty) in &main_arg_bindings {
         locals.insert(name.clone(), ty.clone());
     }
-    for grant in &main_grant_decls {
-        locals.insert(format!("grants.{}", grant.name), TypeRef::GrantToken);
-    }
     for step in steps {
         statements.push(lower_statement(
             step,
@@ -2446,11 +2412,11 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     // sites) must satisfy the base alias's bounds.
     validate_all_where_bounds(&type_aliases, &sigs, &enums)?;
     validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
+    validate_wasm_bodies(&sigs, &type_aliases)?;
 
     Ok(LoweredProgram {
         statements,
         main_arg_bindings,
-        main_grant_decls,
         constants,
         functions: sigs,
         impls,
@@ -2548,6 +2514,8 @@ fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
         &mut warnings,
     )?;
 
+    validate_wasm_bodies(&sigs, &type_aliases)?;
+
     Ok(TestContext {
         sigs,
         constants,
@@ -2565,7 +2533,7 @@ fn lower_single_test_body(
     ctx: &mut TestContext,
     name: &str,
     env: &DefEnvelope,
-) -> Result<(Vec<Statement>, Vec<GrantDecl>)> {
+) -> Result<(Vec<Statement>, Vec<(String, TypeRef)>)> {
     maybe_warn_kebab(name, "test name", &mut ctx.warnings);
     if !env.type_params.is_empty() {
         bail!("`$test` `{name}` must not declare `=where`");
@@ -2576,9 +2544,13 @@ fn lower_single_test_body(
         .as_sequence()
         .context("E-TEST-001: `$test` sibling `do` must be sequence")?;
     let mut locals = HashMap::new();
-    let grant_decls = parse_grant_decls(env.function_grants)?;
-    for grant in &grant_decls {
-        locals.insert(format!("grants.{}", grant.name), TypeRef::GrantToken);
+    let mut arg_bindings = Vec::new();
+    if let Some(policy_value) = env.test_policy {
+        let policy = parse_policy_type_expr(policy_value)
+            .with_context(|| format!("E-TEST-001: invalid `policy` on `$test` `{name}`"))?;
+        let binding = ("args.policy".to_string(), TypeRef::Policy(policy));
+        locals.insert(binding.0.clone(), binding.1.clone());
+        arg_bindings.push(binding);
     }
     let mut statements = Vec::new();
     for step in steps {
@@ -2602,7 +2574,7 @@ fn lower_single_test_body(
         &ctx.impls,
         &statements,
     )?;
-    Ok((statements, grant_decls))
+    Ok((statements, arg_bindings))
 }
 
 /// Lower every `$test` in `program` into its own `LoweredProgram`. Each case
@@ -2631,13 +2603,12 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
         if env.form_key != "$test" {
             continue;
         }
-        let (statements, main_grant_decls) = lower_single_test_body(&mut ctx, name, &env)?;
+        let (statements, main_arg_bindings) = lower_single_test_body(&mut ctx, name, &env)?;
         tests.push(LoweredTestCase {
             name: name.to_string(),
             program: LoweredProgram {
                 statements,
-                main_arg_bindings: Vec::new(),
-                main_grant_decls,
+                main_arg_bindings,
                 constants: ctx.constants.clone(),
                 functions: ctx.sigs.clone(),
                 impls: ctx.impls.clone(),
@@ -2672,7 +2643,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         .as_mapping()
         .context("entry root must be mapping")?;
 
-    let mut lowered_test: Option<(Vec<Statement>, Vec<GrantDecl>)> = None;
+    let mut lowered_test: Option<(Vec<Statement>, Vec<(String, TypeRef)>)> = None;
     for (k, v) in entry_map {
         let candidate = k.as_str().context("module keys must be strings")?;
         if candidate.starts_with('-') {
@@ -2691,7 +2662,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         break;
     }
 
-    let (statements, main_grant_decls) = lowered_test
+    let (statements, main_arg_bindings) = lowered_test
         .with_context(|| format!("test `{name}` not found in {}", program.entry.display()))?;
 
     let TestContext {
@@ -2706,8 +2677,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         name: name.to_string(),
         program: LoweredProgram {
             statements,
-            main_arg_bindings: Vec::new(),
-            main_grant_decls,
+            main_arg_bindings,
             constants,
             functions: sigs,
             impls,
@@ -2893,7 +2863,6 @@ pub fn lower_exec_expr(
         program: LoweredProgram {
             statements: Vec::new(),
             main_arg_bindings: Vec::new(),
-            main_grant_decls: Vec::new(),
             constants,
             functions: sigs,
             impls,
@@ -2998,9 +2967,6 @@ fn lower_pending_user_functions(
         let mut locals: HashMap<String, TypeRef> = HashMap::new();
         for (n, t) in sig.arg_names.iter().zip(sig.arg_types.iter()) {
             locals.insert(format!("args.{n}"), t.clone());
-        }
-        for grant in &sig.grant_decls {
-            locals.insert(format!("grants.{}", grant.name), TypeRef::GrantToken);
         }
         let fn_ctx = UserFnContext {
             return_type: sig.return_type.clone(),
@@ -3222,10 +3188,6 @@ fn collect_module_defs(
                 name: qualified_key.clone(),
                 inner,
             },
-            TypeRef::Capability { kind, .. } => TypeRef::Capability {
-                name: qualified_key.clone(),
-                kind,
-            },
             other => other,
         };
         let raw_bounds = resolve_def_envelope_bounds(&env, skeletons, warnings)?;
@@ -3427,7 +3389,7 @@ fn try_register_function(
         maybe_warn_kebab(name, "function name", warnings);
     }
     let scope = env.type_params.clone();
-    let (args, ret, do_seq, grant_decls) =
+    let (args, ret, do_seq) =
         resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG).with_context(|| {
             if alias.is_empty() {
                 format!("{name}: invalid `$function` envelope")
@@ -3499,7 +3461,6 @@ fn try_register_function(
             type_param_bounds: resolved_bounds,
             arg_names,
             arg_types,
-            grant_decls,
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -3556,6 +3517,101 @@ fn extract_wasm_body(step: &Value) -> Result<(ImportTarget, Vec<WasmArgSpec>)> {
         },
         wasm_args,
     ))
+}
+
+/// Statically validate every `$wasm` body against the versioned host ABI
+/// registry:
+///
+/// - `E-WASM-002`: unknown host module or import name.
+/// - `E-WASM-003`: `$wasm.args` arity/shape does not match the registry
+///   entry (wrong count, constant or non-policy value in a capability
+///   position, policy value in a data position).
+/// - `E-CAP-002`: a capability position is fed by a `$policy` argument whose
+///   declared domains do not cover the import's required domains.
+///
+/// Together with the unforgeability of `$policy` values this bounds a
+/// program's authority by the policy types declared on its roots.
+fn validate_wasm_bodies(
+    sigs: &HashMap<String, FunctionSig>,
+    type_aliases: &HashMap<String, TypeAlias>,
+) -> Result<()> {
+    for (key, sig) in sigs {
+        let FunctionBody::Wasm { import, wasm_args } = &sig.body else {
+            continue;
+        };
+        let Some(entry) = crate::host_abi::lookup(&import.module, &import.name) else {
+            if crate::host_abi::is_host_module(&import.module) {
+                bail!(
+                    "E-WASM-002: `{key}` targets unknown host import `{}.{}`",
+                    import.module,
+                    import.name
+                );
+            }
+            bail!(
+                "E-WASM-002: `{key}` targets unknown host module `{}` (known host modules: vibra_v1, vibra_test, vibra_code)",
+                import.module
+            );
+        };
+        if wasm_args.len() != entry.params.len() {
+            bail!(
+                "E-WASM-003: `{key}` passes {} args to host import `{}.{}` which takes {}",
+                wasm_args.len(),
+                import.module,
+                import.name,
+                entry.params.len()
+            );
+        }
+        for (position, (spec, param)) in wasm_args.iter().zip(entry.params.iter()).enumerate() {
+            let arg_policy = match spec {
+                WasmArgSpec::Arg(name) => {
+                    let ty = sig
+                        .arg_names
+                        .iter()
+                        .position(|n| n == name)
+                        .map(|idx| &sig.arg_types[idx])
+                        .with_context(|| {
+                            format!(
+                                "E-WASM-003: `{key}` forwards unknown argument `$args.{name}` to `{}.{}`",
+                                import.module, import.name
+                            )
+                        })?;
+                    policy_body(ty, type_aliases)
+                }
+                WasmArgSpec::ConstInt(_) | WasmArgSpec::ConstStr(_) => None,
+            };
+            match param {
+                crate::host_abi::ParamKind::Value => {
+                    if arg_policy.is_some() {
+                        bail!(
+                            "E-WASM-003: `{key}` passes a `$policy` value in data position {position} of `{}.{}`",
+                            import.module,
+                            import.name
+                        );
+                    }
+                }
+                crate::host_abi::ParamKind::Capability(required_domains) => {
+                    let Some(policy) = arg_policy else {
+                        bail!(
+                            "E-CAP-002: host import `{}.{}` requires a `$policy` capability covering {} in position {position}; `{key}` must declare and forward a `$policy`-typed argument",
+                            import.module,
+                            import.name,
+                            required_domains.join(" + ")
+                        );
+                    };
+                    for domain in *required_domains {
+                        if !policy.domains.contains_key(*domain) {
+                            bail!(
+                                "E-CAP-002: `{key}` forwards a `$policy` without the `{domain}` domain required by `{}.{}`",
+                                import.module,
+                                import.name
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3644,8 +3700,7 @@ fn register_one_inherent_function(
         all_type_params.push(tp.clone());
     }
 
-    let (args, ret, do_seq, grant_decls) =
-        resolve_function_envelope_fields(&env, INHERENT_FN_PRIMARY_ARG).with_context(|| {
+    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, INHERENT_FN_PRIMARY_ARG).with_context(|| {
             format!("`{qualified_type_key}.{entry_name}`: invalid `$function` envelope")
         })?;
     let (arg_names, arg_types) =
@@ -3719,7 +3774,6 @@ fn register_one_inherent_function(
             type_param_bounds: full_bounds,
             arg_names,
             arg_types,
-            grant_decls,
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -4086,7 +4140,7 @@ fn bind_impl_method(
     }
 
     let iface_primary = iface_impl_primary_field_name(expected_fn_type)?;
-    let (args, ret, do_seq, grant_decls) = resolve_function_envelope_fields(&env, &iface_primary)
+    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, &iface_primary)
         .context("impl method: invalid `$function` envelope")?;
     let (arg_names, arg_types) =
         parse_signature_args(&args, &method_scope, skeletons, warnings, true)?;
@@ -4177,7 +4231,6 @@ fn bind_impl_method(
             type_param_bounds: sig_bounds,
             arg_names,
             arg_types,
-            grant_decls,
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -5573,7 +5626,7 @@ fn looks_like_iface_call(
     let Some(m) = v.as_mapping() else {
         return false;
     };
-    let Ok((call_key, _, _, _)) = split_call_envelope(m) else {
+    let Ok((call_key, _, _)) = split_call_envelope(m) else {
         return false;
     };
     iface_dispatch_arg_name(&call_key, home_module, type_aliases).is_ok()
@@ -5907,12 +5960,11 @@ fn reject_iface_nested_call_bundle(
     Ok(())
 }
 
-type CallEnvelope = (String, Value, Vec<(String, Value)>, Vec<String>);
+type CallEnvelope = (String, Value, Vec<(String, Value)>);
 
 fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<CallEnvelope> {
     let mut callee: Option<(String, Value)> = None;
     let mut siblings: Vec<(String, Value)> = Vec::new();
-    let mut grants: Vec<String> = Vec::new();
     for (k, v) in m {
         let ks = k.as_str().context("call mapping key must be string")?;
         if ks.starts_with('$') {
@@ -5921,34 +5973,18 @@ fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<CallEnvelope> {
             }
             callee = Some((ks.to_string(), v.clone()));
         } else if ks.starts_with('=') {
-            if ks != "=grants" {
-                bail!("unexpected `=` key `{ks}` in call site (only `=grants` is supported)");
+            if ks == "=grants" {
+                bail!(
+                    "E-SEC-001: `=grants` forwarding was removed; pass the `$policy` capability value as an ordinary argument"
+                );
             }
-            let seq = v
-                .as_sequence()
-                .context("`=grants` must be a sequence of `$grants.<kebab-name>` references")?;
-            for item in seq {
-                let s = item
-                    .as_str()
-                    .context("`=grants` entries must be `$grants.<kebab-name>` references")?;
-                grants.push(parse_grant_ref(s)?);
-            }
+            bail!("unexpected `=` key `{ks}` in call site");
         } else {
             siblings.push((ks.to_string(), v.clone()));
         }
     }
     let (call_key, subject) = callee.context("call missing `$callee` key")?;
-    Ok((call_key, subject, siblings, grants))
-}
-
-fn parse_grant_ref(s: &str) -> Result<String> {
-    let Some(name) = s.strip_prefix("$grants.") else {
-        bail!("grant references must use `$grants.<kebab-name>`");
-    };
-    if !is_kebab_case(name) {
-        bail!("grant references must use `$grants.<kebab-name>`");
-    }
-    Ok(name.to_string())
+    Ok((call_key, subject, siblings))
 }
 
 fn reject_unknown_call_keys(
@@ -6165,7 +6201,7 @@ fn parse_call(
     let m = call_mapping_value
         .as_mapping()
         .context("call must be mapping")?;
-    let (call_key, subject, siblings, grant_args) = split_call_envelope(m)?;
+    let (call_key, subject, siblings) = split_call_envelope(m)?;
     let callee_key = match resolve_call_target(&call_key, sigs, home_module) {
         Ok(k) => k,
         Err(direct_err) => {
@@ -6280,12 +6316,10 @@ fn parse_call(
             );
         }
     }
-    validate_call_grants(function, &grant_args, &call_key)?;
     Ok(Call {
         callee_key,
         type_args,
         args,
-        grant_args,
     })
 }
 
@@ -6384,33 +6418,6 @@ fn parse_call_args(
         )?);
     }
     Ok(out)
-}
-
-fn validate_call_grants(
-    function: &FunctionSig,
-    grant_args: &[String],
-    call_key: &str,
-) -> Result<()> {
-    let mut seen = HashSet::new();
-    for grant in grant_args {
-        if !seen.insert(grant.as_str()) {
-            bail!("duplicate grant `{grant}` in `=grants` for call `{call_key}`");
-        }
-        if !function.grant_decls.iter().any(|d| d.name == *grant) {
-            bail!("unknown grant `{grant}` in `=grants` for call `{call_key}`");
-        }
-    }
-    for decl in &function.grant_decls {
-        if decl.requirement == GrantRequirement::Mandatory
-            && !grant_args.iter().any(|g| g == &decl.name)
-        {
-            bail!(
-                "missing mandatory grant `{}` in `=grants` for call `{call_key}`",
-                decl.name
-            );
-        }
-    }
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6519,9 +6526,7 @@ fn parse_expr(
             let target = parse_type_ref(into_v, &[], &empty_skeletons, warnings, false)
                 .context("E-CAST-002: invalid `$cast.into` type")?;
             let target = qualify_named_type(home_module, target, type_aliases);
-            if capability_alias(&target, type_aliases).is_some()
-                || matches!(target, TypeRef::Capability { .. })
-            {
+            if policy_body(&target, type_aliases).is_some() {
                 bail!("E-CAP-001: capability values are runtime-minted and cannot be created with `$cast`");
             }
             if !valid_cast_path(&source, &target, type_aliases) {
@@ -6795,10 +6800,10 @@ fn parse_expr(
     if let Some(s) = v.as_str() {
         if let Some(var) = s.strip_prefix('$') {
             maybe_warn_kebab_qualified(var, "symbol reference", warnings);
-            if let Some(grant_name) = var.strip_prefix("grants.") {
-                if grant_name.is_empty() || grant_name.contains('.') {
-                    bail!("grant references must use `$grants.<kebab-name>`");
-                }
+            if var.strip_prefix("grants.").is_some() {
+                bail!(
+                    "E-SEC-001: `$grants.*` references were removed; pass a `$policy` capability value as an ordinary argument"
+                );
             }
             if let Ok((enum_key, tag)) = resolve_enum_tag_ref(s, home_module, enums) {
                 if let Some(enum_def) = enums.get(&enum_key) {
@@ -6866,7 +6871,7 @@ fn build_function_args_mapping(
 fn resolve_function_envelope_fields(
     env: &DefEnvelope<'_>,
     primary_name: &str,
-) -> Result<(Value, Value, Value, Vec<GrantDecl>)> {
+) -> Result<(Value, Value, Value)> {
     let (primary, first_arg_ty) = canonical_function_first_arg(env.form_value, primary_name)?;
     let merged = build_function_args_mapping(&primary, first_arg_ty, env.function_args)?;
     let ret = env
@@ -6877,52 +6882,7 @@ fn resolve_function_envelope_fields(
         .function_do
         .context("missing `do` on `$function`")?
         .clone();
-    if record_has_grants_arg(&merged) {
-        bail!(
-            "grant arguments moved out of `args`; declare function `grants:` and access them as `$grants.<name>`"
-        );
-    }
-    let grant_decls = parse_grant_decls(env.function_grants)?;
-    Ok((merged, ret, d, grant_decls))
-}
-
-fn record_has_grants_arg(v: &Value) -> bool {
-    v.as_mapping()
-        .is_some_and(|m| m.contains_key(Value::String("grants".to_string())))
-}
-
-fn parse_grant_decls(v: Option<&Value>) -> Result<Vec<GrantDecl>> {
-    let Some(v) = v else {
-        return Ok(Vec::new());
-    };
-    let m = v.as_mapping().context(
-        "`grants` must be a mapping of grant name -> $security.grant.mandatory|optional",
-    )?;
-    let mut out = Vec::with_capacity(m.len());
-    let mut seen = HashSet::new();
-    for (k, v) in m {
-        let name = k.as_str().context("grant name must be string")?.to_string();
-        if !is_kebab_case(&name) {
-            bail!("grant names must be kebab-case, got `{name}`");
-        }
-        if !seen.insert(name.clone()) {
-            bail!("duplicate grant `{name}`");
-        }
-        let s = v
-            .as_str()
-            .with_context(|| format!("grant `{name}` requirement must be a scalar enum tag"))?;
-        let requirement = if s.ends_with(".mandatory") || s == "$security.grant.mandatory" {
-            GrantRequirement::Mandatory
-        } else if s.ends_with(".optional") || s == "$security.grant.optional" {
-            GrantRequirement::Optional
-        } else {
-            bail!(
-                "grant `{name}` must be `$security.grant.mandatory` or `$security.grant.optional`"
-            );
-        };
-        out.push(GrantDecl { name, requirement });
-    }
-    Ok(out)
+    Ok((merged, ret, d))
 }
 
 /// Peel the first parameter from labeled `$function: …` surface syntax.
@@ -7035,11 +6995,7 @@ fn infer_expr_type(
             infer_map_type(items, constants, locals, aliases, enums)
         }
         Expr::Value(RuntimeValue::Typed { type_ref, .. }) => Some(type_ref.clone()),
-        Expr::Value(RuntimeValue::Capability(grant)) => {
-            Some(TypeRef::Named(grant.type_key.clone()))
-        }
         Expr::Value(RuntimeValue::Policy(value)) => Some(TypeRef::Policy(value.policy.clone())),
-        Expr::Value(RuntimeValue::GrantToken(_)) => Some(TypeRef::GrantToken),
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
         Expr::Value(RuntimeValue::Mutable(cell)) => infer_expr_type(
@@ -7766,7 +7722,7 @@ fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: 
     let Some(m) = v.as_mapping() else {
         return false;
     };
-    let Ok((call_key, _, _, _)) = split_call_envelope(m) else {
+    let Ok((call_key, _, _)) = split_call_envelope(m) else {
         return false;
     };
     resolve_call_target(&call_key, sigs, home_module).is_ok()

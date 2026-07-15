@@ -1,6 +1,6 @@
 //! Build [`WasiEnvBuilder`](wasmer_wasix::WasiEnvBuilder): stdio inheritance, argv, preopened dirs.
 
-use crate::lower::PolicyType;
+use crate::lower::{GrantRequirement, PolicyGroup, PolicyScope, PolicyType};
 use std::path::PathBuf;
 use wasmer_wasix::{WasiEnv, WasiEnvBuilder, WasiStateCreationError};
 
@@ -62,6 +62,75 @@ impl Default for RunConfig {
             max_alloc_len: 64 * 1024 * 1024,
             max_open_files: 1024,
         }
+    }
+}
+
+impl RunConfig {
+    /// The approved policy for this run: the single source of runtime
+    /// authority that `$policy`-typed root arguments are intersected against.
+    ///
+    /// Embedders may set [`RunConfig::approved_policy`] directly; otherwise it
+    /// is derived from the CLI-facing `allow_*` fields (`--allow-read`,
+    /// `--allow-env`, ...). `preopen_host_dirs` entries keep seeding read and
+    /// write scopes for backward compatibility until callers migrate.
+    pub fn effective_approved_policy(&self) -> PolicyType {
+        if let Some(policy) = &self.approved_policy {
+            return policy.clone();
+        }
+        let mut domains = std::collections::BTreeMap::new();
+        let mut add = |domain: &str, scopes: Vec<PolicyScope>| {
+            if scopes.is_empty() {
+                return;
+            }
+            domains.insert(
+                domain.to_string(),
+                vec![PolicyGroup {
+                    requirement: GrantRequirement::Optional,
+                    scopes,
+                }],
+            );
+        };
+        let dir_scopes = |dirs: &[PathBuf]| -> Vec<PolicyScope> {
+            dirs.iter()
+                .map(|dir| PolicyScope::Dir(dir.display().to_string()))
+                .collect()
+        };
+        let name_scopes = |names: &[String]| -> Vec<PolicyScope> {
+            names
+                .iter()
+                .map(|name| {
+                    if name == "*" {
+                        PolicyScope::Any
+                    } else {
+                        PolicyScope::Exact(name.clone())
+                    }
+                })
+                .collect()
+        };
+        let mut read_dirs = self.allow_read.clone();
+        let mut write_dirs = self.allow_write.clone();
+        read_dirs.extend(self.preopen_host_dirs.iter().cloned());
+        write_dirs.extend(self.preopen_host_dirs.iter().cloned());
+        add("fs-read", dir_scopes(&read_dirs));
+        add("fs-write", dir_scopes(&write_dirs));
+        if self.allow_stdin {
+            add("stdin-read", vec![PolicyScope::Any]);
+        }
+        add("env-read", name_scopes(&self.allow_env));
+        add("env-write", name_scopes(&self.allow_env_write));
+        add("net-connect", name_scopes(&self.allow_net));
+        add("net-listen", name_scopes(&self.allow_net_listen));
+        add("process-run", name_scopes(&self.allow_run));
+        if self.allow_clock {
+            add("clock", vec![PolicyScope::Any]);
+        }
+        if self.allow_random {
+            add("random", vec![PolicyScope::Any]);
+        }
+        if self.allow_system_info {
+            add("system-info", vec![PolicyScope::Any]);
+        }
+        PolicyType { domains }
     }
 }
 
