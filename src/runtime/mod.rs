@@ -50,7 +50,7 @@ fn run_module_in_current_runtime(wasm: &[u8], config: RunConfig) -> Result<()> {
         .context("WASM must export `main`")?;
     main.call(&mut store, &[]).context("Wasmer: call `main`")?;
 
-    wasi_env.on_exit(&mut store, Some(ExitCode::Other(0)));
+    wasi_env.on_exit(&mut store, Some(ExitCode::from(0)));
     Ok(())
 }
 
