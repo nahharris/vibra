@@ -73,6 +73,7 @@ are not a complete specification of compiler behavior.
   [`expression.schema.json`](schemas/expression.schema.json), and
   [`source-annotations.schema.json`](schemas/source-annotations.schema.json).
 - **Projects and diagnostics:** [`project-manifest.schema.json`](schemas/project-manifest.schema.json),
+  [`project-lock.schema.json`](schemas/project-lock.schema.json),
   [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
 - **Structural code:** [`code-form.schema.json`](schemas/code-form.schema.json),
@@ -159,7 +160,7 @@ core:
   $import: "@core/lib.vibra"
 ```
 
-Use `vibra sync` to clone/fetch pinned git dependencies into `dep/<name>`, and `vibra check` to validate the manifest, targets, dependencies, and `@` imports:
+Use `vibra sync` to export exact Git revisions recursively into package-local `dep/<name>` trees and write the committed `project.lock.vibra`. Exported trees contain no Git metadata. The lock records identities, exact revisions, SHA-256 tree hashes, vendor paths, and alias edges. `vibra check` validates the lock, rejects modified vendor trees, and then validates targets, dependencies, and `@` imports:
 
 ```sh
 vibra sync hello

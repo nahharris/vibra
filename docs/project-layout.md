@@ -119,7 +119,11 @@ dependencies:
     rev: 0123456789abcdef0123456789abcdef01234567
 ```
 
-Git dependencies must pin `rev`. `vibra sync` clones or fetches them into `dep/<name>` and checks out the pinned revision. Local dependencies are not copied.
+Git dependencies must pin a full 40-hex `rev`. `vibra sync` recursively exports clean source trees into package-local `dep/<name>` directories; nested repositories use their own `dep/` directories, so diamond edges may select different revisions without a global namespace collision. Exported trees contain no `.git` metadata. Local dependencies are not copied and published Git dependencies may not declare path dependencies.
+
+Sync writes deterministic `project.lock.vibra` metadata for every vendored package: source identity, exact revision, SHA-256 of its own clean source tree, vendor path, and dependency alias edges. Commit this lock. Offline `check` and build operations use only the vendored graph and reject missing/stale lock entries or modified source. Until the future solver in issue #80 exists, all `std` edges must select one exact revision.
+
+Vendored dependency and stdlib documents are visible to `vibra code` queries. They are read-only to code transactions; change the upstream source and resync instead.
 
 `vibra init` seeds the current toolchain stdlib into `dep/std` for immediate offline use and records its canonical source and exact revision as:
 

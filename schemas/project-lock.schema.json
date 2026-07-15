@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/project-lock.schema.json",
+  "title": "VibraProjectLock",
+  "type": "object",
+  "required": ["lock-version", "packages"],
+  "additionalProperties": false,
+  "properties": {
+    "lock-version": { "const": 1 },
+    "packages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/package" }
+    }
+  },
+  "$defs": {
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "vendorPath": {
+      "type": "string",
+      "pattern": "^dep/[a-z][a-z0-9-]*(/dep/[a-z][a-z0-9-]*)*$"
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "name",
+        "identity",
+        "git",
+        "rev",
+        "tree-sha256",
+        "vendor-path",
+        "dependencies"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "identity": { "type": "string", "minLength": 42 },
+        "git": { "type": "string", "minLength": 1 },
+        "rev": { "$ref": "#/$defs/revision" },
+        "tree-sha256": { "$ref": "#/$defs/sha256" },
+        "vendor-path": { "$ref": "#/$defs/vendorPath" },
+        "dependencies": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "additionalProperties": { "$ref": "#/$defs/vendorPath" }
+        }
+      }
+    }
+  }
+}

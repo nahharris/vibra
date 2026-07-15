@@ -284,7 +284,7 @@ fn workspace_discovery_keeps_module_parts_as_physical_documents() {
     std::fs::write(dir.path().join("src/math.vibra"), "main: 1\n").unwrap();
     std::fs::write(dir.path().join("src/math.test.vibra"), "test-case: 2\n").unwrap();
     std::fs::write(dir.path().join("target/generated.vibra"), "ignored: 1\n").unwrap();
-    std::fs::write(dir.path().join("dep/std/io.vibra"), "ignored: 1\n").unwrap();
+    std::fs::write(dir.path().join("dep/std/io.vibra"), "dependency: 1\n").unwrap();
 
     let db = SourceDatabase::discover(dir.path()).unwrap();
     let paths: Vec<_> = db.paths().map(PathBuf::from).collect();
@@ -292,6 +292,7 @@ fn workspace_discovery_keeps_module_parts_as_physical_documents() {
     assert_eq!(
         paths,
         vec![
+            PathBuf::from("dep/std/io.vibra"),
             PathBuf::from("src/math.test.vibra"),
             PathBuf::from("src/math.vibra"),
         ]
