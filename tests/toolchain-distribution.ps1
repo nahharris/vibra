@@ -32,6 +32,7 @@ $rebuild = '.github/workflows/rebuild-containers.yml'
 Require $rebuild '^\s+image-ref: ghcr\.io/nahharris/vibra:staging-' 'runtime rebuild scan target'
 Require $rebuild '^\s+image-ref: ghcr\.io/nahharris/vibra-dev:staging-' 'dev rebuild scan target'
 Reject $rebuild 'with: \{\s*image-ref:.*:' 'unquoted tagged image in YAML flow mapping'
+Reject $rebuild 'with: \{.*\$\{\{' 'expression in YAML flow mapping'
 
 Require $pack "bin[/\\]vibra" 'toolchain binary layout'
 Require $pack "stdlib" 'bundled stdlib layout'
