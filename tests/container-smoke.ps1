@@ -81,7 +81,7 @@ try {
 
     if ($Dev) {
         if ($Platform -eq 'linux') {
-            Invoke-Docker @('run', '--rm', '--entrypoint', '/bin/sh', $Image, '-lc', 'export PATH="$(cat /opt/vibra/cargo-bin):$PATH"; cd /src && cargo test && cargo run -- test')
+            Invoke-Docker @('run', '--rm', '--entrypoint', '/bin/sh', $Image, '-lc', 'export PATH="$(cat /opt/vibra/cargo-bin):$PATH"; cargo --version; git --version; probe="$(mktemp -d)/probe"; cargo new --quiet "$probe"; cargo check --quiet --offline --manifest-path "$probe/Cargo.toml"')
         }
         else {
             Invoke-Docker @('run', '--rm', '--entrypoint', 'cmd.exe', '-w', 'C:\src', $Image, '/S', '/C', 'C:\Vibra\devcmd.cmd cmd /S /C "cargo test && cargo run -- test"')

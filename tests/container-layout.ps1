@@ -44,6 +44,13 @@ Require-Content $linuxDockerfile '^USER nonroot$' 'Linux runtime nonroot user'
 Require-Content $linuxDockerfile 'ENTRYPOINT.*vibra' 'Linux vibra entrypoint'
 Require-Content $linuxDockerfile 'CMD.*--help' 'Linux help default'
 
+$linuxContents = Get-Content -Raw $linuxDockerfile
+$dependencyBuild = $linuxContents.IndexOf('cargo build --release --locked')
+$sourceCopy = $linuxContents.IndexOf('COPY src ./src')
+if ($dependencyBuild -lt 0 -or $sourceCopy -lt 0 -or $dependencyBuild -gt $sourceCopy) {
+    throw 'Linux Dockerfile must cache dependency compilation before copying real sources.'
+}
+
 Require-Content $windowsDockerfile 'COPY.*stdlib.*C:\\Vibra\\stdlib' 'Windows stdlib runtime copy'
 Require-Content $windowsDockerfile 'C:\\Vibra\\bin' 'Windows binary layout'
 Require-Content $windowsDockerfile 'ARG WINDOWS_BUILDER_IMAGE=mcr\.microsoft\.com/windows/servercore:ltsc2022-amd64@sha256:c747aa0e4668af32773f6f81220fb95d49e2e55237d07fbc18a8138d1b0e4de7' 'Pinned Windows builder build argument default'
@@ -86,6 +93,8 @@ Require-Content $smokeTest "'init', 'smoke'" 'Container smoke test project initi
 Require-Content $smokeTest "'check'" 'Container smoke test project check'
 Require-Content $smokeTest 'cargo test' 'Container smoke test development Rust suite'
 Require-Content $smokeTest 'cargo run -- test' 'Container smoke test development Vibra suite'
+Require-Content $smokeTest 'cargo new --quiet' 'Linux development image Cargo project smoke test'
+Require-Content $smokeTest 'cargo check --quiet --offline' 'Linux development image offline build smoke test'
 Require-Content $smokeTest 'Set-LinuxMountPermissions' 'Container smoke test Linux mount permission helper'
 Require-Content $smokeTest 'chmod 777' 'Container smoke test Linux writable mount permissions'
 Require-Content $smokeTest "'-w', 'C:\\src'" 'Container smoke test Windows dev source workdir'
