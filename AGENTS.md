@@ -19,8 +19,8 @@ pass. Always run them and confirm the output before claiming success.
 
 ### 1. Rust suite (`cargo test`)
 
-Unit and integration tests for the compiler, lowering, and runtime. The bulk of
-the coverage lives in `tests/integration.rs`.
+Unit and integration tests for compiler, lowering, runtime, runner, and CLI
+mechanics. Coverage lives in focused Rust integration targets under `tests/`.
 
 ```sh
 cargo test
@@ -31,7 +31,7 @@ cargo test
 Tests written **in Vibra itself**, under `tests/*.vibra`, exercising language
 features and the standard library through the built-in runner. See
 [`tests/README.md`](tests/README.md) for conventions (flat layout, grant-free
-tests, and the `$match`-based equality idiom).
+tests, typed assertions, profiles, and capability-gated commands).
 
 ```sh
 cargo run -- test            # from the repo root
@@ -39,13 +39,14 @@ cargo run -- test            # from the repo root
 vibra test
 ```
 
-Useful flags: `--filter <name>`, `--jobs <n>`, `--fail-fast`,
-`--report yaml --report-file report.yaml`.
+Useful flags: `--filter <name>`, `--profile <name>`, `--tag <tag>`,
+`--jobs <n>`, `--fail-fast`, and `--report yaml --report-file report.yaml`.
+Profiles select tests; they never grant capabilities.
 
 ## When you add or change behavior
 
-- Changing the **compiler/runtime** (`src/`): add/adjust Rust tests in
-  `tests/integration.rs` and re-run `cargo test`.
+- Changing the **compiler/runtime** (`src/`): add/adjust a focused Rust test
+  under `tests/` and re-run `cargo test`.
 - Changing the **language surface or `stdlib/`**: add/adjust a `tests/*.vibra`
   case and re-run `vibra test`. New stdlib modules should get a matching
   `stdlib-<module>.vibra` test file.

@@ -1,0 +1,15 @@
+test:
+  $import: ../stdlib/test.vibra
+security:
+  $import: ../stdlib/security.vibra
+
+granted-observes-a-capability-token:
+  $test: env
+  tags: [stdlib, capability]
+  grants:
+    env-read: $security.grant.mandatory
+  do:
+    - $let:
+        granted:
+          $security.granted: $grants.env-read
+    - $test.assert: $granted

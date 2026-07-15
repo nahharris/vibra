@@ -1,5 +1,13 @@
 use std::path::Path;
 
+fn vibra_cmd() -> std::process::Command {
+    std::process::Command::new(env!("CARGO_BIN_EXE_vibra"))
+}
+
+fn path_str(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
 #[test]
 fn match_arms_use_case_key() {
     let dir = tempfile::tempdir().unwrap();
@@ -224,216 +232,6 @@ fn wasm_abi_aggregate_layout_is_aligned() {
 }
 
 #[test]
-#[ignore = "removed by policy value model"]
-fn function_grants_side_channel_allows_primary_args_and_grant_forwarding() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let data = dir.path().join("data.txt");
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function: $void
-  grants:
-    fs-write: $security.grant.mandatory
-    fs-read: $security.grant.optional
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "{path}"
-    - $fs.write-string-all: $path
-      s: "hello"
-      =grants:
-        - $grants.fs-write
-    - $if:
-        $security.granted: $grants.fs-read
-      then:
-        - $let:
-            text:
-              $fs.read-to-string: $path
-              =grants:
-                - $grants.fs-read
-      else: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            path = data.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).expect("new grant side channel should lower");
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            allow_write: vec![dir.path().to_path_buf()],
-            allow_read: vec![dir.path().to_path_buf()],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("grant side-channel fs program should run");
-    assert_eq!(std::fs::read_to_string(data).unwrap(), "hello");
-}
-
-#[test]
-#[ignore = "removed by policy value model"]
-fn missing_mandatory_grant_forwarding_is_rejected() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "x"
-    - $fs.read-to-string: $path
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("missing mandatory grant `fs-read`"),
-        "expected missing mandatory grant diagnostic, got: {err}"
-    );
-}
-
-#[test]
-#[ignore = "removed by policy value model"]
-fn mandatory_grant_forwarded_but_denied_fails_before_callee_runs() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let data = dir.path().join("data.txt");
-    std::fs::write(&data, "secret").unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function: $void
-  grants:
-    fs-read: $security.grant.mandatory
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "{path}"
-    - $let:
-        text:
-          $fs.read-to-string: $path
-          =grants:
-            - $grants.fs-read
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            path = data.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::execute::run_lowered(
-            &lowered,
-            &vibra::runtime::RunConfig {
-                program_name: "vibra-test".to_string(),
-                argv: Vec::new(),
-                ..vibra::runtime::RunConfig::default()
-            },
-        )
-        .unwrap_err()
-    );
-    assert!(
-        err.contains("mandatory grant `fs-read` was not granted"),
-        "expected denied mandatory grant preflight failure, got: {err}"
-    );
-}
-
-#[test]
-#[ignore = "removed by policy value model"]
-fn grant_forwarding_requires_token_in_scope() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let data = dir.path().join("data.txt");
-    std::fs::write(&data, "secret").unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "{path}"
-    - $let:
-        text:
-          $fs.read-to-string: $path
-          =grants:
-            - $grants.fs-read
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            path = data.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::execute::run_lowered(
-            &lowered,
-            &vibra::runtime::RunConfig {
-                program_name: "vibra-test".to_string(),
-                argv: Vec::new(),
-                allow_read: vec![dir.path().to_path_buf()],
-                ..vibra::runtime::RunConfig::default()
-            },
-        )
-        .unwrap_err()
-    );
-    assert!(
-        err.contains("grant `fs-read` is not available in this scope"),
-        "expected unavailable grant token rejection, got: {err}"
-    );
-}
-
-#[test]
 fn nested_function_grants_are_rejected() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
@@ -541,83 +339,6 @@ main:
     assert!(
         err.contains("grant names must be kebab-case"),
         "expected grant declaration kebab-case rejection, got: {err}"
-    );
-}
-
-#[test]
-#[ignore = "removed by policy value model"]
-fn grant_forwarding_refs_must_be_kebab_case() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function: $void
-  grants:
-    fs-read: $security.grant.optional
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "x"
-    - $fs.read-to-string: $path
-      =grants:
-        - $grants.fs_read
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("grant references must use `$grants.<kebab-name>`"),
-        "expected grant forwarding kebab-case rejection, got: {err}"
-    );
-}
-
-#[test]
-#[ignore = "removed by policy value model"]
-fn dotted_grant_reference_is_rejected() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"security:
-  $import: "{security}"
-main:
-  $function: $void
-  grants:
-    fs-read: $security.grant.optional
-  return: $void
-  do:
-    - $let:
-        ok:
-          $security.granted: $grants.fs.read
-"#,
-            security = security.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("grant references must use `$grants.<kebab-name>`"),
-        "expected dotted grant reference rejection, got: {err}"
     );
 }
 
@@ -1774,137 +1495,6 @@ main:
 }
 
 #[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn mode_safe_fs_roundtrip_runs() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let data = dir.path().join("hello.txt");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $let:
-          p:
-            $fs.path.new: "{path}"
-      - $match: $args.input.fs-write
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: write-grant
-              do:
-                - $let:
-                    opened-write:
-                      $fs.open-write: $p
-                      grant: $write-grant
-                - $match: $opened-write
-                  when:
-                      - case:
-                          $result.result.ok:
-                            $bind: out
-                        do:
-                          - $fs.writable.write-string: $out
-                            s: "from vibra fs"
-                          - $fs.closeable.close: $out
-                      - case:
-                          $result.result.err:
-                            $bind: err
-                        do: []
-            - case:
-                $security.grant-status.denied:
-                  $bind: write-denied
-              do: []
-      - $match: $args.input.fs-read
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: read-grant
-              do:
-                - $let:
-                    opened-read:
-                      $fs.open-read: $p
-                      grant: $read-grant
-                - $match: $opened-read
-                  when:
-                      - case:
-                          $result.result.ok:
-                            $bind: input
-                        do:
-                          - $let:
-                              text:
-                                $fs.readable.read-string: $input
-                          - $fs.closeable.close: $input
-                      - case:
-                          $result.result.err:
-                            $bind: err2
-                        do: []
-            - case:
-                $security.grant-status.denied:
-                  $bind: read-denied
-              do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            path = data.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).expect("mode-safe fs program should lower");
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            preopen_host_dirs: vec![dir.path().to_path_buf()],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("mode-safe fs roundtrip should run");
-    assert_eq!(std::fs::read_to_string(data).unwrap(), "from vibra fs");
-}
-
-#[test]
-#[ignore = "removed by policy value model"]
-fn capability_values_cannot_be_created_with_cast() {
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"secret:
-  $capability: fs-read
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          forged:
-            $cast: "not a grant"
-            into: $secret
-"#,
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("E-CAP-001"),
-        "expected capability cast rejection, got: {err}"
-    );
-}
-
-#[test]
 fn capability_type_constructor_is_removed() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
@@ -2348,523 +1938,6 @@ main:
 }
 
 #[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn fs_access_is_denied_without_any_runtime_grant() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let data = dir.path().join("data.txt");
-    std::fs::write(&data, "hello").unwrap();
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $let:
-          p:
-            $fs.path.new: "{path}"
-      - $match: $args.input.fs-read
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: grant
-              do:
-                - $let:
-                    opened:
-                      $fs.open-read: $p
-                      grant: $grant
-            - case:
-                $security.grant-status.denied:
-                  $bind: reason
-              do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            path = data.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
-        .expect("denied grant path should be matchable and skip privileged fs access");
-}
-
-#[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn fs_grant_rejects_sibling_prefix_escape() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let allowed = dir.path().join("root");
-    let sibling = dir.path().join("root2");
-    std::fs::create_dir_all(&allowed).unwrap();
-    std::fs::create_dir_all(&sibling).unwrap();
-    let target = sibling.join("escape.txt");
-    std::fs::write(&target, "secret").unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $let:
-          p:
-            $fs.path.new: "{path}"
-      - $match: $args.input.fs-read
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: grant
-              do:
-                - $let:
-                    opened:
-                      $fs.open-read: $p
-                      grant: $grant
-            - case:
-                $security.grant-status.denied:
-                  $bind: reason
-              do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            path = target.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    let err = vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            preopen_host_dirs: vec![allowed],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("outside configured grants"),
-        "expected sibling escape denial, got: {msg}"
-    );
-}
-
-#[test]
-#[ignore = "grant attenuation was removed by grant side-channel model"]
-fn fs_narrow_read_grant_limits_delegated_scope() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let allowed = dir.path().join("allowed");
-    let denied = dir.path().join("denied");
-    std::fs::create_dir_all(&allowed).unwrap();
-    std::fs::create_dir_all(&denied).unwrap();
-    std::fs::write(allowed.join("ok.txt"), "ok").unwrap();
-    std::fs::write(denied.join("no.txt"), "no").unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $let:
-          allow-root:
-            $fs.path.new: "{allowed}"
-      - $let:
-          denied-file:
-            $fs.path.new: "{denied_file}"
-      - $match: $args.input.fs-read
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: read-grant
-              do:
-                - $let:
-                    narrowed:
-                      $fs.narrow-read: $read-grant
-                      p: $allow-root
-                - $match: $narrowed
-                  when:
-                      - case:
-                          $result.result.ok:
-                            $bind: narrow-grant
-                        do:
-                          - $let:
-                              opened:
-                                $fs.open-read: $denied-file
-                                grant: $narrow-grant
-                      - case:
-                          $result.result.err:
-                            $bind: narrow-err
-                        do: []
-            - case:
-                $security.grant-status.denied:
-                  $bind: read-denied
-              do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            allowed = allowed.display().to_string().replace('\\', "/"),
-            denied_file = denied
-                .join("no.txt")
-                .display()
-                .to_string()
-                .replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    let err = vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            preopen_host_dirs: vec![dir.path().to_path_buf()],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("outside configured grants"),
-        "expected narrowed grant to reject delegated escape, got: {msg}"
-    );
-}
-
-#[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn denied_grant_reason_uses_import_alias() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-
-    std::fs::write(
-        &entry,
-        format!(
-            r#"sec:
-  $import: "{security}"
-main:
-  $function:
-    input: $sec.grants
-  return: $void
-  do:
-      - $match: $args.input.stdin-read
-        when:
-            - case:
-                $sec.grant-status.denied:
-                  $sec.denial-reason.not-granted: null
-              do: []
-            - case:
-                $sec.grant-status.granted:
-                  $bind: stdin-grant
-              do: []
-"#,
-            security = security.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
-        .expect("denial reason enum key should follow the security import alias");
-}
-
-#[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn fs_write_grant_allows_nonexistent_configured_scope() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let allowed = dir.path().join("created-later");
-    let file = allowed.join("data.txt");
-
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $let:
-          dir-path:
-            $fs.path.new: "{allowed}"
-      - $let:
-          file-path:
-            $fs.path.new: "{file}"
-      - $match: $args.input.fs-write
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: write-grant
-              do:
-                - $let:
-                    made:
-                      $fs.create-dir-all: $dir-path
-                      grant: $write-grant
-                - $match: $made
-                  when:
-                      - case:
-                          $result.result.ok: null
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $bind: make-err
-                        do: []
-                - $let:
-                    written:
-                      $fs.write-string-all: $file-path
-                      s: "hello"
-                      grant: $write-grant
-                - $match: $written
-                  when:
-                      - case:
-                          $result.result.ok: null
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $bind: write-err
-                        do: []
-            - case:
-                $security.grant-status.denied:
-                  $bind: write-denied
-              do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            allowed = allowed.display().to_string().replace('\\', "/"),
-            file = file.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            allow_write: vec![allowed],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("nonexistent configured write scope should authorize created descendants");
-    assert_eq!(std::fs::read_to_string(file).unwrap(), "hello");
-}
-
-#[test]
-#[ignore = "grant attenuation was removed by grant side-channel model"]
-fn fs_narrow_write_grant_allows_nonexistent_descendant_scope() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let allowed = dir.path().join("allowed");
-    std::fs::create_dir_all(&allowed).unwrap();
-    let narrowed_dir = allowed.join("created-later");
-    let file = narrowed_dir.join("data.txt");
-    let entry = dir.path().join("entry.vibra");
-
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $let:
-          narrow-root:
-            $fs.path.new: "{narrowed_dir}"
-      - $let:
-          file-path:
-            $fs.path.new: "{file}"
-      - $match: $args.input.fs-write
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: write-grant
-              do:
-                - $let:
-                    narrowed:
-                      $fs.narrow-write: $write-grant
-                      p: $narrow-root
-                - $match: $narrowed
-                  when:
-                      - case:
-                          $result.result.ok:
-                            $bind: narrow-grant
-                        do:
-                          - $let:
-                              made:
-                                $fs.create-dir-all: $narrow-root
-                                grant: $narrow-grant
-                          - $match: $made
-                            when:
-                                - case:
-                                    $result.result.ok: null
-                                  do: []
-                                - case:
-                                    $result.result.err:
-                                      $bind: make-err
-                                  do: []
-                          - $let:
-                              written:
-                                $fs.write-string-all: $file-path
-                                s: "hello"
-                                grant: $narrow-grant
-                          - $match: $written
-                            when:
-                                - case:
-                                    $result.result.ok: null
-                                  do: []
-                                - case:
-                                    $result.result.err:
-                                      $bind: write-err
-                                  do: []
-                      - case:
-                          $result.result.err:
-                            $bind: narrow-err
-                        do: []
-            - case:
-                $security.grant-status.denied:
-                  $bind: write-denied
-              do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            narrowed_dir = narrowed_dir.display().to_string().replace('\\', "/"),
-            file = file.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            allow_write: vec![allowed],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("narrowed grant to nonexistent descendant should authorize that descendant");
-    assert_eq!(std::fs::read_to_string(file).unwrap(), "hello");
-}
-
-#[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn env_set_invalid_name_returns_err_result() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let env_mod = std::fs::canonicalize(root.join("stdlib/env.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-
-    std::fs::write(
-        &entry,
-        format!(
-            r#"env:
-  $import: "{env_mod}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $match: $args.input.env-write
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: env-grant
-              do:
-                - $let:
-                    set-result:
-                      $env.set: "BAD=NAME"
-                      value: "value"
-                      grant: $env-grant
-                - $match: $set-result
-                  when:
-                      - case:
-                          $result.result.ok: null
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $env.env-error.invalid-name: null
-                        do: []
-            - case:
-                $security.grant-status.denied:
-                  $bind: env-denied
-              do: []
-"#,
-            env_mod = env_mod.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            allow_env_write: vec!["*".to_string()],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("invalid env var names should be structured env-error results");
-}
-
-#[test]
 fn duplicate_nested_imports_are_idempotent() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
@@ -3236,272 +2309,6 @@ main:
 
     let prog = vibra::load::load_program(&entry).unwrap();
     vibra::lower::lower_program(&prog).expect("same-module qualified refs should lower");
-}
-
-#[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn path_level_fs_apis_return_matchable_results() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let work_dir = dir.path().join("work");
-    let data = work_dir.join("data.txt");
-
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $let:
-          dir-path:
-            $fs.path.new: "{work_dir}"
-      - $let:
-          file-path:
-            $fs.path.new: "{data}"
-      - $match: $args.input.fs-write
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: write-grant
-              do:
-                - $let:
-                    made:
-                      $fs.create-dir-all: $dir-path
-                      grant: $write-grant
-                - $match: $made
-                  when:
-                      - case:
-                          $result.result.ok: null
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $bind: made-err
-                        do: []
-                - $let:
-                    written:
-                      $fs.write-string-all: $file-path
-                      s: "hello"
-                      grant: $write-grant
-                - $match: $written
-                  when:
-                      - case:
-                          $result.result.ok: null
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $bind: written-err
-                        do: []
-                - $let:
-                    appended:
-                      $fs.append-string: $file-path
-                      s: " world"
-                      grant: $write-grant
-                - $match: $appended
-                  when:
-                      - case:
-                          $result.result.ok: null
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $bind: appended-err
-                        do: []
-                - $match: $args.input.fs-read
-                  when:
-                      - case:
-                          $security.grant-status.granted:
-                            $bind: read-grant
-                        do:
-                          - $let:
-                              read:
-                                $fs.read-to-string: $file-path
-                                grant: $read-grant
-                          - $match: $read
-                            when:
-                                - case:
-                                    $result.result.ok:
-                                      $bind: read-ok
-                                  do: []
-                                - case:
-                                    $result.result.err:
-                                      $bind: read-err
-                                  do: []
-                          - $let:
-                              stat:
-                                $fs.metadata: $file-path
-                                grant: $read-grant
-                          - $match: $stat
-                            when:
-                                - case:
-                                    $result.result.ok:
-                                      $bind: stat-ok
-                                  do: []
-                                - case:
-                                    $result.result.err:
-                                      $bind: stat-err
-                                  do: []
-                          - $let:
-                              canon:
-                                $fs.canonicalize: $file-path
-                                grant: $read-grant
-                          - $match: $canon
-                            when:
-                                - case:
-                                    $result.result.ok:
-                                      $bind: canon-ok
-                                  do: []
-                                - case:
-                                    $result.result.err:
-                                      $bind: canon-err
-                                  do: []
-                          - $let:
-                              entries:
-                                $fs.read-dir: $dir-path
-                                grant: $read-grant
-                          - $match: $entries
-                            when:
-                                - case:
-                                    $result.result.ok:
-                                      $bind: entries-ok
-                                  do: []
-                                - case:
-                                    $result.result.err:
-                                      $bind: entries-err
-                                  do: []
-                      - case:
-                          $security.grant-status.denied:
-                            $bind: read-denied
-                        do: []
-                - $let:
-                    removed-file:
-                      $fs.remove-file: $file-path
-                      grant: $write-grant
-                - $match: $removed-file
-                  when:
-                      - case:
-                          $result.result.ok: null
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $bind: removed-file-err
-                        do: []
-                - $let:
-                    removed-dir:
-                      $fs.remove-dir: $dir-path
-                      grant: $write-grant
-                - $match: $removed-dir
-                  when:
-                      - case:
-                          $result.result.ok: null
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $bind: removed-dir-err
-                        do: []
-            - case:
-                $security.grant-status.denied:
-                  $bind: write-denied
-              do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            work_dir = work_dir.display().to_string().replace('\\', "/"),
-            data = data.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            preopen_host_dirs: vec![dir.path().to_path_buf()],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("path-level fs APIs should return matchable result values");
-}
-
-#[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn path_level_fs_errors_return_err_results() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let missing = dir.path().join("missing.txt");
-
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    input: $security.grants
-  return: $void
-  do:
-      - $let:
-          missing-path:
-            $fs.path.new: "{missing}"
-      - $match: $args.input.fs-read
-        when:
-            - case:
-                $security.grant-status.granted:
-                  $bind: read-grant
-              do:
-                - $let:
-                    read:
-                      $fs.read-to-string: $missing-path
-                      grant: $read-grant
-                - $match: $read
-                  when:
-                      - case:
-                          $result.result.ok:
-                            $bind: read-ok
-                        do: []
-                      - case:
-                          $result.result.err:
-                            $bind: read-err
-                        do: []
-            - case:
-                $security.grant-status.denied:
-                  $bind: read-denied
-              do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            missing = missing.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            preopen_host_dirs: vec![dir.path().to_path_buf()],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("path-level fs errors should be returned as result.err values");
 }
 
 #[test]
@@ -4073,73 +2880,6 @@ main:
         err.contains("type mismatch in call `$accepts-int` arg `x`"),
         "expected bool -> int mismatch, got: {err}"
     );
-}
-
-#[test]
-#[ignore = "old grant-status API removed by grant side-channel model"]
-fn fs_exists_returns_boolean_runtime_value() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let data = dir.path().join("exists.txt");
-    std::fs::write(&data, "present").unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"fs:
-  $import: "{fs}"
-security:
-  $import: "{security}"
-main:
-  $function:
-    grants: $security.grants
-  return: $void
-  do:
-    - $let:
-        p:
-          $fs.path.new:
-            s: "{path}"
-    - $match: $args.grants.fs-read
-      when:
-        - case:
-            $security.grant-status.granted:
-              $bind: read-grant
-          do:
-            - $let:
-                exists:
-                  $fs.exists:
-                    p: $p
-                    grant: $read-grant
-            - $match: $exists
-              when:
-                - case: true
-                  do: []
-        - case:
-            $security.grant-status.denied:
-              $bind: denied
-          do: []
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            security = security.display().to_string().replace('\\', "/"),
-            path = data.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).expect("fs.exists bool match should lower");
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            program_name: "vibra-test".to_string(),
-            argv: Vec::new(),
-            preopen_host_dirs: vec![dir.path().to_path_buf()],
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("fs.exists should return a bool runtime value");
 }
 
 #[test]
@@ -6644,319 +5384,6 @@ main:
     );
 }
 
-fn vibra_cmd() -> std::process::Command {
-    std::process::Command::new(env!("CARGO_BIN_EXE_vibra"))
-}
-
-fn path_str(path: &Path) -> String {
-    path.display().to_string().replace('\\', "/")
-}
-
-#[test]
-fn project_init_bin_template_creates_valid_project() {
-    let dir = tempfile::tempdir().unwrap();
-
-    let output = vibra_cmd()
-        .current_dir(dir.path())
-        .args(["init", "hello"])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "init failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let project = dir.path().join("hello");
-    let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
-    let main = std::fs::read_to_string(project.join("src/hello/main.vibra")).unwrap();
-    assert!(manifest.contains("manifest-version: 1"));
-    assert!(main.contains("@std/io.vibra"));
-    assert!(project.join("src/hello/main.vibra").exists());
-    assert!(project.join("dep/std/io.vibra").exists());
-
-    let check = vibra_cmd()
-        .current_dir(dir.path())
-        .args(["check", "hello"])
-        .output()
-        .unwrap();
-    assert!(
-        check.status.success(),
-        "check failed: {}",
-        String::from_utf8_lossy(&check.stderr)
-    );
-
-    let run = vibra_cmd()
-        .current_dir(&project)
-        .args(["run", "src/hello/main.vibra"])
-        .output()
-        .unwrap();
-    assert!(
-        run.status.success(),
-        "run failed: {}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-}
-
-#[test]
-fn project_init_lib_and_workspace_templates_check() {
-    let dir = tempfile::tempdir().unwrap();
-    for (name, template, expected_entry) in [
-        ("mylib", "lib", "src/mylib/lib.vibra"),
-        ("myapp", "workspace", "src/core/lib.vibra"),
-    ] {
-        let init = vibra_cmd()
-            .current_dir(dir.path())
-            .args(["init", name, "--template", template])
-            .output()
-            .unwrap();
-        assert!(
-            init.status.success(),
-            "{template} init failed: {}",
-            String::from_utf8_lossy(&init.stderr)
-        );
-        assert!(dir.path().join(name).join(expected_entry).exists());
-
-        let check = vibra_cmd()
-            .current_dir(dir.path())
-            .args(["check", name])
-            .output()
-            .unwrap();
-        assert!(
-            check.status.success(),
-            "{template} check failed: {}",
-            String::from_utf8_lossy(&check.stderr)
-        );
-    }
-}
-
-#[test]
-fn project_check_rejects_invalid_manifest_shapes() {
-    let dir = tempfile::tempdir().unwrap();
-    let project = dir.path().join("bad");
-    std::fs::create_dir_all(project.join("src/a")).unwrap();
-    std::fs::write(
-        project.join("src/a/main.vibra"),
-        "main:\n  $function: $void\n  return: $void\n  do: []\n",
-    )
-    .unwrap();
-    std::fs::write(
-        project.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: bad
-  version: 0.1.0
-targets:
-  libs:
-    - name: dup
-      root: src/a
-      entry: main.vibra
-  bins:
-    - name: dup
-      root: /tmp/outside
-      entry: main.vibra
-dependencies:
-  remote:
-    git: https://example.com/remote.git
-"#,
-    )
-    .unwrap();
-
-    let check = vibra_cmd()
-        .current_dir(dir.path())
-        .args(["check", "bad"])
-        .output()
-        .unwrap();
-    assert!(!check.status.success());
-    let stderr = String::from_utf8_lossy(&check.stderr);
-    assert!(
-        stderr.contains("duplicate target or dependency name `dup`")
-            || stderr.contains("must be relative")
-            || stderr.contains("git dependency `remote` must pin `rev`"),
-        "unexpected stderr: {stderr}"
-    );
-}
-
-#[test]
-fn project_check_resolves_local_dependency_without_copying_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let dep = dir.path().join("local-utils");
-    std::fs::create_dir_all(&dep).unwrap();
-    std::fs::write(
-        dep.join("util.vibra"),
-        "io:\n  $import: \"@std/io.vibra\"\nanswer: 42\n",
-    )
-    .unwrap();
-    let stdlib = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
-
-    let project = dir.path().join("app");
-    std::fs::create_dir_all(project.join("src/app")).unwrap();
-    std::fs::write(
-        project.join("src/app/main.vibra"),
-        "utils:\n  $import: \"@local-utils/util.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
-    )
-    .unwrap();
-    std::fs::write(
-        project.join("project.vibra"),
-        format!(
-            r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: src/app
-      entry: main.vibra
-dependencies:
-  std:
-    path: {}
-  local-utils:
-    path: {}
-"#,
-            path_str(&stdlib),
-            path_str(&dep)
-        ),
-    )
-    .unwrap();
-
-    let check = vibra_cmd()
-        .current_dir(dir.path())
-        .args(["check", "app"])
-        .output()
-        .unwrap();
-    assert!(
-        check.status.success(),
-        "check failed: {}",
-        String::from_utf8_lossy(&check.stderr)
-    );
-    assert!(!project.join("dep/local-utils").exists());
-
-    let run = vibra_cmd()
-        .current_dir(&project)
-        .args(["run", "src/app/main.vibra"])
-        .output()
-        .unwrap();
-    assert!(
-        run.status.success(),
-        "run failed: {}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-}
-
-#[test]
-fn project_sync_clones_git_dependency_at_pinned_rev() {
-    let dir = tempfile::tempdir().unwrap();
-    let remote = dir.path().join("remote-math");
-    std::fs::create_dir_all(&remote).unwrap();
-    std::fs::write(remote.join("math.vibra"), "pi: 3\n").unwrap();
-    assert!(std::process::Command::new("git")
-        .current_dir(&remote)
-        .args(["init"])
-        .output()
-        .unwrap()
-        .status
-        .success());
-    assert!(std::process::Command::new("git")
-        .current_dir(&remote)
-        .args(["add", "."])
-        .output()
-        .unwrap()
-        .status
-        .success());
-    assert!(std::process::Command::new("git")
-        .current_dir(&remote)
-        .args([
-            "-c",
-            "user.name=Vibra Test",
-            "-c",
-            "user.email=vibra@example.test",
-            "commit",
-            "-m",
-            "seed",
-        ])
-        .output()
-        .unwrap()
-        .status
-        .success());
-    let rev = std::process::Command::new("git")
-        .current_dir(&remote)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .unwrap();
-    assert!(rev.status.success());
-    let rev = String::from_utf8(rev.stdout).unwrap().trim().to_string();
-
-    let project = dir.path().join("app");
-    std::fs::create_dir_all(project.join("src/app")).unwrap();
-    std::fs::write(
-        project.join("src/app/main.vibra"),
-        "math:\n  $import: \"@math/math.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
-    )
-    .unwrap();
-    std::fs::write(
-        project.join("project.vibra"),
-        format!(
-            r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: src/app
-      entry: main.vibra
-dependencies:
-  math:
-    git: {}
-    rev: {}
-"#,
-            path_str(&remote),
-            rev
-        ),
-    )
-    .unwrap();
-
-    let sync = vibra_cmd()
-        .current_dir(dir.path())
-        .args(["sync", "app"])
-        .output()
-        .unwrap();
-    assert!(
-        sync.status.success(),
-        "sync failed: {}",
-        String::from_utf8_lossy(&sync.stderr)
-    );
-    assert!(project.join("dep/math/math.vibra").exists());
-    std::fs::write(project.join("dep/math/math.vibra"), "dirty: 0\n").unwrap();
-
-    let resync = vibra_cmd()
-        .current_dir(dir.path())
-        .args(["sync", "app"])
-        .output()
-        .unwrap();
-    assert!(
-        resync.status.success(),
-        "resync failed: {}",
-        String::from_utf8_lossy(&resync.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(project.join("dep/math/math.vibra")).unwrap(),
-        "pi: 3\n"
-    );
-
-    let check = vibra_cmd()
-        .current_dir(dir.path())
-        .args(["check", "app"])
-        .output()
-        .unwrap();
-    assert!(
-        check.status.success(),
-        "check failed: {}",
-        String::from_utf8_lossy(&check.stderr)
-    );
-}
-
 #[test]
 fn vibra_test_runs_top_level_test_declarations_without_main() {
     let dir = tempfile::tempdir().unwrap();
@@ -6968,12 +5395,12 @@ fn vibra_test_runs_top_level_test_declarations_without_main() {
         r#"test:
   $import: "@std/test.vibra"
 passes:
-  $test:
-    do:
+  $test: core
+  do:
       - $test.assert: true
 also-passes:
-  $test:
-    do:
+  $test: core
+  do:
       - $test.assert: true
 "#,
     )
@@ -7023,8 +5450,8 @@ fn vibra_test_reports_assertion_failures() {
         r#"test:
   $import: "@std/test.vibra"
 fails:
-  $test:
-    do:
+  $test: core
+  do:
       - $test.assert: false
 "#,
     )
@@ -7063,6 +5490,57 @@ dependencies:
 }
 
 #[test]
+fn vibra_test_typed_equality_helpers_report_expected_and_actual_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("app");
+    let tests_dir = project.join("tests");
+    std::fs::create_dir_all(&tests_dir).unwrap();
+    std::fs::write(
+        tests_dir.join("fails.vibra"),
+        r#"test:
+  $import: "@std/test.vibra"
+fails:
+  $test: core
+  do:
+    - $test.assert-eq-int:
+        actual: 1
+        expected: 2
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        r#"manifest-version: 1
+package:
+  name: app
+  version: 0.1.0
+targets:
+  bins:
+    - name: app
+      root: tests
+      entry: fails.vibra
+dependencies:
+  std:
+    path: dep/std
+"#,
+    )
+    .unwrap();
+    copy_stdlib(&project.join("dep/std"));
+
+    let output = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["test", "app"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("expected Int(2), actual Int(1)"),
+        "stderr={stderr}"
+    );
+}
+
+#[test]
 fn vibra_test_writes_yaml_report_file() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("app");
@@ -7074,8 +5552,8 @@ fn vibra_test_writes_yaml_report_file() {
         r#"test:
   $import: "@std/test.vibra"
 passes:
-  $test:
-    do:
+  $test: core
+  do:
       - $test.assert: true
 "#,
     )
@@ -7143,8 +5621,8 @@ fn module_part_test_file_shares_base_module_definitions() {
         r#"test:
   $import: "@std/test.vibra"
 uses-base-function:
-  $test:
-    do:
+  $test: core
+  do:
       - $let:
           ready:
             $is-ready: null
@@ -7954,6 +6432,704 @@ fn vibra_lint_percent_encodes_file_uris() {
 
 // ===== Issue #50: shared test context + single-named-test lowering =====
 
+#[test]
+fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(&entry, "passes:\n  $test: core\n  do: []\n").unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+    let names = vibra::lower::discover_test_names(&program).unwrap();
+    assert_eq!(names, vec!["passes"]);
+    vibra::lower::lower_named_test(&program, "passes")
+        .expect("canonical sibling test envelope should lower");
+
+    for (name, source) in [
+        ("legacy nested test", "legacy:\n  $test:\n    do: []\n"),
+        (
+            "test args",
+            "bad:\n  $test: core\n  args: $void\n  do: []\n",
+        ),
+        (
+            "test return",
+            "bad:\n  $test: core\n  return: $void\n  do: []\n",
+        ),
+        ("uppercase test profile", "bad:\n  $test: Core\n  do: []\n"),
+        (
+            "underscored test profile",
+            "bad:\n  $test: core_profile\n  do: []\n",
+        ),
+        ("empty test profile", "bad:\n  $test: \"\"\n  do: []\n"),
+    ] {
+        std::fs::write(&entry, source).unwrap();
+        let program = vibra::load::load_program(&entry).unwrap();
+        let err = vibra::lower::discover_test_names(&program).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("E-TEST-001"),
+            "{name} should be rejected with E-TEST-001, got: {err:#}"
+        );
+    }
+}
+
+#[test]
+fn test_discovery_exposes_canonical_selection_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        "fast:\n  $test: core\n  tags: [language, fast]\n  timeout-ms: 25\n  do: []\nskipped:\n  $test: fs\n  tags: [filesystem]\n  skip: needs a sandbox\n  do: []\n",
+    )
+    .unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+    let specs = vibra::lower::discover_test_specs(&program).unwrap();
+    assert_eq!(specs.len(), 2);
+    assert_eq!(specs[0].name, "fast");
+    assert_eq!(specs[0].profile, "core");
+    assert_eq!(specs[0].tags, vec!["language", "fast"]);
+    assert_eq!(specs[0].timeout_ms, Some(25));
+    assert_eq!(specs[1].skip.as_deref(), Some("needs a sandbox"));
+    assert_eq!(
+        vibra::lower::discover_test_names(&program).unwrap(),
+        vec!["fast", "skipped"]
+    );
+}
+
+#[test]
+fn test_discovery_rejects_invalid_selection_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    for source in [
+        "bad:\n  $test: core\n  tags: [not_kebab]\n  do: []\n",
+        "bad:\n  $test: core\n  tags: [one, one]\n  do: []\n",
+        "bad:\n  $test: core\n  timeout-ms: 0\n  do: []\n",
+        "bad:\n  $test: core\n  skip: \"\"\n  do: []\n",
+        "bad:\n  $test: core\n  skip: \"   \"\n  do: []\n",
+    ] {
+        std::fs::write(&entry, source).unwrap();
+        let err = match vibra::load::load_program(&entry) {
+            Ok(program) => vibra::lower::discover_test_specs(&program).unwrap_err(),
+            Err(error) => error,
+        };
+        assert!(format!("{err:#}").contains("E-TEST-001"), "{err:#}");
+    }
+}
+
+#[test]
+fn test_discovery_trims_skip_reason_and_closes_profile_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        "skipped:\n  $test: core\n  skip: '  pending fixture  '\n  do: []\n",
+    )
+    .unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+    let specs = vibra::lower::discover_test_specs(&program).unwrap();
+    assert_eq!(specs[0].skip.as_deref(), Some("pending fixture"));
+
+    std::fs::write(&entry, "bad:\n  $test: Not-Kebab\n  do: []\n").unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+    let err = vibra::lower::discover_test_specs(&program).unwrap_err();
+    assert!(format!("{err:#}").contains("got `Not-Kebab`"), "{err:#}");
+}
+
+#[test]
+fn test_discovery_rejects_malformed_expected_error_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    for source in [
+        "bad:\n  $test: core\n  expect-error: compile\n  do: []\n",
+        "bad:\n  $test: core\n  expect-error:\n    phase: compile\n  do: []\n",
+        "bad:\n  $test: core\n  expect-error:\n    phase: runtime\n    code: E-RUNTIME-001\n  do: []\n",
+        "bad:\n  $test: core\n  expect-error:\n    phase: unknown\n    message-contains: nope\n  do: []\n",
+        "bad:\n  $test: core\n  expect-error:\n    phase: compile\n    phase: runtime\n    code: E-OPTION-001\n  do: []\n",
+        "bad:\n  $test: core\n  expect-error:\n    phase: compile\n    code: E-OPTION-001\n    code: E-CALL-001\n  do: []\n",
+        "bad:\n  $test: core\n  expect-error:\n    phase: runtime\n    message-contains: one\n    message-contains: two\n  do: []\n",
+    ] {
+        std::fs::write(&entry, source).unwrap();
+        let err = match vibra::load::load_program(&entry) {
+            Ok(program) => vibra::lower::discover_test_specs(&program).unwrap_err(),
+            Err(error) => error,
+        };
+        assert!(format!("{err:#}").contains("E-TEST-001"), "{err:#}");
+    }
+}
+
+#[test]
+fn vibra_test_matches_structured_expected_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let compile_entry = dir.path().join("compile-error.vibra");
+    let runtime_entry = dir.path().join("runtime-error.vibra");
+    let test_lib =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/test.vibra"))
+            .unwrap();
+    std::fs::write(
+        &compile_entry,
+        format!(
+            r#"test:
+  $import: "{test_lib}"
+legacy:
+  $option: $str
+compile-error:
+  $test: core
+  expect-error:
+    phase: compile
+    code: E-OPTION-001
+    message-contains: $option
+  do: []
+"#,
+            test_lib = path_str(&test_lib),
+        ),
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args(["test", &path_str(&compile_entry)])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "test failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+        "stdout={}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    std::fs::write(
+        &runtime_entry,
+        format!(
+            r#"test:
+  $import: "{test_lib}"
+runtime-error:
+  $test: core
+  expect-error:
+    phase: runtime
+    message-contains: assertion failed
+  do:
+    - $test.assert: false
+"#,
+            test_lib = path_str(&test_lib),
+        ),
+    )
+    .unwrap();
+    let output = vibra_cmd()
+        .args(["test", &path_str(&runtime_entry)])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "test failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn vibra_test_matches_load_error_before_imports_are_recursively_loaded() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("load-error.vibra");
+    let imported = dir.path().join("cycle.vibra");
+    std::fs::write(
+        &entry,
+        "cycle:\n  $import: cycle.vibra\nload-error:\n  $test: core\n  expect-error:\n    phase: load\n    code: E-MOD-003\n  do: []\n",
+    )
+    .unwrap();
+    std::fs::write(&imported, "entry:\n  $import: load-error.vibra\n").unwrap();
+
+    let output = vibra_cmd()
+        .args(["test", &path_str(&entry)])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "test failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+        "stdout={}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn vibra_test_reports_expected_error_mismatches_from_the_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("expected-error-mismatch.vibra");
+    std::fs::write(
+        &entry,
+        "passes:\n  $test: core\n  expect-error:\n    phase: compile\n    code: E-OPTION-001\n  do: []\n",
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args(["test", &path_str(&entry)])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("expected compile error"), "stderr={stderr}");
+}
+
+#[test]
+fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
+    let dir = tempfile::tempdir().unwrap();
+    let test_lib =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/test.vibra"))
+            .unwrap();
+    let cases = [
+        (
+            "wrong-phase.vibra",
+            format!(
+                "test:\n  $import: \"{}\"\nbad:\n  $test: core\n  expect-error:\n    phase: compile\n    code: E-OPTION-001\n  do:\n    - $test.assert: false\n",
+                path_str(&test_lib)
+            ),
+            "expected compile error, but test failed during runtime",
+        ),
+        (
+            "wrong-code.vibra",
+            "legacy:\n  $option: $str\nbad:\n  $test: core\n  expect-error:\n    phase: compile\n    code: E-CALL-001\n  do: []\n".to_string(),
+            "expected compile error code `E-CALL-001`, got `E-OPTION-001`",
+        ),
+        (
+            "wrong-message.vibra",
+            format!(
+                "test:\n  $import: \"{}\"\nbad:\n  $test: core\n  expect-error:\n    phase: runtime\n    message-contains: expected different runtime error\n  do:\n    - $test.assert: false\n",
+                path_str(&test_lib)
+            ),
+            "expected runtime error message to contain `expected different runtime error`",
+        ),
+    ];
+    for (name, source, expected_message) in cases {
+        let entry = dir.path().join(name);
+        std::fs::write(&entry, source).unwrap();
+        let output = vibra_cmd()
+            .args(["test", &path_str(&entry)])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{name} unexpectedly passed");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(expected_message), "stderr={stderr}");
+    }
+}
+
+#[test]
+fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("selection.vibra");
+    let report = dir.path().join("report.yaml");
+    std::fs::write(
+        &entry,
+        "core-language:\n  $test: core\n  tags: [language, fast]\n  do: []\nfs-language:\n  $test: fs\n  tags: [language, filesystem]\n  do: []\nskipped-core:\n  $test: core\n  tags: [language]\n  skip: external fixture unavailable\n  do: []\n",
+    )
+    .unwrap();
+    let output = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--tag",
+            "language",
+            "--report",
+            "yaml",
+            "--report-file",
+            &path_str(&report),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let yaml = std::fs::read_to_string(&report).unwrap();
+    assert!(yaml.contains("passed: 1"), "{yaml}");
+    assert!(yaml.contains("skipped: 1"), "{yaml}");
+    assert!(yaml.contains("profile: core"), "{yaml}");
+    assert!(
+        yaml.contains("skip_reason: external fixture unavailable"),
+        "{yaml}"
+    );
+
+    let output = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--profile",
+            "fs",
+            "--tag",
+            "filesystem",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+}
+
+#[test]
+fn vibra_test_deny_skips_fails_after_reporting_selected_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("skip.vibra");
+    std::fs::write(
+        &entry,
+        "skipped:\n  $test: core\n  skip: pending\n  do: []\n",
+    )
+    .unwrap();
+    let output = vibra_cmd()
+        .args(["test", &path_str(&entry), "--deny-skips"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 skipped"));
+}
+
+#[test]
+fn vibra_test_caps_command_timeout_with_test_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("timeout.vibra");
+    std::fs::write(
+        &entry,
+        "slow:\n  $test: core\n  timeout-ms: 1\n  do:\n    - $while: true\n      do: []\n",
+    )
+    .unwrap();
+    let output = vibra_cmd()
+        .args(["test", &path_str(&entry), "--timeout-ms", "1000"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("timed out after 1 ms"), "stderr: {stderr}");
+}
+
+#[test]
+fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("workspace.vibra");
+    std::fs::write(
+        &entry,
+        "needs-workspace:\n  $test: core\n  workspace: temp\n  do: []\n",
+    )
+    .unwrap();
+
+    let skipped = vibra_cmd()
+        .args(["test", &path_str(&entry)])
+        .output()
+        .unwrap();
+    assert!(
+        skipped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&skipped.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&skipped.stdout).contains("requires --allow-test-workspace"),
+        "{}",
+        String::from_utf8_lossy(&skipped.stdout)
+    );
+
+    let enabled = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--allow-test-workspace",
+            "read-write",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        enabled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    assert!(String::from_utf8_lossy(&enabled.stdout).contains("1 passed"));
+}
+
+#[test]
+fn vibra_test_workspace_metadata_rejects_unknown_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("workspace-invalid.vibra");
+    std::fs::write(
+        &entry,
+        "bad:\n  $test: core\n  workspace: persistent\n  do: []\n",
+    )
+    .unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+    let error = vibra::lower::discover_test_specs(&program).unwrap_err();
+    assert!(format!("{error:#}").contains("E-TEST-001"));
+}
+
+#[test]
+fn vibra_test_deny_warnings_fails_and_emits_warnings_in_yaml_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("warnings.vibra");
+    let report = dir.path().join("report.yaml");
+    std::fs::write(&entry, "BadName: 1\npasses:\n  $test: core\n  do: []\n").unwrap();
+
+    let allowed = vibra_cmd()
+        .args(["test", &path_str(&entry)])
+        .output()
+        .unwrap();
+    assert!(
+        allowed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+
+    let denied = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--deny-warnings",
+            "--report",
+            "yaml",
+            "--report-file",
+            &path_str(&report),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !denied.status.success(),
+        "--deny-warnings should fail warning tests"
+    );
+    let yaml = std::fs::read_to_string(report).unwrap();
+    assert!(yaml.contains("warnings:"), "{yaml}");
+    assert!(yaml.contains("BadName"), "{yaml}");
+}
+
+#[test]
+fn vibra_test_temp_workspace_modes_limit_real_filesystem_operations() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs_lib = path_str(&std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap());
+    let test_lib = path_str(&std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let host_dir = tempfile::tempdir().unwrap();
+    let host_path = path_str(host_dir.path());
+    let entry = dir.path().join("workspace-modes.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"test:
+  $import: "{test_lib}"
+fs:
+  $import: "{fs_lib}"
+security:
+  $import: "{security_lib}"
+result:
+  $import: "{result_lib}"
+workspace-read-only:
+  $test: core
+  workspace: temp
+  grants:
+    fs-read: $security.grant.mandatory
+  do:
+    - $let:
+        path:
+          $fs.path.new: .
+    - $let:
+        readable:
+          $fs.exists: $path
+          =grants:
+          - $grants.fs-read
+    - $test.assert: $readable
+workspace-write-only:
+  $test: core
+  workspace: temp
+  grants:
+    fs-write: $security.grant.mandatory
+  do:
+    - $let:
+        path:
+          $fs.path.new: workspace-created
+    - $let:
+        created:
+          $fs.create-dir-all: $path
+          =grants:
+          - $grants.fs-write
+    - $match: $created
+      when:
+      - case:
+          $result.result.ok: null
+        do:
+        - $test.assert: true
+      - case:
+          $result.result.err:
+            $bind: ignored
+        do:
+        - $test.fail: workspace write grant was denied
+workspace-read-write:
+  $test: core
+  workspace: temp
+  grants:
+    fs-read: $security.grant.mandatory
+    fs-write: $security.grant.mandatory
+  do:
+    - $let:
+        path:
+          $fs.path.new: workspace-created
+    - $let:
+        created:
+          $fs.create-dir-all: $path
+          =grants:
+          - $grants.fs-write
+    - $match: $created
+      when:
+      - case:
+          $result.result.ok: null
+        do: []
+      - case:
+          $result.result.err:
+            $bind: ignored
+        do:
+        - $test.fail: workspace write grant was denied
+    - $let:
+        readable:
+          $fs.exists: $path
+          =grants:
+          - $grants.fs-read
+    - $test.assert: $readable
+host-grants-are-isolated:
+  $test: core
+  workspace: temp
+  expect-error:
+    phase: runtime
+    message-contains: outside configured grants
+  grants:
+    fs-read: $security.grant.mandatory
+  do:
+    - $let:
+        host-path:
+          $fs.path.new: {host_path}
+    - $fs.exists: $host-path
+      =grants:
+      - $grants.fs-read
+"#,
+            security_lib =
+                path_str(&std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap()),
+            result_lib =
+                path_str(&std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap()),
+        ),
+    )
+    .unwrap();
+
+    let read = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--filter",
+            "workspace-read-only",
+            "--allow-test-workspace",
+            "read",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        read.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&read.stdout),
+        String::from_utf8_lossy(&read.stderr)
+    );
+
+    let write = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--filter",
+            "workspace-write-only",
+            "--allow-test-workspace",
+            "write",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        write.status.success(),
+        "{}",
+        String::from_utf8_lossy(&write.stderr)
+    );
+
+    let read_write = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--filter",
+            "workspace-read-write",
+            "--allow-test-workspace",
+            "read-write",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        read_write.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read_write.stderr)
+    );
+
+    let no_host_leak = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--filter",
+            "host-grants-are-isolated",
+            "--allow-test-workspace",
+            "read-write",
+            "--allow-read",
+            &host_path,
+            "--allow-write",
+            &host_path,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        no_host_leak.status.success(),
+        "{}",
+        String::from_utf8_lossy(&no_host_leak.stderr)
+    );
+}
+
+#[test]
+fn vibra_test_drains_large_child_output_without_timing_out() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let io_lib = path_str(&std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("large-output.vibra");
+    let report = dir.path().join("large-output-report.yaml");
+    let payload = "x".repeat(128 * 1024);
+    std::fs::write(
+        &entry,
+        format!(
+            "io:\n  $import: \"{io_lib}\"\nemits-large-output:\n  $test: core\n  do:\n    - $io.println: {payload}\n"
+        ),
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&entry),
+            "--timeout-ms",
+            "1000",
+            "--report",
+            "yaml",
+            "--report-file",
+            &path_str(&report),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(std::fs::read_to_string(report).unwrap().contains(&payload));
+}
+
 /// Write an entry module that imports the canonical `stdlib/test.vibra` and
 /// contains `count` passing `$test` declarations plus a shared helper function
 /// every test can call. Returns the temp dir (keep it alive) and entry path.
@@ -7969,7 +7145,7 @@ fn issue50_many_tests_entry(count: usize) -> (tempfile::TempDir, std::path::Path
     );
     for i in 0..count {
         src.push_str(&format!(
-            "many-{i}:\n  $test:\n    do:\n      - $let:\n          v:\n            $the-answer: null\n      - $match: $v\n        when:\n          - case: 42\n            do:\n              - $test.assert: true\n          - case:\n              $wildcard: null\n            do:\n              - $test.fail: not 42\n",
+            "many-{i}:\n  $test: core\n  do:\n    - $let:\n        v:\n          $the-answer: null\n    - $match: $v\n      when:\n        - case: 42\n          do:\n            - $test.assert: true\n        - case:\n            $wildcard: null\n          do:\n            - $test.fail: not 42\n",
         ));
     }
     std::fs::write(&entry, src).unwrap();
@@ -8040,12 +7216,12 @@ fn issue50_failing_test_still_reported() {
             r#"test:
   $import: "{lib}"
 passes:
-  $test:
-    do:
+  $test: core
+  do:
       - $test.assert: true
 fails:
-  $test:
-    do:
+  $test: core
+  do:
       - $test.assert: false
 "#,
             lib = test_lib.display().to_string().replace('\\', "/"),

@@ -2,24 +2,24 @@
 test:
   $import: ../stdlib/test.vibra
 if-true-takes-then:
-  $test:
-    do:
+  $test: core
+  do:
     - $if: true
       then:
       - $test.assert: true
       else:
       - $test.fail: then branch was skipped
 if-false-takes-else:
-  $test:
-    do:
+  $test: core
+  do:
     - $if: false
       then:
       - $test.fail: then branch ran on false
       else:
       - $test.assert: true
 if-on-bound-condition:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         flag: true
     - $if: $flag
@@ -28,8 +28,8 @@ if-on-bound-condition:
       else:
       - $test.fail: bound true condition took else
 nested-if:
-  $test:
-    do:
+  $test: core
+  do:
     - $if: true
       then:
       - $if: false
@@ -40,8 +40,8 @@ nested-if:
       else:
       - $test.fail: outer true took else
 while-false-never-runs:
-  $test:
-    do:
+  $test: core
+  do:
     - $while: false
       do:
       - $test.fail: while body ran on false condition

@@ -1,0 +1,29 @@
+test:
+  $import: ../stdlib/test.vibra
+time:
+  $import: ../stdlib/time.vibra
+security:
+  $import: ../stdlib/security.vibra
+
+accepts-unix-millis:
+  $function:
+    value: $uint64
+  return: $bool
+  do:
+    - $return: true
+
+now-unix-millis-uses-the-granted-clock:
+  $test: system
+  tags: [stdlib, capability]
+  grants:
+    clock: $security.grant.mandatory
+  do:
+    - $let:
+        now:
+          $time.now-unix-millis: null
+          =grants:
+            - $grants.clock
+    - $let:
+        is-millis:
+          $accepts-unix-millis: $now
+    - $test.assert: $is-millis

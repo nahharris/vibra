@@ -21,3 +21,63 @@ fail:
           name: fail
         args:
           - $args.input
+
+assert-eq-bool:
+  $function:
+    actual: $bool
+  args:
+    expected: $bool
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: vibra_test
+          name: assert-eq-bool
+        args:
+          - $args.actual
+          - $args.expected
+
+assert-eq-int:
+  $function:
+    actual: $int64
+  args:
+    expected: $int64
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: vibra_test
+          name: assert-eq-int
+        args:
+          - $args.actual
+          - $args.expected
+
+assert-eq-float:
+  $function:
+    actual: $float64
+  args:
+    expected: $float64
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: vibra_test
+          name: assert-eq-float
+        args:
+          - $args.actual
+          - $args.expected
+
+assert-eq-str:
+  $function:
+    actual: $str
+  args:
+    expected: $str
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: vibra_test
+          name: assert-eq-str
+        args:
+          - $args.actual
+          - $args.expected

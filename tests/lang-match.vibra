@@ -1,8 +1,8 @@
 test:
   $import: ../stdlib/test.vibra
 literal-int-arm:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n: 3
     - $match: $n
@@ -18,8 +18,8 @@ literal-int-arm:
         do:
         - $test.fail: fell through to wildcard
 literal-string-arm:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         s: b
     - $match: $s
@@ -35,8 +35,8 @@ literal-string-arm:
         do:
         - $test.fail: fell through
 bool-arm:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         flag: false
     - $match: $flag
@@ -52,8 +52,8 @@ bool-arm:
         do:
         - $test.fail: fell through bool match
 wildcard-catch-all:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n: 99
     - $match: $n
@@ -66,8 +66,8 @@ wildcard-catch-all:
         do:
         - $test.assert: true
 bind-captures-value:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n: 8
     - $match: $n

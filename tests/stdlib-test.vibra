@@ -1,0 +1,18 @@
+test:
+  $import: ../stdlib/test.vibra
+
+typed-equality-helpers:
+  $test: core
+  do:
+    - $test.assert-eq-bool:
+        actual: true
+        expected: true
+    - $test.assert-eq-int:
+        actual: 42
+        expected: 42
+    - $test.assert-eq-float:
+        actual: 1.5
+        expected: 1.5
+    - $test.assert-eq-str:
+        actual: vibra
+        expected: vibra

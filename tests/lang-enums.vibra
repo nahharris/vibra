@@ -9,8 +9,8 @@ opt:
     none: $void
     some: $str
 construct-and-match-payload:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         s:
           $signal.go: 3
@@ -34,8 +34,8 @@ construct-and-match-payload:
         do:
         - $test.fail: expected go
 void-variant-constructor:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         s: $signal.stop
     - $match: $s
@@ -50,8 +50,8 @@ void-variant-constructor:
         do:
         - $test.fail: expected stop
 option-like-some:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         v:
           $opt.some: hi
@@ -75,8 +75,8 @@ option-like-some:
         do:
         - $test.fail: expected some
 option-like-none:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         v: $opt.none
     - $match: $v

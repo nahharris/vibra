@@ -159,7 +159,13 @@ fn resolve_manifest_path(path: &Path) -> Result<PathBuf> {
     if !candidate.exists() {
         bail!("project manifest `{}` does not exist", candidate.display());
     }
-    Ok(candidate)
+    if candidate.is_absolute() {
+        Ok(candidate)
+    } else {
+        std::env::current_dir()
+            .with_context(|| "resolve current directory")
+            .map(|current_dir| current_dir.join(candidate))
+    }
 }
 
 fn validate_manifest_shape(project: &LoadedProject) -> Result<()> {

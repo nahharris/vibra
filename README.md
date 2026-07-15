@@ -205,9 +205,9 @@ test:
   $import: "@std/test.vibra"
 
 truth:
-  $test:
-    do:
-      - $test.assert: true
+  $test: core
+  do:
+    - $test.assert: true
 ```
 
 ```sh

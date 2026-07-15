@@ -38,6 +38,18 @@ pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
     })
 }
 
+/// Load only the entry module (including its module parts) for `$test`
+/// discovery. This deliberately does not resolve imports, so a test that
+/// expects a load failure can still be selected and delegated to its worker.
+/// Entry YAML remains fully parsed and validated by the normal module loader.
+pub fn load_entry_module_for_test_discovery(entry: &Path) -> Result<(PathBuf, Value)> {
+    let entry = fs::canonicalize(entry)
+        .with_context(|| format!("cannot open entry module {}", entry.display()))?;
+    let entry = canonical_module_path(&entry)?;
+    let root = load_module_parts(&entry)?;
+    Ok((entry, root))
+}
+
 pub fn load_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram> {
     let base_dir = fs::canonicalize(base_dir)
         .with_context(|| format!("resolve inline base directory {}", base_dir.display()))?;
@@ -373,8 +385,7 @@ fn load_module_parts(module_path: &Path) -> Result<Value> {
     for part in module_part_paths(module_path)? {
         let text = fs::read_to_string(&part).with_context(|| format!("read {}", part.display()))?;
         crate::yaml_subset::validate_yaml_subset_or_err(&text, &part)?;
-        let v: Value = serde_yaml::from_str(&text)
-            .with_context(|| format!("YAML parse {}", part.display()))?;
+        let v = parse_module_yaml(&text, &part)?;
         let map = v
             .as_mapping()
             .with_context(|| format!("{}: root must be a mapping", part.display()))?;
@@ -389,6 +400,23 @@ fn load_module_parts(module_path: &Path) -> Result<Value> {
         }
     }
     Ok(Value::Mapping(merged))
+}
+
+fn parse_module_yaml(text: &str, path: &Path) -> Result<Value> {
+    serde_yaml::from_str(text).map_err(|error| {
+        let message = error.to_string();
+        if text.contains("expect-error:") {
+            for field in ["phase", "code", "message-contains"] {
+                if message.contains(&format!("duplicate entry with key \"{field}\"")) {
+                    return anyhow::anyhow!(
+                        "E-TEST-001: duplicate `expect-error.{field}` key in {}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        anyhow::anyhow!("YAML parse {}: {error}", path.display())
+    })
 }
 
 fn module_part_paths(module_path: &Path) -> Result<Vec<PathBuf>> {

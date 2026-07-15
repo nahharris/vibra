@@ -1,0 +1,32 @@
+test:
+  $import: ../stdlib/test.vibra
+env:
+  $import: ../stdlib/env.vibra
+result:
+  $import: ../stdlib/result.vibra
+security:
+  $import: ../stdlib/security.vibra
+
+get-reads-an-explicitly-granted-variable:
+  $test: env
+  tags: [stdlib, capability]
+  grants:
+    env-read: $security.grant.mandatory
+  do:
+    - $let:
+        value:
+          $env.get: PATH
+          =grants:
+            - $grants.env-read
+    - $match: $value
+      when:
+      - case:
+          $result.result.ok:
+            $wildcard: null
+        do:
+        - $test.assert: true
+      - case:
+          $result.result.err:
+            $wildcard: null
+        do:
+        - $test.fail: granted environment variable was not readable

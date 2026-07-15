@@ -1,0 +1,15 @@
+test:
+  $import: ../stdlib/test.vibra
+
+identity-cast-is-a-compile-error:
+  $test: core
+  tags: [language, diagnostics]
+  expect-error:
+    phase: compile
+    code: E-CAST-001
+    message-contains: no valid cast path
+  do:
+    - $let:
+        value:
+          $cast: 7
+          into: $int64
