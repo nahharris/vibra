@@ -1,0 +1,55 @@
+name: Owner approval
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  owner-approval:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require repository owner approval
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          OWNER: ${{ github.repository_owner }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${AUTHOR,,}" == "${OWNER,,}" ]]; then
+            echo "Repository owner authored PR #${PR_NUMBER}; separate owner approval is not required."
+            exit 0
+          fi
+
+          latest_state="$({
+            gh api --paginate --slurp \
+              "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100"
+          } | jq -r \
+            --arg owner "${OWNER}" \
+            --arg head "${HEAD_SHA}" '
+              add
+              | map(select(
+                  (.user.login | ascii_downcase) == ($owner | ascii_downcase)
+                  and .commit_id == $head
+                  and (.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")
+                ))
+              | sort_by(.submitted_at)
+              | (last.state // "NONE")
+            ')
+
+          if [[ "${latest_state}" != "APPROVED" ]]; then
+            echo "PR #${PR_NUMBER} requires ${OWNER}'s approval for head ${HEAD_SHA}; latest effective state is ${latest_state}."
+            exit 1
+          fi
+
+          echo "${OWNER} approved the current head ${HEAD_SHA}."
