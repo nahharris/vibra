@@ -65,9 +65,9 @@ test:
   $import: "@std/test.vibra"
 
 opens-file:
-  $test:
-    do:
-      - $test.assert: true
+  $test: core
+  do:
+    - $test.assert: true
 ```
 
 Use `--filter`, `--jobs`, `--timeout-ms`, `--fail-fast`, and

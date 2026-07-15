@@ -5,8 +5,8 @@ meters:
 label:
   $newtype: $str
 cast-into-newtype:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         d:
           $cast: 10
@@ -33,8 +33,8 @@ cast-into-newtype:
         do:
         - $test.fail: expected meters newtype
 cast-string-newtype:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         l:
           $cast: north

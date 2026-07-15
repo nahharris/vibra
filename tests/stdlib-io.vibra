@@ -5,8 +5,8 @@ io:
 result:
   $import: ../stdlib/result.vibra
 print-statement-runs:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         r:
           $io.print: stdout from vibra test
@@ -22,8 +22,8 @@ print-statement-runs:
         do:
         - $test.fail: print returned err
 println-returns-ok:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         r:
           $io.println: line from vibra test
@@ -39,8 +39,8 @@ println-returns-ok:
         do:
         - $test.fail: println returned err
 eprintln-statement-runs:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         r:
           $io.eprintln: stderr from vibra test

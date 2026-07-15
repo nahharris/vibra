@@ -3,8 +3,8 @@ test:
 result:
   $import: ../stdlib/result.vibra
 ok-carries-payload:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         r:
           $result.result.ok: 99
@@ -29,8 +29,8 @@ ok-carries-payload:
         do:
         - $test.fail: expected ok
 err-carries-payload:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         r:
           $result.result.err: boom

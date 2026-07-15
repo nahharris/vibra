@@ -1,0 +1,41 @@
+test:
+  $import: ../stdlib/test.vibra
+net:
+  $import: ../stdlib/net.vibra
+result:
+  $import: ../stdlib/result.vibra
+security:
+  $import: ../stdlib/security.vibra
+
+connect-reports-the-current-unsupported-runtime:
+  $test: net
+  tags: [stdlib, capability]
+  grants:
+    net-connect: $security.grant.mandatory
+  do:
+    - $let:
+        outcome:
+          $net.connect: 127.0.0.1:9
+          =grants:
+            - $grants.net-connect
+    - $match: $outcome
+      when:
+      - case:
+          $result.result.err:
+            $bind: error
+        do:
+        - $match: $error
+          when:
+          - case:
+              $net.net-error.unsupported:
+                $wildcard: null
+            do:
+            - $test.assert: true
+          - case:
+              $wildcard: null
+            do:
+            - $test.fail: expected unsupported network runtime
+      - case:
+          $result.result.ok: null
+        do:
+        - $test.fail: network runtime unexpectedly connected

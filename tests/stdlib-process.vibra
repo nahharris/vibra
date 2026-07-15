@@ -1,0 +1,41 @@
+test:
+  $import: ../stdlib/test.vibra
+process:
+  $import: ../stdlib/process.vibra
+result:
+  $import: ../stdlib/result.vibra
+security:
+  $import: ../stdlib/security.vibra
+
+run-reports-the-current-unsupported-runtime:
+  $test: process
+  tags: [stdlib, capability]
+  grants:
+    process-run: $security.grant.mandatory
+  do:
+    - $let:
+        outcome:
+          $process.run: echo
+          =grants:
+            - $grants.process-run
+    - $match: $outcome
+      when:
+      - case:
+          $result.result.err:
+            $bind: error
+        do:
+        - $match: $error
+          when:
+          - case:
+              $process.process-error.unsupported:
+                $wildcard: null
+            do:
+            - $test.assert: true
+          - case:
+              $wildcard: null
+            do:
+            - $test.fail: expected unsupported process runtime
+      - case:
+          $result.result.ok: null
+        do:
+        - $test.fail: process runtime unexpectedly ran a command

@@ -204,6 +204,21 @@ enum Command {
         /// Run only tests whose name or path contains this substring.
         #[arg(long)]
         filter: Option<String>,
+        /// Select tests from these profiles (repeatable; defaults to `core`).
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+        /// Require every listed tag (repeatable).
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        /// Treat selected skipped tests as a failing command.
+        #[arg(long = "deny-skips")]
+        deny_skips: bool,
+        /// Fail tests that produce compiler warnings.
+        #[arg(long = "deny-warnings")]
+        deny_warnings: bool,
+        /// Allow an isolated `workspace: temp` test to access its temporary cwd.
+        #[arg(long = "allow-test-workspace", value_enum)]
+        allow_test_workspace: Option<TestWorkspaceAccessArg>,
         /// Number of test worker processes.
         #[arg(long)]
         jobs: Option<usize>,
@@ -266,6 +281,9 @@ enum Command {
     RunTest {
         path: PathBuf,
         name: String,
+        /// Private parent/worker protocol result path.
+        #[arg(long = "result-file")]
+        result_file: PathBuf,
         #[arg(long = "preopen")]
         preopen: Vec<PathBuf>,
         #[arg(long = "allow-read")]
@@ -311,6 +329,13 @@ enum ReportArg {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
+enum TestWorkspaceAccessArg {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
 enum ToolOutputArg {
     Yaml,
     Json,
@@ -349,6 +374,16 @@ impl From<ReportArg> for test_runner::ReportFormat {
         match value {
             ReportArg::Human => test_runner::ReportFormat::Human,
             ReportArg::Yaml => test_runner::ReportFormat::Yaml,
+        }
+    }
+}
+
+impl From<TestWorkspaceAccessArg> for test_runner::TestWorkspaceAccess {
+    fn from(value: TestWorkspaceAccessArg) -> Self {
+        match value {
+            TestWorkspaceAccessArg::Read => test_runner::TestWorkspaceAccess::Read,
+            TestWorkspaceAccessArg::Write => test_runner::TestWorkspaceAccess::Write,
+            TestWorkspaceAccessArg::ReadWrite => test_runner::TestWorkspaceAccess::ReadWrite,
         }
     }
 }
@@ -570,6 +605,11 @@ fn main() -> Result<()> {
         Command::Test {
             path,
             filter,
+            profiles,
+            tags,
+            deny_skips,
+            deny_warnings,
+            allow_test_workspace,
             jobs,
             timeout_ms,
             fail_fast,
@@ -609,6 +649,11 @@ fn main() -> Result<()> {
             let ok = test_runner::run_tests(test_runner::TestOptions {
                 path: path.unwrap_or_else(|| PathBuf::from(".")),
                 filter,
+                profiles,
+                tags,
+                deny_skips,
+                deny_warnings,
+                allow_test_workspace: allow_test_workspace.map(Into::into),
                 jobs: jobs
                     .or_else(|| std::thread::available_parallelism().ok().map(usize::from))
                     .unwrap_or(1),
@@ -625,6 +670,7 @@ fn main() -> Result<()> {
         Command::RunTest {
             path,
             name,
+            result_file,
             preopen,
             allow_read,
             allow_write,
@@ -656,7 +702,9 @@ fn main() -> Result<()> {
                 allow_all,
                 max_open_files,
             );
-            test_runner::run_single_test(&path, &name, &config)?;
+            let outcome = test_runner::run_single_test(&path, &name, &config);
+            let yaml = serde_yaml::to_string(&outcome)?;
+            std::fs::write(&result_file, yaml)?;
         }
     }
     Ok(())

@@ -3,8 +3,8 @@ test:
 code:
   $import: ../stdlib/code.vibra
 path-lookup-returns-structural-node:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         parsed:
           $code.parse: |
@@ -50,8 +50,8 @@ path-lookup-returns-structural-node:
         do:
         - $test.fail: parse failed
 replace-form-preserves-document-comments:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         parsed:
           $code.parse: |
@@ -117,8 +117,8 @@ replace-form-preserves-document-comments:
         do:
         - $test.fail: parse failed
 mapping-upsert-is-structural:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         parsed:
           $code.parse: |
@@ -183,8 +183,8 @@ mapping-upsert-is-structural:
         do:
         - $test.fail: parse failed
 sequence-splice-is-structural:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         parsed:
           $code.parse: |
@@ -253,8 +253,8 @@ sequence-splice-is-structural:
         do:
         - $test.fail: parse failed
 find-returns-structural-captures:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         parsed:
           $code.parse: |

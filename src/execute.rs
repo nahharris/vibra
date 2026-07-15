@@ -1764,6 +1764,15 @@ fn exec_call(
                         "{}",
                         eval_string(&call.args[0], env, program, files, config)?
                     ),
+                    "assert-eq-bool" | "assert-eq-int" | "assert-eq-float" | "assert-eq-str" => {
+                        let actual = eval_expr(&call.args[0], env, program, files, config)?;
+                        let expected = eval_expr(&call.args[1], env, program, files, config)?;
+                        if actual == expected {
+                            Ok(RuntimeValue::Void)
+                        } else {
+                            bail!("assertion failed: expected {expected:?}, actual {actual:?}")
+                        }
+                    }
                     other => bail!("unsupported vibra_test import `{other}`"),
                 };
             }

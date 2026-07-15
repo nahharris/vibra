@@ -16,25 +16,25 @@ echo-int:
   do:
   - $return: $args.subject
 many-1:
-  $test:
-    do:
+  $test: core
+  do:
     - $test.assert: true
 many-2:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         flag: true
     - $test.assert: $flag
 many-3:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         v:
           $truthy: null
     - $test.assert: $v
 many-4:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n:
           $echo-int:
@@ -49,8 +49,8 @@ many-4:
         do:
         - $test.fail: expected 4
 many-5:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n:
           $echo-int:
@@ -65,8 +65,8 @@ many-5:
         do:
         - $test.fail: expected 5
 many-6:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         s: shared-context
     - $match: $s
@@ -79,8 +79,8 @@ many-6:
         do:
         - $test.fail: expected shared-context
 many-7:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         x: 2.5
     - $match: $x
@@ -93,19 +93,19 @@ many-7:
         do:
         - $test.fail: expected 2.5
 many-8:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         v:
           $truthy: null
     - $test.assert: $v
 many-9:
-  $test:
-    do:
+  $test: core
+  do:
     - $test.assert: true
 many-10:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n:
           $echo-int:
@@ -120,14 +120,14 @@ many-10:
         do:
         - $test.fail: expected 10
 many-11:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         flag: true
     - $test.assert: $flag
 many-12:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n:
           $echo-int:

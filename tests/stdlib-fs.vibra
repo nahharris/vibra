@@ -1,0 +1,24 @@
+test:
+  $import: ../stdlib/test.vibra
+fs:
+  $import: ../stdlib/fs.vibra
+path-new-wraps-a-string:
+  $test: core
+  tags: [stdlib, filesystem]
+  do:
+    - $let:
+        path:
+          $fs.path.new: contract.txt
+    - $let:
+        raw:
+          $cast: $path
+          into: $str
+    - $match: $raw
+      when:
+      - case: contract.txt
+        do:
+        - $test.assert: true
+      - case:
+          $wildcard: null
+        do:
+        - $test.fail: path constructor changed the source string

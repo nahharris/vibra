@@ -29,22 +29,22 @@ check:
         $ready: null
   - $return: $r
 zero-arg-call:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         v:
           $ready: null
     - $test.assert: $v
 single-arg-call:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         v:
           $echo-bool: true
     - $test.assert: $v
 multi-arg-call:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         v:
           $second:
@@ -52,8 +52,8 @@ multi-arg-call:
             b: true
     - $test.assert: $v
 nested-call:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         v:
           $check: null

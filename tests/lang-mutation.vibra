@@ -10,8 +10,8 @@ increment:
       args.value: 4
   - $return: $args.value
 mutable-set-and-copy:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         count:
           $mut: 0
@@ -38,8 +38,8 @@ mutable-set-and-copy:
         do:
         - $test.fail: set did not update mutable binding
 mutable-ref-writes-through:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         count:
           $mut: 0
@@ -59,8 +59,8 @@ mutable-ref-writes-through:
         do:
         - $test.fail: mutable ref did not update pointee
 mutable-ref-temporary:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         writer:
           $ref:
@@ -77,8 +77,8 @@ mutable-ref-temporary:
         do:
         - $test.fail: mutable temporary ref did not retain storage
 mutable-argument:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         result:
           $increment:

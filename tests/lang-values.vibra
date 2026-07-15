@@ -1,18 +1,18 @@
 test:
   $import: ../stdlib/test.vibra
 bool-literal:
-  $test:
-    do:
+  $test: core
+  do:
     - $test.assert: true
 bound-bool:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         flag: true
     - $test.assert: $flag
 int-literal:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n: 7
     - $match: $n
@@ -25,8 +25,8 @@ int-literal:
         do:
         - $test.fail: expected 7
 float-literal:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         x: 1.5
     - $match: $x
@@ -39,8 +39,8 @@ float-literal:
         do:
         - $test.fail: expected 1.5
 string-literal:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         s: hello
     - $match: $s
@@ -53,8 +53,8 @@ string-literal:
         do:
         - $test.fail: expected hello
 match-arm-binding-does-not-leak:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         outer: true
     - $let:

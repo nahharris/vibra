@@ -20,16 +20,16 @@ first-of:
     t: []
     u: []
 identity-bool:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         x:
           $identity: true
           t: $bool
     - $test.assert: $x
 identity-int:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         n:
           $identity: 5
@@ -44,8 +44,8 @@ identity-int:
         do:
         - $test.fail: expected 5
 two-type-params:
-  $test:
-    do:
+  $test: core
+  do:
     - $let:
         r:
           $first-of: true

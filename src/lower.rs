@@ -434,6 +434,40 @@ pub struct LoweredTestCase {
     pub program: LoweredProgram,
 }
 
+/// Metadata used by the test runner to select and schedule a `$test` without
+/// lowering its body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestSpec {
+    pub name: String,
+    pub profile: String,
+    pub tags: Vec<String>,
+    pub timeout_ms: Option<u64>,
+    pub skip: Option<String>,
+    pub expect_error: Option<ExpectedTestError>,
+    pub workspace: Option<TestWorkspace>,
+}
+
+/// An isolated workspace requested by a `$test` declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestWorkspace {
+    Temp,
+}
+
+/// The failure a `$test` is intended to exercise.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedTestError {
+    pub phase: TestErrorPhase,
+    pub code: Option<String>,
+    pub message_contains: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestErrorPhase {
+    Load,
+    Compile,
+    Runtime,
+}
+
 #[derive(Debug, Clone)]
 pub struct LoweredExec {
     pub expr: Expr,
@@ -466,6 +500,11 @@ struct DefEnvelope<'a> {
     function_grants: Option<&'a Value>,
     function_return: Option<&'a Value>,
     function_do: Option<&'a Value>,
+    test_tags: Option<&'a Value>,
+    test_timeout_ms: Option<&'a Value>,
+    test_skip: Option<&'a Value>,
+    test_expect_error: Option<&'a Value>,
+    test_workspace: Option<&'a Value>,
 }
 
 /// Synthetic field name for the `$function` payload in module-level functions.
@@ -492,6 +531,11 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut function_grants: Option<&'a Value> = None;
     let mut function_return: Option<&'a Value> = None;
     let mut function_do: Option<&'a Value> = None;
+    let mut test_tags: Option<&'a Value> = None;
+    let mut test_timeout_ms: Option<&'a Value> = None;
+    let mut test_skip: Option<&'a Value> = None;
+    let mut test_expect_error: Option<&'a Value> = None;
+    let mut test_workspace: Option<&'a Value> = None;
 
     for (k, val) in m {
         let ks = k.as_str().context("definition key must be a string")?;
@@ -567,6 +611,31 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 bail!("duplicate `do` key on definition");
             }
             function_do = Some(val);
+        } else if ks == "tags" {
+            if test_tags.is_some() {
+                bail!("E-TEST-001: duplicate `tags` key on definition");
+            }
+            test_tags = Some(val);
+        } else if ks == "timeout-ms" {
+            if test_timeout_ms.is_some() {
+                bail!("E-TEST-001: duplicate `timeout-ms` key on definition");
+            }
+            test_timeout_ms = Some(val);
+        } else if ks == "skip" {
+            if test_skip.is_some() {
+                bail!("E-TEST-001: duplicate `skip` key on definition");
+            }
+            test_skip = Some(val);
+        } else if ks == "expect-error" {
+            if test_expect_error.is_some() {
+                bail!("E-TEST-001: duplicate `expect-error` key on definition");
+            }
+            test_expect_error = Some(val);
+        } else if ks == "workspace" {
+            if test_workspace.is_some() {
+                bail!("E-TEST-001: duplicate `workspace` key on definition");
+            }
+            test_workspace = Some(val);
         } else if ks == "where" || ks == "doc" {
             bail!(
                 "E-ANNO-002: annotation `{ks}` must use the `=` prefix; rename it to `={ks}` (annotations are now `=`-prefixed in v1)"
@@ -598,6 +667,14 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 form_key
             );
         }
+        if test_tags.is_some()
+            || test_timeout_ms.is_some()
+            || test_skip.is_some()
+            || test_expect_error.is_some()
+            || test_workspace.is_some()
+        {
+            bail!("E-TEST-001: test metadata is only valid on `$test`");
+        }
     } else if form_key == "$function" {
         let nested_function = form_value.as_mapping().is_some_and(|inner| {
             map_get_str(inner, "args").is_some()
@@ -612,21 +689,41 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             let _ = function_return.context("missing `return` on `$function`")?;
             let _ = function_do.context("missing `do` on `$function`")?;
         }
-    } else {
-        if function_args.is_some()
-            || function_grants.is_some()
-            || function_return.is_some()
-            || function_do.is_some()
+        if test_tags.is_some()
+            || test_timeout_ms.is_some()
+            || test_skip.is_some()
+            || test_expect_error.is_some()
+            || test_workspace.is_some()
         {
-            bail!("`$test` must use nested syntax `$test: {{ do: [...] }}`");
+            bail!("E-TEST-001: test metadata is only valid on `$test`");
         }
-        let tm = form_value
-            .as_mapping()
-            .context("`$test` value must be a mapping with `do`")?;
-        if tm.len() != 1 || map_get_str(tm, "do").is_none() {
-            bail!("`$test` value must contain only `do`");
+    } else {
+        if form_value.as_mapping().is_some() {
+            bail!(
+                "E-TEST-001: `$test` must be a profile scalar with sibling `do`; nested `$test: {{ do: [...] }}` syntax is not supported"
+            );
         }
-        let _ = map_get_str(tm, "do").context("missing `do` on `$test`")?;
+        let profile = form_value
+            .as_str()
+            .context("E-TEST-001: `$test` must be a profile scalar with sibling `do`")?;
+        if !is_kebab_case(profile) {
+            bail!(
+                "E-TEST-001: `$test` profile must be a non-empty kebab-case scalar, got `{profile}`"
+            );
+        }
+        if function_args.is_some() || function_return.is_some() {
+            bail!("E-TEST-001: `args` and `return` are only valid on `$function`, not `$test`");
+        }
+        let _ = parse_grant_decls(function_grants)?;
+        let _ = function_do.context("E-TEST-001: missing sibling `do` on `$test`")?;
+        let _ = parse_test_metadata(
+            profile,
+            test_tags,
+            test_timeout_ms,
+            test_skip,
+            test_expect_error,
+            test_workspace,
+        )?;
     }
 
     if defs.is_some() && (form_key == "$function" || form_key == "$test") {
@@ -658,6 +755,158 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         function_grants,
         function_return,
         function_do,
+        test_tags,
+        test_timeout_ms,
+        test_skip,
+        test_expect_error,
+        test_workspace,
+    })
+}
+
+fn parse_test_metadata(
+    profile: &str,
+    tags_value: Option<&Value>,
+    timeout_value: Option<&Value>,
+    skip_value: Option<&Value>,
+    expect_error_value: Option<&Value>,
+    workspace_value: Option<&Value>,
+) -> Result<(
+    Vec<String>,
+    Option<u64>,
+    Option<String>,
+    Option<ExpectedTestError>,
+    Option<TestWorkspace>,
+)> {
+    if !is_kebab_case(profile) {
+        bail!("E-TEST-001: `$test` profile must be a non-empty kebab-case scalar, got `{profile}`");
+    }
+    let mut tags = Vec::new();
+    if let Some(value) = tags_value {
+        let values = value
+            .as_sequence()
+            .context("E-TEST-001: `tags` must be a sequence")?;
+        for value in values {
+            let tag = value
+                .as_str()
+                .context("E-TEST-001: every `tags` item must be a string")?;
+            if !is_kebab_case(tag) {
+                bail!("E-TEST-001: test tag must be non-empty kebab-case, got `{tag}`");
+            }
+            if tags.iter().any(|existing| existing == tag) {
+                bail!("E-TEST-001: duplicate test tag `{tag}`");
+            }
+            tags.push(tag.to_string());
+        }
+    }
+    let timeout_ms = match timeout_value {
+        Some(value) => {
+            let value = value
+                .as_u64()
+                .context("E-TEST-001: `timeout-ms` must be a positive integer")?;
+            if value == 0 {
+                bail!("E-TEST-001: `timeout-ms` must be a positive integer");
+            }
+            Some(value)
+        }
+        None => None,
+    };
+    let skip = match skip_value {
+        Some(value) => {
+            let value = value
+                .as_str()
+                .context("E-TEST-001: `skip` must be a non-empty string")?;
+            let value = value.trim();
+            if value.is_empty() {
+                bail!("E-TEST-001: `skip` must be a non-empty string");
+            }
+            Some(value.to_string())
+        }
+        None => None,
+    };
+    let expect_error = match expect_error_value {
+        Some(value) => Some(parse_expected_test_error(value)?),
+        None => None,
+    };
+    let workspace = match workspace_value {
+        Some(value) => match value.as_str() {
+            Some("temp") => Some(TestWorkspace::Temp),
+            _ => bail!("E-TEST-001: `workspace` must be `temp`"),
+        },
+        None => None,
+    };
+    Ok((tags, timeout_ms, skip, expect_error, workspace))
+}
+
+fn parse_expected_test_error(value: &Value) -> Result<ExpectedTestError> {
+    let map = value
+        .as_mapping()
+        .context("E-TEST-001: `expect-error` must be a mapping")?;
+    let mut phase = None;
+    let mut code = None;
+    let mut message_contains = None;
+    for (key, value) in map {
+        let key = key
+            .as_str()
+            .context("E-TEST-001: `expect-error` keys must be strings")?;
+        match key {
+            "phase" => {
+                if phase.is_some() {
+                    bail!("E-TEST-001: duplicate `expect-error.phase` key");
+                }
+                let value = value
+                    .as_str()
+                    .context("E-TEST-001: `expect-error.phase` must be `load`, `compile`, or `runtime`")?;
+                phase = Some(match value {
+                    "load" => TestErrorPhase::Load,
+                    "compile" => TestErrorPhase::Compile,
+                    "runtime" => TestErrorPhase::Runtime,
+                    _ => bail!("E-TEST-001: `expect-error.phase` must be `load`, `compile`, or `runtime`"),
+                });
+            }
+            "code" => {
+                if code.is_some() {
+                    bail!("E-TEST-001: duplicate `expect-error.code` key");
+                }
+                let value = value
+                    .as_str()
+                    .context("E-TEST-001: `expect-error.code` must be a non-empty string")?;
+                if value.trim().is_empty() {
+                    bail!("E-TEST-001: `expect-error.code` must be a non-empty string");
+                }
+                code = Some(value.trim().to_string());
+            }
+            "message-contains" => {
+                if message_contains.is_some() {
+                    bail!("E-TEST-001: duplicate `expect-error.message-contains` key");
+                }
+                let value = value
+                    .as_str()
+                    .context("E-TEST-001: `expect-error.message-contains` must be a non-empty string")?;
+                if value.trim().is_empty() {
+                    bail!("E-TEST-001: `expect-error.message-contains` must be a non-empty string");
+                }
+                message_contains = Some(value.trim().to_string());
+            }
+            _ => bail!("E-TEST-001: unknown `expect-error` key `{key}`; expected `phase`, `code`, or `message-contains`"),
+        }
+    }
+    let phase = phase.context("E-TEST-001: `expect-error.phase` is required")?;
+    match phase {
+        TestErrorPhase::Load | TestErrorPhase::Compile if code.is_none() => {
+            bail!("E-TEST-001: `expect-error.code` is required for load and compile errors")
+        }
+        TestErrorPhase::Runtime if message_contains.is_none() => {
+            bail!("E-TEST-001: `expect-error.message-contains` is required for runtime errors")
+        }
+        TestErrorPhase::Runtime if code.is_some() => {
+            bail!("E-TEST-001: `expect-error.code` is not supported for runtime errors; use `message-contains`")
+        }
+        _ => {}
+    }
+    Ok(ExpectedTestError {
+        phase,
+        code,
+        message_contains,
     })
 }
 
@@ -2316,20 +2565,21 @@ fn lower_single_test_body(
     ctx: &mut TestContext,
     name: &str,
     env: &DefEnvelope,
-) -> Result<Vec<Statement>> {
+) -> Result<(Vec<Statement>, Vec<GrantDecl>)> {
     maybe_warn_kebab(name, "test name", &mut ctx.warnings);
     if !env.type_params.is_empty() {
         bail!("`$test` `{name}` must not declare `=where`");
     }
-    let tm = env
-        .form_value
-        .as_mapping()
-        .context("`$test` value must be a mapping with `do`")?;
-    let steps = map_get_str(tm, "do")
-        .context("missing `do` on `$test`")?
+    let steps = env
+        .function_do
+        .context("E-TEST-001: missing sibling `do` on `$test`")?
         .as_sequence()
-        .context("`$test.do` must be sequence")?;
+        .context("E-TEST-001: `$test` sibling `do` must be sequence")?;
     let mut locals = HashMap::new();
+    let grant_decls = parse_grant_decls(env.function_grants)?;
+    for grant in &grant_decls {
+        locals.insert(format!("grants.{}", grant.name), TypeRef::GrantToken);
+    }
     let mut statements = Vec::new();
     for step in steps {
         statements.push(lower_statement(
@@ -2352,7 +2602,7 @@ fn lower_single_test_body(
         &ctx.impls,
         &statements,
     )?;
-    Ok(statements)
+    Ok((statements, grant_decls))
 }
 
 /// Lower every `$test` in `program` into its own `LoweredProgram`. Each case
@@ -2381,13 +2631,13 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
         if env.form_key != "$test" {
             continue;
         }
-        let statements = lower_single_test_body(&mut ctx, name, &env)?;
+        let (statements, main_grant_decls) = lower_single_test_body(&mut ctx, name, &env)?;
         tests.push(LoweredTestCase {
             name: name.to_string(),
             program: LoweredProgram {
                 statements,
                 main_arg_bindings: Vec::new(),
-                main_grant_decls: Vec::new(),
+                main_grant_decls,
                 constants: ctx.constants.clone(),
                 functions: ctx.sigs.clone(),
                 impls: ctx.impls.clone(),
@@ -2422,7 +2672,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         .as_mapping()
         .context("entry root must be mapping")?;
 
-    let mut statements: Option<Vec<Statement>> = None;
+    let mut lowered_test: Option<(Vec<Statement>, Vec<GrantDecl>)> = None;
     for (k, v) in entry_map {
         let candidate = k.as_str().context("module keys must be strings")?;
         if candidate.starts_with('-') {
@@ -2437,11 +2687,11 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         if candidate != name {
             continue;
         }
-        statements = Some(lower_single_test_body(&mut ctx, name, &env)?);
+        lowered_test = Some(lower_single_test_body(&mut ctx, name, &env)?);
         break;
     }
 
-    let statements = statements
+    let (statements, main_grant_decls) = lowered_test
         .with_context(|| format!("test `{name}` not found in {}", program.entry.display()))?;
 
     let TestContext {
@@ -2457,7 +2707,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         program: LoweredProgram {
             statements,
             main_arg_bindings: Vec::new(),
-            main_grant_decls: Vec::new(),
+            main_grant_decls,
             constants,
             functions: sigs,
             impls,
@@ -2471,6 +2721,16 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
 /// Lowering errors in individual tests therefore surface when that test is run
 /// in its child process rather than at discovery time.
 pub fn discover_test_names(program: &LoadedProgram) -> Result<Vec<String>> {
+    Ok(discover_test_specs(program)?
+        .into_iter()
+        .map(|spec| spec.name)
+        .collect())
+}
+
+/// Scan `program`'s entry module for `$test` declarations and return their
+/// selection metadata without building the lowering context or lowering test
+/// bodies.
+pub fn discover_test_specs(program: &LoadedProgram) -> Result<Vec<TestSpec>> {
     let entry_map = program
         .modules
         .get(&program.entry)
@@ -2478,8 +2738,18 @@ pub fn discover_test_names(program: &LoadedProgram) -> Result<Vec<String>> {
         .as_mapping()
         .context("entry root must be mapping")?;
 
+    discover_test_specs_in_entry(entry_map, &program.entry)
+}
+
+/// Discover `$test` metadata from an already-parsed entry module without
+/// requiring its imports to load. Used by the test runner so `phase: load`
+/// expectations can exercise import/load diagnostics in their child worker.
+pub fn discover_test_specs_in_entry(
+    entry_map: &serde_yaml::Mapping,
+    entry_path: &Path,
+) -> Result<Vec<TestSpec>> {
     let mut scratch_warnings = Vec::new();
-    let mut names = Vec::new();
+    let mut specs = Vec::new();
     for (k, v) in entry_map {
         let name = k.as_str().context("module keys must be strings")?;
         if name.starts_with('-') {
@@ -2491,15 +2761,32 @@ pub fn discover_test_names(program: &LoadedProgram) -> Result<Vec<String>> {
         if env.form_key != "$test" {
             continue;
         }
-        names.push(name.to_string());
+        let profile = env
+            .form_value
+            .as_str()
+            .expect("$test envelope validated profile scalar");
+        let (tags, timeout_ms, skip, expect_error, workspace) = parse_test_metadata(
+            profile,
+            env.test_tags,
+            env.test_timeout_ms,
+            env.test_skip,
+            env.test_expect_error,
+            env.test_workspace,
+        )?;
+        specs.push(TestSpec {
+            name: name.to_string(),
+            profile: profile.to_string(),
+            tags,
+            timeout_ms,
+            skip,
+            expect_error,
+            workspace,
+        });
     }
-    if names.is_empty() {
-        bail!(
-            "no `$test` declarations found in {}",
-            program.entry.display()
-        );
+    if specs.is_empty() {
+        bail!("no `$test` declarations found in {}", entry_path.display());
     }
-    Ok(names)
+    Ok(specs)
 }
 
 pub fn lower_exec_expr(
