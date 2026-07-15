@@ -8,7 +8,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 use vibra::lower::{RuntimeValue, TypeRef};
-use vibra::{code, execute, load, lower, project, runtime, test_runner, tooling};
+use vibra::{code, execute, load, lower, package, project, runtime, test_runner, tooling};
 
 #[derive(Parser)]
 #[command(name = "vibra", version, about = "Vibra language toolchain")]
@@ -31,6 +31,22 @@ enum Command {
     Sync {
         /// Project directory or project.vibra path.
         path: Option<PathBuf>,
+    },
+    /// Build a deterministic executable `.vapp` archive.
+    Build {
+        /// Project directory or project.vibra path.
+        path: Option<PathBuf>,
+        /// Bin target name (required when the project has multiple bins).
+        #[arg(long = "bin")]
+        bin: Option<String>,
+        /// Output `.vapp` path.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Inspect or verify a `.vapp` archive.
+    Package {
+        #[command(subcommand)]
+        command: PackageCommand,
     },
     /// Validate a Vibra project manifest, dependencies, targets, and imports.
     Check {
@@ -315,6 +331,14 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum PackageCommand {
+    /// Print canonical package metadata.
+    Inspect { path: PathBuf },
+    /// Verify package structure and content hashes.
+    Verify { path: PathBuf },
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum TemplateArg {
     Bin,
@@ -450,6 +474,18 @@ fn main() -> Result<()> {
             project::sync_project(&path)?;
             println!("synced {}", path.display());
         }
+        Command::Build { path, bin, output } => {
+            let path = path.unwrap_or_else(|| PathBuf::from("."));
+            package::build(&path, bin.as_deref(), &output)?;
+            println!("built {}", output.display());
+        }
+        Command::Package { command } => match command {
+            PackageCommand::Inspect { path } => print!("{}", package::inspect(&path)?),
+            PackageCommand::Verify { path } => {
+                package::verify(&path)?;
+                println!("verified {}", path.display());
+            }
+        },
         Command::Check { path } => {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
             project::check_project(&path)?;
@@ -504,11 +540,6 @@ fn main() -> Result<()> {
             allow_all,
             max_open_files,
         } => {
-            let program = load::load_program(&path)?;
-            let lowered = lower::lower_program(&program)?;
-            for warning in &lowered.warnings {
-                eprintln!("warning: {warning}");
-            }
             let config = run_config(
                 preopen,
                 allow_read,
@@ -525,7 +556,16 @@ fn main() -> Result<()> {
                 allow_all,
                 max_open_files,
             );
-            execute::run_lowered(&lowered, &config)?;
+            if path.extension().and_then(|value| value.to_str()) == Some("vapp") {
+                package::run(&path, &config)?;
+            } else {
+                let program = load::load_program(&path)?;
+                let lowered = lower::lower_program(&program)?;
+                for warning in &lowered.warnings {
+                    eprintln!("warning: {warning}");
+                }
+                execute::run_lowered(&lowered, &config)?;
+            }
         }
         Command::Expand { path } => {
             let loaded = load::load_program(&path)?;

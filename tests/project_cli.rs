@@ -90,6 +90,105 @@ fn project_init_lib_and_workspace_templates_check() {
 }
 
 #[test]
+fn project_builds_verifies_inspects_and_runs_deterministic_vapp() {
+    let dir = tempfile::tempdir().unwrap();
+    let init = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["init", "hello"])
+        .output()
+        .unwrap();
+    assert!(
+        init.status.success(),
+        "init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    let first = dir.path().join("first.vapp");
+    let second = dir.path().join("second.vapp");
+    for output in [&first, &second] {
+        let build = vibra_cmd()
+            .current_dir(dir.path())
+            .args(["build", "hello", "--output", &path_str(output)])
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "build failed: {}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+    }
+    assert_eq!(
+        std::fs::read(&first).unwrap(),
+        std::fs::read(&second).unwrap()
+    );
+
+    let verify = vibra_cmd()
+        .args(["package", "verify", &path_str(&first)])
+        .output()
+        .unwrap();
+    assert!(
+        verify.status.success(),
+        "verify failed: {}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    let inspect = vibra_cmd()
+        .args(["package", "inspect", &path_str(&first)])
+        .output()
+        .unwrap();
+    assert!(
+        inspect.status.success(),
+        "inspect failed: {}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let metadata = String::from_utf8(inspect.stdout).unwrap();
+    assert!(metadata.contains("format-version: 1"));
+    assert!(metadata.contains("runtime-abi: vibra-v1"));
+    assert!(metadata.contains("stdlib-rev: edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31"));
+
+    let run = vibra_cmd()
+        .args(["run", &path_str(&first)])
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8(run.stdout).unwrap(), "Hello, World!\n");
+}
+
+#[test]
+fn package_verify_rejects_tampered_vapp() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(vibra_cmd()
+        .current_dir(dir.path())
+        .args(["init", "hello"])
+        .status()
+        .unwrap()
+        .success());
+    let app = dir.path().join("hello.vapp");
+    assert!(vibra_cmd()
+        .current_dir(dir.path())
+        .args(["build", "hello", "--output", &path_str(&app)])
+        .status()
+        .unwrap()
+        .success());
+    let mut bytes = std::fs::read(&app).unwrap();
+    let needle = b"Hello, World!";
+    let offset = bytes
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .expect("stored source text");
+    bytes[offset] = b'J';
+    std::fs::write(&app, bytes).unwrap();
+    let verify = vibra_cmd()
+        .args(["package", "verify", &path_str(&app)])
+        .output()
+        .unwrap();
+    assert!(!verify.status.success());
+    assert!(String::from_utf8_lossy(&verify.stderr).contains("E-PKG-009"));
+}
+
+#[test]
 fn project_check_rejects_invalid_manifest_shapes() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("bad");
