@@ -9,6 +9,8 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 pub const MANIFEST_FILE: &str = "project.vibra";
+pub const STDLIB_GIT: &str = "https://github.com/nahharris/vibra-stdlib.git";
+pub const STDLIB_REV: &str = "edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31";
 
 #[derive(Debug, Clone, Copy)]
 pub enum InitTemplate {
@@ -71,7 +73,7 @@ pub fn init_project(path: &Path, template: InitTemplate) -> Result<()> {
     }
     fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
     fs::create_dir_all(path.join("dep")).with_context(|| "create dep directory")?;
-    copy_dir_recursive(&locate_stdlib_source()?, &path.join("dep/std"))
+    copy_dir_recursive(&locate_stdlib_package()?, &path.join("dep/std"))
         .context("copy stdlib into dep/std")?;
 
     let name = path
@@ -146,7 +148,7 @@ pub fn find_project_for_file(path: &Path) -> Result<Option<LoadedProject>> {
 }
 
 pub fn resolve_project_import(project: &LoadedProject, import: &str) -> Result<PathBuf> {
-    let namespaces = namespace_roots(project);
+    let namespaces = namespace_roots(project)?;
     resolve_at_import(import, &namespaces)
 }
 
@@ -251,7 +253,7 @@ fn validate_dependency_paths(project: &LoadedProject) -> Result<()> {
 }
 
 fn validate_target_imports(project: &LoadedProject) -> Result<()> {
-    let namespaces = namespace_roots(project);
+    let namespaces = namespace_roots(project)?;
     let mut seen = HashSet::new();
     for target in project
         .manifest
@@ -313,7 +315,7 @@ fn validate_module_imports(
     Ok(())
 }
 
-fn namespace_roots(project: &LoadedProject) -> HashMap<String, PathBuf> {
+fn namespace_roots(project: &LoadedProject) -> Result<HashMap<String, PathBuf>> {
     let mut roots = HashMap::new();
     for target in project
         .manifest
@@ -330,9 +332,29 @@ fn namespace_roots(project: &LoadedProject) -> HashMap<String, PathBuf> {
             .as_ref()
             .map(|p| resolve_project_path(&project.root, p))
             .unwrap_or_else(|| project.root.join("dep").join(name));
-        roots.insert(name.clone(), root);
+        roots.insert(name.clone(), dependency_library_root(&root, name)?);
     }
-    roots
+    Ok(roots)
+}
+
+fn dependency_library_root(root: &Path, dependency_name: &str) -> Result<PathBuf> {
+    let manifest_path = root.join(MANIFEST_FILE);
+    if !manifest_path.exists() {
+        return Ok(root.to_path_buf());
+    }
+    let dependency = load_project(&manifest_path)
+        .with_context(|| format!("load dependency `{dependency_name}` manifest"))?;
+    let libraries = &dependency.manifest.targets.libs;
+    let target = libraries
+        .iter()
+        .find(|target| target.name == dependency_name)
+        .or_else(|| (libraries.len() == 1).then(|| &libraries[0]))
+        .with_context(|| {
+            format!(
+                "dependency `{dependency_name}` must expose a matching or single library target"
+            )
+        })?;
+    Ok(root.join(&target.root))
 }
 
 fn resolve_at_import(import: &str, namespaces: &HashMap<String, PathBuf>) -> Result<PathBuf> {
@@ -384,11 +406,15 @@ fn sync_git_dependency(url: &str, rev: &str, dest: &Path) -> Result<()> {
 }
 
 pub fn locate_stdlib_source() -> Result<PathBuf> {
+    Ok(locate_stdlib_package()?.join("src"))
+}
+
+fn locate_stdlib_package() -> Result<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             for ancestor in parent.ancestors() {
                 let candidate = ancestor.join("stdlib");
-                if candidate.join("io.vibra").exists() {
+                if candidate.join("src/io.vibra").exists() {
                     return Ok(candidate);
                 }
             }
@@ -396,7 +422,7 @@ pub fn locate_stdlib_source() -> Result<PathBuf> {
     }
 
     let candidate = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
-    if candidate.join("io.vibra").exists() {
+    if candidate.join("src/io.vibra").exists() {
         return Ok(candidate);
     }
     bail!("cannot locate stdlib directory for project initialization");
@@ -468,7 +494,9 @@ fn manifest_text(name: &str, libs: &str, bins: &[(&str, &str, &str)]) -> String 
             ));
         }
     }
-    text.push_str("\ndependencies:\n  std:\n    path: dep/std\n");
+    text.push_str(&format!(
+        "\ndependencies:\n  std:\n    git: {STDLIB_GIT}\n    rev: {STDLIB_REV}\n"
+    ));
     text
 }
 

@@ -1,9 +1,9 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 random:
-  $import: ../stdlib/random.vibra
+  $import: ../stdlib/src/random.vibra
 security:
-  $import: ../stdlib/security.vibra
+  $import: ../stdlib/src/security.vibra
 
 bytes-uses-the-granted-random-source:
   $test: random

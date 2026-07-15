@@ -45,7 +45,7 @@ structural find and projection, save/load, replace/delete, mapping
 insert/upsert/rename, sequence insert/splice, copy/move, and workspace-wide
 symbol or import-alias rename.
 
-The same structural model is exposed by [stdlib/code.vibra](stdlib/code.vibra)
+The same structural model is exposed by [stdlib/src/code.vibra](stdlib/src/code.vibra)
 through forms, typed key/index paths, revision-bound nodes, structural patterns
 with captures, and every edit primitive. Recoverable operations return typed
 result enums rather than aborting execution.
@@ -150,7 +150,7 @@ vibra init hello --template lib
 vibra init hello --template workspace
 ```
 
-`vibra init` creates `project.vibra`, target source files under `src/`, and a local stdlib copy under `dep/std`. Imports remain relative by default; imports beginning with `@` resolve through project targets or dependencies:
+`vibra init` creates `project.vibra`, target source files under `src/`, and an offline stdlib seed under `dep/std`. The manifest records `std` as an exact-revision Git dependency on [nahharris/vibra-stdlib](https://github.com/nahharris/vibra-stdlib); `vibra sync` can reproduce that same tree. Imports remain relative by default; imports beginning with `@` resolve through project targets or dependencies and honor a dependency's declared library source root:
 
 ```yaml
 io:
@@ -168,6 +168,8 @@ vibra check hello
 
 See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
 
+The compiler repository pins that same stdlib revision as the `stdlib` Git submodule. Clone contributors' checkouts with `git clone --recurse-submodules`, or initialize an existing checkout with `git submodule update --init --recursive`.
+
 Functions use canonical labeled declarations: `$function: $void` for zero arguments, `$function: $self` for a method receiver, or a singleton labeled mapping for the primary argument. Additional arguments use sibling `args:`, and function bodies reference every argument through `$args.<name>`.
 
 **Policies:** authority is moving to unforgeable `$policy` values passed as normal function arguments. `main` receives the root policy value from the runtime, code explicitly narrows it with `$policy.narrow`, and privileged APIs consume the narrowed value through ordinary args. The current branch is migrating the stdlib from the previous grant side channel to this model.
@@ -180,13 +182,13 @@ Filesystem policy checks use canonical ancestry: a `dir` scope for `path/root` d
 
 **Known escape hatch:** arbitrary `$wasm` declarations are still accepted. The grant model currently applies to grant-aware stdlib APIs, not to untrusted modules that define their own `$wasm` shims. Future work should make `$wasm` trusted-stdlib-only or require an explicit unsafe/trust policy.
 
-**Current subset:** entry module defines `main` with `args: $void`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns and ordered `$match` sequence arms with explicit `case:` entries). Entry and imported modules may also define **user functions** (`do:` with `$let` / `$match` / `$return`) and **generic functions** (`$function` with the `=where` annotation declaring type parameters and bounds); generic calls pass explicit type arguments in the same mapping as value arguments (see [DRAFT.md](DRAFT.md)). `io` and `fs` functions declared in [stdlib/io.vibra](stdlib/io.vibra) and [stdlib/fs.vibra](stdlib/fs.vibra) are executable via the runtime execution backend.
+**Current subset:** entry module defines `main` with `args: $void`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns and ordered `$match` sequence arms with explicit `case:` entries). Entry and imported modules may also define **user functions** (`do:` with `$let` / `$match` / `$return`) and **generic functions** (`$function` with the `=where` annotation declaring type parameters and bounds); generic calls pass explicit type arguments in the same mapping as value arguments (see [DRAFT.md](DRAFT.md)). `io` and `fs` functions declared in [stdlib/src/io.vibra](stdlib/src/io.vibra) and [stdlib/src/fs.vibra](stdlib/src/fs.vibra) are executable via the runtime execution backend.
 
 ## Type System Snapshot
 
 - Primitive numerics: `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`
 - Explicit annotations are required on function signatures (`args` + `return`)
-- Algebraic unions are supported in lowering with direct syntax (`$union: [...]`, `$enum: {...}`, constructors, `$match`); optional values use the tagged `stdlib/option.vibra` enum because `$option` sugar and direct `$void` union members are rejected
+- Algebraic unions are supported in lowering with direct syntax (`$union: [...]`, `$enum: {...}`, constructors, `$match`); optional values use the tagged `stdlib/src/option.vibra` enum because `$option` sugar and direct `$void` union members are rejected
 - Value patterns use the single ordered-arm `$match: <expr>` plus sibling `when:` form; pattern variables are written as `{ $bind: name }`, wildcard as `{ $wildcard: null }`, and arm bindings remain local to the arm
 - Generic functions and types declare type parameters via the `=where` annotation; call sites pass type params as keys alongside value args (e.g. `{ $f: { t: $int64, x: 7 } }`)
 - `$newtype` creates nominal wrappers that require explicit `$cast` to cross to/from the inner type; transparent aliases still coerce implicitly, and other conversions use explicit `$from` / `$into` interface calls
@@ -194,14 +196,14 @@ Filesystem policy checks use canonical ancestry: a `dir` scope for `path/root` d
 - Inherent operations on a type live under its `=defs` annotation; explicit interface implementations live under `=impl` and use the reserved `$self` type to refer to the implementing type
 - Interface methods can be invoked **type-qualified** (`$type.iface.method: { ... }`) or, when the method has a `$self`-typed argument, **interface-qualified** (`$iface.method: { x: $val, ... }`) -- the compiler dispatches on the static type of the `$self` argument
 - Rust-inspired tagged enums available:
-  - [stdlib/option.vibra](stdlib/option.vibra)
-  - [stdlib/result.vibra](stdlib/result.vibra)
+  - [stdlib/src/option.vibra](stdlib/src/option.vibra)
+  - [stdlib/src/result.vibra](stdlib/src/result.vibra)
 
 Import option and instantiate its generic type explicitly:
 
 ```yaml
 option:
-  $import: ./stdlib/option.vibra
+  $import: ./stdlib/src/option.vibra
 maybe-name:
   $record:
     value:

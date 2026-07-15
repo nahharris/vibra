@@ -1,11 +1,11 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 net:
-  $import: ../stdlib/net.vibra
+  $import: ../stdlib/src/net.vibra
 result:
-  $import: ../stdlib/result.vibra
+  $import: ../stdlib/src/result.vibra
 security:
-  $import: ../stdlib/security.vibra
+  $import: ../stdlib/src/security.vibra
 
 connect-reports-the-current-unsupported-runtime:
   $test: net

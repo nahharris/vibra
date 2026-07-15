@@ -1,6 +1,6 @@
 =comment: 'User functions: zero-arg, single-arg, multi-arg, and nested calls.'
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 ready:
   $function: $void
   return: $bool

@@ -1,9 +1,9 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 io:
-  $import: ../stdlib/io.vibra
+  $import: ../stdlib/src/io.vibra
 result:
-  $import: ../stdlib/result.vibra
+  $import: ../stdlib/src/result.vibra
 print-statement-runs:
   $test: core
   do:

@@ -283,7 +283,7 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 
 **`$return` (user functions):** User-defined functions (non-`main`) with a non-`$void` return must terminate by **`$return: <expr>`** as the last statement of the function body, or by **`$match`** whose every arm’s `do:` ends with `$return` in the same sense. Functions with `return: $void` may omit `$return`. **`$return` is not allowed in `main`.**
 
-**Null safety (v1):** `null` is valid only for type `$void`, and is the only source-level value of `$void`. Optional values use the tagged generic enum from `stdlib/option.vibra`; raw payloads and `null` do not coerce into option values. Construct `$option.option.some: <value>` or `$option.option.none`, then narrow with `$match`.
+**Null safety (v1):** `null` is valid only for type `$void`, and is the only source-level value of `$void`. Optional values use the tagged generic enum from `stdlib/src/option.vibra`; raw payloads and `null` do not coerce into option values. Construct `$option.option.some: <value>` or `$option.option.none`, then narrow with `$match`.
 
 ### Interface satisfaction
 
@@ -402,7 +402,7 @@ instance exits.
 | Import | Signature (wasm32) | Notes |
 |--------|-------------------|-------|
 | `fd_write` | `(i32 fd, i32 iovs_ptr, i32 iovs_len, i32 nwritten_ptr) -> i32` | errno; UTF-8 via `ciovec` list in linear memory |
-| (others) | per [WASI preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) | `stdlib/fs.vibra` lists representative names |
+| (others) | per [WASI preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) | `stdlib/src/fs.vibra` lists representative names |
 
 The embedded runner uses **wasmer-wasix** (requires a Tokio 1.x runtime). **Preopened directories** map host paths into the guest; stdio does not require preopens.
 
@@ -474,7 +474,7 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 
 ```yaml
 io:
-  $import: ./stdlib/io.vibra
+  $import: ./stdlib/src/io.vibra
 main:
   $function: $void
   return: $void
@@ -617,9 +617,9 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
 - **No-arg function convention:** use `args: $void` (not empty mapping).
 - **Unions:** use direct arrays, e.g. `integer: { $union: [$int64, $int32, $int16, $int8] }`.
 - **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
-- **Typed io/fs:** `stdlib/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
+- **Typed io/fs:** `stdlib/src/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/src/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
 - **Security policies:** privileged host modules consume `$policy` values; supported domains include `fs`, `env`, `net`, `process`, `time`, `random`, and `sys`.
-- **Rust-inspired unions:** `stdlib/option.vibra` (`Option`) is the tagged `$enum: { some: $t, none: $void }` with `=where: {t: []}`; `stdlib/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`. Both use qualified constructors and `$match`.
+- **Rust-inspired unions:** `stdlib/src/option.vibra` (`Option`) is the tagged `$enum: { some: $t, none: $void }` with `=where: {t: []}`; `stdlib/src/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`. Both use qualified constructors and `$match`.
 - **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
 
 ---
@@ -634,4 +634,4 @@ The following early-draft forms were removed and have **no compatibility path**:
 - **Tuple-typed `args:`** — use a named record (`args: { name: T, ... }`).
 - **Legacy `variants:`** under `$union` — use `$union: [...]` or `$enum: { ... }`.
 - **Structured `$match: { target, arms }`** — use `$match: <expr>` with sibling `when:` arms.
-- **`$option: T` and `$union` with a direct `$void` member** — import and instantiate the tagged `stdlib/option.vibra` enum. These forms are rejected with `E-OPTION-001`.
+- **`$option: T` and `$union` with a direct `$void` member** — import and instantiate the tagged `stdlib/src/option.vibra` enum. These forms are rejected with `E-OPTION-001`.

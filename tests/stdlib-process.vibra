@@ -1,11 +1,11 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 process:
-  $import: ../stdlib/process.vibra
+  $import: ../stdlib/src/process.vibra
 result:
-  $import: ../stdlib/result.vibra
+  $import: ../stdlib/src/result.vibra
 security:
-  $import: ../stdlib/security.vibra
+  $import: ../stdlib/src/security.vibra
 
 run-reports-the-current-unsupported-runtime:
   $test: process

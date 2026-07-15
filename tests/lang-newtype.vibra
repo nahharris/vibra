@@ -1,5 +1,5 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 meters:
   $newtype: $int64
 label:

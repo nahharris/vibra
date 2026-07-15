@@ -23,7 +23,7 @@ jobs:
       revision: ${{ steps.release.outputs.revision }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with: { fetch-depth: 0 }
+        with: { submodules: recursive, fetch-depth: 0 }
       - id: release
         shell: bash
         run: |
@@ -61,9 +61,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with: { ref: v${{ needs.select-release.outputs.version }}, path: source }
+        with: { submodules: recursive, ref: v${{ needs.select-release.outputs.version }}, path: source }
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          submodules: recursive
           ref: main
           path: base-config
           sparse-checkout: containers/base-images.env
@@ -121,6 +122,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          submodules: recursive
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: { path: digests }
       - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567

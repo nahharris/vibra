@@ -1,11 +1,11 @@
 io:
-  $import: ../stdlib/io.vibra
+  $import: ../stdlib/src/io.vibra
 fs:
-  $import: ../stdlib/fs.vibra
+  $import: ../stdlib/src/fs.vibra
 result:
-  $import: ../stdlib/result.vibra
+  $import: ../stdlib/src/result.vibra
 security:
-  $import: ../stdlib/security.vibra
+  $import: ../stdlib/src/security.vibra
 main:
   $function: $void
   grants:

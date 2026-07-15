@@ -1,5 +1,5 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 
 identity-cast-is-a-compile-error:
   $test: core

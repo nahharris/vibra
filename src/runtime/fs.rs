@@ -2,7 +2,7 @@
 //!
 //! [`super::RunConfig::allow_read`](crate::runtime::RunConfig) and
 //! [`super::RunConfig::allow_write`](crate::runtime::RunConfig) seed runtime-minted
-//! filesystem grants exposed through `stdlib/security.vibra`. The default is
+//! filesystem grants exposed through `stdlib/src/security.vibra`. The default is
 //! **none** (stdout/stderr do not require grants). Legacy
 //! `preopen_host_dirs` entries seed both read and write grants for compatibility.
 //!

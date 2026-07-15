@@ -25,7 +25,7 @@ sequence. Use `core` for the grant-free suite.
 
 ```yaml
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 
 truth:
   $test: core
@@ -101,7 +101,7 @@ widens permissions from profile names.
 
 ## Asserting equality
 
-Use the typed helpers from `stdlib/test.vibra` for primitive equality. They show
+Use the typed helpers from `stdlib/src/test.vibra` for primitive equality. They show
 both values when an assertion fails:
 
 ```yaml

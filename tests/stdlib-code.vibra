@@ -1,7 +1,7 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 code:
-  $import: ../stdlib/code.vibra
+  $import: ../stdlib/src/code.vibra
 path-lookup-returns-structural-node:
   $test: core
   do:

@@ -1,7 +1,7 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 option:
-  $import: ../stdlib/option.vibra
+  $import: ../stdlib/src/option.vibra
 some-carries-payload:
   $test: core
   do:
