@@ -40,8 +40,10 @@ vibra test
 ```
 
 Useful flags: `--filter <name>`, `--profile <name>`, `--tag <tag>`,
-`--jobs <n>`, `--fail-fast`, and `--report yaml --report-file report.yaml`.
-Profiles select tests; they never grant capabilities.
+`--jobs <n>`, `--fail-fast`, `--deny-skips`, `--deny-warnings`, and
+`--report yaml --report-file report.yaml`. Profiles and tags select tests;
+they never grant capabilities. Tests that require `workspace: temp` also need
+an explicit `--allow-test-workspace` mode.
 
 ## When you add or change behavior
 
@@ -50,9 +52,20 @@ Profiles select tests; they never grant capabilities.
 - Changing the **language surface or `stdlib/`**: add/adjust a `tests/*.vibra`
   case and re-run `vibra test`. New stdlib modules should get a matching
   `stdlib-<module>.vibra` test file.
-- New `.vibra` tests must pass under a bare `vibra test` (no `--allow-*` flags).
-  Capability-gated tests belong in their own file with the required flags
-  documented.
+- New `core` `.vibra` tests must pass under a bare `vibra test` (no
+  `--allow-*` flags). Capability-gated tests must use a non-core profile,
+  belong in their own file, and document the narrow flags needed to run them.
+
+## Documentation and schemas
+
+- Keep `README.md` accurate for user-facing commands, test syntax, and
+  capability behavior when those interfaces change.
+- For changes to machine-readable interfaces, update the relevant JSON Schema
+  under `schemas/`: source shape, project manifest, diagnostics, structural
+  code, or editor query response. Add newly introduced stable diagnostic codes
+  to `schemas/linter-codes.json`.
+- Treat schema IDs and documented response shapes as tooling contracts. Check
+  the README schema guide whenever adding, removing, or repurposing a schema.
 
 ## Conventions
 
