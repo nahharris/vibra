@@ -74,8 +74,9 @@ are not a complete specification of compiler behavior.
   [`type-expr.schema.json`](schemas/type-expr.schema.json),
   [`expression.schema.json`](schemas/expression.schema.json), and
   [`source-annotations.schema.json`](schemas/source-annotations.schema.json).
-- **Projects and diagnostics:** [`project-manifest.schema.json`](schemas/project-manifest.schema.json),
+- **Projects, packages, and diagnostics:** [`project-manifest.schema.json`](schemas/project-manifest.schema.json),
   [`project-lock.schema.json`](schemas/project-lock.schema.json),
+  [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
   [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
 - **Structural code:** [`code-form.schema.json`](schemas/code-form.schema.json),
@@ -170,6 +171,25 @@ vibra check hello
 ```
 
 See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
+
+### Executable application packages
+
+`vibra build` produces a deterministic `.vapp` ZIP containing the selected bin's
+`program.wasm`, its complete project and vendored dependency source graph, and a
+SHA-256 inventory in `package.vibra`. Timestamps, permissions, compression, and
+entry ordering are fixed, so identical inputs produce identical bytes:
+
+```sh
+vibra build hello --output hello.vapp
+vibra package inspect hello.vapp
+vibra package verify hello.vapp
+vibra run hello.vapp
+```
+
+Use `--bin <name>` when a project declares multiple bin targets. Verification
+rejects missing, modified, duplicate, undeclared, or path-unsafe entries before
+execution. The metadata contract is documented by
+[`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
 
 The compiler repository pins that same stdlib revision as the `stdlib` Git submodule. Clone contributors' checkouts with `git clone --recurse-submodules`, or initialize an existing checkout with `git submodule update --init --recursive`.
 

@@ -7,6 +7,7 @@ pub mod execute;
 pub mod load;
 pub mod lower;
 pub mod macro_expand;
+pub mod package;
 pub mod project;
 pub mod runtime;
 pub mod test_runner;

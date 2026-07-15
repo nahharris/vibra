@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/package-manifest.schema.json",
+  "title": "Vibra application package metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format-version", "name", "version", "target", "runtime-abi", "compiler-version", "stdlib-git", "stdlib-rev", "entry", "files"],
+  "properties": {
+    "format-version": { "const": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "runtime-abi": { "const": "vibra-v1" },
+    "compiler-version": { "type": "string", "minLength": 1 },
+    "stdlib-git": { "type": "string", "format": "uri" },
+    "stdlib-rev": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "entry": { "type": "string", "pattern": "^source/.+\\.vibra$" },
+    "files": {
+      "type": "object",
+      "minProperties": 2,
+      "propertyNames": { "pattern": "^(program\\.wasm|source/.+)$" },
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    }
+  }
+}
