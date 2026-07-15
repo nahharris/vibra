@@ -52,7 +52,7 @@ fn stmt_home_module(fn_ctx: Option<&UserFnContext>) -> &str {
     fn_ctx.map(|c| c.home_module.as_str()).unwrap_or("")
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RuntimeValue {
     Bool(bool),
     Int(i64),
@@ -82,24 +82,24 @@ pub enum RuntimeValue {
     Void,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GrantToken {
     pub name: String,
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CapabilityGrant {
     pub type_key: String,
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PolicyValue {
     pub policy: PolicyType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Expr {
     Value(RuntimeValue),
     VarRef(String),
@@ -136,13 +136,13 @@ pub enum Expr {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImportTarget {
     pub module: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WasmArgSpec {
     Arg(String),
     ConstInt(i64),
@@ -150,7 +150,7 @@ pub enum WasmArgSpec {
 }
 
 /// A literal type pins a single value (e.g. the string `"ok"`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LiteralType {
     Bool(bool),
     Int(i64),
@@ -158,7 +158,7 @@ pub enum LiteralType {
     Str(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TypeRef {
     Bool,
     Str,
@@ -241,7 +241,7 @@ pub struct TypeAlias {
     pub doc: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum FunctionBody {
     Wasm {
         import: ImportTarget,
@@ -252,7 +252,7 @@ pub enum FunctionBody {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionSig {
     pub alias: String,
     pub symbol: String,
@@ -269,7 +269,7 @@ pub struct FunctionSig {
     pub doc: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Call {
     pub callee_key: String,
     pub type_args: Vec<TypeRef>,
@@ -277,30 +277,30 @@ pub struct Call {
     pub grant_args: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GrantRequirement {
     Mandatory,
     Optional,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GrantDecl {
     pub name: String,
     pub requirement: GrantRequirement,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PolicyType {
     pub domains: BTreeMap<String, Vec<PolicyGroup>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PolicyGroup {
     pub requirement: GrantRequirement,
     pub scopes: Vec<PolicyScope>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PolicyScope {
     Any,
     File(String),
@@ -309,13 +309,13 @@ pub enum PolicyScope {
     Prefix(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub body: Vec<Statement>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Pattern {
     Wildcard,
     Bind(String),
@@ -336,13 +336,13 @@ pub enum Pattern {
     Interface(TypeRef),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum LetValue {
     Call(Call),
     Expr(Expr),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Statement {
     Call(Call),
     Let {
@@ -389,13 +389,13 @@ pub struct EnumDef {
 /// construction (the orphan rule is enforced syntactically). Concrete
 /// bindings for the interface's `=where` params live in `ImplBody` as data,
 /// not as part of the key.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ImplKey {
     pub implementing_type: String,
     pub interface: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImplBody {
     pub methods: HashMap<String, ImplMethodBinding>,
     /// Bindings for the interface's `=where` type parameters, in the order
@@ -407,7 +407,7 @@ pub struct ImplBody {
     pub impl_type_params: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ImplMethodBinding {
     /// A fresh `$function` envelope was supplied; its sig is registered in
     /// `functions` under the qualified key recorded here.

@@ -1,6 +1,6 @@
 //! Deterministic `.vapp` application archives.
 
-use crate::{execute, load, lower, project, runtime::RunConfig, wasm_backend};
+use crate::{load, lower, project, runtime::RunConfig, wasm_backend};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -129,7 +129,7 @@ pub fn run(path: &Path, config: &RunConfig) -> Result<()> {
     if wasm_backend::emit_program_wasm(&lowered) != expected {
         bail!("E-PKG-008: packaged Wasm does not match packaged sources");
     }
-    execute::run_lowered(&lowered, config)
+    wasm_backend::run_wasm(&expected, config)
 }
 
 fn open_verified(path: &Path) -> Result<(ZipArchive<File>, PackageMetadata)> {
