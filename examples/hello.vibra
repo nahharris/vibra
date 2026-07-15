@@ -1,5 +1,5 @@
 io:
-  $import: ../stdlib/io.vibra
+  $import: ../stdlib/src/io.vibra
 main:
   $function: $void
   return: $void

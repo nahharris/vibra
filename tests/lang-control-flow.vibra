@@ -1,6 +1,6 @@
 =comment: '`$if` / `$while` control flow.'
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 if-true-takes-then:
   $test: core
   do:

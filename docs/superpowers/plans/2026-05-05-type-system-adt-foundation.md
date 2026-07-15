@@ -85,8 +85,8 @@ Run: `cargo test`
 
 **Files:**
 - Modify: `src/lower.rs`
-- Create: `stdlib/option.vibra`
-- Create: `stdlib/result.vibra`
+- Create: `stdlib/src/option.vibra`
+- Create: `stdlib/src/result.vibra`
 - Test: `tests/integration.rs`
 
 - [ ] **Step 1: Write failing tests for union declarations**
@@ -110,8 +110,8 @@ In `src/lower.rs`:
 - [ ] **Step 4: Add `Option` and `Result` stdlib definitions**
 
 Create:
-- `stdlib/option.vibra`
-- `stdlib/result.vibra`
+- `stdlib/src/option.vibra`
+- `stdlib/src/result.vibra`
 
 Use Rust-inspired names:
 - `Option<T>`: `Some(T) | None`
@@ -155,9 +155,9 @@ Run: `cargo test`
 ### Task 5: Add Strong Domain Types (`Fd`, `Path`, `File`, `Dir`)
 
 **Files:**
-- Modify: `stdlib/io.vibra`
-- Modify: `stdlib/fs.vibra`
-- Create: `stdlib/types.vibra`
+- Modify: `stdlib/src/io.vibra`
+- Modify: `stdlib/src/fs.vibra`
+- Create: `stdlib/src/types.vibra`
 - Modify: `src/lower.rs`
 - Test: `tests/integration.rs`
 
@@ -174,15 +174,15 @@ Run: `cargo test --test integration`
 
 - [ ] **Step 3: Define domain types in stdlib**
 
-Create `stdlib/types.vibra` with nominal types:
+Create `stdlib/src/types.vibra` with nominal types:
 - `Fd`
 - `Path`
 - `File`
 - `Dir`
 
 Then migrate signatures in:
-- `stdlib/io.vibra`
-- `stdlib/fs.vibra`
+- `stdlib/src/io.vibra`
+- `stdlib/src/fs.vibra`
 
 - [ ] **Step 4: Implement converter/checker hooks in lowerer**
 

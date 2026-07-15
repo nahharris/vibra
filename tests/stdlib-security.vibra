@@ -1,7 +1,7 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 security:
-  $import: ../stdlib/security.vibra
+  $import: ../stdlib/src/security.vibra
 
 granted-observes-a-capability-token:
   $test: env

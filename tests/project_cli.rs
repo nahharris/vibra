@@ -29,7 +29,9 @@ fn project_init_bin_template_creates_valid_project() {
     assert!(manifest.contains("manifest-version: 1"));
     assert!(main.contains("@std/io.vibra"));
     assert!(project.join("src/hello/main.vibra").exists());
-    assert!(project.join("dep/std/io.vibra").exists());
+    assert!(project.join("dep/std/src/io.vibra").exists());
+    assert!(manifest.contains("git: https://github.com/nahharris/vibra-stdlib.git"));
+    assert!(manifest.contains("rev: edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31"));
 
     let check = vibra_cmd()
         .current_dir(dir.path())
@@ -197,6 +199,67 @@ dependencies:
         run.status.success(),
         "run failed: {}",
         String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+#[test]
+fn project_check_resolves_dependency_library_source_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let dep = dir.path().join("packaged-utils");
+    std::fs::create_dir_all(dep.join("src")).unwrap();
+    std::fs::write(dep.join("src/util.vibra"), "answer: 42\n").unwrap();
+    std::fs::write(
+        dep.join("project.vibra"),
+        r#"manifest-version: 1
+package:
+  name: packaged-utils
+  version: 0.1.0
+targets:
+  libs:
+    - name: packaged-utils
+      root: src
+      entry: util.vibra
+"#,
+    )
+    .unwrap();
+
+    let project = dir.path().join("app");
+    std::fs::create_dir_all(project.join("src/app")).unwrap();
+    std::fs::write(
+        project.join("src/app/main.vibra"),
+        "utils:\n  $import: \"@packaged-utils/util.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        format!(
+            r#"manifest-version: 1
+package:
+  name: app
+  version: 0.1.0
+targets:
+  bins:
+    - name: app
+      root: src/app
+      entry: main.vibra
+dependencies:
+  packaged-utils:
+    path: {}
+"#,
+            path_str(&dep)
+        ),
+    )
+    .unwrap();
+
+    let check = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["check", "app"])
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
     );
 }
 

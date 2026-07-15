@@ -1082,7 +1082,7 @@ fn collect_module_skeletons(
         }
         if env.form_key == "$option" {
             bail!(
-                "E-OPTION-001: `$option: T` was removed; import `stdlib/option.vibra` and instantiate its tagged enum alias"
+                "E-OPTION-001: `$option: T` was removed; import `stdlib/src/option.vibra` and instantiate its tagged enum alias"
             );
         }
         if !BUILTIN_TYPE_FORMS.contains(&env.form_key.as_str()) {
@@ -1125,7 +1125,7 @@ fn parse_type_ref(
             && !map_get_str(m, "$option").is_some_and(is_type_argument_map)
         {
             bail!(
-                "E-OPTION-001: `$option: T` was removed; import `stdlib/option.vibra` and instantiate its tagged enum alias"
+                "E-OPTION-001: `$option: T` was removed; import `stdlib/src/option.vibra` and instantiate its tagged enum alias"
             );
         }
         for &form in BUILTIN_TYPE_FORMS {

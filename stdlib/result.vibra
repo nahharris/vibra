@@ -1,5 +1,0 @@
-result:
-  $enum:
-    err: $e
-    ok: $t
-  =where: {t: [], e: []}

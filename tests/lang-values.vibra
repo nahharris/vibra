@@ -1,5 +1,5 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 bool-literal:
   $test: core
   do:

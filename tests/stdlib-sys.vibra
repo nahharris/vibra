@@ -1,9 +1,9 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 sys:
-  $import: ../stdlib/sys.vibra
+  $import: ../stdlib/src/sys.vibra
 security:
-  $import: ../stdlib/security.vibra
+  $import: ../stdlib/src/security.vibra
 
 info-uses-the-granted-system-capability:
   $test: system

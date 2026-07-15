@@ -1,13 +1,13 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 time:
-  $import: ../stdlib/time.vibra
+  $import: ../stdlib/src/time.vibra
 random:
-  $import: ../stdlib/random.vibra
+  $import: ../stdlib/src/random.vibra
 sys:
-  $import: ../stdlib/sys.vibra
+  $import: ../stdlib/src/sys.vibra
 security:
-  $import: ../stdlib/security.vibra
+  $import: ../stdlib/src/security.vibra
 
 accepts-unix-millis:
   $function:

@@ -59,7 +59,7 @@ fn legacy_pattern_match_arm_key_is_rejected() {
 #[test]
 fn generic_alias_instantiation_prefers_current_module_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
@@ -234,7 +234,7 @@ fn wasm_abi_aggregate_layout_is_aligned() {
 #[test]
 fn nested_function_grants_are_rejected() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
@@ -314,7 +314,7 @@ fn labeled_primary_is_only_available_through_args_namespace() {
 #[test]
 fn grant_names_must_be_kebab_case() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
@@ -599,8 +599,9 @@ fn hello_example_compiles_and_runs() {
 fn enum_match_lowers_with_new_syntax() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
 
     std::fs::write(
@@ -731,8 +732,9 @@ main:
 fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
 
     std::fs::write(
         &entry,
@@ -780,8 +782,9 @@ main:
 fn if_branch_let_does_not_leak_into_other_branch_or_after() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
 
     std::fs::write(
         &entry,
@@ -816,8 +819,9 @@ main:
 fn if_merges_locals_when_both_branches_bind_same_name_with_same_type() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
 
     std::fs::write(
         &entry,
@@ -851,8 +855,9 @@ main:
 fn while_body_let_does_not_leak_after_loop() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
 
     std::fs::write(
         &entry,
@@ -886,8 +891,9 @@ main:
 fn record_tuple_array_and_map_patterns_bind_values() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
 
     std::fs::write(
         &entry,
@@ -1057,8 +1063,9 @@ fn warns_for_non_kebab_case_symbols() {
     let dir = tempfile::tempdir().unwrap();
     let mod_file = dir.path().join("symbols.vibra");
     let entry = dir.path().join("entry.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
 
     std::fs::write(
         &mod_file,
@@ -1114,8 +1121,9 @@ main:
 fn supports_void_enum_constructor_without_payload() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
 
     std::fs::write(
@@ -1462,7 +1470,7 @@ main:
 #[test]
 fn fs_writable_interface_rejects_read_file() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
@@ -1691,7 +1699,7 @@ main:
 #[test]
 fn main_injection_uses_declared_policy_not_broader_approval() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let allowed = dir.path().join("allowed");
     let outside = dir.path().join("outside");
@@ -1762,7 +1770,7 @@ main:
 #[test]
 fn legacy_function_grants_are_rejected_after_policy_redesign() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
@@ -1793,7 +1801,7 @@ main:
 #[test]
 fn main_policy_argument_is_injected_and_authorizes_fs_read() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data.txt");
     std::fs::write(&data, "secret").unwrap();
@@ -1853,7 +1861,7 @@ main:
 #[test]
 fn main_mandatory_policy_requires_full_coverage_before_body_runs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
@@ -1902,7 +1910,7 @@ main:
 #[test]
 fn fs_open_read_requires_policy_argument() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     let data = dir.path().join("data.txt");
@@ -1940,8 +1948,8 @@ main:
 #[test]
 fn duplicate_nested_imports_are_idempotent() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
 
@@ -1978,7 +1986,7 @@ main:
 #[test]
 fn nested_import_same_alias_is_scoped_to_parent() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let leaf_a = dir.path().join("leaf-a.vibra");
     let leaf_b = dir.path().join("leaf-b.vibra");
@@ -2315,8 +2323,9 @@ main:
 fn tagged_option_rejects_raw_payload_and_null_coercions() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
 
     std::fs::write(
@@ -2479,8 +2488,9 @@ main:
 fn result_where_ok_and_err_type_params() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
 
     std::fs::write(
@@ -2555,8 +2565,9 @@ fn where_only_generic_names_no_unscoped_uppercase_fallback() {
     let dir = tempfile::tempdir().unwrap();
     let bad = dir.path().join("bad.vibra");
     let good = dir.path().join("good.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry_bad = dir.path().join("entry_bad.vibra");
     let entry_good = dir.path().join("entry_good.vibra");
 
@@ -2639,8 +2650,9 @@ main:
 #[test]
 fn zero_arg_call_accepts_null_payload() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
 
     std::fs::write(
@@ -2670,8 +2682,9 @@ main:
 #[test]
 fn zero_arg_call_rejects_void_payload_literal() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
 
     std::fs::write(
@@ -2701,8 +2714,9 @@ main:
 #[test]
 fn generic_user_fn_identity_returns_value() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -2738,8 +2752,9 @@ main:
 #[test]
 fn generic_call_requires_explicit_type_args() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -2774,8 +2789,9 @@ main:
 #[test]
 fn generic_call_rejects_unknown_keys() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -2999,8 +3015,9 @@ main:
 #[test]
 fn generic_call_value_arg_must_unify_with_substituted_type() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3032,8 +3049,9 @@ main:
 #[test]
 fn user_fn_non_void_return_requires_return_statement() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3068,8 +3086,9 @@ main:
 fn user_fn_imported_with_user_body_runs() {
     let dir = tempfile::tempdir().unwrap();
     let helper = dir.path().join("helper.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &helper,
@@ -3157,8 +3176,9 @@ main:
 #[test]
 fn where_with_non_interface_bound_is_rejected_with_e_where_002() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3188,8 +3208,9 @@ main:
 #[test]
 fn self_type_is_allowed_inside_interface_body() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3226,8 +3247,9 @@ main:
 #[test]
 fn self_type_is_rejected_in_top_level_record_field() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3258,8 +3280,9 @@ main:
 #[test]
 fn self_type_is_rejected_in_free_standing_function_signature() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3295,8 +3318,9 @@ fn self_type_is_allowed_in_nested_interface_inside_record() {
     // Even when wrapped in a `$record` (which itself forbids `$self`), an
     // inner `$interface` body re-opens the `$self` binding scope.
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3335,8 +3359,9 @@ main:
 #[test]
 fn legacy_unprefixed_where_is_rejected_with_e_anno_002() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3367,8 +3392,9 @@ main:
 #[test]
 fn legacy_unprefixed_doc_is_rejected_with_e_anno_002() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3399,8 +3425,9 @@ main:
 #[test]
 fn unknown_annotation_key_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3431,8 +3458,9 @@ main:
 #[test]
 fn doc_string_lowers_on_function_and_type_decls() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3472,8 +3500,9 @@ fn where_key_order_defines_positional_type_param_order() {
     // Same fields, swapped `=where` key order. Only the second one accepts
     // (a -> Int, b -> Str) at the call site; the first one expects the reverse.
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let mod_ab = dir.path().join("ab.vibra");
     let mod_ba = dir.path().join("ba.vibra");
     let entry = dir.path().join("entry.vibra");
@@ -3566,8 +3595,9 @@ main:
 #[test]
 fn record_type_alias_lowers_and_is_usable_in_signature() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     // io.vibra defines ciovec as a non-generic $record. Function takes $io.ciovec
     // by bare reference (no instantiation) since it's non-generic.
@@ -3607,8 +3637,9 @@ main:
 #[test]
 fn tuple_type_alias_with_where_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3649,8 +3680,9 @@ main:
 #[test]
 fn map_type_alias_with_where_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3691,8 +3723,9 @@ main:
 #[test]
 fn interface_type_alias_with_where_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3725,8 +3758,9 @@ main:
 #[test]
 fn bare_generic_alias_in_signature_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3760,8 +3794,9 @@ main:
 #[test]
 fn instantiation_arity_mismatch_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
@@ -3797,8 +3832,9 @@ main:
 #[test]
 fn instantiated_record_field_type_mismatch_is_caught() {
     let dir = tempfile::tempdir().unwrap();
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let entry = dir.path().join("entry.vibra");
     // Pass a $str where the function expects an int through an instantiated
     // generic record alias.
@@ -5663,11 +5699,12 @@ dependencies:
 }
 
 fn copy_stdlib(dest: &Path) {
-    std::fs::create_dir_all(dest).unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
-    for entry in std::fs::read_dir(root).unwrap() {
+    std::fs::create_dir_all(dest.join("src")).unwrap();
+    std::fs::copy(root.join("project.vibra"), dest.join("project.vibra")).unwrap();
+    for entry in std::fs::read_dir(root.join("src")).unwrap() {
         let entry = entry.unwrap();
-        std::fs::copy(entry.path(), dest.join(entry.file_name())).unwrap();
+        std::fs::copy(entry.path(), dest.join("src").join(entry.file_name())).unwrap();
     }
 }
 
@@ -5703,8 +5740,9 @@ fn vibra_exec_rejects_non_string_raw_output() {
 fn vibra_code_inline_previews_and_write_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("main.vibra");
-    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/io.vibra"))
-        .unwrap();
+    let io =
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
+            .unwrap();
     let original = format!(
         "io:\n  $import: {}\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $io.println: Hello\n",
         path_str(&io)
@@ -6561,7 +6599,7 @@ fn vibra_test_matches_structured_expected_errors() {
     let compile_entry = dir.path().join("compile-error.vibra");
     let runtime_entry = dir.path().join("runtime-error.vibra");
     let test_lib =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/test.vibra"))
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/test.vibra"))
             .unwrap();
     std::fs::write(
         &compile_entry,
@@ -6680,7 +6718,7 @@ fn vibra_test_reports_expected_error_mismatches_from_the_parent() {
 fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
     let dir = tempfile::tempdir().unwrap();
     let test_lib =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/test.vibra"))
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/test.vibra"))
             .unwrap();
     let cases = [
         (
@@ -6906,8 +6944,8 @@ fn vibra_test_deny_warnings_fails_and_emits_warnings_in_yaml_report() {
 #[test]
 fn vibra_test_temp_workspace_modes_limit_real_filesystem_operations() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs_lib = path_str(&std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap());
-    let test_lib = path_str(&std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap());
+    let fs_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap());
+    let test_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap());
     let dir = tempfile::tempdir().unwrap();
     let host_dir = tempfile::tempdir().unwrap();
     let host_path = path_str(host_dir.path());
@@ -7011,9 +7049,9 @@ host-grants-are-isolated:
       - $grants.fs-read
 "#,
             security_lib =
-                path_str(&std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap()),
+                path_str(&std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap()),
             result_lib =
-                path_str(&std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap()),
+                path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap()),
         ),
     )
     .unwrap();
@@ -7095,7 +7133,7 @@ host-grants-are-isolated:
 #[test]
 fn vibra_test_drains_large_child_output_without_timing_out() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let io_lib = path_str(&std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap());
+    let io_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap());
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("large-output.vibra");
     let report = dir.path().join("large-output-report.yaml");
@@ -7130,12 +7168,12 @@ fn vibra_test_drains_large_child_output_without_timing_out() {
     assert!(std::fs::read_to_string(report).unwrap().contains(&payload));
 }
 
-/// Write an entry module that imports the canonical `stdlib/test.vibra` and
+/// Write an entry module that imports the canonical `stdlib/src/test.vibra` and
 /// contains `count` passing `$test` declarations plus a shared helper function
 /// every test can call. Returns the temp dir (keep it alive) and entry path.
 fn issue50_many_tests_entry(count: usize) -> (tempfile::TempDir, std::path::PathBuf) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let test_lib = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+    let test_lib = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
 
@@ -7207,7 +7245,7 @@ fn issue50_named_test_matches_lower_tests() {
 #[test]
 fn issue50_failing_test_still_reported() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let test_lib = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+    let test_lib = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
@@ -7274,10 +7312,10 @@ impl std::io::Write for BrokenPipeWriter {
 #[test]
 fn guest_stdout_write_failure_yields_matchable_fs_error_io() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
-    let io = std::fs::canonicalize(root.join("stdlib/io.vibra")).unwrap();
-    let test = std::fs::canonicalize(root.join("stdlib/test.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
 
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
@@ -7402,8 +7440,8 @@ fn random_bytes_os_rng_is_not_all_zero() {
 #[test]
 fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     let a = dir.path().join("a.txt");
@@ -7560,9 +7598,9 @@ fn env_read_grant_is_case_sensitive_on_unix() {
         return;
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let env_mod = std::fs::canonicalize(root.join("stdlib/env.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/security.vibra")).unwrap();
+    let env_mod = std::fs::canonicalize(root.join("stdlib/src/env.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
+    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
     std::env::set_var("VIBRA_ISSUE53_TOKEN", "public");
     std::env::set_var("vibra_issue53_token", "secret");
     let output = vibra_cmd()
@@ -7595,8 +7633,8 @@ fn env_read_grant_is_case_sensitive_on_unix() {
 #[test]
 fn forged_stdin_read_file_handle_requires_allow_stdin() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/fs.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/result.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
     let output = vibra_cmd()
         .args([
             "exec",

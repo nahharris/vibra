@@ -15,7 +15,7 @@ function Assert-Scope {
 
 Assert-Scope @('docs/containers.md') $false $false
 Assert-Scope @('src/main.rs') $true $true
-Assert-Scope @('stdlib/io.vibra') $true $true
+Assert-Scope @('stdlib/src/io.vibra') $true $true
 Assert-Scope @('tests/lang-values.vibra') $true $false
 Assert-Scope @('containers/Dockerfile.linux') $false $true
 Assert-Scope @('tests/container-smoke.ps1') $false $true

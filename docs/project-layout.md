@@ -20,7 +20,8 @@ targets:
 
 dependencies:
   std:
-    path: dep/std
+    git: https://github.com/nahharris/vibra-stdlib.git
+    rev: edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31
   math:
     git: https://github.com/example/vibra-math.git
     rev: 0123456789abcdef0123456789abcdef01234567
@@ -97,7 +98,7 @@ core:
   $import: "@core/lib.vibra"
 ```
 
-`@name/path` resolves `name` as either a target name or dependency name. Target imports resolve under the target `root`. Path dependencies resolve under their declared `path`. Git dependencies resolve under `dep/<name>` after `vibra sync`.
+`@name/path` resolves `name` as either a target name or dependency name. Target imports resolve under the target `root`. Dependencies with a `project.vibra` resolve under their matching (or only) library target root; unmanifested path dependencies retain root-relative behavior. Git dependencies live under `dep/<name>` after `vibra sync`.
 
 ## Dependencies
 
@@ -120,13 +121,16 @@ dependencies:
 
 Git dependencies must pin `rev`. `vibra sync` clones or fetches them into `dep/<name>` and checks out the pinned revision. Local dependencies are not copied.
 
-`vibra init` copies the current toolchain stdlib into `dep/std` and records it as:
+`vibra init` seeds the current toolchain stdlib into `dep/std` for immediate offline use and records its canonical source and exact revision as:
 
 ```yaml
 dependencies:
   std:
-    path: dep/std
+    git: https://github.com/nahharris/vibra-stdlib.git
+    rev: edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31
 ```
+
+The compiler source tree pins the same revision through its `stdlib` Git submodule.
 
 ## Commands
 

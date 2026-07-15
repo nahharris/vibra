@@ -1,4 +1,4 @@
-"""One-off: migrate stdlib/fs.vibra nested $function to labeled form."""
+"""One-off: migrate stdlib/src/fs.vibra nested $function to labeled form."""
 import pathlib
 import re
 

@@ -1,11 +1,11 @@
 test:
-  $import: ../stdlib/test.vibra
+  $import: ../stdlib/src/test.vibra
 env:
-  $import: ../stdlib/env.vibra
+  $import: ../stdlib/src/env.vibra
 result:
-  $import: ../stdlib/result.vibra
+  $import: ../stdlib/src/result.vibra
 security:
-  $import: ../stdlib/security.vibra
+  $import: ../stdlib/src/security.vibra
 
 get-reads-an-explicitly-granted-variable:
   $test: env
