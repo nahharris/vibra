@@ -21,7 +21,7 @@ RUN install -d /opt/vibra/bin /opt/vibra/stdlib \
 # Keep the Rust image's toolchain available for the development image.  Setting
 # PATH to only Vibra previously made the dev-image smoke test unable to find
 # cargo.
-ENV PATH="/opt/vibra/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ENV PATH="/opt/vibra/bin:/root/.cargo/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 WORKDIR /workspace
 ENTRYPOINT ["vibra"]
 CMD ["--help"]
