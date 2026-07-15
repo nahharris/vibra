@@ -96,9 +96,15 @@ jobs:
             docker buildx build "${build_args[@]}" --platform '${{ matrix.platform }}' --file '${{ matrix.dockerfile }}' --target "$kind" --push --sbom=true --provenance=true --tag "$image:staging-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.suffix }}" source
           done
       - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
-        with: { image-ref: ghcr.io/nahharris/vibra:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}, severity: HIGH,CRITICAL, exit-code: '1' }
+        with:
+          image-ref: ghcr.io/nahharris/vibra:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
       - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
-        with: { image-ref: ghcr.io/nahharris/vibra-dev:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}, severity: HIGH,CRITICAL, exit-code: '1' }
+        with:
+          image-ref: ghcr.io/nahharris/vibra-dev:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
       - if: runner.os != 'Windows'
         shell: pwsh
         run: |

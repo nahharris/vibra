@@ -7,6 +7,11 @@ function Require([string]$Path, [string]$Pattern, [string]$Label) {
     if (-not (Select-String -LiteralPath $full -Pattern $Pattern -Quiet)) { throw "$Label is missing from $Path" }
 }
 
+function Reject([string]$Path, [string]$Pattern, [string]$Label) {
+    $full = Join-Path $root $Path
+    if (Select-String -LiteralPath $full -Pattern $Pattern -Quiet) { throw "$Label in $Path" }
+}
+
 $workflow = '.github/workflows/publish-toolchains.yml'
 $pack = '.github/scripts/package-toolchain.ps1'
 $smoke = 'tests/toolchain-smoke.ps1'
@@ -22,6 +27,11 @@ Require $workflow 'toolchain-smoke\.ps1' 'relocation smoke'
 Require $workflow 'attest-build-provenance' 'GitHub build provenance'
 Require $workflow 'sha256sums\.txt' 'published checksums'
 Require $workflow 'softprops/action-gh-release' 'GitHub release asset upload'
+
+$rebuild = '.github/workflows/rebuild-containers.yml'
+Require $rebuild '^\s+image-ref: ghcr\.io/nahharris/vibra:staging-' 'runtime rebuild scan target'
+Require $rebuild '^\s+image-ref: ghcr\.io/nahharris/vibra-dev:staging-' 'dev rebuild scan target'
+Reject $rebuild 'with: \{\s*image-ref:.*:' 'unquoted tagged image in YAML flow mapping'
 
 Require $pack "bin[/\\]vibra" 'toolchain binary layout'
 Require $pack "stdlib" 'bundled stdlib layout'
