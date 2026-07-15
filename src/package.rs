@@ -203,7 +203,10 @@ fn collect_project_files(
         if path.is_dir() {
             collect_project_files(root, &path, output, files)?;
         } else {
-            files.insert(format!("source/{}", slash(relative)), fs::read(&path)?);
+            files.insert(
+                format!("source/{}", slash(relative)),
+                project::canonical_file_bytes(&path)?,
+            );
         }
     }
     Ok(())

@@ -48,3 +48,39 @@ jobs:
         run: cargo run -- lint tests --deny-warnings
       - name: Run Vibra suite
         run: cargo run -- test --report yaml
+
+  vapp-repro:
+    name: .vapp reproducibility (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked
+      - name: Build twice and verify identical bytes
+        shell: pwsh
+        run: |
+          $binary = if ('${{ runner.os }}' -eq 'Windows') { 'target/debug/vibra.exe' } else { 'target/debug/vibra' }
+          ./tests/vapp-repro.ps1 -Vibra $binary -Output artifacts/sample.vapp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vapp-${{ runner.os }}
+          path: artifacts/sample.vapp
+
+  vapp-cross-host:
+    name: .vapp cross-host byte identity
+    needs: vapp-repro
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vapp-*
+          path: artifacts
+      - name: Compare Linux and Windows output
+        run: cmp artifacts/vapp-Linux/sample.vapp artifacts/vapp-Windows/sample.vapp
