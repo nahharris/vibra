@@ -7,6 +7,7 @@ A vibe-coding-first programming language: **YAML** surface (strict subset), **st
 - **Schemas and tooling contracts:** [below](#schemas-and-tooling-contracts)
 - **Examples:** [examples/](examples/)
 - **[Container images](docs/containers.md)**
+- **[Native toolchain archives](docs/distribution.md)**
 
 ## Run (MVP)
 
@@ -77,6 +78,7 @@ are not a complete specification of compiler behavior.
 - **Projects, packages, and diagnostics:** [`project-manifest.schema.json`](schemas/project-manifest.schema.json),
   [`project-lock.schema.json`](schemas/project-lock.schema.json),
   [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
+  [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
   [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
 - **Structural code:** [`code-form.schema.json`](schemas/code-form.schema.json),

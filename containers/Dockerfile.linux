@@ -19,11 +19,16 @@ COPY src ./src
 RUN touch src/lib.rs src/main.rs \
     && cargo build --release --locked
 COPY stdlib ./stdlib
+RUN files="$(find stdlib -type f -printf '%P\n' | LC_ALL=C sort)" \
+    && digest="$(printf '%s\n' "$files" | while IFS= read -r file; do printf '%s %s\n' "$file" "$(sha256sum "stdlib/$file" | cut -d' ' -f1)"; done | sha256sum | cut -d' ' -f1)" \
+    && stdrev="$(sed -n 's/.*STDLIB_REV: &str = "\([0-9a-f]*\)".*/\1/p' src/project.rs)" \
+    && printf 'format-version: 1\nversion: 0.1.0\nrevision: 0000000000000000000000000000000000000000\nplatform: linux-container\nstdlib-git: https://github.com/nahharris/vibra-stdlib.git\nstdlib-rev: %s\nstdlib-sha256: %s\n' "$stdrev" "$digest" > release.vibra
 
 FROM builder AS dev
 RUN install -d /opt/vibra/bin /opt/vibra/stdlib \
     && install -m 0755 /src/target/release/vibra /opt/vibra/bin/vibra \
     && cp -a /src/stdlib/. /opt/vibra/stdlib/ \
+    && cp /src/release.vibra /opt/vibra/release.vibra \
     && cargo --version \
     && dirname "$(command -v cargo)" > /opt/vibra/cargo-bin \
     && git --version
@@ -35,6 +40,7 @@ CMD ["--help"]
 FROM ${LINUX_RUNTIME_IMAGE} AS runtime
 COPY --from=builder --chown=nonroot:nonroot /src/target/release/vibra /opt/vibra/bin/vibra
 COPY --from=builder --chown=nonroot:nonroot /src/stdlib /opt/vibra/stdlib
+COPY --from=builder --chown=nonroot:nonroot /src/release.vibra /opt/vibra/release.vibra
 ENV PATH="/opt/vibra/bin"
 USER nonroot
 ENTRYPOINT ["/opt/vibra/bin/vibra"]

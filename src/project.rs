@@ -86,6 +86,15 @@ pub struct LoadedProject {
     pub manifest: ProjectManifest,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct ReleaseMetadata {
+    format_version: u32,
+    stdlib_git: String,
+    stdlib_rev: String,
+    stdlib_sha256: String,
+}
+
 pub fn init_project(path: &Path, template: InitTemplate) -> Result<()> {
     if path.exists() && fs::read_dir(path)?.next().is_some() {
         bail!(
@@ -724,6 +733,12 @@ fn locate_stdlib_package() -> Result<PathBuf> {
             for ancestor in parent.ancestors() {
                 let candidate = ancestor.join("stdlib");
                 if candidate.join("src/io.vibra").exists() {
+                    let release = ancestor.join("release.vibra");
+                    if release.exists() {
+                        validate_distributed_stdlib(&candidate, &release)?;
+                    } else if candidate != Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib") {
+                        bail!("E-DIST-002: installed toolchain is missing `release.vibra` beside its bundled stdlib");
+                    }
                     return Ok(candidate);
                 }
             }
@@ -731,10 +746,58 @@ fn locate_stdlib_package() -> Result<PathBuf> {
     }
 
     let candidate = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
-    if candidate.join("src/io.vibra").exists() {
+    if cfg!(debug_assertions) && candidate.join("src/io.vibra").exists() {
         return Ok(candidate);
     }
-    bail!("cannot locate stdlib directory for project initialization");
+    bail!("E-DIST-001: cannot locate the bundled stdlib; expected `stdlib/` beside the toolchain `bin/` directory");
+}
+
+fn validate_distributed_stdlib(stdlib: &Path, release: &Path) -> Result<()> {
+    let text = fs::read_to_string(release)
+        .with_context(|| format!("E-DIST-002: read release metadata `{}`", release.display()))?;
+    let metadata: ReleaseMetadata = serde_yaml::from_str(&text)
+        .with_context(|| format!("E-DIST-002: parse release metadata `{}`", release.display()))?;
+    if metadata.format_version != 1
+        || metadata.stdlib_git != STDLIB_GIT
+        || metadata.stdlib_rev != STDLIB_REV
+    {
+        bail!("E-DIST-003: bundled stdlib identity does not match this compiler (expected {STDLIB_GIT}#{STDLIB_REV})");
+    }
+    let actual = hash_release_stdlib(stdlib)?;
+    if actual != metadata.stdlib_sha256 {
+        bail!("E-DIST-004: bundled stdlib content is damaged or mismatched: expected {}, found {actual}", metadata.stdlib_sha256);
+    }
+    Ok(())
+}
+
+fn hash_release_stdlib(root: &Path) -> Result<String> {
+    let mut files = Vec::new();
+    fn collect(root: &Path, directory: &Path, files: &mut Vec<(String, PathBuf)>) -> Result<()> {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                collect(root, &entry.path(), files)?;
+            } else {
+                let relative = entry
+                    .path()
+                    .strip_prefix(root)?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                files.push((relative, entry.path()));
+            }
+        }
+        Ok(())
+    }
+    collect(root, root, &mut files)?;
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut inventory = String::new();
+    for (relative, path) in files {
+        inventory.push_str(&format!(
+            "{relative} {:x}\n",
+            Sha256::digest(fs::read(path)?)
+        ));
+    }
+    Ok(format!("{:x}", Sha256::digest(inventory.as_bytes())))
 }
 
 fn write_bin_template(root: &Path, name: &str) -> Result<()> {
@@ -929,5 +992,28 @@ mod tests {
         let error =
             record_stdlib_revision("std", "std", STDLIB_GIT, "bbbb", &mut selected).unwrap_err();
         assert!(error.to_string().contains("E-DEP-006"));
+    }
+
+    #[test]
+    fn distributed_stdlib_validates_identity_and_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let stdlib = temp.path().join("stdlib");
+        fs::create_dir(&stdlib).unwrap();
+        fs::write(stdlib.join("io.vibra"), "io: true\n").unwrap();
+        let digest = hash_release_stdlib(&stdlib).unwrap();
+        let release = temp.path().join("release.vibra");
+        fs::write(&release, format!("format-version: 1\nstdlib-git: {STDLIB_GIT}\nstdlib-rev: {STDLIB_REV}\nstdlib-sha256: {digest}\n")).unwrap();
+        validate_distributed_stdlib(&stdlib, &release).unwrap();
+
+        fs::write(stdlib.join("io.vibra"), "tampered: true\n").unwrap();
+        assert!(validate_distributed_stdlib(&stdlib, &release)
+            .unwrap_err()
+            .to_string()
+            .contains("E-DIST-004"));
+        fs::write(&release, format!("format-version: 1\nstdlib-git: {STDLIB_GIT}\nstdlib-rev: 0000000000000000000000000000000000000000\nstdlib-sha256: {digest}\n")).unwrap();
+        assert!(validate_distributed_stdlib(&stdlib, &release)
+            .unwrap_err()
+            .to_string()
+            .contains("E-DIST-003"));
     }
 }
