@@ -20,6 +20,8 @@ vibra run examples/hello.vibra
 
 This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
 
+Source execution emits and enters a deterministic WebAssembly module through the versioned `vibra_v1` host boundary. See [the ABI design](docs/wasm-abi.md) for the entrypoint, capability, value-layout, import-validation, and compatibility contract.
+
 ## Structural code tools
 
 `vibra code` queries and transactionally edits project-owned Vibra files through
