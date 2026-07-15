@@ -533,7 +533,7 @@ fn copy_clean_repository_tree(source: &Path, destination: &Path) -> Result<()> {
         if entry.file_type()?.is_dir() {
             copy_clean_repository_tree(&from, &to)?;
         } else {
-            fs::copy(&from, &to)
+            fs::write(&to, canonical_file_bytes(&from)?)
                 .with_context(|| format!("export {} to {}", from.display(), to.display()))?;
         }
     }
@@ -585,11 +585,28 @@ fn hash_directory(base: &Path, directory: &Path, hasher: &mut Sha256) -> Result<
                 .replace('\\', "/");
             hasher.update(relative.as_bytes());
             hasher.update([0]);
-            hasher.update(fs::read(&path)?);
+            hasher.update(canonical_file_bytes(&path)?);
             hasher.update([0]);
         }
     }
     Ok(())
+}
+
+/// Return the canonical bytes used by source vendoring, hashing, and `.vapp`
+/// archives. Git checkout settings may rewrite text files to CRLF on Windows;
+/// package identities must not depend on that local policy.
+pub(crate) fn canonical_file_bytes(path: &Path) -> Result<Vec<u8>> {
+    let bytes = fs::read(path)?;
+    let text = matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("vibra" | "yaml" | "yml" | "json" | "toml" | "md" | "txt")
+    );
+    if !text || !bytes.contains(&b'\r') {
+        return Ok(bytes);
+    }
+    let value = std::str::from_utf8(&bytes)
+        .with_context(|| format!("text source `{}` is not valid UTF-8", path.display()))?;
+    Ok(value.replace("\r\n", "\n").replace('\r', "\n").into_bytes())
 }
 
 fn validate_project_lock(project: &LoadedProject) -> Result<()> {
@@ -1015,5 +1032,32 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("E-DIST-003"));
+    }
+
+    #[test]
+    fn source_hashes_ignore_checkout_line_endings_but_preserve_binary_bytes() {
+        let unix = tempfile::tempdir().unwrap();
+        let windows = tempfile::tempdir().unwrap();
+        fs::write(unix.path().join("module.vibra"), b"value: one\nnext: two\n").unwrap();
+        fs::write(
+            windows.path().join("module.vibra"),
+            b"value: one\r\nnext: two\r\n",
+        )
+        .unwrap();
+        fs::write(unix.path().join("payload.bin"), b"a\r\nb").unwrap();
+        fs::write(windows.path().join("payload.bin"), b"a\r\nb").unwrap();
+
+        assert_eq!(
+            canonical_file_bytes(&unix.path().join("module.vibra")).unwrap(),
+            canonical_file_bytes(&windows.path().join("module.vibra")).unwrap()
+        );
+        assert_eq!(
+            canonical_file_bytes(&windows.path().join("payload.bin")).unwrap(),
+            b"a\r\nb"
+        );
+        assert_eq!(
+            hash_package_tree(unix.path()).unwrap(),
+            hash_package_tree(windows.path()).unwrap()
+        );
     }
 }

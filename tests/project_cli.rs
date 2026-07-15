@@ -104,7 +104,7 @@ fn project_builds_verifies_inspects_and_runs_deterministic_vapp() {
     );
     let first = dir.path().join("first.vapp");
     let second = dir.path().join("second.vapp");
-    for output in [&first, &second] {
+    for (index, output) in [&first, &second].into_iter().enumerate() {
         let build = vibra_cmd()
             .current_dir(dir.path())
             .args(["build", "hello", "--output", &path_str(output)])
@@ -115,6 +115,24 @@ fn project_builds_verifies_inspects_and_runs_deterministic_vapp() {
             "build failed: {}",
             String::from_utf8_lossy(&build.stderr)
         );
+        if index == 0 {
+            fn rewrite_text_as_crlf(directory: &Path) {
+                for entry in std::fs::read_dir(directory).unwrap() {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        rewrite_text_as_crlf(&path);
+                    } else if matches!(
+                        path.extension().and_then(|extension| extension.to_str()),
+                        Some("vibra" | "yaml" | "md")
+                    ) {
+                        let text = std::fs::read_to_string(&path).unwrap();
+                        std::fs::write(&path, text.replace("\r\n", "\n").replace('\n', "\r\n"))
+                            .unwrap();
+                    }
+                }
+            }
+            rewrite_text_as_crlf(&dir.path().join("hello"));
+        }
     }
     assert_eq!(
         std::fs::read(&first).unwrap(),
