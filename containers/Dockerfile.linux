@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+ARG RUST_BUILDER_IMAGE=rust:1.94.1-slim-bookworm@sha256:cf9dd0ec73e75f827fe59123fff9dc65af1a1c8363c3c31ee8d7f8ad0b6a5fb2
+ARG LINUX_RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot@sha256:ce0d66bc0f64aae46e6a03add867b07f42cc7b8799c949c2e898057b7f75a151
+
+FROM ${RUST_BUILDER_IMAGE} AS builder
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends build-essential ca-certificates git libssl-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+RUN mkdir -p src \
+    && printf 'pub fn dependency_cache_seed() {}\n' > src/lib.rs \
+    && printf 'fn main() {}\n' > src/main.rs \
+    && cargo build --release --locked \
+    && rm -rf src
+COPY src ./src
+RUN touch src/lib.rs src/main.rs \
+    && cargo build --release --locked
+COPY stdlib ./stdlib
+
+FROM builder AS dev
+RUN install -d /opt/vibra/bin /opt/vibra/stdlib \
+    && install -m 0755 /src/target/release/vibra /opt/vibra/bin/vibra \
+    && cp -a /src/stdlib/. /opt/vibra/stdlib/ \
+    && cargo --version \
+    && dirname "$(command -v cargo)" > /opt/vibra/cargo-bin \
+    && git --version
+ENV PATH="/opt/vibra/bin:/root/.cargo/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+WORKDIR /workspace
+ENTRYPOINT ["vibra"]
+CMD ["--help"]
+
+FROM ${LINUX_RUNTIME_IMAGE} AS runtime
+COPY --from=builder --chown=nonroot:nonroot /src/target/release/vibra /opt/vibra/bin/vibra
+COPY --from=builder --chown=nonroot:nonroot /src/stdlib /opt/vibra/stdlib
+ENV PATH="/opt/vibra/bin"
+USER nonroot
+ENTRYPOINT ["/opt/vibra/bin/vibra"]
+CMD ["--help"]

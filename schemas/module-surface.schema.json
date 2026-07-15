@@ -5,7 +5,11 @@
   "description": "Schema for a parsed module root mapping (post-YAML). Module-level keys are symbol names (kebab-case, optional leading `-` for module-private). Function definitions use function.schema.json; other symbols remain loosely described here.",
   "type": "object",
   "propertyNames": {
-    "pattern": "^-?[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    "pattern": "^(=comment|=lint|-?[a-z][a-z0-9]*(-[a-z0-9]+)*)$"
+  },
+  "properties": {
+    "=comment": { "type": "string" },
+    "=lint": { "$ref": "source-annotations.schema.json#/properties/=lint" }
   },
   "additionalProperties": {
     "if": {

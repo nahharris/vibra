@@ -1,0 +1,133 @@
+name: Container CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: container-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  change-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      source: ${{ steps.scope.outputs.source }}
+      image: ${{ steps.scope.outputs.image }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - run: pwsh ./tests/container-layout.ps1
+      - run: pwsh ./tests/container-workflows.ps1
+      - run: pwsh ./tests/container-docs.ps1
+      - run: pwsh ./tests/container-ci-classification.ps1
+      - run: pwsh ./tests/container-smoke.ps1 -Image unused -Platform linux -CheckOnly
+      - id: scope
+        name: Classify changed paths
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $allZero = $env:BASE_SHA -match '^0+$'
+          if (-not $env:BASE_SHA -or -not $env:HEAD_SHA -or $allZero) {
+            $scope = [pscustomobject]@{ Source = $true; Image = $true }
+          } else {
+            $paths = @(git diff --name-only $env:BASE_SHA $env:HEAD_SHA)
+            if ($LASTEXITCODE -ne 0 -or $paths.Count -eq 0) {
+              $scope = [pscustomobject]@{ Source = $true; Image = $true }
+            } else {
+              $scope = & ./.github/scripts/classify-container-ci-changes.ps1 -Paths $paths
+            }
+          }
+          "source=$($scope.Source.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "image=$($scope.Image.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+  source-baseline:
+    needs: change-scope
+    if: needs.change-scope.outputs.source == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: rustup toolchain install 1.94.1
+      - run: rustup default 1.94.1
+      - run: cargo test
+      - run: cargo run -- test
+
+  linux-amd64:
+    needs: change-scope
+    if: needs.change-scope.outputs.image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Build runtime image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        with:
+          context: .
+          file: containers/Dockerfile.linux
+          target: runtime
+          load: true
+          tags: vibra-ci:linux-amd64
+          cache-from: type=gha,scope=vibra-linux-amd64
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci:linux-amd64 -Platform linux
+      - name: Build development image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        with:
+          context: .
+          file: containers/Dockerfile.linux
+          target: dev
+          load: true
+          tags: vibra-ci-dev:linux-amd64
+          cache-from: type=gha,scope=vibra-linux-amd64
+          cache-to: type=gha,mode=max,scope=vibra-linux-amd64,ignore-error=true
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci-dev:linux-amd64 -Platform linux -Dev
+
+  linux-arm64:
+    needs: change-scope
+    if: needs.change-scope.outputs.image == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Build runtime image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        with:
+          context: .
+          file: containers/Dockerfile.linux
+          target: runtime
+          load: true
+          tags: vibra-ci:linux-arm64
+          cache-from: type=gha,scope=vibra-linux-arm64
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci:linux-arm64 -Platform linux
+      - name: Build development image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        with:
+          context: .
+          file: containers/Dockerfile.linux
+          target: dev
+          load: true
+          tags: vibra-ci-dev:linux-arm64
+          cache-from: type=gha,scope=vibra-linux-arm64
+          cache-to: type=gha,mode=max,scope=vibra-linux-arm64,ignore-error=true
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci-dev:linux-arm64 -Platform linux -Dev
+
+  windows-amd64:
+    needs: change-scope
+    if: needs.change-scope.outputs.image == 'true' && vars.VIBRA_WINDOWS_CONTAINERS_RUNNER == 'true'
+    runs-on: [self-hosted, windows, windows-containers]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: '& $Env:ProgramFiles\Docker\Docker\DockerCli.exe -SwitchWindowsEngine'
+        shell: pwsh
+      - run: pwsh ./tests/container-layout.ps1
+      - run: pwsh ./tests/container-workflows.ps1
+      - run: docker build --file containers/Dockerfile.windows --target runtime --tag vibra-ci:windows-amd64 .
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci:windows-amd64 -Platform windows
+      - run: docker build --file containers/Dockerfile.windows --target dev --tag vibra-ci-dev:windows-amd64 .
+      - run: pwsh ./tests/container-smoke.ps1 -Image vibra-ci-dev:windows-amd64 -Platform windows -Dev

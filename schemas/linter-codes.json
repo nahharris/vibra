@@ -236,6 +236,26 @@
       "code": "E-OPTION-001",
       "severity": "error",
       "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
+    },
+    {
+      "code": "E-YAML-002",
+      "severity": "error",
+      "summary": "YAML `#` comments are forbidden; use an attached `=comment` annotation"
+    },
+    {
+      "code": "E-COMMENT-001",
+      "severity": "error",
+      "summary": "`=comment` annotation must be a string scalar"
+    },
+    {
+      "code": "E-LINT-001",
+      "severity": "error",
+      "summary": "`=lint` must contain exactly a non-empty `disable` array of known lint codes or `all`"
+    },
+    {
+      "code": "E-ANNO-003",
+      "severity": "error",
+      "summary": "`=comment` and `=lint` must share a mapping with the syntax they describe"
     }
   ]
 }

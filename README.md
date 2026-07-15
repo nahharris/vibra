@@ -6,6 +6,7 @@ A vibe-coding-first programming language: **YAML** surface (strict subset), **st
 - **Philosophy:** [PHILOSOPHY.md](PHILOSOPHY.md)
 - **Schemas (tooling / LSP):** [schemas/](schemas/)
 - **Examples:** [examples/](examples/)
+- **[Container images](docs/containers.md)**
 
 ## Run (MVP)
 
@@ -19,16 +20,66 @@ vibra run examples/hello.vibra
 
 This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
 
-## Exec
+## Structural code tools
 
-`vibra exec` evaluates one inline Vibra expression and writes the result to stdout. It auto-imports [stdlib/code.vibra](stdlib/code.vibra) as `code`, so tooling can parse and rewrite Vibra source without patch files:
+`vibra code` queries and transactionally edits project-owned Vibra files through
+typed structural paths. Pipelines can be inline, read from stdin, or loaded from
+a file:
+
+```sh
+vibra code '- $code.file: src/main.vibra
+- $code.at: [main, do, 0, "$io.println"]
+- $code.replace: Changed'
+
+vibra code - < refactor.vibra
+vibra code --file refactor.vibra --write
+```
+
+Path strings select mapping keys and non-negative integers select sequence
+indices. Query pipelines print YAML. Editing pipelines preview a structured
+report and unified diff; `--write` rechecks source revisions and applies every
+changed file atomically.
+
+Available stages include file/path navigation, children/parent traversal,
+structural find and projection, save/load, replace/delete, mapping
+insert/upsert/rename, sequence insert/splice, copy/move, and workspace-wide
+symbol or import-alias rename.
+
+The same structural model is exposed by [stdlib/code.vibra](stdlib/code.vibra)
+through forms, typed key/index paths, revision-bound nodes, structural patterns
+with captures, and every edit primitive. Recoverable operations return typed
+result enums rather than aborting execution.
+
+`vibra exec` remains available for evaluating a single Vibra expression:
 
 ```sh
 vibra exec '"hello"' --format raw
-vibra exec '{$code.get: {$code.parse: $src}, path: "/main/do/0/$io.println"}' --arg-file src=examples/hello.vibra --format raw
 ```
 
-Use `--arg name=value` for string bindings, `--arg-file name=path` for file contents, and `--import alias=path` for additional modules. Code paths use JSON Pointer strings; `code.set`, `code.remove`, and `code.append` return a new document string and preserve comments/formatting where the editor can attach them.
+Use `--arg name=value`, `--arg-file name=path`, and `--import alias=path` to
+provide its explicit inputs.
+
+## Macros
+
+Function-shaped `$macro` declarations expand after import resolution and before
+normal lowering/typechecking. `$quote`, `$unquote`, and sequence `$splice`
+construct syntax; generated bindings are hygienic, while `$capture` explicitly
+requests caller-scoped syntax.
+
+```yaml
+identity:
+  $macro:
+    input: $code.expr-syntax
+  return: $code.expr-syntax
+  do:
+    - $return:
+        $quote:
+          $unquote: $args.input
+```
+
+Macro execution is deterministic and limited to 64 nested expansions,
+1,000,000 evaluation steps, and 100,000 generated nodes per module load.
+`vibra expand path/to/module.vibra` prints the canonical expanded module.
 
 ## Format and lint
 
@@ -48,13 +99,18 @@ vibra lint src --deny-warnings
 
 `vibra fmt` is check-only by default. It exits `0` when all files are canonical, exits `1` when check mode finds formatting drift, and only mutates files with `--write`.
 
-`vibra lint` emits diagnostics with stable codes, severity, and spans matching [schemas/diagnostic.schema.json](schemas/diagnostic.schema.json). Warning-only lint runs exit `0` unless `--deny-warnings` is set. Errors always fail. Suppress individual rules with comments:
+`vibra lint` emits diagnostics with stable codes, severity, and spans matching [schemas/diagnostic.schema.json](schemas/diagnostic.schema.json). Warning-only lint runs exit `0` unless `--deny-warnings` is set. Errors always fail. YAML `#` comments are forbidden; use structural annotations:
 
 ```yaml
-# vibra-lint-disable-next-line W-STYLE-001
-BadName: 1
-OtherBad: 2 # vibra-lint-disable-line W-STYLE-001
+BadName:
+  =comment: This external name is intentionally preserved.
+  =lint:
+    disable: [W-STYLE-001]
+  $literal: 1
 ```
+
+`=comment` is ignored by compilation. `=lint` applies to its mapping and
+descendants and cannot suppress syntax or compiler errors.
 
 ## Projects
 

@@ -1,90 +1,411 @@
 document:
   $newtype: $str
-
+node:
+  $newtype: $str
+workspace:
+  $newtype: $str
+query:
+  $record:
+    root: $path
+    include-root: $bool
+    mapping-key: $str
+    kind: $str
+    pattern: $pattern
+    limit: $uint64
+edit:
+  $newtype: $str
+change-set:
+  $newtype: $str
+expr-syntax:
+  $newtype: $str
+statement-syntax:
+  $newtype: $str
+type-syntax:
+  $newtype: $str
+definition-syntax:
+  $newtype: $str
+module-syntax:
+  $newtype: $str
+segment:
+  $enum:
+    key: $str
+    index: $uint64
+path:
+  $array: $segment
+form:
+  $enum:
+    'null': $void
+    bool: $bool
+    int: $int64
+    float: $float64
+    string: $str
+    sequence:
+      $array: $form
+    mapping:
+      $array: $entry
+entry:
+  $record:
+    key: $str
+    value: $form
+pattern:
+  $enum:
+    any: $void
+    exact: $form
+    capture: $pattern-capture
+    kind: $str
+    sequence:
+      $array: $pattern
+    mapping:
+      $array: $pattern-entry
+pattern-capture:
+  $record:
+    name: $str
+    pattern: $pattern
+pattern-entry:
+  $record:
+    key: $str
+    pattern: $pattern
+capture:
+  $record:
+    name: $str
+    value: $form
+match:
+  $record:
+    node: $node
+    captures:
+      $array: $capture
+error:
+  $record:
+    kind: $str
+    message: $str
+document-result:
+  $enum:
+    ok: $document
+    err: $error
+node-result:
+  $enum:
+    ok: $node
+    err: $error
+form-result:
+  $enum:
+    ok: $form
+    err: $error
+nodes-result:
+  $enum:
+    ok:
+      $array: $node
+    err: $error
+matches-result:
+  $enum:
+    ok:
+      $array: $match
+    err: $error
 parse:
   $function:
     input: $str
-  return: $document
+  return: $document-result
   do:
-    - $wasm:
-        import:
-          module: vibra_code
-          name: parse
-        args:
-          - $args.input
-
+  - $wasm:
+      import:
+        module: vibra_code
+        name: parse
+      args:
+      - $args.input
+make-query:
+  $function:
+    input: $path
+  args:
+    include-root: $bool
+    mapping-key: $str
+    kind: $str
+    pattern: $pattern
+    limit: $uint64
+  return: $query
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: make-query
+      args:
+      - $args.input
+      - $args.include-root
+      - $args.mapping-key
+      - $args.kind
+      - $args.pattern
+      - $args.limit
+capture-pattern:
+  $function:
+    input: $pattern
+  args:
+    name: $str
+  return: $pattern
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: capture-pattern
+      args:
+      - $args.input
+      - $args.name
 emit:
   $function:
     input: $document
   return: $str
   do:
-    - $wasm:
-        import:
-          module: vibra_code
-          name: emit
-        args:
-          - $args.input
-
-get:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: emit
+      args:
+      - $args.input
+root:
+  $function:
+    input: $document
+  return: $node-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: root
+      args:
+      - $args.input
+at:
   $function:
     input: $document
   args:
-    path: $str
+    path: $path
+  return: $node-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: at
+      args:
+      - $args.input
+      - $args.path
+parent:
+  $function:
+    input: $node
+  return: $node-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: parent
+      args:
+      - $args.input
+children:
+  $function:
+    input: $node
+  return: $nodes-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: children
+      args:
+      - $args.input
+find:
+  $function:
+    input: $document
+  args:
+    query: $query
+  return: $matches-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: find
+      args:
+      - $args.input
+      - $args.query
+source:
+  $function:
+    input: $node
   return: $str
   do:
-    - $wasm:
-        import:
-          module: vibra_code
-          name: get
-        args:
-          - $args.input
-          - $args.path
-
-set:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: source
+      args:
+      - $args.input
+to-form:
+  $function:
+    input: $node
+  return: $form-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: to-form
+      args:
+      - $args.input
+render:
+  $function:
+    input: $form
+  return: $str
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: render
+      args:
+      - $args.input
+replace:
   $function:
     input: $document
   args:
-    path: $str
-    value: $str
-  return: $document
+    target: $node
+    value: $form
+  return: $document-result
   do:
-    - $wasm:
-        import:
-          module: vibra_code
-          name: set
-        args:
-          - $args.input
-          - $args.path
-          - $args.value
-
-remove:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: replace
+      args:
+      - $args.input
+      - $args.target
+      - $args.value
+delete:
   $function:
     input: $document
   args:
-    path: $str
-  return: $document
+    target: $node
+  return: $document-result
   do:
-    - $wasm:
-        import:
-          module: vibra_code
-          name: remove
-        args:
-          - $args.input
-          - $args.path
-
-append:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: delete
+      args:
+      - $args.input
+      - $args.target
+upsert-mapping:
   $function:
     input: $document
   args:
-    path: $str
-    value: $str
-  return: $document
+    target: $node
+    key: $str
+    value: $form
+  return: $document-result
   do:
-    - $wasm:
-        import:
-          module: vibra_code
-          name: append
-        args:
-          - $args.input
-          - $args.path
-          - $args.value
+  - $wasm:
+      import:
+        module: vibra_code
+        name: upsert-mapping
+      args:
+      - $args.input
+      - $args.target
+      - $args.key
+      - $args.value
+insert-mapping:
+  $function:
+    input: $document
+  args:
+    target: $node
+    key: $str
+    value: $form
+  return: $document-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: insert-mapping
+      args:
+      - $args.input
+      - $args.target
+      - $args.key
+      - $args.value
+rename-key:
+  $function:
+    input: $document
+  args:
+    target: $node
+    new-key: $str
+  return: $document-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: rename-key
+      args:
+      - $args.input
+      - $args.target
+      - $args.new-key
+insert-sequence:
+  $function:
+    input: $document
+  args:
+    target: $node
+    index: $uint64
+    value: $form
+  return: $document-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: insert-sequence
+      args:
+      - $args.input
+      - $args.target
+      - $args.index
+      - $args.value
+splice-sequence:
+  $function:
+    input: $document
+  args:
+    target: $node
+    start: $uint64
+    delete-count: $uint64
+    values:
+      $array: $form
+  return: $document-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: splice-sequence
+      args:
+      - $args.input
+      - $args.target
+      - $args.start
+      - $args.delete-count
+      - $args.values
+copy:
+  $function:
+    input: $document
+  args:
+    source: $node
+    target: $node
+    destination: $segment
+  return: $document-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: copy
+      args:
+      - $args.input
+      - $args.source
+      - $args.target
+      - $args.destination
+move:
+  $function:
+    input: $document
+  args:
+    source: $node
+    target: $node
+    destination: $segment
+  return: $document-result
+  do:
+  - $wasm:
+      import:
+        module: vibra_code
+        name: move
+      args:
+      - $args.input
+      - $args.source
+      - $args.target
+      - $args.destination

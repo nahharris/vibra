@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/code-query.schema.json",
+  "title": "VibraCodeQuery",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "root": { "$ref": "./code-path.schema.json" },
+    "include-root": { "type": "boolean" },
+    "key": { "type": "string" },
+    "mapping-key": { "type": "string" },
+    "kind": { "enum": ["scalar", "mapping", "sequence"] },
+    "scalar": { "$ref": "./code-form.schema.json" },
+    "pattern": { "$ref": "#/$defs/pattern" },
+    "semantic": {
+      "enum": ["definition", "import", "reference", "call"]
+    },
+    "symbol": { "type": "string" },
+    "limit": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "pattern": {
+      "oneOf": [
+        { "const": "any" },
+        {
+          "type": "object",
+          "required": ["exact"],
+          "properties": {
+            "exact": { "$ref": "./code-form.schema.json" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "enum": ["scalar", "mapping", "sequence"] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["capture", "pattern"],
+          "properties": {
+            "capture": { "type": "string" },
+            "pattern": { "$ref": "#/$defs/pattern" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/pattern" }
+        }
+      ]
+    }
+  }
+}

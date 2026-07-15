@@ -50,6 +50,12 @@
     },
     "=where": {
       "type": "object"
+    },
+    "=comment": {
+      "type": "string"
+    },
+    "=lint": {
+      "$ref": "source-annotations.schema.json#/properties/=lint"
     }
   },
   "allOf": [

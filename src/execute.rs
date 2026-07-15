@@ -1065,6 +1065,425 @@ fn result_ok(sig: &crate::lower::FunctionSig, value: RuntimeValue) -> RuntimeVal
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CodeNodeHandle {
+    source: String,
+    path: crate::code::Path,
+    revision: String,
+    fingerprint: String,
+}
+
+fn code_document(
+    source: &str,
+) -> std::result::Result<
+    (crate::code::SourceDatabase, crate::code::DocumentSnapshot),
+    crate::code::CodeError,
+> {
+    let database = crate::code::SourceDatabase::from_sources(
+        PathBuf::from("."),
+        [(PathBuf::from("document.vibra"), source.to_string())],
+    )?;
+    let document = database.document("document.vibra")?;
+    Ok((database, document))
+}
+
+fn encode_code_node(
+    source: &str,
+    node: &crate::code::Node,
+) -> std::result::Result<String, crate::code::CodeError> {
+    serde_json::to_string(&CodeNodeHandle {
+        source: source.to_string(),
+        path: node.path().clone(),
+        revision: node.revision().to_string(),
+        fingerprint: node.fingerprint().to_string(),
+    })
+    .map_err(|error| {
+        crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            format!("encode structural node handle: {error}"),
+        )
+    })
+}
+
+fn decode_code_node(
+    handle: &str,
+) -> std::result::Result<(String, crate::code::Node), crate::code::CodeError> {
+    let handle: CodeNodeHandle = serde_json::from_str(handle).map_err(|error| {
+        crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            format!("decode structural node handle: {error}"),
+        )
+    })?;
+    let (_, document) = code_document(&handle.source)?;
+    if document.revision() != handle.revision {
+        return Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::StaleRevision,
+            "structural node document revision changed",
+        ));
+    }
+    let node = document.at(&handle.path)?;
+    if node.fingerprint() != handle.fingerprint {
+        return Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::StaleNode,
+            "structural node fingerprint changed",
+        ));
+    }
+    Ok((handle.source, node))
+}
+
+fn typed_code_value(type_name: &str, value: RuntimeValue) -> RuntimeValue {
+    RuntimeValue::Typed {
+        type_ref: TypeRef::Named(type_name.to_string()),
+        value: Box::new(value),
+    }
+}
+
+fn code_result_err(
+    sig: &crate::lower::FunctionSig,
+    error: &crate::code::CodeError,
+) -> RuntimeValue {
+    let kind = serde_json::to_value(error.kind)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "code-error".to_string());
+    let payload = RuntimeValue::Record(std::collections::BTreeMap::from([
+        ("kind".to_string(), RuntimeValue::Str(kind)),
+        (
+            "message".to_string(),
+            RuntimeValue::Str(error.message.clone()),
+        ),
+    ]));
+    RuntimeValue::Enum {
+        enum_key: result_enum_key(sig),
+        tag: "err".to_string(),
+        payload: Some(Box::new(typed_code_value("code.error", payload))),
+    }
+}
+
+fn code_path_from_runtime(
+    value: &RuntimeValue,
+) -> std::result::Result<crate::code::Path, crate::code::CodeError> {
+    let RuntimeValue::Array(segments) = untyped(value) else {
+        return Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            "code path must be an array of key/index segments",
+        ));
+    };
+    let mut path = crate::code::Path::root();
+    for segment in segments {
+        let RuntimeValue::Enum { tag, payload, .. } = untyped(segment) else {
+            return Err(crate::code::CodeError::new(
+                crate::code::CodeErrorKind::InvalidForm,
+                "code path segment must be `segment.key` or `segment.index`",
+            ));
+        };
+        let payload = payload.as_deref().ok_or_else(|| {
+            crate::code::CodeError::new(
+                crate::code::CodeErrorKind::InvalidForm,
+                "code path segment requires a payload",
+            )
+        })?;
+        match (tag.as_str(), untyped(payload)) {
+            ("key", RuntimeValue::Str(key)) => {
+                path.push(crate::code::Segment::key(key.clone()));
+            }
+            ("index", RuntimeValue::Int(index)) => {
+                let index = usize::try_from(*index).map_err(|_| {
+                    crate::code::CodeError::new(
+                        crate::code::CodeErrorKind::InvalidForm,
+                        "code path index must be non-negative",
+                    )
+                })?;
+                path.push(crate::code::Segment::index(index));
+            }
+            _ => {
+                return Err(crate::code::CodeError::new(
+                    crate::code::CodeErrorKind::InvalidForm,
+                    "code path segment payload has the wrong type",
+                ));
+            }
+        }
+    }
+    Ok(path)
+}
+
+fn code_segment_from_runtime(
+    value: &RuntimeValue,
+) -> std::result::Result<crate::code::Segment, crate::code::CodeError> {
+    let RuntimeValue::Enum { tag, payload, .. } = untyped(value) else {
+        return Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            "code destination must be a key/index segment",
+        ));
+    };
+    let payload = payload.as_deref().ok_or_else(|| {
+        crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            "code destination segment requires a payload",
+        )
+    })?;
+    match (tag.as_str(), untyped(payload)) {
+        ("key", RuntimeValue::Str(key)) => Ok(crate::code::Segment::key(key.clone())),
+        ("index", RuntimeValue::Int(index)) => {
+            code_usize(*index, "code destination index").map(crate::code::Segment::index)
+        }
+        _ => Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            "code destination segment payload has the wrong type",
+        )),
+    }
+}
+
+fn code_usize(value: i64, label: &str) -> std::result::Result<usize, crate::code::CodeError> {
+    usize::try_from(value).map_err(|_| {
+        crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            format!("{label} must be non-negative"),
+        )
+    })
+}
+
+fn code_form_from_runtime(
+    value: &RuntimeValue,
+) -> std::result::Result<crate::code::Form, crate::code::CodeError> {
+    let RuntimeValue::Enum { tag, payload, .. } = untyped(value) else {
+        return Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            "code form must be a `code.form` value",
+        ));
+    };
+    let payload = payload.as_deref().map(untyped);
+    match (tag.as_str(), payload) {
+        ("null", _) => Ok(crate::code::Form::Null),
+        ("bool", Some(RuntimeValue::Bool(value))) => Ok(crate::code::Form::Bool(*value)),
+        ("int", Some(RuntimeValue::Int(value))) => Ok(crate::code::Form::Int(*value)),
+        ("float", Some(RuntimeValue::Float(value))) => Ok(crate::code::Form::Float(*value)),
+        ("string", Some(RuntimeValue::Str(value))) => Ok(crate::code::Form::String(value.clone())),
+        ("sequence", Some(RuntimeValue::Array(values))) => values
+            .iter()
+            .map(code_form_from_runtime)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map(crate::code::Form::Sequence),
+        ("mapping", Some(RuntimeValue::Array(entries))) => entries
+            .iter()
+            .map(|entry| {
+                let RuntimeValue::Record(fields) = untyped(entry) else {
+                    return Err(crate::code::CodeError::new(
+                        crate::code::CodeErrorKind::InvalidForm,
+                        "code mapping entry must be a record",
+                    ));
+                };
+                let key = fields.get("key").and_then(|value| match untyped(value) {
+                    RuntimeValue::Str(value) => Some(value.clone()),
+                    _ => None,
+                });
+                let key = key.ok_or_else(|| {
+                    crate::code::CodeError::new(
+                        crate::code::CodeErrorKind::InvalidForm,
+                        "code mapping entry key must be a string",
+                    )
+                })?;
+                let value = fields.get("value").ok_or_else(|| {
+                    crate::code::CodeError::new(
+                        crate::code::CodeErrorKind::InvalidForm,
+                        "code mapping entry requires a value",
+                    )
+                })?;
+                Ok(crate::code::Entry {
+                    key,
+                    value: code_form_from_runtime(value)?,
+                })
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map(crate::code::Form::Mapping),
+        _ => Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            format!("invalid code form variant `{tag}`"),
+        )),
+    }
+}
+
+fn code_form_to_runtime(form: &crate::code::Form) -> RuntimeValue {
+    let (tag, payload) = match form {
+        crate::code::Form::Null => ("null", None),
+        crate::code::Form::Bool(value) => ("bool", Some(Box::new(RuntimeValue::Bool(*value)))),
+        crate::code::Form::Int(value) => ("int", Some(Box::new(RuntimeValue::Int(*value)))),
+        crate::code::Form::Float(value) => ("float", Some(Box::new(RuntimeValue::Float(*value)))),
+        crate::code::Form::String(value) => {
+            ("string", Some(Box::new(RuntimeValue::Str(value.clone()))))
+        }
+        crate::code::Form::Sequence(values) => (
+            "sequence",
+            Some(Box::new(RuntimeValue::Array(
+                values.iter().map(code_form_to_runtime).collect(),
+            ))),
+        ),
+        crate::code::Form::Mapping(entries) => (
+            "mapping",
+            Some(Box::new(RuntimeValue::Array(
+                entries
+                    .iter()
+                    .map(|entry| {
+                        RuntimeValue::Record(std::collections::BTreeMap::from([
+                            ("key".to_string(), RuntimeValue::Str(entry.key.clone())),
+                            ("value".to_string(), code_form_to_runtime(&entry.value)),
+                        ]))
+                    })
+                    .collect(),
+            ))),
+        ),
+    };
+    RuntimeValue::Enum {
+        enum_key: "code.form".to_string(),
+        tag: tag.to_string(),
+        payload,
+    }
+}
+
+fn code_pattern_from_runtime(
+    value: &RuntimeValue,
+) -> std::result::Result<crate::code::Pattern, crate::code::CodeError> {
+    let RuntimeValue::Enum { tag, payload, .. } = untyped(value) else {
+        return Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            "code pattern must be a `code.pattern` value",
+        ));
+    };
+    let payload = payload.as_deref().map(untyped);
+    match (tag.as_str(), payload) {
+        ("any", _) => Ok(crate::code::Pattern::Any),
+        ("exact", Some(value)) => Ok(crate::code::Pattern::Exact(code_form_from_runtime(value)?)),
+        ("kind", Some(RuntimeValue::Str(kind))) => {
+            Ok(crate::code::Pattern::Kind(code_node_kind(kind)?))
+        }
+        ("capture", Some(RuntimeValue::Record(fields))) => {
+            let name = code_record_string(fields, "name")?;
+            let pattern = fields.get("pattern").ok_or_else(|| {
+                crate::code::CodeError::new(
+                    crate::code::CodeErrorKind::InvalidForm,
+                    "capture pattern requires `pattern`",
+                )
+            })?;
+            Ok(crate::code::Pattern::capture(
+                name,
+                code_pattern_from_runtime(pattern)?,
+            ))
+        }
+        ("sequence", Some(RuntimeValue::Array(patterns))) => patterns
+            .iter()
+            .map(code_pattern_from_runtime)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map(crate::code::Pattern::Sequence),
+        ("mapping", Some(RuntimeValue::Array(entries))) => entries
+            .iter()
+            .map(|entry| {
+                let RuntimeValue::Record(fields) = untyped(entry) else {
+                    return Err(crate::code::CodeError::new(
+                        crate::code::CodeErrorKind::InvalidForm,
+                        "mapping pattern entry must be a record",
+                    ));
+                };
+                let key = code_record_string(fields, "key")?;
+                let pattern = fields.get("pattern").ok_or_else(|| {
+                    crate::code::CodeError::new(
+                        crate::code::CodeErrorKind::InvalidForm,
+                        "mapping pattern entry requires `pattern`",
+                    )
+                })?;
+                Ok((key, code_pattern_from_runtime(pattern)?))
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map(crate::code::Pattern::Mapping),
+        _ => Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            format!("invalid code pattern variant `{tag}`"),
+        )),
+    }
+}
+
+fn code_query_from_runtime(
+    value: &RuntimeValue,
+) -> std::result::Result<crate::code::Query, crate::code::CodeError> {
+    let RuntimeValue::Record(fields) = untyped(value) else {
+        return Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            "code query must be a record",
+        ));
+    };
+    let root = fields
+        .get("root")
+        .ok_or_else(|| {
+            crate::code::CodeError::new(
+                crate::code::CodeErrorKind::InvalidForm,
+                "code query requires `root`",
+            )
+        })
+        .and_then(code_path_from_runtime)?;
+    let include_root = matches!(
+        fields.get("include-root").map(untyped),
+        Some(RuntimeValue::Bool(true))
+    );
+    let mut query = if include_root {
+        crate::code::Query::subtree(root)
+    } else {
+        crate::code::Query::descendants(root)
+    };
+    let mapping_key = code_record_string(fields, "mapping-key")?;
+    if !mapping_key.is_empty() {
+        query = query.with_mapping_key(mapping_key);
+    }
+    let kind = code_record_string(fields, "kind")?;
+    if !kind.is_empty() {
+        query = query.with_kind(code_node_kind(&kind)?);
+    }
+    if let Some(pattern) = fields.get("pattern") {
+        let pattern = code_pattern_from_runtime(pattern)?;
+        if pattern != crate::code::Pattern::Any {
+            query = query.with_pattern(pattern);
+        }
+    }
+    let limit = match fields.get("limit").map(untyped) {
+        Some(RuntimeValue::Int(limit)) => code_usize(*limit, "code query limit")?,
+        _ => {
+            return Err(crate::code::CodeError::new(
+                crate::code::CodeErrorKind::InvalidForm,
+                "code query limit must be an integer",
+            ));
+        }
+    };
+    if limit > 0 {
+        query = query.with_limit(limit);
+    }
+    Ok(query)
+}
+
+fn code_node_kind(
+    kind: &str,
+) -> std::result::Result<crate::code::NodeKind, crate::code::CodeError> {
+    match kind {
+        "scalar" => Ok(crate::code::NodeKind::Scalar),
+        "mapping" => Ok(crate::code::NodeKind::Mapping),
+        "sequence" => Ok(crate::code::NodeKind::Sequence),
+        _ => Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            format!("unknown code node kind `{kind}`"),
+        )),
+    }
+}
+
+fn code_record_string(
+    fields: &std::collections::BTreeMap<String, RuntimeValue>,
+    name: &str,
+) -> std::result::Result<String, crate::code::CodeError> {
+    match fields.get(name).map(untyped) {
+        Some(RuntimeValue::Str(value)) => Ok(value.clone()),
+        _ => Err(crate::code::CodeError::new(
+            crate::code::CodeErrorKind::InvalidForm,
+            format!("code record field `{name}` must be a string"),
+        )),
+    }
+}
+
 fn result_err(
     sig: &crate::lower::FunctionSig,
     error_tag: &str,
@@ -1351,50 +1770,425 @@ fn exec_call(
 
             if import.module == "vibra_code" {
                 return match import.name.as_str() {
+                    "make-query" => {
+                        let root = eval_expr(&call.args[0], env, program, files, config)?;
+                        let include_root = eval_expr(&call.args[1], env, program, files, config)?;
+                        let mapping_key = eval_expr(&call.args[2], env, program, files, config)?;
+                        let kind = eval_expr(&call.args[3], env, program, files, config)?;
+                        let pattern = eval_expr(&call.args[4], env, program, files, config)?;
+                        let limit = eval_expr(&call.args[5], env, program, files, config)?;
+                        Ok(RuntimeValue::Record(std::collections::BTreeMap::from([
+                            ("root".to_string(), root),
+                            ("include-root".to_string(), include_root),
+                            ("mapping-key".to_string(), mapping_key),
+                            ("kind".to_string(), kind),
+                            ("pattern".to_string(), pattern),
+                            ("limit".to_string(), limit),
+                        ])))
+                    }
+                    "capture-pattern" => {
+                        let pattern = eval_expr(&call.args[0], env, program, files, config)?;
+                        let name = eval_string(&call.args[1], env, program, files, config)?;
+                        Ok(RuntimeValue::Enum {
+                            enum_key: "code.pattern".to_string(),
+                            tag: "capture".to_string(),
+                            payload: Some(Box::new(RuntimeValue::Record(
+                                std::collections::BTreeMap::from([
+                                    ("name".to_string(), RuntimeValue::Str(name)),
+                                    ("pattern".to_string(), pattern),
+                                ]),
+                            ))),
+                        })
+                    }
                     "parse" => {
                         let source = eval_string(&call.args[0], env, program, files, config)?;
-                        let doc = crate::code_doc::parse(&source)?;
-                        Ok(RuntimeValue::Typed {
-                            type_ref: sig.return_type.clone(),
-                            value: Box::new(RuntimeValue::Str(doc)),
+                        Ok(match code_document(&source) {
+                            Ok(_) => result_ok(
+                                sig,
+                                typed_code_value("code.document", RuntimeValue::Str(source)),
+                            ),
+                            Err(error) => code_result_err(sig, &error),
                         })
                     }
                     "emit" => {
-                        let doc = eval_string(&call.args[0], env, program, files, config)?;
-                        Ok(RuntimeValue::Str(crate::code_doc::emit(&doc)?))
+                        let source = eval_string(&call.args[0], env, program, files, config)?;
+                        Ok(RuntimeValue::Str(source))
                     }
-                    "get" => {
-                        let doc = eval_string(&call.args[0], env, program, files, config)?;
-                        let path = eval_string(&call.args[1], env, program, files, config)?;
-                        Ok(RuntimeValue::Str(crate::code_doc::get(&doc, &path)?))
+                    "root" => {
+                        let source = eval_string(&call.args[0], env, program, files, config)?;
+                        Ok(
+                            match code_document(&source).and_then(|(_, document)| document.root()) {
+                                Ok(node) => result_ok(
+                                    sig,
+                                    typed_code_value(
+                                        "code.node",
+                                        RuntimeValue::Str(encode_code_node(&source, &node)?),
+                                    ),
+                                ),
+                                Err(error) => code_result_err(sig, &error),
+                            },
+                        )
                     }
-                    "set" => {
-                        let doc = eval_string(&call.args[0], env, program, files, config)?;
-                        let path = eval_string(&call.args[1], env, program, files, config)?;
-                        let value = eval_string(&call.args[2], env, program, files, config)?;
-                        let doc = crate::code_doc::set(&doc, &path, &value)?;
-                        Ok(RuntimeValue::Typed {
-                            type_ref: sig.return_type.clone(),
-                            value: Box::new(RuntimeValue::Str(doc)),
+                    "at" => {
+                        let source = eval_string(&call.args[0], env, program, files, config)?;
+                        let path_value = eval_expr(&call.args[1], env, program, files, config)?;
+                        Ok(
+                            match code_path_from_runtime(&path_value).and_then(|path| {
+                                let (_, document) = code_document(&source)?;
+                                document.at(&path)
+                            }) {
+                                Ok(node) => result_ok(
+                                    sig,
+                                    typed_code_value(
+                                        "code.node",
+                                        RuntimeValue::Str(encode_code_node(&source, &node)?),
+                                    ),
+                                ),
+                                Err(error) => code_result_err(sig, &error),
+                            },
+                        )
+                    }
+                    "parent" => {
+                        let handle = eval_string(&call.args[0], env, program, files, config)?;
+                        Ok(
+                            match decode_code_node(&handle).and_then(|(source, node)| {
+                                let parent = node.path().parent().ok_or_else(|| {
+                                    crate::code::CodeError::new(
+                                        crate::code::CodeErrorKind::InvalidPath,
+                                        "root node has no parent",
+                                    )
+                                })?;
+                                let (_, document) = code_document(&source)?;
+                                document.at(&parent).map(|node| (source, node))
+                            }) {
+                                Ok((source, node)) => result_ok(
+                                    sig,
+                                    typed_code_value(
+                                        "code.node",
+                                        RuntimeValue::Str(encode_code_node(&source, &node)?),
+                                    ),
+                                ),
+                                Err(error) => code_result_err(sig, &error),
+                            },
+                        )
+                    }
+                    "children" => {
+                        let handle = eval_string(&call.args[0], env, program, files, config)?;
+                        Ok(
+                            match decode_code_node(&handle).and_then(|(source, node)| {
+                                node.children().map(|nodes| (source, nodes))
+                            }) {
+                                Ok((source, nodes)) => {
+                                    let handles = nodes
+                                        .iter()
+                                        .map(|node| {
+                                            encode_code_node(&source, node).map(|handle| {
+                                                typed_code_value(
+                                                    "code.node",
+                                                    RuntimeValue::Str(handle),
+                                                )
+                                            })
+                                        })
+                                        .collect::<std::result::Result<Vec<_>, _>>();
+                                    match handles {
+                                        Ok(handles) => result_ok(sig, RuntimeValue::Array(handles)),
+                                        Err(error) => code_result_err(sig, &error),
+                                    }
+                                }
+                                Err(error) => code_result_err(sig, &error),
+                            },
+                        )
+                    }
+                    "find" => {
+                        let source = eval_string(&call.args[0], env, program, files, config)?;
+                        let query = eval_expr(&call.args[1], env, program, files, config)?;
+                        Ok(
+                            match code_query_from_runtime(&query).and_then(|query| {
+                                let (_, document) = code_document(&source)?;
+                                query.execute(&document)
+                            }) {
+                                Ok(matches) => {
+                                    let matches = matches
+                                    .into_iter()
+                                    .map(|matched| {
+                                        let node = encode_code_node(&source, &matched.node)?;
+                                        let captures = matched
+                                            .captures
+                                            .into_iter()
+                                            .map(|(name, value)| {
+                                                RuntimeValue::Record(
+                                                    std::collections::BTreeMap::from([
+                                                        (
+                                                            "name".to_string(),
+                                                            RuntimeValue::Str(name),
+                                                        ),
+                                                        (
+                                                            "value".to_string(),
+                                                            code_form_to_runtime(&value),
+                                                        ),
+                                                    ]),
+                                                )
+                                            })
+                                            .collect();
+                                        Ok(RuntimeValue::Record(
+                                            std::collections::BTreeMap::from([
+                                                (
+                                                    "node".to_string(),
+                                                    typed_code_value(
+                                                        "code.node",
+                                                        RuntimeValue::Str(node),
+                                                    ),
+                                                ),
+                                                (
+                                                    "captures".to_string(),
+                                                    RuntimeValue::Array(captures),
+                                                ),
+                                            ]),
+                                        ))
+                                    })
+                                    .collect::<std::result::Result<
+                                        Vec<_>,
+                                        crate::code::CodeError,
+                                    >>();
+                                    match matches {
+                                        Ok(matches) => result_ok(sig, RuntimeValue::Array(matches)),
+                                        Err(error) => code_result_err(sig, &error),
+                                    }
+                                }
+                                Err(error) => code_result_err(sig, &error),
+                            },
+                        )
+                    }
+                    "source" => {
+                        let handle = eval_string(&call.args[0], env, program, files, config)?;
+                        let (_, node) = decode_code_node(&handle)
+                            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                        Ok(RuntimeValue::Str(node.source().to_string()))
+                    }
+                    "to-form" => {
+                        let handle = eval_string(&call.args[0], env, program, files, config)?;
+                        Ok(match decode_code_node(&handle) {
+                            Ok((_, node)) => result_ok(sig, code_form_to_runtime(node.form())),
+                            Err(error) => code_result_err(sig, &error),
                         })
                     }
-                    "remove" => {
-                        let doc = eval_string(&call.args[0], env, program, files, config)?;
-                        let path = eval_string(&call.args[1], env, program, files, config)?;
-                        let doc = crate::code_doc::remove(&doc, &path)?;
-                        Ok(RuntimeValue::Typed {
-                            type_ref: sig.return_type.clone(),
-                            value: Box::new(RuntimeValue::Str(doc)),
-                        })
+                    "render" => {
+                        let value = eval_expr(&call.args[0], env, program, files, config)?;
+                        let form = code_form_from_runtime(&value)
+                            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                        Ok(RuntimeValue::Str(
+                            form.render()
+                                .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+                        ))
                     }
-                    "append" => {
-                        let doc = eval_string(&call.args[0], env, program, files, config)?;
-                        let path = eval_string(&call.args[1], env, program, files, config)?;
-                        let value = eval_string(&call.args[2], env, program, files, config)?;
-                        let doc = crate::code_doc::append(&doc, &path, &value)?;
-                        Ok(RuntimeValue::Typed {
-                            type_ref: sig.return_type.clone(),
-                            value: Box::new(RuntimeValue::Str(doc)),
+                    "replace" | "delete" | "upsert-mapping" | "insert-mapping" | "rename-key"
+                    | "insert-sequence" | "splice-sequence" | "copy" | "move" => {
+                        let source = eval_string(&call.args[0], env, program, files, config)?;
+                        let result = (|| {
+                            let (database, document) = code_document(&source)?;
+                            let handle = eval_string(&call.args[1], env, program, files, config)
+                                .map_err(|error| {
+                                    crate::code::CodeError::new(
+                                        crate::code::CodeErrorKind::InvalidForm,
+                                        error.to_string(),
+                                    )
+                                })?;
+                            let (_, handle_node) = decode_code_node(&handle)?;
+                            if handle_node.revision() != document.revision() {
+                                return Err(crate::code::CodeError::new(
+                                    crate::code::CodeErrorKind::StaleRevision,
+                                    "node belongs to a different document revision",
+                                ));
+                            }
+                            let first = document.at(handle_node.path())?;
+                            let changes = match import.name.as_str() {
+                                "replace" => {
+                                    let value =
+                                        eval_expr(&call.args[2], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    crate::code::ChangeSet::new()
+                                        .replace(first.locator(), code_form_from_runtime(&value)?)
+                                }
+                                "delete" => crate::code::ChangeSet::new().delete(first.locator()),
+                                "upsert-mapping" | "insert-mapping" => {
+                                    let key =
+                                        eval_string(&call.args[2], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    let value =
+                                        eval_expr(&call.args[3], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    let value = code_form_from_runtime(&value)?;
+                                    if import.name == "upsert-mapping" {
+                                        crate::code::ChangeSet::new().upsert_mapping(
+                                            first.locator(),
+                                            key,
+                                            value,
+                                        )
+                                    } else {
+                                        crate::code::ChangeSet::new().insert_mapping(
+                                            first.locator(),
+                                            key,
+                                            value,
+                                        )
+                                    }
+                                }
+                                "rename-key" => {
+                                    let new_key =
+                                        eval_string(&call.args[2], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    crate::code::ChangeSet::new()
+                                        .rename_mapping_key(first.locator(), new_key)
+                                }
+                                "insert-sequence" => {
+                                    let index =
+                                        eval_expr(&call.args[2], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    let RuntimeValue::Int(index) = untyped(&index) else {
+                                        return Err(crate::code::CodeError::new(
+                                            crate::code::CodeErrorKind::InvalidForm,
+                                            "sequence insertion index must be an integer",
+                                        ));
+                                    };
+                                    let value =
+                                        eval_expr(&call.args[3], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    crate::code::ChangeSet::new().insert_sequence(
+                                        first.locator(),
+                                        code_usize(*index, "sequence insertion index")?,
+                                        code_form_from_runtime(&value)?,
+                                    )
+                                }
+                                "splice-sequence" => {
+                                    let start =
+                                        eval_expr(&call.args[2], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    let delete_count =
+                                        eval_expr(&call.args[3], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    let values =
+                                        eval_expr(&call.args[4], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    let (
+                                        RuntimeValue::Int(start),
+                                        RuntimeValue::Int(delete_count),
+                                        RuntimeValue::Array(values),
+                                    ) = (untyped(&start), untyped(&delete_count), untyped(&values))
+                                    else {
+                                        return Err(crate::code::CodeError::new(
+                                            crate::code::CodeErrorKind::InvalidForm,
+                                            "sequence splice expects integer bounds and form values",
+                                        ));
+                                    };
+                                    let values = values
+                                        .iter()
+                                        .map(code_form_from_runtime)
+                                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                                    crate::code::ChangeSet::new().splice_sequence(
+                                        first.locator(),
+                                        code_usize(*start, "sequence splice start")?,
+                                        code_usize(*delete_count, "sequence splice delete count")?,
+                                        values,
+                                    )
+                                }
+                                "copy" | "move" => {
+                                    let target_handle =
+                                        eval_string(&call.args[2], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    let (_, target_node) = decode_code_node(&target_handle)?;
+                                    if target_node.revision() != document.revision() {
+                                        return Err(crate::code::CodeError::new(
+                                            crate::code::CodeErrorKind::StaleRevision,
+                                            "target node belongs to a different document revision",
+                                        ));
+                                    }
+                                    let target = document.at(target_node.path())?;
+                                    let destination =
+                                        eval_expr(&call.args[3], env, program, files, config)
+                                            .map_err(|error| {
+                                                crate::code::CodeError::new(
+                                                    crate::code::CodeErrorKind::InvalidForm,
+                                                    error.to_string(),
+                                                )
+                                            })?;
+                                    if import.name == "copy" {
+                                        crate::code::ChangeSet::new().copy(
+                                            first.locator(),
+                                            target.locator(),
+                                            code_segment_from_runtime(&destination)?,
+                                        )
+                                    } else {
+                                        crate::code::ChangeSet::new().move_node(
+                                            first.locator(),
+                                            target.locator(),
+                                            code_segment_from_runtime(&destination)?,
+                                        )
+                                    }
+                                }
+                                _ => unreachable!("matched code edit import"),
+                            };
+                            let applied = database.apply(&changes)?;
+                            Ok(applied
+                                .database
+                                .document("document.vibra")?
+                                .source()
+                                .to_string())
+                        })();
+                        Ok(match result {
+                            Ok(source) => result_ok(
+                                sig,
+                                typed_code_value("code.document", RuntimeValue::Str(source)),
+                            ),
+                            Err(error) => code_result_err(sig, &error),
                         })
                     }
                     other => bail!("unsupported vibra_code import `{other}`"),
