@@ -457,10 +457,7 @@ fn discover_sources(
         let path = entry.path();
         if path.is_dir() {
             let name = entry.file_name();
-            if matches!(
-                name.to_str(),
-                Some(".git" | ".worktrees" | "target" | "dep")
-            ) {
+            if matches!(name.to_str(), Some(".git" | ".worktrees" | "target")) {
                 continue;
             }
             discover_sources(root, &path, sources)?;

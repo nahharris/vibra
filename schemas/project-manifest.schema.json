@@ -96,7 +96,7 @@
             "git": { "type": "string", "minLength": 1 },
             "rev": {
               "type": "string",
-              "pattern": "^[0-9a-fA-F]{7,40}$"
+              "pattern": "^[0-9a-fA-F]{40}$"
             }
           }
         }

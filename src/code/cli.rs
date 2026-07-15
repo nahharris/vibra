@@ -84,6 +84,20 @@ pub fn run_pipeline(options: CodeRunOptions) -> Result<String, CodeError> {
     if state.changed.is_empty() {
         return render_pipeline_value(&state.current);
     }
+    if let Some(path) = state.changed.iter().find(|path| {
+        matches!(
+            path.components().next(),
+            Some(std::path::Component::Normal(name)) if name == "dep" || name == "stdlib"
+        )
+    }) {
+        return Err(CodeError::new(
+            CodeErrorKind::EditConflict,
+            format!(
+                "dependency and stdlib source is read-only to code transactions: `{}`",
+                path.display()
+            ),
+        ));
+    }
     validate_transaction(&options.workspace, &state, options.lint, options.test)?;
     let report = build_report(&state, options.write)?;
     if options.write {

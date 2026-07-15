@@ -5795,6 +5795,48 @@ fn vibra_code_inline_previews_and_write_is_explicit() {
 }
 
 #[test]
+fn vibra_code_queries_but_cannot_edit_vendored_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("dep/std")).unwrap();
+    let dependency = dir.path().join("dep/std/io.vibra");
+    std::fs::write(&dependency, "value: original\n").unwrap();
+
+    let query = vibra_cmd()
+        .args([
+            "code",
+            "- $code.file: dep/std/io.vibra\n- $code.at: [value]",
+            "--workspace",
+            &path_str(dir.path()),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        query.status.success(),
+        "query failed: {}",
+        String::from_utf8_lossy(&query.stderr)
+    );
+    assert!(String::from_utf8_lossy(&query.stdout).contains("io.vibra"));
+    assert!(String::from_utf8_lossy(&query.stdout).contains("value"));
+
+    let edit = vibra_cmd()
+        .args([
+            "code",
+            "- $code.file: dep/std/io.vibra\n- $code.at: [value]\n- $code.replace: changed",
+            "--workspace",
+            &path_str(dir.path()),
+            "--write",
+        ])
+        .output()
+        .unwrap();
+    assert!(!edit.status.success());
+    assert!(String::from_utf8_lossy(&edit.stderr).contains("read-only"));
+    assert_eq!(
+        std::fs::read_to_string(dependency).unwrap(),
+        "value: original\n"
+    );
+}
+
+#[test]
 fn vibra_code_accepts_equivalent_stdin_and_file_pipelines() {
     use std::io::Write;
     use std::process::Stdio;
