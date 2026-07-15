@@ -14,6 +14,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{cell::RefCell, rc::Rc};
 
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
+    crate::wasm_backend::run_lowered(program, config)
+}
+
+pub(crate) fn run_lowered_interpreted(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     seed_main_args(program, config, &mut env)?;
     let mut files = FileTable::new(config.max_open_files);

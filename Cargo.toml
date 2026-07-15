@@ -25,8 +25,8 @@ getrandom = "0.2"
 serde_yaml = "0.9"
 sha2 = "0.10"
 wasm-encoder = "0.240"
-wasmer = "4.4"
-wasmer-wasix = { version = "0.28.0", default-features = false, features = ["sys-default"] }
+wasmer = "6.1"
+wasmer-wasix = { version = "0.601", default-features = false, features = ["sys-default"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 yaml-edit = "0.2.1"
 tempfile = "3.14"
