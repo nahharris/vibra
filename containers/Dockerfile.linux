@@ -17,6 +17,7 @@ RUN install -d /opt/vibra/bin /opt/vibra/stdlib \
     && install -m 0755 /src/target/release/vibra /opt/vibra/bin/vibra \
     && cp -a /src/stdlib/. /opt/vibra/stdlib/ \
     && cargo --version \
+    && dirname "$(command -v cargo)" > /opt/vibra/cargo-bin \
     && git --version
 # Keep the Rust image's toolchain available for the development image.  Setting
 # PATH to only Vibra previously made the dev-image smoke test unable to find

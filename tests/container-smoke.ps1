@@ -81,7 +81,7 @@ try {
 
     if ($Dev) {
         if ($Platform -eq 'linux') {
-            Invoke-Docker @('run', '--rm', '--entrypoint', '/bin/sh', $Image, '-lc', 'cd /src && cargo test && cargo run -- test')
+            Invoke-Docker @('run', '--rm', '--entrypoint', '/bin/sh', $Image, '-lc', 'export PATH="$(cat /opt/vibra/cargo-bin):$PATH"; cd /src && cargo test && cargo run -- test')
         }
         else {
             Invoke-Docker @('run', '--rm', '--entrypoint', 'cmd.exe', '-w', 'C:\src', $Image, '/S', '/C', 'C:\Vibra\devcmd.cmd cmd /S /C "cargo test && cargo run -- test"')
