@@ -1,0 +1,4 @@
+# Wasmer 4.4 references the compiler-builtins `__rust_probestack` archive symbol.
+# Rust 1.94's Linux x86_64 lld driver fails to extract it; GNU bfd resolves it.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=bfd"]
