@@ -4,7 +4,7 @@ A vibe-coding-first programming language: **YAML** surface (strict subset), **st
 
 - **Specification:** [DRAFT.md](DRAFT.md)
 - **Philosophy:** [PHILOSOPHY.md](PHILOSOPHY.md)
-- **Schemas (tooling / LSP):** [schemas/](schemas/)
+- **Schemas and tooling contracts:** [below](#schemas-and-tooling-contracts)
 - **Examples:** [examples/](examples/)
 - **[Container images](docs/containers.md)**
 
@@ -58,6 +58,34 @@ vibra exec '"hello"' --format raw
 
 Use `--arg name=value`, `--arg-file name=path`, and `--import alias=path` to
 provide its explicit inputs.
+
+## Schemas and tooling contracts
+
+The JSON Schema files in [`schemas/`](schemas/) describe the machine-readable
+Vibra surface used by editors, LSP clients, structural-code tooling, and
+automation. They complement the language rules in [DRAFT.md](DRAFT.md); they
+are not a complete specification of compiler behavior.
+
+- **Source surface:** [`module-surface.schema.json`](schemas/module-surface.schema.json),
+  [`function.schema.json`](schemas/function.schema.json),
+  [`macro.schema.json`](schemas/macro.schema.json),
+  [`type-expr.schema.json`](schemas/type-expr.schema.json),
+  [`expression.schema.json`](schemas/expression.schema.json), and
+  [`source-annotations.schema.json`](schemas/source-annotations.schema.json).
+- **Projects and diagnostics:** [`project-manifest.schema.json`](schemas/project-manifest.schema.json),
+  [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
+  code registry in [`linter-codes.json`](schemas/linter-codes.json).
+- **Structural code:** [`code-form.schema.json`](schemas/code-form.schema.json),
+  [`code-path.schema.json`](schemas/code-path.schema.json),
+  [`code-query.schema.json`](schemas/code-query.schema.json), and
+  [`code-change-set.schema.json`](schemas/code-change-set.schema.json).
+- **Editor queries:** [`query-response.schema.json`](schemas/query-response.schema.json)
+  specifies the `vibra/contextAt` (and `vibra query`) response shape.
+
+Each schema has a canonical `$id` under `https://vibra.dev/schemas/`. Tooling
+should use the schema that matches its boundary and treat the expression and
+module-surface schemas as deliberately permissive where contextual compiler
+validation is required.
 
 ## Macros
 
@@ -199,6 +227,8 @@ cargo run -- run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
 
 `vibra test` discovers `.vibra` files under `tests/` and runs each top-level
 `$test` declaration as an isolated test case. Test modules do not need `main`.
+The `$test` value is a non-empty kebab-case profile; a bare `vibra test` runs
+the grant-free `core` profile.
 
 ```yaml
 test:
@@ -213,13 +243,19 @@ truth:
 ```sh
 vibra test
 vibra test --filter truth
+vibra test --profile core --tag language
+vibra test --deny-skips --deny-warnings
 vibra test --jobs 4 --timeout-ms 30000 --fail-fast
 vibra test --report yaml --report-file report.yaml
 ```
 
-Runtime permission flags match `vibra run`; pass `--allow-read`,
-`--allow-write`, `--allow-env`, or `--allow-all` to grant test code access to
-privileged stdlib APIs.
+Profiles and tags only select tests; they never confer host permissions.
+Capability tests declare sibling `grants` and must be run with the matching
+explicit `--allow-*` flag. `workspace: temp` tests additionally need
+`--allow-test-workspace read`, `write`, or `read-write`; without it, they are
+reported as skipped. See [`tests/README.md`](tests/README.md) for expected
+errors, typed assertion helpers, profile contracts, and the complete flag
+reference.
 
 Files named `foo.*.vibra` are loaded as parts of the same module as
 `foo.vibra` when `foo.vibra` exists. A common convention is to place unit
