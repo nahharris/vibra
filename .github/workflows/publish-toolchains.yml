@@ -1,0 +1,69 @@
+name: Publish native toolchains
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  attestations: write
+  id-token: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: { submodules: recursive }
+      - name: Validate release tag
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]
+          [[ "$version" == "$cargo_version" ]]
+      - run: cargo test --locked
+      - run: cargo run --locked -- test
+      - shell: pwsh
+        run: ./tests/toolchain-distribution.ps1
+
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, platform: linux-amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux-arm64 }
+          - { runner: windows-2022, platform: windows-amd64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: { submodules: recursive }
+      - run: cargo build --release --locked
+      - id: package
+        shell: pwsh
+        run: |
+          $binary = if ('${{ runner.os }}' -eq 'Windows') { 'target/release/vibra.exe' } else { 'target/release/vibra' }
+          $version = '${{ github.ref_name }}'.Substring(1)
+          $archive = ./.github/scripts/package-toolchain.ps1 -Binary $binary -Platform '${{ matrix.platform }}' -Version $version -Revision '${{ github.sha }}' -OutputDirectory dist
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+      - shell: pwsh
+        run: ./tests/toolchain-smoke.ps1 -Archive '${{ steps.package.outputs.archive }}' -Platform '${{ matrix.platform }}'
+      - uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
+        with: { subject-path: '${{ steps.package.outputs.archive }}' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: { name: 'toolchain-${{ matrix.platform }}', path: '${{ steps.package.outputs.archive }}' }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: { path: dist, merge-multiple: true }
+      - run: cd dist && sha256sum vibra-* > sha256sums.txt
+      - uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631
+        with:
+          files: |
+            dist/vibra-*
+            dist/sha256sums.txt

@@ -31,6 +31,7 @@ Require-Content $toolchain 'channel\s*=\s*"1\.94\.1"' 'Rust toolchain channel pi
 Require-Content $toolchain 'profile\s*=\s*"minimal"' 'Rust toolchain minimal profile'
 
 Require-Content $linuxDockerfile 'COPY.*stdlib.*\/opt\/vibra\/stdlib' 'Linux stdlib runtime copy'
+Require-Content $linuxDockerfile 'release\.vibra.*\/opt\/vibra\/release\.vibra' 'Linux release metadata copy'
 Require-Content $linuxDockerfile '\/opt\/vibra\/bin' 'Linux binary layout'
 Require-Content $linuxDockerfile 'ARG RUST_BUILDER_IMAGE=rust:1\.94\.1-slim-bookworm@sha256:cf9dd0ec73e75f827fe59123fff9dc65af1a1c8363c3c31ee8d7f8ad0b6a5fb2' 'Pinned Linux Rust builder build argument default'
 Require-Content $linuxDockerfile 'FROM \$\{RUST_BUILDER_IMAGE\} AS builder' 'Linux Rust builder build argument use'
@@ -52,6 +53,7 @@ if ($dependencyBuild -lt 0 -or $sourceCopy -lt 0 -or $dependencyBuild -gt $sourc
 }
 
 Require-Content $windowsDockerfile 'COPY.*stdlib.*C:\\Vibra\\stdlib' 'Windows stdlib runtime copy'
+Require-Content $windowsDockerfile 'release\.vibra.*C:\\Vibra\\release\.vibra' 'Windows release metadata copy'
 Require-Content $windowsDockerfile 'C:\\Vibra\\bin' 'Windows binary layout'
 Require-Content $windowsDockerfile 'ARG WINDOWS_BUILDER_IMAGE=mcr\.microsoft\.com/windows/servercore:ltsc2022-amd64@sha256:c747aa0e4668af32773f6f81220fb95d49e2e55237d07fbc18a8138d1b0e4de7' 'Pinned Windows builder build argument default'
 Require-Content $windowsDockerfile 'FROM \$\{WINDOWS_BUILDER_IMAGE\} AS builder' 'Windows builder build argument use'

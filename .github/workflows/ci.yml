@@ -31,6 +31,9 @@ jobs:
         run: cargo fmt --check
       - name: Run Rust suite
         run: cargo test --all-targets
+      - name: Validate native distribution contracts
+        shell: pwsh
+        run: ./tests/toolchain-distribution.ps1
 
   vibra:
     name: Vibra-first end-to-end suite
