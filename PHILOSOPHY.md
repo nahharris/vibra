@@ -61,15 +61,15 @@ The safe path should be the default path.
 Vibra should prefer:
 
 - Default-deny access to privileged host capabilities.
-- Runtime-minted grant tokens for authority.
+- Runtime-minted, domain-typed capability values for authority.
 - Narrowable permissions that can only reduce authority, not widen it.
 - Nominal wrappers and interfaces that make invalid states unrepresentable.
 - Typed `result` and `option` flows instead of unchecked failure paths.
 - Clear diagnostics when code crosses a trust boundary.
 
-Unsafe escape hatches must be visible in source and easy for tooling to flag.
-The current arbitrary `$wasm` escape hatch is a known gap; future design should
-make `$wasm` trusted-stdlib-only or require an explicit unsafe/trust policy.
+Host interaction must be visible and mechanically auditable. `$wasm` binds only
+to the closed, versioned host ABI and is checked against its complete typed
+signature; declaring a wrapper never creates authority.
 
 ## Explicit Intent
 
@@ -83,7 +83,8 @@ Prefer:
 - Explicit generic type arguments at call sites and type positions.
 - Explicit `$cast` for nominal wrapper boundaries.
 - Explicit `$match` arms with local bindings.
-- Explicit `grants:` declarations and `=grants` forwarding for privileged APIs.
+- Explicit aggregate `$policy` declarations at roots and narrowed
+  `$capability.<domain>` arguments at privileged calls.
 - Explicit implementation blocks for nominal interface satisfaction.
 
 Inference is useful only when it narrows a local expression without hiding a
