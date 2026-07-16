@@ -1,8 +1,9 @@
 //! Execute lowered Vibra programs with stdlib io/fs support.
 
 use crate::lower::{
-    Call, CapabilityGrant, Expr, FunctionBody, GrantRequirement, GrantToken, LetValue, LoweredExec,
-    LoweredProgram, Pattern, PolicyType, PolicyValue, RuntimeValue, Statement, TypeRef,
+    Call, CapabilityDomain, CapabilityType, CapabilityValue, Expr, FunctionBody, HandleAccess,
+    HostHandle, LetValue, LoweredExec, LoweredProgram, Pattern, PolicyGroup, PolicyRequirement,
+    PolicyScope, PolicyType, PolicyValue, RuntimeValue, Statement, TypeRef, WasmArgSpec,
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
@@ -75,190 +76,196 @@ pub fn eval_lowered_exec(
     eval_expr(&exec.expr, &env, &exec.program, &mut files, config)
 }
 
+/// Seed every `$policy`-typed root argument (of `main` or a `$test`) with an
+/// **attenuated** capability value: the intersection of the requested policy
+/// type and the run's approved policy. Mandatory domain groups must intersect
+/// to a non-empty scope set; optional groups may end up empty and fail closed
+/// at the point of use.
 pub(crate) fn seed_main_args(
     program: &LoweredProgram,
     config: &RunConfig,
     env: &mut HashMap<String, RuntimeValue>,
 ) -> Result<()> {
+    let mut approved: Option<PolicyType> = None;
     for (name, ty) in &program.main_arg_bindings {
-        if let Some(value) = grant_status_value(ty, config) {
-            env.insert(name.clone(), value);
-        } else if is_policy_binding(name) {
-            let approved = config
-                .approved_policy
-                .clone()
-                .context("mandatory policy coverage is missing")?;
-            let requested = policy_type_from_type_ref(ty)
-                .context("main policy argument must have a concrete `$policy` type")?;
-            if !runtime_policy_covers(&approved, &requested) {
-                bail!("mandatory policy coverage is missing");
-            }
-            env.insert(
-                name.clone(),
-                RuntimeValue::Policy(PolicyValue { policy: requested }),
-            );
-        }
-    }
-    for decl in &program.main_grant_decls {
+        let TypeRef::Policy(requested) = ty else {
+            continue;
+        };
+        let approved = approved.get_or_insert_with(|| config.effective_approved_policy());
+        let effective = intersect_requested_policy(requested, approved).map_err(|domain| {
+            anyhow::anyhow!(
+                "mandatory policy coverage is missing: `{domain}` is not approved for this run (approve it with the matching `--allow-*` flag)"
+            )
+        })?;
         env.insert(
-            format!("grants.{}", decl.name),
-            RuntimeValue::GrantToken(grant_token_value(&decl.name, config)),
+            name.clone(),
+            RuntimeValue::Policy(PolicyValue { policy: effective }),
         );
     }
     Ok(())
 }
 
-fn policy_type_from_type_ref(ty: &TypeRef) -> Option<PolicyType> {
-    match ty {
-        TypeRef::Policy(policy) => Some(policy.clone()),
-        _ => None,
-    }
+/// Runtime half of `$policy.narrow`: the statically checked target type is
+/// additionally intersected with the **live source value's** scopes, so a
+/// narrowed capability can never exceed the value it came from.
+pub(crate) fn narrow_policy_value(
+    requested: &PolicyType,
+    source: &PolicyType,
+) -> Result<PolicyValue> {
+    let policy = intersect_requested_policy(requested, source).map_err(|domain| {
+        anyhow::anyhow!(
+            "`$policy.narrow` requires mandatory `{domain}` scopes the source value does not carry"
+        )
+    })?;
+    Ok(PolicyValue { policy })
 }
 
-fn runtime_policy_covers(source: &PolicyType, target: &PolicyType) -> bool {
-    target.domains.iter().all(|(domain, target_groups)| {
-        let Some(source_groups) = source.domains.get(domain) else {
-            return false;
+pub(crate) fn narrow_capability_value(
+    requested: &CapabilityType,
+    source: &PolicyType,
+) -> Result<CapabilityValue> {
+    if requested.groups.is_empty() {
+        let groups = source
+            .domains
+            .get(&requested.domain)
+            .cloned()
+            .unwrap_or_default();
+        let policy = PolicyType {
+            domains: std::collections::BTreeMap::from([(requested.domain, groups.clone())]),
         };
-        target_groups.iter().all(|target_group| {
-            source_groups.iter().any(|source_group| {
-                source_group
-                    .scopes
-                    .iter()
-                    .any(|s| matches!(s, crate::lower::PolicyScope::Any))
-                    || target_group.scopes.iter().all(|target_scope| {
-                        source_group
-                            .scopes
-                            .iter()
-                            .any(|source_scope| runtime_scope_covers(source_scope, target_scope))
-                    })
-            })
-        })
+        return Ok(CapabilityValue {
+            capability: CapabilityType {
+                domain: requested.domain,
+                groups,
+            },
+            policy,
+        });
+    }
+    let policy = PolicyType {
+        domains: std::collections::BTreeMap::from([(requested.domain, requested.groups.clone())]),
+    };
+    let narrowed = intersect_requested_policy(&policy, source).map_err(|domain| {
+        anyhow::anyhow!(
+            "`$policy.narrow` requires mandatory `{domain}` scopes the source value does not carry"
+        )
+    })?;
+    Ok(CapabilityValue {
+        capability: CapabilityType {
+            domain: requested.domain,
+            groups: narrowed
+                .domains
+                .get(&requested.domain)
+                .cloned()
+                .unwrap_or_default(),
+        },
+        policy: narrowed,
     })
 }
 
-fn runtime_scope_covers(
-    source: &crate::lower::PolicyScope,
-    target: &crate::lower::PolicyScope,
-) -> bool {
-    match (source, target) {
-        (crate::lower::PolicyScope::Any, _) => true,
-        (crate::lower::PolicyScope::Dir(a), crate::lower::PolicyScope::Dir(b))
-        | (crate::lower::PolicyScope::Dir(a), crate::lower::PolicyScope::File(b)) => {
-            normalize_absolute_path(Path::new(b))
-                .ok()
-                .is_some_and(|target| {
-                    normalize_absolute_path(Path::new(a))
-                        .ok()
-                        .is_some_and(|source| target.starts_with(source))
-                })
+/// Intersect a requested policy type with an approved policy. Every
+/// `mandatory` group must retain at least one scope (otherwise the offending
+/// domain is returned as the error); `optional` groups may intersect to empty
+/// and fail closed at the point of use.
+fn intersect_requested_policy(
+    requested: &PolicyType,
+    approved: &PolicyType,
+) -> std::result::Result<PolicyType, CapabilityDomain> {
+    let mut domains = std::collections::BTreeMap::new();
+    for (domain, groups) in &requested.domains {
+        let approved_scopes: Vec<PolicyScope> = approved
+            .domains
+            .get(domain)
+            .map(|groups| {
+                groups
+                    .iter()
+                    .flat_map(|group| group.scopes.iter().cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut effective_groups = Vec::with_capacity(groups.len());
+        for group in groups {
+            let effective_scopes = intersect_scope_sets(&group.scopes, &approved_scopes);
+            if effective_scopes.is_empty() && group.requirement == PolicyRequirement::Mandatory {
+                return Err(domain.clone());
+            }
+            effective_groups.push(PolicyGroup {
+                requirement: group.requirement.clone(),
+                scopes: effective_scopes,
+            });
         }
-        (crate::lower::PolicyScope::File(a), crate::lower::PolicyScope::File(b)) => {
-            normalize_absolute_path(Path::new(a)).ok() == normalize_absolute_path(Path::new(b)).ok()
+        domains.insert(domain.clone(), effective_groups);
+    }
+    Ok(PolicyType { domains })
+}
+
+/// Scope-set intersection: the portion of `requested` that `approved` covers.
+/// Requesting `any` yields exactly the approved scopes (never more).
+fn intersect_scope_sets(requested: &[PolicyScope], approved: &[PolicyScope]) -> Vec<PolicyScope> {
+    let mut out: Vec<PolicyScope> = Vec::new();
+    for req in requested {
+        for app in approved {
+            if let Some(scope) = intersect_scopes(req, app) {
+                if !out.contains(&scope) {
+                    out.push(scope);
+                }
+            }
         }
-        (crate::lower::PolicyScope::Exact(a), crate::lower::PolicyScope::Exact(b)) => a == b,
-        (crate::lower::PolicyScope::Prefix(a), crate::lower::PolicyScope::Exact(b))
-        | (crate::lower::PolicyScope::Prefix(a), crate::lower::PolicyScope::Prefix(b)) => {
-            b.starts_with(a)
+    }
+    out
+}
+
+/// The intersection of two scopes, or `None` when they are disjoint. The
+/// result never exceeds either input.
+fn intersect_scopes(a: &PolicyScope, b: &PolicyScope) -> Option<PolicyScope> {
+    match (a, b) {
+        (PolicyScope::Any, other) | (other, PolicyScope::Any) => Some(other.clone()),
+        (PolicyScope::Dir(x), PolicyScope::Dir(y)) => {
+            let nx = normalize_absolute_path(Path::new(x)).ok()?;
+            let ny = normalize_absolute_path(Path::new(y)).ok()?;
+            if nx.starts_with(&ny) {
+                Some(PolicyScope::Dir(x.clone()))
+            } else if ny.starts_with(&nx) {
+                Some(PolicyScope::Dir(y.clone()))
+            } else {
+                None
+            }
         }
-        _ => false,
-    }
-}
-
-fn is_policy_binding(name: &str) -> bool {
-    name == "policy" || name.ends_with(".policy")
-}
-
-fn grant_token_value(name: &str, config: &RunConfig) -> GrantToken {
-    GrantToken {
-        name: name.to_string(),
-        scopes: grant_scopes_by_name(name, config),
-    }
-}
-
-fn grant_status_value(ty: &TypeRef, config: &RunConfig) -> Option<RuntimeValue> {
-    let TypeRef::Instantiated { base, type_args } = ty else {
-        return None;
-    };
-    if !base.ends_with("grant-status") || type_args.len() != 1 {
-        return None;
-    }
-    let TypeRef::Named(grant_type) = &type_args[0] else {
-        return None;
-    };
-    let scopes = grant_scopes(grant_type, config);
-    if scopes.is_empty() {
-        Some(RuntimeValue::Enum {
-            enum_key: base.clone(),
-            tag: "denied".to_string(),
-            payload: Some(Box::new(RuntimeValue::Enum {
-                enum_key: denial_reason_key(base),
-                tag: "not-granted".to_string(),
-                payload: None,
-            })),
-        })
-    } else {
-        Some(RuntimeValue::Enum {
-            enum_key: base.clone(),
-            tag: "granted".to_string(),
-            payload: Some(Box::new(RuntimeValue::Capability(CapabilityGrant {
-                type_key: grant_type.clone(),
-                scopes,
-            }))),
-        })
-    }
-}
-
-fn denial_reason_key(grant_status_key: &str) -> String {
-    grant_status_key
-        .rsplit_once('.')
-        .map(|(prefix, _)| format!("{prefix}.denial-reason"))
-        .unwrap_or_else(|| "denial-reason".to_string())
-}
-
-fn grant_scopes(grant_type: &str, config: &RunConfig) -> Vec<String> {
-    if let Some(name) = grant_type.strip_suffix("-grant") {
-        return grant_scopes_by_name(name, config);
-    }
-    Vec::new()
-}
-
-fn grant_scopes_by_name(grant_name: &str, config: &RunConfig) -> Vec<String> {
-    let mut scopes = Vec::new();
-    if grant_name == "fs-read" {
-        scopes.extend(config.preopen_host_dirs.iter().map(|p| path_scope(p)));
-        scopes.extend(config.allow_read.iter().map(|p| path_scope(p)));
-    } else if grant_name == "fs-write" {
-        scopes.extend(config.preopen_host_dirs.iter().map(|p| path_scope(p)));
-        scopes.extend(config.allow_write.iter().map(|p| path_scope(p)));
-    } else if grant_name == "stdin-read" {
-        if config.allow_stdin {
-            scopes.push("*".to_string());
+        (PolicyScope::File(f), PolicyScope::Dir(d))
+        | (PolicyScope::Dir(d), PolicyScope::File(f)) => {
+            let nf = normalize_absolute_path(Path::new(f)).ok()?;
+            let nd = normalize_absolute_path(Path::new(d)).ok()?;
+            nf.starts_with(&nd).then(|| PolicyScope::File(f.clone()))
         }
-    } else if grant_name == "env-read" {
-        scopes.extend(config.allow_env.clone());
-    } else if grant_name == "env-write" {
-        scopes.extend(config.allow_env_write.clone());
-    } else if grant_name == "net-connect" {
-        scopes.extend(config.allow_net.clone());
-    } else if grant_name == "net-listen" {
-        scopes.extend(config.allow_net_listen.clone());
-    } else if grant_name == "process-run" {
-        scopes.extend(config.allow_run.clone());
-    } else if (grant_name == "clock" && config.allow_clock)
-        || (grant_name == "random" && config.allow_random)
-        || (grant_name == "system-info" && config.allow_system_info)
-    {
-        scopes.push("*".to_string());
+        (PolicyScope::File(x), PolicyScope::File(y)) => {
+            let nx = normalize_absolute_path(Path::new(x)).ok()?;
+            let ny = normalize_absolute_path(Path::new(y)).ok()?;
+            (nx == ny).then(|| PolicyScope::File(x.clone()))
+        }
+        (PolicyScope::Exact(x), PolicyScope::Exact(y)) => {
+            (x == y).then(|| PolicyScope::Exact(x.clone()))
+        }
+        (PolicyScope::Exact(e), PolicyScope::Prefix(p))
+        | (PolicyScope::Prefix(p), PolicyScope::Exact(e)) => {
+            e.starts_with(p).then(|| PolicyScope::Exact(e.clone()))
+        }
+        (PolicyScope::Prefix(x), PolicyScope::Prefix(y)) => {
+            if x.starts_with(y) {
+                Some(PolicyScope::Prefix(x.clone()))
+            } else if y.starts_with(x) {
+                Some(PolicyScope::Prefix(y.clone()))
+            } else {
+                None
+            }
+        }
+        (
+            PolicyScope::Dir(_) | PolicyScope::File(_),
+            PolicyScope::Exact(_) | PolicyScope::Prefix(_),
+        )
+        | (
+            PolicyScope::Exact(_) | PolicyScope::Prefix(_),
+            PolicyScope::Dir(_) | PolicyScope::File(_),
+        ) => None,
     }
-    scopes
-}
-
-fn path_scope(p: &Path) -> String {
-    normalize_absolute_path(p)
-        .unwrap_or_else(|_| p.to_path_buf())
-        .display()
-        .to_string()
 }
 
 enum FileHandle {
@@ -306,14 +313,13 @@ pub(crate) struct FileTable {
     limit: usize,
 }
 
-/// Number of reserved stdio handles (`stdin`/`stdout`/`stderr`) that always
-/// occupy the table and are never closed.
-const RESERVED_HANDLES: usize = 3;
-
 impl FileTable {
     pub(crate) fn new(limit: usize) -> Self {
         let mut handles = HashMap::new();
-        handles.insert(0, FileHandle::Stdin);
+        // Stdout/stderr are baseline authority and always present. Stdin is
+        // *not* preinserted: a stdin handle only exists after a
+        // capability-checked `stdin_open`, so a forged integer handle cannot
+        // read stdin in a program that never presented a `stdin-read` policy.
         handles.insert(1, FileHandle::Stdout);
         handles.insert(2, FileHandle::Stderr);
         Self {
@@ -332,9 +338,12 @@ impl FileTable {
         table
     }
 
-    /// Count of live user-opened file handles, excluding reserved stdio.
+    /// Count of live user-opened file handles, excluding stdio entries.
     fn open_file_count(&self) -> usize {
-        self.handles.len().saturating_sub(RESERVED_HANDLES)
+        self.handles
+            .values()
+            .filter(|handle| matches!(handle, FileHandle::File(_)))
+            .count()
     }
 
     /// Whether opening another file would exceed the configured limit.
@@ -346,6 +355,15 @@ impl FileTable {
         let id = self.next;
         self.next += 1;
         self.handles.insert(id, FileHandle::File(file));
+        id
+    }
+
+    /// Mint a stdin handle. Only reachable through the capability-checked
+    /// `stdin_open` host import.
+    fn insert_stdin(&mut self) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::Stdin);
         id
     }
 
@@ -399,18 +417,6 @@ impl FileTable {
             StdStream::Out => std::io::stdout().lock().flush(),
             StdStream::Err => std::io::stderr().lock().flush(),
         }
-    }
-
-    fn write_stdout(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        self.write_std(StdStream::Out, bytes)
-    }
-
-    fn write_stderr(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        self.write_std(StdStream::Err, bytes)
-    }
-
-    fn flush_stdout(&mut self) -> std::io::Result<()> {
-        self.flush_std(StdStream::Out)
     }
 
     /// Write `bytes` through the handle `id`, returning an `io::Result` so the
@@ -512,15 +518,19 @@ fn eval_expr(
         }),
         Expr::PolicyNarrow { from, target } => {
             let value = eval_expr(from, env, program, files, config)?;
-            let RuntimeValue::Policy(_) = value else {
+            let RuntimeValue::Policy(source) = value else {
                 bail!("`$policy.narrow` expects a policy value");
             };
-            let crate::lower::TypeRef::Policy(policy) = target else {
-                bail!("`$policy.narrow.into` must be a `$policy` type");
-            };
-            Ok(RuntimeValue::Policy(crate::lower::PolicyValue {
-                policy: policy.clone(),
-            }))
+            match target {
+                TypeRef::Capability(requested) => Ok(RuntimeValue::Capability(
+                    narrow_capability_value(requested, &source.policy)?,
+                )),
+                TypeRef::Policy(requested) => Ok(RuntimeValue::Policy(narrow_policy_value(
+                    requested,
+                    &source.policy,
+                )?)),
+                _ => bail!("`$policy.narrow.into` must be a capability type"),
+            }
         }
         Expr::EnumConstructor {
             enum_key,
@@ -857,217 +867,72 @@ fn run_block(
     Ok(None)
 }
 
-fn eval_i64(
-    expr: &Expr,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-) -> Result<i64> {
-    match eval_expr(expr, env, program, files, config)? {
-        RuntimeValue::Int(i) => Ok(i),
-        RuntimeValue::Typed { value, .. } => match *value {
-            RuntimeValue::Int(i) => Ok(i),
-            RuntimeValue::Float(_) => bail!("expected integer, got float"),
-            other => bail!("expected integer, got {other:?}"),
-        },
+/// Unwrap a runtime value to an `i64`, looking through newtype wrappers.
+fn value_i64(value: &RuntimeValue) -> Result<i64> {
+    match untyped(value) {
+        RuntimeValue::Int(i) => Ok(*i),
         RuntimeValue::Float(_) => bail!("expected integer, got float"),
-        RuntimeValue::Enum {
-            enum_key,
-            payload: Some(payload),
-            ..
-        } if domain_type_matches(&enum_key, "fd") => match *payload {
-            RuntimeValue::Int(i) => Ok(i),
-            RuntimeValue::Float(_) => bail!("expected fd payload integer, got float"),
-            other => bail!("expected fd payload int, got {other:?}"),
-        },
         other => bail!("expected integer, got {other:?}"),
     }
 }
 
-fn eval_handle(
-    expr: &Expr,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-) -> Result<u64> {
-    let raw = eval_i64(expr, env, program, files, config)?;
-    u64::try_from(raw).context("file handle < 0")
+/// Unwrap a runtime value to a non-negative file handle.
+fn value_handle(value: &RuntimeValue) -> Result<u64> {
+    match value {
+        RuntimeValue::HostHandle(handle) => Ok(handle.id),
+        RuntimeValue::Typed { value, .. } => value_handle(value),
+        other => bail!("expected an opaque host handle, got {other:?}"),
+    }
 }
 
-fn eval_string(
-    expr: &Expr,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-) -> Result<String> {
-    match eval_expr(expr, env, program, files, config)? {
-        RuntimeValue::Str(s) => Ok(s),
-        RuntimeValue::Typed { value, .. } => match *value {
-            RuntimeValue::Str(s) => Ok(s),
-            other => bail!("expected string, got {other:?}"),
-        },
+/// Unwrap a runtime value to a string, looking through newtype wrappers.
+fn value_string(value: &RuntimeValue) -> Result<String> {
+    match untyped(value) {
+        RuntimeValue::Str(s) => Ok(s.clone()),
         other => bail!("expected string, got {other:?}"),
     }
 }
 
-fn eval_bool(
-    expr: &Expr,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-) -> Result<bool> {
-    match eval_expr(expr, env, program, files, config)? {
-        RuntimeValue::Bool(b) => Ok(b),
-        RuntimeValue::Typed { value, .. } => match *value {
-            RuntimeValue::Bool(b) => Ok(b),
-            other => bail!("expected bool, got {other:?}"),
-        },
+fn value_bytes(value: &RuntimeValue) -> Result<Vec<u8>> {
+    match untyped(value) {
+        RuntimeValue::Array(items) => items
+            .iter()
+            .map(|item| match untyped(item) {
+                RuntimeValue::Int(value) => {
+                    u8::try_from(*value).context("byte outside uint8 range")
+                }
+                other => bail!("expected byte integer, got {other:?}"),
+            })
+            .collect(),
+        other => bail!("expected bytes, got {other:?}"),
+    }
+}
+
+fn runtime_bytes(bytes: Vec<u8>) -> RuntimeValue {
+    RuntimeValue::Array(
+        bytes
+            .into_iter()
+            .map(|byte| RuntimeValue::Int(i64::from(byte)))
+            .collect(),
+    )
+}
+
+/// Unwrap a runtime value to a bool, looking through newtype wrappers.
+fn value_bool(value: &RuntimeValue) -> Result<bool> {
+    match untyped(value) {
+        RuntimeValue::Bool(b) => Ok(*b),
         other => bail!("expected bool, got {other:?}"),
     }
 }
 
-fn eval_capability(
-    expr: &Expr,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-) -> Result<CapabilityGrant> {
-    match eval_expr(expr, env, program, files, config)? {
-        RuntimeValue::Capability(grant) => Ok(grant),
-        RuntimeValue::GrantToken(grant) => Ok(CapabilityGrant {
-            type_key: format!("{}-grant", grant.name),
-            scopes: grant.scopes,
-        }),
-        other => bail!("expected capability grant, got {other:?}"),
-    }
-}
-
-fn eval_policy(
-    expr: &Expr,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-) -> Result<PolicyType> {
-    match eval_expr(expr, env, program, files, config)? {
-        RuntimeValue::Policy(policy) => Ok(policy.policy),
-        other => bail!("expected policy value, got {other:?}"),
-    }
-}
-
-fn eval_grant_token(
-    name: &str,
-    env: &HashMap<String, RuntimeValue>,
-    _program: &LoweredProgram,
-    _files: &mut FileTable,
-    _config: &RunConfig,
-) -> Result<GrantToken> {
-    match env.get(&format!("grants.{name}")).cloned() {
-        Some(RuntimeValue::GrantToken(grant)) => Ok(grant),
-        Some(other) => bail!("expected grant token `{name}`, got {other:?}"),
-        None => bail!("grant `{name}` is not available in this scope"),
-    }
-}
-
-fn bind_call_grants(
-    call: &Call,
-    sig: &crate::lower::FunctionSig,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-) -> Result<HashMap<String, RuntimeValue>> {
-    let mut out = HashMap::new();
-    for decl in &sig.grant_decls {
-        let forwarded = call.grant_args.iter().any(|g| g == &decl.name);
-        let grant = if forwarded {
-            eval_grant_token(&decl.name, env, program, files, config)?
-        } else {
-            GrantToken {
-                name: decl.name.clone(),
-                scopes: Vec::new(),
-            }
-        };
-        if decl.requirement == GrantRequirement::Mandatory && grant.scopes.is_empty() {
-            bail!("mandatory grant `{}` was not granted", decl.name);
-        }
-        out.insert(
-            format!("grants.{}", decl.name),
-            RuntimeValue::GrantToken(grant),
-        );
-    }
-    Ok(out)
-}
-
-fn call_grant_capability(
-    call: &Call,
-    name: &str,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-) -> Result<CapabilityGrant> {
-    if !call.grant_args.iter().any(|g| g == name) {
-        bail!("missing grant `{name}` in `=grants`");
-    }
-    let grant = eval_grant_token(name, env, program, files, config)?;
-    if grant.scopes.is_empty() {
-        bail!("grant `{name}` was not granted");
-    }
-    Ok(CapabilityGrant {
-        type_key: format!("{name}-grant"),
-        scopes: grant.scopes,
-    })
-}
-
-fn eval_domain_string(
-    expr: &Expr,
-    env: &HashMap<String, RuntimeValue>,
-    program: &LoweredProgram,
-    files: &mut FileTable,
-    config: &RunConfig,
-    domain: &str,
-) -> Result<String> {
-    match eval_expr(expr, env, program, files, config)? {
-        RuntimeValue::Str(s) => Ok(s),
-        RuntimeValue::Typed { value, .. } => match *value {
-            RuntimeValue::Str(s) => Ok(s),
-            other => bail!("expected {domain} payload string, got {other:?}"),
-        },
-        RuntimeValue::Enum {
-            enum_key,
-            payload: Some(payload),
-            ..
-        } if domain_type_matches(&enum_key, domain) => match *payload {
-            RuntimeValue::Str(s) => Ok(s),
-            other => bail!("expected {domain} payload string, got {other:?}"),
-        },
-        other => bail!("expected {domain} or string wrapper, got {other:?}"),
-    }
-}
-
-fn domain_type_matches(union_key: &str, expected: &str) -> bool {
-    union_key == expected || union_key.ends_with(&format!(".{expected}"))
-}
-
-fn wrap_domain_string(domain: &str, value: String) -> RuntimeValue {
-    RuntimeValue::Enum {
-        enum_key: format!("types.{domain}"),
-        tag: "str".to_string(),
-        payload: Some(Box::new(RuntimeValue::Str(value))),
-    }
-}
-
-fn wrap_domain_int(domain: &str, value: i64) -> RuntimeValue {
-    RuntimeValue::Enum {
-        enum_key: format!("types.{domain}"),
-        tag: "int".to_string(),
-        payload: Some(Box::new(RuntimeValue::Int(value))),
+/// Require a genuine runtime-minted `$policy` capability value.
+fn value_policy(value: &RuntimeValue) -> Result<&PolicyType> {
+    match value {
+        RuntimeValue::Capability(capability) => Ok(&capability.policy),
+        RuntimeValue::Policy(_) => bail!(
+            "expected an explicitly narrowed `$capability.<domain>` value, got root `$policy`"
+        ),
+        other => bail!("expected a domain capability value, got {other:?}"),
     }
 }
 
@@ -1578,44 +1443,15 @@ pub fn checked_alloc_len(
     Ok(len)
 }
 
-fn resolve_granted_path(
+fn resolve_policy_path(
     path: &str,
-    grant: &CapabilityGrant,
-    required_suffix: &str,
+    policy: &PolicyType,
+    domain: CapabilityDomain,
 ) -> Result<PathBuf> {
-    if !grant.type_key.ends_with(required_suffix) {
-        bail!(
-            "grant `{}` cannot authorize `{required_suffix}` filesystem access",
-            grant.type_key
-        );
-    }
     let abs = normalize_absolute_path(Path::new(path))?;
     let auth_path = nearest_existing_path(&abs)?;
     let canon_auth = auth_path.canonicalize().unwrap_or(auth_path);
-    for root in &grant.scopes {
-        if root == "*" {
-            return Ok(abs);
-        }
-        let root_path = PathBuf::from(root);
-        if let Ok(canon_root) = root_path.canonicalize() {
-            if canon_auth.starts_with(&canon_root) {
-                return Ok(abs);
-            }
-        } else {
-            let normalized_root = normalize_absolute_path(&root_path)?;
-            if abs.starts_with(&normalized_root) {
-                return Ok(abs);
-            }
-        }
-    }
-    bail!("path `{}` is outside configured grants", path)
-}
-
-fn resolve_policy_path(path: &str, policy: &PolicyType, domain: &str) -> Result<PathBuf> {
-    let abs = normalize_absolute_path(Path::new(path))?;
-    let auth_path = nearest_existing_path(&abs)?;
-    let canon_auth = auth_path.canonicalize().unwrap_or(auth_path);
-    let Some(groups) = policy.domains.get(domain) else {
+    let Some(groups) = policy.domains.get(&domain) else {
         bail!("policy does not authorize `{domain}`");
     };
     for group in groups {
@@ -1677,44 +1513,45 @@ fn nearest_existing_path(path: &Path) -> Result<PathBuf> {
     }
 }
 
-fn ensure_scope(grant: &CapabilityGrant, required_suffix: &str, requested: &str) -> Result<()> {
-    if !grant.type_key.ends_with(required_suffix) {
-        bail!(
-            "grant `{}` cannot authorize `{required_suffix}`",
-            grant.type_key
-        );
-    }
-    if grant
-        .scopes
-        .iter()
-        .any(|scope| scope_matches(required_suffix, scope, requested))
-    {
-        return Ok(());
-    }
-    bail!("requested scope `{requested}` is outside configured grants")
-}
-
-fn scope_matches(grant_suffix: &str, scope: &str, requested: &str) -> bool {
-    if scope == "*" {
-        return true;
-    }
-    match grant_suffix {
-        "env-read-grant" | "env-write-grant" => {
-            if cfg!(windows) {
-                scope.eq_ignore_ascii_case(requested)
-            } else {
-                scope == requested
+/// Check that `policy` authorizes `requested` under `domain` using
+/// non-filesystem scope selectors: `any` matches everything, `exact` requires
+/// equality, `prefix` requires a leading match. Filesystem domains use
+/// [`resolve_policy_path`] instead.
+fn ensure_policy_scope(
+    policy: &PolicyType,
+    domain: CapabilityDomain,
+    requested: &str,
+) -> Result<()> {
+    let Some(groups) = policy.domains.get(&domain) else {
+        bail!("policy does not authorize `{domain}`");
+    };
+    for group in groups {
+        for scope in &group.scopes {
+            let matched = match scope {
+                PolicyScope::Any => true,
+                PolicyScope::Exact(value) => scope_value_eq(domain, value, requested),
+                PolicyScope::Prefix(prefix) => requested.starts_with(prefix.as_str()),
+                PolicyScope::Dir(_) | PolicyScope::File(_) => false,
+            };
+            if matched {
+                return Ok(());
             }
         }
-        _ => scope.eq_ignore_ascii_case(requested),
     }
+    bail!("`{requested}` is outside the `{domain}` scopes of the provided policy")
 }
 
-fn ensure_stdin_allowed(config: &RunConfig) -> Result<()> {
-    if config.allow_stdin {
-        Ok(())
+fn scope_value_eq(domain: CapabilityDomain, scope: &str, requested: &str) -> bool {
+    // Environment variable names are case-insensitive on Windows.
+    if cfg!(windows)
+        && matches!(
+            domain,
+            CapabilityDomain::EnvRead | CapabilityDomain::EnvWrite
+        )
+    {
+        scope.eq_ignore_ascii_case(requested)
     } else {
-        bail!("stdin read requires --allow-stdin")
+        scope == requested
     }
 }
 
@@ -1751,9 +1588,6 @@ pub(crate) fn exec_call(
                 let val = eval_expr(&call.args[idx], env, program, files, config)?;
                 fn_env.insert(format!("args.{name}"), val);
             }
-            for (name, value) in bind_call_grants(call, sig, env, program, files, config)? {
-                fn_env.insert(name, value);
-            }
             if let Some(v) = run_block(statements, program, &mut fn_env, files, config)? {
                 return Ok(v);
             }
@@ -1765,1008 +1599,874 @@ pub(crate) fn exec_call(
             }
             Ok(RuntimeValue::Void)
         }
-        FunctionBody::Wasm { import, .. } => {
-            if sig.symbol == "granted" {
-                let grant = eval_capability(&call.args[0], env, program, files, config)?;
-                return Ok(RuntimeValue::Bool(!grant.scopes.is_empty()));
-            }
-            let _grant_env = bind_call_grants(call, sig, env, program, files, config)?;
-            let sym = sig.symbol.as_str();
-
-            if import.module == "vibra_test" {
-                return match import.name.as_str() {
-                    "assert" => {
-                        if eval_bool(&call.args[0], env, program, files, config)? {
-                            Ok(RuntimeValue::Void)
-                        } else {
-                            bail!("assertion failed")
-                        }
-                    }
-                    "fail" => bail!(
-                        "{}",
-                        eval_string(&call.args[0], env, program, files, config)?
-                    ),
-                    "assert-eq-bool" | "assert-eq-int" | "assert-eq-float" | "assert-eq-str" => {
-                        let actual = eval_expr(&call.args[0], env, program, files, config)?;
-                        let expected = eval_expr(&call.args[1], env, program, files, config)?;
-                        if actual == expected {
-                            Ok(RuntimeValue::Void)
-                        } else {
-                            bail!("assertion failed: expected {expected:?}, actual {actual:?}")
-                        }
-                    }
-                    other => bail!("unsupported vibra_test import `{other}`"),
-                };
-            }
-
-            if import.module == "vibra_code" {
-                return match import.name.as_str() {
-                    "make-query" => {
-                        let root = eval_expr(&call.args[0], env, program, files, config)?;
-                        let include_root = eval_expr(&call.args[1], env, program, files, config)?;
-                        let mapping_key = eval_expr(&call.args[2], env, program, files, config)?;
-                        let kind = eval_expr(&call.args[3], env, program, files, config)?;
-                        let pattern = eval_expr(&call.args[4], env, program, files, config)?;
-                        let limit = eval_expr(&call.args[5], env, program, files, config)?;
-                        Ok(RuntimeValue::Record(std::collections::BTreeMap::from([
-                            ("root".to_string(), root),
-                            ("include-root".to_string(), include_root),
-                            ("mapping-key".to_string(), mapping_key),
-                            ("kind".to_string(), kind),
-                            ("pattern".to_string(), pattern),
-                            ("limit".to_string(), limit),
-                        ])))
-                    }
-                    "capture-pattern" => {
-                        let pattern = eval_expr(&call.args[0], env, program, files, config)?;
-                        let name = eval_string(&call.args[1], env, program, files, config)?;
-                        Ok(RuntimeValue::Enum {
-                            enum_key: "code.pattern".to_string(),
-                            tag: "capture".to_string(),
-                            payload: Some(Box::new(RuntimeValue::Record(
-                                std::collections::BTreeMap::from([
-                                    ("name".to_string(), RuntimeValue::Str(name)),
-                                    ("pattern".to_string(), pattern),
-                                ]),
-                            ))),
-                        })
-                    }
-                    "parse" => {
-                        let source = eval_string(&call.args[0], env, program, files, config)?;
-                        Ok(match code_document(&source) {
-                            Ok(_) => result_ok(
-                                sig,
-                                typed_code_value("code.document", RuntimeValue::Str(source)),
-                            ),
-                            Err(error) => code_result_err(sig, &error),
-                        })
-                    }
-                    "emit" => {
-                        let source = eval_string(&call.args[0], env, program, files, config)?;
-                        Ok(RuntimeValue::Str(source))
-                    }
-                    "root" => {
-                        let source = eval_string(&call.args[0], env, program, files, config)?;
-                        Ok(
-                            match code_document(&source).and_then(|(_, document)| document.root()) {
-                                Ok(node) => result_ok(
-                                    sig,
-                                    typed_code_value(
-                                        "code.node",
-                                        RuntimeValue::Str(encode_code_node(&source, &node)?),
-                                    ),
-                                ),
-                                Err(error) => code_result_err(sig, &error),
-                            },
-                        )
-                    }
-                    "at" => {
-                        let source = eval_string(&call.args[0], env, program, files, config)?;
-                        let path_value = eval_expr(&call.args[1], env, program, files, config)?;
-                        Ok(
-                            match code_path_from_runtime(&path_value).and_then(|path| {
-                                let (_, document) = code_document(&source)?;
-                                document.at(&path)
-                            }) {
-                                Ok(node) => result_ok(
-                                    sig,
-                                    typed_code_value(
-                                        "code.node",
-                                        RuntimeValue::Str(encode_code_node(&source, &node)?),
-                                    ),
-                                ),
-                                Err(error) => code_result_err(sig, &error),
-                            },
-                        )
-                    }
-                    "parent" => {
-                        let handle = eval_string(&call.args[0], env, program, files, config)?;
-                        Ok(
-                            match decode_code_node(&handle).and_then(|(source, node)| {
-                                let parent = node.path().parent().ok_or_else(|| {
-                                    crate::code::CodeError::new(
-                                        crate::code::CodeErrorKind::InvalidPath,
-                                        "root node has no parent",
-                                    )
-                                })?;
-                                let (_, document) = code_document(&source)?;
-                                document.at(&parent).map(|node| (source, node))
-                            }) {
-                                Ok((source, node)) => result_ok(
-                                    sig,
-                                    typed_code_value(
-                                        "code.node",
-                                        RuntimeValue::Str(encode_code_node(&source, &node)?),
-                                    ),
-                                ),
-                                Err(error) => code_result_err(sig, &error),
-                            },
-                        )
-                    }
-                    "children" => {
-                        let handle = eval_string(&call.args[0], env, program, files, config)?;
-                        Ok(
-                            match decode_code_node(&handle).and_then(|(source, node)| {
-                                node.children().map(|nodes| (source, nodes))
-                            }) {
-                                Ok((source, nodes)) => {
-                                    let handles = nodes
-                                        .iter()
-                                        .map(|node| {
-                                            encode_code_node(&source, node).map(|handle| {
-                                                typed_code_value(
-                                                    "code.node",
-                                                    RuntimeValue::Str(handle),
-                                                )
-                                            })
-                                        })
-                                        .collect::<std::result::Result<Vec<_>, _>>();
-                                    match handles {
-                                        Ok(handles) => result_ok(sig, RuntimeValue::Array(handles)),
-                                        Err(error) => code_result_err(sig, &error),
-                                    }
-                                }
-                                Err(error) => code_result_err(sig, &error),
-                            },
-                        )
-                    }
-                    "find" => {
-                        let source = eval_string(&call.args[0], env, program, files, config)?;
-                        let query = eval_expr(&call.args[1], env, program, files, config)?;
-                        Ok(
-                            match code_query_from_runtime(&query).and_then(|query| {
-                                let (_, document) = code_document(&source)?;
-                                query.execute(&document)
-                            }) {
-                                Ok(matches) => {
-                                    let matches = matches
-                                    .into_iter()
-                                    .map(|matched| {
-                                        let node = encode_code_node(&source, &matched.node)?;
-                                        let captures = matched
-                                            .captures
-                                            .into_iter()
-                                            .map(|(name, value)| {
-                                                RuntimeValue::Record(
-                                                    std::collections::BTreeMap::from([
-                                                        (
-                                                            "name".to_string(),
-                                                            RuntimeValue::Str(name),
-                                                        ),
-                                                        (
-                                                            "value".to_string(),
-                                                            code_form_to_runtime(&value),
-                                                        ),
-                                                    ]),
-                                                )
-                                            })
-                                            .collect();
-                                        Ok(RuntimeValue::Record(
-                                            std::collections::BTreeMap::from([
-                                                (
-                                                    "node".to_string(),
-                                                    typed_code_value(
-                                                        "code.node",
-                                                        RuntimeValue::Str(node),
-                                                    ),
-                                                ),
-                                                (
-                                                    "captures".to_string(),
-                                                    RuntimeValue::Array(captures),
-                                                ),
-                                            ]),
-                                        ))
-                                    })
-                                    .collect::<std::result::Result<
-                                        Vec<_>,
-                                        crate::code::CodeError,
-                                    >>();
-                                    match matches {
-                                        Ok(matches) => result_ok(sig, RuntimeValue::Array(matches)),
-                                        Err(error) => code_result_err(sig, &error),
-                                    }
-                                }
-                                Err(error) => code_result_err(sig, &error),
-                            },
-                        )
-                    }
-                    "source" => {
-                        let handle = eval_string(&call.args[0], env, program, files, config)?;
-                        let (_, node) = decode_code_node(&handle)
-                            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                        Ok(RuntimeValue::Str(node.source().to_string()))
-                    }
-                    "to-form" => {
-                        let handle = eval_string(&call.args[0], env, program, files, config)?;
-                        Ok(match decode_code_node(&handle) {
-                            Ok((_, node)) => result_ok(sig, code_form_to_runtime(node.form())),
-                            Err(error) => code_result_err(sig, &error),
-                        })
-                    }
-                    "render" => {
-                        let value = eval_expr(&call.args[0], env, program, files, config)?;
-                        let form = code_form_from_runtime(&value)
-                            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                        Ok(RuntimeValue::Str(
-                            form.render()
-                                .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-                        ))
-                    }
-                    "replace" | "delete" | "upsert-mapping" | "insert-mapping" | "rename-key"
-                    | "insert-sequence" | "splice-sequence" | "copy" | "move" => {
-                        let source = eval_string(&call.args[0], env, program, files, config)?;
-                        let result = (|| {
-                            let (database, document) = code_document(&source)?;
-                            let handle = eval_string(&call.args[1], env, program, files, config)
-                                .map_err(|error| {
-                                    crate::code::CodeError::new(
-                                        crate::code::CodeErrorKind::InvalidForm,
-                                        error.to_string(),
-                                    )
-                                })?;
-                            let (_, handle_node) = decode_code_node(&handle)?;
-                            if handle_node.revision() != document.revision() {
-                                return Err(crate::code::CodeError::new(
-                                    crate::code::CodeErrorKind::StaleRevision,
-                                    "node belongs to a different document revision",
-                                ));
-                            }
-                            let first = document.at(handle_node.path())?;
-                            let changes = match import.name.as_str() {
-                                "replace" => {
-                                    let value =
-                                        eval_expr(&call.args[2], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    crate::code::ChangeSet::new()
-                                        .replace(first.locator(), code_form_from_runtime(&value)?)
-                                }
-                                "delete" => crate::code::ChangeSet::new().delete(first.locator()),
-                                "upsert-mapping" | "insert-mapping" => {
-                                    let key =
-                                        eval_string(&call.args[2], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    let value =
-                                        eval_expr(&call.args[3], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    let value = code_form_from_runtime(&value)?;
-                                    if import.name == "upsert-mapping" {
-                                        crate::code::ChangeSet::new().upsert_mapping(
-                                            first.locator(),
-                                            key,
-                                            value,
-                                        )
-                                    } else {
-                                        crate::code::ChangeSet::new().insert_mapping(
-                                            first.locator(),
-                                            key,
-                                            value,
-                                        )
-                                    }
-                                }
-                                "rename-key" => {
-                                    let new_key =
-                                        eval_string(&call.args[2], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    crate::code::ChangeSet::new()
-                                        .rename_mapping_key(first.locator(), new_key)
-                                }
-                                "insert-sequence" => {
-                                    let index =
-                                        eval_expr(&call.args[2], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    let RuntimeValue::Int(index) = untyped(&index) else {
-                                        return Err(crate::code::CodeError::new(
-                                            crate::code::CodeErrorKind::InvalidForm,
-                                            "sequence insertion index must be an integer",
-                                        ));
-                                    };
-                                    let value =
-                                        eval_expr(&call.args[3], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    crate::code::ChangeSet::new().insert_sequence(
-                                        first.locator(),
-                                        code_usize(*index, "sequence insertion index")?,
-                                        code_form_from_runtime(&value)?,
-                                    )
-                                }
-                                "splice-sequence" => {
-                                    let start =
-                                        eval_expr(&call.args[2], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    let delete_count =
-                                        eval_expr(&call.args[3], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    let values =
-                                        eval_expr(&call.args[4], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    let (
-                                        RuntimeValue::Int(start),
-                                        RuntimeValue::Int(delete_count),
-                                        RuntimeValue::Array(values),
-                                    ) = (untyped(&start), untyped(&delete_count), untyped(&values))
-                                    else {
-                                        return Err(crate::code::CodeError::new(
-                                            crate::code::CodeErrorKind::InvalidForm,
-                                            "sequence splice expects integer bounds and form values",
-                                        ));
-                                    };
-                                    let values = values
-                                        .iter()
-                                        .map(code_form_from_runtime)
-                                        .collect::<std::result::Result<Vec<_>, _>>()?;
-                                    crate::code::ChangeSet::new().splice_sequence(
-                                        first.locator(),
-                                        code_usize(*start, "sequence splice start")?,
-                                        code_usize(*delete_count, "sequence splice delete count")?,
-                                        values,
-                                    )
-                                }
-                                "copy" | "move" => {
-                                    let target_handle =
-                                        eval_string(&call.args[2], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    let (_, target_node) = decode_code_node(&target_handle)?;
-                                    if target_node.revision() != document.revision() {
-                                        return Err(crate::code::CodeError::new(
-                                            crate::code::CodeErrorKind::StaleRevision,
-                                            "target node belongs to a different document revision",
-                                        ));
-                                    }
-                                    let target = document.at(target_node.path())?;
-                                    let destination =
-                                        eval_expr(&call.args[3], env, program, files, config)
-                                            .map_err(|error| {
-                                                crate::code::CodeError::new(
-                                                    crate::code::CodeErrorKind::InvalidForm,
-                                                    error.to_string(),
-                                                )
-                                            })?;
-                                    if import.name == "copy" {
-                                        crate::code::ChangeSet::new().copy(
-                                            first.locator(),
-                                            target.locator(),
-                                            code_segment_from_runtime(&destination)?,
-                                        )
-                                    } else {
-                                        crate::code::ChangeSet::new().move_node(
-                                            first.locator(),
-                                            target.locator(),
-                                            code_segment_from_runtime(&destination)?,
-                                        )
-                                    }
-                                }
-                                _ => unreachable!("matched code edit import"),
-                            };
-                            let applied = database.apply(&changes)?;
-                            Ok(applied
-                                .database
-                                .document("document.vibra")?
-                                .source()
-                                .to_string())
-                        })();
-                        Ok(match result {
-                            Ok(source) => result_ok(
-                                sig,
-                                typed_code_value("code.document", RuntimeValue::Str(source)),
-                            ),
-                            Err(error) => code_result_err(sig, &error),
-                        })
-                    }
-                    other => bail!("unsupported vibra_code import `{other}`"),
-                };
-            }
-
-            match sym {
-                "print" => {
-                    let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    files
-                        .write_stdout(msg.as_bytes())
-                        .context("write to stdout")?;
-                    Ok(RuntimeValue::Void)
-                }
-                "println" => {
-                    let mut msg = eval_string(&call.args[0], env, program, files, config)?;
-                    msg.push('\n');
-                    files
-                        .write_stdout(msg.as_bytes())
-                        .context("write to stdout")?;
-                    Ok(RuntimeValue::Void)
-                }
-                "eprint" => {
-                    let msg = eval_string(&call.args[0], env, program, files, config)?;
-                    files
-                        .write_stderr(msg.as_bytes())
-                        .context("write to stderr")?;
-                    Ok(RuntimeValue::Void)
-                }
-                "eprintln" => {
-                    let mut msg = eval_string(&call.args[0], env, program, files, config)?;
-                    msg.push('\n');
-                    files
-                        .write_stderr(msg.as_bytes())
-                        .context("write to stderr")?;
-                    Ok(RuntimeValue::Void)
-                }
-                "flush-stdout" => {
-                    files.flush_stdout().context("flush stdout")?;
-                    Ok(RuntimeValue::Void)
-                }
-                "read-line" => {
-                    ensure_stdin_allowed(config)?;
-                    let fd = eval_i64(&call.args[0], env, program, files, config)?;
-                    if fd != 0 {
-                        bail!("read-line currently supports stdin fd 0 only");
-                    }
-                    let mut line = String::new();
-                    std::io::stdin()
-                        .read_line(&mut line)
-                        .context("stdin read_line")?;
-                    if line.ends_with('\n') {
-                        line.pop();
-                        if line.ends_with('\r') {
-                            line.pop();
-                        }
-                    }
-                    Ok(RuntimeValue::Str(line))
-                }
-                "read-raw" => {
-                    ensure_stdin_allowed(config)?;
-                    let fd = eval_i64(&call.args[0], env, program, files, config)?;
-                    let len = eval_i64(&call.args[1], env, program, files, config)?;
-                    if fd != 0 {
-                        bail!("read-raw currently supports stdin fd 0 only");
-                    }
-                    let len = checked_alloc_len(len, config)
-                        .map_err(|(tag, msg)| anyhow::anyhow!("read-raw {tag}: {msg}"))?;
-                    let mut buf = vec![0u8; len];
-                    let n = std::io::stdin().read(&mut buf).context("stdin read")?;
-                    Ok(RuntimeValue::Str(
-                        String::from_utf8_lossy(&buf[..n]).to_string(),
-                    ))
-                }
-                "write-raw" | "write-all" => {
-                    let fd = eval_i64(&call.args[0], env, program, files, config)?;
-                    let bytes = eval_string(&call.args[1], env, program, files, config)?;
-                    if fd == 2 {
-                        files
-                            .write_stderr(bytes.as_bytes())
-                            .context("write to stderr")?;
-                    } else {
-                        files
-                            .write_stdout(bytes.as_bytes())
-                            .context("write to stdout")?;
-                    }
-                    Ok(RuntimeValue::Int(
-                        i64::try_from(bytes.len()).unwrap_or(i64::MAX),
-                    ))
-                }
-
-                "path.new" => {
-                    let path = eval_string(&call.args[0], env, program, files, config)?;
-                    Ok(RuntimeValue::Str(path))
-                }
-                "open-read" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let p = if call.args.len() > 1 {
-                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
-                        resolve_policy_path(&path, &policy, "fs-read")?
-                    } else {
-                        let grant =
-                            call_grant_capability(call, "fs-read", env, program, files, config)?;
-                        resolve_granted_path(&path, &grant, "fs-read-grant")?
-                    };
-                    if files.at_capacity() {
-                        return Ok(result_err(sig, "too-many-open-files", None));
-                    }
-                    Ok(fs_result(
-                        sig,
-                        || fs::OpenOptions::new().read(true).open(p),
-                        |file| {
-                            RuntimeValue::Int(i64::try_from(files.insert(file)).unwrap_or(i64::MAX))
-                        },
-                    ))
-                }
-                "open-write" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let p = if call.args.len() > 1 {
-                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
-                        resolve_policy_path(&path, &policy, "fs-write")?
-                    } else {
-                        let grant =
-                            call_grant_capability(call, "fs-write", env, program, files, config)?;
-                        resolve_granted_path(&path, &grant, "fs-write-grant")?
-                    };
-                    if files.at_capacity() {
-                        return Ok(result_err(sig, "too-many-open-files", None));
-                    }
-                    Ok(fs_result(
-                        sig,
-                        || {
-                            fs::OpenOptions::new()
-                                .create(true)
-                                .truncate(true)
-                                .write(true)
-                                .open(p)
-                        },
-                        |file| {
-                            RuntimeValue::Int(i64::try_from(files.insert(file)).unwrap_or(i64::MAX))
-                        },
-                    ))
-                }
-                "open-append" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let p = if call.args.len() > 1 {
-                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
-                        resolve_policy_path(&path, &policy, "fs-write")?
-                    } else {
-                        let grant =
-                            call_grant_capability(call, "fs-write", env, program, files, config)?;
-                        resolve_granted_path(&path, &grant, "fs-write-grant")?
-                    };
-                    if files.at_capacity() {
-                        return Ok(result_err(sig, "too-many-open-files", None));
-                    }
-                    Ok(fs_result(
-                        sig,
-                        || fs::OpenOptions::new().create(true).append(true).open(p),
-                        |file| {
-                            RuntimeValue::Int(i64::try_from(files.insert(file)).unwrap_or(i64::MAX))
-                        },
-                    ))
-                }
-                "open-read-write" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let p = if call.args.len() > 1 {
-                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
-                        let _ = resolve_policy_path(&path, &policy, "fs-read")?;
-                        resolve_policy_path(&path, &policy, "fs-write")?
-                    } else {
-                        let read_grant =
-                            call_grant_capability(call, "fs-read", env, program, files, config)?;
-                        let write_grant =
-                            call_grant_capability(call, "fs-write", env, program, files, config)?;
-                        let _ = resolve_granted_path(&path, &read_grant, "fs-read-grant")?;
-                        resolve_granted_path(&path, &write_grant, "fs-write-grant")?
-                    };
-                    if files.at_capacity() {
-                        return Ok(result_err(sig, "too-many-open-files", None));
-                    }
-                    Ok(fs_result(
-                        sig,
-                        || {
-                            fs::OpenOptions::new()
-                                .create(true)
-                                .truncate(false)
-                                .read(true)
-                                .write(true)
-                                .open(p)
-                        },
-                        |file| {
-                            RuntimeValue::Int(i64::try_from(files.insert(file)).unwrap_or(i64::MAX))
-                        },
-                    ))
-                }
-                "readln" => {
-                    let grant =
-                        call_grant_capability(call, "stdin-read", env, program, files, config)?;
-                    ensure_scope(&grant, "stdin-read-grant", "*")?;
-                    let mut line = String::new();
-                    match std::io::stdin().read_line(&mut line) {
-                        Ok(_) => {
-                            if line.ends_with('\n') {
-                                line.pop();
-                                if line.ends_with('\r') {
-                                    line.pop();
-                                }
-                            }
-                            Ok(result_ok(sig, RuntimeValue::Str(line)))
-                        }
-                        Err(err) => Ok(result_err(sig, "io", Some(err.to_string()))),
-                    }
-                }
-                "get" if sig.alias.ends_with("env") => {
-                    let name = eval_string(&call.args[0], env, program, files, config)?;
-                    let grant =
-                        call_grant_capability(call, "env-read", env, program, files, config)?;
-                    ensure_scope(&grant, "env-read-grant", &name)?;
-                    Ok(fs_result(sig, || env_get(&name), RuntimeValue::Str))
-                }
-                "set" if sig.alias.ends_with("env") => {
-                    let name = eval_string(&call.args[0], env, program, files, config)?;
-                    let value = eval_string(&call.args[1], env, program, files, config)?;
-                    let grant =
-                        call_grant_capability(call, "env-write", env, program, files, config)?;
-                    ensure_scope(&grant, "env-write-grant", &name)?;
-                    if !is_valid_env_name(&name) {
-                        return Ok(result_err(sig, "invalid-name", None));
-                    }
-                    std::env::set_var(name, value);
-                    Ok(result_ok(sig, RuntimeValue::Void))
-                }
-                "connect" if sig.alias.ends_with("net") => {
-                    let target = eval_string(&call.args[0], env, program, files, config)?;
-                    let grant =
-                        call_grant_capability(call, "net-connect", env, program, files, config)?;
-                    ensure_scope(&grant, "net-connect-grant", &target)?;
-                    Ok(result_err(
-                        sig,
-                        "unsupported",
-                        Some("network runtime is not implemented yet".to_string()),
-                    ))
-                }
-                "listen" if sig.alias.ends_with("net") => {
-                    let target = eval_string(&call.args[0], env, program, files, config)?;
-                    let grant =
-                        call_grant_capability(call, "net-listen", env, program, files, config)?;
-                    ensure_scope(&grant, "net-listen-grant", &target)?;
-                    Ok(result_err(
-                        sig,
-                        "unsupported",
-                        Some("network runtime is not implemented yet".to_string()),
-                    ))
-                }
-                "run" if sig.alias.ends_with("process") => {
-                    let command = eval_string(&call.args[0], env, program, files, config)?;
-                    let grant =
-                        call_grant_capability(call, "process-run", env, program, files, config)?;
-                    ensure_scope(&grant, "process-run-grant", &command)?;
-                    Ok(result_err(
-                        sig,
-                        "unsupported",
-                        Some("process runtime is not implemented yet".to_string()),
-                    ))
-                }
-                "now-unix-millis" => {
-                    let grant = call_grant_capability(call, "clock", env, program, files, config)?;
-                    ensure_scope(&grant, "clock-grant", "*")?;
-                    let millis = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .context("system clock before unix epoch")?
-                        .as_millis();
-                    Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)))
-                }
-                "bytes" if sig.alias.ends_with("random") => {
-                    let len = eval_i64(&call.args[0], env, program, files, config)?;
-                    let grant = call_grant_capability(call, "random", env, program, files, config)?;
-                    ensure_scope(&grant, "random-grant", "*")?;
-                    let len = checked_alloc_len(len, config)
-                        .map_err(|(tag, msg)| anyhow::anyhow!("random.bytes {tag}: {msg}"))?;
-                    let mut buf = vec![0u8; len];
-                    getrandom::getrandom(&mut buf)
-                        .map_err(|err| anyhow::anyhow!("random.bytes unavailable: {err}"))?;
-                    Ok(RuntimeValue::Array(
-                        buf.into_iter()
-                            .map(|byte| RuntimeValue::Int(i64::from(byte)))
-                            .collect(),
-                    ))
-                }
-                "info" if sig.alias.ends_with("sys") => {
-                    let grant =
-                        call_grant_capability(call, "system-info", env, program, files, config)?;
-                    ensure_scope(&grant, "system-info-grant", "*")?;
-                    Ok(RuntimeValue::Str(format!(
-                        "{}-{}",
-                        std::env::consts::OS,
-                        std::env::consts::ARCH
-                    )))
-                }
-                s if s.ends_with(".readable.read-string") => {
-                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
-                    let value = match files.get_mut(handle)? {
-                        FileHandle::Stdin => {
-                            ensure_stdin_allowed(config)?;
-                            let mut line = String::new();
-                            std::io::stdin().read_line(&mut line).map(|_| {
-                                if line.ends_with('\n') {
-                                    line.pop();
-                                    if line.ends_with('\r') {
-                                        line.pop();
-                                    }
-                                }
-                                line
-                            })
-                        }
-                        FileHandle::File(file) => {
-                            let mut s = String::new();
-                            file.read_to_string(&mut s).map(|_| s)
-                        }
-                        FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "handle is not readable",
-                        )),
-                    };
-                    Ok(fs_result(sig, || value, RuntimeValue::Str))
-                }
-                s if s.ends_with(".readable.read-bytes") => {
-                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
-                    let value = match files.get_mut(handle)? {
-                        FileHandle::Stdin => {
-                            ensure_stdin_allowed(config)?;
-                            let mut s = String::new();
-                            std::io::stdin().read_to_string(&mut s).map(|_| s)
-                        }
-                        FileHandle::File(file) => {
-                            let mut buf = Vec::new();
-                            file.read_to_end(&mut buf)
-                                .map(|_| String::from_utf8_lossy(&buf).to_string())
-                        }
-                        FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "handle is not readable",
-                        )),
-                    };
-                    Ok(fs_result(sig, || value, RuntimeValue::Str))
-                }
-                s if s.ends_with(".writable.write-string")
-                    || s.ends_with(".appendable.append-string") =>
-                {
-                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
-                    let contents = eval_string(&call.args[1], env, program, files, config)?;
-                    files.get_mut(handle)?;
-                    let result = files.write_to_handle(handle, contents.as_bytes());
-                    Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
-                }
-                s if s.ends_with(".writable.write-bytes")
-                    || s.ends_with(".appendable.append-bytes") =>
-                {
-                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
-                    let contents = eval_string(&call.args[1], env, program, files, config)?;
-                    files.get_mut(handle)?;
-                    let result = files.write_to_handle(handle, contents.as_bytes());
-                    Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
-                }
-                s if s.ends_with(".writable.flush") => {
-                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
-                    files.get_mut(handle)?;
-                    let result = files.flush_handle(handle);
-                    Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
-                }
-                s if s.ends_with(".closeable.close") => {
-                    let handle = eval_handle(&call.args[0], env, program, files, config)?;
-                    files.close(handle);
-                    Ok(result_ok(sig, RuntimeValue::Void))
-                }
-
-                "create-dir-all" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
-                    Ok(fs_result(
-                        sig,
-                        || fs::create_dir_all(p),
-                        |_| RuntimeValue::Void,
-                    ))
-                }
-                "remove-file" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
-                    Ok(fs_result(
-                        sig,
-                        || fs::remove_file(p),
-                        |_| RuntimeValue::Void,
-                    ))
-                }
-                "remove-dir" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
-                    Ok(fs_result(
-                        sig,
-                        || fs::remove_dir_all(p),
-                        |_| RuntimeValue::Void,
-                    ))
-                }
-                "exists" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
-                    Ok(RuntimeValue::Bool(p.exists()))
-                }
-                "canonicalize" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
-                    Ok(fs_result(
-                        sig,
-                        || p.canonicalize(),
-                        |c| wrap_domain_string("path", c.display().to_string()),
-                    ))
-                }
-                "metadata" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
-                    Ok(fs_result(
-                        sig,
-                        || fs::metadata(p),
-                        |md| RuntimeValue::Str(format!("size={},is_dir={}", md.len(), md.is_dir())),
-                    ))
-                }
-                "read-to-string" | "read-file" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let p = if call.args.len() > 1 {
-                        let policy = eval_policy(&call.args[1], env, program, files, config)?;
-                        resolve_policy_path(&path, &policy, "fs-read")?
-                    } else {
-                        let grant =
-                            call_grant_capability(call, "fs-read", env, program, files, config)?;
-                        resolve_granted_path(&path, &grant, "fs-read-grant")?
-                    };
-                    Ok(fs_result(sig, || fs::read_to_string(p), RuntimeValue::Str))
-                }
-                "write-string-all" | "write-file" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let contents = eval_string(&call.args[1], env, program, files, config)?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
-                    Ok(fs_result(
-                        sig,
-                        || fs::write(p, contents),
-                        |_| RuntimeValue::Void,
-                    ))
-                }
-                "append-string" | "append-file" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let contents = eval_string(&call.args[1], env, program, files, config)?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
-                    Ok(fs_result(
-                        sig,
-                        || {
-                            let mut f = fs::OpenOptions::new().create(true).append(true).open(p)?;
-                            f.write_all(contents.as_bytes())
-                        },
-                        |_| RuntimeValue::Void,
-                    ))
-                }
-                "create-file" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "Path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
-                    let _ = fs::File::create(p).context("create-file")?;
-                    Ok(wrap_domain_string("file", path))
-                }
-                "open-path" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-write", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-write-grant")?;
-                    let _ = fs::OpenOptions::new()
-                        .create(true)
-                        .truncate(false)
-                        .read(true)
-                        .write(true)
-                        .open(p)
-                        .context("open-path")?;
-                    Ok(wrap_domain_int("fd", 1))
-                }
-                "read-dir" => {
-                    let path =
-                        eval_domain_string(&call.args[0], env, program, files, config, "path")?;
-                    let grant =
-                        call_grant_capability(call, "fs-read", env, program, files, config)?;
-                    let p = resolve_granted_path(&path, &grant, "fs-read-grant")?;
-                    Ok(fs_result(
-                        sig,
-                        || {
-                            let mut names = Vec::new();
-                            for entry in fs::read_dir(p)? {
-                                let entry = entry?;
-                                names.push(entry.file_name().to_string_lossy().to_string());
-                            }
-                            Ok(names)
-                        },
-                        |names| {
-                            RuntimeValue::Array(
-                                names.into_iter().map(RuntimeValue::Str).collect::<Vec<_>>(),
-                            )
-                        },
-                    ))
-                }
-                _ => {
-                    bail!(
-                        "unsupported function `{}` import {}.{}",
-                        sym,
-                        import.module,
-                        import.name
+        FunctionBody::Wasm { import, wasm_args } => {
+            let entry =
+                crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
+                    format!(
+                        "E-WASM-002: `{}` targets unknown host import `{}.{}`",
+                        sig.symbol, import.module, import.name
                     )
+                })?;
+            if wasm_args.len() != entry.params.len() {
+                bail!(
+                    "E-WASM-003: `{}` passes {} args to host import `{}.{}` which takes {}",
+                    sig.symbol,
+                    wasm_args.len(),
+                    import.module,
+                    import.name,
+                    entry.params.len()
+                );
+            }
+            // Evaluate the declared `$wasm.args` forwarding specs in the
+            // import's parameter order. The specs -- never the wrapper's
+            // symbol name -- are the binding between wrapper and host import.
+            let mut host_args = Vec::with_capacity(wasm_args.len());
+            for spec in wasm_args {
+                host_args.push(match spec {
+                    WasmArgSpec::Arg(name) => {
+                        let idx =
+                            sig.arg_names
+                                .iter()
+                                .position(|n| n == name)
+                                .with_context(|| {
+                                    format!(
+                                        "`{}` forwards unknown argument `$args.{name}`",
+                                        sig.symbol
+                                    )
+                                })?;
+                        eval_expr(&call.args[idx], env, program, files, config)?
+                    }
+                    WasmArgSpec::ConstInt(value) => RuntimeValue::Int(*value),
+                    WasmArgSpec::ConstStr(value) => RuntimeValue::Str(value.clone()),
+                });
+            }
+            // Defense in depth behind the static `E-CAP-002` check: every
+            // capability position must hold a genuine runtime-minted policy
+            // value. `$policy` values cannot be forged, so presence here
+            // proves the authority was threaded from a root signature.
+            for (position, param) in entry.params.iter().enumerate() {
+                if matches!(param, crate::host_abi::ParamKind::Capability(_)) {
+                    value_policy(&host_args[position]).with_context(|| {
+                        format!(
+                            "host import `{}.{}` requires a `$policy` capability in position {position}",
+                            entry.module, entry.name
+                        )
+                    })?;
                 }
+            }
+            match entry.module {
+                "vibra_v1" => exec_vibra_v1(entry.name, sig, &host_args, files, config),
+                "vibra_test" => exec_vibra_test(entry.name, &host_args),
+                "vibra_code" => exec_vibra_code(entry.name, sig, &host_args),
+                other => bail!("unsupported host module `{other}`"),
             }
         }
+    }
+}
+
+/// Resolve `path` against the `domain` scopes of `policy`, mapping a denial
+/// into the wrapper's typed `permission-denied` error (payload-free, matching
+/// the error enum's `$void` payload) instead of a hard runtime failure.
+fn policy_path_or_denied(
+    sig: &crate::lower::FunctionSig,
+    path: &str,
+    policy: &PolicyType,
+    domain: CapabilityDomain,
+) -> std::result::Result<PathBuf, Box<RuntimeValue>> {
+    resolve_policy_path(path, policy, domain)
+        .map_err(|_| Box::new(result_err(sig, "permission-denied", None)))
+}
+
+fn exec_vibra_v1(
+    name: &str,
+    sig: &crate::lower::FunctionSig,
+    args: &[RuntimeValue],
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<RuntimeValue> {
+    match name {
+        "stdin_open" => {
+            let policy = value_policy(&args[0])?;
+            ensure_policy_scope(policy, CapabilityDomain::StdinRead, "*")?;
+            Ok(RuntimeValue::HostHandle(HostHandle {
+                id: files.insert_stdin(),
+                access: HandleAccess::Read,
+            }))
+        }
+        "stdout_open" => Ok(RuntimeValue::HostHandle(HostHandle {
+            id: 1,
+            access: HandleAccess::Write,
+        })),
+        "stderr_open" => Ok(RuntimeValue::HostHandle(HostHandle {
+            id: 2,
+            access: HandleAccess::Write,
+        })),
+        "fd_read" => {
+            let handle = value_handle(&args[0])?;
+            let value = match files.get_mut(handle)? {
+                FileHandle::Stdin => {
+                    let mut s = String::new();
+                    std::io::stdin().read_to_string(&mut s).map(|_| s)
+                }
+                FileHandle::File(file) => {
+                    let mut s = String::new();
+                    file.read_to_string(&mut s).map(|_| s)
+                }
+                FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "handle is not readable",
+                )),
+            };
+            Ok(fs_result(sig, || value, RuntimeValue::Str))
+        }
+        "fd_read_bytes" => {
+            let handle = value_handle(&args[0])?;
+            let value = match files.get_mut(handle)? {
+                FileHandle::Stdin => {
+                    let mut bytes = Vec::new();
+                    std::io::stdin().read_to_end(&mut bytes).map(|_| bytes)
+                }
+                FileHandle::File(file) => {
+                    let mut bytes = Vec::new();
+                    file.read_to_end(&mut bytes).map(|_| bytes)
+                }
+                FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "handle is not readable",
+                )),
+            };
+            Ok(fs_result(sig, || value, runtime_bytes))
+        }
+        "fd_read_line" => {
+            let handle = value_handle(&args[0])?;
+            let value = match files.get_mut(handle)? {
+                FileHandle::Stdin => {
+                    let mut line = String::new();
+                    std::io::stdin().read_line(&mut line).map(|_| {
+                        trim_line_ending(&mut line);
+                        line
+                    })
+                }
+                FileHandle::File(file) => read_line_from_file(file),
+                FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "handle is not readable",
+                )),
+            };
+            Ok(fs_result(sig, || value, RuntimeValue::Str))
+        }
+        "fd_write" => {
+            let handle = value_handle(&args[0])?;
+            let contents = value_string(&args[1])?;
+            files.get_mut(handle)?;
+            let result = files.write_to_handle(handle, contents.as_bytes());
+            Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
+        }
+        "fd_write_bytes" => {
+            let handle = value_handle(&args[0])?;
+            let contents = value_bytes(&args[1])?;
+            files.get_mut(handle)?;
+            let result = files.write_to_handle(handle, &contents);
+            Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
+        }
+        "fd_sync" => {
+            let handle = value_handle(&args[0])?;
+            files.get_mut(handle)?;
+            let result = files.flush_handle(handle);
+            Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
+        }
+        "fd_close" => {
+            let handle = value_handle(&args[0])?;
+            files.close(handle);
+            Ok(result_ok(sig, RuntimeValue::Void))
+        }
+        "path_new" => Ok(RuntimeValue::Str(value_string(&args[0])?)),
+        "path_join" => {
+            let base = value_string(&args[0])?;
+            let segment = value_string(&args[1])?;
+            Ok(RuntimeValue::Str(
+                Path::new(&base).join(segment).display().to_string(),
+            ))
+        }
+        "path_parent" => {
+            let path = value_string(&args[0])?;
+            let parent = Path::new(&path)
+                .parent()
+                .map(|p| p.display().to_string())
+                .filter(|p| !p.is_empty());
+            Ok(option_value(sig, parent.map(RuntimeValue::Str)))
+        }
+        "path_extension" => {
+            let path = value_string(&args[0])?;
+            let extension = Path::new(&path)
+                .extension()
+                .map(|e| e.to_string_lossy().to_string());
+            Ok(option_value(sig, extension.map(RuntimeValue::Str)))
+        }
+        "bytes_len" => Ok(RuntimeValue::Int(
+            i64::try_from(value_bytes(&args[0])?.len()).unwrap_or(i64::MAX),
+        )),
+        "bytes_slice" => {
+            let bytes = value_bytes(&args[0])?;
+            let start = usize::try_from(value_i64(&args[1])?).context("slice start < 0")?;
+            let end = usize::try_from(value_i64(&args[2])?).context("slice end < 0")?;
+            let slice = bytes
+                .get(start..end)
+                .context("byte slice range is out of bounds")?;
+            Ok(runtime_bytes(slice.to_vec()))
+        }
+        "bytes_from_str" => Ok(runtime_bytes(value_string(&args[0])?.into_bytes())),
+        "bytes_to_str" => Ok(RuntimeValue::Str(
+            String::from_utf8(value_bytes(&args[0])?).context("bytes are not valid UTF-8")?,
+        )),
+        "fs_open_read" | "fs_open_write" | "fs_open_append" | "fs_open_read_write" => {
+            let path = value_string(&args[0])?;
+            let mut resolved: Option<PathBuf> = None;
+            let checks: Vec<(&PolicyType, CapabilityDomain)> = match name {
+                "fs_open_read" => vec![(value_policy(&args[1])?, CapabilityDomain::FsRead)],
+                "fs_open_write" | "fs_open_append" => {
+                    vec![(value_policy(&args[1])?, CapabilityDomain::FsWrite)]
+                }
+                _ => vec![
+                    (value_policy(&args[1])?, CapabilityDomain::FsRead),
+                    (value_policy(&args[2])?, CapabilityDomain::FsWrite),
+                ],
+            };
+            for (policy, domain) in checks {
+                match policy_path_or_denied(sig, &path, policy, domain) {
+                    Ok(p) => resolved = Some(p),
+                    Err(denied) => return Ok(*denied),
+                }
+            }
+            let p = resolved.expect("open import checks at least one domain");
+            if files.at_capacity() {
+                return Ok(result_err(sig, "too-many-open-files", None));
+            }
+            let mut options = fs::OpenOptions::new();
+            match name {
+                "fs_open_read" => options.read(true),
+                "fs_open_write" => options.create(true).truncate(true).write(true),
+                "fs_open_append" => options.create(true).append(true),
+                _ => options.create(true).truncate(false).read(true).write(true),
+            };
+            Ok(fs_result(
+                sig,
+                || options.open(p),
+                |file| {
+                    RuntimeValue::HostHandle(HostHandle {
+                        id: files.insert(file),
+                        access: match name {
+                            "fs_open_read" => HandleAccess::Read,
+                            "fs_open_read_write" => HandleAccess::ReadWrite,
+                            _ => HandleAccess::Write,
+                        },
+                    })
+                },
+            ))
+        }
+        "fs_read_to_string" => {
+            let path = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(sig, || fs::read_to_string(p), RuntimeValue::Str))
+        }
+        "fs_write_string_all" => {
+            let path = value_string(&args[0])?;
+            let contents = value_string(&args[1])?;
+            let policy = value_policy(&args[2])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || fs::write(p, contents),
+                |_| RuntimeValue::Void,
+            ))
+        }
+        "fs_append_string" => {
+            let path = value_string(&args[0])?;
+            let contents = value_string(&args[1])?;
+            let policy = value_policy(&args[2])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || {
+                    let mut f = fs::OpenOptions::new().create(true).append(true).open(p)?;
+                    f.write_all(contents.as_bytes())
+                },
+                |_| RuntimeValue::Void,
+            ))
+        }
+        "fs_exists" => {
+            let path = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let p = resolve_policy_path(&path, policy, CapabilityDomain::FsRead)?;
+            Ok(RuntimeValue::Bool(p.exists()))
+        }
+        "fs_create_dir_all" => {
+            let path = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || fs::create_dir_all(p),
+                |_| RuntimeValue::Void,
+            ))
+        }
+        "fs_remove_file" => {
+            let path = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || fs::remove_file(p),
+                |_| RuntimeValue::Void,
+            ))
+        }
+        "fs_remove_dir" => {
+            let path = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || fs::remove_dir_all(p),
+                |_| RuntimeValue::Void,
+            ))
+        }
+        "fs_read_dir" => {
+            let path = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || {
+                    let mut names = Vec::new();
+                    for entry in fs::read_dir(p)? {
+                        let entry = entry?;
+                        names.push(entry.file_name().to_string_lossy().to_string());
+                    }
+                    Ok(names)
+                },
+                |names| {
+                    RuntimeValue::Array(
+                        names.into_iter().map(RuntimeValue::Str).collect::<Vec<_>>(),
+                    )
+                },
+            ))
+        }
+        "fs_metadata" => {
+            let path = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || fs::metadata(p),
+                |md| RuntimeValue::Str(format!("size={},is_dir={}", md.len(), md.is_dir())),
+            ))
+        }
+        "fs_canonicalize" => {
+            let path = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || p.canonicalize(),
+                |c| RuntimeValue::Str(c.display().to_string()),
+            ))
+        }
+        "env_get" => {
+            let var = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            if ensure_policy_scope(policy, CapabilityDomain::EnvRead, &var).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            Ok(fs_result(sig, || env_get(&var), RuntimeValue::Str))
+        }
+        "env_set" => {
+            let var = value_string(&args[0])?;
+            let value = value_string(&args[1])?;
+            let policy = value_policy(&args[2])?;
+            if ensure_policy_scope(policy, CapabilityDomain::EnvWrite, &var).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            if !is_valid_env_name(&var) {
+                return Ok(result_err(sig, "invalid-name", None));
+            }
+            std::env::set_var(var, value);
+            Ok(result_ok(sig, RuntimeValue::Void))
+        }
+        "net_connect" | "net_listen" | "process_run" => {
+            let target = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            let (domain, what) = match name {
+                "net_connect" => (CapabilityDomain::NetConnect, "network"),
+                "net_listen" => (CapabilityDomain::NetListen, "network"),
+                _ => (CapabilityDomain::ProcessRun, "process"),
+            };
+            if ensure_policy_scope(policy, domain, &target).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            Ok(result_err(
+                sig,
+                "unsupported",
+                Some(format!("{what} runtime is not implemented yet")),
+            ))
+        }
+        "clock_now_unix_millis" => {
+            let policy = value_policy(&args[0])?;
+            ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
+            let millis = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .context("system clock before unix epoch")?
+                .as_millis();
+            Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)))
+        }
+        "random_bytes" => {
+            let len = value_i64(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            ensure_policy_scope(policy, CapabilityDomain::Random, "*")?;
+            let len = checked_alloc_len(len, config)
+                .map_err(|(tag, msg)| anyhow::anyhow!("random_bytes {tag}: {msg}"))?;
+            let mut buf = vec![0u8; len];
+            getrandom::getrandom(&mut buf)
+                .map_err(|err| anyhow::anyhow!("random_bytes unavailable: {err}"))?;
+            Ok(RuntimeValue::Array(
+                buf.into_iter()
+                    .map(|byte| RuntimeValue::Int(i64::from(byte)))
+                    .collect(),
+            ))
+        }
+        "system_info" => {
+            let policy = value_policy(&args[0])?;
+            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
+            Ok(RuntimeValue::Str(format!(
+                "{}-{}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )))
+        }
+        other => bail!("unsupported vibra_v1 import `{other}`"),
+    }
+}
+
+/// Strip a trailing `\n` (and `\r\n`) from a line read from a stream.
+fn trim_line_ending(line: &mut String) {
+    if line.ends_with('\n') {
+        line.pop();
+        if line.ends_with('\r') {
+            line.pop();
+        }
+    }
+}
+
+/// Read one line from a `File` without buffering past the newline, so the
+/// handle's position stays consistent for subsequent reads.
+fn read_line_from_file(file: &mut File) -> std::io::Result<String> {
+    let mut buf = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        if file.read(&mut byte)? == 0 {
+            break;
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        buf.push(byte[0]);
+    }
+    let mut line = String::from_utf8_lossy(&buf).to_string();
+    if line.ends_with('\r') {
+        line.pop();
+    }
+    Ok(line)
+}
+
+/// Construct an `option`-shaped enum value for the wrapper's return type.
+fn option_value(sig: &crate::lower::FunctionSig, value: Option<RuntimeValue>) -> RuntimeValue {
+    match value {
+        Some(v) => RuntimeValue::Enum {
+            enum_key: result_enum_key(sig),
+            tag: "some".to_string(),
+            payload: Some(Box::new(v)),
+        },
+        None => RuntimeValue::Enum {
+            enum_key: result_enum_key(sig),
+            tag: "none".to_string(),
+            payload: None,
+        },
+    }
+}
+
+fn exec_vibra_test(name: &str, args: &[RuntimeValue]) -> Result<RuntimeValue> {
+    match name {
+        "assert" => {
+            if value_bool(&args[0])? {
+                Ok(RuntimeValue::Void)
+            } else {
+                bail!("assertion failed")
+            }
+        }
+        "fail" => bail!("{}", value_string(&args[0])?),
+        "assert-eq-bool" | "assert-eq-int" | "assert-eq-float" | "assert-eq-str" => {
+            let actual = &args[0];
+            let expected = &args[1];
+            if actual == expected {
+                Ok(RuntimeValue::Void)
+            } else {
+                bail!("assertion failed: expected {expected:?}, actual {actual:?}")
+            }
+        }
+        other => bail!("unsupported vibra_test import `{other}`"),
+    }
+}
+
+fn exec_vibra_code(
+    name: &str,
+    sig: &crate::lower::FunctionSig,
+    args: &[RuntimeValue],
+) -> Result<RuntimeValue> {
+    match name {
+        "make-query" => Ok(RuntimeValue::Record(std::collections::BTreeMap::from([
+            ("root".to_string(), args[0].clone()),
+            ("include-root".to_string(), args[1].clone()),
+            ("mapping-key".to_string(), args[2].clone()),
+            ("kind".to_string(), args[3].clone()),
+            ("pattern".to_string(), args[4].clone()),
+            ("limit".to_string(), args[5].clone()),
+        ]))),
+        "capture-pattern" => {
+            let pattern = args[0].clone();
+            let capture_name = value_string(&args[1])?;
+            Ok(RuntimeValue::Enum {
+                enum_key: "code.pattern".to_string(),
+                tag: "capture".to_string(),
+                payload: Some(Box::new(RuntimeValue::Record(
+                    std::collections::BTreeMap::from([
+                        ("name".to_string(), RuntimeValue::Str(capture_name)),
+                        ("pattern".to_string(), pattern),
+                    ]),
+                ))),
+            })
+        }
+        "parse" => {
+            let source = value_string(&args[0])?;
+            Ok(match code_document(&source) {
+                Ok(_) => result_ok(
+                    sig,
+                    typed_code_value("code.document", RuntimeValue::Str(source)),
+                ),
+                Err(error) => code_result_err(sig, &error),
+            })
+        }
+        "emit" => {
+            let source = value_string(&args[0])?;
+            Ok(RuntimeValue::Str(source))
+        }
+        "root" => {
+            let source = value_string(&args[0])?;
+            Ok(
+                match code_document(&source).and_then(|(_, document)| document.root()) {
+                    Ok(node) => result_ok(
+                        sig,
+                        typed_code_value(
+                            "code.node",
+                            RuntimeValue::Str(encode_code_node(&source, &node)?),
+                        ),
+                    ),
+                    Err(error) => code_result_err(sig, &error),
+                },
+            )
+        }
+        "at" => {
+            let source = value_string(&args[0])?;
+            let path_value = &args[1];
+            Ok(
+                match code_path_from_runtime(path_value).and_then(|path| {
+                    let (_, document) = code_document(&source)?;
+                    document.at(&path)
+                }) {
+                    Ok(node) => result_ok(
+                        sig,
+                        typed_code_value(
+                            "code.node",
+                            RuntimeValue::Str(encode_code_node(&source, &node)?),
+                        ),
+                    ),
+                    Err(error) => code_result_err(sig, &error),
+                },
+            )
+        }
+        "parent" => {
+            let handle = value_string(&args[0])?;
+            Ok(
+                match decode_code_node(&handle).and_then(|(source, node)| {
+                    let parent = node.path().parent().ok_or_else(|| {
+                        crate::code::CodeError::new(
+                            crate::code::CodeErrorKind::InvalidPath,
+                            "root node has no parent",
+                        )
+                    })?;
+                    let (_, document) = code_document(&source)?;
+                    document.at(&parent).map(|node| (source, node))
+                }) {
+                    Ok((source, node)) => result_ok(
+                        sig,
+                        typed_code_value(
+                            "code.node",
+                            RuntimeValue::Str(encode_code_node(&source, &node)?),
+                        ),
+                    ),
+                    Err(error) => code_result_err(sig, &error),
+                },
+            )
+        }
+        "children" => {
+            let handle = value_string(&args[0])?;
+            Ok(
+                match decode_code_node(&handle)
+                    .and_then(|(source, node)| node.children().map(|nodes| (source, nodes)))
+                {
+                    Ok((source, nodes)) => {
+                        let handles = nodes
+                            .iter()
+                            .map(|node| {
+                                encode_code_node(&source, node).map(|handle| {
+                                    typed_code_value("code.node", RuntimeValue::Str(handle))
+                                })
+                            })
+                            .collect::<std::result::Result<Vec<_>, _>>();
+                        match handles {
+                            Ok(handles) => result_ok(sig, RuntimeValue::Array(handles)),
+                            Err(error) => code_result_err(sig, &error),
+                        }
+                    }
+                    Err(error) => code_result_err(sig, &error),
+                },
+            )
+        }
+        "find" => {
+            let source = value_string(&args[0])?;
+            let query = &args[1];
+            Ok(
+                match code_query_from_runtime(query).and_then(|query| {
+                    let (_, document) = code_document(&source)?;
+                    query.execute(&document)
+                }) {
+                    Ok(matches) => {
+                        let matches = matches
+                            .into_iter()
+                            .map(|matched| {
+                                let node = encode_code_node(&source, &matched.node)?;
+                                let captures = matched
+                                    .captures
+                                    .into_iter()
+                                    .map(|(name, value)| {
+                                        RuntimeValue::Record(std::collections::BTreeMap::from([
+                                            ("name".to_string(), RuntimeValue::Str(name)),
+                                            ("value".to_string(), code_form_to_runtime(&value)),
+                                        ]))
+                                    })
+                                    .collect();
+                                Ok(RuntimeValue::Record(std::collections::BTreeMap::from([
+                                    (
+                                        "node".to_string(),
+                                        typed_code_value("code.node", RuntimeValue::Str(node)),
+                                    ),
+                                    ("captures".to_string(), RuntimeValue::Array(captures)),
+                                ])))
+                            })
+                            .collect::<std::result::Result<Vec<_>, crate::code::CodeError>>();
+                        match matches {
+                            Ok(matches) => result_ok(sig, RuntimeValue::Array(matches)),
+                            Err(error) => code_result_err(sig, &error),
+                        }
+                    }
+                    Err(error) => code_result_err(sig, &error),
+                },
+            )
+        }
+        "source" => {
+            let handle = value_string(&args[0])?;
+            let (_, node) =
+                decode_code_node(&handle).map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            Ok(RuntimeValue::Str(node.source().to_string()))
+        }
+        "to-form" => {
+            let handle = value_string(&args[0])?;
+            Ok(match decode_code_node(&handle) {
+                Ok((_, node)) => result_ok(sig, code_form_to_runtime(node.form())),
+                Err(error) => code_result_err(sig, &error),
+            })
+        }
+        "render" => {
+            let form = code_form_from_runtime(&args[0])
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            Ok(RuntimeValue::Str(
+                form.render()
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+            ))
+        }
+        "replace" | "delete" | "upsert-mapping" | "insert-mapping" | "rename-key"
+        | "insert-sequence" | "splice-sequence" | "copy" | "move" => {
+            let source = value_string(&args[0])?;
+            let result = (|| {
+                let (database, document) = code_document(&source)?;
+                let handle = value_string(&args[1]).map_err(|error| {
+                    crate::code::CodeError::new(
+                        crate::code::CodeErrorKind::InvalidForm,
+                        error.to_string(),
+                    )
+                })?;
+                let (_, handle_node) = decode_code_node(&handle)?;
+                if handle_node.revision() != document.revision() {
+                    return Err(crate::code::CodeError::new(
+                        crate::code::CodeErrorKind::StaleRevision,
+                        "node belongs to a different document revision",
+                    ));
+                }
+                let first = document.at(handle_node.path())?;
+                let changes = match name {
+                    "replace" => crate::code::ChangeSet::new()
+                        .replace(first.locator(), code_form_from_runtime(&args[2])?),
+                    "delete" => crate::code::ChangeSet::new().delete(first.locator()),
+                    "upsert-mapping" | "insert-mapping" => {
+                        let key = value_string(&args[2]).map_err(|error| {
+                            crate::code::CodeError::new(
+                                crate::code::CodeErrorKind::InvalidForm,
+                                error.to_string(),
+                            )
+                        })?;
+                        let value = code_form_from_runtime(&args[3])?;
+                        if name == "upsert-mapping" {
+                            crate::code::ChangeSet::new().upsert_mapping(
+                                first.locator(),
+                                key,
+                                value,
+                            )
+                        } else {
+                            crate::code::ChangeSet::new().insert_mapping(
+                                first.locator(),
+                                key,
+                                value,
+                            )
+                        }
+                    }
+                    "rename-key" => {
+                        let new_key = value_string(&args[2]).map_err(|error| {
+                            crate::code::CodeError::new(
+                                crate::code::CodeErrorKind::InvalidForm,
+                                error.to_string(),
+                            )
+                        })?;
+                        crate::code::ChangeSet::new().rename_mapping_key(first.locator(), new_key)
+                    }
+                    "insert-sequence" => {
+                        let RuntimeValue::Int(index) = untyped(&args[2]) else {
+                            return Err(crate::code::CodeError::new(
+                                crate::code::CodeErrorKind::InvalidForm,
+                                "sequence insertion index must be an integer",
+                            ));
+                        };
+                        crate::code::ChangeSet::new().insert_sequence(
+                            first.locator(),
+                            code_usize(*index, "sequence insertion index")?,
+                            code_form_from_runtime(&args[3])?,
+                        )
+                    }
+                    "splice-sequence" => {
+                        let (
+                            RuntimeValue::Int(start),
+                            RuntimeValue::Int(delete_count),
+                            RuntimeValue::Array(values),
+                        ) = (untyped(&args[2]), untyped(&args[3]), untyped(&args[4]))
+                        else {
+                            return Err(crate::code::CodeError::new(
+                                crate::code::CodeErrorKind::InvalidForm,
+                                "sequence splice expects integer bounds and form values",
+                            ));
+                        };
+                        let values = values
+                            .iter()
+                            .map(code_form_from_runtime)
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
+                        crate::code::ChangeSet::new().splice_sequence(
+                            first.locator(),
+                            code_usize(*start, "sequence splice start")?,
+                            code_usize(*delete_count, "sequence splice delete count")?,
+                            values,
+                        )
+                    }
+                    "copy" | "move" => {
+                        let target_handle = value_string(&args[2]).map_err(|error| {
+                            crate::code::CodeError::new(
+                                crate::code::CodeErrorKind::InvalidForm,
+                                error.to_string(),
+                            )
+                        })?;
+                        let (_, target_node) = decode_code_node(&target_handle)?;
+                        if target_node.revision() != document.revision() {
+                            return Err(crate::code::CodeError::new(
+                                crate::code::CodeErrorKind::StaleRevision,
+                                "target node belongs to a different document revision",
+                            ));
+                        }
+                        let target = document.at(target_node.path())?;
+                        let destination = code_segment_from_runtime(&args[3])?;
+                        if name == "copy" {
+                            crate::code::ChangeSet::new().copy(
+                                first.locator(),
+                                target.locator(),
+                                destination,
+                            )
+                        } else {
+                            crate::code::ChangeSet::new().move_node(
+                                first.locator(),
+                                target.locator(),
+                                destination,
+                            )
+                        }
+                    }
+                    _ => unreachable!("matched code edit import"),
+                };
+                let applied = database.apply(&changes)?;
+                Ok(applied
+                    .database
+                    .document("document.vibra")?
+                    .source()
+                    .to_string())
+            })();
+            Ok(match result {
+                Ok(source) => result_ok(
+                    sig,
+                    typed_code_value("code.document", RuntimeValue::Str(source)),
+                ),
+                Err(error) => code_result_err(sig, &error),
+            })
+        }
+        other => bail!("unsupported vibra_code import `{other}`"),
     }
 }

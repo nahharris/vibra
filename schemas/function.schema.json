@@ -42,9 +42,6 @@
         "$ref": "expression.schema.json"
       }
     },
-    "grants": {
-      "type": "object"
-    },
     "=doc": {
       "type": "string"
     },

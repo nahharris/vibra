@@ -4,29 +4,35 @@ env:
   $import: ../stdlib/src/env.vibra
 result:
   $import: ../stdlib/src/result.vibra
-security:
-  $import: ../stdlib/src/security.vibra
-
 get-reads-an-explicitly-granted-variable:
   $test: env
-  tags: [stdlib, capability]
-  grants:
-    env-read: $security.grant.mandatory
+  tags:
+  - stdlib
+  - capability
+  policy:
+    $policy:
+      env-read:
+      - requirement: mandatory
+        scopes:
+        - exact: PATH
   do:
-    - $let:
-        value:
-          $env.get: PATH
-          =grants:
-            - $grants.env-read
-    - $match: $value
-      when:
-      - case:
-          $result.result.ok:
-            $wildcard: null
-        do:
-        - $test.assert: true
-      - case:
-          $result.result.err:
-            $wildcard: null
-        do:
-        - $test.fail: granted environment variable was not readable
+  - $let:
+      capability:
+        $policy.narrow: $args.policy
+        into: $env.read-capability
+  - $let:
+      value:
+        $env.get: PATH
+        capability: $capability
+  - $match: $value
+    when:
+    - case:
+        $result.result.ok:
+          $wildcard: null
+      do:
+      - $test.assert: true
+    - case:
+        $result.result.err:
+          $wildcard: null
+      do:
+      - $test.fail: granted environment variable was not readable

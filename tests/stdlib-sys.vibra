@@ -2,20 +2,25 @@ test:
   $import: ../stdlib/src/test.vibra
 sys:
   $import: ../stdlib/src/sys.vibra
-security:
-  $import: ../stdlib/src/security.vibra
-
 info-uses-the-granted-system-capability:
   $test: system
-  tags: [stdlib, capability]
-  grants:
-    system-info: $security.grant.mandatory
+  tags:
+  - stdlib
+  - capability
+  policy:
+    $policy:
+      system-info:
+      - requirement: mandatory
+        scopes: any
   do:
-    - $let:
-        info:
-          $sys.info: null
-          =grants:
-            - $grants.system-info
-    - $test.assert-eq-str:
-        actual: $info
-        expected: $info
+  - $let:
+      capability:
+        $policy.narrow: $args.policy
+        into: $sys.capability
+  - $let:
+      info:
+        $sys.info:
+          capability: $capability
+  - $test.assert-eq-str:
+      actual: $info
+      expected: $info

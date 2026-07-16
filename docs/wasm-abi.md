@@ -47,16 +47,16 @@ and runtime primitives:
 - checked pattern matching and scoped binding lookup; and
 - status/non-exhaustive-match reporting.
 
-The removed `vibra_v1.run_program` envelope is rejected. Imports under
-`vibra_v1` must be in the exact v1 allowlist. Genuine Preview 1 calls must use
-`wasi_snapshot_preview1` and a known WASI function name; unknown WASI and Vibra
-symbols are rejected before instantiation.
+The removed `vibra_v1.run_program` envelope is rejected. Imports must be in the
+exact v1 registry; arbitrary Preview 1 imports and unknown Vibra symbols are
+rejected before instantiation.
 
 ## Policies and capabilities
 
-The host creates policy and grant handles from `RunConfig` before `main`.
-Guest-side narrowing can select a statically validated subset, but all handles
-remain opaque and every privileged host call rechecks the approved scopes.
+The host creates the aggregate root policy from `RunConfig` before `main`.
+Guest-side narrowing produces domain-typed capability values for statically
+validated subsets. Capability and resource handles remain opaque, and every
+privileged host call rechecks the approved scopes.
 Filesystem handles and allocation limits remain host-owned. Instantiation does
 not grant authority by itself.
 

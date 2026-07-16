@@ -406,9 +406,15 @@ instance exits.
 
 The embedded runner uses **wasmer-wasix** (requires a Tokio 1.x runtime). **Preopened directories** map host paths into the guest; stdio does not require preopens.
 
-**Security policies:** Privileged code receives unforgeable `$policy` values as ordinary arguments. `main` owns the root requested policy, helpers may only receive explicitly narrowed subpolicies, and runtime checks dynamic targets against the policy value at the point of use. Policy groups may mix mandatory and optional scopes per domain. Filesystem scopes use canonical ancestry checks so sibling string-prefix escapes are invalid.
+**Security policies:** Authority roots receive aggregate, unforgeable `$policy`
+values. `$policy.narrow` produces a domain-specific `$capability.<domain>` value;
+privileged helpers accept only those narrowed values. The runtime checks dynamic
+targets against the live capability at use. Policy groups may mix mandatory and
+optional scopes, and filesystem scopes use canonical ancestry.
 
-**Known escape hatch:** arbitrary `$wasm` declarations remain accepted in this slice. The grant model applies to grant-aware stdlib APIs, not to untrusted modules that define their own `$wasm` shims. Future work should make `$wasm` trusted-stdlib-only or require explicit unsafe/trust policy.
+**Typed host boundary:** `$wasm` declarations bind only to the closed,
+versioned host registry. Complete parameter, capability-domain, and return types
+are checked statically; wrapper declarations confer no authority.
 
 **`$wasm` encoding (pick one per build):**
 
@@ -618,7 +624,8 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
 - **Unions:** use direct arrays, e.g. `integer: { $union: [$int64, $int32, $int16, $int8] }`.
 - **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
 - **Typed io/fs:** `stdlib/src/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/src/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
-- **Security policies:** privileged host modules consume `$policy` values; supported domains include `fs`, `env`, `net`, `process`, `time`, `random`, and `sys`.
+- **Security policies:** privileged host modules consume narrowed domain
+  capabilities; roots alone receive aggregate `$policy` values.
 - **Rust-inspired unions:** `stdlib/src/option.vibra` (`Option`) is the tagged `$enum: { some: $t, none: $void }` with `=where: {t: []}`; `stdlib/src/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`. Both use qualified constructors and `$match`.
 - **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
 

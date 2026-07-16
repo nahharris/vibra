@@ -256,6 +256,46 @@
       "code": "E-ANNO-003",
       "severity": "error",
       "summary": "`=comment` and `=lint` must share a mapping with the syntax they describe"
+    },
+    {
+      "code": "E-SEC-001",
+      "severity": "error",
+      "summary": "Legacy grant syntax was removed; use root policies and explicit domain capabilities"
+    },
+    {
+      "code": "E-CAP-001",
+      "severity": "error",
+      "summary": "Policies, domain capabilities, and host handles cannot be constructed or cast"
+    },
+    {
+      "code": "E-CAP-002",
+      "severity": "error",
+      "summary": "Host import capability argument is missing or has the wrong domain"
+    },
+    {
+      "code": "E-CAP-003",
+      "severity": "error",
+      "summary": "Unknown capability domain"
+    },
+    {
+      "code": "E-CAP-004",
+      "severity": "error",
+      "summary": "Invalid opaque host handle type"
+    },
+    {
+      "code": "E-WASM-002",
+      "severity": "error",
+      "summary": "Unknown versioned host module or import"
+    },
+    {
+      "code": "E-WASM-003",
+      "severity": "error",
+      "summary": "Host import argument arity or exact value type mismatch"
+    },
+    {
+      "code": "E-WASM-004",
+      "severity": "error",
+      "summary": "Host import wrapper return type mismatch"
     }
   ]
 }

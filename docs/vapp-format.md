@@ -16,7 +16,7 @@ duplicate entries are invalid.
 The runtime verifies the complete inventory before extracting sources. It then
 loads the declared entry, emits its Wasm again, checks that it matches
 `program.wasm`, and executes that self-contained module through the `vibra-v1`
-boundary with the grants supplied to `vibra run`. Execution reconstructs host
+boundary with the policy approvals supplied to `vibra run`. Execution reconstructs host
 descriptors from `vibra.plan.v1`; it does not retain the freshly lowered IR.
 
 The metadata shape is normative in

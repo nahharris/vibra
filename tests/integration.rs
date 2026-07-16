@@ -70,7 +70,9 @@ fn generic_alias_instantiation_prefers_current_module_scope() {
 main:
   $function: $void
   return: $void
-  do: []
+  do:
+    - $let:
+        ok: true
 "#,
             io.display().to_string().replace('\\', "/")
         ),
@@ -233,16 +235,11 @@ fn wasm_abi_aggregate_layout_is_aligned() {
 
 #[test]
 fn nested_function_grants_are_rejected() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        format!(
-            r#"security:
-  $import: "{security}"
-main:
+        r#"main:
   $function:
     args: $void
     grants:
@@ -250,8 +247,6 @@ main:
   return: $void
   do: []
 "#,
-            security = security.display().to_string().replace('\\', "/"),
-        ),
     )
     .unwrap();
 
@@ -313,32 +308,25 @@ fn labeled_primary_is_only_available_through_args_namespace() {
 
 #[test]
 fn grant_names_must_be_kebab_case() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        format!(
-            r#"security:
-  $import: "{security}"
-main:
+        r#"main:
   $function: $void
   grants:
-    fs_read: $security.grant.optional
+    fs_read: optional
   return: $void
   do: []
 "#,
-            security = security.display().to_string().replace('\\', "/"),
-        ),
     )
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("grant names must be kebab-case"),
-        "expected grant declaration kebab-case rejection, got: {err}"
+        err.contains("E-SEC-001"),
+        "expected removed grant declaration rejection, got: {err}"
     );
 }
 
@@ -396,12 +384,8 @@ fn private_import_alias_is_usable_locally() {
   $function: $void
   return: $void
   do:
-    - $wasm:
-        import:
-          module: wasi_snapshot_preview1
-          name: fd_sync
-        args:
-          - $const.1
+    - $let:
+        ok: true
 "#,
     )
     .unwrap();
@@ -1077,12 +1061,8 @@ doThing:
     BadArg: $str
   return: $void
   do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_write
-          args:
-            - $args.BadArg
+      - $let:
+          BadLocal: $args.BadArg
 "#,
     )
     .unwrap();
@@ -1240,23 +1220,15 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
     input: $int32
   return: $void
   do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+      - $let:
+          ok: true
 accepts-float32:
   $function:
     input: $float32
   return: $void
   do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+      - $let:
+          ok: true
 "#,
     )
     .unwrap();
@@ -1298,12 +1270,8 @@ take-meter:
     input: $meter
   return: $void
   do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+      - $let:
+          ok: true
 main:
   $function: $void
   return: $void
@@ -1497,7 +1465,7 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("E-BOUND-001"),
+        err.contains("E-CAP-001"),
         "expected writable dispatch on read-file to be rejected, got: {err}"
     );
 }
@@ -1557,6 +1525,228 @@ main:
 
     let prog = vibra::load::load_program(&entry).unwrap();
     vibra::lower::lower_program(&prog).expect("policy type alias should lower");
+}
+
+#[test]
+fn domain_capability_type_lowers_with_a_typed_domain() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.vibra");
+    std::fs::write(
+        &path,
+        r#"read-data:
+  $capability.fs-read:
+    - requirement: mandatory
+      scopes:
+        - dir: ./data
+read-file:
+  $function:
+    capability: $read-data
+  return: $void
+  do:
+    - $let:
+        ok: true
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&path).unwrap();
+    vibra::lower::lower_program(&loaded).expect("typed fs-read capability should lower");
+    assert_eq!(
+        "fs-read".parse::<vibra::lower::CapabilityDomain>().unwrap(),
+        vibra::lower::CapabilityDomain::FsRead
+    );
+}
+
+#[test]
+fn policy_narrow_returns_a_domain_capability() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"root-policy:
+  $policy:
+    fs-read:
+      - requirement: mandatory
+        scopes:
+          - dir: .
+read-data:
+  $capability.fs-read:
+    - requirement: mandatory
+      scopes:
+        - dir: ./data
+use-read:
+  $function:
+    capability: $read-data
+  return: $void
+  do:
+    - $let:
+        ok: true
+main:
+  $function:
+    policy: $root-policy
+  return: $void
+  do:
+    - $let:
+        read:
+          $policy.narrow: $args.policy
+          into: $read-data
+    - $use-read:
+        capability: $read
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded).expect("policy should narrow into a domain capability");
+}
+
+#[test]
+fn wasm_abi_rejects_wrong_value_parameter_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"bad-assert:
+  $function:
+    value: $str
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: vibra_test
+          name: assert
+        args:
+          - $args.value
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(
+        error.contains("E-WASM-003") && error.contains("bool"),
+        "{error}"
+    );
+}
+
+#[test]
+fn wasm_abi_rejects_wrong_return_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"bad-assert:
+  $function:
+    value: $bool
+  return: $bool
+  do:
+    - $wasm:
+        import:
+          module: vibra_test
+          name: assert
+        args:
+          - $args.value
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(
+        error.contains("E-WASM-004") && error.contains("void"),
+        "{error}"
+    );
+}
+
+#[test]
+fn wasm_abi_accepts_explicit_domain_capability() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"stdin-capability:
+  $capability.stdin-read:
+    - requirement: mandatory
+      scopes: any
+read-file:
+  $handle.read: null
+stdin-open:
+  $function:
+    capability: $stdin-capability
+  return: $read-file
+  do:
+    - $wasm:
+        import:
+          module: vibra_v1
+          name: stdin_open
+        args:
+          - $args.capability
+main:
+  $function: $void
+  return: $void
+  do: []
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded).expect("typed stdin capability should satisfy ABI");
+}
+
+#[test]
+fn opaque_host_handle_cannot_be_cast_from_integer() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"read-file:
+  $handle.read: null
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        forged:
+          $cast: 0
+          into: $read-file
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(error.contains("E-CAP-001"), "{error}");
+}
+
+#[test]
+fn effects_command_reports_typed_host_surface_deterministically() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let hello = root.join("examples/hello.vibra");
+    let first = vibra_cmd()
+        .args(["effects", &path_str(&hello)])
+        .output()
+        .unwrap();
+    let second = vibra_cmd()
+        .args(["effects", &path_str(&hello)])
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(first.stdout, second.stdout);
+    let yaml = String::from_utf8(first.stdout).unwrap();
+    assert!(yaml.contains("module: vibra_v1"), "{yaml}");
+    assert!(yaml.contains("name: stdout_open"), "{yaml}");
+    assert!(yaml.contains("return: write-handle"), "{yaml}");
+    assert!(yaml.contains("root-policy:"), "{yaml}");
 }
 
 #[test]
@@ -1683,9 +1873,9 @@ main:
         &vibra::runtime::RunConfig {
             approved_policy: Some(vibra::lower::PolicyType {
                 domains: std::collections::BTreeMap::from([(
-                    "fs-read".to_string(),
+                    vibra::lower::CapabilityDomain::FsRead,
                     vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::GrantRequirement::Mandatory,
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
                         scopes: vec![vibra::lower::PolicyScope::Dir(".".to_string())],
                     }],
                 )]),
@@ -1727,9 +1917,13 @@ main:
         path:
           $fs.path.new: "{secret}"
     - $let:
+        capability:
+          $policy.narrow: $args.policy
+          into: $fs.read-capability
+    - $let:
         text:
-          $fs.read-to-string: $path
-          policy: $args.policy
+          $fs.exists: $path
+          capability: $capability
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             allowed = allowed.display().to_string().replace('\\', "/"),
@@ -1747,9 +1941,9 @@ main:
             &vibra::runtime::RunConfig {
                 approved_policy: Some(vibra::lower::PolicyType {
                     domains: std::collections::BTreeMap::from([(
-                        "fs-read".to_string(),
+                        vibra::lower::CapabilityDomain::FsRead,
                         vec![vibra::lower::PolicyGroup {
-                            requirement: vibra::lower::GrantRequirement::Mandatory,
+                            requirement: vibra::lower::PolicyRequirement::Mandatory,
                             scopes: vec![vibra::lower::PolicyScope::Dir(
                                 dir.path().display().to_string().replace('\\', "/"),
                             )],
@@ -1769,31 +1963,24 @@ main:
 
 #[test]
 fn legacy_function_grants_are_rejected_after_policy_redesign() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        format!(
-            r#"security:
-  $import: "{security}"
-main:
+        r#"main:
   $function: $void
   grants:
-    fs-read: $security.grant.optional
+    fs-read: optional
   return: $void
   do: []
 "#,
-            security = security.display().to_string().replace('\\', "/"),
-        ),
     )
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("function `grants` were removed; use `$policy` arguments"),
+        err.contains("E-SEC-001"),
         "expected migration diagnostic, got: {err}"
     );
 }
@@ -1825,9 +2012,13 @@ main:
         path:
           $fs.path.new: "{path}"
     - $let:
+        capability:
+          $policy.narrow: $args.policy
+          into: $fs.read-capability
+    - $let:
         text:
           $fs.read-to-string: $path
-          policy: $args.policy
+          capability: $capability
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             dir = dir.path().display().to_string().replace('\\', "/"),
@@ -1843,9 +2034,9 @@ main:
         &vibra::runtime::RunConfig {
             approved_policy: Some(vibra::lower::PolicyType {
                 domains: std::collections::BTreeMap::from([(
-                    "fs-read".to_string(),
+                    vibra::lower::CapabilityDomain::FsRead,
                     vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::GrantRequirement::Mandatory,
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
                         scopes: vec![vibra::lower::PolicyScope::Dir(
                             dir.path().display().to_string().replace('\\', "/"),
                         )],
@@ -1940,8 +2131,8 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("missing value argument `policy`"),
-        "expected missing policy argument rejection, got: {err}"
+        err.contains("missing value argument `capability`"),
+        "expected missing capability argument rejection, got: {err}"
     );
 }
 
@@ -2837,12 +3028,8 @@ fn bool_literals_are_compatible_with_bool_args() {
     x: $bool
   return: $void
   do:
-    - $wasm:
-        import:
-          module: wasi_snapshot_preview1
-          name: fd_sync
-        args:
-          - $const.1
+    - $let:
+        ok: true
 main:
   $function: $void
   return: $void
@@ -2874,12 +3061,8 @@ fn bool_literal_is_rejected_for_non_bool_arg() {
     x: $int64
   return: $void
   do:
-    - $wasm:
-        import:
-          module: wasi_snapshot_preview1
-          name: fd_sync
-        args:
-          - $const.1
+    - $let:
+        ok: true
 main:
   $function: $void
   return: $void
@@ -2988,12 +3171,8 @@ take-maybe:
     x: $maybe
   return: $void
   do:
-    - $wasm:
-        import:
-          module: wasi_snapshot_preview1
-          name: fd_sync
-        args:
-          - $const.1
+    - $let:
+        ok: true
 main:
   $function: $void
   return: $void
@@ -3139,12 +3318,8 @@ fn generic_stdlib_wasm_wrapper_lowers() {
     _: $t
   return: $void
   do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+      - $let:
+          ok: true
   =where: {t: []}
 "#,
     )
@@ -5230,12 +5405,7 @@ box:
           x: $t
         return: $int64
         do:
-            - $wasm:
-                import:
-                  module: wasi_snapshot_preview1
-                  name: fd_sync
-                args:
-                  - $args.x
+            - $return: 0
 main:
   $function: $void
   return: $void
@@ -5309,12 +5479,7 @@ box:
         $function: $self
         return: $t
         do:
-            - $wasm:
-                import:
-                  module: wasi_snapshot_preview1
-                  name: fd_sync
-                args:
-                  - $const.1
+            - $return: 0
 main:
   $function: $void
   return: $void
@@ -6999,39 +7164,49 @@ fn vibra_test_temp_workspace_modes_limit_real_filesystem_operations() {
   $import: "{test_lib}"
 fs:
   $import: "{fs_lib}"
-security:
-  $import: "{security_lib}"
 result:
   $import: "{result_lib}"
 workspace-read-only:
   $test: core
   workspace: temp
-  grants:
-    fs-read: $security.grant.mandatory
+  policy:
+    $policy:
+      fs-read:
+      - requirement: mandatory
+        scopes: [{{dir: .}}]
   do:
+    - $let:
+        capability:
+          $policy.narrow: $args.policy
+          into: $fs.read-capability
     - $let:
         path:
           $fs.path.new: .
     - $let:
         readable:
           $fs.exists: $path
-          =grants:
-          - $grants.fs-read
+          capability: $capability
     - $test.assert: $readable
 workspace-write-only:
   $test: core
   workspace: temp
-  grants:
-    fs-write: $security.grant.mandatory
+  policy:
+    $policy:
+      fs-write:
+      - requirement: mandatory
+        scopes: [{{dir: .}}]
   do:
+    - $let:
+        capability:
+          $policy.narrow: $args.policy
+          into: $fs.write-capability
     - $let:
         path:
           $fs.path.new: workspace-created
     - $let:
         created:
           $fs.create-dir-all: $path
-          =grants:
-          - $grants.fs-write
+          capability: $capability
     - $match: $created
       when:
       - case:
@@ -7046,18 +7221,30 @@ workspace-write-only:
 workspace-read-write:
   $test: core
   workspace: temp
-  grants:
-    fs-read: $security.grant.mandatory
-    fs-write: $security.grant.mandatory
+  policy:
+    $policy:
+      fs-read:
+      - requirement: mandatory
+        scopes: [{{dir: .}}]
+      fs-write:
+      - requirement: mandatory
+        scopes: [{{dir: .}}]
   do:
+    - $let:
+        read-capability:
+          $policy.narrow: $args.policy
+          into: $fs.read-capability
+    - $let:
+        write-capability:
+          $policy.narrow: $args.policy
+          into: $fs.write-capability
     - $let:
         path:
           $fs.path.new: workspace-created
     - $let:
         created:
           $fs.create-dir-all: $path
-          =grants:
-          - $grants.fs-write
+          capability: $write-capability
     - $match: $created
       when:
       - case:
@@ -7071,27 +7258,30 @@ workspace-read-write:
     - $let:
         readable:
           $fs.exists: $path
-          =grants:
-          - $grants.fs-read
+          capability: $read-capability
     - $test.assert: $readable
 host-grants-are-isolated:
   $test: core
   workspace: temp
   expect-error:
     phase: runtime
-    message-contains: outside configured grants
-  grants:
-    fs-read: $security.grant.mandatory
+    message-contains: mandatory policy coverage is missing
+  policy:
+    $policy:
+      fs-read:
+      - requirement: mandatory
+        scopes: [{{dir: "{host_path}"}}]
   do:
+    - $let:
+        capability:
+          $policy.narrow: $args.policy
+          into: $fs.read-capability
     - $let:
         host-path:
           $fs.path.new: {host_path}
     - $fs.exists: $host-path
-      =grants:
-      - $grants.fs-read
+      capability: $capability
 "#,
-            security_lib =
-                path_str(&std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap()),
             result_lib =
                 path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap()),
         ),
@@ -7522,9 +7712,13 @@ main:
           pc:
             $fs.path.new: "{c}"
       - $let:
+          capability:
+            $policy.narrow: $args.policy
+            into: $fs.write-capability
+      - $let:
           oa:
             $fs.open-write: $pa
-            policy: $args.policy
+            capability: $capability
       - $match: $oa
         when:
             - case:
@@ -7534,7 +7728,7 @@ main:
                 - $let:
                     ob:
                       $fs.open-write: $pb
-                      policy: $args.policy
+                      capability: $capability
                 - $match: $ob
                   when:
                       - case:
@@ -7544,7 +7738,7 @@ main:
                           - $let:
                               oc:
                                 $fs.open-write: $pc
-                                policy: $args.policy
+                                capability: $capability
                           - $match: $oc
                             when:
                                 - case:
@@ -7564,7 +7758,7 @@ main:
                                               - $let:
                                                   oc2:
                                                     $fs.open-write: $pc
-                                                    policy: $args.policy
+                                                    capability: $capability
                                               - $match: $oc2
                                                 when:
                                                     - case:
@@ -7610,9 +7804,9 @@ main:
             argv: Vec::new(),
             approved_policy: Some(vibra::lower::PolicyType {
                 domains: std::collections::BTreeMap::from([(
-                    "fs-write".to_string(),
+                    vibra::lower::CapabilityDomain::FsWrite,
                     vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::GrantRequirement::Mandatory,
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
                         scopes: vec![vibra::lower::PolicyScope::Dir(
                             dir.path().display().to_string().replace('\\', "/"),
                         )],
@@ -7632,41 +7826,78 @@ main:
     );
 }
 
-// --- Issue #53: env grants are case-sensitive on Unix ---
+// --- Issue #53: environment capability scopes are case-sensitive on Unix ---
 
 #[test]
-fn env_read_grant_is_case_sensitive_on_unix() {
+fn env_read_capability_is_case_sensitive_on_unix() {
     if cfg!(windows) {
         return;
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let env_mod = std::fs::canonicalize(root.join("stdlib/src/env.vibra")).unwrap();
     let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"env:
+  $import: "{env_mod}"
+result:
+  $import: "{result}"
+test:
+  $import: "{test}"
+env-policy:
+  $policy:
+    env-read:
+    - requirement: mandatory
+      scopes:
+      - exact: VIBRA_ISSUE53_TOKEN
+main:
+  $function:
+    policy: $env-policy
+  return: $void
+  do:
+  - $let:
+      capability:
+        $policy.narrow: $args.policy
+        into: $env.read-capability
+  - $let:
+      value:
+        $env.get: vibra_issue53_token
+        capability: $capability
+  - $match: $value
+    when:
+    - case:
+        $result.result.ok:
+          $wildcard: null
+      do:
+      - $test.fail: lowercase environment name matched uppercase capability scope
+    - case:
+        $result.result.err:
+          $wildcard: null
+      do: []
+"#,
+            env_mod = path_str(&env_mod),
+            result = path_str(&result),
+            test = path_str(&test),
+        ),
+    )
+    .unwrap();
     std::env::set_var("VIBRA_ISSUE53_TOKEN", "public");
     std::env::set_var("vibra_issue53_token", "secret");
     let output = vibra_cmd()
-        .args([
-            "exec",
-            r#"{$env.get: "vibra_issue53_token"}"#,
-            "--import",
-            &format!("env={}", path_str(&env_mod)),
-            "--import",
-            &format!("result={}", path_str(&result)),
-            "--import",
-            &format!("security={}", path_str(&security)),
-            "--allow-env=VIBRA_ISSUE53_TOKEN",
-            "--format",
-            "yaml",
-        ])
+        .args(["run", &path_str(&entry), "--allow-env=VIBRA_ISSUE53_TOKEN"])
         .output()
         .unwrap();
     std::env::remove_var("VIBRA_ISSUE53_TOKEN");
     std::env::remove_var("vibra_issue53_token");
     assert!(
-        !output.status.success(),
-        "lowercase env name must not match uppercase grant on Unix: {}",
-        String::from_utf8_lossy(&output.stdout)
+        output.status.success(),
+        "lowercase env name must not match uppercase capability scope:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -7697,7 +7928,7 @@ fn forged_stdin_read_file_handle_requires_allow_stdin() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("allow-stdin"),
-        "expected allow-stdin denial, got: {stderr}"
+        stderr.contains("E-CAP-001"),
+        "expected opaque-handle forgery rejection, got: {stderr}"
     );
 }

@@ -110,7 +110,6 @@ struct WasmPlan {
     calls: Vec<Call>,
     patterns: Vec<Pattern>,
     main_arg_bindings: Vec<(String, TypeRef)>,
-    main_grant_decls: Vec<crate::lower::GrantDecl>,
     host_functions: BTreeMap<String, crate::lower::FunctionSig>,
     impl_keys: Vec<crate::lower::ImplKey>,
 }
@@ -287,7 +286,6 @@ impl HostExecution {
         let program = LoweredProgram {
             statements: vec![],
             main_arg_bindings: plan.main_arg_bindings.clone(),
-            main_grant_decls: plan.main_grant_decls.clone(),
             constants: HashMap::new(),
             functions,
             impls,
@@ -403,13 +401,18 @@ impl HostExecution {
                 value: Box::new(values[0].clone()),
             },
             Expr::PolicyNarrow { target, .. } => {
-                if !matches!(values[0], RuntimeValue::Policy(_)) {
+                let RuntimeValue::Policy(source) = &values[0] else {
                     bail!("`$policy.narrow` expects a policy value")
-                }
-                let TypeRef::Policy(policy) = target else {
-                    bail!("`$policy.narrow.into` must be a `$policy` type")
                 };
-                RuntimeValue::Policy(crate::lower::PolicyValue { policy })
+                match target {
+                    TypeRef::Capability(requested) => RuntimeValue::Capability(
+                        crate::execute::narrow_capability_value(&requested, &source.policy)?,
+                    ),
+                    TypeRef::Policy(requested) => RuntimeValue::Policy(
+                        crate::execute::narrow_policy_value(&requested, &source.policy)?,
+                    ),
+                    _ => bail!("`$policy.narrow.into` must be a capability type"),
+                }
             }
             Expr::EnumConstructor {
                 enum_key,
@@ -689,7 +692,6 @@ impl<'a> Compiler<'a> {
             program,
             plan: WasmPlan {
                 main_arg_bindings: program.main_arg_bindings.clone(),
-                main_grant_decls: program.main_grant_decls.clone(),
                 host_functions,
                 impl_keys,
                 ..WasmPlan::default()
@@ -800,18 +802,12 @@ impl<'a> Compiler<'a> {
 
     fn compile_main(&mut self) -> Function {
         let statements = self.program.statements.clone();
-        let mut seeds: Vec<String> = self
+        let seeds: Vec<String> = self
             .program
             .main_arg_bindings
             .iter()
             .map(|(name, _)| name.clone())
             .collect();
-        seeds.extend(
-            self.program
-                .main_grant_decls
-                .iter()
-                .map(|decl| format!("grants.{}", decl.name)),
-        );
         let mut context = FunctionCompiler::new(self, vec![], seeds.clone(), &statements, true);
         for name in seeds {
             let seed = context.compiler.seed_id(name.clone());
@@ -1228,8 +1224,8 @@ fn validate_imports(module: &wasmer::Module) -> Result<()> {
 
 fn deterministic_program_fingerprint(program: &LoweredProgram) -> String {
     let mut canonical = format!(
-        "abi=vibra-v1\nstatements={:?}\nmain-args={:?}\ngrants={:?}\nwarnings={:?}\n",
-        program.statements, program.main_arg_bindings, program.main_grant_decls, program.warnings
+        "abi=vibra-v1\nstatements={:?}\nmain-args={:?}\nwarnings={:?}\n",
+        program.statements, program.main_arg_bindings, program.warnings
     );
     let mut names: Vec<_> = program.constants.keys().collect();
     names.sort();
@@ -1286,7 +1282,6 @@ mod tests {
         LoweredProgram {
             statements: vec![],
             main_arg_bindings: vec![],
-            main_grant_decls: vec![],
             constants: HashMap::new(),
             functions: HashMap::new(),
             impls: HashMap::new(),
@@ -1444,9 +1439,13 @@ main:
         path:
           $fs.path.new: "{}"
     - $let:
+        capability:
+          $policy.narrow: $args.policy
+          into: $fs.read-capability
+    - $let:
         text:
           $fs.read-to-string: $path
-          policy: $args.policy
+          capability: $capability
 "#,
                 path(&fs),
                 path(temp.path()),
@@ -1459,9 +1458,9 @@ main:
         let config = RunConfig {
             approved_policy: Some(crate::lower::PolicyType {
                 domains: BTreeMap::from([(
-                    "fs-read".into(),
+                    crate::lower::CapabilityDomain::FsRead,
                     vec![crate::lower::PolicyGroup {
-                        requirement: crate::lower::GrantRequirement::Mandatory,
+                        requirement: crate::lower::PolicyRequirement::Mandatory,
                         scopes: vec![crate::lower::PolicyScope::Dir(path(temp.path()))],
                     }],
                 )]),

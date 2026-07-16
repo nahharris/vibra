@@ -4,6 +4,7 @@ pub mod annotations;
 pub mod code;
 pub mod emit;
 pub mod execute;
+pub mod host_abi;
 pub mod load;
 pub mod lower;
 pub mod macro_expand;

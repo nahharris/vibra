@@ -197,7 +197,10 @@ The compiler repository pins that same stdlib revision as the `stdlib` Git submo
 
 Functions use canonical labeled declarations: `$function: $void` for zero arguments, `$function: $self` for a method receiver, or a singleton labeled mapping for the primary argument. Additional arguments use sibling `args:`, and function bodies reference every argument through `$args.<name>`.
 
-**Policies:** authority is moving to unforgeable `$policy` values passed as normal function arguments. `main` receives the root policy value from the runtime, code explicitly narrows it with `$policy.narrow`, and privileged APIs consume the narrowed value through ordinary args. The current branch is migrating the stdlib from the previous grant side channel to this model.
+**Policies:** authority roots declare aggregate `$policy` arguments. The runtime
+intersects those declarations with `--allow-*` approvals, then code explicitly
+narrows the live value with `$policy.narrow` into a typed
+`$capability.<domain>` argument for privileged helpers.
 
 ```sh
 vibra run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
@@ -205,7 +208,10 @@ vibra run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
 
 Filesystem policy checks use canonical ancestry: a `dir` scope for `path/root` does not authorize a sibling such as `path/root2`.
 
-**Known escape hatch:** arbitrary `$wasm` declarations are still accepted. The grant model currently applies to grant-aware stdlib APIs, not to untrusted modules that define their own `$wasm` shims. Future work should make `$wasm` trusted-stdlib-only or require an explicit unsafe/trust policy.
+**Host ABI:** `$wasm` is a checked binding to the closed `vibra_v1` registry,
+not an authority escape hatch. The compiler validates the module/import pair,
+every argument and capability domain, and the exact return type. Run
+`vibra effects <path>` to inspect the reachable host surface without executing it.
 
 **Current subset:** entry module defines `main` with `args: $void`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns and ordered `$match` sequence arms with explicit `case:` entries). Entry and imported modules may also define **user functions** (`do:` with `$let` / `$match` / `$return`) and **generic functions** (`$function` with the `=where` annotation declaring type parameters and bounds); generic calls pass explicit type arguments in the same mapping as value arguments (see [DRAFT.md](DRAFT.md)). `io` and `fs` functions declared in [stdlib/src/io.vibra](stdlib/src/io.vibra) and [stdlib/src/fs.vibra](stdlib/src/fs.vibra) are executable via the runtime execution backend.
 
@@ -246,7 +252,7 @@ Construct values with `$option.option.some: "name"` or `$option.option.none`.
 # Interactive stdin path
 cargo run -- run examples/ask-name.vibra
 
-# Filesystem roundtrip (requires grants)
+# Filesystem roundtrip (requires explicit approval)
 cargo run -- run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
 ```
 
@@ -255,7 +261,7 @@ cargo run -- run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
 `vibra test` discovers `.vibra` files under `tests/` and runs each top-level
 `$test` declaration as an isolated test case. Test modules do not need `main`.
 The `$test` value is a non-empty kebab-case profile; a bare `vibra test` runs
-the grant-free `core` profile.
+the capability-free `core` profile.
 
 ```yaml
 test:
@@ -277,7 +283,7 @@ vibra test --report yaml --report-file report.yaml
 ```
 
 Profiles and tags only select tests; they never confer host permissions.
-Capability tests declare sibling `grants` and must be run with the matching
+Capability tests declare sibling `policy` and must be run with the matching
 explicit `--allow-*` flag. `workspace: temp` tests additionally need
 `--allow-test-workspace read`, `write`, or `read-write`; without it, they are
 reported as skipped. See [`tests/README.md`](tests/README.md) for expected
