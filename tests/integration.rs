@@ -7888,11 +7888,7 @@ main:
     std::env::set_var("VIBRA_ISSUE53_TOKEN", "public");
     std::env::set_var("vibra_issue53_token", "secret");
     let output = vibra_cmd()
-        .args([
-            "run",
-            &path_str(&entry),
-            "--allow-env=VIBRA_ISSUE53_TOKEN",
-        ])
+        .args(["run", &path_str(&entry), "--allow-env=VIBRA_ISSUE53_TOKEN"])
         .output()
         .unwrap();
     std::env::remove_var("VIBRA_ISSUE53_TOKEN");
