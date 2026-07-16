@@ -4,38 +4,44 @@ net:
   $import: ../stdlib/src/net.vibra
 result:
   $import: ../stdlib/src/result.vibra
-security:
-  $import: ../stdlib/src/security.vibra
-
 connect-reports-the-current-unsupported-runtime:
   $test: net
-  tags: [stdlib, capability]
-  grants:
-    net-connect: $security.grant.mandatory
+  tags:
+  - stdlib
+  - capability
+  policy:
+    $policy:
+      net-connect:
+      - requirement: mandatory
+        scopes:
+        - exact: 127.0.0.1:9
   do:
-    - $let:
-        outcome:
-          $net.connect: 127.0.0.1:9
-          =grants:
-            - $grants.net-connect
-    - $match: $outcome
-      when:
-      - case:
-          $result.result.err:
-            $bind: error
-        do:
-        - $match: $error
-          when:
-          - case:
-              $net.net-error.unsupported:
-                $wildcard: null
-            do:
-            - $test.assert: true
-          - case:
+  - $let:
+      capability:
+        $policy.narrow: $args.policy
+        into: $net.connect-capability
+  - $let:
+      outcome:
+        $net.connect: 127.0.0.1:9
+        capability: $capability
+  - $match: $outcome
+    when:
+    - case:
+        $result.result.err:
+          $bind: error
+      do:
+      - $match: $error
+        when:
+        - case:
+            $net.net-error.unsupported:
               $wildcard: null
-            do:
-            - $test.fail: expected unsupported network runtime
-      - case:
-          $result.result.ok: null
-        do:
-        - $test.fail: network runtime unexpectedly connected
+          do:
+          - $test.assert: true
+        - case:
+            $wildcard: null
+          do:
+          - $test.fail: expected unsupported network runtime
+    - case:
+        $result.result.ok: null
+      do:
+      - $test.fail: network runtime unexpectedly connected

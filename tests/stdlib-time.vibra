@@ -2,28 +2,32 @@ test:
   $import: ../stdlib/src/test.vibra
 time:
   $import: ../stdlib/src/time.vibra
-security:
-  $import: ../stdlib/src/security.vibra
-
 accepts-unix-millis:
   $function:
     value: $uint64
   return: $bool
   do:
-    - $return: true
-
+  - $return: true
 now-unix-millis-uses-the-granted-clock:
   $test: system
-  tags: [stdlib, capability]
-  grants:
-    clock: $security.grant.mandatory
+  tags:
+  - stdlib
+  - capability
+  policy:
+    $policy:
+      clock:
+      - requirement: mandatory
+        scopes: any
   do:
-    - $let:
-        now:
-          $time.now-unix-millis: null
-          =grants:
-            - $grants.clock
-    - $let:
-        is-millis:
-          $accepts-unix-millis: $now
-    - $test.assert: $is-millis
+  - $let:
+      capability:
+        $policy.narrow: $args.policy
+        into: $time.capability
+  - $let:
+      now:
+        $time.now-unix-millis:
+          capability: $capability
+  - $let:
+      is-millis:
+        $accepts-unix-millis: $now
+  - $test.assert: $is-millis

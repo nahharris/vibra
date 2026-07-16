@@ -6,67 +6,80 @@ random:
   $import: ../stdlib/src/random.vibra
 sys:
   $import: ../stdlib/src/sys.vibra
-security:
-  $import: ../stdlib/src/security.vibra
-
 accepts-unix-millis:
   $function:
     value: $uint64
   return: $bool
   do:
-    - $return: true
-
+  - $return: true
 accepts-system-info:
   $function:
     value: $str
   return: $bool
   do:
-    - $return: true
-
+  - $return: true
 privileged-stdlib-operations-return-their-declared-shapes:
   $test: system
-  tags: [stdlib, capability]
-  grants:
-    clock: $security.grant.mandatory
-    random: $security.grant.mandatory
-    system-info: $security.grant.mandatory
+  tags:
+  - stdlib
+  - capability
+  policy:
+    $policy:
+      clock:
+      - requirement: mandatory
+        scopes: any
+      random:
+      - requirement: mandatory
+        scopes: any
+      system-info:
+      - requirement: mandatory
+        scopes: any
   do:
-    - $let:
-        now:
-          $time.now-unix-millis: null
-          =grants:
-            - $grants.clock
-    - $let:
-        is-millis:
-          $accepts-unix-millis: $now
-    - $test.assert: $is-millis
-    - $let:
-        bytes:
-          $random.bytes: 1
-          =grants:
-            - $grants.random
-    - $let:
-        raw-bytes:
-          $cast: $bytes
-          into:
-            $array: $uint8
-    - $match: $raw-bytes
-      when:
-      - case:
-          $array:
-            - $wildcard: null
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: random bytes returned the wrong length
-    - $let:
-        info:
-          $sys.info: null
-          =grants:
-            - $grants.system-info
-    - $let:
-        is-info:
-          $accepts-system-info: $info
-    - $test.assert: $is-info
+  - $let:
+      clock-capability:
+        $policy.narrow: $args.policy
+        into: $time.capability
+  - $let:
+      random-capability:
+        $policy.narrow: $args.policy
+        into: $random.capability
+  - $let:
+      system-capability:
+        $policy.narrow: $args.policy
+        into: $sys.capability
+  - $let:
+      now:
+        $time.now-unix-millis:
+          capability: $clock-capability
+  - $let:
+      is-millis:
+        $accepts-unix-millis: $now
+  - $test.assert: $is-millis
+  - $let:
+      bytes:
+        $random.bytes: 1
+        capability: $random-capability
+  - $let:
+      raw-bytes:
+        $cast: $bytes
+        into:
+          $array: $uint8
+  - $match: $raw-bytes
+    when:
+    - case:
+        $array:
+        - $wildcard: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: random bytes returned the wrong length
+  - $let:
+      info:
+        $sys.info:
+          capability: $system-capability
+  - $let:
+      is-info:
+        $accepts-system-info: $info
+  - $test.assert: $is-info

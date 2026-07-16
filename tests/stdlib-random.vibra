@@ -2,40 +2,45 @@ test:
   $import: ../stdlib/src/test.vibra
 random:
   $import: ../stdlib/src/random.vibra
-security:
-  $import: ../stdlib/src/security.vibra
-
 bytes-uses-the-granted-random-source:
   $test: random
-  tags: [stdlib, capability]
-  grants:
-    random: $security.grant.mandatory
+  tags:
+  - stdlib
+  - capability
+  policy:
+    $policy:
+      random:
+      - requirement: mandatory
+        scopes: any
   do:
-    - $let:
-        value:
-          $random.bytes: 8
-          =grants:
-            - $grants.random
-    - $let:
-        raw:
-          $cast: $value
-          into:
-            $array: $uint8
-    - $match: $raw
-      when:
-      - case:
-          $array:
-            - $wildcard: null
-            - $wildcard: null
-            - $wildcard: null
-            - $wildcard: null
-            - $wildcard: null
-            - $wildcard: null
-            - $wildcard: null
-            - $wildcard: null
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: random bytes returned the wrong length
+  - $let:
+      capability:
+        $policy.narrow: $args.policy
+        into: $random.capability
+  - $let:
+      value:
+        $random.bytes: 8
+        capability: $capability
+  - $let:
+      raw:
+        $cast: $value
+        into:
+          $array: $uint8
+  - $match: $raw
+    when:
+    - case:
+        $array:
+        - $wildcard: null
+        - $wildcard: null
+        - $wildcard: null
+        - $wildcard: null
+        - $wildcard: null
+        - $wildcard: null
+        - $wildcard: null
+        - $wildcard: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: random bytes returned the wrong length
