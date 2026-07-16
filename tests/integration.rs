@@ -7892,8 +7892,6 @@ main:
             "run",
             &path_str(&entry),
             "--allow-env=VIBRA_ISSUE53_TOKEN",
-            "--format",
-            "yaml",
         ])
         .output()
         .unwrap();
