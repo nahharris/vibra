@@ -85,7 +85,7 @@ enum Command {
     Run {
         /// Entry module path (e.g. examples/hello.vibra).
         path: PathBuf,
-        /// Deprecated: seed both read and write filesystem grants.
+        /// Preopen a host directory for WASI mapping; does not approve host ABI access.
         #[arg(long = "preopen")]
         preopen: Vec<PathBuf>,
         /// Allow filesystem reads under this host path (repeatable).
@@ -128,6 +128,11 @@ enum Command {
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
     },
+    /// Print the statically referenced, typed host effect surface as YAML.
+    Effects {
+        /// Entry module path.
+        path: PathBuf,
+    },
     /// Expand compile-time macros and print canonical Vibra source.
     Expand {
         /// Entry module to expand.
@@ -149,7 +154,7 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = ExecFormatArg::Yaml)]
         format: ExecFormatArg,
-        /// Deprecated: seed both read and write filesystem grants.
+        /// Preopen a host directory for WASI mapping; does not approve host ABI access.
         #[arg(long = "preopen")]
         preopen: Vec<PathBuf>,
         /// Allow filesystem reads under this host path (repeatable).
@@ -250,7 +255,7 @@ enum Command {
         /// Write structured report to this path.
         #[arg(long = "report-file")]
         report_file: Option<PathBuf>,
-        /// Deprecated: seed both read and write filesystem grants.
+        /// Preopen a host directory for WASI mapping; does not approve host ABI access.
         #[arg(long = "preopen")]
         preopen: Vec<PathBuf>,
         /// Allow filesystem reads under this host path (repeatable).
@@ -567,6 +572,7 @@ fn main() -> Result<()> {
                 execute::run_lowered(&lowered, &config)?;
             }
         }
+        Command::Effects { path } => print_effects(&path)?,
         Command::Expand { path } => {
             let loaded = load::load_program(&path)?;
             let expanded = loaded
@@ -880,6 +886,191 @@ fn raw_exec_string(value: RuntimeValue) -> Result<String> {
     }
 }
 
+#[derive(serde::Serialize)]
+struct EffectsReport {
+    effects: Vec<EffectEntry>,
+    #[serde(rename = "root-policy")]
+    root_policy: std::collections::BTreeMap<String, vibra::lower::PolicyType>,
+}
+
+#[derive(serde::Serialize)]
+struct EffectEntry {
+    source: String,
+    module: String,
+    name: String,
+    params: Vec<EffectParam>,
+    #[serde(rename = "return")]
+    result: String,
+    #[serde(rename = "required-domains")]
+    required_domains: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct EffectParam {
+    kind: String,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    value_type: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    domains: Vec<String>,
+}
+
+fn print_effects(path: &std::path::Path) -> Result<()> {
+    let loaded = load::load_program(path)?;
+    let lowered = lower::lower_program(&loaded)?;
+    let reachable = reachable_functions(&lowered);
+    let mut functions = lowered
+        .functions
+        .iter()
+        .filter(|(name, _)| reachable.contains(*name))
+        .collect::<Vec<_>>();
+    functions.sort_by(|(left, _), (right, _)| left.cmp(right));
+    let mut effects = Vec::new();
+    for (source, signature) in functions {
+        let lower::FunctionBody::Wasm { import, .. } = &signature.body else {
+            continue;
+        };
+        let entry = vibra::host_abi::lookup(&import.module, &import.name)
+            .context("lowered host import is absent from the ABI registry")?;
+        let params = entry
+            .params
+            .iter()
+            .map(|param| match param {
+                vibra::host_abi::ParamKind::Value(kind) => EffectParam {
+                    kind: "value".into(),
+                    value_type: Some(kind.as_str().into()),
+                    domains: Vec::new(),
+                },
+                vibra::host_abi::ParamKind::Capability(domains) => EffectParam {
+                    kind: "capability".into(),
+                    value_type: None,
+                    domains: domains
+                        .iter()
+                        .map(|domain| domain.as_str().into())
+                        .collect(),
+                },
+            })
+            .collect();
+        effects.push(EffectEntry {
+            source: source.clone(),
+            module: import.module.clone(),
+            name: import.name.clone(),
+            params,
+            result: entry.result.as_str().into(),
+            required_domains: entry
+                .required_domains()
+                .iter()
+                .map(|domain| domain.as_str().into())
+                .collect(),
+        });
+    }
+    let root_policy = lowered
+        .main_arg_bindings
+        .iter()
+        .filter_map(|(name, ty)| match ty {
+            TypeRef::Policy(policy) => Some((name.clone(), policy.clone())),
+            _ => None,
+        })
+        .collect();
+    print!(
+        "{}",
+        serde_yaml::to_string(&EffectsReport {
+            effects,
+            root_policy
+        })?
+    );
+    Ok(())
+}
+
+fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTreeSet<String> {
+    fn visit_expr(expr: &lower::Expr, pending: &mut Vec<String>) {
+        use lower::Expr;
+        match expr {
+            Expr::Call { call, .. } => visit_call(call, pending),
+            Expr::Mutable(value)
+            | Expr::Cast { from: value, .. }
+            | Expr::PolicyNarrow { from: value, .. } => visit_expr(value, pending),
+            Expr::Reference { target, .. } => visit_expr(target, pending),
+            Expr::EnumConstructor { payload, .. } => {
+                if let Some(payload) = payload {
+                    visit_expr(payload, pending);
+                }
+            }
+            Expr::Record(fields) => fields.values().for_each(|value| visit_expr(value, pending)),
+            Expr::Tuple(values) | Expr::Array(values) => {
+                values.iter().for_each(|value| visit_expr(value, pending));
+            }
+            Expr::Map(entries) => entries.iter().for_each(|(key, value)| {
+                visit_expr(key, pending);
+                visit_expr(value, pending);
+            }),
+            Expr::If {
+                cond,
+                then_e,
+                else_e,
+            } => {
+                visit_expr(cond, pending);
+                visit_expr(then_e, pending);
+                visit_expr(else_e, pending);
+            }
+            Expr::Value(_) | Expr::VarRef(_) => {}
+        }
+    }
+    fn visit_call(call: &lower::Call, pending: &mut Vec<String>) {
+        pending.push(call.callee_key.clone());
+        call.args.iter().for_each(|arg| visit_expr(arg, pending));
+    }
+    fn visit_statements(statements: &[lower::Statement], pending: &mut Vec<String>) {
+        use lower::{LetValue, Statement};
+        for statement in statements {
+            match statement {
+                Statement::Call(call) => visit_call(call, pending),
+                Statement::Let { value, .. } => match value {
+                    LetValue::Call(call) => visit_call(call, pending),
+                    LetValue::Expr(expr) => visit_expr(expr, pending),
+                },
+                Statement::Set { value, .. }
+                | Statement::Return(value)
+                | Statement::Eval(value) => {
+                    visit_expr(value, pending);
+                }
+                Statement::Match { target, arms } => {
+                    visit_expr(target, pending);
+                    arms.iter()
+                        .for_each(|arm| visit_statements(&arm.body, pending));
+                }
+                Statement::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    visit_expr(cond, pending);
+                    visit_statements(then_body, pending);
+                    visit_statements(else_body, pending);
+                }
+                Statement::While { cond, body } => {
+                    visit_expr(cond, pending);
+                    visit_statements(body, pending);
+                }
+            }
+        }
+    }
+
+    let mut reachable = std::collections::BTreeSet::new();
+    let mut pending = Vec::new();
+    visit_statements(&program.statements, &mut pending);
+    while let Some(name) = pending.pop() {
+        if !reachable.insert(name.clone()) {
+            continue;
+        }
+        if let Some(signature) = program.functions.get(&name) {
+            if let lower::FunctionBody::User { statements } = &signature.body {
+                visit_statements(statements, &mut pending);
+            }
+        }
+    }
+    reachable
+}
+
 fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
     let value = vibra::execute::materialize_runtime_value(value);
     Ok(match value {
@@ -930,6 +1121,12 @@ fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
             Value::Mapping(map)
         }
         RuntimeValue::Policy(policy) => Value::String(format!("{:?}", policy.policy)),
+        RuntimeValue::Capability(capability) => {
+            Value::String(format!("{:?}", capability.capability))
+        }
+        RuntimeValue::HostHandle(_) => {
+            bail!("opaque host handles cannot be rendered as source values")
+        }
         RuntimeValue::Enum {
             enum_key,
             tag,

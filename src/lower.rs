@@ -67,6 +67,8 @@ pub enum RuntimeValue {
         value: Box<RuntimeValue>,
     },
     Policy(PolicyValue),
+    Capability(CapabilityValue),
+    HostHandle(HostHandle),
     Enum {
         enum_key: String,
         tag: String,
@@ -83,6 +85,25 @@ pub enum RuntimeValue {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PolicyValue {
     pub policy: PolicyType,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CapabilityValue {
+    pub capability: CapabilityType,
+    pub policy: PolicyType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum HandleAccess {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HostHandle {
+    pub id: u64,
+    pub access: HandleAccess,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -173,6 +194,13 @@ pub enum TypeRef {
         inner: Box<TypeRef>,
     },
     Policy(PolicyType),
+    /// An explicitly narrowed, domain-specific authority value. Unlike a
+    /// root `$policy`, this is the only authority type accepted by privileged
+    /// helpers and host imports.
+    Capability(CapabilityType),
+    /// An opaque runtime-minted host resource handle. No source expression,
+    /// literal, or cast can construct a value of this type.
+    HostHandle(HandleAccess),
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
     /// A use of a generic type alias with explicit type arguments. `type_args`
@@ -257,19 +285,97 @@ pub struct Call {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum GrantRequirement {
+pub enum PolicyRequirement {
     Mandatory,
     Optional,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PolicyType {
-    pub domains: BTreeMap<String, Vec<PolicyGroup>>,
+    pub domains: BTreeMap<CapabilityDomain, Vec<PolicyGroup>>,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum CapabilityDomain {
+    FsRead,
+    FsWrite,
+    StdinRead,
+    EnvRead,
+    EnvWrite,
+    NetConnect,
+    NetListen,
+    ProcessRun,
+    Clock,
+    Random,
+    SystemInfo,
+}
+
+impl CapabilityDomain {
+    pub const ALL: [Self; 11] = [
+        Self::FsRead,
+        Self::FsWrite,
+        Self::StdinRead,
+        Self::EnvRead,
+        Self::EnvWrite,
+        Self::NetConnect,
+        Self::NetListen,
+        Self::ProcessRun,
+        Self::Clock,
+        Self::Random,
+        Self::SystemInfo,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FsRead => "fs-read",
+            Self::FsWrite => "fs-write",
+            Self::StdinRead => "stdin-read",
+            Self::EnvRead => "env-read",
+            Self::EnvWrite => "env-write",
+            Self::NetConnect => "net-connect",
+            Self::NetListen => "net-listen",
+            Self::ProcessRun => "process-run",
+            Self::Clock => "clock",
+            Self::Random => "random",
+            Self::SystemInfo => "system-info",
+        }
+    }
+}
+
+impl std::str::FromStr for CapabilityDomain {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|domain| domain.as_str() == value)
+            .with_context(|| {
+                format!(
+                    "unknown capability domain `{value}`; known domains are: {}",
+                    Self::ALL.map(Self::as_str).join(", ")
+                )
+            })
+    }
+}
+
+impl std::fmt::Display for CapabilityDomain {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CapabilityType {
+    pub domain: CapabilityDomain,
+    pub groups: Vec<PolicyGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PolicyGroup {
-    pub requirement: GrantRequirement,
+    pub requirement: PolicyRequirement,
     pub scopes: Vec<PolicyScope>,
 }
 
@@ -949,6 +1055,12 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$grant-token",
 ];
 
+fn is_builtin_type_form(form: &str) -> bool {
+    BUILTIN_TYPE_FORMS.contains(&form)
+        || form.starts_with("$capability.")
+        || form.starts_with("$handle.")
+}
+
 fn collect_alias_skeletons(
     program: &LoadedProgram,
     entry_project: Option<&project::LoadedProject>,
@@ -1060,7 +1172,7 @@ fn collect_module_skeletons(
                 "E-OPTION-001: `$option: T` was removed; import `stdlib/src/option.vibra` and instantiate its tagged enum alias"
             );
         }
-        if !BUILTIN_TYPE_FORMS.contains(&env.form_key.as_str()) {
+        if !is_builtin_type_form(&env.form_key) {
             continue;
         }
         let key = if alias.is_empty() {
@@ -1102,6 +1214,23 @@ fn parse_type_ref(
             bail!(
                 "E-OPTION-001: `$option: T` was removed; import `stdlib/src/option.vibra` and instantiate its tagged enum alias"
             );
+        }
+        if m.len() == 1 {
+            let (key, body) = m.iter().next().expect("one entry");
+            let key = key
+                .as_str()
+                .context("type expression key must be a string")?;
+            if let Some(domain) = key.strip_prefix("$capability.") {
+                return Ok(TypeRef::Capability(CapabilityType {
+                    domain: domain
+                        .parse()
+                        .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?,
+                    groups: parse_policy_groups(domain, body)?,
+                }));
+            }
+            if let Some(access) = key.strip_prefix("$handle.") {
+                return Ok(TypeRef::HostHandle(parse_handle_access(access)?));
+            }
         }
         for &form in BUILTIN_TYPE_FORMS {
             if let Some(form_v) = map_get_str(m, form) {
@@ -1224,6 +1353,20 @@ fn parse_type_constructor(
     warnings: &mut Vec<String>,
     self_allowed: bool,
 ) -> Result<TypeRef> {
+    if let Some(domain) = form.strip_prefix("$capability.") {
+        return Ok(TypeRef::Capability(CapabilityType {
+            domain: domain
+                .parse()
+                .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?,
+            groups: parse_policy_groups(domain, v)?,
+        }));
+    }
+    if let Some(access) = form.strip_prefix("$handle.") {
+        if !v.is_null() {
+            bail!("E-CAP-004: opaque handle type `{form}` must have a null body");
+        }
+        return Ok(TypeRef::HostHandle(parse_handle_access(access)?));
+    }
     match form {
         "$mut" => Ok(TypeRef::Mutable(Box::new(parse_type_ref(
             v,
@@ -1424,6 +1567,15 @@ fn parse_type_constructor(
     }
 }
 
+fn parse_handle_access(access: &str) -> Result<HandleAccess> {
+    match access {
+        "read" => Ok(HandleAccess::Read),
+        "write" => Ok(HandleAccess::Write),
+        "read-write" => Ok(HandleAccess::ReadWrite),
+        _ => bail!("E-CAP-004: unknown opaque handle type `$handle.{access}`"),
+    }
+}
+
 /// Parse a `{ $policy: <domains> }` envelope (used by `$test` `policy:`
 /// siblings, where the policy type appears as a value rather than in a type
 /// position).
@@ -1447,40 +1599,44 @@ fn parse_policy_type(v: &Value) -> Result<PolicyType> {
         .context("`$policy` must be a mapping of domain -> groups")?;
     let mut out = BTreeMap::new();
     for (domain, groups_v) in domains {
-        let domain = domain
+        let domain_name = domain
             .as_str()
-            .context("`$policy` domain names must be strings")?
-            .to_string();
-        if !crate::host_abi::DOMAINS.contains(&domain.as_str()) {
-            bail!(
-                "unknown `$policy` domain `{domain}`; known domains are: {}",
-                crate::host_abi::DOMAINS.join(", ")
-            );
-        }
-        let groups = groups_v
-            .as_sequence()
-            .with_context(|| format!("`$policy.{domain}` must be a sequence"))?;
-        let mut parsed_groups = Vec::with_capacity(groups.len());
-        for group_v in groups {
-            let group = group_v
-                .as_mapping()
-                .with_context(|| format!("`$policy.{domain}` entries must be mappings"))?;
-            let requirement = match map_get_str(group, "requirement").and_then(Value::as_str) {
-                Some("mandatory") => GrantRequirement::Mandatory,
-                Some("optional") => GrantRequirement::Optional,
-                _ => bail!("`$policy.{domain}` requirement must be `mandatory` or `optional`"),
-            };
-            let scopes_v = map_get_str(group, "scopes")
-                .with_context(|| format!("`$policy.{domain}` entry missing `scopes`"))?;
-            let scopes = parse_policy_scopes(&domain, scopes_v)?;
-            parsed_groups.push(PolicyGroup {
-                requirement,
-                scopes,
-            });
-        }
+            .context("`$policy` domain names must be strings")?;
+        let domain: CapabilityDomain = domain_name
+            .parse()
+            .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?;
+        let parsed_groups = parse_policy_groups(domain_name, groups_v)?;
         out.insert(domain, parsed_groups);
     }
     Ok(PolicyType { domains: out })
+}
+
+fn parse_policy_groups(domain: &str, value: &Value) -> Result<Vec<PolicyGroup>> {
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let groups = value
+        .as_sequence()
+        .with_context(|| format!("capability `{domain}` must be a sequence"))?;
+    let mut parsed_groups = Vec::with_capacity(groups.len());
+    for group_v in groups {
+        let group = group_v
+            .as_mapping()
+            .with_context(|| format!("`$policy.{domain}` entries must be mappings"))?;
+        let requirement = match map_get_str(group, "requirement").and_then(Value::as_str) {
+            Some("mandatory") => PolicyRequirement::Mandatory,
+            Some("optional") => PolicyRequirement::Optional,
+            _ => bail!("`$policy.{domain}` requirement must be `mandatory` or `optional`"),
+        };
+        let scopes_v = map_get_str(group, "scopes")
+            .with_context(|| format!("`$policy.{domain}` entry missing `scopes`"))?;
+        let scopes = parse_policy_scopes(&domain, scopes_v)?;
+        parsed_groups.push(PolicyGroup {
+            requirement,
+            scopes,
+        });
+    }
+    Ok(parsed_groups)
 }
 
 fn parse_policy_scopes(domain: &str, v: &Value) -> Result<Vec<PolicyScope>> {
@@ -2060,7 +2216,10 @@ fn valid_cast_path(
     target: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
-    if policy_body(target, aliases).is_some() {
+    if policy_body(target, aliases).is_some()
+        || capability_body(target, aliases).is_some()
+        || matches!(resolve_alias_type(target, aliases), TypeRef::HostHandle(_))
+    {
         return false;
     }
     if let Some(inner) = newtype_inner(target, aliases) {
@@ -2090,6 +2249,27 @@ fn policy_body<'a>(
     }
 }
 
+fn capability_body<'a>(
+    ty: &'a TypeRef,
+    aliases: &'a HashMap<String, TypeAlias>,
+) -> Option<&'a CapabilityType> {
+    match ty {
+        TypeRef::Capability(capability) => Some(capability),
+        TypeRef::Named(name) => aliases.get(name).and_then(|alias| match &alias.body {
+            TypeRef::Capability(capability) => Some(capability),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+fn resolve_alias_type<'a>(ty: &'a TypeRef, aliases: &'a HashMap<String, TypeAlias>) -> &'a TypeRef {
+    match ty {
+        TypeRef::Named(name) => aliases.get(name).map(|alias| &alias.body).unwrap_or(ty),
+        _ => ty,
+    }
+}
+
 fn policy_type_is_subset(
     source: &TypeRef,
     target: &TypeRef,
@@ -2098,6 +2278,19 @@ fn policy_type_is_subset(
     let Some(source) = policy_body(source, aliases) else {
         return false;
     };
+    if let Some(target) = capability_body(target, aliases) {
+        let Some(source_groups) = source.domains.get(&target.domain) else {
+            return false;
+        };
+        if target.groups.is_empty() {
+            return true;
+        }
+        return target.groups.iter().all(|target_group| {
+            source_groups
+                .iter()
+                .any(|source_group| policy_group_covers(source_group, target_group))
+        });
+    }
     let Some(target) = policy_body(target, aliases) else {
         return false;
     };
@@ -3151,7 +3344,7 @@ fn collect_module_defs(
         if env.form_key == "$function" || env.form_key == "$test" || env.form_key == "$import" {
             continue;
         }
-        if !BUILTIN_TYPE_FORMS.contains(&env.form_key.as_str()) {
+        if !is_builtin_type_form(&env.form_key) {
             let display_key = if alias.is_empty() {
                 name.to_string()
             } else {
@@ -3389,8 +3582,8 @@ fn try_register_function(
         maybe_warn_kebab(name, "function name", warnings);
     }
     let scope = env.type_params.clone();
-    let (args, ret, do_seq) =
-        resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG).with_context(|| {
+    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, MODULE_FN_PRIMARY_ARG)
+        .with_context(|| {
             if alias.is_empty() {
                 format!("{name}: invalid `$function` envelope")
             } else {
@@ -3561,10 +3754,19 @@ fn validate_wasm_bodies(
                 entry.params.len()
             );
         }
+        if !abi_value_type_matches(entry.result, &sig.return_type, type_aliases) {
+            bail!(
+                "E-WASM-004: `{key}` declares return type {:?}, but host import `{}.{}` returns `{}`",
+                sig.return_type,
+                import.module,
+                import.name,
+                entry.result.as_str()
+            );
+        }
         for (position, (spec, param)) in wasm_args.iter().zip(entry.params.iter()).enumerate() {
-            let arg_policy = match spec {
+            let arg_type = match spec {
                 WasmArgSpec::Arg(name) => {
-                    let ty = sig
+                    sig
                         .arg_names
                         .iter()
                         .position(|n| n == name)
@@ -3574,34 +3776,46 @@ fn validate_wasm_bodies(
                                 "E-WASM-003: `{key}` forwards unknown argument `$args.{name}` to `{}.{}`",
                                 import.module, import.name
                             )
-                        })?;
-                    policy_body(ty, type_aliases)
+                        })?
                 }
-                WasmArgSpec::ConstInt(_) | WasmArgSpec::ConstStr(_) => None,
+                WasmArgSpec::ConstInt(_) => &TypeRef::Int64,
+                WasmArgSpec::ConstStr(_) => &TypeRef::Str,
             };
             match param {
-                crate::host_abi::ParamKind::Value => {
-                    if arg_policy.is_some() {
+                crate::host_abi::ParamKind::Value(kind) => {
+                    if policy_body(arg_type, type_aliases).is_some()
+                        || capability_body(arg_type, type_aliases).is_some()
+                    {
                         bail!(
-                            "E-WASM-003: `{key}` passes a `$policy` value in data position {position} of `{}.{}`",
+                            "E-WASM-003: `{key}` passes an authority value in data position {position} of `{}.{}`",
                             import.module,
                             import.name
                         );
                     }
-                }
-                crate::host_abi::ParamKind::Capability(required_domains) => {
-                    let Some(policy) = arg_policy else {
+                    if !abi_value_type_matches(*kind, arg_type, type_aliases) {
                         bail!(
-                            "E-CAP-002: host import `{}.{}` requires a `$policy` capability covering {} in position {position}; `{key}` must declare and forward a `$policy`-typed argument",
+                            "E-WASM-003: `{key}` passes {:?} in position {position} of `{}.{}`, which requires `{}`",
+                            arg_type,
                             import.module,
                             import.name,
-                            required_domains.join(" + ")
+                            kind.as_str()
+                        );
+                    }
+                }
+                crate::host_abi::ParamKind::Capability(required_domains) => {
+                    let Some(capability) = capability_body(arg_type, type_aliases) else {
+                        bail!(
+                            "E-CAP-002: host import `{}.{}` requires an explicit domain capability covering {} in position {position}; `{key}` must declare and forward a `$capability.<domain>` argument",
+                            import.module,
+                            import.name,
+                            required_domains.iter().map(|domain| domain.as_str()).collect::<Vec<_>>().join(" + ")
                         );
                     };
                     for domain in *required_domains {
-                        if !policy.domains.contains_key(*domain) {
+                        if capability.domain != *domain {
                             bail!(
-                                "E-CAP-002: `{key}` forwards a `$policy` without the `{domain}` domain required by `{}.{}`",
+                                "E-CAP-002: `{key}` forwards `{}` capability where `{domain}` is required by `{}.{}`",
+                                capability.domain,
                                 import.module,
                                 import.name
                             );
@@ -3612,6 +3826,63 @@ fn validate_wasm_bodies(
         }
     }
     Ok(())
+}
+
+fn abi_value_type_matches(
+    kind: crate::host_abi::ValueKind,
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    use crate::host_abi::ValueKind as A;
+    let resolved = match ty {
+        TypeRef::Named(name) => aliases.get(name).map(|alias| &alias.body).unwrap_or(ty),
+        _ => ty,
+    };
+    let named_ends = |suffix: &str| matches!(ty, TypeRef::Named(name) if name == suffix || name.ends_with(&format!(".{suffix}")));
+    let instantiated = |suffix: &str| match ty {
+        TypeRef::Instantiated { base, type_args }
+            if base == suffix || base.ends_with(&format!(".{suffix}")) =>
+        {
+            Some(type_args)
+        }
+        _ => None,
+    };
+    match kind {
+        A::Void => matches!(resolved, TypeRef::Void),
+        A::Bool => matches!(resolved, TypeRef::Bool),
+        A::Int64 => matches!(resolved, TypeRef::Int64),
+        A::UInt64 => matches!(resolved, TypeRef::UInt64),
+        A::Float64 => matches!(resolved, TypeRef::Float64),
+        A::Str => matches!(resolved, TypeRef::Str),
+        A::Bytes => named_ends("bytes"),
+        A::Path => named_ends("path"),
+        A::ReadHandle => matches!(resolved, TypeRef::HostHandle(HandleAccess::Read | HandleAccess::ReadWrite)),
+        A::WriteHandle => matches!(resolved, TypeRef::HostHandle(HandleAccess::Write | HandleAccess::ReadWrite)),
+        A::AnyHandle => matches!(resolved, TypeRef::HostHandle(_)),
+        A::ResultVoid => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Void, t, aliases))),
+        A::ResultStr => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
+        A::ResultBytes => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Bytes, t, aliases))),
+        A::ResultReadHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::ReadHandle, t, aliases))),
+        A::ResultWriteHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::WriteHandle, t, aliases))),
+        A::ResultPaths => instantiated("result").is_some_and(|args| matches!(args.first(), Some(TypeRef::Array(inner)) if abi_value_type_matches(A::Path, inner, aliases))),
+        A::ResultPath => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
+        A::OptionPath => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
+        A::OptionStr => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
+        A::CodeDocument => named_ends("document"),
+        A::CodeQuery => named_ends("query"),
+        A::CodeNode => named_ends("node") || instantiated("option").is_some(),
+        A::CodeForm => named_ends("form"),
+        A::CodeChangeSet => named_ends("change-set") || instantiated("result").is_some(),
+        A::CodePath => named_ends("path"),
+        A::CodePattern => named_ends("pattern"),
+        A::CodeSegment => named_ends("segment"),
+        A::CodeForms => matches!(resolved, TypeRef::Array(inner) if abi_value_type_matches(A::CodeForm, inner, aliases)),
+        A::CodeDocumentResult => named_ends("document-result"),
+        A::CodeNodeResult => named_ends("node-result"),
+        A::CodeNodesResult => named_ends("nodes-result"),
+        A::CodeMatchesResult => named_ends("matches-result"),
+        A::CodeFormResult => named_ends("form-result"),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3700,7 +3971,8 @@ fn register_one_inherent_function(
         all_type_params.push(tp.clone());
     }
 
-    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, INHERENT_FN_PRIMARY_ARG).with_context(|| {
+    let (args, ret, do_seq) = resolve_function_envelope_fields(&env, INHERENT_FN_PRIMARY_ARG)
+        .with_context(|| {
             format!("`{qualified_type_key}.{entry_name}`: invalid `$function` envelope")
         })?;
     let (arg_names, arg_types) =
@@ -6052,7 +6324,7 @@ fn reject_unknown_call_keys(
 }
 
 /// When the callee payload is a mapping of only parameter names (no `$...` keys), detect a
-/// *partial* arg map (e.g. missing `grant`) before [`merge_call_payload`] nests it incorrectly.
+/// *partial* arg map before [`merge_call_payload`] nests it incorrectly.
 fn report_missing_inline_call_args(
     function: &FunctionSig,
     call_key: &str,
@@ -6526,7 +6798,13 @@ fn parse_expr(
             let target = parse_type_ref(into_v, &[], &empty_skeletons, warnings, false)
                 .context("E-CAST-002: invalid `$cast.into` type")?;
             let target = qualify_named_type(home_module, target, type_aliases);
-            if policy_body(&target, type_aliases).is_some() {
+            if policy_body(&target, type_aliases).is_some()
+                || capability_body(&target, type_aliases).is_some()
+                || matches!(
+                    resolve_alias_type(&target, type_aliases),
+                    TypeRef::HostHandle(_)
+                )
+            {
                 bail!("E-CAP-001: capability values are runtime-minted and cannot be created with `$cast`");
             }
             if !valid_cast_path(&source, &target, type_aliases) {
@@ -6567,9 +6845,14 @@ fn parse_expr(
             if !policy_type_is_subset(&source, &target, type_aliases) {
                 bail!("policy narrowing cannot widen authority");
             }
-            let target = policy_body(&target, type_aliases)
+            let target = capability_body(&target, type_aliases)
                 .cloned()
-                .map(TypeRef::Policy)
+                .map(TypeRef::Capability)
+                .or_else(|| {
+                    policy_body(&target, type_aliases)
+                        .cloned()
+                        .map(TypeRef::Policy)
+                })
                 .unwrap_or(target);
             return Ok(Expr::PolicyNarrow {
                 from: Box::new(from),
@@ -6996,6 +7279,10 @@ fn infer_expr_type(
         }
         Expr::Value(RuntimeValue::Typed { type_ref, .. }) => Some(type_ref.clone()),
         Expr::Value(RuntimeValue::Policy(value)) => Some(TypeRef::Policy(value.policy.clone())),
+        Expr::Value(RuntimeValue::Capability(value)) => {
+            Some(TypeRef::Capability(value.capability.clone()))
+        }
+        Expr::Value(RuntimeValue::HostHandle(value)) => Some(TypeRef::HostHandle(value.access)),
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
         Expr::Value(RuntimeValue::Mutable(cell)) => infer_expr_type(

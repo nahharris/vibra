@@ -35,7 +35,7 @@ pub struct TestOptions {
     pub run_config: runtime::RunConfig,
 }
 
-/// The filesystem grants given to an isolated `workspace: temp` test.
+/// The filesystem policy approved for an isolated `workspace: temp` test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestWorkspaceAccess {
     Read,

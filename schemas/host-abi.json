@@ -28,122 +28,230 @@
       ],
       "required-domains": [
         "stdin-read"
-      ]
+      ],
+      "return": "read-handle"
     },
     {
       "module": "vibra_v1",
       "name": "stdout_open",
       "params": [],
-      "required-domains": []
+      "required-domains": [],
+      "return": "write-handle"
     },
     {
       "module": "vibra_v1",
       "name": "stderr_open",
       "params": [],
-      "required-domains": []
+      "required-domains": [],
+      "return": "write-handle"
     },
     {
       "module": "vibra_v1",
       "name": "fd_read",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "read-handle"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "result-str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fd_read_bytes",
+      "params": [
+        {
+          "kind": "value",
+          "type": "read-handle"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-bytes"
     },
     {
       "module": "vibra_v1",
       "name": "fd_read_line",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "read-handle"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "result-str"
     },
     {
       "module": "vibra_v1",
       "name": "fd_write",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "write-handle"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "result-void"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fd_write_bytes",
+      "params": [
+        {
+          "kind": "value",
+          "type": "write-handle"
+        },
+        {
+          "kind": "value",
+          "type": "bytes"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "fd_sync",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "write-handle"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "fd_close",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "any-handle"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "path_new",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "path"
     },
     {
       "module": "vibra_v1",
       "name": "path_join",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "path"
     },
     {
       "module": "vibra_v1",
       "name": "path_parent",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "option-path"
     },
     {
       "module": "vibra_v1",
       "name": "path_extension",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "option-str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "bytes_len",
+      "params": [
+        {
+          "kind": "value",
+          "type": "bytes"
+        }
+      ],
+      "required-domains": [],
+      "return": "uint64"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "bytes_slice",
+      "params": [
+        {
+          "kind": "value",
+          "type": "bytes"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "bytes"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "bytes_from_str",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "bytes"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "bytes_to_str",
+      "params": [
+        {
+          "kind": "value",
+          "type": "bytes"
+        }
+      ],
+      "required-domains": [],
+      "return": "str"
     },
     {
       "module": "vibra_v1",
       "name": "fs_open_read",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -154,14 +262,16 @@
       ],
       "required-domains": [
         "fs-read"
-      ]
+      ],
+      "return": "result-read-handle"
     },
     {
       "module": "vibra_v1",
       "name": "fs_open_write",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -172,14 +282,16 @@
       ],
       "required-domains": [
         "fs-write"
-      ]
+      ],
+      "return": "result-write-handle"
     },
     {
       "module": "vibra_v1",
       "name": "fs_open_append",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -190,18 +302,25 @@
       ],
       "required-domains": [
         "fs-write"
-      ]
+      ],
+      "return": "result-write-handle"
     },
     {
       "module": "vibra_v1",
       "name": "fs_open_read_write",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
-            "fs-read",
+            "fs-read"
+          ],
+          "kind": "capability"
+        },
+        {
+          "domains": [
             "fs-write"
           ],
           "kind": "capability"
@@ -210,14 +329,16 @@
       "required-domains": [
         "fs-read",
         "fs-write"
-      ]
+      ],
+      "return": "result-read-handle"
     },
     {
       "module": "vibra_v1",
       "name": "fs_read_to_string",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -228,17 +349,20 @@
       ],
       "required-domains": [
         "fs-read"
-      ]
+      ],
+      "return": "result-str"
     },
     {
       "module": "vibra_v1",
       "name": "fs_write_string_all",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
           "domains": [
@@ -249,17 +373,20 @@
       ],
       "required-domains": [
         "fs-write"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "fs_append_string",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
           "domains": [
@@ -270,14 +397,16 @@
       ],
       "required-domains": [
         "fs-write"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "fs_exists",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -288,14 +417,16 @@
       ],
       "required-domains": [
         "fs-read"
-      ]
+      ],
+      "return": "bool"
     },
     {
       "module": "vibra_v1",
       "name": "fs_create_dir_all",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -306,14 +437,16 @@
       ],
       "required-domains": [
         "fs-write"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "fs_remove_file",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -324,14 +457,16 @@
       ],
       "required-domains": [
         "fs-write"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "fs_remove_dir",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -342,14 +477,16 @@
       ],
       "required-domains": [
         "fs-write"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "fs_read_dir",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -360,14 +497,16 @@
       ],
       "required-domains": [
         "fs-read"
-      ]
+      ],
+      "return": "result-paths"
     },
     {
       "module": "vibra_v1",
       "name": "fs_metadata",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -378,14 +517,16 @@
       ],
       "required-domains": [
         "fs-read"
-      ]
+      ],
+      "return": "result-str"
     },
     {
       "module": "vibra_v1",
       "name": "fs_canonicalize",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "path"
         },
         {
           "domains": [
@@ -396,14 +537,16 @@
       ],
       "required-domains": [
         "fs-read"
-      ]
+      ],
+      "return": "result-path"
     },
     {
       "module": "vibra_v1",
       "name": "env_get",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
           "domains": [
@@ -414,17 +557,20 @@
       ],
       "required-domains": [
         "env-read"
-      ]
+      ],
+      "return": "result-str"
     },
     {
       "module": "vibra_v1",
       "name": "env_set",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
           "domains": [
@@ -435,14 +581,16 @@
       ],
       "required-domains": [
         "env-write"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "net_connect",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
           "domains": [
@@ -453,14 +601,16 @@
       ],
       "required-domains": [
         "net-connect"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "net_listen",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
           "domains": [
@@ -471,14 +621,16 @@
       ],
       "required-domains": [
         "net-listen"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
       "name": "process_run",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
           "domains": [
@@ -489,7 +641,8 @@
       ],
       "required-domains": [
         "process-run"
-      ]
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
@@ -504,14 +657,16 @@
       ],
       "required-domains": [
         "clock"
-      ]
+      ],
+      "return": "uint64"
     },
     {
       "module": "vibra_v1",
       "name": "random_bytes",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "uint64"
         },
         {
           "domains": [
@@ -522,7 +677,8 @@
       ],
       "required-domains": [
         "random"
-      ]
+      ],
+      "return": "bytes"
     },
     {
       "module": "vibra_v1",
@@ -537,385 +693,476 @@
       ],
       "required-domains": [
         "system-info"
-      ]
+      ],
+      "return": "str"
     },
     {
       "module": "vibra_test",
       "name": "assert",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "bool"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "void"
     },
     {
       "module": "vibra_test",
       "name": "fail",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "void"
     },
     {
       "module": "vibra_test",
       "name": "assert-eq-bool",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "bool"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "bool"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "void"
     },
     {
       "module": "vibra_test",
       "name": "assert-eq-int",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "int64"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "int64"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "void"
     },
     {
       "module": "vibra_test",
       "name": "assert-eq-float",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "float64"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "float64"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "void"
     },
     {
       "module": "vibra_test",
       "name": "assert-eq-str",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "void"
     },
     {
       "module": "vibra_code",
       "name": "parse",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "make-query",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-path"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "bool"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-pattern"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "uint64"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-query"
     },
     {
       "module": "vibra_code",
       "name": "capture-pattern",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-pattern"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-pattern"
     },
     {
       "module": "vibra_code",
       "name": "emit",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "str"
     },
     {
       "module": "vibra_code",
       "name": "root",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-node-result"
     },
     {
       "module": "vibra_code",
       "name": "at",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-path"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-node-result"
     },
     {
       "module": "vibra_code",
       "name": "parent",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-node-result"
     },
     {
       "module": "vibra_code",
       "name": "children",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-nodes-result"
     },
     {
       "module": "vibra_code",
       "name": "find",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-query"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-matches-result"
     },
     {
       "module": "vibra_code",
       "name": "source",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "str"
     },
     {
       "module": "vibra_code",
       "name": "to-form",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-form-result"
     },
     {
       "module": "vibra_code",
       "name": "render",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-form"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "str"
     },
     {
       "module": "vibra_code",
       "name": "replace",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-form"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "delete",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "upsert-mapping",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-form"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "insert-mapping",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-form"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "rename-key",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "str"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "insert-sequence",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "uint64"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-form"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "splice-sequence",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "uint64"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "uint64"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-forms"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "copy",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-segment"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     },
     {
       "module": "vibra_code",
       "name": "move",
       "params": [
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-document"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-node"
         },
         {
-          "kind": "value"
+          "kind": "value",
+          "type": "code-segment"
         }
       ],
-      "required-domains": []
+      "required-domains": [],
+      "return": "code-document-result"
     }
   ]
 }

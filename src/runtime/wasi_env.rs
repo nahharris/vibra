@@ -1,6 +1,6 @@
 //! Build [`WasiEnvBuilder`](wasmer_wasix::WasiEnvBuilder): stdio inheritance, argv, preopened dirs.
 
-use crate::lower::{GrantRequirement, PolicyGroup, PolicyScope, PolicyType};
+use crate::lower::{CapabilityDomain, PolicyGroup, PolicyRequirement, PolicyScope, PolicyType};
 use std::path::PathBuf;
 use wasmer_wasix::{WasiEnv, WasiEnvBuilder, WasiStateCreationError};
 
@@ -12,12 +12,11 @@ pub struct RunConfig {
     /// Extra argv entries after `program_name` (MVP: often empty).
     pub argv: Vec<String>,
     /// Host directories preopened at the WASI virtual root (`/`).
-    /// Deprecated compatibility field. These paths also seed read/write grants
-    /// for the embedded interpreter until callers migrate to explicit grants.
+    /// This mapping does not contribute authority to the Vibra host ABI.
     pub preopen_host_dirs: Vec<PathBuf>,
-    /// Directories readable by grant-aware filesystem APIs.
+    /// Directories approved for filesystem-read capabilities.
     pub allow_read: Vec<PathBuf>,
-    /// Directories writable by grant-aware filesystem APIs.
+    /// Directories approved for filesystem-write capabilities.
     pub allow_write: Vec<PathBuf>,
     /// Allow reading from stdin. Stdout/stderr writes remain baseline.
     pub allow_stdin: bool,
@@ -71,21 +70,20 @@ impl RunConfig {
     ///
     /// Embedders may set [`RunConfig::approved_policy`] directly; otherwise it
     /// is derived from the CLI-facing `allow_*` fields (`--allow-read`,
-    /// `--allow-env`, ...). `preopen_host_dirs` entries keep seeding read and
-    /// write scopes for backward compatibility until callers migrate.
+    /// `--allow-env`, ...). Preopened directories are deliberately excluded.
     pub fn effective_approved_policy(&self) -> PolicyType {
         if let Some(policy) = &self.approved_policy {
             return policy.clone();
         }
         let mut domains = std::collections::BTreeMap::new();
-        let mut add = |domain: &str, scopes: Vec<PolicyScope>| {
+        let mut add = |domain: CapabilityDomain, scopes: Vec<PolicyScope>| {
             if scopes.is_empty() {
                 return;
             }
             domains.insert(
-                domain.to_string(),
+                domain,
                 vec![PolicyGroup {
-                    requirement: GrantRequirement::Optional,
+                    requirement: PolicyRequirement::Optional,
                     scopes,
                 }],
             );
@@ -107,28 +105,30 @@ impl RunConfig {
                 })
                 .collect()
         };
-        let mut read_dirs = self.allow_read.clone();
-        let mut write_dirs = self.allow_write.clone();
-        read_dirs.extend(self.preopen_host_dirs.iter().cloned());
-        write_dirs.extend(self.preopen_host_dirs.iter().cloned());
-        add("fs-read", dir_scopes(&read_dirs));
-        add("fs-write", dir_scopes(&write_dirs));
+        add(CapabilityDomain::FsRead, dir_scopes(&self.allow_read));
+        add(CapabilityDomain::FsWrite, dir_scopes(&self.allow_write));
         if self.allow_stdin {
-            add("stdin-read", vec![PolicyScope::Any]);
+            add(CapabilityDomain::StdinRead, vec![PolicyScope::Any]);
         }
-        add("env-read", name_scopes(&self.allow_env));
-        add("env-write", name_scopes(&self.allow_env_write));
-        add("net-connect", name_scopes(&self.allow_net));
-        add("net-listen", name_scopes(&self.allow_net_listen));
-        add("process-run", name_scopes(&self.allow_run));
+        add(CapabilityDomain::EnvRead, name_scopes(&self.allow_env));
+        add(
+            CapabilityDomain::EnvWrite,
+            name_scopes(&self.allow_env_write),
+        );
+        add(CapabilityDomain::NetConnect, name_scopes(&self.allow_net));
+        add(
+            CapabilityDomain::NetListen,
+            name_scopes(&self.allow_net_listen),
+        );
+        add(CapabilityDomain::ProcessRun, name_scopes(&self.allow_run));
         if self.allow_clock {
-            add("clock", vec![PolicyScope::Any]);
+            add(CapabilityDomain::Clock, vec![PolicyScope::Any]);
         }
         if self.allow_random {
-            add("random", vec![PolicyScope::Any]);
+            add(CapabilityDomain::Random, vec![PolicyScope::Any]);
         }
         if self.allow_system_info {
-            add("system-info", vec![PolicyScope::Any]);
+            add(CapabilityDomain::SystemInfo, vec![PolicyScope::Any]);
         }
         PolicyType { domains }
     }

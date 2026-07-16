@@ -404,13 +404,15 @@ impl HostExecution {
                 let RuntimeValue::Policy(source) = &values[0] else {
                     bail!("`$policy.narrow` expects a policy value")
                 };
-                let TypeRef::Policy(requested) = target else {
-                    bail!("`$policy.narrow.into` must be a `$policy` type")
-                };
-                RuntimeValue::Policy(crate::execute::narrow_policy_value(
-                    &requested,
-                    &source.policy,
-                )?)
+                match target {
+                    TypeRef::Capability(requested) => RuntimeValue::Capability(
+                        crate::execute::narrow_capability_value(&requested, &source.policy)?,
+                    ),
+                    TypeRef::Policy(requested) => RuntimeValue::Policy(
+                        crate::execute::narrow_policy_value(&requested, &source.policy)?,
+                    ),
+                    _ => bail!("`$policy.narrow.into` must be a capability type"),
+                }
             }
             Expr::EnumConstructor {
                 enum_key,
@@ -1437,9 +1439,13 @@ main:
         path:
           $fs.path.new: "{}"
     - $let:
+        capability:
+          $policy.narrow: $args.policy
+          into: $fs.read-capability
+    - $let:
         text:
           $fs.read-to-string: $path
-          policy: $args.policy
+          capability: $capability
 "#,
                 path(&fs),
                 path(temp.path()),
@@ -1452,9 +1458,9 @@ main:
         let config = RunConfig {
             approved_policy: Some(crate::lower::PolicyType {
                 domains: BTreeMap::from([(
-                    "fs-read".into(),
+                    crate::lower::CapabilityDomain::FsRead,
                     vec![crate::lower::PolicyGroup {
-                        requirement: crate::lower::GrantRequirement::Mandatory,
+                        requirement: crate::lower::PolicyRequirement::Mandatory,
                         scopes: vec![crate::lower::PolicyScope::Dir(path(temp.path()))],
                     }],
                 )]),
