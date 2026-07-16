@@ -7826,29 +7826,71 @@ main:
     );
 }
 
-// --- Issue #53: env grants are case-sensitive on Unix ---
+// --- Issue #53: environment capability scopes are case-sensitive on Unix ---
 
 #[test]
-fn env_read_grant_is_case_sensitive_on_unix() {
+fn env_read_capability_is_case_sensitive_on_unix() {
     if cfg!(windows) {
         return;
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let env_mod = std::fs::canonicalize(root.join("stdlib/src/env.vibra")).unwrap();
     let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
-    let security = std::fs::canonicalize(root.join("stdlib/src/security.vibra")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"env:
+  $import: "{env_mod}"
+result:
+  $import: "{result}"
+test:
+  $import: "{test}"
+env-policy:
+  $policy:
+    env-read:
+    - requirement: mandatory
+      scopes:
+      - exact: VIBRA_ISSUE53_TOKEN
+main:
+  $function:
+    policy: $env-policy
+  return: $void
+  do:
+  - $let:
+      capability:
+        $policy.narrow: $args.policy
+        into: $env.read-capability
+  - $let:
+      value:
+        $env.get: vibra_issue53_token
+        capability: $capability
+  - $match: $value
+    when:
+    - case:
+        $result.result.ok:
+          $wildcard: null
+      do:
+      - $test.fail: lowercase environment name matched uppercase capability scope
+    - case:
+        $result.result.err:
+          $wildcard: null
+      do: []
+"#,
+            env_mod = path_str(&env_mod),
+            result = path_str(&result),
+            test = path_str(&test),
+        ),
+    )
+    .unwrap();
     std::env::set_var("VIBRA_ISSUE53_TOKEN", "public");
     std::env::set_var("vibra_issue53_token", "secret");
     let output = vibra_cmd()
         .args([
-            "exec",
-            r#"{$env.get: "vibra_issue53_token"}"#,
-            "--import",
-            &format!("env={}", path_str(&env_mod)),
-            "--import",
-            &format!("result={}", path_str(&result)),
-            "--import",
-            &format!("security={}", path_str(&security)),
+            "run",
+            &path_str(&entry),
             "--allow-env=VIBRA_ISSUE53_TOKEN",
             "--format",
             "yaml",
@@ -7858,9 +7900,10 @@ fn env_read_grant_is_case_sensitive_on_unix() {
     std::env::remove_var("VIBRA_ISSUE53_TOKEN");
     std::env::remove_var("vibra_issue53_token");
     assert!(
-        !output.status.success(),
-        "lowercase env name must not match uppercase grant on Unix: {}",
-        String::from_utf8_lossy(&output.stdout)
+        output.status.success(),
+        "lowercase env name must not match uppercase capability scope:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
