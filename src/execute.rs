@@ -1272,6 +1272,14 @@ mod iteration_tests {
         (dir, lowered)
     }
 
+    fn lower_error(source: &str) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(&entry, source).unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        format!("{:#}", crate::lower::lower_program(&loaded).unwrap_err())
+    }
+
     #[test]
     fn canonical_iteration_runs_in_interpreter_and_wasm() {
         let (_dir, program) = lower(
@@ -1327,6 +1335,38 @@ mod iteration_tests {
         let wasm = run_lowered(&program, &RunConfig::default()).unwrap_err();
         assert!(format!("{interpreted:#}").contains("E-ITER-002"));
         assert!(format!("{wasm:#}").contains("E-ITER-002"));
+    }
+
+    #[test]
+    fn loop_control_requires_a_loop_and_canonical_null_envelopes() {
+        for statement in ["$break: null", "$continue: null"] {
+            let error = lower_error(&format!(
+                "main:\n  $function: $void\n  return: $void\n  do:\n  - {statement}\n"
+            ));
+            assert!(
+                error.contains("only valid inside `$for` or `$while`"),
+                "{error}"
+            );
+        }
+        for statement in [
+            "$break: false",
+            "$continue: {}",
+            "$break: null\n    extra: null",
+        ] {
+            let error = lower_error(&format!(
+                "main:\n  $function: $void\n  return: $void\n  do:\n  - {statement}\n"
+            ));
+            assert!(error.contains("must use canonical form"), "{error}");
+        }
+    }
+
+    #[test]
+    fn while_is_an_existing_loop_control_target() {
+        let (_dir, program) = lower(
+            "main:\n  $function: $void\n  return: $void\n  do:\n  - $while: true\n    do:\n    - $break: null\n",
+        );
+        run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        run_lowered(&program, &RunConfig::default()).unwrap();
     }
 }
 

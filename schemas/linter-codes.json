@@ -316,6 +316,31 @@
       "code": "E-WASM-004",
       "severity": "error",
       "summary": "Host import wrapper return type mismatch"
+    },
+    {
+      "code": "E-ITER-001",
+      "severity": "error",
+      "summary": "Value is not a supported traversal source"
+    },
+    {
+      "code": "E-ITER-002",
+      "severity": "error",
+      "summary": "Integer range step is zero"
+    },
+    {
+      "code": "E-ITER-003",
+      "severity": "error",
+      "summary": "Traversal length exceeds configured or platform limits"
+    },
+    {
+      "code": "E-ITER-004",
+      "severity": "error",
+      "summary": "Integer range arithmetic overflow"
+    },
+    {
+      "code": "E-ITER-005",
+      "severity": "error",
+      "summary": "Internal traversal index is negative or out of bounds"
     }
   ]
 }
