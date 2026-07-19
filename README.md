@@ -217,6 +217,8 @@ every argument and capability domain, and the exact return type. Run
 
 **Current subset:** entry module defines `main` with `args: $void`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns and ordered `$match` sequence arms with explicit `case:` entries). Entry and imported modules may also define **user functions** (`do:` with `$let` / `$match` / `$return`) and **generic functions** (`$function` with the `=where` annotation declaring type parameters and bounds); generic calls pass explicit type arguments in the same mapping as value arguments (see [DRAFT.md](DRAFT.md)). `io` and `fs` functions declared in [stdlib/src/io.vibra](stdlib/src/io.vibra) and [stdlib/src/fs.vibra](stdlib/src/fs.vibra) are executable via the runtime execution backend.
 
+Pure collection operations live in [stdlib/src/collections.vibra](stdlib/src/collections.vibra): generic arrays support safe lookup and copy-on-return updates, while deterministic string-key maps preserve insertion order and use explicit `option`/`result` outcomes.
+
 ## Type System Snapshot
 
 - Primitive numerics: `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`

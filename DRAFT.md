@@ -195,6 +195,27 @@ $map:
     value: "vibra"
 ```
 
+### Core collection contract
+
+`stdlib/src/collections.vibra` is the single canonical operational surface for
+v1 arrays and maps. Arrays are generic ordered values. The initial map is a
+generic-value, `$str`-keyed map; broader key types require a future explicit
+equality contract and are not inferred implicitly.
+
+Collection functions never mutate an input value. `set`, `append`, `insert`,
+and `remove` return a copied collection, preserving Vibra's value-copy model.
+Array lookup returns `option<T>`; invalid bounds from modifying or slicing
+operations return `result<_, collection-error>`. Appending and inserting use
+the runtime `max-alloc-len` ceiling and return `limit-exceeded` instead of
+trapping. Array slices use the half-open range `[start, end)`.
+
+Maps preserve first-insertion order deterministically. Inserting an existing
+key replaces its value at the same position; the same last-value-wins rule
+canonicalizes duplicate keys in a literal. Missing lookup returns `none`, and
+removing a missing key returns `none` (the caller already retains the original
+value), while a successful removal returns `some<map>`. Iteration will
+expose this order when the v1 iteration protocol is added.
+
 ### `$match`
 
 `$match` uses one canonical ordered arm sequence: the target expression is the `$match` value, and sibling `when:` contains the ordered arms. Each arm has `case` and `do`.

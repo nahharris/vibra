@@ -247,6 +247,222 @@
     },
     {
       "module": "vibra_v1",
+      "name": "array_len",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        }
+      ],
+      "required-domains": [],
+      "return": "uint64"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "array_get",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "option-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "array_set",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        },
+        {
+          "kind": "value",
+          "type": "any"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "array_slice",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "array_append",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "any"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "array_insert",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        },
+        {
+          "kind": "value",
+          "type": "any"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "array_remove",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "array_contains",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "any"
+        }
+      ],
+      "required-domains": [],
+      "return": "bool"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "map_len",
+      "params": [
+        {
+          "kind": "value",
+          "type": "string-map"
+        }
+      ],
+      "required-domains": [],
+      "return": "uint64"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "map_get",
+      "params": [
+        {
+          "kind": "value",
+          "type": "string-map"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "option-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "map_insert",
+      "params": [
+        {
+          "kind": "value",
+          "type": "string-map"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "any"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "map_remove",
+      "params": [
+        {
+          "kind": "value",
+          "type": "string-map"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "option-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "map_contains_key",
+      "params": [
+        {
+          "kind": "value",
+          "type": "string-map"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "bool"
+    },
+    {
+      "module": "vibra_v1",
       "name": "fs_open_read",
       "params": [
         {
