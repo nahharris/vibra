@@ -21,7 +21,7 @@ targets:
 dependencies:
   std:
     git: https://github.com/nahharris/vibra-stdlib.git
-    rev: edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31
+    rev: 6b9fa5838e4f4122ff141e13a5ef737e99955dad
   math:
     git: https://github.com/example/vibra-math.git
     rev: 0123456789abcdef0123456789abcdef01234567
@@ -131,7 +131,7 @@ Vendored dependency and stdlib documents are visible to `vibra code` queries. Th
 dependencies:
   std:
     git: https://github.com/nahharris/vibra-stdlib.git
-    rev: edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31
+    rev: 6b9fa5838e4f4122ff141e13a5ef737e99955dad
 ```
 
 The compiler source tree pins the same revision through its `stdlib` Git submodule.

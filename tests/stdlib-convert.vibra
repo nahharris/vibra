@@ -1,0 +1,110 @@
+=comment: Primitive parsing is strict and typed; formatting is canonical and locale-free.
+test:
+  $import: ../stdlib/src/test.vibra
+convert:
+  $import: ../stdlib/src/convert.vibra
+result:
+  $import: ../stdlib/src/result.vibra
+integer-parse-format-and-errors:
+  $test: core
+  do:
+  - $let:
+      parsed:
+        $convert.parse-int64: '-42'
+  - $match: $parsed
+    when:
+    - case:
+        $result.result.ok: -42
+      do:
+      - $test.assert-eq-str:
+          actual:
+            $convert.format-int64: -42
+          expected: '-42'
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: signed integer round trip failed
+  - $let:
+      invalid:
+        $convert.parse-int64: 42x
+  - $match: $invalid
+    when:
+    - case:
+        $result.result.err:
+          $convert.parse-error.invalid: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: invalid integer was accepted
+  - $let:
+      overflow:
+        $convert.parse-int64: '9223372036854775808'
+  - $match: $overflow
+    when:
+    - case:
+        $result.result.err:
+          $convert.parse-error.overflow: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: integer overflow was not typed
+float-special-values-and-round-trip:
+  $test: core
+  do:
+  - $test.assert-eq-str:
+      actual:
+        $convert.format-float64: 1.25
+      expected: '1.25'
+  - $let:
+      parsed:
+        $convert.parse-float64: '1.25'
+  - $match: $parsed
+    when:
+    - case:
+        $result.result.ok: 1.25
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: float round trip failed
+  - $let:
+      infinity:
+        $convert.parse-float64: inf
+  - $match: $infinity
+    when:
+    - case:
+        $result.result.ok:
+          $bind: value
+      do:
+      - $test.assert-eq-str:
+          actual:
+            $convert.format-float64: $value
+          expected: inf
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: infinity contract failed
+boolean-is-exact:
+  $test: core
+  do:
+  - $let:
+      parsed:
+        $convert.parse-bool: 'true'
+  - $match: $parsed
+    when:
+    - case:
+        $result.result.ok: true
+      do:
+      - $test.assert-eq-str:
+          actual:
+            $convert.format-bool: false
+          expected: 'false'
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: bool conversion failed
