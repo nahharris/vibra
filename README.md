@@ -117,12 +117,14 @@ Macro execution is deterministic and limited to 64 nested expansions,
 
 ## Format and lint
 
-`vibra fmt` and `vibra lint` are YAML-first tooling commands. Their default output is structured YAML for vibe-coding workflows; JSON and SARIF are opt-in compatibility formats for external automation.
+Vibra's CLI is YAML-first: every command that emits CLI-owned output uses structured YAML by default. Use `--format yaml` to request it explicitly, or select a supported alternative such as `json`, `human`, `raw`, or `sarif`. Program-owned stdout from `vibra run` is passed through unchanged.
+
+`vibra fmt` and `vibra lint` follow the same convention. JSON and SARIF remain opt-in compatibility formats for external automation.
 
 ```sh
 vibra fmt                 # check every .vibra/.vibra.yaml file under .
 vibra fmt src --write     # rewrite changed files in place
-vibra fmt src --output json
+vibra fmt src --format json
 
 vibra lint
 vibra lint src --category style
@@ -279,7 +281,7 @@ vibra test --filter truth
 vibra test --profile core --tag language
 vibra test --deny-skips --deny-warnings
 vibra test --jobs 4 --timeout-ms 30000 --fail-fast
-vibra test --report yaml --report-file report.yaml
+vibra test --format yaml --report-file report.yaml
 ```
 
 Profiles and tags only select tests; they never confer host permissions.
