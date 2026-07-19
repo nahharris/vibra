@@ -60,6 +60,33 @@ privileged host call rechecks the approved scopes.
 Filesystem handles and allocation limits remain host-owned. Instantiation does
 not grant authority by itself.
 
+## Resource lifecycle and limits
+
+Opaque host handles are valid only in the program instance that minted them;
+copying the value does not duplicate the underlying resource or its authority.
+Dynamic resources have one explicit close transition. The first close releases
+the resource immediately. Duplicate close and every operation through an alias
+after close return `fs-error.resource-closed`; a never-minted handle returns
+`fs-error.invalid-handle`. Standard streams are borrowed from the process:
+close is a no-op and cannot revoke them. Stdin is a singleton per instance, so
+repeated access cannot grow the handle table.
+
+All remaining live resources are closed when the program instance ends,
+including error exits. `RunConfig.max_open_files` / `--max-open-files` bounds
+all live owned handles (currently files; borrowed standard streams are
+excluded); the default is 1024 and zero explicitly disables the bound.
+Exhaustion is the typed
+`fs-error.too-many-open-files` result and does not mint a handle. Future socket,
+child-process, and timer handles must use this same table and contract.
+
+`RunConfig.max_alloc_len` bounds each program-controlled raw buffer allocation
+(64 MiB by default). Strings, arrays, maps, enum payloads, function arguments,
+and assignments are value copies in v1; aggregate copy cost is proportional to
+the copied value, and collection growth may allocate and copy the collection.
+The host arena itself lasts for the instance and is reclaimed wholesale at
+exit. Compact `bytes` values are the safe buffer strategy at the host boundary;
+APIs must reject a requested buffer above `max_alloc_len` before allocation.
+
 ## Determinism and compatibility
 
 Reachable specializations, types, imports, functions, exports, code,
