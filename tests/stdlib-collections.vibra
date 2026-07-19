@@ -1,0 +1,165 @@
+test:
+  $import: ../stdlib/src/test.vibra
+collections:
+  $import: ../stdlib/src/collections.vibra
+option:
+  $import: ../stdlib/src/option.vibra
+result:
+  $import: ../stdlib/src/result.vibra
+array-generic-get:
+  $test: core
+  do:
+  - $let:
+      found:
+        $collections.array-get:
+          t: $str
+          values:
+            $array:
+            - alpha
+            - beta
+          index: 1
+  - $match: $found
+    when:
+    - case:
+        $option.option.some: beta
+      do:
+      - $test.assert: true
+    - case:
+        $option.option.some:
+          $bind: wrong
+      do:
+      - $test.fail: wrong value
+    - case:
+        $option.option.none: null
+      do:
+      - $test.fail: expected value
+array-copy-on-write-and-bounds:
+  $test: core
+  do:
+  - $let:
+      original:
+        $array:
+        - 1
+        - 2
+  - $let:
+      changed:
+        $collections.array-set:
+          t: $int64
+          values: $original
+          index: 0
+          value: 9
+  - $match: $changed
+    when:
+    - case:
+        $result.result.ok:
+          $array:
+          - 9
+          - 2
+      do:
+      - $match: $original
+        when:
+        - case:
+            $array:
+            - 1
+            - 2
+          do:
+          - $test.assert: true
+        - case:
+            $wildcard: null
+          do:
+          - $test.fail: original was aliased
+    - case:
+        $result.result.err:
+          $bind: error
+      do:
+      - $test.fail: unexpected set error
+  - $let:
+      missing:
+        $collections.array-remove:
+          t: $int64
+          values: $original
+          index: 2
+  - $match: $missing
+    when:
+    - case:
+        $result.result.ok:
+          $bind: value
+      do:
+      - $test.fail: expected bounds error
+    - case:
+        $result.result.err:
+          $collections.collection-error.out-of-bounds:
+            $record:
+              index: 2
+              len: 2
+      do:
+      - $test.assert: true
+map-upsert-is-deterministic:
+  $test: core
+  do:
+  - $let:
+      words:
+        $map:
+        - key: alpha
+          value: 1
+        - key: beta
+          value: 2
+  - $let:
+      updated:
+        $collections.map-insert:
+          v: $int64
+          values: $words
+          key: alpha
+          value: 3
+  - $match: $updated
+    when:
+    - case:
+        $result.result.ok:
+          $map:
+          - key: alpha
+            value: 3
+          - key: beta
+            value: 2
+      do:
+      - $test.assert: true
+    - case:
+        $result.result.err:
+          $bind: error
+      do:
+      - $test.fail: unexpected map error
+  - $let:
+      absent:
+        $collections.map-get:
+          v: $int64
+          values: $words
+          key: gamma
+  - $match: $absent
+    when:
+    - case:
+        $option.option.none: null
+      do:
+      - $test.assert: true
+    - case:
+        $option.option.some:
+          $bind: value
+      do:
+      - $test.fail: expected none
+  - $let:
+      removed:
+        $collections.map-remove:
+          v: $int64
+          values: $words
+          key: alpha
+  - $match: $removed
+    when:
+    - case:
+        $option.option.some:
+          $map:
+          - key: beta
+            value: 2
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: wrong map removal

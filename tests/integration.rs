@@ -95,6 +95,42 @@ fn primitive_integer_failures_have_stable_diagnostics() {
 }
 
 #[test]
+fn collection_operations_execute_through_wasm_backend() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let collections =
+        path_str(&std::fs::canonicalize(root.join("stdlib/src/collections.vibra")).unwrap());
+    let test = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"collections:
+  $import: "{collections}"
+test:
+  $import: "{test}"
+main:
+  $function: $void
+  return: $void
+  do:
+  - $let:
+      found:
+        $collections.array-contains:
+          t: $int64
+          values: {{$array: [1, 2, 3]}}
+          value: 2
+  - $test.assert: $found
+"#
+        ),
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&loaded).unwrap();
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default()).unwrap();
+}
+
+#[test]
 fn match_arms_use_case_key() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");

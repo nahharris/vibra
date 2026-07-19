@@ -8,7 +8,7 @@ use crate::lower::{
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -576,16 +576,24 @@ fn eval_expr(
             .map(|expr| eval_expr(expr, env, program, files, config))
             .collect::<Result<Vec<_>>>()
             .map(RuntimeValue::Array),
-        Expr::Map(items) => items
-            .iter()
-            .map(|(k, v)| {
-                Ok((
-                    eval_expr(k, env, program, files, config)?,
-                    eval_expr(v, env, program, files, config)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()
-            .map(RuntimeValue::Map),
+        Expr::Map(items) => {
+            let mut values: Vec<(RuntimeValue, RuntimeValue)> = Vec::with_capacity(items.len());
+            for (key, value) in items {
+                let key = eval_expr(key, env, program, files, config)?;
+                let value = eval_expr(value, env, program, files, config)?;
+                // Map literals have the same deterministic upsert rule as the
+                // public API: the first key fixes order and the last value wins.
+                if let Some((_, current)) = values
+                    .iter_mut()
+                    .find(|(current, _)| runtime_value_eq(current, &key))
+                {
+                    *current = value;
+                } else {
+                    values.push((key, value));
+                }
+            }
+            Ok(RuntimeValue::Map(values))
+        }
         Expr::If {
             cond,
             then_e,
@@ -1193,6 +1201,44 @@ fn result_ok(sig: &crate::lower::FunctionSig, value: RuntimeValue) -> RuntimeVal
         tag: "ok".to_string(),
         payload: Some(Box::new(value)),
     }
+}
+
+fn collection_result_err(
+    sig: &crate::lower::FunctionSig,
+    tag: &str,
+    payload: Option<RuntimeValue>,
+) -> RuntimeValue {
+    let error_key = match &sig.return_type {
+        TypeRef::Instantiated { type_args, .. } if type_args.len() >= 2 => match &type_args[1] {
+            TypeRef::Named(name) => name.clone(),
+            other => format!("{other:?}"),
+        },
+        _ => "collection-error".to_string(),
+    };
+    RuntimeValue::Enum {
+        enum_key: result_enum_key(sig),
+        tag: "err".to_string(),
+        payload: Some(Box::new(RuntimeValue::Enum {
+            enum_key: error_key,
+            tag: tag.to_string(),
+            payload: payload.map(Box::new),
+        })),
+    }
+}
+
+fn collection_bounds_err(
+    sig: &crate::lower::FunctionSig,
+    index: usize,
+    len: usize,
+) -> RuntimeValue {
+    collection_result_err(
+        sig,
+        "out-of-bounds",
+        Some(RuntimeValue::Record(BTreeMap::from([
+            ("index".to_string(), RuntimeValue::Int(index as i64)),
+            ("len".to_string(), RuntimeValue::Int(len as i64)),
+        ]))),
+    )
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1928,6 +1974,159 @@ fn exec_vibra_v1(
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
     match name {
+        "array_len" => match untyped(&args[0]) {
+            RuntimeValue::Array(values) => Ok(RuntimeValue::Int(values.len() as i64)),
+            other => bail!("array_len expects an array, got {other:?}"),
+        },
+        "array_get" => {
+            let index = usize::try_from(value_i64(&args[1])?).context("array index too large")?;
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("array_get expects an array")
+            };
+            Ok(option_value(sig, values.get(index).cloned()))
+        }
+        "array_set" => {
+            let index = usize::try_from(value_i64(&args[1])?).context("array index too large")?;
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("array_set expects an array")
+            };
+            if index >= values.len() {
+                return Ok(collection_bounds_err(sig, index, values.len()));
+            }
+            let mut next = values.clone();
+            next[index] = args[2].clone();
+            Ok(result_ok(sig, RuntimeValue::Array(next)))
+        }
+        "array_slice" => {
+            let start = usize::try_from(value_i64(&args[1])?).context("array start too large")?;
+            let end = usize::try_from(value_i64(&args[2])?).context("array end too large")?;
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("array_slice expects an array")
+            };
+            if start > end || end > values.len() {
+                return Ok(collection_bounds_err(
+                    sig,
+                    if start > end { start } else { end },
+                    values.len(),
+                ));
+            }
+            Ok(result_ok(
+                sig,
+                RuntimeValue::Array(values[start..end].to_vec()),
+            ))
+        }
+        "array_append" => {
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("array_append expects an array")
+            };
+            if values.len() >= config.max_alloc_len {
+                return Ok(collection_result_err(sig, "limit-exceeded", None));
+            }
+            let mut next = values.clone();
+            next.push(args[1].clone());
+            Ok(result_ok(sig, RuntimeValue::Array(next)))
+        }
+        "array_insert" => {
+            let index = usize::try_from(value_i64(&args[1])?).context("array index too large")?;
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("array_insert expects an array")
+            };
+            if index > values.len() {
+                return Ok(collection_bounds_err(sig, index, values.len()));
+            }
+            if values.len() >= config.max_alloc_len {
+                return Ok(collection_result_err(sig, "limit-exceeded", None));
+            }
+            let mut next = values.clone();
+            next.insert(index, args[2].clone());
+            Ok(result_ok(sig, RuntimeValue::Array(next)))
+        }
+        "array_remove" => {
+            let index = usize::try_from(value_i64(&args[1])?).context("array index too large")?;
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("array_remove expects an array")
+            };
+            if index >= values.len() {
+                return Ok(collection_bounds_err(sig, index, values.len()));
+            }
+            let mut next = values.clone();
+            let removed = next.remove(index);
+            Ok(result_ok(
+                sig,
+                RuntimeValue::Record(BTreeMap::from([
+                    ("values".to_string(), RuntimeValue::Array(next)),
+                    ("removed".to_string(), removed),
+                ])),
+            ))
+        }
+        "array_contains" => {
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("array_contains expects an array")
+            };
+            Ok(RuntimeValue::Bool(
+                values.iter().any(|value| runtime_value_eq(value, &args[1])),
+            ))
+        }
+        "map_len" => match untyped(&args[0]) {
+            RuntimeValue::Map(values) => Ok(RuntimeValue::Int(values.len() as i64)),
+            other => bail!("map_len expects a map, got {other:?}"),
+        },
+        "map_get" => {
+            let key = value_string(&args[1])?;
+            let RuntimeValue::Map(values) = untyped(&args[0]) else {
+                bail!("map_get expects a map")
+            };
+            Ok(option_value(
+                sig,
+                values
+                    .iter()
+                    .find(|(k, _)| value_string(k).is_ok_and(|candidate| candidate == key))
+                    .map(|(_, value)| value.clone()),
+            ))
+        }
+        "map_insert" => {
+            let key = value_string(&args[1])?;
+            let RuntimeValue::Map(values) = untyped(&args[0]) else {
+                bail!("map_insert expects a map")
+            };
+            let mut next = values.clone();
+            if let Some((_, current)) = next
+                .iter_mut()
+                .find(|(k, _)| value_string(k).is_ok_and(|candidate| candidate == key))
+            {
+                *current = args[2].clone();
+            } else {
+                if next.len() >= config.max_alloc_len {
+                    return Ok(collection_result_err(sig, "limit-exceeded", None));
+                }
+                next.push((RuntimeValue::Str(key), args[2].clone()));
+            }
+            Ok(result_ok(sig, RuntimeValue::Map(next)))
+        }
+        "map_remove" => {
+            let key = value_string(&args[1])?;
+            let RuntimeValue::Map(values) = untyped(&args[0]) else {
+                bail!("map_remove expects a map")
+            };
+            let mut next = values.clone();
+            let removed = next
+                .iter()
+                .position(|(k, _)| value_string(k).is_ok_and(|candidate| candidate == key))
+                .map(|index| {
+                    next.remove(index);
+                    RuntimeValue::Map(next)
+                });
+            Ok(option_value(sig, removed))
+        }
+        "map_contains_key" => {
+            let key = value_string(&args[1])?;
+            let RuntimeValue::Map(values) = untyped(&args[0]) else {
+                bail!("map_contains_key expects a map")
+            };
+            Ok(RuntimeValue::Bool(values.iter().any(|(k, _)| {
+                value_string(k).is_ok_and(|candidate| candidate == key)
+            })))
+        }
         "stdin_open" => {
             let policy = value_policy(&args[0])?;
             ensure_policy_scope(policy, CapabilityDomain::StdinRead, "*")?;
@@ -2711,5 +2910,52 @@ fn exec_vibra_code(
             })
         }
         other => bail!("unsupported vibra_code import `{other}`"),
+    }
+}
+
+#[cfg(test)]
+mod collection_tests {
+    use super::*;
+
+    #[test]
+    fn collection_operations_execute_in_interpreter() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let collections = root
+            .join("stdlib/src/collections.vibra")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let test = root
+            .join("stdlib/src/test.vibra")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(
+            &entry,
+            format!(
+                r#"collections:
+  $import: "{collections}"
+test:
+  $import: "{test}"
+main:
+  $function: $void
+  return: $void
+  do:
+  - $let:
+      found:
+        $collections.array-contains:
+          t: $int64
+          values: {{$array: [1, 2, 3]}}
+          value: 2
+  - $test.assert: $found
+"#
+            ),
+        )
+        .unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        let lowered = crate::lower::lower_program(&loaded).unwrap();
+        run_lowered_interpreted(&lowered, &RunConfig::default()).unwrap();
     }
 }

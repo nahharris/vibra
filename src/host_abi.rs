@@ -47,6 +47,11 @@ pub enum ValueKind {
     ResultPath,
     OptionPath,
     OptionStr,
+    Any,
+    Array,
+    StringMap,
+    OptionAny,
+    ResultAny,
     CodeDocument,
     CodeQuery,
     CodeNode,
@@ -113,6 +118,11 @@ impl ValueKind {
             Self::ResultPath => "result-path",
             Self::OptionPath => "option-path",
             Self::OptionStr => "option-str",
+            Self::Any => "any",
+            Self::Array => "array",
+            Self::StringMap => "string-map",
+            Self::OptionAny => "option-any",
+            Self::ResultAny => "result-any",
             Self::CodeDocument => "code-document",
             Self::CodeQuery => "code-query",
             Self::CodeNode => "code-node",
@@ -208,6 +218,104 @@ pub const HOST_ABI: &[HostImport] = &[
     ),
     entry("vibra_v1", "bytes_from_str", &[STR], ValueKind::Bytes),
     entry("vibra_v1", "bytes_to_str", &[BYTES], ValueKind::Str),
+    // Pure, deterministic collection operations. `Any` is intentional: the
+    // generic wrapper signatures are statically checked by Vibra lowering.
+    entry(
+        "vibra_v1",
+        "array_len",
+        &[ParamKind::Value(ValueKind::Array)],
+        ValueKind::UInt64,
+    ),
+    entry(
+        "vibra_v1",
+        "array_get",
+        &[ParamKind::Value(ValueKind::Array), U64],
+        ValueKind::OptionAny,
+    ),
+    entry(
+        "vibra_v1",
+        "array_set",
+        &[
+            ParamKind::Value(ValueKind::Array),
+            U64,
+            ParamKind::Value(ValueKind::Any),
+        ],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "array_slice",
+        &[ParamKind::Value(ValueKind::Array), U64, U64],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "array_append",
+        &[
+            ParamKind::Value(ValueKind::Array),
+            ParamKind::Value(ValueKind::Any),
+        ],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "array_insert",
+        &[
+            ParamKind::Value(ValueKind::Array),
+            U64,
+            ParamKind::Value(ValueKind::Any),
+        ],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "array_remove",
+        &[ParamKind::Value(ValueKind::Array), U64],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "array_contains",
+        &[
+            ParamKind::Value(ValueKind::Array),
+            ParamKind::Value(ValueKind::Any),
+        ],
+        ValueKind::Bool,
+    ),
+    entry(
+        "vibra_v1",
+        "map_len",
+        &[ParamKind::Value(ValueKind::StringMap)],
+        ValueKind::UInt64,
+    ),
+    entry(
+        "vibra_v1",
+        "map_get",
+        &[ParamKind::Value(ValueKind::StringMap), STR],
+        ValueKind::OptionAny,
+    ),
+    entry(
+        "vibra_v1",
+        "map_insert",
+        &[
+            ParamKind::Value(ValueKind::StringMap),
+            STR,
+            ParamKind::Value(ValueKind::Any),
+        ],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "map_remove",
+        &[ParamKind::Value(ValueKind::StringMap), STR],
+        ValueKind::OptionAny,
+    ),
+    entry(
+        "vibra_v1",
+        "map_contains_key",
+        &[ParamKind::Value(ValueKind::StringMap), STR],
+        ValueKind::Bool,
+    ),
     // vibra_v1: filesystem.
     entry(
         "vibra_v1",
