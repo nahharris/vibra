@@ -8,7 +8,7 @@ use crate::lower::{
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -304,10 +304,6 @@ impl FileHandle {
 pub(crate) struct FileTable {
     next: u64,
     handles: HashMap<u64, FileHandle>,
-    /// IDs of dynamic resources that were successfully closed. Tombstones are
-    /// retained for the program-instance lifetime so duplicate close and
-    /// use-after-close are distinguishable from forged/never-minted IDs.
-    closed: HashSet<u64>,
     /// Optional injected sinks for guest stdout/stderr. When `None`, writes go
     /// to the process's locked standard streams. Injected sinks are primarily
     /// used by tests to exercise write-failure paths deterministically.
@@ -330,7 +326,6 @@ impl FileTable {
         Self {
             next: 3,
             handles,
-            closed: HashSet::new(),
             stdout_sink: None,
             stderr_sink: None,
             limit,
@@ -395,23 +390,28 @@ impl FileTable {
         ) {
             return Ok(());
         }
-        if self.closed.contains(&id) {
-            return Err(HandleLifecycleError::Closed);
-        }
         if self.handles.remove(&id).is_none() {
-            return Err(HandleLifecycleError::Invalid);
+            return Err(self.classify_absent(id));
         }
-        self.closed.insert(id);
         Ok(())
     }
 
     fn lifecycle_error(&self, id: u64) -> Option<HandleLifecycleError> {
         if self.handles.contains_key(&id) {
             None
-        } else if self.closed.contains(&id) {
-            Some(HandleLifecycleError::Closed)
         } else {
-            Some(HandleLifecycleError::Invalid)
+            Some(self.classify_absent(id))
+        }
+    }
+
+    /// Monotonic IDs make tombstones unnecessary: every dynamic ID below
+    /// `next` was minted by this instance, so an absent one is closed. IDs
+    /// outside that half-open range were never minted and are invalid.
+    fn classify_absent(&self, id: u64) -> HandleLifecycleError {
+        if (3..self.next).contains(&id) {
+            HandleLifecycleError::Closed
+        } else {
+            HandleLifecycleError::Invalid
         }
     }
 
@@ -501,7 +501,6 @@ impl Drop for FileTable {
         // Dropping each File closes its OS descriptor. Clear explicitly to
         // make the instance-boundary cleanup contract visible and immediate.
         self.handles.clear();
-        self.closed.clear();
     }
 }
 
@@ -3048,7 +3047,7 @@ mod resource_lifecycle_tests {
     use super::{FileTable, HandleLifecycleError};
 
     #[test]
-    fn close_is_linear_and_tombstones_closed_ids() {
+    fn close_is_linear_and_classifies_minted_ids_as_closed() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("resource.txt");
         let mut table = FileTable::new(1);
@@ -3098,5 +3097,30 @@ mod resource_lifecycle_tests {
             .truncate(true)
             .open(path)
             .expect("instance teardown must release owned OS files");
+    }
+
+    #[test]
+    fn repeated_open_close_uses_constant_lifecycle_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("churn.txt");
+        let mut table = FileTable::new(1);
+
+        for _ in 0..10_000 {
+            let id = table.insert(std::fs::File::create(&path).unwrap());
+            assert_eq!(table.close(id), Ok(()));
+            assert_eq!(
+                table.lifecycle_error(id),
+                Some(HandleLifecycleError::Closed)
+            );
+        }
+
+        // Only the two borrowed output streams remain. Closed-ID tracking is
+        // represented by the single monotonic `next` counter, not tombstones.
+        assert_eq!(table.handles.len(), 2);
+        assert_eq!(table.open_resource_count(), 0);
+        assert_eq!(
+            table.lifecycle_error(table.next),
+            Some(HandleLifecycleError::Invalid)
+        );
     }
 }
