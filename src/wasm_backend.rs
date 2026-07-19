@@ -37,7 +37,9 @@ const HOST_MATCH: u32 = 9;
 const HOST_BINDING: u32 = 10;
 const HOST_STATUS: u32 = 11;
 const HOST_NO_MATCH: u32 = 12;
-const HOST_FUNCTIONS: u32 = 13;
+const HOST_ITER_LEN: u32 = 13;
+const HOST_ITER_GET: u32 = 14;
+const HOST_FUNCTIONS: u32 = 15;
 
 const ABI_IMPORTS: &[&str] = &[
     "seed",
@@ -53,6 +55,8 @@ const ABI_IMPORTS: &[&str] = &[
     "pattern_binding",
     "status",
     "no_match",
+    "iter_len",
+    "iter_get",
 ];
 const WASI_IMPORTS: &[&str] = &[
     "args_get",
@@ -200,12 +204,19 @@ fn run_wasm_inner(
     let no_match = HostFunction::new_typed(&mut store, || {
         host_unit(|_| bail!("non-exhaustive $match reached runtime"))
     });
+    let iter_len = HostFunction::new_typed(&mut store, |handle: i32| {
+        host_value(|host| host.iter_len(handle))
+    });
+    let iter_get = HostFunction::new_typed(&mut store, |handle: i32, index: i32| {
+        host_value(|host| host.iter_get(handle, index))
+    });
     let imports = imports! { ABI_MODULE => {
         "seed" => seed, "value_const" => value_const, "value_read" => value_read,
         "frame_begin" => frame_begin, "frame_push" => frame_push, "value_construct" => construct,
         "host_call" => host_call, "value_set" => value_set, "value_bool" => value_bool,
         "pattern_match" => pattern_match, "pattern_binding" => pattern_binding,
         "status" => status, "no_match" => no_match,
+        "iter_len" => iter_len, "iter_get" => iter_get,
     }};
     let instance =
         Instance::new(&mut store, &module, &imports).context("instantiate Vibra Wasm")?;
@@ -440,6 +451,23 @@ impl HostExecution {
                     .map(|pair| (pair[0].clone(), pair[1].clone()))
                     .collect(),
             ),
+            Expr::Range { .. } => {
+                let values: Vec<i64> = values
+                    .iter()
+                    .map(|value| match value {
+                        RuntimeValue::Int(value) => Ok(*value),
+                        other => bail!("range component must be integer, got {other:?}"),
+                    })
+                    .collect::<Result<_>>()?;
+                if values[2] == 0 {
+                    bail!("E-ITER-002: `$range.step` must not be zero");
+                }
+                RuntimeValue::Range {
+                    start: values[0],
+                    end: values[1],
+                    step: values[2],
+                }
+            }
             other => bail!("unsupported host value construction {other:?}"),
         };
         Ok(self.alloc(value))
@@ -524,6 +552,71 @@ impl HostExecution {
             .clone();
         Ok(self.alloc(value))
     }
+    fn iter_len(&mut self, handle: i32) -> Result<i32> {
+        let len = match self.get(handle)? {
+            RuntimeValue::Array(items) => items.len(),
+            RuntimeValue::Map(items) => items.len(),
+            RuntimeValue::Str(text) => text.chars().count(),
+            RuntimeValue::Range { start, end, step } => range_len(*start, *end, *step)?,
+            other => bail!("E-ITER-001: value is not traversable: {other:?}"),
+        };
+        if len > self.config.max_alloc_len {
+            bail!(
+                "E-ITER-003: traversal exceeds configured limit `{}`",
+                self.config.max_alloc_len
+            );
+        }
+        i32::try_from(len).context("E-ITER-003: traversal is too large for wasm32")
+    }
+    fn iter_get(&mut self, handle: i32, index: i32) -> Result<i32> {
+        let index = usize::try_from(index).context("E-ITER-005: negative traversal index")?;
+        let item = match self.get(handle)? {
+            RuntimeValue::Array(items) => items.get(index).cloned(),
+            RuntimeValue::Map(items) => items
+                .get(index)
+                .map(|(key, value)| RuntimeValue::Tuple(vec![key.clone(), value.clone()])),
+            RuntimeValue::Str(text) => text
+                .chars()
+                .nth(index)
+                .map(|scalar| RuntimeValue::Str(scalar.to_string())),
+            RuntimeValue::Range { start, end, step } => {
+                if index >= range_len(*start, *end, *step)? {
+                    None
+                } else {
+                    let offset = step
+                        .checked_mul(
+                            i64::try_from(index).context("E-ITER-004: range index overflow")?,
+                        )
+                        .context("E-ITER-004: integer range overflow")?;
+                    Some(RuntimeValue::Int(
+                        start
+                            .checked_add(offset)
+                            .context("E-ITER-004: integer range overflow")?,
+                    ))
+                }
+            }
+            other => bail!("E-ITER-001: value is not traversable: {other:?}"),
+        }
+        .context("E-ITER-005: traversal index out of bounds")?;
+        Ok(self.alloc(item))
+    }
+}
+
+fn range_len(start: i64, end: i64, step: i64) -> Result<usize> {
+    if step == 0 {
+        bail!("E-ITER-002: `$range.step` must not be zero");
+    }
+    if (step > 0 && start >= end) || (step < 0 && start <= end) {
+        return Ok(0);
+    }
+    let distance = if step > 0 {
+        (end as i128) - (start as i128)
+    } else {
+        (start as i128) - (end as i128)
+    };
+    let magnitude = (step as i128).abs();
+    usize::try_from((distance + magnitude - 1) / magnitude)
+        .context("E-ITER-003: range length exceeds platform limits")
 }
 
 fn compile_program(program: &LoweredProgram) -> CompiledProgram {
@@ -644,6 +737,11 @@ fn collect_calls_in_statements(statements: &[Statement], calls: &mut Vec<Call>) 
                 collect_calls_in_expr(cond, calls);
                 collect_calls_in_statements(body, calls);
             }
+            Statement::For { source, body, .. } => {
+                collect_calls_in_expr(source, calls);
+                collect_calls_in_statements(body, calls);
+            }
+            Statement::Break | Statement::Continue => {}
         }
     }
 }
@@ -744,6 +842,8 @@ impl<'a> Compiler<'a> {
             ("pattern_binding", 0),
             ("status", 5),
             ("no_match", 1),
+            ("iter_len", 0),
+            ("iter_get", 4),
         ] {
             imports.import(ABI_MODULE, name, EntityType::Function(ty));
         }
@@ -861,6 +961,10 @@ struct FunctionCompiler<'a, 'b> {
     match_temp: u32,
     next_shadow: u32,
     is_main: bool,
+    for_temps: Vec<(u32, u32)>,
+    for_depth: usize,
+    control_depth: u32,
+    loop_stack: Vec<(u32, u32)>,
 }
 
 impl<'a, 'b> FunctionCompiler<'a, 'b> {
@@ -898,6 +1002,11 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         next += 1;
         let next_shadow = next;
         next += count_pattern_bindings(statements) as u32;
+        let mut for_temps = Vec::new();
+        for _ in 0..max_for_depth(statements) {
+            for_temps.push((next, next + 1));
+            next += 2;
+        }
         let extra = next - args.len() as u32;
         Self {
             compiler,
@@ -910,6 +1019,10 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             match_temp,
             next_shadow,
             is_main,
+            for_temps,
+            for_depth: 0,
+            control_depth: 0,
+            loop_stack: Vec::new(),
         }
     }
 
@@ -958,16 +1071,23 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.emit_bool(cond);
                 self.function
                     .instruction(&Instruction::If(BlockType::Empty));
+                self.control_depth += 1;
                 self.emit_statements(then_body);
                 self.function.instruction(&Instruction::Else);
                 self.emit_statements(else_body);
                 self.function.instruction(&Instruction::End);
+                self.control_depth -= 1;
             }
             Statement::While { cond, body } => {
                 self.function
                     .instruction(&Instruction::Block(BlockType::Empty));
+                self.control_depth += 1;
+                let break_depth = self.control_depth;
                 self.function
                     .instruction(&Instruction::Loop(BlockType::Empty));
+                self.control_depth += 1;
+                let loop_depth = self.control_depth;
+                self.loop_stack.push((break_depth, loop_depth));
                 self.emit_bool(cond);
                 self.function.instruction(&Instruction::I32Eqz);
                 self.function.instruction(&Instruction::BrIf(1));
@@ -975,6 +1095,70 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.function.instruction(&Instruction::Br(0));
                 self.function.instruction(&Instruction::End);
                 self.function.instruction(&Instruction::End);
+                self.loop_stack.pop();
+                self.control_depth -= 2;
+            }
+            Statement::For { var, source, body } => {
+                let (source_local, index_local) = self.for_temps[self.for_depth];
+                self.for_depth += 1;
+                self.emit_expr(source);
+                self.function
+                    .instruction(&Instruction::LocalSet(source_local));
+                self.function.instruction(&Instruction::I32Const(0));
+                self.function
+                    .instruction(&Instruction::LocalSet(index_local));
+                self.function
+                    .instruction(&Instruction::Block(BlockType::Empty));
+                self.control_depth += 1;
+                let break_depth = self.control_depth;
+                self.function
+                    .instruction(&Instruction::Loop(BlockType::Empty));
+                self.control_depth += 1;
+                let continue_depth = self.control_depth;
+                self.loop_stack.push((break_depth, continue_depth));
+                self.function
+                    .instruction(&Instruction::LocalGet(index_local));
+                self.function
+                    .instruction(&Instruction::LocalGet(source_local));
+                self.function.instruction(&Instruction::Call(HOST_ITER_LEN));
+                self.function.instruction(&Instruction::I32GeU);
+                self.function.instruction(&Instruction::BrIf(1));
+                self.function
+                    .instruction(&Instruction::LocalGet(source_local));
+                self.function
+                    .instruction(&Instruction::LocalGet(index_local));
+                self.function.instruction(&Instruction::Call(HOST_ITER_GET));
+                self.function
+                    .instruction(&Instruction::LocalSet(self.locals[var]));
+                self.function
+                    .instruction(&Instruction::Block(BlockType::Empty));
+                self.control_depth += 1;
+                self.loop_stack.last_mut().expect("loop pushed").1 = self.control_depth;
+                self.emit_statements(body);
+                self.function.instruction(&Instruction::End);
+                self.control_depth -= 1;
+                self.function
+                    .instruction(&Instruction::LocalGet(index_local));
+                self.function.instruction(&Instruction::I32Const(1));
+                self.function.instruction(&Instruction::I32Add);
+                self.function
+                    .instruction(&Instruction::LocalSet(index_local));
+                self.function.instruction(&Instruction::Br(0));
+                self.function.instruction(&Instruction::End);
+                self.function.instruction(&Instruction::End);
+                self.loop_stack.pop();
+                self.control_depth -= 2;
+                self.for_depth -= 1;
+            }
+            Statement::Break => {
+                let (target, _) = self.loop_stack.last().expect("validated loop control");
+                self.function
+                    .instruction(&Instruction::Br(self.control_depth - target));
+            }
+            Statement::Continue => {
+                let (_, target) = self.loop_stack.last().expect("validated loop control");
+                self.function
+                    .instruction(&Instruction::Br(self.control_depth - target));
             }
             Statement::Match { target, arms } => {
                 self.emit_expr(target);
@@ -998,6 +1182,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         self.function.instruction(&Instruction::Call(HOST_MATCH));
         self.function
             .instruction(&Instruction::If(BlockType::Empty));
+        self.control_depth += 1;
         let mut bindings = Vec::new();
         collect_pattern_bindings(&arm.pattern, &mut bindings);
         bindings.sort();
@@ -1032,6 +1217,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         self.function.instruction(&Instruction::Else);
         self.emit_match_arms(arms, index + 1);
         self.function.instruction(&Instruction::End);
+        self.control_depth -= 1;
     }
 
     fn emit_bool(&mut self, expr: &Expr) {
@@ -1067,8 +1253,13 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             _ => {
                 self.function
                     .instruction(&Instruction::Call(HOST_FRAME_BEGIN));
+                let preserves_place = matches!(expr, Expr::Mutable(_) | Expr::Reference { .. });
                 for child in expr_children(expr) {
-                    self.emit_raw_if_place(child);
+                    if preserves_place {
+                        self.emit_raw_if_place(child);
+                    } else {
+                        self.emit_expr(child);
+                    }
                     self.function
                         .instruction(&Instruction::Call(HOST_FRAME_PUSH));
                 }
@@ -1126,6 +1317,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::Record(fields) => fields.values().collect(),
         Expr::Tuple(v) | Expr::Array(v) | Expr::Primitive { args: v, .. } => v.iter().collect(),
         Expr::Map(v) => v.iter().flat_map(|(k, v)| [k, v]).collect(),
+        Expr::Range { start, end, step } => vec![start, end, step],
         _ => vec![],
     }
 }
@@ -1148,6 +1340,10 @@ fn collect_locals(statements: &[Statement], names: &mut Vec<String>) {
                 collect_locals(else_body, names);
             }
             Statement::While { body, .. } => collect_locals(body, names),
+            Statement::For { var, body, .. } => {
+                names.push(var.clone());
+                collect_locals(body, names);
+            }
             _ => {}
         }
     }
@@ -1177,10 +1373,33 @@ fn count_pattern_bindings(statements: &[Statement]) -> usize {
                 count += count_pattern_bindings(else_body);
             }
             Statement::While { body, .. } => count += count_pattern_bindings(body),
+            Statement::For { body, .. } => count += count_pattern_bindings(body),
             _ => {}
         }
     }
     count
+}
+
+fn max_for_depth(statements: &[Statement]) -> usize {
+    statements
+        .iter()
+        .map(|statement| match statement {
+            Statement::For { body, .. } => 1 + max_for_depth(body),
+            Statement::While { body, .. } => max_for_depth(body),
+            Statement::If {
+                then_body,
+                else_body,
+                ..
+            } => max_for_depth(then_body).max(max_for_depth(else_body)),
+            Statement::Match { arms, .. } => arms
+                .iter()
+                .map(|arm| max_for_depth(&arm.body))
+                .max()
+                .unwrap_or(0),
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 fn collect_pattern_bindings(pattern: &Pattern, names: &mut Vec<String>) {

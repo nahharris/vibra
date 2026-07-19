@@ -136,6 +136,7 @@ enums are exhaustive when every tag is covered.
 | `lang-values.vibra` | literals, `$let` bindings, match-arm scope isolation |
 | `stdlib-test.vibra` | typed primitive equality assertions |
 | `lang-control-flow.vibra` | `$if` / `$while` |
+| `lang-iteration.vibra` | ranges, array/map/string traversal, nesting, `$break` / `$continue` |
 | `lang-functions.vibra` | zero/single/multi-arg user functions, nested calls |
 | `lang-generics.vibra` | generic functions with `=where` and explicit type args |
 | `lang-match.vibra` | literal / wildcard / bind patterns, nested matches |

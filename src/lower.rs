@@ -20,6 +20,20 @@ use std::rc::Rc;
 
 thread_local! {
     static TYPE_PARSE_MODULE: RefCell<String> = const { RefCell::new(String::new()) };
+    static LOOP_NESTING: RefCell<usize> = const { RefCell::new(0) };
+}
+
+struct LoopNestingGuard;
+impl LoopNestingGuard {
+    fn enter() -> Self {
+        LOOP_NESTING.with(|depth| *depth.borrow_mut() += 1);
+        Self
+    }
+}
+impl Drop for LoopNestingGuard {
+    fn drop(&mut self) {
+        LOOP_NESTING.with(|depth| *depth.borrow_mut() -= 1);
+    }
 }
 
 struct TypeParseModuleGuard(String);
@@ -62,6 +76,11 @@ pub enum RuntimeValue {
     Record(BTreeMap<String, RuntimeValue>),
     Tuple(Vec<RuntimeValue>),
     Map(Vec<(RuntimeValue, RuntimeValue)>),
+    Range {
+        start: i64,
+        end: i64,
+        step: i64,
+    },
     Typed {
         type_ref: TypeRef,
         value: Box<RuntimeValue>,
@@ -142,6 +161,11 @@ pub enum Expr {
     Tuple(Vec<Expr>),
     Array(Vec<Expr>),
     Map(Vec<(Expr, Expr)>),
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        step: Box<Expr>,
+    },
     If {
         cond: Box<Expr>,
         then_e: Box<Expr>,
@@ -212,6 +236,8 @@ pub enum TypeRef {
     Float32,
     Float64,
     Void,
+    /// Internal type of the canonical `$range` traversal source.
+    Range,
     Mutable(Box<TypeRef>),
     Reference {
         inner: Box<TypeRef>,
@@ -480,6 +506,13 @@ pub enum Statement {
         cond: Expr,
         body: Vec<Statement>,
     },
+    For {
+        var: String,
+        source: Expr,
+        body: Vec<Statement>,
+    },
+    Break,
+    Continue,
 }
 
 #[derive(Debug, Clone)]
@@ -3249,7 +3282,10 @@ fn user_body_terminates(stmts: &[Statement]) -> bool {
         | Statement::Call(_)
         | Statement::Let { .. }
         | Statement::Set { .. }
-        | Statement::While { .. } => false,
+        | Statement::While { .. }
+        | Statement::For { .. }
+        | Statement::Break
+        | Statement::Continue => false,
     }
 }
 
@@ -5147,6 +5183,20 @@ fn check_expr_call_bounds(
                 )?;
             }
         }
+        Expr::Range { start, end, step } => {
+            for part in [start.as_ref(), end.as_ref(), step.as_ref()] {
+                check_expr_call_bounds(
+                    part,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?;
+            }
+        }
         Expr::EnumConstructor { payload, .. } => {
             if let Some(payload) = payload {
                 check_expr_call_bounds(
@@ -5375,6 +5425,29 @@ fn check_statements_call_bounds(
                     context,
                 )?;
             }
+            Statement::For { source, body, .. } => {
+                check_expr_call_bounds(
+                    source,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?;
+                check_statements_call_bounds(
+                    body,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?;
+            }
+            Statement::Break | Statement::Continue => {}
         }
     }
     Ok(())
@@ -5655,6 +5728,7 @@ fn parse_while_statement(
     let baseline = locals.clone();
     let mut body_locals = baseline.clone();
     let mut body = Vec::with_capacity(steps.len());
+    let _guard = LoopNestingGuard::enter();
     for step in steps {
         body.push(lower_statement(
             step,
@@ -5670,6 +5744,77 @@ fn parse_while_statement(
     }
     *locals = baseline;
     Ok(Statement::While { cond, body })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_for_statement(
+    stmt: &serde_yaml::Mapping,
+    sigs: &HashMap<String, FunctionSig>,
+    constants: &HashMap<String, RuntimeValue>,
+    type_aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+    impls: &HashMap<ImplKey, ImplBody>,
+    locals: &mut HashMap<String, TypeRef>,
+    warnings: &mut Vec<String>,
+    fn_ctx: Option<&UserFnContext>,
+) -> Result<Statement> {
+    verify_stmt_keys(stmt, &["$for", "in", "do"])?;
+    let var = map_get_str(stmt, "$for")
+        .and_then(Value::as_str)
+        .context("`$for` must name one iteration binding")?
+        .to_string();
+    if var.starts_with('$') {
+        bail!("`$for` binding must not include `$`");
+    }
+    maybe_warn_kebab(&var, "iteration binding", warnings);
+    let source = parse_expr(
+        map_get_str(stmt, "in").context("`$for` missing `in`")?,
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        locals,
+        stmt_home_module(fn_ctx),
+        warnings,
+    )?;
+    let source_ty = infer_expr_type(&source, constants, locals, type_aliases, enums)
+        .context("could not infer `$for.in` source type")?;
+    let item_ty = match resolve_alias_type(&source_ty, type_aliases) {
+        TypeRef::Range => TypeRef::Int64,
+        TypeRef::Array(item) => item.as_ref().clone(),
+        TypeRef::Map { key, value } if key.as_ref() == &TypeRef::Str => {
+            TypeRef::Tuple(vec![TypeRef::Str, value.as_ref().clone()])
+        }
+        TypeRef::Str => TypeRef::Str,
+        other => {
+            bail!("`$for.in` must be a range, array, string-key map, or `$str`, got {other:?}")
+        }
+    };
+    let steps = map_get_str(stmt, "do")
+        .context("`$for` missing `do`")?
+        .as_sequence()
+        .context("`$for.do` must be a block sequence")?;
+    let baseline = locals.clone();
+    let mut body_locals = baseline.clone();
+    body_locals.insert(var.clone(), item_ty);
+    let _guard = LoopNestingGuard::enter();
+    let mut body = Vec::with_capacity(steps.len());
+    for step in steps {
+        body.push(lower_statement(
+            step,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            &mut body_locals,
+            warnings,
+            fn_ctx,
+        )?);
+    }
+    *locals = baseline;
+    Ok(Statement::For { var, source, body })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5867,6 +6012,34 @@ fn lower_statement(
             warnings,
             fn_ctx,
         )
+    } else if map_get_str(stmt, "$for").is_some() {
+        parse_for_statement(
+            stmt,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            warnings,
+            fn_ctx,
+        )
+    } else if map_get_str(stmt, "$break").is_some() {
+        if stmt.len() != 1 || !map_get_str(stmt, "$break").is_some_and(Value::is_null) {
+            bail!("`$break` must use canonical form `$break: null`");
+        }
+        if LOOP_NESTING.with(|depth| *depth.borrow() == 0) {
+            bail!("`$break` is only valid inside `$for` or `$while`");
+        }
+        Ok(Statement::Break)
+    } else if map_get_str(stmt, "$continue").is_some() {
+        if stmt.len() != 1 || !map_get_str(stmt, "$continue").is_some_and(Value::is_null) {
+            bail!("`$continue` must use canonical form `$continue: null`");
+        }
+        if LOOP_NESTING.with(|depth| *depth.borrow() == 0) {
+            bail!("`$continue` is only valid inside `$for` or `$while`");
+        }
+        Ok(Statement::Continue)
     } else {
         let call = parse_call(
             step,
@@ -7338,6 +7511,40 @@ fn parse_expr(
                     }
                     return Ok(Expr::Map(items));
                 }
+                if constructor == "$range" {
+                    let payload = payload_v
+                        .as_mapping()
+                        .context("`$range` must be a mapping with `start`, `end`, and `step`")?;
+                    verify_stmt_keys(payload, &["start", "end", "step"])?;
+                    let mut parse_part = |name: &str| -> Result<Expr> {
+                        let expr = parse_expr(
+                            map_get_str(payload, name)
+                                .with_context(|| format!("`$range` missing `{name}`"))?,
+                            sigs,
+                            constants,
+                            type_aliases,
+                            enums,
+                            impls,
+                            locals,
+                            home_module,
+                            warnings,
+                        )?;
+                        let ty = infer_expr_type(&expr, constants, locals, type_aliases, enums)
+                            .with_context(|| format!("could not infer `$range.{name}` type"))?;
+                        if ty != TypeRef::Int64 {
+                            bail!("`$range.{name}` must be `$int64`, got {ty:?}");
+                        }
+                        Ok(expr)
+                    };
+                    let start = parse_part("start")?;
+                    let end = parse_part("end")?;
+                    let step = parse_part("step")?;
+                    return Ok(Expr::Range {
+                        start: Box::new(start),
+                        end: Box::new(end),
+                        step: Box::new(step),
+                    });
+                }
                 if constructor == "$cast" {
                     bail!(
                         "E-CAST-002: `$cast` must use `$cast: <expr>` with sibling `into: <type>`"
@@ -7607,6 +7814,7 @@ fn infer_expr_type(
         Expr::Value(RuntimeValue::Map(items)) => {
             infer_map_type(items, constants, locals, aliases, enums)
         }
+        Expr::Value(RuntimeValue::Range { .. }) => Some(TypeRef::Range),
         Expr::Value(RuntimeValue::Typed { type_ref, .. }) => Some(type_ref.clone()),
         Expr::Value(RuntimeValue::Policy(value)) => Some(TypeRef::Policy(value.policy.clone())),
         Expr::Value(RuntimeValue::Capability(value)) => {
@@ -7664,6 +7872,7 @@ fn infer_expr_type(
             .map(TypeRef::Tuple),
         Expr::Array(items) => infer_expr_array_type(items, constants, locals, aliases, enums),
         Expr::Map(items) => infer_expr_map_type(items, constants, locals, aliases, enums),
+        Expr::Range { .. } => Some(TypeRef::Range),
         Expr::EnumConstructor {
             enum_key,
             tag,

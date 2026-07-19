@@ -1097,6 +1097,11 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
                 visit_expr(key, pending);
                 visit_expr(value, pending);
             }),
+            Expr::Range { start, end, step } => {
+                visit_expr(start, pending);
+                visit_expr(end, pending);
+                visit_expr(step, pending);
+            }
             Expr::If {
                 cond,
                 then_e,
@@ -1145,6 +1150,11 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
                     visit_expr(cond, pending);
                     visit_statements(body, pending);
                 }
+                Statement::For { source, body, .. } => {
+                    visit_expr(source, pending);
+                    visit_statements(body, pending);
+                }
+                Statement::Break | Statement::Continue => {}
             }
         }
     }
@@ -1202,6 +1212,15 @@ fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
                 })
                 .collect::<Result<Vec<_>>>()?,
         ),
+        RuntimeValue::Range { start, end, step } => {
+            let mut range = Mapping::new();
+            range.insert(Value::String("start".into()), Value::Number(start.into()));
+            range.insert(Value::String("end".into()), Value::Number(end.into()));
+            range.insert(Value::String("step".into()), Value::Number(step.into()));
+            let mut value = Mapping::new();
+            value.insert(Value::String("$range".into()), Value::Mapping(range));
+            Value::Mapping(value)
+        }
         RuntimeValue::Typed { type_ref, value } => {
             let mut map = Mapping::new();
             map.insert(
