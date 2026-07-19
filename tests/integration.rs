@@ -5627,7 +5627,7 @@ dependencies:
 
     let output = vibra_cmd()
         .current_dir(dir.path())
-        .args(["test", "app"])
+        .args(["test", "app", "--format", "human"])
         .output()
         .unwrap();
     assert!(
@@ -5678,7 +5678,7 @@ dependencies:
 
     let output = vibra_cmd()
         .current_dir(dir.path())
-        .args(["test", "app"])
+        .args(["test", "app", "--format", "human"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -5730,7 +5730,7 @@ dependencies:
 
     let output = vibra_cmd()
         .current_dir(dir.path())
-        .args(["test", "app"])
+        .args(["test", "app", "--format", "human"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -5783,7 +5783,7 @@ dependencies:
         .args([
             "test",
             "app",
-            "--report",
+            "--format",
             "yaml",
             "--report-file",
             &path_str(&report),
@@ -5899,6 +5899,21 @@ fn vibra_exec_rejects_non_string_raw_output() {
         "stderr: {}",
         String::from_utf8_lossy(&non_string.stderr)
     );
+}
+
+#[test]
+fn vibra_exec_json_output_is_explicit() {
+    let output = vibra_cmd()
+        .args(["exec", "42", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "exec failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value, 42);
 }
 
 #[test]
@@ -6360,7 +6375,7 @@ fn vibra_fmt_json_output_is_explicit() {
     .unwrap();
 
     let output = vibra_cmd()
-        .args(["fmt", &path_str(&source), "--output", "json"])
+        .args(["fmt", &path_str(&source), "--format", "json"])
         .output()
         .unwrap();
     assert!(
@@ -6829,7 +6844,7 @@ compile-error:
     .unwrap();
 
     let output = vibra_cmd()
-        .args(["test", &path_str(&compile_entry)])
+        .args(["test", &path_str(&compile_entry), "--format", "human"])
         .output()
         .unwrap();
     assert!(
@@ -6886,7 +6901,7 @@ fn vibra_test_matches_load_error_before_imports_are_recursively_loaded() {
     std::fs::write(&imported, "entry:\n  $import: load-error.vibra\n").unwrap();
 
     let output = vibra_cmd()
-        .args(["test", &path_str(&entry)])
+        .args(["test", &path_str(&entry), "--format", "human"])
         .output()
         .unwrap();
     assert!(
@@ -6913,7 +6928,7 @@ fn vibra_test_reports_expected_error_mismatches_from_the_parent() {
     .unwrap();
 
     let output = vibra_cmd()
-        .args(["test", &path_str(&entry)])
+        .args(["test", &path_str(&entry), "--format", "human"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -6954,7 +6969,7 @@ fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
         let entry = dir.path().join(name);
         std::fs::write(&entry, source).unwrap();
         let output = vibra_cmd()
-            .args(["test", &path_str(&entry)])
+            .args(["test", &path_str(&entry), "--format", "human"])
             .output()
             .unwrap();
         assert!(!output.status.success(), "{name} unexpectedly passed");
@@ -6979,7 +6994,7 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
             &path_str(&entry),
             "--tag",
             "language",
-            "--report",
+            "--format",
             "yaml",
             "--report-file",
             &path_str(&report),
@@ -7008,6 +7023,8 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
             "fs",
             "--tag",
             "filesystem",
+            "--format",
+            "human",
         ])
         .output()
         .unwrap();
@@ -7029,7 +7046,13 @@ fn vibra_test_deny_skips_fails_after_reporting_selected_skip() {
     )
     .unwrap();
     let output = vibra_cmd()
-        .args(["test", &path_str(&entry), "--deny-skips"])
+        .args([
+            "test",
+            &path_str(&entry),
+            "--deny-skips",
+            "--format",
+            "human",
+        ])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -7046,7 +7069,14 @@ fn vibra_test_caps_command_timeout_with_test_metadata() {
     )
     .unwrap();
     let output = vibra_cmd()
-        .args(["test", &path_str(&entry), "--timeout-ms", "1000"])
+        .args([
+            "test",
+            &path_str(&entry),
+            "--timeout-ms",
+            "1000",
+            "--format",
+            "human",
+        ])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -7065,7 +7095,7 @@ fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
     .unwrap();
 
     let skipped = vibra_cmd()
-        .args(["test", &path_str(&entry)])
+        .args(["test", &path_str(&entry), "--format", "human"])
         .output()
         .unwrap();
     assert!(
@@ -7085,6 +7115,8 @@ fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
             &path_str(&entry),
             "--allow-test-workspace",
             "read-write",
+            "--format",
+            "human",
         ])
         .output()
         .unwrap();
@@ -7132,7 +7164,7 @@ fn vibra_test_deny_warnings_fails_and_emits_warnings_in_yaml_report() {
             "test",
             &path_str(&entry),
             "--deny-warnings",
-            "--report",
+            "--format",
             "yaml",
             "--report-file",
             &path_str(&report),
@@ -7384,7 +7416,7 @@ fn vibra_test_drains_large_child_output_without_timing_out() {
             &path_str(&entry),
             "--timeout-ms",
             "1000",
-            "--report",
+            "--format",
             "yaml",
             "--report-file",
             &path_str(&report),

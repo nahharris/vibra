@@ -26,11 +26,17 @@ enum Command {
         /// Project template to scaffold.
         #[arg(long, value_enum, default_value_t = TemplateArg::Bin)]
         template: TemplateArg,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        format: StatusFormatArg,
     },
     /// Clone/fetch pinned git dependencies into dep/.
     Sync {
         /// Project directory or project.vibra path.
         path: Option<PathBuf>,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        format: StatusFormatArg,
     },
     /// Build a deterministic executable `.vapp` archive.
     Build {
@@ -42,6 +48,9 @@ enum Command {
         /// Output `.vapp` path.
         #[arg(short, long)]
         output: PathBuf,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        format: StatusFormatArg,
     },
     /// Inspect or verify a `.vapp` archive.
     Package {
@@ -52,6 +61,9 @@ enum Command {
     Check {
         /// Project directory or project.vibra path.
         path: Option<PathBuf>,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        format: StatusFormatArg,
     },
     /// Check or rewrite canonical Vibra/YAML formatting.
     Fmt {
@@ -61,8 +73,8 @@ enum Command {
         #[arg(long)]
         write: bool,
         /// Structured output format.
-        #[arg(long, value_enum, default_value_t = ToolOutputArg::Yaml)]
-        output: ToolOutputArg,
+        #[arg(long, visible_alias = "output", value_enum, default_value_t = ToolOutputArg::Yaml)]
+        format: ToolOutputArg,
     },
     /// Emit Vibra diagnostics for source files.
     Lint {
@@ -132,11 +144,17 @@ enum Command {
     Effects {
         /// Entry module path.
         path: PathBuf,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
+        format: StructuredFormatArg,
     },
     /// Expand compile-time macros and print canonical Vibra source.
     Expand {
         /// Entry module to expand.
         path: PathBuf,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
+        format: StructuredFormatArg,
     },
     /// Evaluate one inline Vibra expression for tooling workflows.
     Exec {
@@ -217,6 +235,9 @@ enum Command {
         /// Run the Vibra-language test suite against the staged workspace.
         #[arg(long)]
         test: bool,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
+        format: StructuredFormatArg,
     },
     /// Discover and run `$test` declarations.
     Test {
@@ -250,8 +271,8 @@ enum Command {
         #[arg(long = "fail-fast")]
         fail_fast: bool,
         /// Structured report format.
-        #[arg(long, value_enum, default_value_t = ReportArg::Human)]
-        report: ReportArg,
+        #[arg(long, visible_alias = "report", value_enum, default_value_t = ReportArg::Yaml)]
+        format: ReportArg,
         /// Write structured report to this path.
         #[arg(long = "report-file")]
         report_file: Option<PathBuf>,
@@ -339,9 +360,17 @@ enum Command {
 #[derive(Subcommand)]
 enum PackageCommand {
     /// Print canonical package metadata.
-    Inspect { path: PathBuf },
+    Inspect {
+        path: PathBuf,
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
+        format: StructuredFormatArg,
+    },
     /// Verify package structure and content hashes.
-    Verify { path: PathBuf },
+    Verify {
+        path: PathBuf,
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        format: StatusFormatArg,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -355,6 +384,20 @@ enum TemplateArg {
 enum ReportArg {
     Human,
     Yaml,
+    Json,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum StructuredFormatArg {
+    Yaml,
+    Json,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum StatusFormatArg {
+    Yaml,
+    Json,
+    Human,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -396,6 +439,7 @@ enum LintSeverityArg {
 enum ExecFormatArg {
     Raw,
     Yaml,
+    Json,
 }
 
 impl From<ReportArg> for test_runner::ReportFormat {
@@ -403,6 +447,7 @@ impl From<ReportArg> for test_runner::ReportFormat {
         match value {
             ReportArg::Human => test_runner::ReportFormat::Human,
             ReportArg::Yaml => test_runner::ReportFormat::Yaml,
+            ReportArg::Json => test_runner::ReportFormat::Json,
         }
     }
 }
@@ -470,41 +515,53 @@ impl From<LintSeverityArg> for tooling::Severity {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Init { name, template } => {
+        Command::Init {
+            name,
+            template,
+            format,
+        } => {
             project::init_project(&name, template.into())?;
-            println!("created {}", name.display());
+            print_status("created", &name, format)?;
         }
-        Command::Sync { path } => {
+        Command::Sync { path, format } => {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
             project::sync_project(&path)?;
-            println!("synced {}", path.display());
+            print_status("synced", &path, format)?;
         }
-        Command::Build { path, bin, output } => {
+        Command::Build {
+            path,
+            bin,
+            output,
+            format,
+        } => {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
             package::build(&path, bin.as_deref(), &output)?;
-            println!("built {}", output.display());
+            print_status("built", &output, format)?;
         }
         Command::Package { command } => match command {
-            PackageCommand::Inspect { path } => print!("{}", package::inspect(&path)?),
-            PackageCommand::Verify { path } => {
+            PackageCommand::Inspect { path, format } => {
+                let metadata: Value = serde_yaml::from_str(&package::inspect(&path)?)?;
+                print_structured(&metadata, format)?;
+            }
+            PackageCommand::Verify { path, format } => {
                 package::verify(&path)?;
-                println!("verified {}", path.display());
+                print_status("verified", &path, format)?;
             }
         },
-        Command::Check { path } => {
+        Command::Check { path, format } => {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
             project::check_project(&path)?;
-            println!("checked {}", path.display());
+            print_status("checked", &path, format)?;
         }
         Command::Fmt {
             path,
             write,
-            output,
+            format,
         } => {
             let ok = tooling::run_fmt(tooling::FmtOptions {
                 inputs: path,
                 write,
-                output: output.into(),
+                output: format.into(),
             })?;
             if !ok {
                 std::process::exit(1);
@@ -572,14 +629,14 @@ fn main() -> Result<()> {
                 execute::run_lowered(&lowered, &config)?;
             }
         }
-        Command::Effects { path } => print_effects(&path)?,
-        Command::Expand { path } => {
+        Command::Effects { path, format } => print_effects(&path, format)?,
+        Command::Expand { path, format } => {
             let loaded = load::load_program(&path)?;
             let expanded = loaded
                 .modules
                 .get(&loaded.entry)
                 .context("expanded entry module is missing")?;
-            print!("{}", serde_yaml::to_string(expanded)?);
+            print_structured(expanded, format)?;
         }
         Command::Exec {
             expr,
@@ -637,6 +694,7 @@ fn main() -> Result<()> {
             write,
             lint,
             test,
+            format,
         } => {
             let pipeline = code_pipeline_input(pipeline, file)?;
             let report = code::run_pipeline(code::CodeRunOptions {
@@ -646,7 +704,8 @@ fn main() -> Result<()> {
                 lint,
                 test,
             })?;
-            print!("{report}");
+            let report: Value = serde_yaml::from_str(&report)?;
+            print_structured(&report, format)?;
         }
         Command::Test {
             path,
@@ -659,7 +718,7 @@ fn main() -> Result<()> {
             jobs,
             timeout_ms,
             fail_fast,
-            report,
+            format,
             report_file,
             preopen,
             allow_read,
@@ -705,7 +764,7 @@ fn main() -> Result<()> {
                     .unwrap_or(1),
                 timeout: Duration::from_millis(timeout_ms),
                 fail_fast,
-                report: report.into(),
+                report: format.into(),
                 report_file,
                 run_config: config,
             })?;
@@ -871,6 +930,39 @@ fn print_exec_value(value: RuntimeValue, format: ExecFormatArg) -> Result<()> {
             let yaml = serde_yaml::to_string(&runtime_value_to_yaml(value)?)?;
             print!("{yaml}");
         }
+        ExecFormatArg::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&runtime_value_to_yaml(value)?)?
+            );
+        }
+    }
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct StatusReport<'a> {
+    status: &'a str,
+    path: String,
+}
+
+fn print_status(status: &str, path: &std::path::Path, format: StatusFormatArg) -> Result<()> {
+    let report = StatusReport {
+        status,
+        path: path.display().to_string(),
+    };
+    match format {
+        StatusFormatArg::Yaml => print!("{}", serde_yaml::to_string(&report)?),
+        StatusFormatArg::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        StatusFormatArg::Human => println!("{status} {}", path.display()),
+    }
+    Ok(())
+}
+
+fn print_structured<T: serde::Serialize>(value: &T, format: StructuredFormatArg) -> Result<()> {
+    match format {
+        StructuredFormatArg::Yaml => print!("{}", serde_yaml::to_string(value)?),
+        StructuredFormatArg::Json => println!("{}", serde_json::to_string_pretty(value)?),
     }
     Ok(())
 }
@@ -914,7 +1006,7 @@ struct EffectParam {
     domains: Vec<String>,
 }
 
-fn print_effects(path: &std::path::Path) -> Result<()> {
+fn print_effects(path: &std::path::Path, format: StructuredFormatArg) -> Result<()> {
     let loaded = load::load_program(path)?;
     let lowered = lower::lower_program(&loaded)?;
     let reachable = reachable_functions(&lowered);
@@ -971,14 +1063,13 @@ fn print_effects(path: &std::path::Path) -> Result<()> {
             _ => None,
         })
         .collect();
-    print!(
-        "{}",
-        serde_yaml::to_string(&EffectsReport {
+    print_structured(
+        &EffectsReport {
             effects,
-            root_policy
-        })?
-    );
-    Ok(())
+            root_policy,
+        },
+        format,
+    )
 }
 
 fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTreeSet<String> {

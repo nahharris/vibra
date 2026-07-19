@@ -158,7 +158,7 @@ vibra test --allow-test-workspace read-write # enable an isolated temp cwd and f
 vibra test --jobs 4                      # parallel workers
 vibra test --fail-fast                   # stop after first failure
 vibra test --timeout-ms 30000            # per-test timeout
-vibra test --report yaml --report-file report.yaml
+vibra test --format yaml --report-file report.yaml
 ```
 
 `workspace: temp` is test metadata, not a profile capability. It creates an

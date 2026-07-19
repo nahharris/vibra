@@ -22,6 +22,9 @@ fn project_init_bin_template_creates_valid_project() {
         "init failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let init_report: serde_yaml::Value = serde_yaml::from_slice(&output.stdout).unwrap();
+    assert_eq!(init_report["status"], "created");
+    assert_eq!(init_report["path"], "hello");
 
     let project = dir.path().join("hello");
     let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
@@ -149,7 +152,7 @@ fn project_builds_verifies_inspects_and_runs_deterministic_vapp() {
         String::from_utf8_lossy(&verify.stderr)
     );
     let inspect = vibra_cmd()
-        .args(["package", "inspect", &path_str(&first)])
+        .args(["package", "inspect", &path_str(&first), "--format", "json"])
         .output()
         .unwrap();
     assert!(
@@ -157,10 +160,13 @@ fn project_builds_verifies_inspects_and_runs_deterministic_vapp() {
         "inspect failed: {}",
         String::from_utf8_lossy(&inspect.stderr)
     );
-    let metadata = String::from_utf8(inspect.stdout).unwrap();
-    assert!(metadata.contains("format-version: 1"));
-    assert!(metadata.contains("runtime-abi: vibra-v1"));
-    assert!(metadata.contains("stdlib-rev: edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31"));
+    let metadata: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
+    assert_eq!(metadata["format-version"], 1);
+    assert_eq!(metadata["runtime-abi"], "vibra-v1");
+    assert_eq!(
+        metadata["stdlib-rev"],
+        "edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31"
+    );
 
     let run = vibra_cmd()
         .args(["run", &path_str(&first)])

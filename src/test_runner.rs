@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 pub enum ReportFormat {
     Human,
     Yaml,
+    Json,
 }
 
 #[derive(Debug, Clone)]
@@ -195,12 +196,15 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
     if options.report == ReportFormat::Human {
         print_human_report(&report);
     }
-    if options.report == ReportFormat::Yaml || options.report_file.is_some() {
-        let yaml = serde_yaml::to_string(&report)?;
+    if options.report != ReportFormat::Human || options.report_file.is_some() {
+        let rendered = match options.report {
+            ReportFormat::Human | ReportFormat::Yaml => serde_yaml::to_string(&report)?,
+            ReportFormat::Json => serde_json::to_string_pretty(&report)? + "\n",
+        };
         if let Some(path) = &options.report_file {
-            fs::write(path, &yaml).with_context(|| format!("write {}", path.display()))?;
+            fs::write(path, &rendered).with_context(|| format!("write {}", path.display()))?;
         } else {
-            println!("{yaml}");
+            print!("{rendered}");
         }
     }
     Ok(report.failed == 0 && report.timed_out == 0 && (!options.deny_skips || report.skipped == 0))
