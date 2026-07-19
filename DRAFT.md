@@ -213,8 +213,37 @@ Maps preserve first-insertion order deterministically. Inserting an existing
 key replaces its value at the same position; the same last-value-wins rule
 canonicalizes duplicate keys in a literal. Missing lookup returns `none`, and
 removing a missing key returns `none` (the caller already retains the original
-value), while a successful removal returns `some<map>`. Iteration will
-expose this order when the v1 iteration protocol is added.
+value), while a successful removal returns `some<map>`. `$for` exposes this order.
+
+### Canonical traversal and ranges
+
+Traversal has one statement form: `$for: <binding>` with required sibling
+`in:` and `do:` keys. The source expression is evaluated once and copied before
+the first iteration, so body mutation cannot change the traversal in progress.
+
+```yaml
+- $for: number
+  in:
+    $range: {start: 0, end: 10, step: 1}
+  do:
+  - $if: {$equal: [$number, 5]}
+    then:
+    - $break: null
+    else: []
+```
+
+`$range` is half-open and contains exactly `start`, `end`, and `step`, all
+`$int64`. Positive steps advance below `end`; negative steps advance above it.
+Direction mismatches produce an empty traversal, zero step is `E-ITER-002`,
+checked addition prevents overflow, and traversal length is bounded by the
+runtime `max-alloc-len` limit.
+
+Arrays yield copied elements. `$str` yields one Unicode scalar represented as a
+`$str`, deliberately neither byte nor grapheme-cluster iteration. String-key
+maps yield `$tuple: [key, value]` entries in first-insertion order. `$break:
+null` and `$continue: null` are valid only within `$for` or `$while`, target the
+nearest loop, and are the sole early-loop-control forms. Iteration bindings and
+body-local bindings do not escape the loop.
 
 ### `$match`
 

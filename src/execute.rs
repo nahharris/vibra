@@ -25,7 +25,10 @@ pub(crate) fn run_lowered_interpreted(program: &LoweredProgram, config: &RunConf
     seed_main_args(program, config, &mut env)?;
     let mut files = FileTable::new(config.max_open_files);
     for stmt in &program.statements {
-        if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
+        if !matches!(
+            exec_statement(stmt, program, &mut env, &mut files, config)?,
+            ExecFlow::Next
+        ) {
             bail!("unexpected `$return` at top level");
         }
     }
@@ -60,7 +63,10 @@ pub(crate) fn run_lowered_interpreted_with_io(
     files.stdout_sink = Some(stdout);
     files.stderr_sink = Some(stderr);
     for stmt in &program.statements {
-        if exec_statement(stmt, program, &mut env, &mut files, config)?.is_some() {
+        if !matches!(
+            exec_statement(stmt, program, &mut env, &mut files, config)?,
+            ExecFlow::Next
+        ) {
             bail!("unexpected `$return` at top level");
         }
     }
@@ -652,6 +658,15 @@ fn eval_expr(
             }
             Ok(RuntimeValue::Map(values))
         }
+        Expr::Range { start, end, step } => {
+            let start = value_i64(&eval_expr(start, env, program, files, config)?)?;
+            let end = value_i64(&eval_expr(end, env, program, files, config)?)?;
+            let step = value_i64(&eval_expr(step, env, program, files, config)?)?;
+            if step == 0 {
+                bail!("E-ITER-002: `$range.step` must not be zero");
+            }
+            Ok(RuntimeValue::Range { start, end, step })
+        }
         Expr::If {
             cond,
             then_e,
@@ -894,19 +909,28 @@ pub(crate) fn eval_primitive(
     checked_integer_result(operand_type, result)
 }
 
-/// Runs one statement; `Some` means a `$return` was executed.
+#[derive(Debug)]
+enum ExecFlow {
+    Next,
+    Return(RuntimeValue),
+    Break,
+    Continue,
+}
+
 fn exec_statement(
     stmt: &Statement,
     program: &LoweredProgram,
     env: &mut HashMap<String, RuntimeValue>,
     files: &mut FileTable,
     config: &RunConfig,
-) -> Result<Option<RuntimeValue>> {
+) -> Result<ExecFlow> {
     match stmt {
-        Statement::Return(expr) => Ok(Some(eval_expr(expr, env, program, files, config)?)),
+        Statement::Return(expr) => Ok(ExecFlow::Return(eval_expr(
+            expr, env, program, files, config,
+        )?)),
         Statement::Call(call) => {
             let _ = exec_call(call, program, env, files, config)?;
-            Ok(None)
+            Ok(ExecFlow::Next)
         }
         Statement::Let {
             var,
@@ -917,7 +941,7 @@ fn exec_statement(
                 LetValue::Expr(e) => eval_expr(e, env, program, files, config)?,
             };
             env.insert(var.clone(), value);
-            Ok(None)
+            Ok(ExecFlow::Next)
         }
         Statement::Set { var, value } => {
             let next = eval_expr(value, env, program, files, config)?;
@@ -931,7 +955,7 @@ fn exec_statement(
                     mutable: true,
                 } => {
                     *cell.borrow_mut() = next;
-                    Ok(None)
+                    Ok(ExecFlow::Next)
                 }
                 _ => bail!("E-SET-002: symbol `{var}` is not writable"),
             }
@@ -941,17 +965,14 @@ fn exec_statement(
             for arm in arms {
                 let mut scoped = env.clone();
                 if pattern_matches(&arm.pattern, &value, program, &mut scoped)? {
-                    if let Some(v) = run_block(&arm.body, program, &mut scoped, files, config)? {
-                        return Ok(Some(v));
-                    }
-                    return Ok(None);
+                    return run_block(&arm.body, program, &mut scoped, files, config);
                 }
             }
             bail!("non-exhaustive $match reached runtime with value `{value:?}`")
         }
         Statement::Eval(expr) => {
             eval_expr(expr, env, program, files, config)?;
-            Ok(None)
+            Ok(ExecFlow::Next)
         }
         Statement::If {
             cond,
@@ -964,16 +985,68 @@ fn exec_statement(
         },
         Statement::While { cond, body } => loop {
             match eval_expr(cond, env, program, files, config)? {
-                RuntimeValue::Bool(true) => {
-                    if let Some(v) = run_block(body, program, env, files, config)? {
-                        return Ok(Some(v));
-                    }
-                }
-                RuntimeValue::Bool(false) => return Ok(None),
+                RuntimeValue::Bool(true) => match run_block(body, program, env, files, config)? {
+                    ExecFlow::Next | ExecFlow::Continue => {}
+                    ExecFlow::Break => return Ok(ExecFlow::Next),
+                    flow @ ExecFlow::Return(_) => return Ok(flow),
+                },
+                RuntimeValue::Bool(false) => return Ok(ExecFlow::Next),
                 other => bail!("`$while` condition must be `$bool`, got {other:?}"),
             }
         },
+        Statement::For { var, source, body } => {
+            let source = eval_expr(source, env, program, files, config)?;
+            let items = iteration_items(source, config.max_alloc_len)?;
+            for item in items {
+                let mut scoped = env.clone();
+                scoped.insert(var.clone(), item);
+                match run_block(body, program, &mut scoped, files, config)? {
+                    ExecFlow::Next | ExecFlow::Continue => {}
+                    ExecFlow::Break => return Ok(ExecFlow::Next),
+                    flow @ ExecFlow::Return(_) => return Ok(flow),
+                }
+            }
+            Ok(ExecFlow::Next)
+        }
+        Statement::Break => Ok(ExecFlow::Break),
+        Statement::Continue => Ok(ExecFlow::Continue),
     }
+}
+
+pub(crate) fn iteration_items(value: RuntimeValue, limit: usize) -> Result<Vec<RuntimeValue>> {
+    let mut items = match value {
+        RuntimeValue::Array(items) => items,
+        RuntimeValue::Map(items) => items
+            .into_iter()
+            .map(|(key, value)| RuntimeValue::Tuple(vec![key, value]))
+            .collect(),
+        RuntimeValue::Str(text) => text
+            .chars()
+            .map(|scalar| RuntimeValue::Str(scalar.to_string()))
+            .collect(),
+        RuntimeValue::Range { start, end, step } => {
+            if step == 0 {
+                bail!("E-ITER-002: `$range.step` must not be zero");
+            }
+            let mut out = Vec::new();
+            let mut current = start;
+            while (step > 0 && current < end) || (step < 0 && current > end) {
+                if out.len() >= limit {
+                    bail!("E-ITER-003: traversal exceeds configured limit `{limit}`");
+                }
+                out.push(RuntimeValue::Int(current));
+                current = current
+                    .checked_add(step)
+                    .context("E-ITER-004: integer range overflow")?;
+            }
+            out
+        }
+        other => bail!("E-ITER-001: value is not traversable: {other:?}"),
+    };
+    if items.len() > limit {
+        bail!("E-ITER-003: traversal exceeds configured limit `{limit}`");
+    }
+    Ok(std::mem::take(&mut items))
 }
 
 fn read_place_value(value: &RuntimeValue) -> RuntimeValue {
@@ -1167,13 +1240,14 @@ fn run_block(
     env: &mut HashMap<String, RuntimeValue>,
     files: &mut FileTable,
     config: &RunConfig,
-) -> Result<Option<RuntimeValue>> {
+) -> Result<ExecFlow> {
     for stmt in stmts {
-        if let Some(v) = exec_statement(stmt, program, env, files, config)? {
-            return Ok(Some(v));
+        let flow = exec_statement(stmt, program, env, files, config)?;
+        if !matches!(flow, ExecFlow::Next) {
+            return Ok(flow);
         }
     }
-    Ok(None)
+    Ok(ExecFlow::Next)
 }
 
 /// Unwrap a runtime value to an `i64`, looking through newtype wrappers.
@@ -1182,6 +1256,77 @@ fn value_i64(value: &RuntimeValue) -> Result<i64> {
         RuntimeValue::Int(i) => Ok(*i),
         RuntimeValue::Float(_) => bail!("expected integer, got float"),
         other => bail!("expected integer, got {other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod iteration_tests {
+    use super::*;
+
+    fn lower(source: &str) -> (tempfile::TempDir, LoweredProgram) {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(&entry, source).unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        let lowered = crate::lower::lower_program(&loaded).unwrap();
+        (dir, lowered)
+    }
+
+    #[test]
+    fn canonical_iteration_runs_in_interpreter_and_wasm() {
+        let (_dir, program) = lower(
+            r#"main:
+  $function: $void
+  return: $void
+  do:
+  - $let:
+      sum:
+        $mut: 0
+  - $for: value
+    in:
+      $range:
+        start: 0
+        end: 4
+        step: 1
+    do:
+    - $if:
+        $equal: [$value, 1]
+      then:
+      - $continue: null
+      else: []
+    - $set:
+        sum:
+          $add: [$sum, $value]
+  - $for: scalar
+    in: "é🙂"
+    do:
+    - $break: null
+"#,
+        );
+        run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        run_lowered(&program, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn zero_step_fails_consistently_in_both_runtimes() {
+        let (_dir, program) = lower(
+            r#"main:
+  $function: $void
+  return: $void
+  do:
+  - $for: value
+    in:
+      $range:
+        start: 0
+        end: 2
+        step: 0
+    do: []
+"#,
+        );
+        let interpreted = run_lowered_interpreted(&program, &RunConfig::default()).unwrap_err();
+        let wasm = run_lowered(&program, &RunConfig::default()).unwrap_err();
+        assert!(format!("{interpreted:#}").contains("E-ITER-002"));
+        assert!(format!("{wasm:#}").contains("E-ITER-002"));
     }
 }
 
@@ -1935,8 +2080,10 @@ pub(crate) fn exec_call(
                 let val = eval_expr(&call.args[idx], env, program, files, config)?;
                 fn_env.insert(format!("args.{name}"), val);
             }
-            if let Some(v) = run_block(statements, program, &mut fn_env, files, config)? {
-                return Ok(v);
+            match run_block(statements, program, &mut fn_env, files, config)? {
+                ExecFlow::Return(value) => return Ok(value),
+                ExecFlow::Next => {}
+                ExecFlow::Break | ExecFlow::Continue => bail!("loop control escaped its loop"),
             }
             if sig.return_type != TypeRef::Void {
                 bail!(
