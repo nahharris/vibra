@@ -1259,6 +1259,14 @@ fn value_i64(value: &RuntimeValue) -> Result<i64> {
     }
 }
 
+/// Unwrap a runtime value to an `f64`, looking through newtype wrappers.
+fn value_f64(value: &RuntimeValue) -> Result<f64> {
+    match untyped(value) {
+        RuntimeValue::Float(value) => Ok(*value),
+        other => bail!("expected float, got {other:?}"),
+    }
+}
+
 #[cfg(test)]
 mod iteration_tests {
     use super::*;
@@ -2514,6 +2522,165 @@ fn exec_vibra_v1(
                 .map(|e| e.to_string_lossy().to_string());
             Ok(option_value(sig, extension.map(RuntimeValue::Str)))
         }
+        "str_scalar_len" => Ok(RuntimeValue::Int(
+            i64::try_from(value_string(&args[0])?.chars().count()).unwrap_or(i64::MAX),
+        )),
+        "str_byte_len" => Ok(RuntimeValue::Int(
+            i64::try_from(value_string(&args[0])?.len()).unwrap_or(i64::MAX),
+        )),
+        "str_is_empty" => Ok(RuntimeValue::Bool(value_string(&args[0])?.is_empty())),
+        "str_contains" => Ok(RuntimeValue::Bool(
+            value_string(&args[0])?.contains(&value_string(&args[1])?),
+        )),
+        "str_starts_with" => Ok(RuntimeValue::Bool(
+            value_string(&args[0])?.starts_with(&value_string(&args[1])?),
+        )),
+        "str_ends_with" => Ok(RuntimeValue::Bool(
+            value_string(&args[0])?.ends_with(&value_string(&args[1])?),
+        )),
+        "str_find" => {
+            let text = value_string(&args[0])?;
+            let needle = value_string(&args[1])?;
+            let found = text.find(&needle).map(|byte| {
+                RuntimeValue::Int(text[..byte].chars().count().try_into().unwrap_or(i64::MAX))
+            });
+            Ok(option_value(sig, found))
+        }
+        "str_scalar_at" => {
+            let index = usize::try_from(value_i64(&args[1])?).context("scalar index too large")?;
+            Ok(option_value(
+                sig,
+                value_string(&args[0])?
+                    .chars()
+                    .nth(index)
+                    .map(|value| RuntimeValue::Str(value.to_string())),
+            ))
+        }
+        "str_split" => {
+            let text = value_string(&args[0])?;
+            let separator = value_string(&args[1])?;
+            let values: Vec<_> = text.split(&separator).collect();
+            let bytes = values.iter().map(|value| value.len()).sum::<usize>();
+            if values.len() > config.max_alloc_len || bytes > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            Ok(result_ok(
+                sig,
+                RuntimeValue::Array(
+                    values
+                        .into_iter()
+                        .map(|value| RuntimeValue::Str(value.to_string()))
+                        .collect(),
+                ),
+            ))
+        }
+        "str_trim" => {
+            let value = value_string(&args[0])?.trim().to_string();
+            if value.len() > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            Ok(result_ok(sig, RuntimeValue::Str(value)))
+        }
+        "str_replace" => {
+            let text = value_string(&args[0])?;
+            let from = value_string(&args[1])?;
+            let to = value_string(&args[2])?;
+            if from.is_empty() {
+                return Ok(result_err(sig, "empty-pattern", None));
+            }
+            let value = text.replace(&from, &to);
+            if value.len() > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            Ok(result_ok(sig, RuntimeValue::Str(value)))
+        }
+        "str_join" => {
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("str_join expects an array")
+            };
+            let separator = value_string(&args[1])?;
+            let strings = values
+                .iter()
+                .map(value_string)
+                .collect::<Result<Vec<_>>>()?;
+            let value = strings.join(&separator);
+            if value.len() > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            Ok(result_ok(sig, RuntimeValue::Str(value)))
+        }
+        "str_lowercase" | "str_uppercase" => {
+            let text = value_string(&args[0])?;
+            let value = if name == "str_lowercase" {
+                text.to_lowercase()
+            } else {
+                text.to_uppercase()
+            };
+            if value.len() > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            Ok(result_ok(sig, RuntimeValue::Str(value)))
+        }
+        "parse_int64" => match value_string(&args[0])?.parse::<i64>() {
+            Ok(value) => Ok(result_ok(sig, RuntimeValue::Int(value))),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow
+                ) =>
+            {
+                Ok(result_err(sig, "overflow", None))
+            }
+            Err(_) => Ok(result_err(sig, "invalid", None)),
+        },
+        "parse_uint64" => match value_string(&args[0])?.parse::<u64>() {
+            Ok(value) if value <= i64::MAX as u64 => {
+                Ok(result_ok(sig, RuntimeValue::Int(value as i64)))
+            }
+            Ok(_) => Ok(result_err(sig, "overflow", None)),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow
+                ) =>
+            {
+                Ok(result_err(sig, "overflow", None))
+            }
+            Err(_) => Ok(result_err(sig, "invalid", None)),
+        },
+        "parse_float64" => {
+            let text = value_string(&args[0])?;
+            let parsed = match text.as_str() {
+                "nan" => Some(f64::NAN),
+                "inf" => Some(f64::INFINITY),
+                "-inf" => Some(f64::NEG_INFINITY),
+                _ if text.trim() != text || text.is_empty() => None,
+                _ => text.parse::<f64>().ok(),
+            };
+            Ok(match parsed {
+                Some(value) => result_ok(sig, RuntimeValue::Float(value)),
+                None => result_err(sig, "invalid", None),
+            })
+        }
+        "parse_bool" => Ok(match value_string(&args[0])?.as_str() {
+            "true" => result_ok(sig, RuntimeValue::Bool(true)),
+            "false" => result_ok(sig, RuntimeValue::Bool(false)),
+            _ => result_err(sig, "invalid", None),
+        }),
+        "format_int64" | "format_uint64" => Ok(RuntimeValue::Str(value_i64(&args[0])?.to_string())),
+        "format_float64" => {
+            let value = value_f64(&args[0])?;
+            Ok(RuntimeValue::Str(if value.is_nan() {
+                "nan".to_string()
+            } else if value == f64::INFINITY {
+                "inf".to_string()
+            } else if value == f64::NEG_INFINITY {
+                "-inf".to_string()
+            } else {
+                value.to_string()
+            }))
+        }
+        "format_bool" => Ok(RuntimeValue::Str(value_bool(&args[0])?.to_string())),
         "bytes_len" => Ok(RuntimeValue::Int(
             i64::try_from(value_bytes(&args[0])?.len()).unwrap_or(i64::MAX),
         )),
@@ -2527,9 +2694,63 @@ fn exec_vibra_v1(
             Ok(runtime_bytes(slice.to_vec()))
         }
         "bytes_from_str" => Ok(runtime_bytes(value_string(&args[0])?.into_bytes())),
-        "bytes_to_str" => Ok(RuntimeValue::Str(
-            String::from_utf8(value_bytes(&args[0])?).context("bytes are not valid UTF-8")?,
-        )),
+        "bytes_get" => {
+            let index = usize::try_from(value_i64(&args[1])?).context("byte index too large")?;
+            Ok(option_value(
+                sig,
+                value_bytes(&args[0])?
+                    .get(index)
+                    .map(|value| RuntimeValue::Int(i64::from(*value))),
+            ))
+        }
+        "bytes_concat" => {
+            let mut left = value_bytes(&args[0])?;
+            let right = value_bytes(&args[1])?;
+            let Some(len) = left.len().checked_add(right.len()) else {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            };
+            if len > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            left.extend_from_slice(&right);
+            Ok(result_ok(sig, runtime_bytes(left)))
+        }
+        "bytes_find" => {
+            let haystack = value_bytes(&args[0])?;
+            let needle = value_bytes(&args[1])?;
+            let found = if needle.is_empty() {
+                Some(0)
+            } else {
+                haystack
+                    .windows(needle.len())
+                    .position(|window| window == needle)
+            };
+            Ok(option_value(
+                sig,
+                found.map(|value| RuntimeValue::Int(value.try_into().unwrap_or(i64::MAX))),
+            ))
+        }
+        "bytes_from_array" => {
+            let RuntimeValue::Array(values) = untyped(&args[0]) else {
+                bail!("bytes_from_array expects an array")
+            };
+            if values.len() > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            let mut bytes = Vec::with_capacity(values.len());
+            for value in values {
+                let value = value_i64(value)?;
+                let Ok(value) = u8::try_from(value) else {
+                    return Ok(result_err(sig, "invalid-byte", None));
+                };
+                bytes.push(value);
+            }
+            Ok(result_ok(sig, runtime_bytes(bytes)))
+        }
+        "bytes_decode_utf8" => Ok(match String::from_utf8(value_bytes(&args[0])?) {
+            Ok(value) => result_ok(sig, RuntimeValue::Str(value)),
+            Err(_) => result_err(sig, "invalid-utf8", None),
+        }),
         "fs_open_read" | "fs_open_write" | "fs_open_append" | "fs_open_read_write" => {
             let path = value_string(&args[0])?;
             let mut resolved: Option<PathBuf> = None;
@@ -3226,6 +3447,95 @@ main:
         let loaded = crate::load::load_program(&entry).unwrap();
         let lowered = crate::lower::lower_program(&loaded).unwrap();
         run_lowered_interpreted(&lowered, &RunConfig::default()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod text_conversion_tests {
+    use super::*;
+
+    fn lower(body: &str) -> LoweredProgram {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let import = |name: &str| {
+            root.join(format!("stdlib/src/{name}.vibra"))
+                .display()
+                .to_string()
+                .replace('\\', "/")
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(
+            &entry,
+            format!(
+                "text:\n  $import: \"{}\"\nconvert:\n  $import: \"{}\"\nbytes:\n  $import: \"{}\"\noption:\n  $import: \"{}\"\nresult:\n  $import: \"{}\"\ntest:\n  $import: \"{}\"\nmain:\n  $function: $void\n  return: $void\n  do:\n{}",
+                import("text"),
+                import("convert"),
+                import("bytes"),
+                import("option"),
+                import("result"),
+                import("test"),
+                body
+            ),
+        )
+        .unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        crate::lower::lower_program(&loaded).unwrap()
+    }
+
+    #[test]
+    fn unicode_parse_and_invalid_utf8_match_in_interpreter_and_wasm() {
+        let program = lower(
+            r#"  - $test.assert-eq-int:
+      actual: {$text.scalar-len: aé🙂}
+      expected: 3
+  - $let:
+      parsed: {$convert.parse-int64: '-42'}
+  - $match: $parsed
+    when:
+    - case: {$result.result.ok: -42}
+      do: [{$test.assert: true}]
+    - case: {$wildcard: null}
+      do: [{$test.fail: parse-failed}]
+  - $let:
+      raw:
+        $cast: {$array: [255]}
+        into: $bytes.bytes
+  - $let:
+      decoded: {$bytes.bytes.decode-utf8: $raw}
+  - $match: $decoded
+    when:
+    - case: {$result.result.err: {$bytes.bytes-error.invalid-utf8: null}}
+      do: [{$test.assert: true}]
+    - case: {$wildcard: null}
+      do: [{$test.fail: invalid-utf8-was-accepted}]
+"#,
+        );
+        run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        run_lowered(&program, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn text_growth_limit_is_a_typed_result_in_both_backends() {
+        let program = lower(
+            r#"  - $let:
+      replaced:
+        $text.replace: aa
+        from: a
+        to: xx
+  - $match: $replaced
+    when:
+    - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
+      do: [{$test.assert: true}]
+    - case: {$wildcard: null}
+      do: [{$test.fail: allocation-limit-was-not-enforced}]
+"#,
+        );
+        let config = RunConfig {
+            max_alloc_len: 3,
+            ..RunConfig::default()
+        };
+        run_lowered_interpreted(&program, &config).unwrap();
+        run_lowered(&program, &config).unwrap();
     }
 }
 

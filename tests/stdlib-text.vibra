@@ -1,0 +1,159 @@
+=comment: UTF-8 text operations use Unicode scalar offsets; byte length is explicit.
+test:
+  $import: ../stdlib/src/test.vibra
+text:
+  $import: ../stdlib/src/text.vibra
+option:
+  $import: ../stdlib/src/option.vibra
+result:
+  $import: ../stdlib/src/result.vibra
+unicode-units-and-search:
+  $test: core
+  do:
+  - $test.assert-eq-int:
+      actual:
+        $text.scalar-len: aé🙂
+      expected: 3
+  - $test.assert-eq-int:
+      actual:
+        $text.byte-len: aé🙂
+      expected: 7
+  - $let:
+      found:
+        $text.find: aé🙂
+        needle: 🙂
+  - $match: $found
+    when:
+    - case:
+        $option.option.some: 2
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: find did not return a scalar offset
+queries-and-empty-input:
+  $test: core
+  do:
+  - $test.assert:
+      $text.is-empty: ''
+  - $test.assert:
+      $text.contains: alphabet
+      needle: pha
+  - $test.assert:
+      $text.starts-with: alphabet
+      prefix: alpha
+  - $test.assert:
+      $text.ends-with: alphabet
+      suffix: bet
+  - $let:
+      missing:
+        $text.scalar-at: aé
+        index: 2
+  - $match: $missing
+    when:
+    - case:
+        $option.option.none: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: scalar-at must be bounds safe
+split-trim-replace-join-and-case:
+  $test: core
+  do:
+  - $let:
+      split:
+        $text.split: a,,b,
+        separator: ','
+  - $match: $split
+    when:
+    - case:
+        $result.result.ok:
+          $array:
+          - a
+          - ''
+          - b
+          - ''
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: split did not preserve empty fields
+  - $let:
+      joined:
+        $text.join:
+          $array:
+          - a
+          - b
+          - c
+        separator: '-'
+  - $match: $joined
+    when:
+    - case:
+        $result.result.ok: a-b-c
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: join failed
+  - $let:
+      replaced:
+        $text.replace: aéa
+        from: a
+        to: zz
+  - $match: $replaced
+    when:
+    - case:
+        $result.result.ok: zzézz
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: replace failed
+  - $let:
+      invalid:
+        $text.replace: abc
+        from: ''
+        to: x
+  - $match: $invalid
+    when:
+    - case:
+        $result.result.err:
+          $text.text-error.empty-pattern: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: empty replacement pattern was not typed
+  - $let:
+      trimmed:
+        $text.trim: '  hé  '
+  - $match: $trimmed
+    when:
+    - case:
+        $result.result.ok: hé
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: trim failed
+  - $let:
+      upper:
+        $text.uppercase: Straße
+  - $match: $upper
+    when:
+    - case:
+        $result.result.ok: STRASSE
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: Unicode uppercase failed

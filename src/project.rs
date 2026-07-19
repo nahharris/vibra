@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 pub const MANIFEST_FILE: &str = "project.vibra";
 pub const LOCK_FILE: &str = "project.lock.vibra";
 pub const STDLIB_GIT: &str = "https://github.com/nahharris/vibra-stdlib.git";
-pub const STDLIB_REV: &str = "edc46c6eefb1c0df62b0b5fe4bace2e2f06fec31";
+pub const STDLIB_REV: &str = "42d4d875a8b4398305849c6d668c64a0559122e2";
 
 #[derive(Debug, Clone, Copy)]
 pub enum InitTemplate {

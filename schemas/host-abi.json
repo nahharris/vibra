@@ -235,11 +235,371 @@
     },
     {
       "module": "vibra_v1",
-      "name": "bytes_to_str",
+      "name": "bytes_get",
       "params": [
         {
           "kind": "value",
           "type": "bytes"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "option-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "bytes_concat",
+      "params": [
+        {
+          "kind": "value",
+          "type": "bytes"
+        },
+        {
+          "kind": "value",
+          "type": "bytes"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "bytes_find",
+      "params": [
+        {
+          "kind": "value",
+          "type": "bytes"
+        },
+        {
+          "kind": "value",
+          "type": "bytes"
+        }
+      ],
+      "required-domains": [],
+      "return": "option-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "bytes_from_array",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "bytes_decode_utf8",
+      "params": [
+        {
+          "kind": "value",
+          "type": "bytes"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_scalar_len",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "uint64"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_byte_len",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "uint64"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_is_empty",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "bool"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_contains",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "bool"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_starts_with",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "bool"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_ends_with",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "bool"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_find",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "option-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_scalar_at",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "option-str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_split",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_trim",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_replace",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_join",
+      "params": [
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_lowercase",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "str_uppercase",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "parse_int64",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "parse_uint64",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "parse_float64",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "parse_bool",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "format_int64",
+      "params": [
+        {
+          "kind": "value",
+          "type": "int64"
+        }
+      ],
+      "required-domains": [],
+      "return": "str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "format_uint64",
+      "params": [
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "format_float64",
+      "params": [
+        {
+          "kind": "value",
+          "type": "float64"
+        }
+      ],
+      "required-domains": [],
+      "return": "str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "format_bool",
+      "params": [
+        {
+          "kind": "value",
+          "type": "bool"
         }
       ],
       "required-domains": [],

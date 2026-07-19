@@ -245,6 +245,13 @@ null` and `$continue: null` are valid only within `$for` or `$while`, target the
 nearest loop, and are the sole early-loop-control forms. Iteration bindings and
 body-local bindings do not escape the loop.
 
+`$str` values are always valid UTF-8. `text.scalar-len`, `text.scalar-at`, and
+`text.find` use Unicode-scalar units, matching `$for`; `text.byte-len` is the
+explicit UTF-8 byte measurement. No API exposes an ambiguously named string
+index. Grapheme clusters and locale-sensitive collation/casing are not v1
+units. `bytes.decode-utf8` returns a typed `invalid-utf8` error and there is no
+lossy decoding operation.
+
 ### `$match`
 
 `$match` uses one canonical ordered arm sequence: the target expression is the `$match` value, and sibling `when:` contains the ordered arms. Each arm has `case` and `do`.
@@ -718,6 +725,15 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
 - **No-arg function convention:** use `args: $void` (not empty mapping).
 - **Unions:** use direct arrays, e.g. `integer: { $union: [$int64, $int32, $int16, $int8] }`.
 - **Enums:** use direct tag map, e.g. `number: { $enum: { int: $integer, float: $decimal } }`.
+- **Text and conversion:** `text` provides scalar-aware queries and bounded
+  split/trim/replace/join/case transformations; `bytes` provides safe byte
+  lookup/build/concat/search and fallible UTF-8 decoding. `convert` parses with
+  typed `invalid`/`overflow` failures and formats primitives without locale.
+  Float special values have exactly `nan`, `inf`, and `-inf` spellings.
+- **Display/debug contracts:** the `display` module declares separate
+  `display` and `debug` interfaces for nominal types. Built-in primitives use
+  the explicit `convert.format-*` functions until primitive interface impls
+  are supported; implicit interpolation remains forbidden.
 - **Typed io/fs:** `stdlib/src/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/src/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
 - **Security policies:** privileged host modules consume narrowed domain
   capabilities; roots alone receive aggregate `$policy` values.

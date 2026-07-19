@@ -219,6 +219,14 @@ every argument and capability domain, and the exact return type. Run
 
 Pure collection operations live in [stdlib/src/collections.vibra](stdlib/src/collections.vibra): generic arrays support safe lookup and copy-on-return updates, while deterministic string-key maps preserve insertion order and use explicit `option`/`result` outcomes.
 
+Text and conversion foundations live in `stdlib/src/text.vibra`,
+`stdlib/src/bytes.vibra`, and `stdlib/src/convert.vibra`. `$str` is valid UTF-8:
+string traversal and text offsets count Unicode scalar values, while explicitly
+named byte operations count UTF-8 bytes. Decoding arbitrary bytes and parsing
+primitives are fallible typed operations; formatting is deterministic and
+locale-free (`nan`, `inf`, and `-inf` are the canonical float spellings).
+Potentially growing text/byte operations honor the runtime allocation limit.
+
 ## Type System Snapshot
 
 - Primitive numerics: `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`
