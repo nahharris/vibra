@@ -216,6 +216,51 @@ $map:
 
 Pattern forms are scalar literals, enum-constructor patterns, `$record`, `$tuple`, `$array`, `$map`, `$newtype`, `$interface`, `{ $bind: name }`, and `{ $wildcard: null }`. Matches must be total: enum matches cover all tags or include wildcard; open-ended targets such as strings, numbers, records, arrays, and maps require wildcard unless a single literal target is trivially exhaustive. Bindings introduced in an arm are scoped to that arm and do not leak after the match. Runtime interface patterns use nominal `=impl` satisfaction.
 
+### Primitive operations
+
+Primitive operations are compiler intrinsics and use the same canonical named-call
+shape as functions. Binary operations take exactly one two-item block sequence;
+unary operations take their operand directly. There are no symbolic aliases.
+
+| Family | Canonical forms | Operand / result rule |
+|---|---|---|
+| Arithmetic | `$add`, `$subtract`, `$multiply`, `$divide`, `$remainder` | Two identical numeric types; result has that type |
+| Unary numeric | `$negate` | Signed integer or float; result has the operand type |
+| Comparison | `$equal`, `$not-equal`, `$less-than`, `$less-or-equal`, `$greater-than`, `$greater-or-equal` | Identically typed numerics, or strings; equality also accepts booleans; result is `$bool` |
+| Boolean | `$and`, `$or`, `$not` | `$bool`; result is `$bool` |
+| Bitwise | `$bit-and`, `$bit-or`, `$bit-xor`, `$bit-not` | Identically typed integers; result has that type |
+| Shifts | `$shift-left`, `$shift-right` | Identically typed integers; result has the left operand type |
+| Conversion | `$convert: <number>` with siblings `into: <numeric-type>` and `or: <literal>` | Exact numeric conversion, or the statically representable fallback |
+
+No implicit numeric widening or narrowing occurs: mixed primitive types are
+`E-OP-001`, and callers must perform an explicit supported conversion. Integer
+arithmetic is checked and reports `E-OP-002` on overflow. Integer division and
+remainder by zero report `E-OP-003`; the signed minimum divided by `-1` is
+overflow. Shift counts must be in `0..bit-width` and otherwise report
+`E-OP-004`; signed right shift is arithmetic. Boolean operations do not
+short-circuit because both operands are expressions evaluated before the
+intrinsic.
+
+`$convert` is the only primitive numeric-conversion form. It never traps and
+never silently loses precision: integer targets require an in-range integral
+source; integer-to-float and float narrowing require exact representation.
+Failure yields the required `or` literal, which the compiler verifies is
+exactly representable by the target type. The result always has the `into`
+type. Use richer stdlib parsing and result APIs when callers need an error
+reason rather than a deterministic fallback.
+
+Floating arithmetic follows IEEE 754 at the declared width (`$float32` rounds
+each result to binary32). Division by zero produces the corresponding infinity
+or NaN. NaN is unequal to every value including itself, and every ordered
+comparison involving NaN is false. String ordering compares Unicode scalar
+values lexicographically; it is locale-independent.
+
+```yaml
+$add:
+- $args.x
+- $args.y
+```
+
 ### `$cast`
 
 Explicitly crosses a `$newtype` boundary.

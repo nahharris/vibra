@@ -3,7 +3,8 @@
 use crate::lower::{
     Call, CapabilityDomain, CapabilityType, CapabilityValue, Expr, FunctionBody, HandleAccess,
     HostHandle, LetValue, LoweredExec, LoweredProgram, Pattern, PolicyGroup, PolicyRequirement,
-    PolicyScope, PolicyType, PolicyValue, RuntimeValue, Statement, TypeRef, WasmArgSpec,
+    PolicyScope, PolicyType, PolicyValue, PrimitiveOp, RuntimeValue, Statement, TypeRef,
+    WasmArgSpec,
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
@@ -512,6 +513,18 @@ fn eval_expr(
             })
         }
         Expr::Call { call, .. } => exec_call(call, program, env, files, config),
+        Expr::Primitive {
+            op,
+            args,
+            operand_type,
+            return_type,
+        } => {
+            let values = args
+                .iter()
+                .map(|arg| eval_expr(arg, env, program, files, config))
+                .collect::<Result<Vec<_>>>()?;
+            eval_primitive(*op, operand_type, return_type, &values)
+        }
         Expr::Cast { from, target } => Ok(RuntimeValue::Typed {
             type_ref: target.clone(),
             value: Box::new(eval_expr(from, env, program, files, config)?),
@@ -583,6 +596,236 @@ fn eval_expr(
             other => bail!("`$if` condition must be `$bool`, got {other:?}"),
         },
     }
+}
+
+fn primitive_inner(value: &RuntimeValue) -> &RuntimeValue {
+    match value {
+        RuntimeValue::Typed { value, .. } => primitive_inner(value),
+        value => value,
+    }
+}
+
+fn integer_bounds(ty: &TypeRef) -> Option<(i128, i128, u32)> {
+    Some(match ty {
+        TypeRef::Int8 => (i8::MIN as i128, i8::MAX as i128, 8),
+        TypeRef::Int16 => (i16::MIN as i128, i16::MAX as i128, 16),
+        TypeRef::Int32 => (i32::MIN as i128, i32::MAX as i128, 32),
+        TypeRef::Int64 => (i64::MIN as i128, i64::MAX as i128, 64),
+        TypeRef::UInt8 => (0, u8::MAX as i128, 8),
+        TypeRef::UInt16 => (0, u16::MAX as i128, 16),
+        TypeRef::UInt32 => (0, u32::MAX as i128, 32),
+        // RuntimeValue::Int is currently i64-backed; values above i64::MAX are
+        // deliberately not fabricated until the value representation grows.
+        TypeRef::UInt64 => (0, i64::MAX as i128, 64),
+        _ => return None,
+    })
+}
+
+fn wrap_primitive(ty: &TypeRef, value: RuntimeValue) -> RuntimeValue {
+    if matches!(
+        ty,
+        TypeRef::Int64 | TypeRef::Float64 | TypeRef::Bool | TypeRef::Str
+    ) {
+        value
+    } else {
+        RuntimeValue::Typed {
+            type_ref: ty.clone(),
+            value: Box::new(value),
+        }
+    }
+}
+
+fn checked_integer_result(ty: &TypeRef, value: i128) -> Result<RuntimeValue> {
+    let (min, max, _) = integer_bounds(ty).context("E-OP-001: expected integer operand")?;
+    if !(min..=max).contains(&value) {
+        bail!("E-OP-002: integer overflow for {ty:?}");
+    }
+    Ok(wrap_primitive(ty, RuntimeValue::Int(value as i64)))
+}
+
+fn checked_numeric_conversion(
+    value: &RuntimeValue,
+    target: &TypeRef,
+) -> Result<Option<RuntimeValue>> {
+    if let Some((min, max, _)) = integer_bounds(target) {
+        let candidate = match primitive_inner(value) {
+            RuntimeValue::Int(value) => Some(*value as i128),
+            RuntimeValue::Float(value) if value.is_finite() && value.fract() == 0.0 => {
+                Some(*value as i128)
+            }
+            RuntimeValue::Float(_) => None,
+            _ => bail!("E-OP-001: expected numeric conversion source"),
+        };
+        return Ok(candidate
+            .filter(|value| (min..=max).contains(value))
+            .map(|value| wrap_primitive(target, RuntimeValue::Int(value as i64))));
+    }
+    let (candidate, exact_integer) = match primitive_inner(value) {
+        RuntimeValue::Int(value) => (*value as f64, Some(*value as i128)),
+        RuntimeValue::Float(value) => (*value, None),
+        _ => bail!("E-OP-001: expected numeric conversion source"),
+    };
+    let converted = if target == &TypeRef::Float32 {
+        (candidate as f32) as f64
+    } else {
+        candidate
+    };
+    let exact = if let Some(integer) = exact_integer {
+        converted.is_finite() && converted as i128 == integer
+    } else {
+        (candidate.is_nan() && converted.is_nan()) || converted == candidate
+    };
+    Ok(exact.then(|| wrap_primitive(target, RuntimeValue::Float(converted))))
+}
+
+pub(crate) fn eval_primitive(
+    op: PrimitiveOp,
+    operand_type: &TypeRef,
+    return_type: &TypeRef,
+    values: &[RuntimeValue],
+) -> Result<RuntimeValue> {
+    use PrimitiveOp::*;
+    if op == Convert {
+        if let Some(converted) = checked_numeric_conversion(&values[0], return_type)? {
+            return Ok(converted);
+        }
+        return checked_numeric_conversion(&values[1], return_type)?
+            .context("internal: statically checked conversion fallback was not representable");
+    }
+    if operand_type == &TypeRef::Bool {
+        let bools = values
+            .iter()
+            .map(|v| match primitive_inner(v) {
+                RuntimeValue::Bool(v) => Ok(*v),
+                _ => bail!("E-OP-001: expected boolean operand"),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        return Ok(RuntimeValue::Bool(match op {
+            Equal => bools[0] == bools[1],
+            NotEqual => bools[0] != bools[1],
+            And => bools[0] && bools[1],
+            Or => bools[0] || bools[1],
+            Not => !bools[0],
+            _ => bail!("E-OP-001: invalid boolean operation"),
+        }));
+    }
+    if operand_type == &TypeRef::Str {
+        let strings = values
+            .iter()
+            .map(|v| match primitive_inner(v) {
+                RuntimeValue::Str(v) => Ok(v.as_str()),
+                _ => bail!("E-OP-001: expected string operand"),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        return Ok(RuntimeValue::Bool(match op {
+            Equal => strings[0] == strings[1],
+            NotEqual => strings[0] != strings[1],
+            LessThan => strings[0] < strings[1],
+            LessOrEqual => strings[0] <= strings[1],
+            GreaterThan => strings[0] > strings[1],
+            GreaterOrEqual => strings[0] >= strings[1],
+            _ => bail!("E-OP-001: invalid string operation"),
+        }));
+    }
+    if matches!(operand_type, TypeRef::Float32 | TypeRef::Float64) {
+        let floats = values
+            .iter()
+            .map(|v| match primitive_inner(v) {
+                RuntimeValue::Float(v) => Ok(*v),
+                _ => bail!("E-OP-001: expected float operand"),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let comparison = match op {
+            Equal => Some(floats[0] == floats[1]),
+            NotEqual => Some(floats[0] != floats[1]),
+            LessThan => Some(floats[0] < floats[1]),
+            LessOrEqual => Some(floats[0] <= floats[1]),
+            GreaterThan => Some(floats[0] > floats[1]),
+            GreaterOrEqual => Some(floats[0] >= floats[1]),
+            _ => None,
+        };
+        if let Some(value) = comparison {
+            return Ok(RuntimeValue::Bool(value));
+        }
+        let mut value = match op {
+            Add => floats[0] + floats[1],
+            Subtract => floats[0] - floats[1],
+            Multiply => floats[0] * floats[1],
+            Divide => floats[0] / floats[1],
+            Remainder => floats[0] % floats[1],
+            Negate => -floats[0],
+            _ => bail!("E-OP-001: invalid float operation"),
+        };
+        if operand_type == &TypeRef::Float32 {
+            value = (value as f32) as f64;
+        }
+        return Ok(wrap_primitive(operand_type, RuntimeValue::Float(value)));
+    }
+
+    let ints = values
+        .iter()
+        .map(|v| match primitive_inner(v) {
+            RuntimeValue::Int(v) => Ok(*v as i128),
+            _ => bail!("E-OP-001: expected integer operand"),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let comparison = match op {
+        Equal => Some(ints[0] == ints[1]),
+        NotEqual => Some(ints[0] != ints[1]),
+        LessThan => Some(ints[0] < ints[1]),
+        LessOrEqual => Some(ints[0] <= ints[1]),
+        GreaterThan => Some(ints[0] > ints[1]),
+        GreaterOrEqual => Some(ints[0] >= ints[1]),
+        _ => None,
+    };
+    if let Some(value) = comparison {
+        return Ok(RuntimeValue::Bool(value));
+    }
+    let (_, _, width) = integer_bounds(operand_type).context("E-OP-001: expected integer type")?;
+    let result = match op {
+        Add => ints[0] + ints[1],
+        Subtract => ints[0] - ints[1],
+        Multiply => ints[0] * ints[1],
+        Divide | Remainder => {
+            if ints[1] == 0 {
+                bail!("E-OP-003: integer division by zero");
+            }
+            if op == Divide {
+                ints[0] / ints[1]
+            } else {
+                ints[0] % ints[1]
+            }
+        }
+        Negate => -ints[0],
+        BitAnd => ints[0] & ints[1],
+        BitOr => ints[0] | ints[1],
+        BitXor => ints[0] ^ ints[1],
+        BitNot => {
+            let mask = (1_i128 << width) - 1;
+            let raw = (!ints[0]) & mask;
+            let signed = matches!(
+                operand_type,
+                TypeRef::Int8 | TypeRef::Int16 | TypeRef::Int32 | TypeRef::Int64
+            );
+            if signed && raw >= (1_i128 << (width - 1)) {
+                raw - (1_i128 << width)
+            } else {
+                raw
+            }
+        }
+        ShiftLeft | ShiftRight => {
+            if ints[1] < 0 || ints[1] >= width as i128 {
+                bail!("E-OP-004: shift count must be in 0..{width}");
+            }
+            if op == ShiftLeft {
+                ints[0] << ints[1]
+            } else {
+                ints[0] >> ints[1]
+            }
+        }
+        _ => bail!("E-OP-001: invalid integer operation"),
+    };
+    checked_integer_result(operand_type, result)
 }
 
 /// Runs one statement; `Some` means a `$return` was executed.

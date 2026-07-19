@@ -1,0 +1,91 @@
+=comment: Canonical, typed primitive operations require no host capability.
+test:
+  $import: ../stdlib/src/test.vibra
+integer-arithmetic:
+  $test: core
+  do:
+  - $test.assert-eq-int:
+      actual:
+        $add:
+        - 20
+        - 22
+      expected: 42
+  - $test.assert-eq-int:
+      actual:
+        $subtract:
+        - 50
+        - 8
+      expected: 42
+  - $test.assert-eq-int:
+      actual:
+        $multiply:
+        - 6
+        - 7
+      expected: 42
+  - $test.assert-eq-int:
+      actual:
+        $divide:
+        - 85
+        - 2
+      expected: 42
+  - $test.assert-eq-int:
+      actual:
+        $remainder:
+        - 85
+        - 43
+      expected: 42
+boolean-and-comparison:
+  $test: core
+  do:
+  - $test.assert:
+      $and:
+      - $less-than:
+        - 1
+        - 2
+      - $equal:
+        - 42
+        - 42
+  - $test.assert:
+      $not:
+        $not-equal:
+        - same
+        - same
+bitwise-and-shift:
+  $test: core
+  do:
+  - $test.assert-eq-int:
+      actual:
+        $bit-or:
+        - 32
+        - 10
+      expected: 42
+  - $test.assert-eq-int:
+      actual:
+        $shift-left:
+        - 21
+        - 1
+      expected: 42
+float-arithmetic:
+  $test: core
+  do:
+  - $test.assert-eq-float:
+      actual:
+        $divide:
+        - 84.0
+        - 2.0
+      expected: 42.0
+checked-numeric-conversion:
+  $test: core
+  do:
+  - $test.assert-eq-int:
+      actual:
+        $convert: 42.0
+        into: $int64
+        or: 0
+      expected: 42
+  - $test.assert-eq-int:
+      actual:
+        $convert: 42.5
+        into: $int64
+        or: 7
+      expected: 7

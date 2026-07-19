@@ -23,6 +23,26 @@
       "summary": "Invalid $-callee name (e.g. punctuation-only like $+); use identifier forms such as $add"
     },
     {
+      "code": "E-OP-001",
+      "severity": "error",
+      "summary": "Primitive operation has invalid arity, operand types, or mixed types"
+    },
+    {
+      "code": "E-OP-002",
+      "severity": "error",
+      "summary": "Checked integer primitive operation overflowed its declared type"
+    },
+    {
+      "code": "E-OP-003",
+      "severity": "error",
+      "summary": "Integer division or remainder by zero"
+    },
+    {
+      "code": "E-OP-004",
+      "severity": "error",
+      "summary": "Integer shift count is outside the declared type bit width"
+    },
+    {
       "code": "E-ONE-001",
       "severity": "error",
       "summary": "$function must use canonical labeled shorthand; implicit subject, nested envelopes, and $void plus args are forbidden"

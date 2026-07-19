@@ -414,6 +414,12 @@ impl HostExecution {
                     _ => bail!("`$policy.narrow.into` must be a capability type"),
                 }
             }
+            Expr::Primitive {
+                op,
+                operand_type,
+                return_type,
+                ..
+            } => crate::execute::eval_primitive(op, &operand_type, &return_type, &values)?,
             Expr::EnumConstructor {
                 enum_key,
                 tag,
@@ -1118,7 +1124,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::Reference { target, .. } => vec![target],
         Expr::EnumConstructor { payload, .. } => payload.iter().map(|v| v.as_ref()).collect(),
         Expr::Record(fields) => fields.values().collect(),
-        Expr::Tuple(v) | Expr::Array(v) => v.iter().collect(),
+        Expr::Tuple(v) | Expr::Array(v) | Expr::Primitive { args: v, .. } => v.iter().collect(),
         Expr::Map(v) => v.iter().flat_map(|(k, v)| [k, v]).collect(),
         _ => vec![],
     }

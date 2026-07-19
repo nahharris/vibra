@@ -220,6 +220,7 @@ every argument and capability domain, and the exact return type. Run
 ## Type System Snapshot
 
 - Primitive numerics: `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`
+- Canonical primitive intrinsics provide checked integer arithmetic, IEEE float arithmetic, comparisons, boolean operations, bitwise operations, bounded shifts, and explicit non-trapping exact numeric conversion with a typed fallback. Operands must have the same type; Vibra never widens or narrows them implicitly.
 - Explicit annotations are required on function signatures (`args` + `return`)
 - Algebraic unions are supported in lowering with direct syntax (`$union: [...]`, `$enum: {...}`, constructors, `$match`); optional values use the tagged `stdlib/src/option.vibra` enum because `$option` sugar and direct `$void` union members are rejected
 - Value patterns use the single ordered-arm `$match: <expr>` plus sibling `when:` form; pattern variables are written as `{ $bind: name }`, wildcard as `{ $wildcard: null }`, and arm bindings remain local to the arm

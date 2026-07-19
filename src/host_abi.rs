@@ -614,7 +614,8 @@ mod tests {
         }
         let published = std::fs::read_to_string(path).expect("schemas/host-abi.json must exist");
         assert_eq!(
-            published, expected,
+            published.replace("\r\n", "\n"),
+            expected,
             "schemas/host-abi.json is out of sync with src/host_abi.rs; regenerate it with `VIBRA_REGEN_SCHEMAS=1 cargo test -p vibra host_abi`"
         );
     }
