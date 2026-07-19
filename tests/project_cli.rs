@@ -9,6 +9,167 @@ fn path_str(path: &Path) -> String {
 }
 
 #[test]
+fn docs_resolves_local_and_imported_symbols_in_all_formats() {
+    let dir = tempfile::tempdir().unwrap();
+    let helper = dir.path().join("helper.vibra");
+    let main = dir.path().join("main.vibra");
+    std::fs::write(
+        &helper,
+        r#"=doc: Helper module documentation.
+greet:
+  $function: {name: $string}
+  return: $string
+  =doc: |
+    Return a friendly greeting.
+
+    ```vibra
+    $helper.greet: {name: Vibra}
+    ```
+  do:
+    - $return: $args.name
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &main,
+        r#"helper:
+  $import: ./helper.vibra
+main:
+  $function: $void
+  return: $void
+  =doc: Run the example application.
+  do: []
+"#,
+    )
+    .unwrap();
+
+    let plain = vibra_cmd()
+        .args(["docs", &path_str(&main), "helper.greet"])
+        .output()
+        .unwrap();
+    assert!(
+        plain.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plain.stderr)
+    );
+    let plain = String::from_utf8(plain.stdout).unwrap();
+    assert!(plain.starts_with("Return a friendly greeting."));
+    assert!(plain.contains("$helper.greet"));
+
+    let markdown = vibra_cmd()
+        .args([
+            "docs",
+            &path_str(&main),
+            "$helper.greet",
+            "--format",
+            "markdown",
+        ])
+        .output()
+        .unwrap();
+    let markdown = String::from_utf8(markdown.stdout).unwrap();
+    assert!(markdown.contains("## `helper.greet`"));
+    assert!(markdown.contains("```vibra"));
+
+    let json = vibra_cmd()
+        .args(["docs", &path_str(&main), "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(
+        json.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert!(json.as_array().unwrap().iter().any(|entry| {
+        entry["symbol"] == "helper.greet"
+            && entry["kind"] == "function"
+            && entry["documentation"]
+                .as_str()
+                .unwrap()
+                .contains("friendly greeting")
+    }));
+
+    let yaml = vibra_cmd()
+        .args(["docs", &path_str(&main), "helper.greet", "--format", "yaml"])
+        .output()
+        .unwrap();
+    assert!(
+        yaml.status.success(),
+        "{}",
+        String::from_utf8_lossy(&yaml.stderr)
+    );
+    let yaml: serde_yaml::Value = serde_yaml::from_slice(&yaml.stdout).unwrap();
+    assert_eq!(yaml["symbol"], "helper.greet");
+    assert_eq!(yaml["kind"], "function");
+    assert!(yaml["documentation"]
+        .as_str()
+        .unwrap()
+        .contains("friendly greeting"));
+}
+
+#[test]
+fn docs_reads_package_docs_and_requires_a_target_when_ambiguous() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/one")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src/two")).unwrap();
+    std::fs::write(
+        dir.path().join("project.vibra"),
+        r#"manifest-version: 1
+package:
+  name: docs-sample
+  version: 0.1.0
+  =doc: Package-level documentation.
+targets:
+  libs:
+    - name: one
+      root: src/one
+      entry: lib.vibra
+    - name: two
+      root: src/two
+      entry: lib.vibra
+"#,
+    )
+    .unwrap();
+    for name in ["one", "two"] {
+        std::fs::write(
+            dir.path().join(format!("src/{name}/lib.vibra")),
+            format!("=doc: The {name} module.\nvalue:\n  $literal: 1\n  =doc: A value.\n"),
+        )
+        .unwrap();
+    }
+
+    let ambiguous = vibra_cmd()
+        .current_dir(dir.path())
+        .args(["docs"])
+        .output()
+        .unwrap();
+    assert!(!ambiguous.status.success());
+    assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("--target <name>"));
+
+    let selected = vibra_cmd()
+        .current_dir(dir.path())
+        .args([
+            "docs",
+            ".",
+            "docs-sample",
+            "--target",
+            "one",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&selected.stdout).unwrap();
+    assert_eq!(json["kind"], "package");
+    assert_eq!(json["documentation"], "Package-level documentation.");
+}
+
+#[test]
 fn project_init_bin_template_creates_valid_project() {
     let dir = tempfile::tempdir().unwrap();
 
