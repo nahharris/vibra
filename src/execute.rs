@@ -1395,6 +1395,39 @@ fn value_string(value: &RuntimeValue) -> Result<String> {
     }
 }
 
+fn value_str(value: &RuntimeValue) -> Result<&str> {
+    match untyped(value) {
+        RuntimeValue::Str(value) => Ok(value),
+        other => bail!("expected string, got {other:?}"),
+    }
+}
+
+fn value_byte_items(value: &RuntimeValue) -> Result<&[RuntimeValue]> {
+    match untyped(value) {
+        RuntimeValue::Array(items) => Ok(items),
+        other => bail!("expected bytes, got {other:?}"),
+    }
+}
+
+fn runtime_byte(value: &RuntimeValue) -> Result<u8> {
+    match untyped(value) {
+        RuntimeValue::Int(value) => u8::try_from(*value).context("byte outside uint8 range"),
+        other => bail!("expected byte integer, got {other:?}"),
+    }
+}
+
+fn push_bounded_char(value: &mut String, scalar: char, limit: usize) -> bool {
+    let width = scalar.len_utf8();
+    let Some(next_len) = value.len().checked_add(width) else {
+        return false;
+    };
+    if next_len > limit || value.try_reserve_exact(width).is_err() {
+        return false;
+    }
+    value.push(scalar);
+    true
+}
+
 fn value_bytes(value: &RuntimeValue) -> Result<Vec<u8>> {
     match untyped(value) {
         RuntimeValue::Array(items) => items
@@ -2557,67 +2590,105 @@ fn exec_vibra_v1(
             ))
         }
         "str_split" => {
-            let text = value_string(&args[0])?;
-            let separator = value_string(&args[1])?;
-            let values: Vec<_> = text.split(&separator).collect();
-            let bytes = values.iter().map(|value| value.len()).sum::<usize>();
-            if values.len() > config.max_alloc_len || bytes > config.max_alloc_len {
-                return Ok(result_err(sig, "limit-exceeded", None));
+            let text = value_str(&args[0])?;
+            let separator = value_str(&args[1])?;
+            let mut values = Vec::new();
+            let mut bytes = 0usize;
+            for value in text.split(separator) {
+                let Some(next_count) = values.len().checked_add(1) else {
+                    return Ok(result_err(sig, "limit-exceeded", None));
+                };
+                let Some(next_bytes) = bytes.checked_add(value.len()) else {
+                    return Ok(result_err(sig, "limit-exceeded", None));
+                };
+                if next_count > config.max_alloc_len || next_bytes > config.max_alloc_len {
+                    return Ok(result_err(sig, "limit-exceeded", None));
+                }
+                if values.try_reserve_exact(1).is_err() {
+                    return Ok(result_err(sig, "limit-exceeded", None));
+                }
+                values.push(RuntimeValue::Str(value.to_string()));
+                bytes = next_bytes;
             }
-            Ok(result_ok(
-                sig,
-                RuntimeValue::Array(
-                    values
-                        .into_iter()
-                        .map(|value| RuntimeValue::Str(value.to_string()))
-                        .collect(),
-                ),
-            ))
+            Ok(result_ok(sig, RuntimeValue::Array(values)))
         }
         "str_trim" => {
-            let value = value_string(&args[0])?.trim().to_string();
+            let value = value_str(&args[0])?.trim();
             if value.len() > config.max_alloc_len {
                 return Ok(result_err(sig, "limit-exceeded", None));
             }
-            Ok(result_ok(sig, RuntimeValue::Str(value)))
+            Ok(result_ok(sig, RuntimeValue::Str(value.to_string())))
         }
         "str_replace" => {
-            let text = value_string(&args[0])?;
-            let from = value_string(&args[1])?;
-            let to = value_string(&args[2])?;
+            let text = value_str(&args[0])?;
+            let from = value_str(&args[1])?;
+            let to = value_str(&args[2])?;
             if from.is_empty() {
                 return Ok(result_err(sig, "empty-pattern", None));
             }
-            let value = text.replace(&from, &to);
-            if value.len() > config.max_alloc_len {
+            let replacements = text.matches(from).count();
+            let Some(removed) = replacements.checked_mul(from.len()) else {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            };
+            let Some(added) = replacements.checked_mul(to.len()) else {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            };
+            let Some(output_len) = text
+                .len()
+                .checked_sub(removed)
+                .and_then(|len| len.checked_add(added))
+            else {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            };
+            if output_len > config.max_alloc_len {
                 return Ok(result_err(sig, "limit-exceeded", None));
             }
-            Ok(result_ok(sig, RuntimeValue::Str(value)))
+            Ok(result_ok(sig, RuntimeValue::Str(text.replace(from, to))))
         }
         "str_join" => {
             let RuntimeValue::Array(values) = untyped(&args[0]) else {
                 bail!("str_join expects an array")
             };
-            let separator = value_string(&args[1])?;
-            let strings = values
-                .iter()
-                .map(value_string)
-                .collect::<Result<Vec<_>>>()?;
-            let value = strings.join(&separator);
-            if value.len() > config.max_alloc_len {
+            let separator = value_str(&args[1])?;
+            let separators = values.len().saturating_sub(1);
+            let Some(mut output_len) = separators.checked_mul(separator.len()) else {
                 return Ok(result_err(sig, "limit-exceeded", None));
+            };
+            for value in values {
+                let Some(next) = output_len.checked_add(value_str(value)?.len()) else {
+                    return Ok(result_err(sig, "limit-exceeded", None));
+                };
+                output_len = next;
+            }
+            if output_len > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            let mut value = String::with_capacity(output_len);
+            for (index, item) in values.iter().enumerate() {
+                if index != 0 {
+                    value.push_str(separator);
+                }
+                value.push_str(value_str(item)?);
             }
             Ok(result_ok(sig, RuntimeValue::Str(value)))
         }
         "str_lowercase" | "str_uppercase" => {
-            let text = value_string(&args[0])?;
-            let value = if name == "str_lowercase" {
-                text.to_lowercase()
-            } else {
-                text.to_uppercase()
-            };
-            if value.len() > config.max_alloc_len {
-                return Ok(result_err(sig, "limit-exceeded", None));
+            let text = value_str(&args[0])?;
+            let mut value = String::new();
+            for scalar in text.chars() {
+                if name == "str_lowercase" {
+                    for mapped_scalar in scalar.to_lowercase() {
+                        if !push_bounded_char(&mut value, mapped_scalar, config.max_alloc_len) {
+                            return Ok(result_err(sig, "limit-exceeded", None));
+                        }
+                    }
+                } else {
+                    for mapped_scalar in scalar.to_uppercase() {
+                        if !push_bounded_char(&mut value, mapped_scalar, config.max_alloc_len) {
+                            return Ok(result_err(sig, "limit-exceeded", None));
+                        }
+                    }
+                }
             }
             Ok(result_ok(sig, RuntimeValue::Str(value)))
         }
@@ -2682,48 +2753,58 @@ fn exec_vibra_v1(
         }
         "format_bool" => Ok(RuntimeValue::Str(value_bool(&args[0])?.to_string())),
         "bytes_len" => Ok(RuntimeValue::Int(
-            i64::try_from(value_bytes(&args[0])?.len()).unwrap_or(i64::MAX),
+            i64::try_from(value_byte_items(&args[0])?.len()).unwrap_or(i64::MAX),
         )),
         "bytes_slice" => {
-            let bytes = value_bytes(&args[0])?;
+            let bytes = value_byte_items(&args[0])?;
             let start = usize::try_from(value_i64(&args[1])?).context("slice start < 0")?;
             let end = usize::try_from(value_i64(&args[2])?).context("slice end < 0")?;
             let slice = bytes
                 .get(start..end)
                 .context("byte slice range is out of bounds")?;
-            Ok(runtime_bytes(slice.to_vec()))
+            Ok(RuntimeValue::Array(slice.to_vec()))
         }
-        "bytes_from_str" => Ok(runtime_bytes(value_string(&args[0])?.into_bytes())),
+        "bytes_from_str" => {
+            let value = value_str(&args[0])?;
+            Ok(runtime_bytes(value.as_bytes().to_vec()))
+        }
         "bytes_get" => {
             let index = usize::try_from(value_i64(&args[1])?).context("byte index too large")?;
             Ok(option_value(
                 sig,
-                value_bytes(&args[0])?
+                value_byte_items(&args[0])?
                     .get(index)
-                    .map(|value| RuntimeValue::Int(i64::from(*value))),
+                    .map(runtime_byte)
+                    .transpose()?
+                    .map(|value| RuntimeValue::Int(i64::from(value))),
             ))
         }
         "bytes_concat" => {
-            let mut left = value_bytes(&args[0])?;
-            let right = value_bytes(&args[1])?;
+            let left = value_byte_items(&args[0])?;
+            let right = value_byte_items(&args[1])?;
             let Some(len) = left.len().checked_add(right.len()) else {
                 return Ok(result_err(sig, "limit-exceeded", None));
             };
             if len > config.max_alloc_len {
                 return Ok(result_err(sig, "limit-exceeded", None));
             }
-            left.extend_from_slice(&right);
-            Ok(result_ok(sig, runtime_bytes(left)))
+            let mut joined = Vec::with_capacity(len);
+            joined.extend_from_slice(left);
+            joined.extend_from_slice(right);
+            Ok(result_ok(sig, RuntimeValue::Array(joined)))
         }
         "bytes_find" => {
-            let haystack = value_bytes(&args[0])?;
-            let needle = value_bytes(&args[1])?;
+            let haystack = value_byte_items(&args[0])?;
+            let needle = value_byte_items(&args[1])?;
             let found = if needle.is_empty() {
                 Some(0)
             } else {
-                haystack
-                    .windows(needle.len())
-                    .position(|window| window == needle)
+                haystack.windows(needle.len()).position(|window| {
+                    window
+                        .iter()
+                        .zip(needle)
+                        .all(|(left, right)| runtime_byte(left).ok() == runtime_byte(right).ok())
+                })
             };
             Ok(option_value(
                 sig,
@@ -2747,10 +2828,20 @@ fn exec_vibra_v1(
             }
             Ok(result_ok(sig, runtime_bytes(bytes)))
         }
-        "bytes_decode_utf8" => Ok(match String::from_utf8(value_bytes(&args[0])?) {
-            Ok(value) => result_ok(sig, RuntimeValue::Str(value)),
-            Err(_) => result_err(sig, "invalid-utf8", None),
-        }),
+        "bytes_decode_utf8" => {
+            let items = value_byte_items(&args[0])?;
+            if items.len() > config.max_alloc_len {
+                return Ok(result_err(sig, "limit-exceeded", None));
+            }
+            let mut bytes = Vec::with_capacity(items.len());
+            for item in items {
+                bytes.push(runtime_byte(item)?);
+            }
+            Ok(match String::from_utf8(bytes) {
+                Ok(value) => result_ok(sig, RuntimeValue::Str(value)),
+                Err(_) => result_err(sig, "invalid-utf8", None),
+            })
+        }
         "fs_open_read" | "fs_open_write" | "fs_open_append" | "fs_open_read_write" => {
             let path = value_string(&args[0])?;
             let mut resolved: Option<PathBuf> = None;
@@ -3519,7 +3610,7 @@ mod text_conversion_tests {
         let program = lower(
             r#"  - $let:
       replaced:
-        $text.replace: aa
+        $text.replace: a
         from: a
         to: xx
   - $match: $replaced
@@ -3527,11 +3618,69 @@ mod text_conversion_tests {
     - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
       do: [{$test.assert: true}]
     - case: {$wildcard: null}
-      do: [{$test.fail: allocation-limit-was-not-enforced}]
+      do: [{$test.fail: replace-limit-was-not-enforced}]
+  - $let:
+      joined:
+        $text.join: {$array: [a, a]}
+        separator: ''
+  - $match: $joined
+    when:
+    - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
+      do: [{$test.assert: true}]
+    - case: {$wildcard: null}
+      do: [{$test.fail: join-limit-was-not-enforced}]
+  - $let:
+      uppercase: {$text.uppercase: ß}
+  - $match: $uppercase
+    when:
+    - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
+      do: [{$test.assert: true}]
+    - case: {$wildcard: null}
+      do: [{$test.fail: case-limit-was-not-enforced}]
+  - $let:
+      split:
+        $text.split: 'a,'
+        separator: ','
+  - $match: $split
+    when:
+    - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
+      do: [{$test.assert: true}]
+    - case: {$wildcard: null}
+      do: [{$test.fail: split-element-limit-was-not-enforced}]
+  - $let:
+      left:
+        $cast: {$array: [97]}
+        into: $bytes.bytes
+  - $let:
+      right:
+        $cast: {$array: [98]}
+        into: $bytes.bytes
+  - $let:
+      concatenated:
+        $bytes.bytes.concat: $left
+        other: $right
+  - $match: $concatenated
+    when:
+    - case: {$result.result.err: {$bytes.bytes-error.limit-exceeded: null}}
+      do: [{$test.assert: true}]
+    - case: {$wildcard: null}
+      do: [{$test.fail: bytes-concat-limit-was-not-enforced}]
+  - $let:
+      raw:
+        $cast: {$array: [97, 98]}
+        into: $bytes.bytes
+  - $let:
+      decoded: {$bytes.bytes.decode-utf8: $raw}
+  - $match: $decoded
+    when:
+    - case: {$result.result.err: {$bytes.bytes-error.limit-exceeded: null}}
+      do: [{$test.assert: true}]
+    - case: {$wildcard: null}
+      do: [{$test.fail: bytes-decode-limit-was-not-enforced}]
 "#,
         );
         let config = RunConfig {
-            max_alloc_len: 3,
+            max_alloc_len: 1,
             ..RunConfig::default()
         };
         run_lowered_interpreted(&program, &config).unwrap();

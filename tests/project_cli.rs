@@ -35,7 +35,7 @@ fn project_init_bin_template_creates_valid_project() {
     assert!(project.join("dep/std/src/io.vibra").exists());
     assert!(!project.join("dep/std/.git").exists());
     assert!(manifest.contains("git: https://github.com/nahharris/vibra-stdlib.git"));
-    assert!(manifest.contains("rev: 42d4d875a8b4398305849c6d668c64a0559122e2"));
+    assert!(manifest.contains("rev: 6b9fa5838e4f4122ff141e13a5ef737e99955dad"));
 
     let check = vibra_cmd()
         .current_dir(dir.path())
@@ -165,7 +165,7 @@ fn project_builds_verifies_inspects_and_runs_deterministic_vapp() {
     assert_eq!(metadata["runtime-abi"], "vibra-v1");
     assert_eq!(
         metadata["stdlib-rev"],
-        "42d4d875a8b4398305849c6d668c64a0559122e2"
+        "6b9fa5838e4f4122ff141e13a5ef737e99955dad"
     );
 
     let run = vibra_cmd()
