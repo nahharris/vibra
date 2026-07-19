@@ -119,6 +119,12 @@ pub enum Expr {
         call: Box<Call>,
         return_type: TypeRef,
     },
+    Primitive {
+        op: PrimitiveOp,
+        args: Vec<Expr>,
+        operand_type: TypeRef,
+        return_type: TypeRef,
+    },
     Cast {
         from: Box<Expr>,
         target: TypeRef,
@@ -141,6 +147,32 @@ pub enum Expr {
         then_e: Box<Expr>,
         else_e: Box<Expr>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PrimitiveOp {
+    Convert,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Negate,
+    Equal,
+    NotEqual,
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
+    And,
+    Or,
+    Not,
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitNot,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -5024,6 +5056,20 @@ fn check_expr_call_bounds(
             referrer_owner,
             context,
         )?,
+        Expr::Primitive { args, .. } => {
+            for arg in args {
+                check_expr_call_bounds(
+                    arg,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?;
+            }
+        }
         Expr::Cast { from, .. } => check_expr_call_bounds(
             from,
             sigs,
@@ -6693,6 +6739,259 @@ fn parse_call_args(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn primitive_op(name: &str) -> Option<(PrimitiveOp, usize)> {
+    use PrimitiveOp::*;
+    Some(match name {
+        "$add" => (Add, 2),
+        "$subtract" => (Subtract, 2),
+        "$multiply" => (Multiply, 2),
+        "$divide" => (Divide, 2),
+        "$remainder" => (Remainder, 2),
+        "$negate" => (Negate, 1),
+        "$equal" => (Equal, 2),
+        "$not-equal" => (NotEqual, 2),
+        "$less-than" => (LessThan, 2),
+        "$less-or-equal" => (LessOrEqual, 2),
+        "$greater-than" => (GreaterThan, 2),
+        "$greater-or-equal" => (GreaterOrEqual, 2),
+        "$and" => (And, 2),
+        "$or" => (Or, 2),
+        "$not" => (Not, 1),
+        "$bit-and" => (BitAnd, 2),
+        "$bit-or" => (BitOr, 2),
+        "$bit-xor" => (BitXor, 2),
+        "$bit-not" => (BitNot, 1),
+        "$shift-left" => (ShiftLeft, 2),
+        "$shift-right" => (ShiftRight, 2),
+        _ => return None,
+    })
+}
+
+fn primitive_numeric(ty: &TypeRef) -> bool {
+    matches!(
+        ty,
+        TypeRef::Int8
+            | TypeRef::Int16
+            | TypeRef::Int32
+            | TypeRef::Int64
+            | TypeRef::UInt8
+            | TypeRef::UInt16
+            | TypeRef::UInt32
+            | TypeRef::UInt64
+            | TypeRef::Float32
+            | TypeRef::Float64
+    )
+}
+
+fn primitive_integer(ty: &TypeRef) -> bool {
+    primitive_numeric(ty) && !matches!(ty, TypeRef::Float32 | TypeRef::Float64)
+}
+
+fn conversion_fallback_fits(expr: &Expr, target: &TypeRef) -> bool {
+    let Expr::Value(value) = expr else {
+        return false;
+    };
+    match (value, target) {
+        (RuntimeValue::Int(value), TypeRef::Int8) => i8::try_from(*value).is_ok(),
+        (RuntimeValue::Int(value), TypeRef::Int16) => i16::try_from(*value).is_ok(),
+        (RuntimeValue::Int(value), TypeRef::Int32) => i32::try_from(*value).is_ok(),
+        (RuntimeValue::Int(_), TypeRef::Int64) => true,
+        (RuntimeValue::Int(value), TypeRef::UInt8) => u8::try_from(*value).is_ok(),
+        (RuntimeValue::Int(value), TypeRef::UInt16) => u16::try_from(*value).is_ok(),
+        (RuntimeValue::Int(value), TypeRef::UInt32) => u32::try_from(*value).is_ok(),
+        (RuntimeValue::Int(value), TypeRef::UInt64) => *value >= 0,
+        (RuntimeValue::Float(value), TypeRef::Float32) => {
+            let narrowed = (*value as f32) as f64;
+            (value.is_nan() && narrowed.is_nan()) || narrowed == *value
+        }
+        (RuntimeValue::Float(_), TypeRef::Float64) => true,
+        _ => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_checked_conversion(
+    m: &serde_yaml::Mapping,
+    sigs: &HashMap<String, FunctionSig>,
+    constants: &HashMap<String, RuntimeValue>,
+    type_aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+    impls: &HashMap<ImplKey, ImplBody>,
+    locals: &HashMap<String, TypeRef>,
+    home_module: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Option<Expr>> {
+    let convert = map_get_str(m, "$convert");
+    if convert.is_none() {
+        return Ok(None);
+    }
+    if m.len() != 3 || map_get_str(m, "into").is_none() || map_get_str(m, "or").is_none() {
+        bail!("E-OP-001: `$convert` requires exactly `$convert`, `into`, and `or`");
+    }
+    let source = parse_expr(
+        convert.expect("checked"),
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        locals,
+        home_module,
+        warnings,
+    )?;
+    let operand_type = infer_expr_type(&source, constants, locals, type_aliases, enums)
+        .context("E-OP-001: could not infer `$convert` source type")?;
+    let empty_skeletons = HashMap::new();
+    let return_type = parse_type_ref(
+        map_get_str(m, "into").expect("checked"),
+        &[],
+        &empty_skeletons,
+        warnings,
+        false,
+    )?;
+    let fallback = parse_expr(
+        map_get_str(m, "or").expect("checked"),
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        locals,
+        home_module,
+        warnings,
+    )?;
+    if !primitive_numeric(&operand_type) || !primitive_numeric(&return_type) {
+        bail!("E-OP-001: `$convert` source and target must be primitive numeric types");
+    }
+    if !conversion_fallback_fits(&fallback, &return_type) {
+        bail!(
+            "E-OP-001: `$convert.or` must be a literal exactly representable by {:?}",
+            return_type
+        );
+    }
+    Ok(Some(Expr::Primitive {
+        op: PrimitiveOp::Convert,
+        args: vec![source, fallback],
+        operand_type,
+        return_type,
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_primitive_expr(
+    m: &serde_yaml::Mapping,
+    sigs: &HashMap<String, FunctionSig>,
+    constants: &HashMap<String, RuntimeValue>,
+    type_aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+    impls: &HashMap<ImplKey, ImplBody>,
+    locals: &HashMap<String, TypeRef>,
+    home_module: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Option<Expr>> {
+    if m.len() != 1 {
+        return Ok(None);
+    }
+    let (key, payload) = m.iter().next().expect("length checked");
+    let Some((op, arity)) = key.as_str().and_then(primitive_op) else {
+        return Ok(None);
+    };
+    let values: Vec<&Value> = if arity == 1 {
+        vec![payload]
+    } else {
+        payload
+            .as_sequence()
+            .with_context(|| {
+                format!(
+                    "E-OP-001: `{}` requires a two-item sequence",
+                    key.as_str().unwrap()
+                )
+            })?
+            .iter()
+            .collect()
+    };
+    if values.len() != arity {
+        bail!(
+            "E-OP-001: `{}` requires exactly {arity} operand{}",
+            key.as_str().unwrap(),
+            if arity == 1 { "" } else { "s" }
+        );
+    }
+    let args = values
+        .into_iter()
+        .map(|value| {
+            parse_expr(
+                value,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                home_module,
+                warnings,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let types = args
+        .iter()
+        .map(|arg| {
+            infer_expr_type(arg, constants, locals, type_aliases, enums)
+                .context("E-OP-001: could not infer primitive operand type")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let operand_type = types[0].clone();
+    if types.iter().any(|ty| ty != &operand_type) {
+        bail!(
+            "E-OP-001: `{}` operands must have the same primitive type; explicit `$cast` is required",
+            key.as_str().unwrap()
+        );
+    }
+    use PrimitiveOp::*;
+    let valid = match op {
+        Convert => unreachable!("conversion uses a dedicated envelope"),
+        Add | Subtract | Multiply | Divide | Remainder | Negate => {
+            primitive_numeric(&operand_type)
+                && !(matches!(op, Negate)
+                    && matches!(
+                        operand_type,
+                        TypeRef::UInt8 | TypeRef::UInt16 | TypeRef::UInt32 | TypeRef::UInt64
+                    ))
+        }
+        Equal | NotEqual => {
+            primitive_numeric(&operand_type) || matches!(operand_type, TypeRef::Bool | TypeRef::Str)
+        }
+        LessThan | LessOrEqual | GreaterThan | GreaterOrEqual => {
+            primitive_numeric(&operand_type) || operand_type == TypeRef::Str
+        }
+        And | Or | Not => operand_type == TypeRef::Bool,
+        BitAnd | BitOr | BitXor | BitNot | ShiftLeft | ShiftRight => {
+            primitive_integer(&operand_type)
+        }
+    };
+    if !valid {
+        bail!(
+            "E-OP-001: `{}` is not defined for {:?}",
+            key.as_str().unwrap(),
+            operand_type
+        );
+    }
+    let return_type = if matches!(
+        op,
+        Equal | NotEqual | LessThan | LessOrEqual | GreaterThan | GreaterOrEqual | And | Or | Not
+    ) {
+        TypeRef::Bool
+    } else {
+        operand_type.clone()
+    };
+    Ok(Some(Expr::Primitive {
+        op,
+        args,
+        operand_type,
+        return_type,
+    }))
+}
+
 fn parse_expr(
     v: &Value,
     sigs: &HashMap<String, FunctionSig>,
@@ -6705,6 +7004,19 @@ fn parse_expr(
     warnings: &mut Vec<String>,
 ) -> Result<Expr> {
     if let Some(m) = v.as_mapping() {
+        if let Some(expr) = parse_checked_conversion(
+            m,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            home_module,
+            warnings,
+        )? {
+            return Ok(expr);
+        }
         if m.len() == 1 {
             if let Some(inner_v) = map_get_str(m, "$mut") {
                 let inner = parse_expr(
@@ -6741,6 +7053,19 @@ fn parse_expr(
                     mutable,
                 });
             }
+        }
+        if let Some(expr) = parse_primitive_expr(
+            m,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            home_module,
+            warnings,
+        )? {
+            return Ok(expr);
         }
         if looks_like_call(v, sigs, home_module)
             || looks_like_iface_call(v, home_module, type_aliases)
@@ -7317,6 +7642,7 @@ fn infer_expr_type(
                 })
             }),
         Expr::Call { return_type, .. } => Some(return_type.clone()),
+        Expr::Primitive { return_type, .. } => Some(return_type.clone()),
         Expr::Cast { target, .. } => Some(target.clone()),
         Expr::PolicyNarrow { target, .. } => Some(target.clone()),
         Expr::Record(fields) => fields

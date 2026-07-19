@@ -1090,6 +1090,9 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
             Expr::Tuple(values) | Expr::Array(values) => {
                 values.iter().for_each(|value| visit_expr(value, pending));
             }
+            Expr::Primitive { args, .. } => {
+                args.iter().for_each(|value| visit_expr(value, pending));
+            }
             Expr::Map(entries) => entries.iter().for_each(|(key, value)| {
                 visit_expr(key, pending);
                 visit_expr(value, pending);

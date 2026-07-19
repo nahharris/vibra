@@ -8,6 +8,92 @@ fn path_str(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
 }
 
+fn lower_exec_value(source: &str) -> anyhow::Result<vibra::lower::RuntimeValue> {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(&entry, "placeholder: true\n").unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let expression: serde_yaml::Value = serde_yaml::from_str(source).unwrap();
+    let exec = vibra::lower::lower_exec_expr(&loaded, &expression, &Default::default())?;
+    vibra::execute::eval_lowered_exec(
+        &exec,
+        &Default::default(),
+        &vibra::runtime::RunConfig::default(),
+    )
+}
+
+#[test]
+fn primitive_operations_are_typed_and_evaluate() {
+    assert_eq!(
+        lower_exec_value("$add: [20, 22]").unwrap(),
+        vibra::lower::RuntimeValue::Int(42)
+    );
+    assert_eq!(
+        lower_exec_value("$less-than: [1.0, 2.0]").unwrap(),
+        vibra::lower::RuntimeValue::Bool(true)
+    );
+    assert_eq!(
+        lower_exec_value("$and: [true, false]").unwrap(),
+        vibra::lower::RuntimeValue::Bool(false)
+    );
+    assert_eq!(
+        lower_exec_value("$shift-left: [21, 1]").unwrap(),
+        vibra::lower::RuntimeValue::Int(42)
+    );
+}
+
+#[test]
+fn checked_numeric_conversion_is_explicit_and_non_trapping() {
+    assert_eq!(
+        lower_exec_value("$convert: 42\ninto: $int8\nor: 0").unwrap(),
+        vibra::lower::RuntimeValue::Typed {
+            type_ref: vibra::lower::TypeRef::Int8,
+            value: Box::new(vibra::lower::RuntimeValue::Int(42)),
+        }
+    );
+    assert_eq!(
+        lower_exec_value("$convert: 300\ninto: $int8\nor: -1").unwrap(),
+        vibra::lower::RuntimeValue::Typed {
+            type_ref: vibra::lower::TypeRef::Int8,
+            value: Box::new(vibra::lower::RuntimeValue::Int(-1)),
+        }
+    );
+    let invalid_fallback = lower_exec_value("$convert: 1\ninto: $uint8\nor: -1")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        invalid_fallback.contains("E-OP-001"),
+        "unexpected error: {invalid_fallback}"
+    );
+}
+
+#[test]
+fn primitive_operations_reject_mixed_or_invalid_types() {
+    let mixed = lower_exec_value("$add: [1, 2.0]").unwrap_err().to_string();
+    assert!(mixed.contains("E-OP-001"), "unexpected error: {mixed}");
+    let invalid = lower_exec_value("$bit-and: [true, false]")
+        .unwrap_err()
+        .to_string();
+    assert!(invalid.contains("E-OP-001"), "unexpected error: {invalid}");
+}
+
+#[test]
+fn primitive_integer_failures_have_stable_diagnostics() {
+    let divide = lower_exec_value("$divide: [1, 0]").unwrap_err().to_string();
+    assert!(divide.contains("E-OP-003"), "unexpected error: {divide}");
+    let shift = lower_exec_value("$shift-left: [1, 64]")
+        .unwrap_err()
+        .to_string();
+    assert!(shift.contains("E-OP-004"), "unexpected error: {shift}");
+    let overflow = lower_exec_value("$add: [9223372036854775807, 1]")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        overflow.contains("E-OP-002"),
+        "unexpected error: {overflow}"
+    );
+}
+
 #[test]
 fn match_arms_use_case_key() {
     let dir = tempfile::tempdir().unwrap();
