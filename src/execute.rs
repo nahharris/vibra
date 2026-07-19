@@ -8,7 +8,7 @@ use crate::lower::{
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -304,6 +304,10 @@ impl FileHandle {
 pub(crate) struct FileTable {
     next: u64,
     handles: HashMap<u64, FileHandle>,
+    /// IDs of dynamic resources that were successfully closed. Tombstones are
+    /// retained for the program-instance lifetime so duplicate close and
+    /// use-after-close are distinguishable from forged/never-minted IDs.
+    closed: HashSet<u64>,
     /// Optional injected sinks for guest stdout/stderr. When `None`, writes go
     /// to the process's locked standard streams. Injected sinks are primarily
     /// used by tests to exercise write-failure paths deterministically.
@@ -326,6 +330,7 @@ impl FileTable {
         Self {
             next: 3,
             handles,
+            closed: HashSet::new(),
             stdout_sink: None,
             stderr_sink: None,
             limit,
@@ -339,8 +344,8 @@ impl FileTable {
         table
     }
 
-    /// Count of live user-opened file handles, excluding stdio entries.
-    fn open_file_count(&self) -> usize {
+    /// Count of live owned host resources, excluding borrowed standard streams.
+    fn open_resource_count(&self) -> usize {
         self.handles
             .values()
             .filter(|handle| matches!(handle, FileHandle::File(_)))
@@ -349,7 +354,7 @@ impl FileTable {
 
     /// Whether opening another file would exceed the configured limit.
     fn at_capacity(&self) -> bool {
-        self.limit != 0 && self.open_file_count() >= self.limit
+        self.limit != 0 && self.open_resource_count() >= self.limit
     }
 
     fn insert(&mut self, file: File) -> u64 {
@@ -362,6 +367,13 @@ impl FileTable {
     /// Mint a stdin handle. Only reachable through the capability-checked
     /// `stdin_open` host import.
     fn insert_stdin(&mut self) -> u64 {
+        if let Some(id) = self
+            .handles
+            .iter()
+            .find_map(|(id, handle)| matches!(handle, FileHandle::Stdin).then_some(*id))
+        {
+            return id;
+        }
         let id = self.next;
         self.next += 1;
         self.handles.insert(id, FileHandle::Stdin);
@@ -374,9 +386,32 @@ impl FileTable {
             .with_context(|| format!("invalid file handle `{id}`"))
     }
 
-    fn close(&mut self, id: u64) {
-        if id > 2 {
-            self.handles.remove(&id);
+    fn close(&mut self, id: u64) -> std::result::Result<(), HandleLifecycleError> {
+        // Standard streams are borrowed process resources. They are never
+        // invalidated by guest code; close is a deterministic no-op.
+        if matches!(
+            self.handles.get(&id),
+            Some(FileHandle::Stdin | FileHandle::Stdout | FileHandle::Stderr)
+        ) {
+            return Ok(());
+        }
+        if self.closed.contains(&id) {
+            return Err(HandleLifecycleError::Closed);
+        }
+        if self.handles.remove(&id).is_none() {
+            return Err(HandleLifecycleError::Invalid);
+        }
+        self.closed.insert(id);
+        Ok(())
+    }
+
+    fn lifecycle_error(&self, id: u64) -> Option<HandleLifecycleError> {
+        if self.handles.contains_key(&id) {
+            None
+        } else if self.closed.contains(&id) {
+            Some(HandleLifecycleError::Closed)
+        } else {
+            Some(HandleLifecycleError::Invalid)
         }
     }
 
@@ -457,6 +492,30 @@ impl FileTable {
                 std::io::ErrorKind::InvalidInput,
                 format!("invalid file handle `{id}`"),
             )),
+        }
+    }
+}
+
+impl Drop for FileTable {
+    fn drop(&mut self) {
+        // Dropping each File closes its OS descriptor. Clear explicitly to
+        // make the instance-boundary cleanup contract visible and immediate.
+        self.handles.clear();
+        self.closed.clear();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HandleLifecycleError {
+    Closed,
+    Invalid,
+}
+
+impl HandleLifecycleError {
+    const fn tag(self) -> &'static str {
+        match self {
+            Self::Closed => "resource-closed",
+            Self::Invalid => "invalid-handle",
         }
     }
 }
@@ -1973,6 +2032,10 @@ fn exec_vibra_v1(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
+    let checked_handle = |value: &RuntimeValue, files: &FileTable| {
+        let handle = value_handle(value)?;
+        Ok::<_, anyhow::Error>((handle, files.lifecycle_error(handle)))
+    };
     match name {
         "array_len" => match untyped(&args[0]) {
             RuntimeValue::Array(values) => Ok(RuntimeValue::Int(values.len() as i64)),
@@ -2144,7 +2207,10 @@ fn exec_vibra_v1(
             access: HandleAccess::Write,
         })),
         "fd_read" => {
-            let handle = value_handle(&args[0])?;
+            let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
+            if let Some(error) = lifecycle_error {
+                return Ok(result_err(sig, error.tag(), None));
+            }
             let value = match files.get_mut(handle)? {
                 FileHandle::Stdin => {
                     let mut s = String::new();
@@ -2162,7 +2228,10 @@ fn exec_vibra_v1(
             Ok(fs_result(sig, || value, RuntimeValue::Str))
         }
         "fd_read_bytes" => {
-            let handle = value_handle(&args[0])?;
+            let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
+            if let Some(error) = lifecycle_error {
+                return Ok(result_err(sig, error.tag(), None));
+            }
             let value = match files.get_mut(handle)? {
                 FileHandle::Stdin => {
                     let mut bytes = Vec::new();
@@ -2180,7 +2249,10 @@ fn exec_vibra_v1(
             Ok(fs_result(sig, || value, runtime_bytes))
         }
         "fd_read_line" => {
-            let handle = value_handle(&args[0])?;
+            let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
+            if let Some(error) = lifecycle_error {
+                return Ok(result_err(sig, error.tag(), None));
+            }
             let value = match files.get_mut(handle)? {
                 FileHandle::Stdin => {
                     let mut line = String::new();
@@ -2198,29 +2270,40 @@ fn exec_vibra_v1(
             Ok(fs_result(sig, || value, RuntimeValue::Str))
         }
         "fd_write" => {
-            let handle = value_handle(&args[0])?;
+            let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
+            if let Some(error) = lifecycle_error {
+                return Ok(result_err(sig, error.tag(), None));
+            }
             let contents = value_string(&args[1])?;
             files.get_mut(handle)?;
             let result = files.write_to_handle(handle, contents.as_bytes());
             Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
         }
         "fd_write_bytes" => {
-            let handle = value_handle(&args[0])?;
+            let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
+            if let Some(error) = lifecycle_error {
+                return Ok(result_err(sig, error.tag(), None));
+            }
             let contents = value_bytes(&args[1])?;
             files.get_mut(handle)?;
             let result = files.write_to_handle(handle, &contents);
             Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
         }
         "fd_sync" => {
-            let handle = value_handle(&args[0])?;
+            let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
+            if let Some(error) = lifecycle_error {
+                return Ok(result_err(sig, error.tag(), None));
+            }
             files.get_mut(handle)?;
             let result = files.flush_handle(handle);
             Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
         }
         "fd_close" => {
             let handle = value_handle(&args[0])?;
-            files.close(handle);
-            Ok(result_ok(sig, RuntimeValue::Void))
+            Ok(match files.close(handle) {
+                Ok(()) => result_ok(sig, RuntimeValue::Void),
+                Err(error) => result_err(sig, error.tag(), None),
+            })
         }
         "path_new" => Ok(RuntimeValue::Str(value_string(&args[0])?)),
         "path_join" => {
@@ -2957,5 +3040,63 @@ main:
         let loaded = crate::load::load_program(&entry).unwrap();
         let lowered = crate::lower::lower_program(&loaded).unwrap();
         run_lowered_interpreted(&lowered, &RunConfig::default()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod resource_lifecycle_tests {
+    use super::{FileTable, HandleLifecycleError};
+
+    #[test]
+    fn close_is_linear_and_tombstones_closed_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("resource.txt");
+        let mut table = FileTable::new(1);
+        let id = table.insert(std::fs::File::create(&path).unwrap());
+
+        assert_eq!(table.open_resource_count(), 1);
+        assert_eq!(table.close(id), Ok(()));
+        assert_eq!(table.open_resource_count(), 0);
+        assert_eq!(
+            table.lifecycle_error(id),
+            Some(HandleLifecycleError::Closed)
+        );
+        assert_eq!(table.close(id), Err(HandleLifecycleError::Closed));
+        assert_eq!(
+            table.lifecycle_error(u64::MAX),
+            Some(HandleLifecycleError::Invalid)
+        );
+    }
+
+    #[test]
+    fn stdin_is_singleton_and_cannot_grow_the_table() {
+        let mut table = FileTable::new(1);
+        let first = table.insert_stdin();
+        let second = table.insert_stdin();
+        assert_eq!(first, second);
+        assert_eq!(table.open_resource_count(), 0);
+    }
+
+    #[test]
+    fn reserved_output_close_is_a_noop() {
+        let mut table = FileTable::new(1);
+        assert_eq!(table.close(1), Ok(()));
+        assert_eq!(table.close(1), Ok(()));
+        assert_eq!(table.lifecycle_error(1), None);
+    }
+
+    #[test]
+    fn dropping_table_releases_live_owned_resources() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("leaked.txt");
+        let mut table = FileTable::new(1);
+        table.insert(std::fs::File::create(&path).unwrap());
+        drop(table);
+
+        std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .expect("instance teardown must release owned OS files");
     }
 }

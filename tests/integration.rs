@@ -7980,6 +7980,116 @@ main:
     );
 }
 
+#[test]
+fn closed_file_aliases_return_stable_typed_lifecycle_errors() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    let target = dir.path().join("closed.txt");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"fs:
+  $import: "{fs}"
+result:
+  $import: "{result}"
+test:
+  $import: "{test}"
+main:
+  $function:
+    policy:
+      $policy:
+        fs-write:
+          - requirement: mandatory
+            scopes:
+              - dir: "{dir}"
+  return: $void
+  do:
+    - $let:
+        path:
+          $fs.path.new: "{target}"
+    - $let:
+        capability:
+          $policy.narrow: $args.policy
+          into: $fs.write-capability
+    - $let:
+        opened:
+          $fs.open-write: $path
+          capability: $capability
+    - $match: $opened
+      when:
+        - case:
+            $result.result.ok:
+              $bind: handle
+          do:
+            - $fs.closeable.close: $handle
+            - $let:
+                duplicate:
+                  $fs.closeable.close: $handle
+            - $match: $duplicate
+              when:
+                - case:
+                    $result.result.err:
+                      $fs.fs-error.resource-closed: null
+                  do:
+                    - $test.assert: true
+                - case:
+                    $wildcard: null
+                  do:
+                    - $test.fail: duplicate close did not return resource-closed
+            - $let:
+                after-close:
+                  $fs.writable.write-string: $handle
+                  s: forbidden
+            - $match: $after-close
+              when:
+                - case:
+                    $result.result.err:
+                      $fs.fs-error.resource-closed: null
+                  do:
+                    - $test.assert: true
+                - case:
+                    $wildcard: null
+                  do:
+                    - $test.fail: use after close did not return resource-closed
+        - case:
+            $result.result.err:
+              $wildcard: null
+          do:
+            - $test.fail: lifecycle fixture could not open file
+"#,
+            fs = path_str(&fs),
+            result = path_str(&result),
+            test = path_str(&test),
+            dir = path_str(dir.path()),
+            target = path_str(&target),
+        ),
+    )
+    .unwrap();
+
+    let program = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&program).expect("lifecycle program should lower");
+    vibra::execute::run_lowered(
+        &lowered,
+        &vibra::runtime::RunConfig {
+            approved_policy: Some(vibra::lower::PolicyType {
+                domains: std::collections::BTreeMap::from([(
+                    vibra::lower::CapabilityDomain::FsWrite,
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Dir(path_str(dir.path()))],
+                    }],
+                )]),
+            }),
+            ..vibra::runtime::RunConfig::default()
+        },
+    )
+    .expect("guest should observe lifecycle violations as typed errors");
+}
+
 // --- Issue #53: environment capability scopes are case-sensitive on Unix ---
 
 #[test]
