@@ -4,11 +4,47 @@ net:
   $import: ../stdlib/src/net.vibra
 result:
   $import: ../stdlib/src/result.vibra
-connect-reports-the-current-unsupported-runtime:
+address-parsing-is-typed:
+  $test: core
+  tags:
+  - stdlib
+  - network
+  do:
+  - $let:
+      valid:
+        $net.parse-address: 127.0.0.1:8080
+  - $match: $valid
+    when:
+    - case:
+        $result.result.ok:
+          $wildcard: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: valid socket address was rejected
+  - $let:
+      invalid:
+        $net.parse-address: not-an-address
+  - $match: $invalid
+    when:
+    - case:
+        $result.result.err:
+          $net.net-error.invalid-address:
+            $wildcard: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: invalid socket address was accepted
+connect-requires-the-exact-target-grant:
   $test: net
   tags:
   - stdlib
   - capability
+  - network
   policy:
     $policy:
       net-connect:
@@ -21,27 +57,30 @@ connect-reports-the-current-unsupported-runtime:
         $policy.narrow: $args.policy
         into: $net.connect-capability
   - $let:
-      outcome:
-        $net.connect: 127.0.0.1:9
-        capability: $capability
-  - $match: $outcome
+      parsed:
+        $net.parse-address: 127.0.0.1:10
+  - $match: $parsed
     when:
     - case:
-        $result.result.err:
-          $bind: error
+        $result.result.ok:
+          $bind: address
       do:
-      - $match: $error
+      - $let:
+          outcome:
+            $net.connect: $address
+            capability: $capability
+      - $match: $outcome
         when:
         - case:
-            $net.net-error.unsupported:
-              $wildcard: null
+            $result.result.err:
+              $net.net-error.permission-denied: null
           do:
           - $test.assert: true
         - case:
             $wildcard: null
           do:
-          - $test.fail: expected unsupported network runtime
+          - $test.fail: out-of-scope network target was attempted
     - case:
-        $result.result.ok: null
+        $wildcard: null
       do:
-      - $test.fail: network runtime unexpectedly connected
+      - $test.fail: test socket address did not parse

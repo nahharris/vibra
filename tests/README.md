@@ -87,7 +87,7 @@ itself. Run each capability contract with the permission it declares:
 
 ```sh
 vibra test --profile env --filter get-reads-an-explicitly-granted-variable --allow-env PATH
-vibra test --profile net --filter connect-reports-the-current-unsupported-runtime --allow-net 127.0.0.1:9
+vibra test --profile net --filter connect-requires-the-exact-target-grant --allow-net 127.0.0.1:9
 vibra test --profile process --filter run-reports-the-current-unsupported-runtime --allow-run echo
 vibra test --profile random --filter bytes-uses-the-granted-random-source --allow-random
 vibra test --profile system --filter now-unix-millis-uses-the-granted-clock --allow-clock

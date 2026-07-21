@@ -2,23 +2,67 @@ test:
   $import: ../stdlib/src/test.vibra
 fs:
   $import: ../stdlib/src/fs.vibra
+option:
+  $import: ../stdlib/src/option.vibra
+result:
+  $import: ../stdlib/src/result.vibra
 path-new-wraps-a-string:
   $test: core
-  tags: [stdlib, filesystem]
+  tags:
+  - stdlib
+  - filesystem
   do:
-    - $let:
-        path:
-          $fs.path.new: contract.txt
-    - $let:
-        raw:
-          $cast: $path
-          into: $str
-    - $match: $raw
-      when:
-      - case: contract.txt
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: path constructor changed the source string
+  - $let:
+      path:
+        $fs.path.new: contract.txt
+  - $let:
+      raw:
+        $cast: $path
+        into: $str
+  - $match: $raw
+    when:
+    - case: contract.txt
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: path constructor changed the source string
+path-name-and-components-are-structural:
+  $test: core
+  tags:
+  - stdlib
+  - filesystem
+  do:
+  - $let:
+      base:
+        $fs.path.new: alpha
+  - $let:
+      path:
+        $fs.path.join: $base
+        segment: beta.txt
+  - $match:
+      $fs.path.file-name: $path
+    when:
+    - case:
+        $option.option.some: beta.txt
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: file name was not the final component
+  - $match:
+      $fs.path.components: $path
+    when:
+    - case:
+        $result.result.ok:
+          $array:
+          - alpha
+          - beta.txt
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: path components were not platform-neutral

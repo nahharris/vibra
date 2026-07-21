@@ -117,6 +117,7 @@ pub enum HandleAccess {
     Read,
     Write,
     ReadWrite,
+    Process,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1637,6 +1638,7 @@ fn parse_handle_access(access: &str) -> Result<HandleAccess> {
         "read" => Ok(HandleAccess::Read),
         "write" => Ok(HandleAccess::Write),
         "read-write" => Ok(HandleAccess::ReadWrite),
+        "process" => Ok(HandleAccess::Process),
         _ => bail!("E-CAP-004: unknown opaque handle type `$handle.{access}`"),
     }
 }
@@ -3920,18 +3922,26 @@ fn abi_value_type_matches(
         A::Bool => matches!(resolved, TypeRef::Bool),
         A::Int64 => matches!(resolved, TypeRef::Int64),
         A::UInt64 => matches!(resolved, TypeRef::UInt64),
+        A::Duration => named_ends("duration"),
+        A::Instant => named_ends("instant"),
+        A::NetAddress => named_ends("address"),
+        A::TcpStream => named_ends("tcp-stream"),
+        A::TcpListener => named_ends("tcp-listener"),
+        A::UdpSocket => named_ends("udp-socket"),
         A::Float64 => matches!(resolved, TypeRef::Float64),
         A::Str => matches!(resolved, TypeRef::Str),
         A::Bytes => named_ends("bytes"),
         A::Path => named_ends("path"),
         A::ReadHandle => matches!(resolved, TypeRef::HostHandle(HandleAccess::Read | HandleAccess::ReadWrite)),
         A::WriteHandle => matches!(resolved, TypeRef::HostHandle(HandleAccess::Write | HandleAccess::ReadWrite)),
+        A::ProcessHandle => matches!(resolved, TypeRef::HostHandle(HandleAccess::Process)),
         A::AnyHandle => matches!(resolved, TypeRef::HostHandle(_)),
         A::ResultVoid => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Void, t, aliases))),
         A::ResultStr => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
         A::ResultBytes => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Bytes, t, aliases))),
         A::ResultReadHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::ReadHandle, t, aliases))),
         A::ResultWriteHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::WriteHandle, t, aliases))),
+        A::ResultProcessHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::ProcessHandle, t, aliases))),
         A::ResultPaths => instantiated("result").is_some_and(|args| matches!(args.first(), Some(TypeRef::Array(inner)) if abi_value_type_matches(A::Path, inner, aliases))),
         A::ResultPath => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
         A::OptionPath => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
@@ -3939,6 +3949,7 @@ fn abi_value_type_matches(
         A::Any => true,
         A::Array => matches!(resolved, TypeRef::Array(_)),
         A::StringMap => matches!(resolved, TypeRef::Map { key, .. } if abi_value_type_matches(A::Str, key, aliases)),
+        A::Record => matches!(resolved, TypeRef::Record(_)),
         A::OptionAny => instantiated("option").is_some(),
         A::ResultAny => instantiated("result").is_some(),
         A::CodeDocument => named_ends("document"),
@@ -6755,6 +6766,7 @@ fn parse_call(
             // Type arguments at a call site are concrete types; `$self` makes
             // no sense here, so disallow it.
             let ty = parse_type_ref(tv, &[], &empty_skeletons, warnings, false)?;
+            let ty = resolve_call_site_type_argument(ty, locals);
             let q = qualify_named_type(&function.alias, ty, type_aliases);
             type_args.push(q.clone());
             subst.insert(tp.clone(), q);
@@ -8507,7 +8519,15 @@ fn resolve_enum_tag_ref(
         if alias.is_empty() || enum_name.is_empty() || tag.is_empty() {
             bail!("invalid constructor `{raw}`");
         }
-        let enum_key = format!("{alias}.{enum_name}");
+        let unscoped = format!("{alias}.{enum_name}");
+        let scoped = if module_scope.is_empty() {
+            None
+        } else {
+            Some(format!("{module_scope}.{unscoped}"))
+        };
+        let enum_key = scoped
+            .filter(|candidate| enums.contains_key(candidate))
+            .unwrap_or(unscoped);
         if qualified_type_leaks_imported_module_private(&enum_key) {
             bail!("unknown enum reference `{enum_key}` in `{raw}`");
         }
@@ -8581,4 +8601,87 @@ fn is_kebab_case(name: &str) -> bool {
     }
     name.chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+fn collect_generic_names(ty: &TypeRef, out: &mut HashSet<String>) {
+    match ty {
+        TypeRef::Generic(name) => {
+            out.insert(name.clone());
+        }
+        TypeRef::Array(inner) | TypeRef::Mutable(inner) | TypeRef::Newtype { inner, .. } => {
+            collect_generic_names(inner, out)
+        }
+        TypeRef::Reference { inner, .. } => collect_generic_names(inner, out),
+        TypeRef::Map { key, value } => {
+            collect_generic_names(key, out);
+            collect_generic_names(value, out);
+        }
+        TypeRef::Tuple(items) | TypeRef::Union(items) | TypeRef::Intersect(items) => {
+            for item in items {
+                collect_generic_names(item, out);
+            }
+        }
+        TypeRef::Record(fields) => {
+            for field in fields.values() {
+                collect_generic_names(field, out);
+            }
+        }
+        TypeRef::Instantiated { type_args, .. } => {
+            for arg in type_args {
+                collect_generic_names(arg, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn resolve_call_site_type_argument(ty: TypeRef, locals: &HashMap<String, TypeRef>) -> TypeRef {
+    let mut enclosing_generics = HashSet::new();
+    for local_ty in locals.values() {
+        collect_generic_names(local_ty, &mut enclosing_generics);
+    }
+    match ty {
+        TypeRef::Named(ref name) if enclosing_generics.contains(name) => {
+            TypeRef::Generic(name.clone())
+        }
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod enum_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn qualified_enum_constructor_prefers_import_in_current_module_scope() {
+        let mut enums = HashMap::new();
+        enums.insert(
+            "result.option.option".to_string(),
+            EnumDef {
+                alias: "result.option.option".to_string(),
+                name: "option".to_string(),
+                type_params: vec!["t".to_string()],
+                type_param_bounds: vec![vec![]],
+                tags: BTreeMap::new(),
+            },
+        );
+        let (key, tag) = resolve_enum_tag_ref("$option.option.some", "result", &enums).unwrap();
+        assert_eq!(key, "result.option.option");
+        assert_eq!(tag, "some");
+    }
+
+    #[test]
+    fn generic_call_type_argument_forwards_enclosing_generic() {
+        let locals = HashMap::from([(
+            "input".to_string(),
+            TypeRef::Instantiated {
+                base: "result.result".to_string(),
+                type_args: vec![TypeRef::Generic("t".to_string()), TypeRef::Str],
+            },
+        )]);
+        assert_eq!(
+            resolve_call_site_type_argument(TypeRef::Named("t".to_string()), &locals),
+            TypeRef::Generic("t".to_string())
+        );
+    }
 }

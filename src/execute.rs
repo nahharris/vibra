@@ -11,8 +11,11 @@ use anyhow::{bail, Context, Result};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{Read, Write};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cell::RefCell, rc::Rc};
 
 pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
@@ -280,6 +283,13 @@ enum FileHandle {
     Stdout,
     Stderr,
     File(File),
+    Child(Child),
+    ChildStdin(ChildStdin),
+    ChildStdout(ChildStdout),
+    ChildStderr(ChildStderr),
+    TcpStream(TcpStream),
+    TcpListener(TcpListener),
+    UdpSocket(UdpSocket),
 }
 
 #[derive(Clone, Copy)]
@@ -294,6 +304,12 @@ enum HandleKind {
     Stdout,
     Stderr,
     File,
+    Child,
+    ReadPipe,
+    WritePipe,
+    TcpStream,
+    TcpListener,
+    UdpSocket,
 }
 
 impl FileHandle {
@@ -303,6 +319,12 @@ impl FileHandle {
             FileHandle::Stdout => HandleKind::Stdout,
             FileHandle::Stderr => HandleKind::Stderr,
             FileHandle::File(_) => HandleKind::File,
+            FileHandle::Child(_) => HandleKind::Child,
+            FileHandle::ChildStdin(_) => HandleKind::WritePipe,
+            FileHandle::ChildStdout(_) | FileHandle::ChildStderr(_) => HandleKind::ReadPipe,
+            FileHandle::TcpStream(_) => HandleKind::TcpStream,
+            FileHandle::TcpListener(_) => HandleKind::TcpListener,
+            FileHandle::UdpSocket(_) => HandleKind::UdpSocket,
         }
     }
 }
@@ -349,7 +371,19 @@ impl FileTable {
     fn open_resource_count(&self) -> usize {
         self.handles
             .values()
-            .filter(|handle| matches!(handle, FileHandle::File(_)))
+            .filter(|handle| {
+                matches!(
+                    handle,
+                    FileHandle::File(_)
+                        | FileHandle::Child(_)
+                        | FileHandle::ChildStdin(_)
+                        | FileHandle::ChildStdout(_)
+                        | FileHandle::ChildStderr(_)
+                        | FileHandle::TcpStream(_)
+                        | FileHandle::TcpListener(_)
+                        | FileHandle::UdpSocket(_)
+                )
+            })
             .count()
     }
 
@@ -362,6 +396,55 @@ impl FileTable {
         let id = self.next;
         self.next += 1;
         self.handles.insert(id, FileHandle::File(file));
+        id
+    }
+
+    fn insert_child(&mut self, child: Child) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::Child(child));
+        id
+    }
+
+    fn insert_child_stdin(&mut self, pipe: ChildStdin) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::ChildStdin(pipe));
+        id
+    }
+
+    fn insert_child_stdout(&mut self, pipe: ChildStdout) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::ChildStdout(pipe));
+        id
+    }
+
+    fn insert_child_stderr(&mut self, pipe: ChildStderr) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::ChildStderr(pipe));
+        id
+    }
+
+    fn insert_tcp_stream(&mut self, stream: TcpStream) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::TcpStream(stream));
+        id
+    }
+
+    fn insert_tcp_listener(&mut self, listener: TcpListener) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::TcpListener(listener));
+        id
+    }
+
+    fn insert_udp_socket(&mut self, socket: UdpSocket) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        self.handles.insert(id, FileHandle::UdpSocket(socket));
         id
     }
 
@@ -477,9 +560,68 @@ impl FileTable {
                 Some(FileHandle::File(file)) => file.write_all(bytes),
                 _ => unreachable!("handle kind changed between lookups"),
             },
+            Some(HandleKind::WritePipe) => match self.handles.get_mut(&id) {
+                Some(FileHandle::ChildStdin(pipe)) => pipe.write_all(bytes),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            Some(HandleKind::ReadPipe) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "handle is not writable",
+            )),
+            Some(HandleKind::TcpStream) => match self.handles.get_mut(&id) {
+                Some(FileHandle::TcpStream(stream)) => stream.write_all(bytes),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            Some(HandleKind::TcpListener | HandleKind::UdpSocket) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "handle is not a byte stream",
+            )),
+            Some(HandleKind::Child) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "process handle is not writable",
+            )),
             None => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("invalid file handle `{id}`"),
+            )),
+        }
+    }
+
+    fn write_some_to_handle(&mut self, id: u64, bytes: &[u8]) -> std::io::Result<usize> {
+        match self.handles.get(&id).map(FileHandle::kind) {
+            Some(HandleKind::Stdout) => self.write_std(StdStream::Out, bytes).map(|()| bytes.len()),
+            Some(HandleKind::Stderr) => self.write_std(StdStream::Err, bytes).map(|()| bytes.len()),
+            Some(HandleKind::Stdin) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "handle is not writable",
+            )),
+            Some(HandleKind::File) => match self.handles.get_mut(&id) {
+                Some(FileHandle::File(file)) => file.write(bytes),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            Some(HandleKind::WritePipe) => match self.handles.get_mut(&id) {
+                Some(FileHandle::ChildStdin(pipe)) => pipe.write(bytes),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            Some(HandleKind::ReadPipe) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "handle is not writable",
+            )),
+            Some(HandleKind::TcpStream) => match self.handles.get_mut(&id) {
+                Some(FileHandle::TcpStream(stream)) => stream.write(bytes),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            Some(HandleKind::TcpListener | HandleKind::UdpSocket) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "handle is not a byte stream",
+            )),
+            Some(HandleKind::Child) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "process handle is not writable",
+            )),
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid file handle",
             )),
         }
     }
@@ -494,6 +636,17 @@ impl FileTable {
                 Some(FileHandle::File(file)) => file.flush(),
                 _ => unreachable!("handle kind changed between lookups"),
             },
+            Some(HandleKind::WritePipe) => match self.handles.get_mut(&id) {
+                Some(FileHandle::ChildStdin(pipe)) => pipe.flush(),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            Some(HandleKind::ReadPipe) => Ok(()),
+            Some(HandleKind::TcpStream) => match self.handles.get_mut(&id) {
+                Some(FileHandle::TcpStream(stream)) => stream.flush(),
+                _ => unreachable!("handle kind changed between lookups"),
+            },
+            Some(HandleKind::TcpListener | HandleKind::UdpSocket) => Ok(()),
+            Some(HandleKind::Child) => Ok(()),
             None => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("invalid file handle `{id}`"),
@@ -506,6 +659,12 @@ impl Drop for FileTable {
     fn drop(&mut self) {
         // Dropping each File closes its OS descriptor. Clear explicitly to
         // make the instance-boundary cleanup contract visible and immediate.
+        for handle in self.handles.values_mut() {
+            if let FileHandle::Child(child) = handle {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
         self.handles.clear();
     }
 }
@@ -1968,6 +2127,48 @@ fn result_err(
     }
 }
 
+fn process_output_value(
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+) -> RuntimeValue {
+    RuntimeValue::Record(BTreeMap::from([
+        ("success".to_string(), RuntimeValue::Bool(status.success())),
+        (
+            "code".to_string(),
+            RuntimeValue::Int(i64::from(status.code().unwrap_or(-1))),
+        ),
+        ("stdout".to_string(), runtime_bytes(stdout)),
+        ("stderr".to_string(), runtime_bytes(stderr)),
+    ]))
+}
+
+fn process_io_error(sig: &crate::lower::FunctionSig, error: std::io::Error) -> RuntimeValue {
+    let tag = match error.kind() {
+        std::io::ErrorKind::NotFound => "not-found",
+        std::io::ErrorKind::PermissionDenied => "permission-denied",
+        std::io::ErrorKind::InvalidInput => "invalid-input",
+        _ => "io",
+    };
+    result_err(sig, tag, (tag == "io").then(|| error.to_string()))
+}
+
+fn net_io_error(sig: &crate::lower::FunctionSig, error: std::io::Error) -> RuntimeValue {
+    let tag = match error.kind() {
+        std::io::ErrorKind::AddrInUse => "address-in-use",
+        std::io::ErrorKind::AddrNotAvailable => "address-not-available",
+        std::io::ErrorKind::ConnectionRefused => "connection-refused",
+        std::io::ErrorKind::ConnectionReset => "connection-reset",
+        std::io::ErrorKind::ConnectionAborted => "connection-aborted",
+        std::io::ErrorKind::NotConnected => "not-connected",
+        std::io::ErrorKind::TimedOut => "timed-out",
+        std::io::ErrorKind::WouldBlock => "would-block",
+        std::io::ErrorKind::InvalidInput => "invalid-input",
+        _ => "io",
+    };
+    result_err(sig, tag, Some(error.to_string()))
+}
+
 fn fs_result<T>(
     sig: &crate::lower::FunctionSig,
     op: impl FnOnce() -> std::io::Result<T>,
@@ -2447,7 +2648,24 @@ fn exec_vibra_v1(
                     let mut s = String::new();
                     file.read_to_string(&mut s).map(|_| s)
                 }
-                FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
+                FileHandle::TcpStream(stream) => {
+                    let mut s = String::new();
+                    stream.read_to_string(&mut s).map(|_| s)
+                }
+                FileHandle::ChildStdout(pipe) => {
+                    let mut s = String::new();
+                    pipe.read_to_string(&mut s).map(|_| s)
+                }
+                FileHandle::ChildStderr(pipe) => {
+                    let mut s = String::new();
+                    pipe.read_to_string(&mut s).map(|_| s)
+                }
+                FileHandle::Stdout
+                | FileHandle::Stderr
+                | FileHandle::Child(_)
+                | FileHandle::ChildStdin(_)
+                | FileHandle::TcpListener(_)
+                | FileHandle::UdpSocket(_) => Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "handle is not readable",
                 )),
@@ -2468,7 +2686,24 @@ fn exec_vibra_v1(
                     let mut bytes = Vec::new();
                     file.read_to_end(&mut bytes).map(|_| bytes)
                 }
-                FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
+                FileHandle::TcpStream(stream) => {
+                    let mut bytes = Vec::new();
+                    stream.read_to_end(&mut bytes).map(|_| bytes)
+                }
+                FileHandle::ChildStdout(pipe) => {
+                    let mut bytes = Vec::new();
+                    pipe.read_to_end(&mut bytes).map(|_| bytes)
+                }
+                FileHandle::ChildStderr(pipe) => {
+                    let mut bytes = Vec::new();
+                    pipe.read_to_end(&mut bytes).map(|_| bytes)
+                }
+                FileHandle::Stdout
+                | FileHandle::Stderr
+                | FileHandle::Child(_)
+                | FileHandle::ChildStdin(_)
+                | FileHandle::TcpListener(_)
+                | FileHandle::UdpSocket(_) => Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "handle is not readable",
                 )),
@@ -2489,12 +2724,72 @@ fn exec_vibra_v1(
                     })
                 }
                 FileHandle::File(file) => read_line_from_file(file),
-                FileHandle::Stdout | FileHandle::Stderr => Err(std::io::Error::new(
+                FileHandle::TcpStream(stream) => read_line_from_file(stream),
+                FileHandle::ChildStdout(pipe) => read_line_from_file(pipe),
+                FileHandle::ChildStderr(pipe) => read_line_from_file(pipe),
+                FileHandle::Stdout
+                | FileHandle::Stderr
+                | FileHandle::Child(_)
+                | FileHandle::ChildStdin(_)
+                | FileHandle::TcpListener(_)
+                | FileHandle::UdpSocket(_) => Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "handle is not readable",
                 )),
             };
             Ok(fs_result(sig, || value, RuntimeValue::Str))
+        }
+        "fd_read_bytes_up_to" => {
+            let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
+            if let Some(error) = lifecycle_error {
+                return Ok(result_err(sig, error.tag(), None));
+            }
+            let requested = usize::try_from(value_i64(&args[1])?).unwrap_or(usize::MAX);
+            let limit = requested.min(config.max_alloc_len);
+            let value = match files.get_mut(handle)? {
+                FileHandle::Stdin => {
+                    let mut bytes = Vec::new();
+                    std::io::stdin()
+                        .take(limit as u64)
+                        .read_to_end(&mut bytes)
+                        .map(|_| bytes)
+                }
+                FileHandle::File(file) => {
+                    let mut bytes = Vec::new();
+                    file.take(limit as u64)
+                        .read_to_end(&mut bytes)
+                        .map(|_| bytes)
+                }
+                FileHandle::TcpStream(stream) => {
+                    let mut bytes = vec![0; limit];
+                    stream.read(&mut bytes).map(|count| {
+                        bytes.truncate(count);
+                        bytes
+                    })
+                }
+                FileHandle::ChildStdout(pipe) => {
+                    let mut bytes = Vec::new();
+                    pipe.take(limit as u64)
+                        .read_to_end(&mut bytes)
+                        .map(|_| bytes)
+                }
+                FileHandle::ChildStderr(pipe) => {
+                    let mut bytes = Vec::new();
+                    pipe.take(limit as u64)
+                        .read_to_end(&mut bytes)
+                        .map(|_| bytes)
+                }
+                FileHandle::Stdout
+                | FileHandle::Stderr
+                | FileHandle::Child(_)
+                | FileHandle::ChildStdin(_)
+                | FileHandle::TcpListener(_)
+                | FileHandle::UdpSocket(_) => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "handle is not readable",
+                )),
+            };
+            Ok(fs_result(sig, || value, runtime_bytes))
         }
         "fd_write" => {
             let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
@@ -2515,6 +2810,20 @@ fn exec_vibra_v1(
             files.get_mut(handle)?;
             let result = files.write_to_handle(handle, &contents);
             Ok(fs_result(sig, || result, |_| RuntimeValue::Void))
+        }
+        "fd_write_bytes_some" => {
+            let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
+            if let Some(error) = lifecycle_error {
+                return Ok(result_err(sig, error.tag(), None));
+            }
+            let contents = value_bytes(&args[1])?;
+            files.get_mut(handle)?;
+            let result = files.write_some_to_handle(handle, &contents);
+            Ok(fs_result(
+                sig,
+                || result,
+                |written| RuntimeValue::Int(written.try_into().unwrap_or(i64::MAX)),
+            ))
         }
         "fd_sync" => {
             let (handle, lifecycle_error) = checked_handle(&args[0], files)?;
@@ -2554,6 +2863,27 @@ fn exec_vibra_v1(
                 .extension()
                 .map(|e| e.to_string_lossy().to_string());
             Ok(option_value(sig, extension.map(RuntimeValue::Str)))
+        }
+        "path_file_name" => {
+            let path = value_string(&args[0])?;
+            let name = Path::new(&path)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string());
+            Ok(option_value(sig, name.map(RuntimeValue::Str)))
+        }
+        "path_components" => {
+            let path = value_string(&args[0])?;
+            let mut components = Vec::new();
+            for component in Path::new(&path).components() {
+                let component = component.as_os_str().to_string_lossy().to_string();
+                if component.len() > config.max_alloc_len
+                    || components.len() >= config.max_alloc_len
+                {
+                    return Ok(result_err(sig, "limit-exceeded", None));
+                }
+                components.push(RuntimeValue::Str(component));
+            }
+            Ok(result_ok(sig, RuntimeValue::Array(components)))
         }
         "str_scalar_len" => Ok(RuntimeValue::Int(
             i64::try_from(value_string(&args[0])?.chars().count()).unwrap_or(i64::MAX),
@@ -2842,13 +3172,20 @@ fn exec_vibra_v1(
                 Err(_) => result_err(sig, "invalid-utf8", None),
             })
         }
-        "fs_open_read" | "fs_open_write" | "fs_open_append" | "fs_open_read_write" => {
+        "fs_open_read"
+        | "fs_open_write"
+        | "fs_open_write_options"
+        | "fs_open_append"
+        | "fs_open_read_write" => {
             let path = value_string(&args[0])?;
             let mut resolved: Option<PathBuf> = None;
             let checks: Vec<(&PolicyType, CapabilityDomain)> = match name {
                 "fs_open_read" => vec![(value_policy(&args[1])?, CapabilityDomain::FsRead)],
                 "fs_open_write" | "fs_open_append" => {
                     vec![(value_policy(&args[1])?, CapabilityDomain::FsWrite)]
+                }
+                "fs_open_write_options" => {
+                    vec![(value_policy(&args[4])?, CapabilityDomain::FsWrite)]
                 }
                 _ => vec![
                     (value_policy(&args[1])?, CapabilityDomain::FsRead),
@@ -2869,6 +3206,11 @@ fn exec_vibra_v1(
             match name {
                 "fs_open_read" => options.read(true),
                 "fs_open_write" => options.create(true).truncate(true).write(true),
+                "fs_open_write_options" => options
+                    .create(value_bool(&args[1])?)
+                    .create_new(value_bool(&args[2])?)
+                    .truncate(value_bool(&args[3])?)
+                    .write(true),
                 "fs_open_append" => options.create(true).append(true),
                 _ => options.create(true).truncate(false).read(true).write(true),
             };
@@ -2996,6 +3338,43 @@ fn exec_vibra_v1(
                 },
             ))
         }
+        "fs_read_dir_entries" => {
+            let path = value_string(&args[0])?;
+            let logical_path = PathBuf::from(&path);
+            let policy = value_policy(&args[1])?;
+            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
+                Ok(p) => p,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || {
+                    let mut entries = Vec::new();
+                    for entry in fs::read_dir(p)? {
+                        let entry = entry?;
+                        let metadata = entry.metadata()?;
+                        let name = entry.file_name();
+                        entries.push(RuntimeValue::Record(BTreeMap::from([
+                            (
+                                "path".to_string(),
+                                RuntimeValue::Str(logical_path.join(&name).display().to_string()),
+                            ),
+                            (
+                                "name".to_string(),
+                                RuntimeValue::Str(name.to_string_lossy().to_string()),
+                            ),
+                            ("is-dir".to_string(), RuntimeValue::Bool(metadata.is_dir())),
+                            (
+                                "size".to_string(),
+                                RuntimeValue::Int(metadata.len().try_into().unwrap_or(i64::MAX)),
+                            ),
+                        ])));
+                    }
+                    Ok(entries)
+                },
+                RuntimeValue::Array,
+            ))
+        }
         "fs_metadata" => {
             let path = value_string(&args[0])?;
             let policy = value_policy(&args[1])?;
@@ -3022,6 +3401,45 @@ fn exec_vibra_v1(
                 |c| RuntimeValue::Str(c.display().to_string()),
             ))
         }
+        "fs_rename" => {
+            let from = value_string(&args[0])?;
+            let to = value_string(&args[1])?;
+            let policy = value_policy(&args[2])?;
+            let from = match policy_path_or_denied(sig, &from, policy, CapabilityDomain::FsWrite) {
+                Ok(path) => path,
+                Err(denied) => return Ok(*denied),
+            };
+            let to = match policy_path_or_denied(sig, &to, policy, CapabilityDomain::FsWrite) {
+                Ok(path) => path,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || fs::rename(from, to),
+                |_| RuntimeValue::Void,
+            ))
+        }
+        "fs_copy" => {
+            let from = value_string(&args[0])?;
+            let to = value_string(&args[1])?;
+            let read_policy = value_policy(&args[2])?;
+            let write_policy = value_policy(&args[3])?;
+            let from =
+                match policy_path_or_denied(sig, &from, read_policy, CapabilityDomain::FsRead) {
+                    Ok(path) => path,
+                    Err(denied) => return Ok(*denied),
+                };
+            let to = match policy_path_or_denied(sig, &to, write_policy, CapabilityDomain::FsWrite)
+            {
+                Ok(path) => path,
+                Err(denied) => return Ok(*denied),
+            };
+            Ok(fs_result(
+                sig,
+                || fs::copy(from, to),
+                |_| RuntimeValue::Void,
+            ))
+        }
         "env_get" => {
             let var = value_string(&args[0])?;
             let policy = value_policy(&args[1])?;
@@ -3043,22 +3461,434 @@ fn exec_vibra_v1(
             std::env::set_var(var, value);
             Ok(result_ok(sig, RuntimeValue::Void))
         }
-        "net_connect" | "net_listen" | "process_run" => {
-            let target = value_string(&args[0])?;
+        "env_remove" => {
+            let var = value_string(&args[0])?;
             let policy = value_policy(&args[1])?;
-            let (domain, what) = match name {
-                "net_connect" => (CapabilityDomain::NetConnect, "network"),
-                "net_listen" => (CapabilityDomain::NetListen, "network"),
-                _ => (CapabilityDomain::ProcessRun, "process"),
-            };
-            if ensure_policy_scope(policy, domain, &target).is_err() {
+            if ensure_policy_scope(policy, CapabilityDomain::EnvWrite, &var).is_err() {
                 return Ok(result_err(sig, "permission-denied", None));
             }
-            Ok(result_err(
-                sig,
-                "unsupported",
-                Some(format!("{what} runtime is not implemented yet")),
+            if !is_valid_env_name(&var) {
+                return Ok(result_err(sig, "invalid-name", None));
+            }
+            std::env::remove_var(var);
+            Ok(result_ok(sig, RuntimeValue::Void))
+        }
+        "env_list" => {
+            let policy = value_policy(&args[0])?;
+            let mut names = std::env::vars_os()
+                .filter_map(|(name, _)| name.into_string().ok())
+                .filter(|name| ensure_policy_scope(policy, CapabilityDomain::EnvRead, name).is_ok())
+                .collect::<Vec<_>>();
+            names.sort();
+            Ok(RuntimeValue::Array(
+                names.into_iter().map(RuntimeValue::Str).collect(),
             ))
+        }
+        "net_address_parse" => match value_string(&args[0])?.parse::<SocketAddr>() {
+            Ok(address) => Ok(result_ok(sig, RuntimeValue::Str(address.to_string()))),
+            Err(error) => Ok(result_err(sig, "invalid-address", Some(error.to_string()))),
+        },
+        "net_resolve" => {
+            let target = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            if ensure_policy_scope(policy, CapabilityDomain::NetConnect, &target).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            match target.to_socket_addrs() {
+                Ok(addresses) => Ok(result_ok(
+                    sig,
+                    RuntimeValue::Array(
+                        addresses
+                            .map(|a| RuntimeValue::Str(a.to_string()))
+                            .collect(),
+                    ),
+                )),
+                Err(error) => Ok(result_err(sig, "dns-failed", Some(error.to_string()))),
+            }
+        }
+        "net_connect" => {
+            let target = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            if ensure_policy_scope(policy, CapabilityDomain::NetConnect, &target).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            if files.at_capacity() {
+                return Ok(result_err(
+                    sig,
+                    "resource-limit",
+                    Some("host resource limit reached".into()),
+                ));
+            }
+            match TcpStream::connect(&target) {
+                Ok(stream) => {
+                    let id = files.insert_tcp_stream(stream);
+                    Ok(result_ok(
+                        sig,
+                        RuntimeValue::HostHandle(HostHandle {
+                            id,
+                            access: HandleAccess::ReadWrite,
+                        }),
+                    ))
+                }
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_listen" => {
+            let target = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            if ensure_policy_scope(policy, CapabilityDomain::NetListen, &target).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            if files.at_capacity() {
+                return Ok(result_err(
+                    sig,
+                    "resource-limit",
+                    Some("host resource limit reached".into()),
+                ));
+            }
+            match TcpListener::bind(&target) {
+                Ok(listener) => {
+                    let id = files.insert_tcp_listener(listener);
+                    Ok(result_ok(
+                        sig,
+                        RuntimeValue::HostHandle(HostHandle {
+                            id,
+                            access: HandleAccess::Read,
+                        }),
+                    ))
+                }
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_accept" => {
+            let id = value_handle(&args[0])?;
+            if let Some(error) = files.lifecycle_error(id) {
+                return Ok(result_err(sig, error.tag(), None));
+            }
+            if files.at_capacity() {
+                return Ok(result_err(
+                    sig,
+                    "resource-limit",
+                    Some("host resource limit reached".into()),
+                ));
+            }
+            let accepted = match files.get_mut(id)? {
+                FileHandle::TcpListener(listener) => listener.accept(),
+                _ => return Ok(result_err(sig, "invalid-handle", None)),
+            };
+            match accepted {
+                Ok((stream, _)) => {
+                    let id = files.insert_tcp_stream(stream);
+                    Ok(result_ok(
+                        sig,
+                        RuntimeValue::HostHandle(HostHandle {
+                            id,
+                            access: HandleAccess::ReadWrite,
+                        }),
+                    ))
+                }
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_local_address" => {
+            let id = value_handle(&args[0])?;
+            if let Some(error) = files.lifecycle_error(id) {
+                return Ok(result_err(sig, error.tag(), None));
+            }
+            let address = match files.get_mut(id)? {
+                FileHandle::TcpStream(v) => v.local_addr(),
+                FileHandle::TcpListener(v) => v.local_addr(),
+                FileHandle::UdpSocket(v) => v.local_addr(),
+                _ => return Ok(result_err(sig, "invalid-handle", None)),
+            };
+            match address {
+                Ok(v) => Ok(result_ok(sig, RuntimeValue::Str(v.to_string()))),
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_set_deadline" => {
+            let id = value_handle(&args[0])?;
+            let millis =
+                u64::try_from(value_i64(&args[1])?).context("deadline must be non-negative")?;
+            let timeout = (millis != 0).then(|| Duration::from_millis(millis));
+            let result = match files.get_mut(id)? {
+                FileHandle::TcpStream(v) => v
+                    .set_read_timeout(timeout)
+                    .and_then(|_| v.set_write_timeout(timeout)),
+                _ => return Ok(result_err(sig, "invalid-handle", None)),
+            };
+            match result {
+                Ok(()) => Ok(result_ok(sig, RuntimeValue::Void)),
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_shutdown" => {
+            let id = value_handle(&args[0])?;
+            let direction = match value_string(&args[1])?.as_str() {
+                "read" => Shutdown::Read,
+                "write" => Shutdown::Write,
+                "both" => Shutdown::Both,
+                _ => {
+                    return Ok(result_err(
+                        sig,
+                        "invalid-input",
+                        Some("expected read, write, or both".into()),
+                    ))
+                }
+            };
+            let result = match files.get_mut(id)? {
+                FileHandle::TcpStream(v) => v.shutdown(direction),
+                _ => return Ok(result_err(sig, "invalid-handle", None)),
+            };
+            match result {
+                Ok(()) => Ok(result_ok(sig, RuntimeValue::Void)),
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_udp_bind" => {
+            let target = value_string(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            if ensure_policy_scope(policy, CapabilityDomain::NetListen, &target).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            if files.at_capacity() {
+                return Ok(result_err(
+                    sig,
+                    "resource-limit",
+                    Some("host resource limit reached".into()),
+                ));
+            }
+            match UdpSocket::bind(&target) {
+                Ok(socket) => {
+                    let id = files.insert_udp_socket(socket);
+                    Ok(result_ok(
+                        sig,
+                        RuntimeValue::HostHandle(HostHandle {
+                            id,
+                            access: HandleAccess::ReadWrite,
+                        }),
+                    ))
+                }
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_udp_connect" => {
+            let id = value_handle(&args[0])?;
+            let target = value_string(&args[1])?;
+            let policy = value_policy(&args[2])?;
+            if ensure_policy_scope(policy, CapabilityDomain::NetConnect, &target).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            let result = match files.get_mut(id)? {
+                FileHandle::UdpSocket(v) => v.connect(&target),
+                _ => return Ok(result_err(sig, "invalid-handle", None)),
+            };
+            match result {
+                Ok(()) => Ok(result_ok(sig, RuntimeValue::Void)),
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_udp_send_to" => {
+            let id = value_handle(&args[0])?;
+            let bytes = value_bytes(&args[1])?;
+            let target = value_string(&args[2])?;
+            let policy = value_policy(&args[3])?;
+            if ensure_policy_scope(policy, CapabilityDomain::NetConnect, &target).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            let result = match files.get_mut(id)? {
+                FileHandle::UdpSocket(v) => v.send_to(&bytes, &target),
+                _ => return Ok(result_err(sig, "invalid-handle", None)),
+            };
+            match result {
+                Ok(count) => Ok(result_ok(
+                    sig,
+                    RuntimeValue::Int(count.try_into().unwrap_or(i64::MAX)),
+                )),
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "net_udp_recv_from" => {
+            let id = value_handle(&args[0])?;
+            let len = match checked_alloc_len(value_i64(&args[1])?, config) {
+                Ok(v) => v,
+                Err((tag, message)) => return Ok(result_err(sig, tag, Some(message))),
+            };
+            let mut bytes = vec![0; len];
+            let result = match files.get_mut(id)? {
+                FileHandle::UdpSocket(v) => v.recv_from(&mut bytes),
+                _ => return Ok(result_err(sig, "invalid-handle", None)),
+            };
+            match result {
+                Ok((count, from)) => {
+                    bytes.truncate(count);
+                    Ok(result_ok(
+                        sig,
+                        RuntimeValue::Record(BTreeMap::from([
+                            ("data".into(), runtime_bytes(bytes)),
+                            ("from".into(), RuntimeValue::Str(from.to_string())),
+                        ])),
+                    ))
+                }
+                Err(error) => Ok(net_io_error(sig, error)),
+            }
+        }
+        "process_run" | "process_spawn" => {
+            let executable = value_string(&args[0])?;
+            let policy = value_policy(&args[5])?;
+            if ensure_policy_scope(policy, CapabilityDomain::ProcessRun, &executable).is_err() {
+                return Ok(result_err(sig, "permission-denied", None));
+            }
+            let RuntimeValue::Array(argv) = untyped(&args[1]) else {
+                bail!("process arguments must be an array")
+            };
+            let RuntimeValue::Map(environment) = untyped(&args[2]) else {
+                bail!("process environment must be a string map")
+            };
+            let cwd = value_string(&args[3])?;
+            let RuntimeValue::Enum { tag: stdio, .. } = untyped(&args[4]) else {
+                bail!("process stdio must be a policy enum")
+            };
+            if name == "process_run" && stdio == "stream" {
+                return Ok(result_err(
+                    sig,
+                    "unsupported",
+                    Some("stream stdio requires process.spawn".to_string()),
+                ));
+            }
+            let mut command = Command::new(&executable);
+            for arg in argv {
+                command.arg(value_str(arg)?);
+            }
+            command.env_clear();
+            for (key, value) in environment {
+                command.env(value_str(key)?, value_str(value)?);
+            }
+            if !cwd.is_empty() {
+                command.current_dir(cwd);
+            }
+            match stdio.as_str() {
+                "capture" => {
+                    command
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped());
+                }
+                "stream" => {
+                    command
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped());
+                }
+                "inherit" => {
+                    command
+                        .stdin(Stdio::inherit())
+                        .stdout(Stdio::inherit())
+                        .stderr(Stdio::inherit());
+                }
+                "null" => {
+                    command
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null());
+                }
+                _ => return Ok(result_err(sig, "invalid-input", None)),
+            }
+            if name == "process_run" {
+                Ok(match command.output() {
+                    Ok(output) => result_ok(
+                        sig,
+                        process_output_value(output.status, output.stdout, output.stderr),
+                    ),
+                    Err(error) => process_io_error(sig, error),
+                })
+            } else if files.at_capacity() {
+                Ok(result_err(sig, "resource-exhausted", None))
+            } else {
+                Ok(match command.spawn() {
+                    Ok(child) => result_ok(
+                        sig,
+                        RuntimeValue::HostHandle(HostHandle {
+                            id: files.insert_child(child),
+                            access: HandleAccess::Process,
+                        }),
+                    ),
+                    Err(error) => process_io_error(sig, error),
+                })
+            }
+        }
+        "process_wait" => {
+            let handle = value_handle(&args[0])?;
+            let Some(FileHandle::Child(child)) = files.handles.remove(&handle) else {
+                return Ok(result_err(sig, "resource-closed", None));
+            };
+            Ok(match child.wait_with_output() {
+                Ok(output) => result_ok(
+                    sig,
+                    process_output_value(output.status, output.stdout, output.stderr),
+                ),
+                Err(error) => process_io_error(sig, error),
+            })
+        }
+        "process_kill" => {
+            let handle = value_handle(&args[0])?;
+            let Some(FileHandle::Child(child)) = files.handles.get_mut(&handle) else {
+                return Ok(result_err(sig, "resource-closed", None));
+            };
+            Ok(match child.kill() {
+                Ok(()) => result_ok(sig, RuntimeValue::Void),
+                Err(error) => process_io_error(sig, error),
+            })
+        }
+        "process_child_stdin" | "process_child_stdout" | "process_child_stderr" => {
+            let handle = value_handle(&args[0])?;
+            if files.at_capacity() {
+                return Ok(result_err(sig, "resource-exhausted", None));
+            }
+            let Some(FileHandle::Child(child)) = files.handles.get_mut(&handle) else {
+                return Ok(result_err(sig, "resource-closed", None));
+            };
+            match name {
+                "process_child_stdin" => {
+                    let Some(pipe) = child.stdin.take() else {
+                        return Ok(result_err(sig, "unavailable", None));
+                    };
+                    let id = files.insert_child_stdin(pipe);
+                    Ok(result_ok(
+                        sig,
+                        RuntimeValue::HostHandle(HostHandle {
+                            id,
+                            access: HandleAccess::Write,
+                        }),
+                    ))
+                }
+                "process_child_stdout" => {
+                    let Some(pipe) = child.stdout.take() else {
+                        return Ok(result_err(sig, "unavailable", None));
+                    };
+                    let id = files.insert_child_stdout(pipe);
+                    Ok(result_ok(
+                        sig,
+                        RuntimeValue::HostHandle(HostHandle {
+                            id,
+                            access: HandleAccess::Read,
+                        }),
+                    ))
+                }
+                _ => {
+                    let Some(pipe) = child.stderr.take() else {
+                        return Ok(result_err(sig, "unavailable", None));
+                    };
+                    let id = files.insert_child_stderr(pipe);
+                    Ok(result_ok(
+                        sig,
+                        RuntimeValue::HostHandle(HostHandle {
+                            id,
+                            access: HandleAccess::Read,
+                        }),
+                    ))
+                }
+            }
         }
         "clock_now_unix_millis" => {
             let policy = value_policy(&args[0])?;
@@ -3068,6 +3898,38 @@ fn exec_vibra_v1(
                 .context("system clock before unix epoch")?
                 .as_millis();
             Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)))
+        }
+        "clock_monotonic_millis" => {
+            let policy = value_policy(&args[0])?;
+            ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
+            static EPOCH: OnceLock<Instant> = OnceLock::new();
+            let millis = EPOCH.get_or_init(Instant::now).elapsed().as_millis();
+            Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)))
+        }
+        "clock_duration_from_millis" => Ok(RuntimeValue::Int(value_i64(&args[0])?)),
+        "clock_duration_add" => {
+            let left = value_i64(&args[0])?;
+            let right = value_i64(&args[1])?;
+            match left.checked_add(right) {
+                Some(value) if value >= 0 => Ok(result_ok(sig, RuntimeValue::Int(value))),
+                _ => Ok(result_err(sig, "overflow", None)),
+            }
+        }
+        "clock_duration_between" => {
+            let earlier = value_i64(&args[0])?;
+            let later = value_i64(&args[1])?;
+            match later.checked_sub(earlier) {
+                Some(value) if value >= 0 => Ok(result_ok(sig, RuntimeValue::Int(value))),
+                _ => Ok(result_err(sig, "invalid-order", None)),
+            }
+        }
+        "clock_sleep_millis" => {
+            let millis = value_i64(&args[0])?;
+            let policy = value_policy(&args[1])?;
+            ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
+            let millis = u64::try_from(millis).context("sleep duration must be non-negative")?;
+            std::thread::sleep(Duration::from_millis(millis));
+            Ok(RuntimeValue::Void)
         }
         "random_bytes" => {
             let len = value_i64(&args[0])?;
@@ -3087,11 +3949,51 @@ fn exec_vibra_v1(
         "system_info" => {
             let policy = value_policy(&args[0])?;
             ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
-            Ok(RuntimeValue::Str(format!(
-                "{}-{}",
-                std::env::consts::OS,
-                std::env::consts::ARCH
-            )))
+            Ok(RuntimeValue::Record(BTreeMap::from([
+                (
+                    "architecture".to_string(),
+                    RuntimeValue::Str(std::env::consts::ARCH.to_string()),
+                ),
+                (
+                    "family".to_string(),
+                    RuntimeValue::Str(std::env::consts::FAMILY.to_string()),
+                ),
+                (
+                    "operating-system".to_string(),
+                    RuntimeValue::Str(std::env::consts::OS.to_string()),
+                ),
+            ])))
+        }
+        "system_args" => {
+            let policy = value_policy(&args[0])?;
+            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
+            Ok(RuntimeValue::Array(
+                std::iter::once(config.program_name.clone())
+                    .chain(config.argv.iter().cloned())
+                    .map(RuntimeValue::Str)
+                    .collect(),
+            ))
+        }
+        "system_current_dir" => {
+            let policy = value_policy(&args[0])?;
+            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
+            Ok(fs_result(sig, std::env::current_dir, |path| {
+                RuntimeValue::Str(path.display().to_string())
+            }))
+        }
+        "system_executable" => {
+            let policy = value_policy(&args[0])?;
+            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
+            Ok(fs_result(sig, std::env::current_exe, |path| {
+                RuntimeValue::Str(path.display().to_string())
+            }))
+        }
+        "system_temp_dir" => {
+            let policy = value_policy(&args[0])?;
+            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
+            Ok(RuntimeValue::Str(
+                std::env::temp_dir().display().to_string(),
+            ))
         }
         other => bail!("unsupported vibra_v1 import `{other}`"),
     }
@@ -3109,7 +4011,7 @@ fn trim_line_ending(line: &mut String) {
 
 /// Read one line from a `File` without buffering past the newline, so the
 /// handle's position stays consistent for subsequent reads.
-fn read_line_from_file(file: &mut File) -> std::io::Result<String> {
+fn read_line_from_file(file: &mut impl Read) -> std::io::Result<String> {
     let mut buf = Vec::new();
     let mut byte = [0u8; 1];
     loop {
@@ -3690,7 +4592,81 @@ mod text_conversion_tests {
 
 #[cfg(test)]
 mod resource_lifecycle_tests {
-    use super::{FileTable, HandleLifecycleError};
+    use super::{FileHandle, FileTable, HandleLifecycleError};
+    use std::io::{Read, Write};
+    use std::net::{Shutdown, TcpListener, TcpStream, UdpSocket};
+
+    #[test]
+    fn stream_write_some_reports_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial.bin");
+        let mut table = FileTable::new(1);
+        let id = table.insert(std::fs::File::create(&path).unwrap());
+
+        let written = table.write_some_to_handle(id, b"abcdef").unwrap();
+        assert!(written > 0 && written <= 6);
+        assert_eq!(std::fs::read(path).unwrap(), b"abcdef"[..written]);
+    }
+
+    #[test]
+    fn child_wait_consumes_the_process_resource() {
+        let executable = std::env::current_exe().unwrap();
+        let child = std::process::Command::new(executable)
+            .arg("--list")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut table = FileTable::new(1);
+        let id = table.insert_child(child);
+        let super::FileHandle::Child(child) = table.handles.remove(&id).unwrap() else {
+            panic!("inserted child changed resource kind");
+        };
+        let status = child.wait_with_output().unwrap().status;
+        assert!(status.success());
+        assert_eq!(
+            table.lifecycle_error(id),
+            Some(HandleLifecycleError::Closed)
+        );
+    }
+
+    #[test]
+    fn child_pipes_become_independent_stream_resources() {
+        let executable = std::env::current_exe().unwrap();
+        let child = std::process::Command::new(executable)
+            .arg("--list")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut table = FileTable::new(8);
+        let child_id = table.insert_child(child);
+        let super::FileHandle::Child(child) = table.handles.get_mut(&child_id).unwrap() else {
+            panic!("inserted child changed resource kind");
+        };
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let stdin_id = table.insert_child_stdin(stdin);
+        let stdout_id = table.insert_child_stdout(stdout);
+        let stderr_id = table.insert_child_stderr(stderr);
+
+        table.close(stdin_id).unwrap();
+        let mut stdout = Vec::new();
+        let super::FileHandle::ChildStdout(pipe) = table.handles.get_mut(&stdout_id).unwrap()
+        else {
+            panic!("stdout pipe changed resource kind");
+        };
+        pipe.read_to_end(&mut stdout).unwrap();
+        assert!(!stdout.is_empty());
+        table.close(stdout_id).unwrap();
+        table.close(stderr_id).unwrap();
+        let super::FileHandle::Child(child) = table.handles.remove(&child_id).unwrap() else {
+            panic!("child changed resource kind");
+        };
+        assert!(child.wait_with_output().unwrap().status.success());
+    }
 
     #[test]
     fn close_is_linear_and_classifies_minted_ids_as_closed() {
@@ -3768,5 +4744,67 @@ mod resource_lifecycle_tests {
             table.lifecycle_error(table.next),
             Some(HandleLifecycleError::Invalid)
         );
+    }
+
+    #[test]
+    fn tcp_streams_share_io_and_instance_cleanup() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream.write_all(b"ping").unwrap();
+            stream.shutdown(Shutdown::Write).unwrap();
+            let mut reply = Vec::new();
+            stream.read_to_end(&mut reply).unwrap();
+            reply
+        });
+
+        let mut table = FileTable::new(4);
+        let listener_id = table.insert_tcp_listener(listener);
+        let stream = match table.get_mut(listener_id).unwrap() {
+            FileHandle::TcpListener(listener) => listener.accept().unwrap().0,
+            _ => unreachable!(),
+        };
+        let stream_id = table.insert_tcp_stream(stream);
+        let mut request = Vec::new();
+        match table.get_mut(stream_id).unwrap() {
+            FileHandle::TcpStream(stream) => stream.read_to_end(&mut request).unwrap(),
+            _ => unreachable!(),
+        };
+        assert_eq!(request, b"ping");
+        table.write_to_handle(stream_id, b"pong").unwrap();
+        table.close(stream_id).unwrap();
+        table.close(listener_id).unwrap();
+        assert_eq!(client.join().unwrap(), b"pong");
+        assert_eq!(table.open_resource_count(), 0);
+    }
+
+    #[test]
+    fn udp_resources_exchange_datagrams_and_close() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let receiver_address = receiver.local_addr().unwrap();
+        receiver
+            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+            .unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+
+        let mut table = FileTable::new(2);
+        let receiver_id = table.insert_udp_socket(receiver);
+        let sender_id = table.insert_udp_socket(sender);
+        match table.get_mut(sender_id).unwrap() {
+            FileHandle::UdpSocket(socket) => {
+                socket.send_to(b"datagram", receiver_address).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let mut bytes = [0; 32];
+        let count = match table.get_mut(receiver_id).unwrap() {
+            FileHandle::UdpSocket(socket) => socket.recv_from(&mut bytes).unwrap().0,
+            _ => unreachable!(),
+        };
+        assert_eq!(&bytes[..count], b"datagram");
+        table.close(sender_id).unwrap();
+        table.close(receiver_id).unwrap();
+        assert_eq!(table.open_resource_count(), 0);
     }
 }

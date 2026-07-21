@@ -5,54 +5,79 @@ option:
 some-carries-payload:
   $test: core
   do:
-    - $let:
-        o:
-          $option.option.some: 7
-    - $match: $o
-      when:
-      - case:
-          $option.option.some:
-            $bind: v
-        do:
-        - $match: $v
-          when:
-          - case: 7
-            do:
-            - $test.assert: true
-          - case:
-              $wildcard: null
-            do:
-            - $test.fail: wrong some payload
-      - case:
-          $option.option.none: null
-        do:
-        - $test.fail: expected some
+  - $let:
+      o:
+        $option.option.some: 7
+  - $match: $o
+    when:
+    - case:
+        $option.option.some:
+          $bind: v
+      do:
+      - $match: $v
+        when:
+        - case: 7
+          do:
+          - $test.assert: true
+        - case:
+            $wildcard: null
+          do:
+          - $test.fail: wrong some payload
+    - case:
+        $option.option.none: null
+      do:
+      - $test.fail: expected some
 none-variant:
   $test: core
   do:
-    - $let:
-        present:
-          $option.option.some: 1
-    - $match: $present
-      when:
-      - case:
-          $option.option.some:
-            $bind: _v
-        do:
-        - $let:
-            absent: $option.option.none
-        - $match: $absent
-          when:
-          - case:
-              $option.option.some:
-                $bind: _x
-            do:
-            - $test.fail: expected none
-          - case:
-              $option.option.none: null
-            do:
-            - $test.assert: true
-      - case:
-          $option.option.none: null
-        do:
-        - $test.fail: expected some
+  - $let:
+      present:
+        $option.option.some: 1
+  - $match: $present
+    when:
+    - case:
+        $option.option.some:
+          $bind: _v
+      do:
+      - $let:
+          absent: $option.option.none
+      - $match: $absent
+        when:
+        - case:
+            $option.option.some:
+              $bind: _x
+          do:
+          - $test.fail: expected none
+        - case:
+            $option.option.none: null
+          do:
+          - $test.assert: true
+    - case:
+        $option.option.none: null
+      do:
+      - $test.fail: expected some
+queries-and-defaulting:
+  $test: core
+  do:
+  - $let:
+      present:
+        $option.option.some: 7
+  - $test.assert:
+      $option.is-some:
+        t: $int64
+        input: $present
+  - $let:
+      present-value:
+        $option.unwrap-or:
+          t: $int64
+          input: $present
+          default: 11
+  - $match: $present-value
+    when:
+    - case: 7
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: some did not preserve its value

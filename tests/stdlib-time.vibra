@@ -2,9 +2,17 @@ test:
   $import: ../stdlib/src/test.vibra
 time:
   $import: ../stdlib/src/time.vibra
+result:
+  $import: ../stdlib/src/result.vibra
 accepts-unix-millis:
   $function:
     value: $uint64
+  return: $bool
+  do:
+  - $return: true
+accepts-duration:
+  $function:
+    value: $time.duration
   return: $bool
   do:
   - $return: true
@@ -31,3 +39,35 @@ now-unix-millis-uses-the-granted-clock:
       is-millis:
         $accepts-unix-millis: $now
   - $test.assert: $is-millis
+  - $let:
+      start:
+        $time.monotonic-now:
+          capability: $capability
+  - $time.sleep:
+      duration:
+        $time.milliseconds: 0
+      capability: $capability
+  - $let:
+      finish:
+        $time.monotonic-now:
+          capability: $capability
+  - $let:
+      elapsed:
+        $time.duration-between:
+          earlier: $start
+          later: $finish
+  - $match: $elapsed
+    when:
+    - case:
+        $result.result.ok:
+          $bind: duration
+      do:
+      - $let:
+          is-duration:
+            $accepts-duration: $duration
+      - $test.assert: $is-duration
+    - case:
+        $result.result.err:
+          $wildcard: null
+      do:
+      - $test.fail: monotonic clock moved backwards

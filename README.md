@@ -257,6 +257,26 @@ primitives are fallible typed operations; formatting is deterministic and
 locale-free (`nan`, `inf`, and `-inf` are the canonical float spellings).
 Potentially growing text/byte operations honor the runtime allocation limit.
 
+Time, environment, and system helpers remain explicitly capability-gated.
+`time` distinguishes unit-safe `duration` values from monotonic `instant`
+values, provides checked addition/elapsed arithmetic, and never uses wall time
+for elapsed measurement. `env.list` filters its deterministic name list through
+the supplied `env-read` scopes, while get/set/remove check the requested name.
+`sys` exposes configured program arguments, current/executable/temp locations,
+and structured operating-system, architecture, and family fields under the
+existing `system-info` grant.
+
+Networking uses typed `net.address`, `tcp-stream`, `tcp-listener`, and
+`udp-socket` resources. Address parsing is pure; hostname resolution and every
+outbound TCP/UDP target require an explicit matching `net-connect` scope, while
+bind operations require `net-listen`. TCP supports connect/listen/accept,
+bounded byte I/O, deadlines, shutdown, and deterministic close; UDP supports
+bind/connect/send-to/receive-from. All socket resources share the instance host
+resource limit and are reclaimed at instance teardown. Until cross-module
+interface method forwarding is supported, `net.stream-read`, `stream-write`,
+and `close-*` expose the common fd behavior directly rather than claiming an
+unusable `$fs.readable`/`writable`/`closeable` implementation.
+
 ## Type System Snapshot
 
 - Primitive numerics: `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`
@@ -286,7 +306,14 @@ maybe-name:
 ```
 
 Construct values with `$option.option.some: "name"` or `$option.option.none`.
-- `io`/`fs` APIs use nominal `path`, `bytes`, and file-mode types, with `readable`/`writable`/`appendable`/`closeable` interfaces to reject invalid file-mode operations
+- `io`/`fs` APIs use nominal paths and file-mode handles with reusable
+  `readable`/`writable`/`closeable` stream interfaces. Bounded reads use an
+  empty successful chunk for EOF, partial writes report progress, and file
+  rename/copy/open options and typed directory entries remain capability gated
+- `process` runs an explicit executable plus argument array without shell
+  parsing, supports controlled env/cwd and capture/inherit/null stdio, and
+  exposes instance-owned child handles with typed wait/kill outcomes; stream
+  mode provides child pipes through the shared file reader/writer interfaces
 - Kebab-case is recommended for every symbol; non-kebab symbols emit warnings
 
 ## Examples
