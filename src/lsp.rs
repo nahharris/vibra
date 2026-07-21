@@ -153,7 +153,14 @@ impl Server {
     fn diagnostic_notifications(&self, uri: String) -> Result<Value> {
         let source = self.documents.get(&uri).context("open document missing")?;
         let path = uri_path(&uri).unwrap_or_else(|| PathBuf::from("document.vibra"));
-        let diagnostics = crate::tooling::diagnostics_for_source(&path, source).into_iter().map(|d| json!({
+        let mut diagnostics = crate::tooling::diagnostics_for_source(&path, source);
+        if !diagnostics
+            .iter()
+            .any(|item| item.severity == crate::tooling::Severity::Error)
+        {
+            diagnostics.extend(self.overlay_compile_diagnostics(&path)?);
+        }
+        let diagnostics = diagnostics.into_iter().map(|d| json!({
             "range":{"start":{"line":d.span.start.line,"character":d.span.start.column},"end":{"line":d.span.end.line,"character":d.span.end.column}},
             "severity":match d.severity { crate::tooling::Severity::Error=>1, crate::tooling::Severity::Warning=>2, crate::tooling::Severity::Info=>3, crate::tooling::Severity::Hint=>4 },
             "code":d.code,"source":"vibra","message":d.message
@@ -161,6 +168,45 @@ impl Server {
         Ok(
             json!([{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":uri,"diagnostics":diagnostics}}]),
         )
+    }
+
+    fn overlay_compile_diagnostics(
+        &self,
+        document: &std::path::Path,
+    ) -> Result<Vec<crate::tooling::Diagnostic>> {
+        let root = self
+            .root
+            .clone()
+            .or_else(|| discover_root(document))
+            .context("workspace root is not available")?;
+        if !document.starts_with(&root) {
+            return Ok(Vec::new());
+        }
+        let mirror = tempfile::tempdir().context("create LSP compile workspace")?;
+        mirror_workspace(&root, mirror.path())?;
+        for (uri, source) in &self.documents {
+            let Some(path) = uri_path(uri) else { continue };
+            let Ok(relative) = path.strip_prefix(&root) else {
+                continue;
+            };
+            let target = mirror.path().join(relative);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&target, source)
+                .with_context(|| format!("write overlay {}", relative.display()))?;
+        }
+        let mirrored_document = mirror.path().join(document.strip_prefix(&root)?);
+        let entry = mirrored_project_entry(mirror.path()).unwrap_or(mirrored_document);
+        let mirror_text = mirror.path().to_string_lossy();
+        let root_text = root.to_string_lossy();
+        let mut diagnostics = crate::tooling::compile_diagnostics(&entry);
+        for diagnostic in &mut diagnostics {
+            diagnostic.message = diagnostic
+                .message
+                .replace(mirror_text.as_ref(), root_text.as_ref());
+        }
+        Ok(diagnostics)
     }
 
     fn hover(&self, params: &Value) -> Result<Value> {
@@ -272,16 +318,21 @@ impl Server {
 }
 
 struct Workspace {
+    root: PathBuf,
     index: SemanticIndex,
     sources: BTreeMap<PathBuf, String>,
 }
 
 impl Workspace {
     fn build(root: PathBuf, sources: BTreeMap<PathBuf, String>) -> Result<Self> {
-        let database =
-            SourceDatabase::from_sources(root, sources.clone()).map_err(anyhow::Error::msg)?;
+        let database = SourceDatabase::from_sources(root.clone(), sources.clone())
+            .map_err(anyhow::Error::msg)?;
         let index = SemanticIndex::build(&database).map_err(anyhow::Error::msg)?;
-        Ok(Self { index, sources })
+        Ok(Self {
+            root,
+            index,
+            sources,
+        })
     }
     fn resolve(&self, document: &PathBuf, word: &str) -> Option<(PathBuf, String)> {
         let symbol = word.trim_start_matches('$');
@@ -292,7 +343,13 @@ impl Workspace {
                 .query(Some(SemanticKind::Import), Some(alias))
                 .into_iter()
                 .find(|fact| fact.document == document)?;
-            return Some((import.target_document.clone()?, name.to_string()));
+            let target = self.resolve_import_target(import.target_document.as_ref()?)?;
+            if name.contains('.') {
+                return self.resolve(&target, &format!("${name}"));
+            }
+            return self
+                .definition(&target, name)
+                .map(|_| (target, name.to_string()));
         }
         let name = symbol.to_string();
         self.definition(&document, &name).map(|_| (document, name))
@@ -319,17 +376,61 @@ impl Workspace {
             .into_iter()
             .filter(|f| f.document == document)
         {
-            if let Some(target) = &import.target_document {
-                if let Some(source) = self.sources.get(target) {
+            if let Some(target) = import
+                .target_document
+                .as_ref()
+                .and_then(|path| self.resolve_import_target(path))
+            {
+                if let Some(source) = self.sources.get(&target) {
                     result.extend(
                         definitions(source)
                             .into_iter()
                             .map(|d| format!("{}.{}", import.symbol, d.0)),
                     );
                 }
+                result.extend(self.visible_imports(&target, &import.symbol, 0));
             }
         }
         result
+    }
+    fn visible_imports(&self, document: &PathBuf, prefix: &str, depth: usize) -> Vec<String> {
+        if depth >= 16 {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        for import in self
+            .index
+            .query(Some(SemanticKind::Import), None)
+            .into_iter()
+            .filter(|fact| fact.document == *document)
+        {
+            let Some(target) = import
+                .target_document
+                .as_ref()
+                .and_then(|path| self.resolve_import_target(path))
+            else {
+                continue;
+            };
+            let qualified = format!("{prefix}.{}", import.symbol);
+            if let Some(source) = self.sources.get(&target) {
+                result.extend(
+                    definitions(source)
+                        .into_iter()
+                        .map(|d| format!("{qualified}.{}", d.0)),
+                );
+            }
+            result.extend(self.visible_imports(&target, &qualified, depth + 1));
+        }
+        result
+    }
+    fn resolve_import_target(&self, target: &std::path::Path) -> Option<PathBuf> {
+        if !target.to_string_lossy().starts_with('@') {
+            return Some(target.to_path_buf());
+        }
+        let project = crate::project::load_project(&self.root).ok()?;
+        crate::project::resolve_project_import(&project, target.to_str()?)
+            .ok()
+            .map(normalize)
     }
 }
 
@@ -473,6 +574,40 @@ fn discover_workspace_sources(
         }
     }
     Ok(())
+}
+fn mirror_workspace(source: &std::path::Path, destination: &std::path::Path) -> Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in
+        fs::read_dir(source).with_context(|| format!("read workspace {}", source.display()))?
+    {
+        let entry = entry?;
+        let name = entry.file_name();
+        if matches!(name.to_str(), Some(".git" | "target")) {
+            continue;
+        }
+        let from = entry.path();
+        let to = destination.join(&name);
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            mirror_workspace(&from, &to)?;
+        } else {
+            fs::copy(&from, &to).with_context(|| format!("mirror {}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+fn mirrored_project_entry(root: &std::path::Path) -> Option<PathBuf> {
+    let project = crate::project::load_project(root).ok()?;
+    let target = project
+        .manifest
+        .targets
+        .bins
+        .first()
+        .or_else(|| project.manifest.targets.libs.first())?;
+    Some(project.root.join(&target.root).join(&target.entry))
 }
 fn read_message<R: BufRead>(input: &mut R) -> Result<Option<Value>> {
     let mut length = None;

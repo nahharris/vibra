@@ -252,9 +252,14 @@ completion requests. Hover uses `=doc` text.
 Navigation, references, hover, and completion discover `.vibra` files under
 the initialized workspace and resolve directly imported top-level symbols.
 Open buffers replace their saved versions in this semantic snapshot, including
-files in nested local packages. Completion is not yet expression-type-aware,
-and compile diagnostics continue to use the saved workspace; editor overlays
-receive syntax and style diagnostics. The advertised capability shape is
+files in nested local packages. Direct and transitive aliases are followed,
+including project `@name/path` imports when the dependency is present in the
+workspace. Completion is not yet expression-type-aware.
+
+Syntax, style, and compile diagnostics use all open editor overlays. Compile
+checking runs in a temporary mirror of the project (excluding `.git` and
+`target`) and never rewrites the user's workspace. The advertised capability
+shape is
 documented by
 [`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
 
