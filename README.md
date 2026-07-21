@@ -77,6 +77,7 @@ are not a complete specification of compiler behavior.
   [`source-annotations.schema.json`](schemas/source-annotations.schema.json).
 - **Projects, packages, and diagnostics:** [`project-manifest.schema.json`](schemas/project-manifest.schema.json),
   [`project-lock.schema.json`](schemas/project-lock.schema.json),
+  [`dependency-resolution.schema.json`](schemas/dependency-resolution.schema.json),
   [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
   [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
   [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
@@ -89,6 +90,10 @@ are not a complete specification of compiler behavior.
   specifies the `vibra/contextAt` (and `vibra query`) response shape, and
   [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
   `vibra docs --format yaml|json`.
+- **Async conformance:** [`async-task-trace.schema.json`](schemas/async-task-trace.schema.json)
+  defines deterministic structured-task traces. The semantics, implementation
+  milestones, and normative vectors are documented in
+  [`docs/async-structured-concurrency.md`](docs/async-structured-concurrency.md).
 
 Each schema has a canonical `$id` under `https://vibra.dev/schemas/`. Tooling
 should use the schema that matches its boundary and treat the expression and
@@ -177,6 +182,9 @@ vibra check hello
 ```
 
 See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
+The proposed post-v1 deterministic source version solver is specified in
+[docs/version-solving.md](docs/version-solving.md); it does not change today's
+exact-revision workflow.
 
 ### Compile-time file embedding
 

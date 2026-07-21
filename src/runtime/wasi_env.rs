@@ -2,6 +2,7 @@
 
 use crate::lower::{CapabilityDomain, PolicyGroup, PolicyRequirement, PolicyScope, PolicyType};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use wasmer_wasix::{WasiEnv, WasiEnvBuilder, WasiStateCreationError};
 
 /// Configuration for [`super::run_module`](crate::runtime::run_module).
@@ -28,6 +29,12 @@ pub struct RunConfig {
     pub allow_clock: bool,
     pub allow_random: bool,
     pub allow_system_info: bool,
+    /// Optional isolated environment used by embedders and tests. When set,
+    /// host environment operations read and mutate this map instead of the
+    /// runner process environment.
+    pub injected_environment: Option<Arc<Mutex<std::collections::BTreeMap<String, String>>>>,
+    /// Optional deterministic clock used by embedders and tests.
+    pub injected_clock: Option<Arc<Mutex<InjectedClock>>>,
     pub approved_policy: Option<PolicyType>,
     /// Maximum byte length the runtime will allocate for a single
     /// program-controlled buffer (e.g. `read-raw`, `random.bytes`). Guards
@@ -57,11 +64,20 @@ impl Default for RunConfig {
             allow_clock: false,
             allow_random: false,
             allow_system_info: false,
+            injected_environment: None,
+            injected_clock: None,
             approved_policy: None,
             max_alloc_len: 64 * 1024 * 1024,
             max_open_files: 1024,
         }
     }
+}
+
+/// Deterministic wall and monotonic clock state for an isolated run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InjectedClock {
+    pub unix_millis: u64,
+    pub monotonic_millis: u64,
 }
 
 impl RunConfig {
