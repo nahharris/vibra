@@ -81,3 +81,49 @@ queries-and-defaulting:
         $wildcard: null
       do:
       - $test.fail: some did not preserve its value
+and-or-combinators:
+  $test: core
+  do:
+  - $let:
+      present:
+        $option.from-value:
+          t: $int64
+          input: 1
+  - $let:
+      absent:
+        $option.empty:
+          t: $int64
+          ignored: false
+  - $let:
+      next:
+        $option.from-value:
+          t: $str
+          input: next
+  - $match:
+      $option.and:
+        t: $int64
+        u: $str
+        input: $present
+        next: $next
+    when:
+    - case:
+        $option.option.some: next
+      do:
+      - $match:
+          $option.or:
+            t: $int64
+            input: $absent
+            fallback: $present
+        when:
+        - case:
+            $option.option.some: 1
+          do:
+          - $test.assert: true
+        - case:
+            $wildcard: null
+          do:
+          - $test.fail: option or did not select fallback
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: option and did not select next

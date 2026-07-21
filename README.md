@@ -350,6 +350,18 @@ maybe-name:
 ```
 
 Construct values with `$option.option.some: "name"` or `$option.option.none`.
+Both tagged types provide `is-*` queries and `unwrap-or` defaulting. `option`
+also provides `and`/`or`; `result` provides `and`/`or` plus conversions to its
+ok/error options. These combinators are eager and effect-transparent: arguments
+are evaluated before the call. Vibra does not yet have first-class function
+values, so callback combinators such as `map` and `and-then` are intentionally
+not exposed with a misleading file-specific or dynamically typed callback.
+
+Error propagation is explicit with `$match`: return the unchanged
+`$result.result.err` payload from the error arm and continue from the ok arm.
+This preserves the exact error type and structured context and keeps effects
+visible. There is currently no implicit `?`-style control-flow form.
+
 - `io`/`fs` APIs use nominal paths and file-mode handles with reusable
   `readable`/`writable`/`closeable` stream interfaces. Bounded reads use an
   empty successful chunk for EOF, partial writes report progress, and file
