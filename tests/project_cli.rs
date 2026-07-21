@@ -841,3 +841,149 @@ fn create_git_package(path: &Path, name: &str, dependencies: &str) -> String {
     assert!(rev.status.success());
     String::from_utf8(rev.stdout).unwrap().trim().to_string()
 }
+
+fn scalar_ffi_module(sum_bias: i32) -> Vec<u8> {
+    use wasm_encoder::{
+        CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
+        TypeSection, ValType,
+    };
+    let mut module = Module::new();
+    let mut types = TypeSection::new();
+    types
+        .ty()
+        .function([ValType::I32, ValType::I32], [ValType::I32]);
+    types.ty().function([ValType::I32], []);
+    module.section(&types);
+    let mut functions = FunctionSection::new();
+    functions.function(0);
+    functions.function(1);
+    module.section(&functions);
+    let mut exports = ExportSection::new();
+    exports.export("sum", ExportKind::Func, 0);
+    exports.export("assert_42", ExportKind::Func, 1);
+    module.section(&exports);
+    let mut code = CodeSection::new();
+    let mut sum = Function::new([]);
+    sum.instruction(&Instruction::LocalGet(0));
+    sum.instruction(&Instruction::LocalGet(1));
+    sum.instruction(&Instruction::I32Add);
+    sum.instruction(&Instruction::I32Const(sum_bias));
+    sum.instruction(&Instruction::I32Add);
+    sum.instruction(&Instruction::End);
+    code.function(&sum);
+    let mut assert = Function::new([]);
+    assert.instruction(&Instruction::LocalGet(0));
+    assert.instruction(&Instruction::I32Const(42));
+    assert.instruction(&Instruction::I32Ne);
+    assert.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+    assert.instruction(&Instruction::Unreachable);
+    assert.instruction(&Instruction::End);
+    assert.instruction(&Instruction::End);
+    code.function(&assert);
+    module.section(&code);
+    module.finish()
+}
+
+#[test]
+fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("ffi-app");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::create_dir_all(project.join("foreign")).unwrap();
+    std::fs::write(project.join("foreign/math.wasm"), scalar_ffi_module(0)).unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        "manifest-version: 1\npackage:\n  name: ffi-app\n  version: 0.1.0\ntargets:\n  bins:\n    - name: ffi-app\n      root: src\n      entry: main.vibra\ndependencies:\n  math:\n    path: foreign\n    wasm: math.wasm\n",
+    ).unwrap();
+    std::fs::write(
+        project.join("src/main.vibra"),
+        r#"foreign-sum:
+  $function:
+    left: $int32
+  args:
+    right: $int32
+  return: $int32
+  do:
+    - $wasm:
+        import:
+          module: "@math"
+          name: sum
+        args: [$args.left, $args.right]
+foreign-assert:
+  $function:
+    value: $int32
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: "@math"
+          name: assert_42
+        args: [$args.value]
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        answer:
+          $foreign-sum:
+            left: 20
+            right: 22
+    - $foreign-assert: $answer
+"#,
+    )
+    .unwrap();
+
+    let run = vibra_cmd()
+        .args(["run", &path_str(&project.join("src/main.vibra"))])
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "source run failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let first = dir.path().join("first.vapp");
+    let second = dir.path().join("second.vapp");
+    for output in [&first, &second] {
+        let build = vibra_cmd()
+            .args(["build", &path_str(&project), "--output", &path_str(output)])
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "build failed: {}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+    }
+    assert_eq!(
+        std::fs::read(&first).unwrap(),
+        std::fs::read(&second).unwrap()
+    );
+    let packaged = vibra_cmd()
+        .args(["run", &path_str(&first)])
+        .output()
+        .unwrap();
+    assert!(
+        packaged.status.success(),
+        "packaged run failed: {}",
+        String::from_utf8_lossy(&packaged.stderr)
+    );
+
+    std::fs::write(project.join("foreign/math.wasm"), scalar_ffi_module(1)).unwrap();
+    let changed = dir.path().join("changed.vapp");
+    let build = vibra_cmd()
+        .args([
+            "build",
+            &path_str(&project),
+            "--output",
+            &path_str(&changed),
+        ])
+        .output()
+        .unwrap();
+    assert!(build.status.success());
+    assert_ne!(
+        std::fs::read(&first).unwrap(),
+        std::fs::read(&changed).unwrap()
+    );
+}

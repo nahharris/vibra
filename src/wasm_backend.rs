@@ -116,6 +116,7 @@ struct WasmPlan {
     main_arg_bindings: Vec<(String, TypeRef)>,
     host_functions: BTreeMap<String, crate::lower::FunctionSig>,
     impl_keys: Vec<crate::lower::ImplKey>,
+    foreign_modules: BTreeMap<String, Vec<u8>>,
 }
 
 struct CompiledProgram {
@@ -301,6 +302,7 @@ impl HostExecution {
             functions,
             impls,
             warnings: vec![],
+            foreign_modules: plan.foreign_modules.clone(),
         };
         let mut seed_env = HashMap::new();
         crate::execute::seed_main_args(&program, &config, &mut seed_env)?;
@@ -480,7 +482,7 @@ impl HostExecution {
             .context("invalid call id")?
             .clone();
         let values = self.take_frame_values()?;
-        call.args = values.into_iter().map(Expr::Value).collect();
+        call.args = values.iter().cloned().map(Expr::Value).collect();
         let sig = self
             .program
             .functions
@@ -491,6 +493,13 @@ impl HostExecution {
                 "user function `{}` attempted host interpretation",
                 call.callee_key
             )
+        }
+        if let FunctionBody::Wasm { import, .. } = &sig.body {
+            if import.module.starts_with('@') {
+                let value =
+                    exec_static_wasm_scalar(&self.plan.foreign_modules, import, sig, &values)?;
+                return Ok(self.alloc(value));
+            }
         }
         let value = crate::execute::exec_call(
             &call,
@@ -599,6 +608,118 @@ impl HostExecution {
         }
         .context("E-ITER-005: traversal index out of bounds")?;
         Ok(self.alloc(item))
+    }
+}
+
+fn exec_static_wasm_scalar(
+    modules: &BTreeMap<String, Vec<u8>>,
+    import: &crate::lower::ImportTarget,
+    signature: &crate::lower::FunctionSig,
+    args: &[RuntimeValue],
+) -> Result<RuntimeValue> {
+    let bytes = modules.get(&import.module).with_context(|| {
+        format!(
+            "E-WASM-005: static wasm module `{}` was not embedded",
+            import.module
+        )
+    })?;
+    let mut store = Store::default();
+    let module = wasmer::Module::new(&store, bytes)
+        .with_context(|| format!("E-WASM-005: compile static wasm module `{}`", import.module))?;
+    // v1 scalar calls admit no imports. `vibra_ffi.memory` is reserved for the
+    // caller-owned-buffer milestone and is rejected here rather than being
+    // silently instantiated with unrelated memory.
+    if let Some(required) = module.imports().next() {
+        bail!(
+            "E-WASM-005: static scalar execution cannot satisfy import `{}.{}`",
+            required.module(),
+            required.name()
+        );
+    }
+    let instance = Instance::new(&mut store, &module, &wasmer::Imports::new())
+        .with_context(|| format!("instantiate static wasm module `{}`", import.module))?;
+    let function = instance
+        .exports
+        .get_function(&import.name)
+        .with_context(|| {
+            format!(
+                "E-WASM-006: static wasm module `{}` has no function `{}`",
+                import.module, import.name
+            )
+        })?;
+    let wasm_args = args
+        .iter()
+        .zip(&signature.arg_types)
+        .map(|(value, ty)| runtime_to_wasm_scalar(value, ty))
+        .collect::<Result<Vec<_>>>()?;
+    let results = function.call(&mut store, &wasm_args).with_context(|| {
+        format!(
+            "call static wasm export `{}.{}`",
+            import.module, import.name
+        )
+    })?;
+    match signature.return_type {
+        TypeRef::Void => {
+            if !results.is_empty() {
+                bail!("E-WASM-007: void wrapper received a foreign result");
+            }
+            Ok(RuntimeValue::Void)
+        }
+        _ => {
+            if results.len() != 1 {
+                bail!(
+                    "E-WASM-007: scalar wrapper expected one result, got {}",
+                    results.len()
+                );
+            }
+            wasm_to_runtime_scalar(&results[0], &signature.return_type)
+        }
+    }
+}
+
+fn runtime_to_wasm_scalar(value: &RuntimeValue, ty: &TypeRef) -> Result<wasmer::Value> {
+    let value = match value {
+        RuntimeValue::Typed { value, .. } => value.as_ref(),
+        value => value,
+    };
+    match (ty, value) {
+        (TypeRef::Bool, RuntimeValue::Bool(value)) => Ok(wasmer::Value::I32(i32::from(*value))),
+        (
+            TypeRef::Int8
+            | TypeRef::Int16
+            | TypeRef::Int32
+            | TypeRef::UInt8
+            | TypeRef::UInt16
+            | TypeRef::UInt32,
+            RuntimeValue::Int(value),
+        ) => Ok(wasmer::Value::I32(*value as i32)),
+        (TypeRef::Int64 | TypeRef::UInt64, RuntimeValue::Int(value)) => {
+            Ok(wasmer::Value::I64(*value))
+        }
+        (TypeRef::Float32, RuntimeValue::Float(value)) => Ok(wasmer::Value::F32(*value as f32)),
+        (TypeRef::Float64, RuntimeValue::Float(value)) => Ok(wasmer::Value::F64(*value)),
+        _ => bail!("E-WASM-007: value `{value:?}` is not scalar type `{ty:?}`"),
+    }
+}
+
+fn wasm_to_runtime_scalar(value: &wasmer::Value, ty: &TypeRef) -> Result<RuntimeValue> {
+    match (ty, value) {
+        (TypeRef::Bool, wasmer::Value::I32(value)) => Ok(RuntimeValue::Bool(*value != 0)),
+        (
+            TypeRef::Int8
+            | TypeRef::Int16
+            | TypeRef::Int32
+            | TypeRef::UInt8
+            | TypeRef::UInt16
+            | TypeRef::UInt32,
+            wasmer::Value::I32(value),
+        ) => Ok(RuntimeValue::Int(i64::from(*value))),
+        (TypeRef::Int64 | TypeRef::UInt64, wasmer::Value::I64(value)) => {
+            Ok(RuntimeValue::Int(*value))
+        }
+        (TypeRef::Float32, wasmer::Value::F32(value)) => Ok(RuntimeValue::Float(*value as f64)),
+        (TypeRef::Float64, wasmer::Value::F64(value)) => Ok(RuntimeValue::Float(*value)),
+        _ => bail!("E-WASM-007: foreign result `{value:?}` does not match `{ty:?}`"),
     }
 }
 
@@ -798,6 +919,7 @@ impl<'a> Compiler<'a> {
                 main_arg_bindings: program.main_arg_bindings.clone(),
                 host_functions,
                 impl_keys,
+                foreign_modules: program.foreign_modules.clone(),
                 ..WasmPlan::default()
             },
             user_functions,
@@ -1462,6 +1584,12 @@ fn deterministic_program_fingerprint(program: &LoweredProgram) -> String {
     for name in names {
         canonical.push_str(&format!("function:{name}={:?}\n", program.functions[name]));
     }
+    for (module, bytes) in &program.foreign_modules {
+        canonical.push_str(&format!(
+            "foreign-module:{module}={:x}\n",
+            Sha256::digest(bytes)
+        ));
+    }
     let mut keys: Vec<_> = program.impls.keys().collect();
     keys.sort_by(|a, b| {
         (&a.implementing_type, &a.interface).cmp(&(&b.implementing_type, &b.interface))
@@ -1511,6 +1639,7 @@ mod tests {
             functions: HashMap::new(),
             impls: HashMap::new(),
             warnings: vec![],
+            foreign_modules: BTreeMap::new(),
         }
     }
     #[test]

@@ -150,6 +150,13 @@ payloads, fairness beyond deterministic FIFO, and an unbiased nondeterministic
 
 ## Independently testable implementation milestones
 
+The first executable slice lives in `src/async_runtime.rs`. It implements the
+single-threaded fake-clock scheduler, typed task outcomes, affine join handles,
+scope cancellation and cleanup, deadlines, and hierarchical capability
+attenuation. It is an embedding prototype rather than a stable Vibra source or
+host ABI. Async host-operation tokens, compiler alias diagnostics, admission
+limits, and language syntax remain subsequent milestones.
+
 1. **Trace and scheduler:** implement identifiers, event serialization, fake
    clock, scripted completions, and ordering. Pass vectors `ordering-*`.
 2. **Structured tasks:** scope ownership, affine join, retained failures, and

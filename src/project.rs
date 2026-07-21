@@ -207,6 +207,44 @@ pub fn find_project_for_file(path: &Path) -> Result<Option<LoadedProject>> {
     }
 }
 
+/// Resolve and read every statically declared wasm library for the project
+/// containing `entry`. The project-wide check is intentionally repeated here
+/// so direct `vibra run` receives the same missing-artifact and signature
+/// diagnostics as `vibra check` before lowering or execution.
+pub fn static_wasm_artifacts_for_entry(entry: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    let Some(project) = find_project_for_file(entry)? else {
+        return Ok(BTreeMap::new());
+    };
+    if !project
+        .manifest
+        .dependencies
+        .values()
+        .any(|dependency| dependency.wasm.is_some())
+    {
+        return Ok(BTreeMap::new());
+    }
+    check_project(&project.root)?;
+    let mut artifacts = BTreeMap::new();
+    for alias in sorted_dependency_names(&project.manifest.dependencies) {
+        let dependency = &project.manifest.dependencies[alias];
+        let Some(relative) = &dependency.wasm else {
+            continue;
+        };
+        let dependency_root = dependency
+            .path
+            .as_ref()
+            .map(|value| resolve_project_path(&project.root, value))
+            .unwrap_or_else(|| project.root.join("dep").join(alias));
+        let path = dependency_root.join(relative);
+        artifacts.insert(
+            format!("@{alias}"),
+            fs::read(&path)
+                .with_context(|| format!("read static wasm artifact {}", path.display()))?,
+        );
+    }
+    Ok(artifacts)
+}
+
 pub fn resolve_project_import(project: &LoadedProject, import: &str) -> Result<PathBuf> {
     let namespaces = namespace_roots(project)?;
     resolve_at_import(import, &namespaces)
@@ -466,6 +504,17 @@ fn external_wasm_signature(
         }
     } else if function.as_str() != Some("$void") {
         bail!("E-WASM-007: `{symbol}` has an invalid `$function` signature");
+    }
+    if let Some(arguments) = definition
+        .get(Value::String("args".into()))
+        .and_then(Value::as_mapping)
+    {
+        for (argument, ty) in arguments {
+            let argument = argument.as_str().unwrap_or("<argument>");
+            params.push(ForeignWasmType::from_source(ty).with_context(|| {
+                format!("E-WASM-007: `{symbol}` argument `{argument}` is not a v1 wasm scalar")
+            })?);
+        }
     }
     let return_type = definition
         .get(Value::String("return".into()))
@@ -1390,7 +1439,7 @@ mod tests {
         temp
     }
 
-    const FFI_WRAPPER: &str = "sum:\n  $function:\n    left: $int32\n    right: $int32\n  return: $int32\n  do:\n    - $wasm:\n        import:\n          module: '@math'\n          name: sum\n        args: [$args.left, $args.right]\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
+    const FFI_WRAPPER: &str = "sum:\n  $function:\n    left: $int32\n  args:\n    right: $int32\n  return: $int32\n  do:\n    - $wasm:\n        import:\n          module: '@math'\n          name: sum\n        args: [$args.left, $args.right]\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
 
     #[test]
     fn check_accepts_matching_static_wasm_export() {

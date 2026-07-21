@@ -13,7 +13,13 @@
     }
   },
   "$defs": {
-    "id": { "type": "string", "pattern": "^[a-z]+-[0-9]+$" },
+    "id": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[a-z]+-[0-9]+$" },
+        { "type": "integer", "minimum": 1 }
+      ],
+      "description": "Text IDs are canonical interchange; numeric IDs are accepted from the Rust prototype."
+    },
     "event": {
       "type": "object",
       "additionalProperties": false,
@@ -35,7 +41,7 @@
         "operation": { "$ref": "#/$defs/id" },
         "resource": { "$ref": "#/$defs/id" },
         "reason": {
-          "enum": ["explicit", "parent-cancelled", "deadline", "sibling-failed", "capability-revoked", "resource-limit", "closed", "busy"]
+          "enum": ["explicit", "parent-cancelled", "deadline", "sibling-failed", "capability-revoked", "scope-closed", "resource-limit", "closed", "busy"]
         },
         "detail": { "type": ["string", "integer", "boolean", "null"] }
       }
