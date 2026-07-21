@@ -127,3 +127,55 @@ queries-defaulting-and-option-conversion:
         $wildcard: null
       do:
       - $test.fail: ok conversion lost value
+and-or-preserve-error-types:
+  $test: core
+  do:
+  - $let:
+      failure:
+        $result.from-err:
+          t: $int64
+          e: $str
+          input: original
+  - $let:
+      next:
+        $result.from-ok:
+          t: $bool
+          e: $str
+          input: true
+  - $let:
+      chained:
+        $result.and:
+          t: $int64
+          u: $bool
+          e: $str
+          input: $failure
+          next: $next
+  - $match: $chained
+    when:
+    - case:
+        $result.result.err: original
+      do:
+      - $match:
+          $result.or:
+            t: $int64
+            e: $str
+            f: $bool
+            input: $failure
+            fallback:
+              $result.from-ok:
+                t: $int64
+                e: $bool
+                input: 9
+        when:
+        - case:
+            $result.result.ok: 9
+          do:
+          - $test.assert: true
+        - case:
+            $wildcard: null
+          do:
+          - $test.fail: result or did not select fallback
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: result and did not preserve the original error
