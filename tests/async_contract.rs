@@ -28,7 +28,10 @@ fn async_contract_schema_and_vectors_are_well_formed() {
         .expect("event kind enum");
     for case in cases {
         let name = case["name"].as_str().expect("vector name");
-        assert!(!case["script"].as_array().expect("script").is_empty(), "{name}");
+        assert!(
+            !case["script"].as_array().expect("script").is_empty(),
+            "{name}"
+        );
         assert_eq!(case["expected"]["contract-version"], "1", "{name}");
         let events = case["expected"]["events"].as_array().expect("events");
         assert!(!events.is_empty(), "{name}");
@@ -37,7 +40,10 @@ fn async_contract_schema_and_vectors_are_well_formed() {
             let at = event["at"].as_u64().expect("non-negative time");
             assert!(at >= last, "{name}: trace time must be monotonic");
             last = at;
-            assert!(allowed.contains(&event["kind"]), "{name}: unknown event kind");
+            assert!(
+                allowed.contains(&event["kind"]),
+                "{name}: unknown event kind"
+            );
             assert!(event["scope"].as_str().is_some(), "{name}: scope required");
         }
     }
