@@ -1,6 +1,7 @@
 foreign-sum:
   $function:
     left: $int32
+  args:
     right: $int32
   return: $int32
   do:
@@ -13,4 +14,9 @@ foreign-sum:
 main:
   $function: $void
   return: $void
-  do: []
+  do:
+    - $let:
+        answer:
+          $foreign-sum:
+            left: 20
+            right: 22
