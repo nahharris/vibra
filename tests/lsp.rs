@@ -47,15 +47,27 @@ fn lifecycle_and_capabilities_use_lsp_framing() {
 
 #[test]
 fn open_document_publishes_diagnostics_and_semantic_requests_work() {
-    let uri = "file:///tmp/main.vibra";
-    let source = "=doc: Greets the caller\ngreet:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: hi\nmain:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: $greet\n";
+    let workspace = tempfile::tempdir().unwrap();
+    let uri = format!(
+        "file:///{}",
+        workspace
+            .path()
+            .join("main.vibra")
+            .to_string_lossy()
+            .replace('\\', "/")
+    );
+    let root_uri = format!(
+        "file:///{}",
+        workspace.path().to_string_lossy().replace('\\', "/")
+    );
+    let source = "greet:\n  $function: null\n  =doc: Greets the caller\n  args: {}\n  return: string\n  do:\n    - $return: hi\nmain:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: $greet\n";
     let mut input = Vec::new();
     for value in [
-        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
         json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":"vibra","version":1,"text":source}}}),
         json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":uri},"position":{"line":12,"character":17}}}),
         json!({"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":uri},"position":{"line":12,"character":17}}}),
-        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/references","params":{"textDocument":{"uri":uri},"position":{"line":1,"character":2}}}),
+        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/references","params":{"textDocument":{"uri":uri},"position":{"line":0,"character":2}}}),
         json!({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":uri},"position":{"line":12,"character":17}}}),
         json!({"jsonrpc":"2.0","id":6,"method":"shutdown"}),
         json!({"jsonrpc":"2.0","method":"exit"}),
@@ -70,13 +82,66 @@ fn open_document_publishes_diagnostics_and_semantic_requests_work() {
         .as_str()
         .unwrap()
         .contains("Greets"));
-    assert_eq!(output[3]["result"]["range"]["start"]["line"], 1);
+    assert_eq!(output[3]["result"]["range"]["start"]["line"], 0);
     assert_eq!(output[4]["result"].as_array().unwrap().len(), 1);
     assert!(output[5]["result"]
         .as_array()
         .unwrap()
         .iter()
         .any(|item| item["label"] == "greet"));
+}
+
+#[test]
+fn workspace_navigation_resolves_imported_package_symbols_and_open_overlays() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(workspace.path().join("packages")).unwrap();
+    let main_path = workspace.path().join("main.vibra");
+    let util_path = workspace.path().join("packages/util.vibra");
+    let main = "util:\n  $import: packages/util.vibra\nmain:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: $util.greet\n";
+    let util_disk = "greet:\n  $function: null\n  =doc: Old docs\n  args: {}\n  return: string\n  do:\n    - $return: hello\n";
+    let util_overlay = util_disk.replace("Old docs", "Workspace greeting");
+    std::fs::write(&main_path, main).unwrap();
+    std::fs::write(&util_path, util_disk).unwrap();
+    let uri = |path: &std::path::Path| {
+        let value = path.to_string_lossy().replace('\\', "/");
+        if value.starts_with('/') {
+            format!("file://{value}")
+        } else {
+            format!("file:///{value}")
+        }
+    };
+    let main_uri = uri(&main_path);
+    let util_uri = uri(&util_path);
+    let root_uri = uri(workspace.path());
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":main_uri,"text":main}}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":util_uri,"text":util_overlay}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":main_uri},"position":{"line":7,"character":22}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":main_uri},"position":{"line":7,"character":22}}}),
+        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/references","params":{"textDocument":{"uri":util_uri},"position":{"line":0,"character":2}}}),
+        json!({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":main_uri},"position":{"line":7,"character":22}}}),
+        json!({"jsonrpc":"2.0","id":6,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    assert_eq!(output[3]["result"]["uri"], util_uri);
+    assert_eq!(output[3]["result"]["range"]["start"]["line"], 0);
+    assert!(output[4]["result"]["contents"]["value"]
+        .as_str()
+        .unwrap()
+        .contains("Workspace greeting"));
+    assert_eq!(output[5]["result"].as_array().unwrap().len(), 1);
+    assert!(output[6]["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["label"] == "util.greet"));
 }
 
 #[test]
