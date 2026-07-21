@@ -8,3 +8,8 @@ the validated bytes in the compiled program, instantiates the module, and calls
 `sum(20, 22)` through the typed wrapper. The complete ABI and safety contract is
 in
 [`docs/static-wasm-ffi.md`](../../docs/static-wasm-ffi.md).
+
+For caller-owned string and byte buffers, the foreign artifact imports
+`vibra_ffi.memory` and declares two `i32` parameters for each `$str` or direct
+`$array: $uint8` wrapper argument. The project CLI integration fixture exercises
+this contract with multibyte UTF-8 in both source and packaged execution.

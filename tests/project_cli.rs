@@ -987,3 +987,145 @@ main:
         std::fs::read(&changed).unwrap()
     );
 }
+
+fn buffer_ffi_module() -> Vec<u8> {
+    use wasm_encoder::{
+        CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
+        ImportSection, Instruction, MemArg, MemoryType, Module, TypeSection, ValType,
+    };
+    let mut module = Module::new();
+    let mut types = TypeSection::new();
+    types
+        .ty()
+        .function([ValType::I32, ValType::I32], [ValType::I32]);
+    types.ty().function([ValType::I32], []);
+    module.section(&types);
+    let mut imports = ImportSection::new();
+    imports.import(
+        "vibra_ffi",
+        "memory",
+        EntityType::Memory(MemoryType {
+            minimum: 0,
+            maximum: Some(2),
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        }),
+    );
+    module.section(&imports);
+    let mut functions = FunctionSection::new();
+    functions.function(0);
+    functions.function(1);
+    module.section(&functions);
+    let mut exports = ExportSection::new();
+    exports.export("utf8_status", ExportKind::Func, 0);
+    exports.export("assert_89", ExportKind::Func, 1);
+    module.section(&exports);
+    let mut code = CodeSection::new();
+    // Status is first UTF-8 byte plus byte length. "Vï" is [86, 195, 175],
+    // so the expected status is 89. This distinguishes byte length from
+    // Unicode scalar count and proves the pointer addresses copied memory.
+    let mut status = Function::new([]);
+    status.instruction(&Instruction::LocalGet(0));
+    status.instruction(&Instruction::I32Load8U(MemArg {
+        offset: 0,
+        align: 0,
+        memory_index: 0,
+    }));
+    status.instruction(&Instruction::LocalGet(1));
+    status.instruction(&Instruction::I32Add);
+    status.instruction(&Instruction::End);
+    code.function(&status);
+    let mut assert = Function::new([]);
+    assert.instruction(&Instruction::LocalGet(0));
+    assert.instruction(&Instruction::I32Const(89));
+    assert.instruction(&Instruction::I32Ne);
+    assert.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+    assert.instruction(&Instruction::Unreachable);
+    assert.instruction(&Instruction::End);
+    assert.instruction(&Instruction::End);
+    code.function(&assert);
+    module.section(&code);
+    module.finish()
+}
+
+#[test]
+fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("ffi-buffer-app");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::create_dir_all(project.join("foreign")).unwrap();
+    std::fs::write(project.join("foreign/text.wasm"), buffer_ffi_module()).unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        "manifest-version: 1\npackage:\n  name: ffi-buffer-app\n  version: 0.1.0\ntargets:\n  bins:\n    - name: ffi-buffer-app\n      root: src\n      entry: main.vibra\ndependencies:\n  text-ffi:\n    path: foreign\n    wasm: text.wasm\n",
+    ).unwrap();
+    std::fs::write(
+        project.join("src/main.vibra"),
+        r#"foreign-status:
+  $function:
+    text: $str
+  return: $int32
+  do:
+    - $wasm:
+        import:
+          module: "@text-ffi"
+          name: utf8_status
+        args: [$args.text]
+foreign-assert:
+  $function:
+    status: $int32
+  return: $void
+  do:
+    - $wasm:
+        import:
+          module: "@text-ffi"
+          name: assert_89
+        args: [$args.status]
+main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        status:
+          $foreign-status: "Vï"
+    - $foreign-assert: $status
+"#,
+    )
+    .unwrap();
+
+    let check = vibra_cmd()
+        .args(["check", &path_str(&project)])
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let run = vibra_cmd()
+        .args(["run", &path_str(&project.join("src/main.vibra"))])
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "source run failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let app = dir.path().join("buffer.vapp");
+    let build = vibra_cmd()
+        .args(["build", &path_str(&project), "--output", &path_str(&app)])
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let packaged = vibra_cmd().args(["run", &path_str(&app)]).output().unwrap();
+    assert!(
+        packaged.status.success(),
+        "packaged run failed: {}",
+        String::from_utf8_lossy(&packaged.stderr)
+    );
+}

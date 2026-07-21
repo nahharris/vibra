@@ -47,23 +47,38 @@ The scalar mapping is exact:
 | `float64` | `f64` |
 | `void` return | no result |
 
-Only zero or one result is supported. Records, arrays, nominal wrappers,
-references, handles, and host capabilities never cross this boundary.
+Only zero or one result is supported. Records, arrays other than a direct
+`$array: $uint8` input, nominal wrappers, references, handles, and host
+capabilities never cross this boundary.
 
 Bytes and UTF-8 strings use caller-owned linear-memory buffers and an explicit
 `(pointer: int32, length: int32)` pair. Both values are unsigned bit patterns:
 `pointer + length` must not overflow and must remain within the caller memory.
 The callee may read the half-open range `[pointer, pointer + length)` only for
-the duration of the call. A mutable output buffer adds a separate capacity;
-the callee returns the number of bytes written or a documented status code and
-must never retain the pointer. Empty buffers use length zero; pointer zero is
-allowed only with length zero. Strings must be valid UTF-8 before and after a
-successful call. The wrapper allocates, validates, and frees/copies the buffer.
+the duration of the call and must never retain the pointer. Empty buffers use
+length zero; pointer zero is allowed only with length zero. Strings are valid
+UTF-8 before the call. The wrapper allocates, validates, and releases the
+call-scoped buffer. A future mutable output buffer contract will add a separate
+capacity and explicit number-of-bytes-written result.
 
 The artifact must import a memory named `vibra_ffi.memory` when it accepts
 caller-owned pointers. Linking supplies the current instance's memory. It must
 not export or require an allocator. Callee-owned pointers, allocator
 negotiation, and foreign-owned heap values are outside v1.
+
+`$str` wrapper arguments are automatically lowered to one `(pointer, length)`
+pair containing their validated UTF-8 bytes. A direct `$array: $uint8` argument
+uses the same pair without UTF-8 interpretation. Non-empty allocations are
+8-byte aligned; an empty buffer is exactly `(0, 0)`. The host checks every
+length, addition, alignment, wasm32 conversion, memory growth, and write before
+calling the export. A fresh memory and module instance are used for each call,
+so a foreign function cannot observe or retain a previous call's buffer.
+
+Foreign status codes remain ordinary declared scalar results. A Vibra wrapper
+can match or convert that integer into its public typed `result`; the FFI layer
+does not assign meaning to status values. Mutable output buffers and copying
+foreign writes back into Vibra arrays are deferred; v1's implemented buffer
+path is caller-owned, call-scoped input.
 
 ## Validation and safety
 
@@ -91,9 +106,9 @@ so changing foreign code changes the package bytes and verification result.
 
 This milestone deliberately excludes native/C ABIs, runtime plugin discovery,
 network-loaded code, rich values, callee-owned memory, allocator negotiation,
-and automatic error translation. Caller-owned memory import instantiation and
-buffer marshalling remain a follow-up to the implemented scalar path. Typed
-runtime plugins are a separate design;
+and automatic error translation. Mutable output-buffer copy-back remains a
+follow-up to the implemented caller-owned input path. Typed runtime plugins are
+a separate design;
 they must not reuse `@alias` static resolution. Future milestones may add a
 multiple named wasm artifacts per package, generated
 safe wrappers, and negotiated richer-value ABI versions without weakening the

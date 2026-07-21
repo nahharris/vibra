@@ -385,6 +385,33 @@ impl ForeignWasmType {
     }
 }
 
+fn push_foreign_wasm_params(params: &mut Vec<ForeignWasmType>, ty: &Value) -> Option<()> {
+    if ty.as_str() == Some("$str") {
+        params.extend([ForeignWasmType::I32, ForeignWasmType::I32]);
+        return Some(());
+    }
+    if ty
+        .as_mapping()
+        .and_then(|mapping| mapping.get(Value::String("$array".into())))
+        .and_then(Value::as_str)
+        == Some("$uint8")
+    {
+        params.extend([ForeignWasmType::I32, ForeignWasmType::I32]);
+        return Some(());
+    }
+    params.push(ForeignWasmType::from_source(ty)?);
+    Some(())
+}
+
+fn is_foreign_buffer_source(ty: &Value) -> bool {
+    ty.as_str() == Some("$str")
+        || ty
+            .as_mapping()
+            .and_then(|mapping| mapping.get(Value::String("$array".into())))
+            .and_then(Value::as_str)
+            == Some("$uint8")
+}
+
 fn validate_external_wasm_imports(project: &LoadedProject) -> Result<()> {
     let mut seen = HashSet::new();
     for target in project
@@ -421,7 +448,7 @@ fn validate_module_external_wasm(
         let Some(definition) = definition.as_mapping() else {
             continue;
         };
-        if let Some((alias, import_name, params, results)) =
+        if let Some((alias, import_name, params, results, requires_memory)) =
             external_wasm_signature(symbol, definition)?
         {
             validate_external_wasm_export(
@@ -431,6 +458,7 @@ fn validate_module_external_wasm(
                 &import_name,
                 &params,
                 &results,
+                requires_memory,
             )?;
         }
     }
@@ -459,7 +487,15 @@ fn validate_module_external_wasm(
 fn external_wasm_signature(
     symbol: &str,
     definition: &serde_yaml::Mapping,
-) -> Result<Option<(String, String, Vec<ForeignWasmType>, Vec<ForeignWasmType>)>> {
+) -> Result<
+    Option<(
+        String,
+        String,
+        Vec<ForeignWasmType>,
+        Vec<ForeignWasmType>,
+        bool,
+    )>,
+> {
     let Some(body) = definition
         .get(Value::String("do".into()))
         .and_then(Value::as_sequence)
@@ -495,12 +531,14 @@ fn external_wasm_signature(
         .get(Value::String("$function".into()))
         .with_context(|| format!("`{symbol}` external $wasm wrapper must declare `$function`"))?;
     let mut params = Vec::new();
+    let mut requires_memory = false;
     if let Some(arguments) = function.as_mapping() {
         for (argument, ty) in arguments {
             let argument = argument.as_str().unwrap_or("<argument>");
-            params.push(ForeignWasmType::from_source(ty).with_context(|| {
+            requires_memory |= is_foreign_buffer_source(ty);
+            push_foreign_wasm_params(&mut params, ty).with_context(|| {
                 format!("E-WASM-007: `{symbol}` argument `{argument}` is not a v1 wasm scalar")
-            })?);
+            })?;
         }
     } else if function.as_str() != Some("$void") {
         bail!("E-WASM-007: `{symbol}` has an invalid `$function` signature");
@@ -511,9 +549,10 @@ fn external_wasm_signature(
     {
         for (argument, ty) in arguments {
             let argument = argument.as_str().unwrap_or("<argument>");
-            params.push(ForeignWasmType::from_source(ty).with_context(|| {
+            requires_memory |= is_foreign_buffer_source(ty);
+            push_foreign_wasm_params(&mut params, ty).with_context(|| {
                 format!("E-WASM-007: `{symbol}` argument `{argument}` is not a v1 wasm scalar")
-            })?);
+            })?;
         }
     }
     let return_type = definition
@@ -526,7 +565,13 @@ fn external_wasm_signature(
             format!("E-WASM-007: `{symbol}` return type is not a v1 wasm scalar")
         })?]
     };
-    Ok(Some((alias.to_string(), name.to_string(), params, results)))
+    Ok(Some((
+        alias.to_string(),
+        name.to_string(),
+        params,
+        results,
+        requires_memory,
+    )))
 }
 
 fn validate_external_wasm_export(
@@ -536,6 +581,7 @@ fn validate_external_wasm_export(
     name: &str,
     expected_params: &[ForeignWasmType],
     expected_results: &[ForeignWasmType],
+    requires_memory: bool,
 ) -> Result<()> {
     let dependency = project.manifest.dependencies.get(alias).with_context(|| {
         format!("E-WASM-005: `{symbol}` references undeclared wasm dependency `@{alias}`")
@@ -559,6 +605,7 @@ fn validate_external_wasm_export(
     let store = wasmer::Store::default();
     let module = wasmer::Module::new(&store, bytes)
         .with_context(|| format!("E-WASM-005: compile dependency `{alias}` wasm artifact"))?;
+    let mut has_memory = false;
     for import in module.imports() {
         let allowed_memory = import.module() == "vibra_ffi"
             && import.name() == "memory"
@@ -570,6 +617,12 @@ fn validate_external_wasm_export(
                 import.name()
             );
         }
+        has_memory = true;
+    }
+    if requires_memory && !has_memory {
+        bail!(
+            "E-WASM-005: dependency `{alias}` buffer wrapper `{symbol}` requires import `vibra_ffi.memory`"
+        );
     }
     let export = module
         .exports()
@@ -1491,6 +1544,23 @@ mod tests {
         let error = format!("{:#}", check_project(project.path()).unwrap_err());
         assert!(
             error.contains("E-WASM-005") && error.contains("missing"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn check_rejects_buffer_wrapper_without_ffi_memory_import() {
+        let wrapper = "sum:\n  $function:\n    text: $str\n  return: $int32\n  do:\n    - $wasm:\n        import:\n          module: '@math'\n          name: sum\n        args: [$args.text]\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
+        let project = ffi_project(
+            wrapper,
+            Some(wasm_fixture(
+                vec![wasm_encoder::ValType::I32; 2],
+                vec![wasm_encoder::ValType::I32],
+            )),
+        );
+        let error = format!("{:#}", check_project(project.path()).unwrap_err());
+        assert!(
+            error.contains("E-WASM-005") && error.contains("vibra_ffi.memory"),
             "{error}"
         );
     }
