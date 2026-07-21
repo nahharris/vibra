@@ -531,7 +531,10 @@ fn style_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn compile_diagnostics(path: &Path) -> Vec<Diagnostic> {
+/// Compile a saved entry path and return its structured compiler diagnostics.
+/// Embedders that use in-memory documents should call this against an isolated
+/// workspace mirror rather than modifying the user's files.
+pub fn compile_diagnostics(path: &Path) -> Vec<Diagnostic> {
     let result = load::load_program(path).and_then(|program| {
         let Some(entry) = program.modules.get(&program.entry) else {
             return Ok(());
