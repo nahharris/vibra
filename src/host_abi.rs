@@ -623,27 +623,13 @@ pub const HOST_ABI: &[HostImport] = &[
     entry(
         "vibra_v1",
         "process_run",
-        &[
-            STR,
-            ParamKind::Value(ValueKind::Array),
-            ParamKind::Value(ValueKind::StringMap),
-            STR,
-            ParamKind::Value(ValueKind::Any),
-            cap!(ProcessRun),
-        ],
+        &[ParamKind::Value(ValueKind::Record), cap!(ProcessRun)],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "process_spawn",
-        &[
-            STR,
-            ParamKind::Value(ValueKind::Array),
-            ParamKind::Value(ValueKind::StringMap),
-            STR,
-            ParamKind::Value(ValueKind::Any),
-            cap!(ProcessRun),
-        ],
+        &[ParamKind::Value(ValueKind::Record), cap!(ProcessRun)],
         ValueKind::ResultProcessHandle,
     ),
     entry(

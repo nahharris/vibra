@@ -23,17 +23,19 @@ executable-scope-is-attenuated:
         into: $process.run-capability
   - $let:
       outcome:
-        $process.run: outside-grant
-        arguments:
-          $array:
-          - unused
-        environment:
-          $map:
-          - key: VIBRA_PROCESS_TEST
-            value: '1'
-        cwd: ''
-        stdio:
-          $process.stdio-policy.capture: null
+        $process.run:
+          $record:
+            executable: outside-grant
+            arguments:
+              $array:
+              - unused
+            environment:
+              $map:
+              - key: VIBRA_PROCESS_TEST
+                value: '1'
+            cwd: ''
+            stdio:
+              $process.stdio-policy.capture: null
         capability: $capability
   - $match: $outcome
     when:
@@ -46,3 +48,47 @@ executable-scope-is-attenuated:
         $wildcard: null
       do:
       - $test.fail: executable outside process grant was not rejected
+run-rejects-stream-stdio-without-spawning:
+  $test: process
+  tags:
+  - stdlib
+  - process
+  policy:
+    $policy:
+      process-run:
+      - requirement: mandatory
+        scopes:
+        - exact: vibra-process-test
+  do:
+  - $let:
+      capability:
+        $policy.narrow: $args.policy
+        into: $process.run-capability
+  - $let:
+      outcome:
+        $process.run:
+          $record:
+            executable: vibra-process-test
+            arguments:
+              $array:
+              - unused
+            environment:
+              $map:
+              - key: VIBRA_PROCESS_TEST
+                value: '1'
+            cwd: ''
+            stdio:
+              $process.stdio-policy.stream: null
+        capability: $capability
+  - $match: $outcome
+    when:
+    - case:
+        $result.result.err:
+          $process.process-error.unsupported:
+            $wildcard: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: run stream mode was not rejected as unsupported
