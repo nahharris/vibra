@@ -228,8 +228,14 @@ fn semantic_navigation_resolves_transitive_import_aliases() {
     std::fs::write(&main_path, main).unwrap();
     std::fs::write(workspace.path().join("pkg/mid.vibra"), mid).unwrap();
     std::fs::write(&leaf_path, leaf).unwrap();
-    let uri =
-        |path: &std::path::Path| format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
+    let uri = |path: &std::path::Path| {
+        let value = path.to_string_lossy().replace('\\', "/");
+        if value.starts_with('/') {
+            format!("file://{value}")
+        } else {
+            format!("file:///{value}")
+        }
+    };
     let root_uri = uri(workspace.path());
     let main_uri = uri(&main_path);
     let leaf_uri = uri(&leaf_path);
