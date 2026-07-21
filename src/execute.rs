@@ -3769,19 +3769,27 @@ fn exec_vibra_v1(
             }
         }
         "process_run" | "process_spawn" => {
-            let executable = value_string(&args[0])?;
-            let policy = value_policy(&args[5])?;
+            let RuntimeValue::Record(command) = untyped(&args[0]) else {
+                bail!("process command must be a record")
+            };
+            let field = |name: &str| {
+                command
+                    .get(name)
+                    .with_context(|| format!("process command is missing `{name}`"))
+            };
+            let executable = value_string(field("executable")?)?;
+            let policy = value_policy(&args[1])?;
             if ensure_policy_scope(policy, CapabilityDomain::ProcessRun, &executable).is_err() {
                 return Ok(result_err(sig, "permission-denied", None));
             }
-            let RuntimeValue::Array(argv) = untyped(&args[1]) else {
+            let RuntimeValue::Array(argv) = untyped(field("arguments")?) else {
                 bail!("process arguments must be an array")
             };
-            let RuntimeValue::Map(environment) = untyped(&args[2]) else {
+            let RuntimeValue::Map(environment) = untyped(field("environment")?) else {
                 bail!("process environment must be a string map")
             };
-            let cwd = value_string(&args[3])?;
-            let RuntimeValue::Enum { tag: stdio, .. } = untyped(&args[4]) else {
+            let cwd = value_string(field("cwd")?)?;
+            let RuntimeValue::Enum { tag: stdio, .. } = untyped(field("stdio")?) else {
                 bail!("process stdio must be a policy enum")
             };
             if name == "process_run" && stdio == "stream" {

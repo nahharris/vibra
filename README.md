@@ -366,10 +366,13 @@ visible. There is currently no implicit `?`-style control-flow form.
   `readable`/`writable`/`closeable` stream interfaces. Bounded reads use an
   empty successful chunk for EOF, partial writes report progress, and file
   rename/copy/open options and typed directory entries remain capability gated
-- `process` runs an explicit executable plus argument array without shell
-  parsing, supports controlled env/cwd and capture/inherit/null stdio, and
+- `process` uses a typed command record containing an explicit executable,
+  argument array, environment, cwd, and stdio policy without shell parsing;
+  capture/inherit/null execution returns typed status and output, and
   exposes instance-owned child handles with typed wait/kill outcomes; stream
-  mode provides child pipes through the shared file reader/writer interfaces
+  mode provides child pipes through the shared file reader/writer interfaces.
+  `run` rejects stream mode (use `spawn`), and live children are terminated and
+  reaped when their program instance ends
 - Kebab-case is recommended for every symbol; non-kebab symbols emit warnings
 
 ## Examples
