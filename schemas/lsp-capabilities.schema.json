@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/lsp-capabilities.schema.json",
+  "title": "Vibra LSP initialize capabilities",
+  "type": "object",
+  "required": ["textDocumentSync", "documentFormattingProvider", "hoverProvider", "definitionProvider", "referencesProvider", "completionProvider"],
+  "properties": {
+    "textDocumentSync": { "const": 1 },
+    "documentFormattingProvider": { "const": true },
+    "hoverProvider": { "const": true },
+    "definitionProvider": { "const": true },
+    "referencesProvider": { "const": true },
+    "completionProvider": {
+      "type": "object",
+      "required": ["triggerCharacters"],
+      "properties": { "triggerCharacters": { "type": "array", "prefixItems": [{ "const": "$" }, { "const": "." }], "items": false } },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
