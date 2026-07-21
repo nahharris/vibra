@@ -2,6 +2,10 @@ test:
   $import: ../stdlib/src/test.vibra
 error:
   $import: ../stdlib/src/error.vibra
+env:
+  $import: ../stdlib/src/env.vibra
+fs:
+  $import: ../stdlib/src/fs.vibra
 context-preserves-structured-detail:
   $test: core
   do:
@@ -18,3 +22,33 @@ context-preserves-structured-detail:
         $wildcard: null
       do:
       - $test.fail: error context lost structured detail
+host-errors-share-kind-contract:
+  $test: core
+  do:
+  - $let:
+      missing-file:
+        $fs.fs-error.not-found: null
+  - $let:
+      invalid-env:
+        $env.env-error.invalid-name: null
+  - $match:
+      $fs.error-kind: $missing-file
+    when:
+    - case:
+        $error.error-kind.not-found: null
+      do:
+      - $match:
+          $env.error-kind: $invalid-env
+        when:
+        - case:
+            $error.error-kind.invalid-input: null
+          do:
+          - $test.assert: true
+        - case:
+            $wildcard: null
+          do:
+          - $test.fail: env error kind was not normalized
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: filesystem error kind was not normalized

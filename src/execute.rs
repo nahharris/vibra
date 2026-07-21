@@ -3446,6 +3446,13 @@ fn exec_vibra_v1(
             if ensure_policy_scope(policy, CapabilityDomain::EnvRead, &var).is_err() {
                 return Ok(result_err(sig, "permission-denied", None));
             }
+            if let Some(environment) = &config.injected_environment {
+                let environment = environment.lock().expect("injected environment poisoned");
+                return Ok(match environment.get(&var) {
+                    Some(value) => result_ok(sig, RuntimeValue::Str(value.clone())),
+                    None => result_err(sig, "not-found", None),
+                });
+            }
             Ok(fs_result(sig, || env_get(&var), RuntimeValue::Str))
         }
         "env_set" => {
@@ -3458,7 +3465,14 @@ fn exec_vibra_v1(
             if !is_valid_env_name(&var) {
                 return Ok(result_err(sig, "invalid-name", None));
             }
-            std::env::set_var(var, value);
+            if let Some(environment) = &config.injected_environment {
+                environment
+                    .lock()
+                    .expect("injected environment poisoned")
+                    .insert(var, value);
+            } else {
+                std::env::set_var(var, value);
+            }
             Ok(result_ok(sig, RuntimeValue::Void))
         }
         "env_remove" => {
@@ -3470,15 +3484,36 @@ fn exec_vibra_v1(
             if !is_valid_env_name(&var) {
                 return Ok(result_err(sig, "invalid-name", None));
             }
-            std::env::remove_var(var);
+            if let Some(environment) = &config.injected_environment {
+                environment
+                    .lock()
+                    .expect("injected environment poisoned")
+                    .remove(&var);
+            } else {
+                std::env::remove_var(var);
+            }
             Ok(result_ok(sig, RuntimeValue::Void))
         }
         "env_list" => {
             let policy = value_policy(&args[0])?;
-            let mut names = std::env::vars_os()
-                .filter_map(|(name, _)| name.into_string().ok())
-                .filter(|name| ensure_policy_scope(policy, CapabilityDomain::EnvRead, name).is_ok())
-                .collect::<Vec<_>>();
+            let mut names = if let Some(environment) = &config.injected_environment {
+                environment
+                    .lock()
+                    .expect("injected environment poisoned")
+                    .keys()
+                    .filter(|name| {
+                        ensure_policy_scope(policy, CapabilityDomain::EnvRead, name).is_ok()
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                std::env::vars_os()
+                    .filter_map(|(name, _)| name.into_string().ok())
+                    .filter(|name| {
+                        ensure_policy_scope(policy, CapabilityDomain::EnvRead, name).is_ok()
+                    })
+                    .collect::<Vec<_>>()
+            };
             names.sort();
             Ok(RuntimeValue::Array(
                 names.into_iter().map(RuntimeValue::Str).collect(),
@@ -3893,6 +3928,10 @@ fn exec_vibra_v1(
         "clock_now_unix_millis" => {
             let policy = value_policy(&args[0])?;
             ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
+            if let Some(clock) = &config.injected_clock {
+                let millis = clock.lock().expect("injected clock poisoned").unix_millis;
+                return Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)));
+            }
             let millis = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .context("system clock before unix epoch")?
@@ -3902,6 +3941,13 @@ fn exec_vibra_v1(
         "clock_monotonic_millis" => {
             let policy = value_policy(&args[0])?;
             ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
+            if let Some(clock) = &config.injected_clock {
+                let millis = clock
+                    .lock()
+                    .expect("injected clock poisoned")
+                    .monotonic_millis;
+                return Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)));
+            }
             static EPOCH: OnceLock<Instant> = OnceLock::new();
             let millis = EPOCH.get_or_init(Instant::now).elapsed().as_millis();
             Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)))
@@ -3928,7 +3974,13 @@ fn exec_vibra_v1(
             let policy = value_policy(&args[1])?;
             ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
             let millis = u64::try_from(millis).context("sleep duration must be non-negative")?;
-            std::thread::sleep(Duration::from_millis(millis));
+            if let Some(clock) = &config.injected_clock {
+                let mut clock = clock.lock().expect("injected clock poisoned");
+                clock.monotonic_millis = clock.monotonic_millis.saturating_add(millis);
+                clock.unix_millis = clock.unix_millis.saturating_add(millis);
+            } else {
+                std::thread::sleep(Duration::from_millis(millis));
+            }
             Ok(RuntimeValue::Void)
         }
         "random_bytes" => {
