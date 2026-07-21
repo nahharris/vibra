@@ -14,6 +14,17 @@ fn async_contract_schema_and_vectors_are_well_formed() {
     );
     assert_eq!(schema["additionalProperties"], false);
 
+    let host_schema: Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{root}/schemas/async-host-operation.schema.json"))
+            .expect("read async host operation schema"),
+    )
+    .expect("async host operation schema is JSON");
+    assert_eq!(
+        host_schema["$id"],
+        "https://vibra.dev/schemas/async-host-operation.schema.json"
+    );
+    assert_eq!(host_schema["oneOf"].as_array().unwrap().len(), 3);
+
     let vectors: Value = serde_json::from_str(
         &std::fs::read_to_string(format!("{root}/tests/conformance/async-task-vectors.json"))
             .expect("read async vectors"),

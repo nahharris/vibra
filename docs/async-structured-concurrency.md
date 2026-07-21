@@ -6,6 +6,9 @@ shared-memory synchronization model.
 
 The machine-readable trace format is
 [`async-task-trace.schema.json`](../schemas/async-task-trace.schema.json). The
+typed host-adapter boundary is
+[`async-host-operation.schema.json`](../schemas/async-host-operation.schema.json).
+The
 normative examples are
 [`async-task-vectors.json`](../tests/conformance/async-task-vectors.json).
 
@@ -156,6 +159,15 @@ scope cancellation and cleanup, deadlines, and hierarchical capability
 attenuation. It is an embedding prototype rather than a stable Vibra source or
 host ABI. Async host-operation tokens, compiler alias diagnostics, admission
 limits, and language syntax remain subsequent milestones.
+
+The second slice adds the typed `AsyncHostAdapter` command/completion boundary,
+generation-tagged operation tokens, deterministic completion ordering, and
+task wakeup. Cancellation distinguishes hosts that guarantee cancellation from
+those requiring late-completion draining. Scope limits reject admission before
+allocating partial state, while cleanup reports draining operations and retained
+resources and closes them after the final completion. The adapter remains
+single-thread compatible: production event loops and deterministic fake hosts
+implement the same interface.
 
 1. **Trace and scheduler:** implement identifiers, event serialization, fake
    clock, scripted completions, and ordering. Pass vectors `ordering-*`.
