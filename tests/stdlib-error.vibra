@@ -1,0 +1,20 @@
+test:
+  $import: ../stdlib/src/test.vibra
+error:
+  $import: ../stdlib/src/error.vibra
+context-preserves-structured-detail:
+  $test: core
+  do:
+  - $let:
+      kind:
+        $error.error-kind.io: null
+  - $match: $kind
+    when:
+    - case:
+        $error.error-kind.io: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: error context lost structured detail

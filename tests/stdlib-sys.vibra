@@ -2,6 +2,21 @@ test:
   $import: ../stdlib/src/test.vibra
 sys:
   $import: ../stdlib/src/sys.vibra
+result:
+  $import: ../stdlib/src/result.vibra
+accepts-args:
+  $function:
+    value:
+      $array: $str
+  return: $bool
+  do:
+  - $return: true
+accepts-info:
+  $function:
+    value: $sys.info-record
+  return: $bool
+  do:
+  - $return: true
 info-uses-the-granted-system-capability:
   $test: system
   tags:
@@ -21,6 +36,38 @@ info-uses-the-granted-system-capability:
       info:
         $sys.info:
           capability: $capability
+  - $let:
+      info-has-the-declared-type:
+        $accepts-info: $info
+  - $test.assert: $info-has-the-declared-type
+  - $let:
+      args:
+        $sys.args:
+          capability: $capability
+  - $let:
+      args-have-the-declared-type:
+        $accepts-args: $args
+  - $test.assert: $args-have-the-declared-type
+  - $let:
+      temp-dir:
+        $sys.temp-dir:
+          capability: $capability
   - $test.assert-eq-str:
-      actual: $info
-      expected: $info
+      actual: $temp-dir
+      expected: $temp-dir
+  - $let:
+      cwd:
+        $sys.current-dir:
+          capability: $capability
+  - $match: $cwd
+    when:
+    - case:
+        $result.result.ok:
+          $wildcard: null
+      do:
+      - $test.assert: true
+    - case:
+        $result.result.err:
+          $wildcard: null
+      do:
+      - $test.fail: current directory was unavailable

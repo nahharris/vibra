@@ -4,17 +4,18 @@ process:
   $import: ../stdlib/src/process.vibra
 result:
   $import: ../stdlib/src/result.vibra
-run-reports-the-current-unsupported-runtime:
+executable-scope-is-attenuated:
   $test: process
   tags:
   - stdlib
   - capability
+  - process
   policy:
     $policy:
       process-run:
       - requirement: mandatory
         scopes:
-        - exact: echo
+        - exact: vibra-process-test
   do:
   - $let:
       capability:
@@ -22,26 +23,26 @@ run-reports-the-current-unsupported-runtime:
         into: $process.run-capability
   - $let:
       outcome:
-        $process.run: echo
+        $process.run: outside-grant
+        arguments:
+          $array:
+          - unused
+        environment:
+          $map:
+          - key: VIBRA_PROCESS_TEST
+            value: '1'
+        cwd: ''
+        stdio:
+          $process.stdio-policy.capture: null
         capability: $capability
   - $match: $outcome
     when:
     - case:
         $result.result.err:
-          $bind: error
+          $process.process-error.permission-denied: null
       do:
-      - $match: $error
-        when:
-        - case:
-            $process.process-error.unsupported:
-              $wildcard: null
-          do:
-          - $test.assert: true
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: expected unsupported process runtime
+      - $test.assert: true
     - case:
-        $result.result.ok: null
+        $wildcard: null
       do:
-      - $test.fail: process runtime unexpectedly ran a command
+      - $test.fail: executable outside process grant was not rejected

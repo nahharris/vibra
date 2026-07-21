@@ -387,6 +387,25 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 
 **Null safety (v1):** `null` is valid only for type `$void`, and is the only source-level value of `$void`. Optional values use the tagged generic enum from `stdlib/src/option.vibra`; raw payloads and `null` do not coerce into option values. Construct `$option.option.some: <value>` or `$option.option.none`, then narrow with `$match`.
 
+**Option and result operations (v1):** The standard library provides `is-some`,
+`is-none`, and `unwrap-or` for options, and `is-ok`, `is-err`, and `unwrap-or`
+for results. `into-ok-option` and `into-err-option` convert either side of a
+result to an option. Defaults are evaluated before the call, consistently
+with ordinary Vibra argument evaluation. Vibra v1 has no implicit unwrap or
+exception-style propagation: callers propagate a result explicitly with an
+exhaustive `$match`, returning the unchanged `err` payload. This preserves the
+static error type and all context. Transforming `map`/`and-then` operations are
+reserved until callable values are supported;
+the v1 language must not simulate them by erasing callback or error types.
+
+**Error contract (v1):** `stdlib/src/error.vibra` defines the common
+`error-kind` taxonomy, structured `context` (`kind`, `operation`, `message`,
+and optional textual `source`), and the `error` interface. Fallible host-module
+errors must implement this interface. `kind` is stable and suitable for
+control flow; `display` is human-readable; `context` retains the host operation
+and source detail when available. Host mappings must not collapse an unknown
+failure to a bare string or discard its structured module-specific variant.
+
 ### Interface satisfaction
 
 Vibra distinguishes **two** ways an `$interface` is matched. They look similar but apply in different contexts and do not subsume each other.
@@ -734,7 +753,27 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
   `display` and `debug` interfaces for nominal types. Built-in primitives use
   the explicit `convert.format-*` functions until primitive interface impls
   are supported; implicit interpolation remains forbidden.
-- **Typed io/fs:** `stdlib/src/fs.vibra` uses `$newtype` wrappers for `path`, `bytes`, and mode-specific file handles (`read-file`, `write-file`, `append-file`, `read-write-file`). File operations return `result<T, fs-error>` and capability interfaces (`readable`, `writable`, `appendable`, `closeable`) make invalid mode use unrepresentable. `stdlib/src/io.vibra` exposes stdin/stdout/stderr as fs file abstractions and provides string-only helpers such as `print`, `println`, and `readln`.
+- **Typed io/fs:** `stdlib/src/fs.vibra` uses nominal paths and mode-specific
+  file handles (`read-file`, `write-file`, `append-file`, `read-write-file`).
+  The reusable `readable`, `writable`, and `closeable` interfaces are the
+  stream contract used by files and future pipes/sockets. Bounded reads return
+  at most the requested byte count, with a successful empty byte sequence
+  denoting EOF; `write-bytes-some` reports the count written, so callers must
+  retry the unwritten suffix. `read-line` removes one trailing CRLF or LF.
+  Writes can select create/create-new/truncate behavior explicitly. Path
+  join/parent/file-name/components are pure platform path operations; rename,
+  copy, directory enumeration, and canonicalization remain capability checked.
+  `stdlib/src/io.vibra` exposes stdin/stdout/stderr through the same handles.
+- **Typed processes:** `process.run` and `process.spawn` take an executable and
+  argument array directly, so no shell parses a command string. Callers choose
+  the complete child environment, working directory (empty means inherit), and
+  capture/inherit/null stdio policy. Captured output includes raw stdout/stderr
+  bytes and an exit code. Spawned children are opaque instance-owned resources
+  consumed by `wait` and terminable with `kill`. Capability scope is checked
+  against the executable. Stream mode exposes child stdin/stdout/stderr through
+  `process.stdin`, `process.stdout`, and `process.stderr`; those returned file
+  handles implement the same byte stream and close interfaces as filesystem
+  handles, and taking the same pipe twice returns `unavailable`.
 - **Security policies:** privileged host modules consume narrowed domain
   capabilities; roots alone receive aggregate `$policy` values.
 - **Rust-inspired unions:** `stdlib/src/option.vibra` (`Option`) is the tagged `$enum: { some: $t, none: $void }` with `=where: {t: []}`; `stdlib/src/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`. Both use qualified constructors and `$match`.

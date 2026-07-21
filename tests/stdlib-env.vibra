@@ -4,6 +4,13 @@ env:
   $import: ../stdlib/src/env.vibra
 result:
   $import: ../stdlib/src/result.vibra
+accepts-names:
+  $function:
+    value:
+      $array: $str
+  return: $bool
+  do:
+  - $return: true
 get-reads-an-explicitly-granted-variable:
   $test: env
   tags:
@@ -36,3 +43,69 @@ get-reads-an-explicitly-granted-variable:
           $wildcard: null
       do:
       - $test.fail: granted environment variable was not readable
+  - $let:
+      names:
+        $env.list:
+          capability: $capability
+  - $let:
+      names-have-the-declared-type:
+        $accepts-names: $names
+  - $test.assert: $names-have-the-declared-type
+set-and-remove-use-the-exact-write-grant:
+  $test: env
+  tags:
+  - stdlib
+  - capability
+  policy:
+    $policy:
+      env-read:
+      - requirement: mandatory
+        scopes:
+        - exact: VIBRA_STDLIB_ENV_REMOVE_TEST
+      env-write:
+      - requirement: mandatory
+        scopes:
+        - exact: VIBRA_STDLIB_ENV_REMOVE_TEST
+  do:
+  - $let:
+      read-capability:
+        $policy.narrow: $args.policy
+        into: $env.read-capability
+  - $let:
+      write-capability:
+        $policy.narrow: $args.policy
+        into: $env.write-capability
+  - $let:
+      set-result:
+        $env.set: VIBRA_STDLIB_ENV_REMOVE_TEST
+        value: present
+        capability: $write-capability
+  - $let:
+      remove-result:
+        $env.remove: VIBRA_STDLIB_ENV_REMOVE_TEST
+        capability: $write-capability
+  - $match: $remove-result
+    when:
+    - case:
+        $result.result.ok: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: environment removal returned an error
+  - $let:
+      after-remove:
+        $env.get: VIBRA_STDLIB_ENV_REMOVE_TEST
+        capability: $read-capability
+  - $match: $after-remove
+    when:
+    - case:
+        $result.result.err:
+          $wildcard: null
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: removed environment variable remained visible

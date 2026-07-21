@@ -83,6 +83,22 @@
     },
     {
       "module": "vibra_v1",
+      "name": "fd_read_bytes_up_to",
+      "params": [
+        {
+          "kind": "value",
+          "type": "read-handle"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-bytes"
+    },
+    {
+      "module": "vibra_v1",
       "name": "fd_write",
       "params": [
         {
@@ -112,6 +128,22 @@
       ],
       "required-domains": [],
       "return": "result-void"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fd_write_bytes_some",
+      "params": [
+        {
+          "kind": "value",
+          "type": "write-handle"
+        },
+        {
+          "kind": "value",
+          "type": "bytes"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
     },
     {
       "module": "vibra_v1",
@@ -188,6 +220,30 @@
       ],
       "required-domains": [],
       "return": "option-str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "path_file_name",
+      "params": [
+        {
+          "kind": "value",
+          "type": "path"
+        }
+      ],
+      "required-domains": [],
+      "return": "option-str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "path_components",
+      "params": [
+        {
+          "kind": "value",
+          "type": "path"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
     },
     {
       "module": "vibra_v1",
@@ -863,6 +919,38 @@
     },
     {
       "module": "vibra_v1",
+      "name": "fs_open_write_options",
+      "params": [
+        {
+          "kind": "value",
+          "type": "path"
+        },
+        {
+          "kind": "value",
+          "type": "bool"
+        },
+        {
+          "kind": "value",
+          "type": "bool"
+        },
+        {
+          "kind": "value",
+          "type": "bool"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ],
+      "return": "result-write-handle"
+    },
+    {
+      "module": "vibra_v1",
       "name": "fs_open_append",
       "params": [
         {
@@ -1078,6 +1166,26 @@
     },
     {
       "module": "vibra_v1",
+      "name": "fs_read_dir_entries",
+      "params": [
+        {
+          "kind": "value",
+          "type": "path"
+        },
+        {
+          "domains": [
+            "fs-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read"
+      ],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
       "name": "fs_metadata",
       "params": [
         {
@@ -1115,6 +1223,61 @@
         "fs-read"
       ],
       "return": "result-path"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_rename",
+      "params": [
+        {
+          "kind": "value",
+          "type": "path"
+        },
+        {
+          "kind": "value",
+          "type": "path"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-write"
+      ],
+      "return": "result-void"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "fs_copy",
+      "params": [
+        {
+          "kind": "value",
+          "type": "path"
+        },
+        {
+          "kind": "value",
+          "type": "path"
+        },
+        {
+          "domains": [
+            "fs-read"
+          ],
+          "kind": "capability"
+        },
+        {
+          "domains": [
+            "fs-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "fs-read",
+        "fs-write"
+      ],
+      "return": "result-void"
     },
     {
       "module": "vibra_v1",
@@ -1162,7 +1325,55 @@
     },
     {
       "module": "vibra_v1",
-      "name": "net_connect",
+      "name": "env_remove",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "domains": [
+            "env-write"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "env-write"
+      ],
+      "return": "result-void"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "env_list",
+      "params": [
+        {
+          "domains": [
+            "env-read"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "env-read"
+      ],
+      "return": "array"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_address_parse",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_resolve",
       "params": [
         {
           "kind": "value",
@@ -1178,7 +1389,27 @@
       "required-domains": [
         "net-connect"
       ],
-      "return": "result-void"
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_connect",
+      "params": [
+        {
+          "kind": "value",
+          "type": "net-address"
+        },
+        {
+          "domains": [
+            "net-connect"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "net-connect"
+      ],
+      "return": "result-any"
     },
     {
       "module": "vibra_v1",
@@ -1186,7 +1417,7 @@
       "params": [
         {
           "kind": "value",
-          "type": "str"
+          "type": "net-address"
         },
         {
           "domains": [
@@ -1198,7 +1429,151 @@
       "required-domains": [
         "net-listen"
       ],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_accept",
+      "params": [
+        {
+          "kind": "value",
+          "type": "tcp-listener"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_local_address",
+      "params": [
+        {
+          "kind": "value",
+          "type": "any-handle"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_set_deadline",
+      "params": [
+        {
+          "kind": "value",
+          "type": "tcp-stream"
+        },
+        {
+          "kind": "value",
+          "type": "duration"
+        }
+      ],
+      "required-domains": [],
       "return": "result-void"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_shutdown",
+      "params": [
+        {
+          "kind": "value",
+          "type": "tcp-stream"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-void"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_udp_bind",
+      "params": [
+        {
+          "kind": "value",
+          "type": "net-address"
+        },
+        {
+          "domains": [
+            "net-listen"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "net-listen"
+      ],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_udp_connect",
+      "params": [
+        {
+          "kind": "value",
+          "type": "udp-socket"
+        },
+        {
+          "kind": "value",
+          "type": "net-address"
+        },
+        {
+          "domains": [
+            "net-connect"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "net-connect"
+      ],
+      "return": "result-void"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_udp_send_to",
+      "params": [
+        {
+          "kind": "value",
+          "type": "udp-socket"
+        },
+        {
+          "kind": "value",
+          "type": "bytes"
+        },
+        {
+          "kind": "value",
+          "type": "net-address"
+        },
+        {
+          "domains": [
+            "net-connect"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "net-connect"
+      ],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "net_udp_recv_from",
+      "params": [
+        {
+          "kind": "value",
+          "type": "udp-socket"
+        },
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
     },
     {
       "module": "vibra_v1",
@@ -1207,6 +1582,22 @@
         {
           "kind": "value",
           "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "string-map"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "any"
         },
         {
           "domains": [
@@ -1218,7 +1609,103 @@
       "required-domains": [
         "process-run"
       ],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "process_spawn",
+      "params": [
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "array"
+        },
+        {
+          "kind": "value",
+          "type": "string-map"
+        },
+        {
+          "kind": "value",
+          "type": "str"
+        },
+        {
+          "kind": "value",
+          "type": "any"
+        },
+        {
+          "domains": [
+            "process-run"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "process-run"
+      ],
+      "return": "result-process-handle"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "process_wait",
+      "params": [
+        {
+          "kind": "value",
+          "type": "process-handle"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "process_kill",
+      "params": [
+        {
+          "kind": "value",
+          "type": "process-handle"
+        }
+      ],
+      "required-domains": [],
       "return": "result-void"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "process_child_stdin",
+      "params": [
+        {
+          "kind": "value",
+          "type": "process-handle"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-write-handle"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "process_child_stdout",
+      "params": [
+        {
+          "kind": "value",
+          "type": "process-handle"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-read-handle"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "process_child_stderr",
+      "params": [
+        {
+          "kind": "value",
+          "type": "process-handle"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-read-handle"
     },
     {
       "module": "vibra_v1",
@@ -1235,6 +1722,86 @@
         "clock"
       ],
       "return": "uint64"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "clock_monotonic_millis",
+      "params": [
+        {
+          "domains": [
+            "clock"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "clock"
+      ],
+      "return": "instant"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "clock_duration_from_millis",
+      "params": [
+        {
+          "kind": "value",
+          "type": "uint64"
+        }
+      ],
+      "required-domains": [],
+      "return": "duration"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "clock_duration_add",
+      "params": [
+        {
+          "kind": "value",
+          "type": "duration"
+        },
+        {
+          "kind": "value",
+          "type": "duration"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "clock_duration_between",
+      "params": [
+        {
+          "kind": "value",
+          "type": "instant"
+        },
+        {
+          "kind": "value",
+          "type": "instant"
+        }
+      ],
+      "required-domains": [],
+      "return": "result-any"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "clock_sleep_millis",
+      "params": [
+        {
+          "kind": "value",
+          "type": "duration"
+        },
+        {
+          "domains": [
+            "clock"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "clock"
+      ],
+      "return": "void"
     },
     {
       "module": "vibra_v1",
@@ -1259,6 +1826,70 @@
     {
       "module": "vibra_v1",
       "name": "system_info",
+      "params": [
+        {
+          "domains": [
+            "system-info"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "system-info"
+      ],
+      "return": "record"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "system_args",
+      "params": [
+        {
+          "domains": [
+            "system-info"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "system-info"
+      ],
+      "return": "array"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "system_current_dir",
+      "params": [
+        {
+          "domains": [
+            "system-info"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "system-info"
+      ],
+      "return": "result-str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "system_executable",
+      "params": [
+        {
+          "domains": [
+            "system-info"
+          ],
+          "kind": "capability"
+        }
+      ],
+      "required-domains": [
+        "system-info"
+      ],
+      "return": "result-str"
+    },
+    {
+      "module": "vibra_v1",
+      "name": "system_temp_dir",
       "params": [
         {
           "domains": [

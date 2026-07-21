@@ -31,18 +31,26 @@ pub enum ValueKind {
     Bool,
     Int64,
     UInt64,
+    Duration,
+    Instant,
+    NetAddress,
+    TcpStream,
+    TcpListener,
+    UdpSocket,
     Float64,
     Str,
     Bytes,
     Path,
     ReadHandle,
     WriteHandle,
+    ProcessHandle,
     AnyHandle,
     ResultVoid,
     ResultStr,
     ResultBytes,
     ResultReadHandle,
     ResultWriteHandle,
+    ResultProcessHandle,
     ResultPaths,
     ResultPath,
     OptionPath,
@@ -52,6 +60,7 @@ pub enum ValueKind {
     Any,
     Array,
     StringMap,
+    Record,
     CodeDocument,
     CodeQuery,
     CodeNode,
@@ -102,18 +111,26 @@ impl ValueKind {
             Self::Bool => "bool",
             Self::Int64 => "int64",
             Self::UInt64 => "uint64",
+            Self::Duration => "duration",
+            Self::Instant => "instant",
+            Self::NetAddress => "net-address",
+            Self::TcpStream => "tcp-stream",
+            Self::TcpListener => "tcp-listener",
+            Self::UdpSocket => "udp-socket",
             Self::Float64 => "float64",
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::Path => "path",
             Self::ReadHandle => "read-handle",
             Self::WriteHandle => "write-handle",
+            Self::ProcessHandle => "process-handle",
             Self::AnyHandle => "any-handle",
             Self::ResultVoid => "result-void",
             Self::ResultStr => "result-str",
             Self::ResultBytes => "result-bytes",
             Self::ResultReadHandle => "result-read-handle",
             Self::ResultWriteHandle => "result-write-handle",
+            Self::ResultProcessHandle => "result-process-handle",
             Self::ResultPaths => "result-paths",
             Self::ResultPath => "result-path",
             Self::OptionPath => "option-path",
@@ -123,6 +140,7 @@ impl ValueKind {
             Self::Any => "any",
             Self::Array => "array",
             Self::StringMap => "string-map",
+            Self::Record => "record",
             Self::CodeDocument => "code-document",
             Self::CodeQuery => "code-query",
             Self::CodeNode => "code-node",
@@ -144,12 +162,19 @@ impl ValueKind {
 const BOOL: ParamKind = ParamKind::Value(ValueKind::Bool);
 const I64: ParamKind = ParamKind::Value(ValueKind::Int64);
 const U64: ParamKind = ParamKind::Value(ValueKind::UInt64);
+const DURATION: ParamKind = ParamKind::Value(ValueKind::Duration);
+const INSTANT: ParamKind = ParamKind::Value(ValueKind::Instant);
+const NET_ADDRESS: ParamKind = ParamKind::Value(ValueKind::NetAddress);
+const TCP_STREAM: ParamKind = ParamKind::Value(ValueKind::TcpStream);
+const TCP_LISTENER: ParamKind = ParamKind::Value(ValueKind::TcpListener);
+const UDP_SOCKET: ParamKind = ParamKind::Value(ValueKind::UdpSocket);
 const F64: ParamKind = ParamKind::Value(ValueKind::Float64);
 const STR: ParamKind = ParamKind::Value(ValueKind::Str);
 const BYTES: ParamKind = ParamKind::Value(ValueKind::Bytes);
 const PATH: ParamKind = ParamKind::Value(ValueKind::Path);
 const READ_HANDLE: ParamKind = ParamKind::Value(ValueKind::ReadHandle);
 const WRITE_HANDLE: ParamKind = ParamKind::Value(ValueKind::WriteHandle);
+const PROCESS_HANDLE: ParamKind = ParamKind::Value(ValueKind::ProcessHandle);
 const ANY_HANDLE: ParamKind = ParamKind::Value(ValueKind::AnyHandle);
 
 macro_rules! cap {
@@ -186,6 +211,12 @@ pub const HOST_ABI: &[HostImport] = &[
     ),
     entry(
         "vibra_v1",
+        "fd_read_bytes_up_to",
+        &[READ_HANDLE, U64],
+        ValueKind::ResultBytes,
+    ),
+    entry(
+        "vibra_v1",
         "fd_write",
         &[WRITE_HANDLE, STR],
         ValueKind::ResultVoid,
@@ -195,6 +226,12 @@ pub const HOST_ABI: &[HostImport] = &[
         "fd_write_bytes",
         &[WRITE_HANDLE, BYTES],
         ValueKind::ResultVoid,
+    ),
+    entry(
+        "vibra_v1",
+        "fd_write_bytes_some",
+        &[WRITE_HANDLE, BYTES],
+        ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
@@ -208,6 +245,8 @@ pub const HOST_ABI: &[HostImport] = &[
     entry("vibra_v1", "path_join", &[PATH, STR], ValueKind::Path),
     entry("vibra_v1", "path_parent", &[PATH], ValueKind::OptionPath),
     entry("vibra_v1", "path_extension", &[PATH], ValueKind::OptionStr),
+    entry("vibra_v1", "path_file_name", &[PATH], ValueKind::OptionStr),
+    entry("vibra_v1", "path_components", &[PATH], ValueKind::ResultAny),
     // vibra_v1: pure byte-array helpers.
     entry("vibra_v1", "bytes_len", &[BYTES], ValueKind::UInt64),
     entry(
@@ -395,6 +434,12 @@ pub const HOST_ABI: &[HostImport] = &[
     ),
     entry(
         "vibra_v1",
+        "fs_open_write_options",
+        &[PATH, BOOL, BOOL, BOOL, cap!(FsWrite)],
+        ValueKind::ResultWriteHandle,
+    ),
+    entry(
+        "vibra_v1",
         "fs_open_append",
         &[PATH, cap!(FsWrite)],
         ValueKind::ResultWriteHandle,
@@ -455,6 +500,12 @@ pub const HOST_ABI: &[HostImport] = &[
     ),
     entry(
         "vibra_v1",
+        "fs_read_dir_entries",
+        &[PATH, cap!(FsRead)],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
         "fs_metadata",
         &[PATH, cap!(FsRead)],
         ValueKind::ResultStr,
@@ -464,6 +515,18 @@ pub const HOST_ABI: &[HostImport] = &[
         "fs_canonicalize",
         &[PATH, cap!(FsRead)],
         ValueKind::ResultPath,
+    ),
+    entry(
+        "vibra_v1",
+        "fs_rename",
+        &[PATH, PATH, cap!(FsWrite)],
+        ValueKind::ResultVoid,
+    ),
+    entry(
+        "vibra_v1",
+        "fs_copy",
+        &[PATH, PATH, cap!(FsRead), cap!(FsWrite)],
+        ValueKind::ResultVoid,
     ),
     // vibra_v1: environment, network, process, clock, randomness, system.
     entry(
@@ -480,27 +543,174 @@ pub const HOST_ABI: &[HostImport] = &[
     ),
     entry(
         "vibra_v1",
-        "net_connect",
-        &[STR, cap!(NetConnect)],
+        "env_remove",
+        &[STR, cap!(EnvWrite)],
         ValueKind::ResultVoid,
+    ),
+    entry("vibra_v1", "env_list", &[cap!(EnvRead)], ValueKind::Array),
+    entry(
+        "vibra_v1",
+        "net_address_parse",
+        &[STR],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "net_resolve",
+        &[STR, cap!(NetConnect)],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "net_connect",
+        &[NET_ADDRESS, cap!(NetConnect)],
+        ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "net_listen",
-        &[STR, cap!(NetListen)],
+        &[NET_ADDRESS, cap!(NetListen)],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "net_accept",
+        &[TCP_LISTENER],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "net_local_address",
+        &[ANY_HANDLE],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "net_set_deadline",
+        &[TCP_STREAM, DURATION],
         ValueKind::ResultVoid,
     ),
     entry(
         "vibra_v1",
-        "process_run",
-        &[STR, cap!(ProcessRun)],
+        "net_shutdown",
+        &[TCP_STREAM, STR],
         ValueKind::ResultVoid,
+    ),
+    entry(
+        "vibra_v1",
+        "net_udp_bind",
+        &[NET_ADDRESS, cap!(NetListen)],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "net_udp_connect",
+        &[UDP_SOCKET, NET_ADDRESS, cap!(NetConnect)],
+        ValueKind::ResultVoid,
+    ),
+    entry(
+        "vibra_v1",
+        "net_udp_send_to",
+        &[UDP_SOCKET, BYTES, NET_ADDRESS, cap!(NetConnect)],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "net_udp_recv_from",
+        &[UDP_SOCKET, U64],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "process_run",
+        &[
+            STR,
+            ParamKind::Value(ValueKind::Array),
+            ParamKind::Value(ValueKind::StringMap),
+            STR,
+            ParamKind::Value(ValueKind::Any),
+            cap!(ProcessRun),
+        ],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "process_spawn",
+        &[
+            STR,
+            ParamKind::Value(ValueKind::Array),
+            ParamKind::Value(ValueKind::StringMap),
+            STR,
+            ParamKind::Value(ValueKind::Any),
+            cap!(ProcessRun),
+        ],
+        ValueKind::ResultProcessHandle,
+    ),
+    entry(
+        "vibra_v1",
+        "process_wait",
+        &[PROCESS_HANDLE],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "process_kill",
+        &[PROCESS_HANDLE],
+        ValueKind::ResultVoid,
+    ),
+    entry(
+        "vibra_v1",
+        "process_child_stdin",
+        &[PROCESS_HANDLE],
+        ValueKind::ResultWriteHandle,
+    ),
+    entry(
+        "vibra_v1",
+        "process_child_stdout",
+        &[PROCESS_HANDLE],
+        ValueKind::ResultReadHandle,
+    ),
+    entry(
+        "vibra_v1",
+        "process_child_stderr",
+        &[PROCESS_HANDLE],
+        ValueKind::ResultReadHandle,
     ),
     entry(
         "vibra_v1",
         "clock_now_unix_millis",
         &[cap!(Clock)],
         ValueKind::UInt64,
+    ),
+    entry(
+        "vibra_v1",
+        "clock_monotonic_millis",
+        &[cap!(Clock)],
+        ValueKind::Instant,
+    ),
+    entry(
+        "vibra_v1",
+        "clock_duration_from_millis",
+        &[U64],
+        ValueKind::Duration,
+    ),
+    entry(
+        "vibra_v1",
+        "clock_duration_add",
+        &[DURATION, DURATION],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "clock_duration_between",
+        &[INSTANT, INSTANT],
+        ValueKind::ResultAny,
+    ),
+    entry(
+        "vibra_v1",
+        "clock_sleep_millis",
+        &[DURATION, cap!(Clock)],
+        ValueKind::Void,
     ),
     entry(
         "vibra_v1",
@@ -511,6 +721,30 @@ pub const HOST_ABI: &[HostImport] = &[
     entry(
         "vibra_v1",
         "system_info",
+        &[cap!(SystemInfo)],
+        ValueKind::Record,
+    ),
+    entry(
+        "vibra_v1",
+        "system_args",
+        &[cap!(SystemInfo)],
+        ValueKind::Array,
+    ),
+    entry(
+        "vibra_v1",
+        "system_current_dir",
+        &[cap!(SystemInfo)],
+        ValueKind::ResultStr,
+    ),
+    entry(
+        "vibra_v1",
+        "system_executable",
+        &[cap!(SystemInfo)],
+        ValueKind::ResultStr,
+    ),
+    entry(
+        "vibra_v1",
+        "system_temp_dir",
         &[cap!(SystemInfo)],
         ValueKind::Str,
     ),
@@ -772,6 +1006,44 @@ mod tests {
         let open = lookup("vibra_v1", "fs_open_read").unwrap();
         assert_eq!(open.params[0], ParamKind::Value(ValueKind::Path));
         assert_eq!(open.result, ValueKind::ResultReadHandle);
+
+        let bounded = lookup("vibra_v1", "fd_read_bytes_up_to").unwrap();
+        assert_eq!(bounded.params, &[READ_HANDLE, U64]);
+        assert_eq!(bounded.result, ValueKind::ResultBytes);
+
+        let rename = lookup("vibra_v1", "fs_rename").unwrap();
+        assert_eq!(rename.required_domains(), vec![CapabilityDomain::FsWrite]);
+
+        let copy = lookup("vibra_v1", "fs_copy").unwrap();
+        assert_eq!(
+            copy.required_domains(),
+            vec![CapabilityDomain::FsRead, CapabilityDomain::FsWrite]
+        );
+
+        let monotonic = lookup("vibra_v1", "clock_monotonic_millis").unwrap();
+        assert_eq!(monotonic.result, ValueKind::Instant);
+        assert_eq!(monotonic.required_domains(), vec![CapabilityDomain::Clock]);
+
+        let list = lookup("vibra_v1", "env_list").unwrap();
+        assert_eq!(list.result, ValueKind::Array);
+        assert_eq!(list.required_domains(), vec![CapabilityDomain::EnvRead]);
+
+        let info = lookup("vibra_v1", "system_info").unwrap();
+        assert_eq!(info.result, ValueKind::Record);
+        assert_eq!(info.required_domains(), vec![CapabilityDomain::SystemInfo]);
+
+        let connect = lookup("vibra_v1", "net_connect").unwrap();
+        assert_eq!(connect.params[0], NET_ADDRESS);
+        assert_eq!(
+            connect.required_domains(),
+            vec![CapabilityDomain::NetConnect]
+        );
+
+        let bind = lookup("vibra_v1", "net_udp_bind").unwrap();
+        assert_eq!(bind.required_domains(), vec![CapabilityDomain::NetListen]);
+
+        let accept = lookup("vibra_v1", "net_accept").unwrap();
+        assert!(accept.required_domains().is_empty());
     }
 
     #[test]
