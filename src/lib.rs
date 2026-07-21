@@ -1,6 +1,7 @@
 //! Library surface for tests and future embedding.
 
 pub mod annotations;
+pub mod async_runtime;
 pub mod code;
 pub mod docs;
 pub mod emit;
