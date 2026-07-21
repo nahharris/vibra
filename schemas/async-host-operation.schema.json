@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/async-host-operation.schema.json",
+  "title": "Vibra async host adapter message",
+  "oneOf": [
+    { "$ref": "#/$defs/start" },
+    { "$ref": "#/$defs/cancel" },
+    { "$ref": "#/$defs/completion" }
+  ],
+  "$defs": {
+    "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot", "generation"],
+      "properties": {
+        "slot": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "generation": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+      }
+    },
+    "start": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "token", "resource", "request"],
+      "properties": {
+        "command": { "const": "start" },
+        "token": { "$ref": "#/$defs/token" },
+        "resource": { "type": "integer", "minimum": 1 },
+        "request": { "type": "string" }
+      }
+    },
+    "cancel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "token"],
+      "properties": {
+        "command": { "const": "cancel" },
+        "token": { "$ref": "#/$defs/token" }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token", "result"],
+      "properties": {
+        "token": { "$ref": "#/$defs/token" },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "value"],
+              "properties": { "status": { "const": "completed" }, "value": { "type": "string" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "value"],
+              "properties": { "status": { "const": "failed" }, "value": { "type": "string" } }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
