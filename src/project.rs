@@ -60,6 +60,9 @@ pub struct Dependency {
     pub path: Option<PathBuf>,
     pub git: Option<String>,
     pub rev: Option<String>,
+    /// Package-relative static WebAssembly library exposed as `@<alias>` to
+    /// `$wasm.import.module`. The artifact is validated by `vibra check`.
+    pub wasm: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -166,6 +169,7 @@ pub fn check_project(path: &Path) -> Result<()> {
     validate_manifest_shape(&project)?;
     validate_dependency_paths(&project)?;
     validate_project_lock(&project)?;
+    validate_external_wasm_imports(&project)?;
     validate_target_imports(&project)?;
     Ok(())
 }
@@ -279,6 +283,284 @@ fn validate_manifest_shape(project: &LoadedProject) -> Result<()> {
                 validate_exact_revision(name, dep.rev.as_deref())?;
             }
         }
+        if let Some(wasm) = &dep.wasm {
+            validate_relative_artifact_path(wasm, "wasm artifact")
+                .with_context(|| format!("dependency `{name}`"))?;
+            if wasm.extension().and_then(|value| value.to_str()) != Some("wasm") {
+                bail!("dependency `{name}` wasm artifact must end in `.wasm`");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_relative_artifact_path(path: &Path, label: &str) -> Result<()> {
+    if path.as_os_str().is_empty() || path.is_absolute() {
+        bail!("{label} must be a non-empty relative path");
+    }
+    for component in path.components() {
+        if !matches!(component, Component::Normal(_)) {
+            bail!("{label} must not contain `.` or `..`");
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForeignWasmType {
+    I32,
+    I64,
+    F32,
+    F64,
+}
+
+impl ForeignWasmType {
+    fn from_source(value: &Value) -> Option<Self> {
+        match value.as_str()? {
+            "$bool" | "$int8" | "$int16" | "$int32" | "$uint8" | "$uint16" | "$uint32" => {
+                Some(Self::I32)
+            }
+            "$int64" | "$uint64" => Some(Self::I64),
+            "$float32" => Some(Self::F32),
+            "$float64" => Some(Self::F64),
+            _ => None,
+        }
+    }
+
+    fn from_wasmer(value: wasmer::Type) -> Option<Self> {
+        match value {
+            wasmer::Type::I32 => Some(Self::I32),
+            wasmer::Type::I64 => Some(Self::I64),
+            wasmer::Type::F32 => Some(Self::F32),
+            wasmer::Type::F64 => Some(Self::F64),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::F32 => "f32",
+            Self::F64 => "f64",
+        }
+    }
+}
+
+fn validate_external_wasm_imports(project: &LoadedProject) -> Result<()> {
+    let mut seen = HashSet::new();
+    for target in project
+        .manifest
+        .targets
+        .libs
+        .iter()
+        .chain(project.manifest.targets.bins.iter())
+    {
+        let entry = project.root.join(&target.root).join(&target.entry);
+        validate_module_external_wasm(project, &entry, &mut seen)?;
+    }
+    Ok(())
+}
+
+fn validate_module_external_wasm(
+    project: &LoadedProject,
+    path: &Path,
+    seen: &mut HashSet<PathBuf>,
+) -> Result<()> {
+    let path = fs::canonicalize(path).with_context(|| format!("resolve {}", path.display()))?;
+    if !seen.insert(path.clone()) {
+        return Ok(());
+    }
+    let value: Value = serde_yaml::from_str(&fs::read_to_string(&path)?)
+        .with_context(|| format!("parse {}", path.display()))?;
+    let map = value
+        .as_mapping()
+        .with_context(|| format!("{}: module root must be a mapping", path.display()))?;
+    for (symbol, definition) in map {
+        let Some(symbol) = symbol.as_str() else {
+            continue;
+        };
+        let Some(definition) = definition.as_mapping() else {
+            continue;
+        };
+        if let Some((alias, import_name, params, results)) =
+            external_wasm_signature(symbol, definition)?
+        {
+            validate_external_wasm_export(
+                project,
+                symbol,
+                &alias,
+                &import_name,
+                &params,
+                &results,
+            )?;
+        }
+    }
+    // Import recursion and path safety are validated by the normal import
+    // pass. Reuse its resolved graph so wrappers in imported project modules
+    // cannot escape static validation.
+    let namespaces = namespace_roots(project)?;
+    let parent = path.parent().context("module path has no parent")?;
+    for definition in map.values().filter_map(Value::as_mapping) {
+        let Some(import) = definition
+            .get(Value::String("$import".into()))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let resolved = if import.starts_with('@') {
+            resolve_at_import(import, &namespaces)?
+        } else {
+            parent.join(import)
+        };
+        validate_module_external_wasm(project, &resolved, seen)?;
+    }
+    Ok(())
+}
+
+fn external_wasm_signature(
+    symbol: &str,
+    definition: &serde_yaml::Mapping,
+) -> Result<Option<(String, String, Vec<ForeignWasmType>, Vec<ForeignWasmType>)>> {
+    let Some(body) = definition
+        .get(Value::String("do".into()))
+        .and_then(Value::as_sequence)
+    else {
+        return Ok(None);
+    };
+    if body.len() != 1 {
+        return Ok(None);
+    }
+    let Some(wasm) = body[0]
+        .as_mapping()
+        .and_then(|step| step.get(Value::String("$wasm".into())))
+        .and_then(Value::as_mapping)
+    else {
+        return Ok(None);
+    };
+    let import = wasm
+        .get(Value::String("import".into()))
+        .and_then(Value::as_mapping)
+        .with_context(|| format!("`{symbol}` $wasm.import must be a mapping"))?;
+    let module = import
+        .get(Value::String("module".into()))
+        .and_then(Value::as_str)
+        .with_context(|| format!("`{symbol}` $wasm.import.module must be a string"))?;
+    let Some(alias) = module.strip_prefix('@') else {
+        return Ok(None);
+    };
+    let name = import
+        .get(Value::String("name".into()))
+        .and_then(Value::as_str)
+        .with_context(|| format!("`{symbol}` $wasm.import.name must be a string"))?;
+    let function = definition
+        .get(Value::String("$function".into()))
+        .with_context(|| format!("`{symbol}` external $wasm wrapper must declare `$function`"))?;
+    let mut params = Vec::new();
+    if let Some(arguments) = function.as_mapping() {
+        for (argument, ty) in arguments {
+            let argument = argument.as_str().unwrap_or("<argument>");
+            params.push(ForeignWasmType::from_source(ty).with_context(|| {
+                format!("E-WASM-007: `{symbol}` argument `{argument}` is not a v1 wasm scalar")
+            })?);
+        }
+    } else if function.as_str() != Some("$void") {
+        bail!("E-WASM-007: `{symbol}` has an invalid `$function` signature");
+    }
+    let return_type = definition
+        .get(Value::String("return".into()))
+        .with_context(|| format!("`{symbol}` external $wasm wrapper must declare `return`"))?;
+    let results = if return_type.as_str() == Some("$void") {
+        Vec::new()
+    } else {
+        vec![ForeignWasmType::from_source(return_type).with_context(|| {
+            format!("E-WASM-007: `{symbol}` return type is not a v1 wasm scalar")
+        })?]
+    };
+    Ok(Some((alias.to_string(), name.to_string(), params, results)))
+}
+
+fn validate_external_wasm_export(
+    project: &LoadedProject,
+    symbol: &str,
+    alias: &str,
+    name: &str,
+    expected_params: &[ForeignWasmType],
+    expected_results: &[ForeignWasmType],
+) -> Result<()> {
+    let dependency = project.manifest.dependencies.get(alias).with_context(|| {
+        format!("E-WASM-005: `{symbol}` references undeclared wasm dependency `@{alias}`")
+    })?;
+    let artifact = dependency.wasm.as_ref().with_context(|| {
+        format!("E-WASM-005: dependency `{alias}` does not declare a `wasm` artifact")
+    })?;
+    let dependency_root = dependency
+        .path
+        .as_ref()
+        .map(|value| resolve_project_path(&project.root, value))
+        .unwrap_or_else(|| project.root.join("dep").join(alias));
+    let artifact = dependency_root.join(artifact);
+    if !artifact.is_file() {
+        bail!(
+            "E-WASM-005: dependency `{alias}` wasm artifact `{}` is missing",
+            artifact.display()
+        );
+    }
+    let bytes = fs::read(&artifact).with_context(|| format!("read {}", artifact.display()))?;
+    let store = wasmer::Store::default();
+    let module = wasmer::Module::new(&store, bytes)
+        .with_context(|| format!("E-WASM-005: compile dependency `{alias}` wasm artifact"))?;
+    for import in module.imports() {
+        let allowed_memory = import.module() == "vibra_ffi"
+            && import.name() == "memory"
+            && matches!(import.ty(), wasmer::ExternType::Memory(_));
+        if !allowed_memory {
+            bail!(
+                "E-WASM-005: dependency `{alias}` has forbidden wasm import `{}.{}`; v1 permits only `vibra_ffi.memory`",
+                import.module(),
+                import.name()
+            );
+        }
+    }
+    let export = module
+        .exports()
+        .find(|export| export.name() == name)
+        .with_context(|| {
+            format!("E-WASM-006: dependency `{alias}` does not export function `{name}`")
+        })?;
+    let wasmer::ExternType::Function(function) = export.ty() else {
+        bail!("E-WASM-006: dependency `{alias}` export `{name}` is not a function");
+    };
+    let actual_params: Option<Vec<_>> = function
+        .params()
+        .iter()
+        .copied()
+        .map(ForeignWasmType::from_wasmer)
+        .collect();
+    let actual_results: Option<Vec<_>> = function
+        .results()
+        .iter()
+        .copied()
+        .map(ForeignWasmType::from_wasmer)
+        .collect();
+    let actual_params = actual_params.with_context(|| {
+        format!("E-WASM-007: `{alias}.{name}` uses an unsupported wasm parameter type")
+    })?;
+    let actual_results = actual_results.with_context(|| {
+        format!("E-WASM-007: `{alias}.{name}` uses an unsupported wasm result type")
+    })?;
+    if actual_params != expected_params || actual_results != expected_results {
+        let render = |types: &[ForeignWasmType]| {
+            types
+                .iter()
+                .map(|ty| ty.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        bail!(
+            "E-WASM-007: wrapper `{symbol}` declares ({}) -> ({}), but `@{alias}.{name}` exports ({}) -> ({})",
+            render(expected_params), render(expected_results), render(&actual_params), render(&actual_results)
+        );
     }
     Ok(())
 }
@@ -986,6 +1268,7 @@ mod tests {
             path: None,
             git: Some(git.into()),
             rev: Some(rev.into()),
+            wasm: None,
         };
         let temp = tempfile::tempdir().unwrap();
         let mut packages = Vec::new();
@@ -1060,6 +1343,106 @@ mod tests {
         assert_eq!(
             hash_package_tree(unix.path()).unwrap(),
             hash_package_tree(windows.path()).unwrap()
+        );
+    }
+
+    fn wasm_fixture(
+        params: Vec<wasm_encoder::ValType>,
+        results: Vec<wasm_encoder::ValType>,
+    ) -> Vec<u8> {
+        use wasm_encoder::{
+            CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
+            TypeSection,
+        };
+        let mut module = Module::new();
+        let mut types = TypeSection::new();
+        types.ty().function(params, results.clone());
+        module.section(&types);
+        let mut functions = FunctionSection::new();
+        functions.function(0);
+        module.section(&functions);
+        let mut exports = ExportSection::new();
+        exports.export("sum", ExportKind::Func, 0);
+        module.section(&exports);
+        let mut code = CodeSection::new();
+        let mut body = Function::new([]);
+        if results == vec![wasm_encoder::ValType::I32] {
+            body.instruction(&Instruction::I32Const(0));
+        }
+        body.instruction(&Instruction::End);
+        code.function(&body);
+        module.section(&code);
+        module.finish()
+    }
+
+    fn ffi_project(wrapper: &str, artifact: Option<Vec<u8>>) -> tempfile::TempDir {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::create_dir_all(temp.path().join("foreign")).unwrap();
+        fs::write(temp.path().join("src/main.vibra"), wrapper).unwrap();
+        if let Some(bytes) = artifact {
+            fs::write(temp.path().join("foreign/math.wasm"), bytes).unwrap();
+        }
+        fs::write(
+            temp.path().join(MANIFEST_FILE),
+            "manifest-version: 1\npackage:\n  name: ffi-test\n  version: 0.1.0\ntargets:\n  bins:\n    - name: ffi-test\n      root: src\n      entry: main.vibra\ndependencies:\n  math:\n    path: foreign\n    wasm: math.wasm\n",
+        ).unwrap();
+        temp
+    }
+
+    const FFI_WRAPPER: &str = "sum:\n  $function:\n    left: $int32\n    right: $int32\n  return: $int32\n  do:\n    - $wasm:\n        import:\n          module: '@math'\n          name: sum\n        args: [$args.left, $args.right]\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
+
+    #[test]
+    fn check_accepts_matching_static_wasm_export() {
+        let project = ffi_project(
+            FFI_WRAPPER,
+            Some(wasm_fixture(
+                vec![wasm_encoder::ValType::I32; 2],
+                vec![wasm_encoder::ValType::I32],
+            )),
+        );
+        check_project(project.path()).unwrap();
+    }
+
+    #[test]
+    fn check_rejects_missing_static_wasm_symbol_before_execution() {
+        let project = ffi_project(
+            &FFI_WRAPPER.replace("name: sum", "name: absent"),
+            Some(wasm_fixture(
+                vec![wasm_encoder::ValType::I32; 2],
+                vec![wasm_encoder::ValType::I32],
+            )),
+        );
+        let error = format!("{:#}", check_project(project.path()).unwrap_err());
+        assert!(
+            error.contains("E-WASM-006") && error.contains("absent"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn check_rejects_static_wasm_signature_mismatch_before_execution() {
+        let project = ffi_project(
+            FFI_WRAPPER,
+            Some(wasm_fixture(
+                vec![wasm_encoder::ValType::I64; 2],
+                vec![wasm_encoder::ValType::I32],
+            )),
+        );
+        let error = format!("{:#}", check_project(project.path()).unwrap_err());
+        assert!(
+            error.contains("E-WASM-007") && error.contains("i64"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn check_rejects_missing_static_wasm_artifact_before_execution() {
+        let project = ffi_project(FFI_WRAPPER, None);
+        let error = format!("{:#}", check_project(project.path()).unwrap_err());
+        assert!(
+            error.contains("E-WASM-005") && error.contains("missing"),
+            "{error}"
         );
     }
 }

@@ -119,6 +119,11 @@ dependencies:
     rev: 0123456789abcdef0123456789abcdef01234567
 ```
 
+A path or Git dependency may expose a static WebAssembly library with a
+package-relative `wasm: path/to/library.wasm` field. Typed wrappers bind its
+exports through `$wasm.import.module: "@dependency-name"`; see
+[static-wasm-ffi.md](static-wasm-ffi.md) for the ABI and safety contract.
+
 Git dependencies must pin a full 40-hex `rev`. `vibra sync` recursively exports clean source trees into package-local `dep/<name>` directories; nested repositories use their own `dep/` directories, so diamond edges may select different revisions without a global namespace collision. Exported trees contain no `.git` metadata. Local dependencies are not copied and published Git dependencies may not declare path dependencies.
 
 Sync writes deterministic `project.lock.vibra` metadata for every vendored package: source identity, exact revision, SHA-256 of its own clean source tree, vendor path, and dependency alias edges. Commit this lock. Offline `check` and build operations use only the vendored graph and reject missing/stale lock entries or modified source. Until the future solver in issue #80 exists, all `std` edges must select one exact revision.
