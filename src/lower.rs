@@ -512,6 +512,13 @@ pub enum Statement {
         source: Expr,
         body: Vec<Statement>,
     },
+    /// A structured child task with explicit, immutable captures. The current
+    /// source contract joins at the block boundary; later handle syntax may
+    /// permit several children to overlap without changing capture safety.
+    Task {
+        captures: Vec<String>,
+        body: Vec<Statement>,
+    },
     Break,
     Continue,
 }
@@ -3294,8 +3301,33 @@ fn user_body_terminates(stmts: &[Statement]) -> bool {
         | Statement::Set { .. }
         | Statement::While { .. }
         | Statement::For { .. }
+        | Statement::Task { .. }
         | Statement::Break
         | Statement::Continue => false,
+    }
+}
+
+fn task_body_has_escaping_control(statement: &Statement) -> bool {
+    match statement {
+        Statement::Return(_) | Statement::Break | Statement::Continue => true,
+        Statement::Match { arms, .. } => arms
+            .iter()
+            .flat_map(|arm| &arm.body)
+            .any(task_body_has_escaping_control),
+        Statement::If {
+            then_body,
+            else_body,
+            ..
+        } => then_body
+            .iter()
+            .chain(else_body)
+            .any(task_body_has_escaping_control),
+        Statement::While { body, .. }
+        | Statement::For { body, .. }
+        | Statement::Task { body, .. } => body.iter().any(task_body_has_escaping_control),
+        Statement::Eval(_) | Statement::Call(_) | Statement::Let { .. } | Statement::Set { .. } => {
+            false
+        }
     }
 }
 
@@ -5488,6 +5520,16 @@ fn check_statements_call_bounds(
                     context,
                 )?;
             }
+            Statement::Task { body, .. } => check_statements_call_bounds(
+                body,
+                sigs,
+                type_aliases,
+                impls,
+                enclosing_params,
+                enclosing_bounds,
+                referrer_owner,
+                context,
+            )?,
             Statement::Break | Statement::Continue => {}
         }
     }
@@ -5873,7 +5915,53 @@ fn lower_statement(
     let stmt = step.as_mapping().context("statement must be a mapping")?;
     let home = stmt_home_module(fn_ctx);
 
-    if map_get_str(stmt, "$let").is_some() {
+    if map_get_str(stmt, "$task").is_some() {
+        verify_stmt_keys(stmt, &["$task", "do"])?;
+        let capture_values = map_get_str(stmt, "$task")
+            .context("E-TASK-001: `$task` missing capture sequence")?
+            .as_sequence()
+            .context("E-TASK-001: `$task` must be a sequence of captured symbol names")?;
+        let mut captures = Vec::with_capacity(capture_values.len());
+        let mut task_locals = HashMap::new();
+        for value in capture_values {
+            let name = value
+                .as_str()
+                .context("E-TASK-001: task captures must be symbol-name strings")?;
+            if captures.iter().any(|capture| capture == name) {
+                bail!("E-TASK-001: duplicate task capture `{name}`");
+            }
+            let ty = locals
+                .get(name)
+                .with_context(|| format!("E-TASK-001: unknown task capture `{name}`"))?;
+            if matches!(ty, TypeRef::Mutable(_) | TypeRef::Reference { .. }) {
+                bail!("E-TASK-001: task capture `{name}` has mutable or reference type {ty:?}; move an immutable snapshot into the task instead");
+            }
+            captures.push(name.to_string());
+            task_locals.insert(name.to_string(), ty.clone());
+        }
+        let steps = map_get_str(stmt, "do")
+            .context("E-TASK-002: `$task` missing `do` block")?
+            .as_sequence()
+            .context("E-TASK-002: `$task.do` must be a block sequence")?;
+        let mut body = Vec::with_capacity(steps.len());
+        for step in steps {
+            body.push(lower_statement(
+                step,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                &mut task_locals,
+                warnings,
+                fn_ctx,
+            )?);
+        }
+        if body.iter().any(task_body_has_escaping_control) {
+            bail!("E-TASK-002: `$task` body cannot return or use loop control across its task boundary");
+        }
+        Ok(Statement::Task { captures, body })
+    } else if map_get_str(stmt, "$let").is_some() {
         if stmt.len() != 1 {
             bail!("`$let` statement must contain only the `$let` key");
         }

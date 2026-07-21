@@ -1,0 +1,32 @@
+test:
+  $import: ../stdlib/src/test.vibra
+
+structured-task-captures-immutable-snapshot:
+  $test: core
+  tags: [language, tasks]
+  do:
+    - $let:
+        answer: 42
+    - $task: [answer]
+      do:
+        - $match: $answer
+          when:
+            - case: 42
+              do:
+                - $test.assert: true
+            - case: {$wildcard: null}
+              do:
+                - $test.fail: task capture changed
+
+structured-task-rejects-mutable-capture:
+  $test: core
+  tags: [language, tasks, diagnostics]
+  expect-error:
+    phase: compile
+    code: E-TASK-001
+    message-contains: immutable snapshot
+  do:
+    - $let:
+        count: {$mut: 0}
+    - $task: [count]
+      do: []

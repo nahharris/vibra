@@ -169,6 +169,13 @@ resources and closes them after the final completion. The adapter remains
 single-thread compatible: production event loops and deterministic fake hosts
 implement the same interface.
 
+The source-level foundation is `$task: [capture, ...]` plus `do:`. It creates a
+structured child with explicit immutable snapshots and an implicit join at the
+block boundary. The compiler rejects mutable and reference-typed captures with
+`E-TASK-001`, and task-local control cannot escape the boundary. This provides
+an alias-safe boundary before exposing overlapping tasks or affine join handles
+in Vibra source.
+
 1. **Trace and scheduler:** implement identifiers, event serialization, fake
    clock, scripted completions, and ordering. Pass vectors `ordering-*`.
 2. **Structured tasks:** scope ownership, affine join, retained failures, and
