@@ -318,6 +318,21 @@
       "summary": "Host import wrapper return type mismatch"
     },
     {
+      "code": "E-WASM-005",
+      "severity": "error",
+      "summary": "Static wasm dependency or artifact is missing or invalid"
+    },
+    {
+      "code": "E-WASM-006",
+      "severity": "error",
+      "summary": "Static wasm artifact does not export the requested function"
+    },
+    {
+      "code": "E-WASM-007",
+      "severity": "error",
+      "summary": "Static wasm wrapper and exported function signatures differ"
+    },
+    {
       "code": "E-ITER-001",
       "severity": "error",
       "summary": "Value is not a supported traversal source"

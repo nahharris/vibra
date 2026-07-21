@@ -1,0 +1,16 @@
+foreign-sum:
+  $function:
+    left: $int32
+    right: $int32
+  return: $int32
+  do:
+    - $wasm:
+        import:
+          module: "@math"
+          name: sum
+        args: [$args.left, $args.right]
+
+main:
+  $function: $void
+  return: $void
+  do: []

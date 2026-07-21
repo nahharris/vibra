@@ -23,6 +23,10 @@ This parses the entry `.vibra` file, resolves `$import` **relative to that fileâ
 
 Source execution emits and enters a deterministic WebAssembly module through the versioned `vibra_v1` host boundary. See [the ABI design](docs/wasm-abi.md) for the entrypoint, capability, value-layout, import-validation, and compatibility contract.
 
+Project dependencies may also declare statically resolved WebAssembly
+libraries behind explicit typed `$wasm` wrappers. The supported scalar and
+caller-owned-buffer ABI is specified in [the static wasm FFI design](docs/static-wasm-ffi.md).
+
 ## Structural code tools
 
 `vibra code` queries and transactionally edits project-owned Vibra files through
