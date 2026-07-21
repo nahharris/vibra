@@ -201,10 +201,22 @@ symbols are addressed through their import alias, such as `io.println`.
 
 The command reports source documentation and does not execute macros beyond the
 compiler's normal load-time expansion. Generated implementation methods that
-have no source `=doc` are not listed. This repository does not yet contain an
-LSP hover server; the structured documentation records are exposed from the
-library so a future hover implementation can use the same content and symbol
-qualification.
+have no source `=doc` are not listed. The structured documentation records are
+also exposed to editor tooling.
+
+### Language server
+
+Run `vibra lsp` and configure an editor to communicate with the process over
+standard input/output. The server implements LSP lifecycle requests,
+full-document synchronization, syntax/style diagnostics for unsaved buffers,
+canonical formatting, and local-document hover, definition, reference, and
+completion requests. Hover uses `=doc` text.
+
+Navigation and completion are currently top-level and local to the open
+document; they do not resolve imported symbols or infer expression types.
+Compile diagnostics continue to use the saved workspace. The advertised
+capability shape is documented by
+[`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
 
 ### Executable application packages
 
