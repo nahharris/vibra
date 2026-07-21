@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use vibra::lower::{RuntimeValue, TypeRef};
 use vibra::{
-    code, docs, execute, load, lower, lsp, package, project, runtime, test_runner, tooling,
+    code, docs, execute, load, lower, lsp, package, plugin, project, runtime, test_runner, tooling,
 };
 
 #[derive(Parser)]
@@ -68,6 +68,20 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
         format: StatusFormatArg,
+    },
+    /// Validate and instantiate a typed local runtime plugin.
+    Plugin {
+        /// Project directory containing the declared plugin interface.
+        project: PathBuf,
+        /// Declared interface name under `plugin-interfaces`.
+        #[arg(long = "interface")]
+        interface: String,
+        /// Arbitrary local wasm plugin path.
+        #[arg(long = "path")]
+        path: PathBuf,
+        /// Explicit plugin-load authority for this file or directory.
+        #[arg(long = "allow-plugin-load")]
+        allow_plugin_load: Vec<PathBuf>,
     },
     /// Show `=doc` documentation for modules and symbols.
     Docs {
@@ -578,6 +592,17 @@ fn main() -> Result<()> {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
             project::check_project(&path)?;
             print_status("checked", &path, format)?;
+        }
+        Command::Plugin {
+            project,
+            interface,
+            path,
+            allow_plugin_load,
+        } => {
+            print!(
+                "{}",
+                plugin::load_yaml(&project, &interface, &path, &allow_plugin_load)?
+            );
         }
         Command::Docs {
             path,

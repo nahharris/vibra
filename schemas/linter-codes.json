@@ -333,6 +333,41 @@
       "summary": "Static wasm wrapper and exported function signatures differ"
     },
     {
+      "code": "E-PLUGIN-001",
+      "severity": "error",
+      "summary": "Unknown or unsupported typed plugin interface"
+    },
+    {
+      "code": "E-PLUGIN-002",
+      "severity": "error",
+      "summary": "Runtime plugin path or wasm artifact is invalid"
+    },
+    {
+      "code": "E-PLUGIN-003",
+      "severity": "error",
+      "summary": "Runtime plugin load authority was not granted"
+    },
+    {
+      "code": "E-PLUGIN-004",
+      "severity": "error",
+      "summary": "Runtime plugin requests ambient imports or authority"
+    },
+    {
+      "code": "E-PLUGIN-005",
+      "severity": "error",
+      "summary": "Runtime plugin is missing a declared function export"
+    },
+    {
+      "code": "E-PLUGIN-006",
+      "severity": "error",
+      "summary": "Runtime plugin function signature does not satisfy its interface"
+    },
+    {
+      "code": "E-PLUGIN-007",
+      "severity": "error",
+      "summary": "Validated runtime plugin could not be instantiated"
+    },
+    {
       "code": "E-ITER-001",
       "severity": "error",
       "summary": "Value is not a supported traversal source"

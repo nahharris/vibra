@@ -1129,3 +1129,58 @@ main:
         String::from_utf8_lossy(&packaged.stderr)
     );
 }
+
+#[test]
+fn runtime_plugin_load_is_capability_gated_typed_and_deterministic() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("plugin-host");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::create_dir_all(project.join("plugins")).unwrap();
+    std::fs::write(
+        project.join("src/main.vibra"),
+        "main:\n  $function: $void\n  return: $void\n  do: []\n",
+    )
+    .unwrap();
+    std::fs::write(project.join("plugins/math.wasm"), scalar_ffi_module(0)).unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        "manifest-version: 1\npackage:\n  name: plugin-host\n  version: 0.1.0\ntargets:\n  bins:\n    - name: plugin-host\n      root: src\n      entry: main.vibra\nplugin-interfaces:\n  arithmetic:\n    functions:\n      sum:\n        params: [int32, int32]\n        result: int32\n",
+    ).unwrap();
+    let plugin = project.join("plugins/math.wasm");
+    let base = vec![
+        "plugin".to_string(),
+        path_str(&project),
+        "--interface".to_string(),
+        "arithmetic".to_string(),
+        "--path".to_string(),
+        path_str(&plugin),
+    ];
+    let denied = vibra_cmd().args(&base).output().unwrap();
+    assert!(!denied.status.success());
+    assert!(String::from_utf8_lossy(&denied.stderr).contains("E-PLUGIN-003"));
+
+    let mut approved_args = base.to_vec();
+    approved_args.extend(["--allow-plugin-load".to_string(), path_str(&plugin)]);
+    let first = vibra_cmd().args(&approved_args).output().unwrap();
+    let second = vibra_cmd().args(&approved_args).output().unwrap();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(first.stdout, second.stdout);
+    let report = String::from_utf8(first.stdout).unwrap();
+    assert!(report.contains("interface: arithmetic"));
+    assert!(report.contains("instantiated: true"));
+    assert!(report.contains("sha256:"));
+
+    let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
+    std::fs::write(
+        project.join("project.vibra"),
+        manifest.replace("params: [int32, int32]", "params: [int64, int64]"),
+    )
+    .unwrap();
+    let mismatch = vibra_cmd().args(&approved_args).output().unwrap();
+    assert!(!mismatch.status.success());
+    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("E-PLUGIN-006"));
+}
