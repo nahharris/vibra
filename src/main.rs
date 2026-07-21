@@ -8,7 +8,9 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 use vibra::lower::{RuntimeValue, TypeRef};
-use vibra::{code, docs, execute, load, lower, package, project, runtime, test_runner, tooling};
+use vibra::{
+    code, docs, execute, load, lower, lsp, package, project, runtime, test_runner, tooling,
+};
 
 #[derive(Parser)]
 #[command(name = "vibra", version, about = "Vibra language toolchain")]
@@ -19,6 +21,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Start the Language Server Protocol server over stdin/stdout.
+    Lsp,
     /// Create a new Vibra project.
     Init {
         /// Project directory name to create.
@@ -536,6 +540,7 @@ impl From<LintSeverityArg> for tooling::Severity {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Lsp => lsp::run_stdio()?,
         Command::Init {
             name,
             template,
