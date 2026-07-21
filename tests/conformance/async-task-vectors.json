@@ -1,0 +1,70 @@
+{
+  "contract-version": "1",
+  "vectors": [
+    {
+      "name": "ordering-concurrent-io-by-operation-sequence",
+      "script": ["spawn task-1", "start op-1", "start op-2", "complete op-2 at 5", "complete op-1 at 5"],
+      "expected": {"contract-version":"1","events":[
+        {"at":0,"kind":"task-created","scope":"scope-1","task":"task-1"},
+        {"at":0,"kind":"operation-started","scope":"scope-1","task":"task-1","operation":"op-1"},
+        {"at":0,"kind":"operation-started","scope":"scope-1","task":"task-1","operation":"op-2"},
+        {"at":5,"kind":"operation-completed","scope":"scope-1","task":"task-1","operation":"op-1"},
+        {"at":5,"kind":"operation-completed","scope":"scope-1","task":"task-1","operation":"op-2"}
+      ]}
+    },
+    {
+      "name": "cancel-parent-propagates-in-creation-order",
+      "script": ["spawn task-1", "spawn task-2", "cancel scope-1"],
+      "expected": {"contract-version":"1","events":[
+        {"at":0,"kind":"task-created","scope":"scope-1","task":"task-1"},
+        {"at":0,"kind":"task-created","scope":"scope-1","task":"task-2"},
+        {"at":1,"kind":"scope-cancelled","scope":"scope-1","reason":"explicit"},
+        {"at":1,"kind":"task-cancelled","scope":"scope-1","task":"task-1","reason":"parent-cancelled"},
+        {"at":1,"kind":"task-cancelled","scope":"scope-1","task":"task-2","reason":"parent-cancelled"}
+      ]}
+    },
+    {
+      "name": "deadline-wins-equal-time-io",
+      "script": ["deadline scope-1 at 10", "start op-1", "complete op-1 at 10"],
+      "expected": {"contract-version":"1","events":[
+        {"at":0,"kind":"operation-started","scope":"scope-1","task":"task-1","operation":"op-1"},
+        {"at":10,"kind":"scope-cancelled","scope":"scope-1","reason":"deadline"},
+        {"at":10,"kind":"operation-cancelled","scope":"scope-1","task":"task-1","operation":"op-1","reason":"deadline"},
+        {"at":10,"kind":"late-completion-drained","scope":"scope-1","operation":"op-1"}
+      ]}
+    },
+    {
+      "name": "capability-amplification-rejected-before-spawn",
+      "script": ["parent grants fs.read:/safe", "spawn with fs.read:/"],
+      "expected": {"contract-version":"1","events":[
+        {"at":0,"kind":"admission-rejected","scope":"scope-1","reason":"capability-revoked","detail":"spawn capability amplification"}
+      ]}
+    },
+    {
+      "name": "limit-task-admission-is-atomic",
+      "script": ["limit tasks 1", "spawn task-1", "spawn task-2"],
+      "expected": {"contract-version":"1","events":[
+        {"at":0,"kind":"task-created","scope":"scope-1","task":"task-1"},
+        {"at":0,"kind":"admission-rejected","scope":"scope-1","reason":"resource-limit","detail":"live-tasks"}
+      ]}
+    },
+    {
+      "name": "join-preserves-child-failure",
+      "script": ["spawn task-1", "fail task-1 io-error", "join task-1"],
+      "expected": {"contract-version":"1","events":[
+        {"at":0,"kind":"task-created","scope":"scope-1","task":"task-1"},
+        {"at":1,"kind":"task-failed","scope":"scope-1","task":"task-1","detail":"io-error"},
+        {"at":1,"kind":"join-completed","scope":"scope-1","task":"task-1","detail":"failed:io-error"}
+      ]}
+    },
+    {
+      "name": "channel-bounded-fifo-evaluation",
+      "script": ["channel resource-1 capacity 1", "send 7", "receive"],
+      "expected": {"contract-version":"1","events":[
+        {"at":0,"kind":"resource-opened","scope":"scope-1","resource":"resource-1"},
+        {"at":0,"kind":"channel-sent","scope":"scope-1","task":"task-1","resource":"resource-1","detail":7},
+        {"at":1,"kind":"channel-received","scope":"scope-1","task":"task-2","resource":"resource-1","detail":7}
+      ]}
+    }
+  ]
+}

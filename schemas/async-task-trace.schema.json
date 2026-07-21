@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/async-task-trace.schema.json",
+  "title": "Vibra deterministic async task trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract-version", "events"],
+  "properties": {
+    "contract-version": { "const": "1" },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z]+-[0-9]+$" },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "kind", "scope"],
+      "properties": {
+        "at": { "type": "integer", "minimum": 0, "description": "Injected monotonic-clock ticks" },
+        "kind": {
+          "enum": [
+            "scope-opened", "scope-cancelled", "scope-completed",
+            "task-created", "task-runnable", "task-waiting", "task-completed",
+            "task-failed", "task-cancelled", "join-completed",
+            "operation-started", "operation-completed", "operation-cancelled",
+            "late-completion-drained", "resource-opened", "resource-closed",
+            "admission-rejected", "channel-sent", "channel-received", "channel-closed"
+          ]
+        },
+        "scope": { "$ref": "#/$defs/id" },
+        "task": { "$ref": "#/$defs/id" },
+        "operation": { "$ref": "#/$defs/id" },
+        "resource": { "$ref": "#/$defs/id" },
+        "reason": {
+          "enum": ["explicit", "parent-cancelled", "deadline", "sibling-failed", "capability-revoked", "resource-limit", "closed", "busy"]
+        },
+        "detail": { "type": ["string", "integer", "boolean", "null"] }
+      }
+    }
+  }
+}
