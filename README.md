@@ -95,7 +95,9 @@ are not a complete specification of compiler behavior.
   [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
   `vibra docs --format yaml|json`.
 - **Async conformance:** [`async-task-trace.schema.json`](schemas/async-task-trace.schema.json)
-  defines deterministic structured-task traces. The semantics, implementation
+  defines deterministic structured-task traces and
+  [`async-host-operation.schema.json`](schemas/async-host-operation.schema.json)
+  defines generation-safe host adapter messages. The semantics, implementation
   milestones, and normative vectors are documented in
   [`docs/async-structured-concurrency.md`](docs/async-structured-concurrency.md).
 
