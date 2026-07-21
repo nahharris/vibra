@@ -244,10 +244,13 @@ full-document synchronization, syntax/style diagnostics for unsaved buffers,
 canonical formatting, and local-document hover, definition, reference, and
 completion requests. Hover uses `=doc` text.
 
-Navigation and completion are currently top-level and local to the open
-document; they do not resolve imported symbols or infer expression types.
-Compile diagnostics continue to use the saved workspace. The advertised
-capability shape is documented by
+Navigation, references, hover, and completion discover `.vibra` files under
+the initialized workspace and resolve directly imported top-level symbols.
+Open buffers replace their saved versions in this semantic snapshot, including
+files in nested local packages. Completion is not yet expression-type-aware,
+and compile diagnostics continue to use the saved workspace; editor overlays
+receive syntax and style diagnostics. The advertised capability shape is
+documented by
 [`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
 
 ### Executable application packages

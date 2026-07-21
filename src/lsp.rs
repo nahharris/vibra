@@ -7,6 +7,8 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 
+use crate::code::{SemanticIndex, SemanticKind, SourceDatabase};
+
 #[derive(Default)]
 struct Server {
     root: Option<PathBuf>,
@@ -112,9 +114,16 @@ impl Server {
                 )
             }
             "textDocument/completion" => {
-                let (_, source) = self.source(params)?;
-                let symbols = definitions(&source).into_iter().map(|(name, line, _)|
-                    json!({"label":name,"kind":6,"detail":format!("Vibra symbol (line {})",line+1)})).collect::<Vec<_>>();
+                let (uri, _) = self.source(params)?;
+                let workspace = self.workspace()?;
+                let document = uri_path(&uri).context("completion requires a file URI")?;
+                let mut names = workspace.visible_symbols(&document);
+                names.sort();
+                names.dedup();
+                let symbols = names
+                    .into_iter()
+                    .map(|name| json!({"label":name,"kind":6,"detail":"Vibra workspace symbol"}))
+                    .collect::<Vec<_>>();
                 Ok(Value::Array(symbols))
             }
             "textDocument/hover" => self.hover(params),
@@ -155,22 +164,20 @@ impl Server {
     }
 
     fn hover(&self, params: &Value) -> Result<Value> {
-        let (_, source) = self.source(params)?;
+        let (uri, source) = self.source(params)?;
         let pos = position(params)?;
         let Some(word) = word_at(&source, pos.0, pos.1) else {
             return Ok(Value::Null);
         };
-        let name = word
-            .trim_start_matches('$')
-            .split('.')
-            .next_back()
-            .unwrap_or(&word);
-        let Some((_, _, doc)) = definitions(&source)
-            .into_iter()
-            .find(|(candidate, _, _)| candidate == name)
-        else {
+        let workspace = self.workspace()?;
+        let document = uri_path(&uri).context("hover requires a file URI")?;
+        let Some((target, name)) = workspace.resolve(&document, &word) else {
             return Ok(Value::Null);
         };
+        let doc = workspace
+            .definition(&target, &name)
+            .map(|d| d.2)
+            .unwrap_or_default();
         Ok(
             json!({"contents":{"kind":"markdown","value":if doc.is_empty(){format!("`{name}` — Vibra symbol")}else{doc}}}),
         )
@@ -182,16 +189,13 @@ impl Server {
         let Some(word) = word_at(&source, pos.0, pos.1) else {
             return Ok(Value::Null);
         };
-        let name = word
-            .trim_start_matches('$')
-            .split('.')
-            .next_back()
-            .unwrap_or(&word);
-        match definitions(&source)
-            .into_iter()
-            .find(|(candidate, _, _)| candidate == name)
-        {
-            Some((_, line, _)) => Ok(location(&uri, line, 0, name.len())),
+        let workspace = self.workspace()?;
+        let document = uri_path(&uri).context("definition requires a file URI")?;
+        let Some((target, name)) = workspace.resolve(&document, &word) else {
+            return Ok(Value::Null);
+        };
+        match workspace.definition(&target, &name) {
+            Some((_, line, _)) => Ok(location(&path_uri(&target), line, 0, name.len())),
             None => Ok(Value::Null),
         }
     }
@@ -202,38 +206,150 @@ impl Server {
         let Some(word) = word_at(&source, pos.0, pos.1) else {
             return Ok(json!([]));
         };
-        let name = word
-            .trim_start_matches('$')
-            .split('.')
-            .next_back()
-            .unwrap_or(&word);
-        let needle = format!("${name}");
+        let workspace = self.workspace()?;
+        let document = uri_path(&uri).context("references require a file URI")?;
+        let Some((target, name)) = workspace.resolve(&document, &word) else {
+            return Ok(json!([]));
+        };
         let mut result = Vec::new();
-        for (line, text) in source.lines().enumerate() {
-            let mut start = 0;
-            while let Some(found) = text[start..].find(&needle) {
-                let column = start + found;
-                result.push(location(&uri, line, column, needle.len()));
-                start = column + needle.len();
+        if let Some(text) = workspace.sources.get(&target) {
+            let needle = format!("${name}");
+            for (line, row) in text.lines().enumerate() {
+                if let Some(column) = row.find(&needle) {
+                    result.push(location(&path_uri(&target), line, column, needle.len()));
+                }
             }
         }
+        for (path, text) in &workspace.sources {
+            for (line, row) in text.lines().enumerate() {
+                let bytes = row.as_bytes();
+                let mut column = 0;
+                while column < bytes.len() {
+                    if bytes[column] != b'$' {
+                        column += 1;
+                        continue;
+                    }
+                    let mut end = column + 1;
+                    while end < bytes.len() && is_word(bytes[end]) {
+                        end += 1;
+                    }
+                    let token = &row[column..end];
+                    if workspace.resolve(path, token).as_ref()
+                        == Some(&(target.clone(), name.clone()))
+                    {
+                        result.push(location(&path_uri(path), line, column, token.len()));
+                    }
+                    column = end;
+                }
+            }
+        }
+        result.sort_by_key(|item| item.to_string());
+        result.dedup();
         Ok(Value::Array(result))
+    }
+
+    fn workspace(&self) -> Result<Workspace> {
+        let root = self
+            .root
+            .clone()
+            .or_else(|| {
+                self.documents
+                    .keys()
+                    .next()
+                    .and_then(|u| uri_path(u))
+                    .and_then(|p| discover_root(&p))
+            })
+            .context("workspace root is not available")?;
+        let mut sources = BTreeMap::new();
+        discover_workspace_sources(&root, &mut sources)?;
+        for (uri, source) in &self.documents {
+            if let Some(path) = uri_path(uri) {
+                sources.insert(normalize(path), source.clone());
+            }
+        }
+        Workspace::build(root, sources)
+    }
+}
+
+struct Workspace {
+    index: SemanticIndex,
+    sources: BTreeMap<PathBuf, String>,
+}
+
+impl Workspace {
+    fn build(root: PathBuf, sources: BTreeMap<PathBuf, String>) -> Result<Self> {
+        let database =
+            SourceDatabase::from_sources(root, sources.clone()).map_err(anyhow::Error::msg)?;
+        let index = SemanticIndex::build(&database).map_err(anyhow::Error::msg)?;
+        Ok(Self { index, sources })
+    }
+    fn resolve(&self, document: &PathBuf, word: &str) -> Option<(PathBuf, String)> {
+        let symbol = word.trim_start_matches('$');
+        let document = normalize(document.clone());
+        if let Some((alias, name)) = symbol.split_once('.') {
+            let import = self
+                .index
+                .query(Some(SemanticKind::Import), Some(alias))
+                .into_iter()
+                .find(|fact| fact.document == document)?;
+            return Some((import.target_document.clone()?, name.to_string()));
+        }
+        let name = symbol.to_string();
+        self.definition(&document, &name).map(|_| (document, name))
+    }
+    fn definition(&self, document: &PathBuf, name: &str) -> Option<(String, usize, String)> {
+        definitions(self.sources.get(&normalize(document.clone()))?)
+            .into_iter()
+            .find(|d| d.0 == name)
+    }
+    fn visible_symbols(&self, document: &PathBuf) -> Vec<String> {
+        let document = normalize(document.clone());
+        let mut result = definitions(
+            self.sources
+                .get(&document)
+                .map(String::as_str)
+                .unwrap_or(""),
+        )
+        .into_iter()
+        .map(|d| d.0)
+        .collect::<Vec<_>>();
+        for import in self
+            .index
+            .query(Some(SemanticKind::Import), None)
+            .into_iter()
+            .filter(|f| f.document == document)
+        {
+            if let Some(target) = &import.target_document {
+                if let Some(source) = self.sources.get(target) {
+                    result.extend(
+                        definitions(source)
+                            .into_iter()
+                            .map(|d| format!("{}.{}", import.symbol, d.0)),
+                    );
+                }
+            }
+        }
+        result
     }
 }
 
 fn definitions(source: &str) -> Vec<(String, usize, String)> {
     let mut result = Vec::new();
-    let mut pending_doc = String::new();
-    for (line, text) in source.lines().enumerate() {
-        let trimmed = text.trim();
-        if let Some(doc) = trimmed.strip_prefix("=doc:") {
-            pending_doc = doc.trim().trim_matches('"').to_string();
-            continue;
-        }
+    let lines = source.lines().collect::<Vec<_>>();
+    for (line, text) in lines.iter().enumerate() {
         if text.starts_with(|c: char| !c.is_whitespace()) {
             if let Some((key, _)) = text.split_once(':') {
                 if !key.starts_with(['=', '$']) && !key.is_empty() {
-                    result.push((key.to_string(), line, std::mem::take(&mut pending_doc)));
+                    let doc = lines[line + 1..]
+                        .iter()
+                        .take_while(|next| next.starts_with(|c: char| c.is_whitespace()))
+                        .find_map(|next| {
+                            next.trim()
+                                .strip_prefix("=doc:")
+                                .map(|value| value.trim().trim_matches('"').to_string())
+                        })
+                        .unwrap_or_default();
+                    result.push((key.to_string(), line, doc));
                 }
             }
         }
@@ -287,6 +403,76 @@ fn uri_path(uri: &str) -> Option<PathBuf> {
         .filter(|_| cfg!(windows))
         .unwrap_or(value);
     Some(PathBuf::from(value.replace("%20", " ")))
+}
+fn path_uri(path: &std::path::Path) -> String {
+    let value = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace(' ', "%20");
+    if value.starts_with('/') {
+        format!("file://{value}")
+    } else {
+        format!("file:///{value}")
+    }
+}
+fn normalize(path: PathBuf) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                result.pop();
+            }
+            other => result.push(other.as_os_str()),
+        }
+    }
+    result
+}
+fn discover_root(path: &std::path::Path) -> Option<PathBuf> {
+    let mut current = if path.is_dir() { path } else { path.parent()? };
+    loop {
+        if current.join(crate::project::MANIFEST_FILE).is_file() {
+            return Some(current.to_path_buf());
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => return path.parent().map(PathBuf::from),
+        }
+    }
+}
+fn discover_workspace_sources(
+    root: &std::path::Path,
+    output: &mut BTreeMap<PathBuf, String>,
+) -> Result<()> {
+    if !root.exists() {
+        return Ok(());
+    }
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)
+            .with_context(|| format!("read workspace {}", directory.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                if !matches!(
+                    path.file_name().and_then(|v| v.to_str()),
+                    Some(".git" | "target")
+                ) {
+                    pending.push(path);
+                }
+            } else if path.extension().and_then(|v| v.to_str()) == Some("vibra")
+                && path.file_name().and_then(|v| v.to_str()) != Some(crate::project::MANIFEST_FILE)
+            {
+                output.insert(
+                    normalize(path.clone()),
+                    fs::read_to_string(&path)
+                        .with_context(|| format!("read {}", path.display()))?,
+                );
+            }
+        }
+    }
+    Ok(())
 }
 fn read_message<R: BufRead>(input: &mut R) -> Result<Option<Value>> {
     let mut length = None;
