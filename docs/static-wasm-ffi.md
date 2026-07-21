@@ -19,6 +19,7 @@ and traversal are rejected. The dependency alias is the stable module name:
 sum:
   $function:
     left: $int32
+  args:
     right: $int32
   return: $int32
   do:
@@ -79,12 +80,21 @@ The linker must repeat these checks as defense in depth. Static foreign code
 receives no Vibra grants and cannot import the privileged `vibra_v1` host ABI.
 Its only permitted import in v1 is `vibra_ffi.memory` when using buffers.
 
+For scalar-only libraries, lowering embeds the validated artifact bytes in the
+deterministic `program.wasm` execution plan. Source execution and `.vapp`
+execution instantiate that embedded module and invoke the named export through
+the wrapper's exact scalar signature. The artifact digest contributes to the
+program fingerprint; `.vapp` also inventories the original dependency file,
+so changing foreign code changes the package bytes and verification result.
+
 ## Limitations and roadmap
 
 This milestone deliberately excludes native/C ABIs, runtime plugin discovery,
 network-loaded code, rich values, callee-owned memory, allocator negotiation,
-and automatic error translation. Typed runtime plugins are a separate design;
+and automatic error translation. Caller-owned memory import instantiation and
+buffer marshalling remain a follow-up to the implemented scalar path. Typed
+runtime plugins are a separate design;
 they must not reuse `@alias` static resolution. Future milestones may add a
-linker execution path, multiple named wasm artifacts per package, generated
+multiple named wasm artifacts per package, generated
 safe wrappers, and negotiated richer-value ABI versions without weakening the
 explicit `$wasm` boundary.
