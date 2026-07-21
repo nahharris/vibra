@@ -147,7 +147,9 @@ fn workspace_navigation_resolves_imported_package_symbols_and_open_overlays() {
 #[test]
 fn formatting_returns_a_whole_document_edit() {
     let uri = "file:///tmp/main.vibra";
-    let source = "main:\n    $literal: 1\n";
+    // Flow mappings are valid input but the canonical emitter always expands
+    // them, making this assertion independent of platform-specific indentation.
+    let source = "main: {$literal: 1}\n";
     let mut input = Vec::new();
     for value in [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
@@ -177,8 +179,14 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
     std::fs::write(workspace.path().join("main.vibra"), main).unwrap();
     std::fs::write(workspace.path().join("helper.vibra"), valid).unwrap();
-    let uri =
-        |path: &std::path::Path| format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
+    let uri = |path: &std::path::Path| {
+        let value = path.to_string_lossy().replace('\\', "/");
+        if value.starts_with('/') {
+            format!("file://{value}")
+        } else {
+            format!("file:///{value}")
+        }
+    };
     let root_uri = uri(workspace.path());
     let helper_uri = uri(&workspace.path().join("helper.vibra"));
     let mut input = Vec::new();
