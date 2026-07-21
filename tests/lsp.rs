@@ -102,8 +102,14 @@ fn workspace_navigation_resolves_imported_package_symbols_and_open_overlays() {
     let util_overlay = util_disk.replace("Old docs", "Workspace greeting");
     std::fs::write(&main_path, main).unwrap();
     std::fs::write(&util_path, util_disk).unwrap();
-    let uri =
-        |path: &std::path::Path| format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
+    let uri = |path: &std::path::Path| {
+        let value = path.to_string_lossy().replace('\\', "/");
+        if value.starts_with('/') {
+            format!("file://{value}")
+        } else {
+            format!("file:///{value}")
+        }
+    };
     let main_uri = uri(&main_path);
     let util_uri = uri(&util_path);
     let root_uri = uri(workspace.path());
