@@ -8165,6 +8165,120 @@ main:
     );
 }
 
+#[test]
+fn injected_clock_and_environment_are_deterministic_and_isolated() {
+    use std::sync::{Arc, Mutex};
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let env_mod = std::fs::canonicalize(root.join("stdlib/src/env.vibra")).unwrap();
+    let time_mod = std::fs::canonicalize(root.join("stdlib/src/time.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"env:
+  $import: "{env_mod}"
+time:
+  $import: "{time_mod}"
+result:
+  $import: "{result}"
+test:
+  $import: "{test}"
+host-policy:
+  $policy:
+    clock: [{{requirement: mandatory, scopes: any}}]
+    env-read: [{{requirement: mandatory, scopes: [{{exact: VIBRA_INJECTED}}]}}]
+    env-write: [{{requirement: mandatory, scopes: [{{exact: VIBRA_INJECTED}}]}}]
+main:
+  $function:
+    policy: $host-policy
+  return: $void
+  do:
+  - $let: {{clock: {{$policy.narrow: $args.policy, into: $time.capability}}}}
+  - $let: {{read: {{$policy.narrow: $args.policy, into: $env.read-capability}}}}
+  - $let: {{write: {{$policy.narrow: $args.policy, into: $env.write-capability}}}}
+  - $let: {{wall: {{$time.now-unix-millis: {{capability: $clock}}}}}}
+  - $match: $wall
+    when:
+    - case: 1000
+      do: []
+    - case: {{$wildcard: null}}
+      do: [{{$test.fail: injected-wall-clock-was-not-used}}]
+  - $let: {{start: {{$time.monotonic-now: {{capability: $clock}}}}}}
+  - $time.sleep: {{duration: {{$time.milliseconds: 7}}, capability: $clock}}
+  - $let: {{finish: {{$time.now-unix-millis: {{capability: $clock}}}}}}
+  - $match: $finish
+    when:
+    - case: 1007
+      do: []
+    - case: {{$wildcard: null}}
+      do: [{{$test.fail: injected-monotonic-clock-was-not-advanced}}]
+  - $let: {{set: {{$env.set: VIBRA_INJECTED, value: changed, capability: $write}}}}
+  - $match: $set
+    when:
+    - case: {{$result.result.ok: null}}
+      do: []
+    - case: {{$wildcard: null}}
+      do: [{{$test.fail: injected-env-set-failed}}]
+  - $let: {{value: {{$env.get: VIBRA_INJECTED, capability: $read}}}}
+  - $match: $value
+    when:
+    - case: {{$result.result.ok: changed}}
+      do: []
+    - case: {{$wildcard: null}}
+      do: [{{$test.fail: injected-env-read-was-not-isolated}}]
+"#,
+            env_mod = path_str(&env_mod),
+            time_mod = path_str(&time_mod),
+            result = path_str(&result),
+            test = path_str(&test),
+        ),
+    )
+    .unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&program).unwrap();
+    let make_config = || vibra::runtime::RunConfig {
+        injected_environment: Some(Arc::new(Mutex::new(std::collections::BTreeMap::from([(
+            "VIBRA_INJECTED".to_string(),
+            "original".to_string(),
+        )])))),
+        injected_clock: Some(Arc::new(Mutex::new(vibra::runtime::InjectedClock {
+            unix_millis: 1000,
+            monotonic_millis: 10,
+        }))),
+        approved_policy: Some(vibra::lower::PolicyType {
+            domains: std::collections::BTreeMap::from([
+                (
+                    vibra::lower::CapabilityDomain::Clock,
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Any],
+                    }],
+                ),
+                (
+                    vibra::lower::CapabilityDomain::EnvRead,
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Exact("VIBRA_INJECTED".into())],
+                    }],
+                ),
+                (
+                    vibra::lower::CapabilityDomain::EnvWrite,
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Exact("VIBRA_INJECTED".into())],
+                    }],
+                ),
+            ]),
+        }),
+        ..vibra::runtime::RunConfig::default()
+    };
+    vibra::execute::run_lowered(&lowered, &make_config()).unwrap();
+}
+
 // --- Issue #51: stdin reads require --allow-stdin ---
 
 #[test]
