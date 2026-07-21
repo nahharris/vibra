@@ -89,6 +89,10 @@ are not a complete specification of compiler behavior.
   specifies the `vibra/contextAt` (and `vibra query`) response shape, and
   [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
   `vibra docs --format yaml|json`.
+- **Async conformance:** [`async-task-trace.schema.json`](schemas/async-task-trace.schema.json)
+  defines deterministic structured-task traces. The semantics, implementation
+  milestones, and normative vectors are documented in
+  [`docs/async-structured-concurrency.md`](docs/async-structured-concurrency.md).
 
 Each schema has a canonical `$id` under `https://vibra.dev/schemas/`. Tooling
 should use the schema that matches its boundary and treat the expression and
