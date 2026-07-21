@@ -85,8 +85,10 @@ are not a complete specification of compiler behavior.
   [`code-path.schema.json`](schemas/code-path.schema.json),
   [`code-query.schema.json`](schemas/code-query.schema.json), and
   [`code-change-set.schema.json`](schemas/code-change-set.schema.json).
-- **Editor queries:** [`query-response.schema.json`](schemas/query-response.schema.json)
-  specifies the `vibra/contextAt` (and `vibra query`) response shape.
+- **Editor and documentation queries:** [`query-response.schema.json`](schemas/query-response.schema.json)
+  specifies the `vibra/contextAt` (and `vibra query`) response shape, and
+  [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
+  `vibra docs --format yaml|json`.
 
 Each schema has a canonical `$id` under `https://vibra.dev/schemas/`. Tooling
 should use the schema that matches its boundary and treat the expression and
@@ -175,6 +177,34 @@ vibra check hello
 ```
 
 See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
+
+### Symbol documentation
+
+Use `vibra docs` to read compile-time `=doc` annotations without running a
+program. Pass a source module or a project directory, followed by an optional
+qualified symbol. Plain output is the default; Markdown preserves examples and
+other formatting from the annotation, while YAML and JSON are intended for
+tooling.
+
+```sh
+vibra docs src/app/main.vibra main
+vibra docs src/app/main.vibra io.println --format markdown
+vibra docs src/app/main.vibra --format yaml
+vibra docs . --target app --format json
+```
+
+With no symbol, the command lists every documented package, module, function,
+type, interface, constant, macro, and inherent definition visible from the
+selected entry module. Prefixing a lookup with `$` is optional. Package docs use
+`package.=doc` in `project.vibra`; module docs use a top-level `=doc`. Imported
+symbols are addressed through their import alias, such as `io.println`.
+
+The command reports source documentation and does not execute macros beyond the
+compiler's normal load-time expansion. Generated implementation methods that
+have no source `=doc` are not listed. This repository does not yet contain an
+LSP hover server; the structured documentation records are exposed from the
+library so a future hover implementation can use the same content and symbol
+qualification.
 
 ### Executable application packages
 

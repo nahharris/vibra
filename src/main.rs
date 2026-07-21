@@ -8,7 +8,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 use vibra::lower::{RuntimeValue, TypeRef};
-use vibra::{code, execute, load, lower, package, project, runtime, test_runner, tooling};
+use vibra::{code, docs, execute, load, lower, package, project, runtime, test_runner, tooling};
 
 #[derive(Parser)]
 #[command(name = "vibra", version, about = "Vibra language toolchain")]
@@ -64,6 +64,19 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
         format: StatusFormatArg,
+    },
+    /// Show `=doc` documentation for modules and symbols.
+    Docs {
+        /// Entry module, project directory, or project.vibra. Defaults to the current project.
+        path: Option<PathBuf>,
+        /// Qualified symbol such as `main` or `io.println`. Omit to browse documented symbols.
+        symbol: Option<String>,
+        /// Project target to inspect when the project has multiple targets.
+        #[arg(long)]
+        target: Option<String>,
+        /// Documentation output format.
+        #[arg(long, value_enum, default_value_t = DocsFormatArg::Plain)]
+        format: DocsFormatArg,
     },
     /// Check or rewrite canonical Vibra/YAML formatting.
     Fmt {
@@ -442,6 +455,14 @@ enum ExecFormatArg {
     Json,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum DocsFormatArg {
+    Plain,
+    Markdown,
+    Yaml,
+    Json,
+}
+
 impl From<ReportArg> for test_runner::ReportFormat {
     fn from(value: ReportArg) -> Self {
         match value {
@@ -552,6 +573,17 @@ fn main() -> Result<()> {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
             project::check_project(&path)?;
             print_status("checked", &path, format)?;
+        }
+        Command::Docs {
+            path,
+            symbol,
+            target,
+            format,
+        } => {
+            let path = path.unwrap_or_else(|| PathBuf::from("."));
+            let entry = docs::resolve_entry(&path, target.as_deref())?;
+            let available = docs::collect(&entry)?;
+            print_docs(&available, symbol.as_deref(), format)?;
         }
         Command::Fmt {
             path,
@@ -963,6 +995,63 @@ fn print_structured<T: serde::Serialize>(value: &T, format: StructuredFormatArg)
     match format {
         StructuredFormatArg::Yaml => print!("{}", serde_yaml::to_string(value)?),
         StructuredFormatArg::Json => println!("{}", serde_json::to_string_pretty(value)?),
+    }
+    Ok(())
+}
+
+fn print_docs(
+    available: &[docs::Documentation],
+    symbol: Option<&str>,
+    format: DocsFormatArg,
+) -> Result<()> {
+    let selected = if let Some(symbol) = symbol {
+        let symbol = symbol.strip_prefix('$').unwrap_or(symbol);
+        vec![available
+            .iter()
+            .find(|entry| entry.symbol == symbol)
+            .with_context(|| format!("no documentation found for symbol `{symbol}`"))?]
+    } else {
+        available.iter().collect::<Vec<_>>()
+    };
+
+    match format {
+        DocsFormatArg::Yaml => {
+            if symbol.is_some() {
+                print!("{}", serde_yaml::to_string(selected[0])?);
+            } else {
+                print!("{}", serde_yaml::to_string(&selected)?);
+            }
+        }
+        DocsFormatArg::Json => {
+            if symbol.is_some() {
+                println!("{}", serde_json::to_string_pretty(selected[0])?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&selected)?);
+            }
+        }
+        DocsFormatArg::Plain if symbol.is_some() => {
+            print!("{}", selected[0].documentation);
+            if !selected[0].documentation.ends_with('\n') {
+                println!();
+            }
+        }
+        DocsFormatArg::Plain => {
+            for entry in selected {
+                let summary = entry.documentation.lines().next().unwrap_or_default();
+                println!("{}\t{}\t{}", entry.symbol, entry.kind, summary);
+            }
+        }
+        DocsFormatArg::Markdown => {
+            for (index, entry) in selected.iter().enumerate() {
+                if index > 0 {
+                    println!();
+                }
+                println!(
+                    "## `{}`\n\n*{}*\n\n{}",
+                    entry.symbol, entry.kind, entry.documentation
+                );
+            }
+        }
     }
     Ok(())
 }

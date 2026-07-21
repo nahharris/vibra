@@ -2,6 +2,7 @@
 
 pub mod annotations;
 pub mod code;
+pub mod docs;
 pub mod emit;
 pub mod execute;
 pub mod host_abi;

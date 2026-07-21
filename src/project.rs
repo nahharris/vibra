@@ -36,6 +36,8 @@ pub struct ProjectManifest {
 pub struct Package {
     pub name: String,
     pub version: String,
+    #[serde(default, rename = "=doc")]
+    pub doc: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
