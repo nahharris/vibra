@@ -130,6 +130,10 @@ Sync writes deterministic `project.lock.vibra` metadata for every vendored packa
 
 Vendored dependency and stdlib documents are visible to `vibra code` queries. They are read-only to code transactions; change the upstream source and resync instead.
 
+The design for a future SemVer-based resolver, including deterministic
+selection, lock migration, and offline behavior, is documented in
+[version-solving.md](version-solving.md). It is not part of manifest version 1.
+
 `vibra init` seeds the current toolchain stdlib into `dep/std` for immediate offline use and records its canonical source and exact revision as:
 
 ```yaml

@@ -8,6 +8,7 @@ pub mod execute;
 pub mod host_abi;
 pub mod load;
 pub mod lower;
+pub mod lsp;
 pub mod macro_expand;
 pub mod package;
 pub mod project;

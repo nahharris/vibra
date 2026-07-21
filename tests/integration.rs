@@ -8165,6 +8165,120 @@ main:
     );
 }
 
+#[test]
+fn injected_clock_and_environment_are_deterministic_and_isolated() {
+    use std::sync::{Arc, Mutex};
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let env_mod = std::fs::canonicalize(root.join("stdlib/src/env.vibra")).unwrap();
+    let time_mod = std::fs::canonicalize(root.join("stdlib/src/time.vibra")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"env:
+  $import: "{env_mod}"
+time:
+  $import: "{time_mod}"
+result:
+  $import: "{result}"
+test:
+  $import: "{test}"
+host-policy:
+  $policy:
+    clock: [{{requirement: mandatory, scopes: any}}]
+    env-read: [{{requirement: mandatory, scopes: [{{exact: VIBRA_INJECTED}}]}}]
+    env-write: [{{requirement: mandatory, scopes: [{{exact: VIBRA_INJECTED}}]}}]
+main:
+  $function:
+    policy: $host-policy
+  return: $void
+  do:
+  - $let: {{clock: {{$policy.narrow: $args.policy, into: $time.capability}}}}
+  - $let: {{read: {{$policy.narrow: $args.policy, into: $env.read-capability}}}}
+  - $let: {{write: {{$policy.narrow: $args.policy, into: $env.write-capability}}}}
+  - $let: {{wall: {{$time.now-unix-millis: {{capability: $clock}}}}}}
+  - $match: $wall
+    when:
+    - case: 1000
+      do: []
+    - case: {{$wildcard: null}}
+      do: [{{$test.fail: injected-wall-clock-was-not-used}}]
+  - $let: {{start: {{$time.monotonic-now: {{capability: $clock}}}}}}
+  - $time.sleep: {{duration: {{$time.milliseconds: 7}}, capability: $clock}}
+  - $let: {{finish: {{$time.now-unix-millis: {{capability: $clock}}}}}}
+  - $match: $finish
+    when:
+    - case: 1007
+      do: []
+    - case: {{$wildcard: null}}
+      do: [{{$test.fail: injected-monotonic-clock-was-not-advanced}}]
+  - $let: {{set: {{$env.set: VIBRA_INJECTED, value: changed, capability: $write}}}}
+  - $match: $set
+    when:
+    - case: {{$result.result.ok: null}}
+      do: []
+    - case: {{$wildcard: null}}
+      do: [{{$test.fail: injected-env-set-failed}}]
+  - $let: {{value: {{$env.get: VIBRA_INJECTED, capability: $read}}}}
+  - $match: $value
+    when:
+    - case: {{$result.result.ok: changed}}
+      do: []
+    - case: {{$wildcard: null}}
+      do: [{{$test.fail: injected-env-read-was-not-isolated}}]
+"#,
+            env_mod = path_str(&env_mod),
+            time_mod = path_str(&time_mod),
+            result = path_str(&result),
+            test = path_str(&test),
+        ),
+    )
+    .unwrap();
+    let program = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&program).unwrap();
+    let make_config = || vibra::runtime::RunConfig {
+        injected_environment: Some(Arc::new(Mutex::new(std::collections::BTreeMap::from([(
+            "VIBRA_INJECTED".to_string(),
+            "original".to_string(),
+        )])))),
+        injected_clock: Some(Arc::new(Mutex::new(vibra::runtime::InjectedClock {
+            unix_millis: 1000,
+            monotonic_millis: 10,
+        }))),
+        approved_policy: Some(vibra::lower::PolicyType {
+            domains: std::collections::BTreeMap::from([
+                (
+                    vibra::lower::CapabilityDomain::Clock,
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Any],
+                    }],
+                ),
+                (
+                    vibra::lower::CapabilityDomain::EnvRead,
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Exact("VIBRA_INJECTED".into())],
+                    }],
+                ),
+                (
+                    vibra::lower::CapabilityDomain::EnvWrite,
+                    vec![vibra::lower::PolicyGroup {
+                        requirement: vibra::lower::PolicyRequirement::Mandatory,
+                        scopes: vec![vibra::lower::PolicyScope::Exact("VIBRA_INJECTED".into())],
+                    }],
+                ),
+            ]),
+        }),
+        ..vibra::runtime::RunConfig::default()
+    };
+    vibra::execute::run_lowered(&lowered, &make_config()).unwrap();
+}
+
 // --- Issue #51: stdin reads require --allow-stdin ---
 
 #[test]
@@ -8195,4 +8309,77 @@ fn forged_stdin_read_file_handle_requires_allow_stdin() {
         stderr.contains("E-CAP-001"),
         "expected opaque-handle forgery rejection, got: {stderr}"
     );
+}
+
+#[test]
+fn compile_time_embed_supports_text_binary_and_structured_formats() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("message.txt"), "$literal-looking text\n").unwrap();
+    std::fs::write(dir.path().join("payload.bin"), [0_u8, 127, 255]).unwrap();
+    std::fs::write(dir.path().join("data.yaml"), "name: yaml\ncount: 2\n").unwrap();
+    std::fs::write(dir.path().join("data.json"), r#"{"name":"json","count":3}"#).unwrap();
+    std::fs::write(dir.path().join("data.toml"), "name = 'toml'\ncount = 4\n").unwrap();
+    std::fs::write(
+        dir.path().join("data.xml"),
+        "<root><name>xml</name><count>5</count></root>",
+    )
+    .unwrap();
+    let entry = dir.path().join("main.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $let: {text: {$embed: message.txt}}
+    - $let: {binary: {$embed: payload.bin}}
+    - $let: {yaml: {$embed: data.yaml}}
+    - $let: {json: {$embed: data.json}}
+    - $let: {toml: {$embed: data.toml}}
+    - $let: {xml: {$embed: data.xml}}
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    assert_eq!(loaded.embedded_files.len(), 6);
+    let expanded = serde_yaml::to_string(loaded.modules.get(&loaded.entry).unwrap()).unwrap();
+    assert!(expanded.contains("$literal-looking text"));
+    assert!(expanded.contains("$uint8"));
+    assert!(expanded.contains("yaml"));
+    assert!(expanded.contains("json"));
+    assert!(expanded.contains("toml"));
+    assert!(expanded.contains("xml"));
+    vibra::lower::lower_program(&loaded).unwrap();
+}
+
+#[test]
+fn compile_time_embed_rejects_escape_and_fingerprints_raw_content() {
+    let outer = tempfile::tempdir().unwrap();
+    let package = outer.path().join("package");
+    std::fs::create_dir(&package).unwrap();
+    std::fs::write(outer.path().join("secret.txt"), "secret").unwrap();
+    let entry = package.join("main.vibra");
+    std::fs::write(
+        &entry,
+        "main:\n  $function: $void\n  return: $void\n  do:\n    - $let: {value: {$embed: ../secret.txt}}\n",
+    )
+    .unwrap();
+    let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(error.contains("E-EMBED-002"), "{error}");
+
+    std::fs::write(package.join("asset.txt"), "one").unwrap();
+    std::fs::write(
+        &entry,
+        "main:\n  $function: $void\n  return: $void\n  do:\n    - $let: {value: {$embed: asset.txt}}\n",
+    )
+    .unwrap();
+    let first = vibra::load::load_program(&entry).unwrap();
+    let first = vibra::lower::lower_program(&first).unwrap();
+    let first = vibra::wasm_backend::emit_program_wasm(&first);
+    std::fs::write(package.join("asset.txt"), "two").unwrap();
+    let second = vibra::load::load_program(&entry).unwrap();
+    let second = vibra::lower::lower_program(&second).unwrap();
+    let second = vibra::wasm_backend::emit_program_wasm(&second);
+    assert_ne!(first, second);
 }

@@ -4,7 +4,8 @@ use crate::code::SourceDatabase;
 use crate::project;
 use anyhow::{bail, Context, Result};
 use serde_yaml::{Mapping, Value};
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,9 @@ pub struct LoadedProgram {
     pub modules: HashMap<PathBuf, Value>,
     pub sources: SourceDatabase,
     pub module_parts: HashMap<PathBuf, Vec<PathBuf>>,
+    /// Canonical embedded-file path to raw-content SHA-256. This is part of the
+    /// compiler fingerprint even when two structured files decode identically.
+    pub embedded_files: BTreeMap<PathBuf, String>,
 }
 
 pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
@@ -28,6 +32,7 @@ pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
     let (sources, module_parts) = source_database_for_modules(&entry, modules.keys(), None)?;
     let mut modules = rebuild_modules_from_sources(modules.keys(), &sources, &module_parts)?;
     normalize_ignored_annotations(&mut modules)?;
+    let embedded_files = expand_embeds(&mut modules)?;
     let modules = crate::macro_expand::expand_program_modules(&entry, modules)?;
     validate_direct_import_aliases(&modules)?;
     Ok(LoadedProgram {
@@ -35,6 +40,7 @@ pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
         modules,
         sources,
         module_parts,
+        embedded_files,
     })
 }
 
@@ -66,6 +72,7 @@ pub fn load_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram
         source_database_for_modules(&entry, modules.keys(), Some((&entry, inline_source)))?;
     let mut modules = rebuild_modules_from_sources(modules.keys(), &sources, &module_parts)?;
     normalize_ignored_annotations(&mut modules)?;
+    let embedded_files = expand_embeds(&mut modules)?;
     let modules = crate::macro_expand::expand_program_modules(&entry, modules)?;
     validate_direct_import_aliases(&modules)?;
     Ok(LoadedProgram {
@@ -73,7 +80,254 @@ pub fn load_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram
         modules,
         sources,
         module_parts,
+        embedded_files,
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+enum EmbedFormat {
+    Text,
+    Binary,
+    Yaml,
+    Json,
+    Toml,
+    Xml,
+}
+
+fn expand_embeds(modules: &mut HashMap<PathBuf, Value>) -> Result<BTreeMap<PathBuf, String>> {
+    let mut embedded = BTreeMap::new();
+    let mut paths = modules.keys().cloned().collect::<Vec<_>>();
+    paths.sort();
+    for module_path in paths {
+        let package_root = project::find_project_for_file(&module_path)?
+            .map(|project| project.root)
+            .unwrap_or_else(|| module_path.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let package_root = fs::canonicalize(&package_root).with_context(|| {
+            format!(
+                "E-EMBED-002: resolve package root {}",
+                package_root.display()
+            )
+        })?;
+        let value = modules
+            .get_mut(&module_path)
+            .expect("module path came from map");
+        let mut module_embedded = BTreeMap::new();
+        expand_embeds_in_value(value, &module_path, &package_root, &mut module_embedded)?;
+        if !module_embedded.is_empty() {
+            let mut inventory = String::new();
+            for (path, digest) in &module_embedded {
+                let relative = path.strip_prefix(&package_root).unwrap_or(path);
+                inventory.push_str(&relative.to_string_lossy().replace('\\', "/"));
+                inventory.push('\0');
+                inventory.push_str(digest);
+                inventory.push('\n');
+            }
+            let fingerprint = format!("{:x}", Sha256::digest(inventory.as_bytes()));
+            value
+                .as_mapping_mut()
+                .context("internal: expanded module root is not a mapping")?
+                .insert(
+                    Value::String("-embedded-files-sha256".into()),
+                    Value::String(fingerprint),
+                );
+        }
+        embedded.extend(module_embedded);
+    }
+    Ok(embedded)
+}
+
+fn expand_embeds_in_value(
+    value: &mut Value,
+    module_path: &Path,
+    package_root: &Path,
+    embedded: &mut BTreeMap<PathBuf, String>,
+) -> Result<()> {
+    if let Some(map) = value.as_mapping() {
+        if map.len() == 1 {
+            if let Some(spec) = map_get_str(map, "$embed") {
+                *value = load_embed(spec, module_path, package_root, embedded)?;
+                return Ok(());
+            }
+        }
+    }
+    match value {
+        Value::Mapping(map) => {
+            for (_, child) in map {
+                expand_embeds_in_value(child, module_path, package_root, embedded)?;
+            }
+        }
+        Value::Sequence(items) => {
+            for child in items {
+                expand_embeds_in_value(child, module_path, package_root, embedded)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn load_embed(
+    spec: &Value,
+    module_path: &Path,
+    package_root: &Path,
+    embedded: &mut BTreeMap<PathBuf, String>,
+) -> Result<Value> {
+    let (path, requested_format) = if let Some(path) = spec.as_str() {
+        (path, "auto")
+    } else {
+        let map = spec
+            .as_mapping()
+            .context("E-EMBED-001: `$embed` must be a path string or `{path, format}` mapping")?;
+        for key in map.keys() {
+            let key = key
+                .as_str()
+                .context("E-EMBED-001: `$embed` option keys must be strings")?;
+            if !matches!(key, "path" | "format") {
+                bail!("E-EMBED-001: unknown `$embed` option `{key}`");
+            }
+        }
+        let path = map_get_str(map, "path")
+            .and_then(Value::as_str)
+            .context("E-EMBED-001: `$embed.path` must be a string")?;
+        let format = map_get_str(map, "format")
+            .map(|v| {
+                v.as_str()
+                    .context("E-EMBED-001: `$embed.format` must be a string")
+            })
+            .transpose()?
+            .unwrap_or("auto");
+        (path, format)
+    };
+    let relative = Path::new(path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        bail!("E-EMBED-002: embedded path must be a normalized relative path: `{path}`");
+    }
+    let base = module_path
+        .parent()
+        .context("E-EMBED-002: module has no parent")?;
+    let resolved = fs::canonicalize(base.join(relative)).with_context(|| {
+        format!(
+            "E-EMBED-003: cannot read embedded file `{path}` from {}",
+            module_path.display()
+        )
+    })?;
+    if !resolved.starts_with(package_root) || !resolved.is_file() {
+        bail!(
+            "E-EMBED-002: embedded file `{}` escapes package root {}",
+            resolved.display(),
+            package_root.display()
+        );
+    }
+    let bytes = fs::read(&resolved)
+        .with_context(|| format!("E-EMBED-003: read embedded file {}", resolved.display()))?;
+    embedded.insert(resolved.clone(), format!("{:x}", Sha256::digest(&bytes)));
+    let format = parse_embed_format(requested_format, &resolved)?;
+    match format {
+        EmbedFormat::Text => Ok(literal_string(
+            String::from_utf8(bytes).context("E-EMBED-004: text embed is not valid UTF-8")?,
+        )),
+        EmbedFormat::Binary => Ok(binary_expr(&bytes)),
+        EmbedFormat::Yaml => {
+            let parsed: Value =
+                serde_yaml::from_slice(&bytes).context("E-EMBED-004: parse embedded YAML")?;
+            structured_expr(parsed)
+        }
+        EmbedFormat::Json => {
+            let parsed: serde_json::Value =
+                serde_json::from_slice(&bytes).context("E-EMBED-004: parse embedded JSON")?;
+            structured_expr(serde_yaml::to_value(parsed)?)
+        }
+        EmbedFormat::Toml => {
+            let text = std::str::from_utf8(&bytes)
+                .context("E-EMBED-004: TOML embed is not valid UTF-8")?;
+            let parsed: toml::Value =
+                toml::from_str(text).context("E-EMBED-004: parse embedded TOML")?;
+            structured_expr(serde_yaml::to_value(parsed)?)
+        }
+        EmbedFormat::Xml => {
+            let text =
+                std::str::from_utf8(&bytes).context("E-EMBED-004: XML embed is not valid UTF-8")?;
+            let parsed: serde_json::Value =
+                quick_xml::de::from_str(text).context("E-EMBED-004: parse embedded XML")?;
+            structured_expr(serde_yaml::to_value(parsed)?)
+        }
+    }
+}
+
+fn parse_embed_format(requested: &str, path: &Path) -> Result<EmbedFormat> {
+    let name = if requested == "auto" {
+        path.extension().and_then(|v| v.to_str()).unwrap_or("")
+    } else {
+        requested
+    };
+    match name.to_ascii_lowercase().as_str() {
+        "text" | "txt" => Ok(EmbedFormat::Text),
+        "binary" | "bin" => Ok(EmbedFormat::Binary),
+        "yaml" | "yml" => Ok(EmbedFormat::Yaml),
+        "json" => Ok(EmbedFormat::Json),
+        "toml" => Ok(EmbedFormat::Toml),
+        "xml" => Ok(EmbedFormat::Xml),
+        _ => bail!(
+            "E-EMBED-001: cannot infer embed format for {}; use text, binary, yaml, json, toml, or xml",
+            path.display()
+        ),
+    }
+}
+
+fn literal_string(value: String) -> Value {
+    let mut map = Mapping::new();
+    map.insert(Value::String("$literal".into()), Value::String(value));
+    Value::Mapping(map)
+}
+
+fn binary_expr(bytes: &[u8]) -> Value {
+    let items = bytes
+        .iter()
+        .map(|byte| {
+            let mut typed = Mapping::new();
+            typed.insert(Value::String("value".into()), Value::Number((*byte).into()));
+            typed.insert(Value::String("type".into()), Value::String("$uint8".into()));
+            let mut literal = Mapping::new();
+            literal.insert(Value::String("$literal".into()), Value::Mapping(typed));
+            Value::Mapping(literal)
+        })
+        .collect();
+    let mut array = Mapping::new();
+    array.insert(Value::String("$array".into()), Value::Sequence(items));
+    Value::Mapping(array)
+}
+
+fn structured_expr(value: Value) -> Result<Value> {
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => Ok(value),
+        Value::String(value) => Ok(literal_string(value)),
+        Value::Sequence(items) => {
+            let items = items
+                .into_iter()
+                .map(structured_expr)
+                .collect::<Result<_>>()?;
+            let mut array = Mapping::new();
+            array.insert(Value::String("$array".into()), Value::Sequence(items));
+            Ok(Value::Mapping(array))
+        }
+        Value::Mapping(items) => {
+            let mut fields = Mapping::new();
+            for (key, value) in items {
+                let key = key
+                    .as_str()
+                    .context("E-EMBED-005: structured mapping keys must be strings")?;
+                fields.insert(Value::String(key.into()), structured_expr(value)?);
+            }
+            let mut record = Mapping::new();
+            record.insert(Value::String("$record".into()), Value::Mapping(fields));
+            Ok(Value::Mapping(record))
+        }
+        Value::Tagged(_) => bail!("E-EMBED-005: YAML tags are not supported in embedded data"),
+    }
 }
 
 fn normalize_ignored_annotations(modules: &mut HashMap<PathBuf, Value>) -> Result<()> {

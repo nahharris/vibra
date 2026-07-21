@@ -169,12 +169,40 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
     Ok(options.write || report.summary.changed == 0)
 }
 
-fn format_source(source: &str) -> Result<String> {
+pub fn format_source(source: &str) -> Result<String> {
     crate::yaml_subset::validate_yaml_subset_or_err(source, Path::new("<format>"))?;
     let _ = Document::from_str(source).context("parse Vibra code document")?;
     let value: serde_yaml::Value = serde_yaml::from_str(source).context("parse Vibra YAML")?;
     crate::annotations::validate(&value)?;
     serde_yaml::to_string(&value).context("emit canonical Vibra YAML")
+}
+
+/// Produce syntax and style diagnostics for an in-memory editor document.
+/// Compile diagnostics intentionally remain workspace/disk based.
+pub fn diagnostics_for_source(path: &Path, source: &str) -> Vec<Diagnostic> {
+    let suppressions = Suppressions::parse(source);
+    let mut diagnostics = Vec::new();
+    let violations = crate::yaml_subset::validate_yaml_subset(source);
+    if !violations.is_empty() {
+        diagnostics.extend(
+            violations
+                .iter()
+                .map(|violation| yaml_subset_diagnostic(path, violation)),
+        );
+    } else {
+        match serde_yaml::from_str::<serde_yaml::Value>(source) {
+            Ok(value) => match crate::annotations::validate(&value) {
+                Ok(()) => diagnostics.extend(style_diagnostics(path, source)),
+                Err(error) => diagnostics.push(annotation_diagnostic(path, source, &error)),
+            },
+            Err(error) => diagnostics.push(yaml_diagnostic(path, &error)),
+        }
+    }
+    diagnostics.retain(|diagnostic| {
+        diagnostic.severity == Severity::Error
+            || !suppressions.suppresses(&diagnostic.code, diagnostic.span.start.line)
+    });
+    diagnostics
 }
 
 pub fn run_lint(options: LintOptions) -> Result<bool> {

@@ -81,6 +81,7 @@ are not a complete specification of compiler behavior.
   [`source-annotations.schema.json`](schemas/source-annotations.schema.json).
 - **Projects, packages, and diagnostics:** [`project-manifest.schema.json`](schemas/project-manifest.schema.json),
   [`project-lock.schema.json`](schemas/project-lock.schema.json),
+  [`dependency-resolution.schema.json`](schemas/dependency-resolution.schema.json),
   [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
   [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
   [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
@@ -93,6 +94,10 @@ are not a complete specification of compiler behavior.
   specifies the `vibra/contextAt` (and `vibra query`) response shape, and
   [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
   `vibra docs --format yaml|json`.
+- **Async conformance:** [`async-task-trace.schema.json`](schemas/async-task-trace.schema.json)
+  defines deterministic structured-task traces. The semantics, implementation
+  milestones, and normative vectors are documented in
+  [`docs/async-structured-concurrency.md`](docs/async-structured-concurrency.md).
 
 Each schema has a canonical `$id` under `https://vibra.dev/schemas/`. Tooling
 should use the schema that matches its boundary and treat the expression and
@@ -181,6 +186,29 @@ vibra check hello
 ```
 
 See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
+The proposed post-v1 deterministic source version solver is specified in
+[docs/version-solving.md](docs/version-solving.md); it does not change today's
+exact-revision workflow.
+
+### Compile-time file embedding
+
+`$embed` turns a package-owned file into a Vibra expression while loading the
+module. A string value uses the file extension to select `txt`, `bin`, `yaml`,
+`json`, `toml`, or `xml`; use the mapping form when the extension is ambiguous:
+
+```yaml
+message: {$embed: assets/message.txt}
+logo: {$embed: {path: assets/logo.dat, format: binary}}
+settings: {$embed: {path: assets/settings.conf, format: toml}}
+```
+
+Text produces `$str`, binary produces `$array<$uint8>`, and structured formats
+produce statically typed records and arrays. Paths are relative to the module,
+must be normalized, and cannot leave the nearest package root (including via a
+symlink). Embedded raw bytes and their package-relative paths participate in
+the deterministic compiler fingerprint; no runtime filesystem grant is needed.
+Malformed content uses `E-EMBED-004`, invalid structured shapes use
+`E-EMBED-005`, and path/sandbox failures use `E-EMBED-002`/`E-EMBED-003`.
 
 ### Symbol documentation
 
@@ -205,10 +233,22 @@ symbols are addressed through their import alias, such as `io.println`.
 
 The command reports source documentation and does not execute macros beyond the
 compiler's normal load-time expansion. Generated implementation methods that
-have no source `=doc` are not listed. This repository does not yet contain an
-LSP hover server; the structured documentation records are exposed from the
-library so a future hover implementation can use the same content and symbol
-qualification.
+have no source `=doc` are not listed. The structured documentation records are
+also exposed to editor tooling.
+
+### Language server
+
+Run `vibra lsp` and configure an editor to communicate with the process over
+standard input/output. The server implements LSP lifecycle requests,
+full-document synchronization, syntax/style diagnostics for unsaved buffers,
+canonical formatting, and local-document hover, definition, reference, and
+completion requests. Hover uses `=doc` text.
+
+Navigation and completion are currently top-level and local to the open
+document; they do not resolve imported symbols or infer expression types.
+Compile diagnostics continue to use the saved workspace. The advertised
+capability shape is documented by
+[`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
 
 ### Executable application packages
 
