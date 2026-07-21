@@ -570,6 +570,9 @@ pub struct LoweredProgram {
     pub functions: HashMap<String, FunctionSig>,
     pub impls: HashMap<ImplKey, ImplBody>,
     pub warnings: Vec<String>,
+    /// Canonical `@dependency` module name to validated static wasm bytes.
+    /// These bytes are included in the deterministic guest execution plan.
+    pub foreign_modules: BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -2674,6 +2677,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
     validate_wasm_bodies(&sigs, &type_aliases)?;
 
+    let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
     Ok(LoweredProgram {
         statements,
         main_arg_bindings,
@@ -2681,6 +2685,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         functions: sigs,
         impls,
         warnings,
+        foreign_modules,
     })
 }
 
@@ -2873,6 +2878,7 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
                 functions: ctx.sigs.clone(),
                 impls: ctx.impls.clone(),
                 warnings: ctx.warnings.clone(),
+                foreign_modules: BTreeMap::new(),
             },
         });
     }
@@ -2942,6 +2948,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
             functions: sigs,
             impls,
             warnings,
+            foreign_modules: BTreeMap::new(),
         },
     })
 }
@@ -3127,6 +3134,7 @@ pub fn lower_exec_expr(
             functions: sigs,
             impls,
             warnings,
+            foreign_modules: BTreeMap::new(),
         },
     })
 }
@@ -3802,6 +3810,28 @@ fn validate_wasm_bodies(
         let FunctionBody::Wasm { import, wasm_args } = &sig.body else {
             continue;
         };
+        if import.module.starts_with('@') {
+            if wasm_args.len() != sig.arg_types.len() {
+                bail!(
+                    "E-WASM-007: `{key}` forwards {} values but declares {} parameters",
+                    wasm_args.len(),
+                    sig.arg_types.len()
+                );
+            }
+            for spec in wasm_args {
+                match spec {
+                    WasmArgSpec::Arg(name) if sig.arg_names.contains(name) => {}
+                    WasmArgSpec::ConstInt(_) => {}
+                    WasmArgSpec::Arg(name) => {
+                        bail!("E-WASM-007: `{key}` forwards unknown argument `$args.{name}`")
+                    }
+                    WasmArgSpec::ConstStr(_) => {
+                        bail!("E-WASM-007: `{key}` cannot pass strings across the scalar wasm ABI")
+                    }
+                }
+            }
+            continue;
+        }
         let Some(entry) = crate::host_abi::lookup(&import.module, &import.name) else {
             if crate::host_abi::is_host_module(&import.module) {
                 bail!(
