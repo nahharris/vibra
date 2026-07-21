@@ -626,17 +626,81 @@ fn exec_static_wasm_scalar(
     let mut store = Store::default();
     let module = wasmer::Module::new(&store, bytes)
         .with_context(|| format!("E-WASM-005: compile static wasm module `{}`", import.module))?;
-    // v1 scalar calls admit no imports. `vibra_ffi.memory` is reserved for the
-    // caller-owned-buffer milestone and is rejected here rather than being
-    // silently instantiated with unrelated memory.
-    if let Some(required) = module.imports().next() {
-        bail!(
-            "E-WASM-005: static scalar execution cannot satisfy import `{}.{}`",
-            required.module(),
-            required.name()
-        );
+    let mut memory_type = None;
+    for required in module.imports() {
+        match required.ty() {
+            wasmer::ExternType::Memory(ty)
+                if required.module() == "vibra_ffi" && required.name() == "memory" =>
+            {
+                if memory_type.replace(ty.clone()).is_some() {
+                    bail!(
+                        "E-WASM-005: static wasm module imports `vibra_ffi.memory` more than once"
+                    );
+                }
+            }
+            _ => bail!(
+                "E-WASM-005: static wasm module has forbidden import `{}.{}`",
+                required.module(),
+                required.name()
+            ),
+        }
     }
-    let instance = Instance::new(&mut store, &module, &wasmer::Imports::new())
+    let has_buffer = signature.arg_types.iter().any(is_foreign_buffer_type);
+    if has_buffer && memory_type.is_none() {
+        bail!("E-WASM-005: buffer wrapper requires the artifact to import `vibra_ffi.memory`");
+    }
+    let memory = memory_type
+        .map(|ty| wasmer::Memory::new(&mut store, ty))
+        .transpose()
+        .context("E-WASM-005: create caller-owned FFI memory")?;
+    let imports = match &memory {
+        Some(memory) => wasmer::imports! {
+            "vibra_ffi" => { "memory" => memory.clone() }
+        },
+        None => wasmer::Imports::new(),
+    };
+    let mut wasm_args = Vec::new();
+    let mut buffers = Vec::new();
+    let mut next_pointer = 8_u64;
+    for (value, ty) in args.iter().zip(&signature.arg_types) {
+        if is_foreign_buffer_type(ty) {
+            let bytes = runtime_buffer_bytes(value, ty)?;
+            if bytes.is_empty() {
+                wasm_args.extend([wasmer::Value::I32(0), wasmer::Value::I32(0)]);
+                continue;
+            }
+            let length = i32::try_from(bytes.len())
+                .context("E-WASM-007: caller-owned buffer exceeds wasm32 length")?;
+            let end = next_pointer
+                .checked_add(bytes.len() as u64)
+                .context("E-WASM-007: caller-owned buffer range overflow")?;
+            if end > i32::MAX as u64 {
+                bail!("E-WASM-007: caller-owned buffer exceeds wasm32 address space");
+            }
+            wasm_args.extend([
+                wasmer::Value::I32(next_pointer as i32),
+                wasmer::Value::I32(length),
+            ]);
+            buffers.push((next_pointer, bytes));
+            next_pointer = end
+                .checked_add(7)
+                .context("E-WASM-007: buffer alignment overflow")?
+                & !7;
+        } else {
+            wasm_args.push(runtime_to_wasm_scalar(value, ty)?);
+        }
+    }
+    if let Some(memory) = &memory {
+        memory
+            .grow_at_least(&mut store, next_pointer)
+            .context("E-WASM-007: imported memory cannot hold caller-owned buffers")?;
+        let view = memory.view(&store);
+        for (pointer, bytes) in &buffers {
+            view.write(*pointer, bytes)
+                .context("E-WASM-007: write caller-owned buffer")?;
+        }
+    }
+    let instance = Instance::new(&mut store, &module, &imports)
         .with_context(|| format!("instantiate static wasm module `{}`", import.module))?;
     let function = instance
         .exports
@@ -647,11 +711,6 @@ fn exec_static_wasm_scalar(
                 import.module, import.name
             )
         })?;
-    let wasm_args = args
-        .iter()
-        .zip(&signature.arg_types)
-        .map(|(value, ty)| runtime_to_wasm_scalar(value, ty))
-        .collect::<Result<Vec<_>>>()?;
     let results = function.call(&mut store, &wasm_args).with_context(|| {
         format!(
             "call static wasm export `{}.{}`",
@@ -674,6 +733,43 @@ fn exec_static_wasm_scalar(
             }
             wasm_to_runtime_scalar(&results[0], &signature.return_type)
         }
+    }
+}
+
+fn is_foreign_buffer_type(ty: &TypeRef) -> bool {
+    matches!(ty, TypeRef::Str)
+        || matches!(ty, TypeRef::Array(inner) if matches!(inner.as_ref(), TypeRef::UInt8))
+}
+
+fn runtime_buffer_bytes(value: &RuntimeValue, ty: &TypeRef) -> Result<Vec<u8>> {
+    let value = match value {
+        RuntimeValue::Typed { value, .. } => value.as_ref(),
+        value => value,
+    };
+    match (ty, value) {
+        (TypeRef::Str, RuntimeValue::Str(text)) => {
+            // Rust strings are valid UTF-8, which establishes the v1 string
+            // precondition before any foreign instruction executes.
+            Ok(text.as_bytes().to_vec())
+        }
+        (TypeRef::Array(inner), RuntimeValue::Array(items))
+            if matches!(inner.as_ref(), TypeRef::UInt8) =>
+        {
+            items
+                .iter()
+                .map(|item| match item {
+                    RuntimeValue::Int(value) => u8::try_from(*value)
+                        .context("E-WASM-007: byte buffer item is outside 0..=255"),
+                    RuntimeValue::Typed { value, .. } => match value.as_ref() {
+                        RuntimeValue::Int(value) => u8::try_from(*value)
+                            .context("E-WASM-007: byte buffer item is outside 0..=255"),
+                        other => bail!("E-WASM-007: byte buffer contains `{other:?}`"),
+                    },
+                    other => bail!("E-WASM-007: byte buffer contains `{other:?}`"),
+                })
+                .collect()
+        }
+        _ => bail!("E-WASM-007: value `{value:?}` is not caller-owned buffer `{ty:?}`"),
     }
 }
 
@@ -1646,6 +1742,30 @@ mod tests {
     fn emitted_program_is_byte_deterministic() {
         let p = empty_program();
         assert_eq!(emit_program_wasm(&p), emit_program_wasm(&p));
+    }
+
+    #[test]
+    fn caller_owned_byte_buffers_require_uint8_values() {
+        let ty = TypeRef::Array(Box::new(TypeRef::UInt8));
+        assert_eq!(
+            runtime_buffer_bytes(
+                &RuntimeValue::Array(vec![RuntimeValue::Int(0), RuntimeValue::Int(255)]),
+                &ty
+            )
+            .unwrap(),
+            vec![0, 255]
+        );
+        let error = runtime_buffer_bytes(&RuntimeValue::Array(vec![RuntimeValue::Int(256)]), &ty)
+            .unwrap_err();
+        assert!(error.to_string().contains("outside 0..=255"));
+    }
+
+    #[test]
+    fn caller_owned_strings_use_valid_utf8_bytes() {
+        assert_eq!(
+            runtime_buffer_bytes(&RuntimeValue::Str("Vï".into()), &TypeRef::Str).unwrap(),
+            vec![86, 195, 175]
+        );
     }
     #[test]
     fn emitted_program_fingerprint_covers_lowered_contents() {
