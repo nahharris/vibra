@@ -21,6 +21,8 @@ git2 = "0.20"
 glob = "0.3"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
+toml = "0.8"
+quick-xml = { version = "0.38", features = ["serialize"] }
 getrandom = "0.2"
 serde_yaml = "0.9"
 sha2 = "0.10"

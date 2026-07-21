@@ -186,6 +186,26 @@ The proposed post-v1 deterministic source version solver is specified in
 [docs/version-solving.md](docs/version-solving.md); it does not change today's
 exact-revision workflow.
 
+### Compile-time file embedding
+
+`$embed` turns a package-owned file into a Vibra expression while loading the
+module. A string value uses the file extension to select `txt`, `bin`, `yaml`,
+`json`, `toml`, or `xml`; use the mapping form when the extension is ambiguous:
+
+```yaml
+message: {$embed: assets/message.txt}
+logo: {$embed: {path: assets/logo.dat, format: binary}}
+settings: {$embed: {path: assets/settings.conf, format: toml}}
+```
+
+Text produces `$str`, binary produces `$array<$uint8>`, and structured formats
+produce statically typed records and arrays. Paths are relative to the module,
+must be normalized, and cannot leave the nearest package root (including via a
+symlink). Embedded raw bytes and their package-relative paths participate in
+the deterministic compiler fingerprint; no runtime filesystem grant is needed.
+Malformed content uses `E-EMBED-004`, invalid structured shapes use
+`E-EMBED-005`, and path/sandbox failures use `E-EMBED-002`/`E-EMBED-003`.
+
 ### Symbol documentation
 
 Use `vibra docs` to read compile-time `=doc` annotations without running a

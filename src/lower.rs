@@ -7208,6 +7208,34 @@ fn parse_expr(
             return Ok(expr);
         }
         if m.len() == 1 {
+            if let Some(literal) = map_get_str(m, "$literal") {
+                if let Some(typed) = literal.as_mapping() {
+                    let value = map_get_str(typed, "value")
+                        .and_then(Value::as_i64)
+                        .context("`$literal.value` must be an integer")?;
+                    let ty = map_get_str(typed, "type")
+                        .and_then(Value::as_str)
+                        .context("`$literal.type` must be a type string")?;
+                    if typed.len() == 2 && ty == "$uint8" && (0..=255).contains(&value) {
+                        return Ok(Expr::Value(RuntimeValue::Typed {
+                            type_ref: TypeRef::UInt8,
+                            value: Box::new(RuntimeValue::Int(value)),
+                        }));
+                    }
+                    bail!("`$literal` typed form only supports uint8 values from 0 through 255");
+                }
+                return match literal {
+                    Value::String(value) => Ok(Expr::Value(RuntimeValue::Str(value.clone()))),
+                    Value::Bool(value) => Ok(Expr::Value(RuntimeValue::Bool(*value))),
+                    Value::Number(value) if value.as_i64().is_some() => {
+                        Ok(Expr::Value(RuntimeValue::Int(value.as_i64().unwrap())))
+                    }
+                    Value::Number(value) if value.as_f64().is_some() => {
+                        Ok(Expr::Value(RuntimeValue::Float(value.as_f64().unwrap())))
+                    }
+                    _ => bail!("`$literal` supports only string, boolean, and numeric scalars"),
+                };
+            }
             if let Some(inner_v) = map_get_str(m, "$mut") {
                 let inner = parse_expr(
                     inner_v,
