@@ -166,3 +166,83 @@ fn formatting_returns_a_whole_document_edit() {
         .unwrap()
         .contains("$literal"));
 }
+
+#[test]
+fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
+    let workspace = tempfile::tempdir().unwrap();
+    let manifest = "manifest-version: 1\npackage:\n  name: overlay-test\n  version: 0.1.0\ntargets:\n  bins:\n    - name: app\n      root: .\n      entry: main.vibra\ndependencies: {}\n";
+    let main = "helper:\n  $import: helper.vibra\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $helper.run: null\n";
+    let valid = "run:\n  $function: $void\n  return: $void\n  do:\n    - $let:\n        value: 1\n";
+    let broken = valid.replace("    - $let:", "    - $missing: null\n    - $let:");
+    std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
+    std::fs::write(workspace.path().join("main.vibra"), main).unwrap();
+    std::fs::write(workspace.path().join("helper.vibra"), valid).unwrap();
+    let uri =
+        |path: &std::path::Path| format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
+    let root_uri = uri(workspace.path());
+    let helper_uri = uri(&workspace.path().join("helper.vibra"));
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":helper_uri,"text":broken}}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":helper_uri},"contentChanges":[{"text":valid}]}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    assert!(!output[1]["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(output[2]["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join("helper.vibra")).unwrap(),
+        valid
+    );
+}
+
+#[test]
+fn semantic_navigation_resolves_transitive_import_aliases() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(workspace.path().join("pkg")).unwrap();
+    let main="mid:\n  $import: pkg/mid.vibra\nmain:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: $mid.leaf.greet\n";
+    let mid = "leaf:\n  $import: leaf.vibra\n";
+    let leaf="greet:\n  $function: null\n  =doc: Transitive greeting\n  args: {}\n  return: string\n  do:\n    - $return: hello\n";
+    let main_path = workspace.path().join("main.vibra");
+    let leaf_path = workspace.path().join("pkg/leaf.vibra");
+    std::fs::write(&main_path, main).unwrap();
+    std::fs::write(workspace.path().join("pkg/mid.vibra"), mid).unwrap();
+    std::fs::write(&leaf_path, leaf).unwrap();
+    let uri =
+        |path: &std::path::Path| format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
+    let root_uri = uri(workspace.path());
+    let main_uri = uri(&main_path);
+    let leaf_uri = uri(&leaf_path);
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":main_uri,"text":main}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":main_uri},"position":{"line":7,"character":27}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":main_uri},"position":{"line":7,"character":27}}}),
+        json!({"jsonrpc":"2.0","id":4,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    assert_eq!(output[2]["result"]["uri"], leaf_uri);
+    assert!(output[3]["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["label"] == "mid.leaf.greet"));
+}
