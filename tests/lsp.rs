@@ -146,13 +146,15 @@ fn workspace_navigation_resolves_imported_package_symbols_and_open_overlays() {
 
 #[test]
 fn formatting_returns_a_whole_document_edit() {
-    let uri = "file:///tmp/main.vibra";
+    let workspace = tempfile::tempdir().unwrap();
+    let uri = path_uri(&workspace.path().join("main.vibra"));
+    let root_uri = path_uri(workspace.path());
     // Canonical output always uses LF, so CRLF input guarantees an edit on
     // every host without relying on emitter choices around YAML flow style.
     let source = "main:\r\n  $literal: 1\r\n";
     let mut input = Vec::new();
     for value in [
-        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
         json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"text":source}}}),
         json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{"textDocument":{"uri":uri},"options":{"tabSize":2,"insertSpaces":true}}}),
         json!({"jsonrpc":"2.0","id":3,"method":"shutdown"}),
@@ -167,6 +169,15 @@ fn formatting_returns_a_whole_document_edit() {
         .as_str()
         .unwrap()
         .contains("$literal"));
+}
+
+fn path_uri(path: &std::path::Path) -> String {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if value.starts_with('/') {
+        format!("file://{value}")
+    } else {
+        format!("file:///{value}")
+    }
 }
 
 #[test]
