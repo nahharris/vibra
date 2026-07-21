@@ -11,7 +11,8 @@
     { "type": "array", "items": { "$ref": "#" } },
     {
       "type": "object",
-      "additionalProperties": { "$ref": "#" }
+      "additionalProperties": { "$ref": "#" },
+      "description": "Includes compile-time {$embed: path} or {$embed: {path, format}} expressions. Formats: auto, text, binary, yaml, json, toml, xml."
     }
   ]
 }
