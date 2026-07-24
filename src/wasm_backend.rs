@@ -958,6 +958,7 @@ fn collect_calls_in_statements(statements: &[Statement], calls: &mut Vec<Call>) 
                 collect_calls_in_expr(source, calls);
                 collect_calls_in_statements(body, calls);
             }
+            Statement::Task { body, .. } => collect_calls_in_statements(body, calls),
             Statement::Break | Statement::Continue => {}
         }
     }
@@ -1368,6 +1369,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.control_depth -= 2;
                 self.for_depth -= 1;
             }
+            Statement::Task { body, .. } => self.emit_statements(body),
             Statement::Break => {
                 let (target, _) = self.loop_stack.last().expect("validated loop control");
                 self.function
@@ -1562,6 +1564,7 @@ fn collect_locals(statements: &[Statement], names: &mut Vec<String>) {
                 names.push(var.clone());
                 collect_locals(body, names);
             }
+            Statement::Task { body, .. } => collect_locals(body, names),
             _ => {}
         }
     }
@@ -1592,6 +1595,7 @@ fn count_pattern_bindings(statements: &[Statement]) -> usize {
             }
             Statement::While { body, .. } => count += count_pattern_bindings(body),
             Statement::For { body, .. } => count += count_pattern_bindings(body),
+            Statement::Task { body, .. } => count += count_pattern_bindings(body),
             _ => {}
         }
     }
@@ -1603,6 +1607,7 @@ fn max_for_depth(statements: &[Statement]) -> usize {
         .iter()
         .map(|statement| match statement {
             Statement::For { body, .. } => 1 + max_for_depth(body),
+            Statement::Task { body, .. } => max_for_depth(body),
             Statement::While { body, .. } => max_for_depth(body),
             Statement::If {
                 then_body,

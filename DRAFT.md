@@ -245,6 +245,18 @@ null` and `$continue: null` are valid only within `$for` or `$while`, target the
 nearest loop, and are the sole early-loop-control forms. Iteration bindings and
 body-local bindings do not escape the loop.
 
+### Structured task blocks
+
+`$task: [capture, ...]` with a sibling `do:` sequence creates a structured
+child task and implicitly joins it before the following statement. Captures are
+explicit immutable snapshots. Mutable values and all reference-typed values
+are rejected with `E-TASK-001`; callers must snapshot the underlying value
+first. Task-local bindings do not escape. `$return`, `$break`, and `$continue`
+cannot cross the task boundary (`E-TASK-002`). This first source form is a
+deterministic task boundary in both interpreter and Wasm backends; overlapping
+tasks and explicit affine join handles will extend it without weakening capture
+safety.
+
 `$str` values are always valid UTF-8. `text.scalar-len`, `text.scalar-at`, and
 `text.find` use Unicode-scalar units, matching `$for`; `text.byte-len` is the
 explicit UTF-8 byte measurement. No API exposes an ambiguously named string
