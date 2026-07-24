@@ -49,6 +49,11 @@
       "type": "object",
       "propertyNames": { "$ref": "#/$defs/kebabName" },
       "additionalProperties": { "$ref": "#/$defs/dependency" }
+    },
+    "plugin-interfaces": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/kebabName" },
+      "additionalProperties": { "$ref": "#/$defs/pluginInterface" }
     }
   },
   "$defs": {
@@ -114,6 +119,29 @@
           }
         }
       ]
+    },
+    "pluginInterface": {
+      "type": "object",
+      "required": ["functions"],
+      "additionalProperties": false,
+      "properties": {
+        "functions": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/kebabName" },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["result"],
+            "additionalProperties": false,
+            "properties": {
+              "params": {
+                "type": "array",
+                "items": { "enum": ["bool", "int32", "uint32", "int64", "uint64", "float32", "float64"] }
+              },
+              "result": { "enum": ["void", "bool", "int32", "uint32", "int64", "uint64", "float32", "float64"] }
+            }
+          }
+        }
+      }
     }
   }
 }

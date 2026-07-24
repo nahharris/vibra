@@ -5,7 +5,7 @@ use crate::project;
 use anyhow::{bail, Context, Result};
 use serde_yaml::{Mapping, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,15 +21,41 @@ pub struct LoadedProgram {
     pub embedded_files: BTreeMap<PathBuf, String>,
 }
 
+/// Compiler flags that select conditional module parts.
+///
+/// A file named `name.flag.vibra` contributes to `name.vibra` only when
+/// `flag` is enabled. Multiple suffix segments are conjunctive, so
+/// `name.unix.debug.vibra` requires both `unix` and `debug`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompilationFlags {
+    enabled: BTreeSet<String>,
+}
+
+impl CompilationFlags {
+    pub fn new(flags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            enabled: flags.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn contains(&self, flag: &str) -> bool {
+        self.enabled.contains(flag)
+    }
+}
+
 pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
+    load_program_with_flags(entry, &CompilationFlags::default())
+}
+
+pub fn load_program_with_flags(entry: &Path, flags: &CompilationFlags) -> Result<LoadedProgram> {
     let entry = fs::canonicalize(entry)
         .with_context(|| format!("cannot open entry module {}", entry.display()))?;
     let project = project::find_project_for_file(&entry)?;
     let entry = canonical_module_path(&entry)?;
     let mut modules = HashMap::new();
     let mut stack = Vec::new();
-    load_recursive(&entry, project.as_ref(), &mut modules, &mut stack)?;
-    let (sources, module_parts) = source_database_for_modules(&entry, modules.keys(), None)?;
+    load_recursive(&entry, project.as_ref(), flags, &mut modules, &mut stack)?;
+    let (sources, module_parts) = source_database_for_modules(&entry, modules.keys(), None, flags)?;
     let mut modules = rebuild_modules_from_sources(modules.keys(), &sources, &module_parts)?;
     normalize_ignored_annotations(&mut modules)?;
     let embedded_files = expand_embeds(&mut modules)?;
@@ -52,7 +78,7 @@ pub fn load_entry_module_for_test_discovery(entry: &Path) -> Result<(PathBuf, Va
     let entry = fs::canonicalize(entry)
         .with_context(|| format!("cannot open entry module {}", entry.display()))?;
     let entry = canonical_module_path(&entry)?;
-    let root = load_module_parts(&entry)?;
+    let root = load_module_parts(&entry, &CompilationFlags::new(["test"]))?;
     Ok((entry, root))
 }
 
@@ -63,13 +89,18 @@ pub fn load_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram
     let project = project::find_project_for_file(&entry)?;
     let mut modules = HashMap::new();
     let mut stack = Vec::new();
+    let flags = CompilationFlags::default();
     for import in module_imports(&entry, &root, project.as_ref())? {
-        load_recursive(&import, project.as_ref(), &mut modules, &mut stack)?;
+        load_recursive(&import, project.as_ref(), &flags, &mut modules, &mut stack)?;
     }
     modules.insert(entry.clone(), root.clone());
     let inline_source = serde_yaml::to_string(&root).context("serialize inline Vibra program")?;
-    let (sources, module_parts) =
-        source_database_for_modules(&entry, modules.keys(), Some((&entry, inline_source)))?;
+    let (sources, module_parts) = source_database_for_modules(
+        &entry,
+        modules.keys(),
+        Some((&entry, inline_source)),
+        &flags,
+    )?;
     let mut modules = rebuild_modules_from_sources(modules.keys(), &sources, &module_parts)?;
     normalize_ignored_annotations(&mut modules)?;
     let embedded_files = expand_embeds(&mut modules)?;
@@ -343,6 +374,7 @@ fn source_database_for_modules<'a>(
     entry: &Path,
     modules: impl Iterator<Item = &'a PathBuf>,
     inline: Option<(&Path, String)>,
+    flags: &CompilationFlags,
 ) -> Result<(SourceDatabase, HashMap<PathBuf, Vec<PathBuf>>)> {
     let mut source_pairs = Vec::new();
     let mut module_parts = HashMap::new();
@@ -350,7 +382,7 @@ fn source_database_for_modules<'a>(
         if inline.as_ref().is_some_and(|(path, _)| *path == module) {
             continue;
         }
-        let parts = module_part_paths(module)?;
+        let parts = module_part_paths(module, flags)?;
         for part in &parts {
             let source =
                 fs::read_to_string(part).with_context(|| format!("read {}", part.display()))?;
@@ -559,6 +591,7 @@ fn module_self_alias(path: &Path) -> Option<String> {
 fn load_recursive(
     path: &Path,
     project: Option<&project::LoadedProject>,
+    flags: &CompilationFlags,
     modules: &mut HashMap<PathBuf, Value>,
     stack: &mut Vec<PathBuf>,
 ) -> Result<()> {
@@ -574,11 +607,11 @@ fn load_recursive(
     }
     stack.push(path.clone());
 
-    let v = load_module_parts(&path)?;
+    let v = load_module_parts(&path, flags)?;
     let imports = module_imports(&path, &v, project)?;
 
     for imp in imports {
-        load_recursive(&imp, project, modules, stack)?;
+        load_recursive(&imp, project, flags, modules, stack)?;
     }
 
     modules.insert(path, v);
@@ -634,9 +667,9 @@ fn module_imports(
     Ok(imports)
 }
 
-fn load_module_parts(module_path: &Path) -> Result<Value> {
+fn load_module_parts(module_path: &Path, flags: &CompilationFlags) -> Result<Value> {
     let mut merged = Mapping::new();
-    for part in module_part_paths(module_path)? {
+    for part in module_part_paths(module_path, flags)? {
         let text = fs::read_to_string(&part).with_context(|| format!("read {}", part.display()))?;
         crate::yaml_subset::validate_yaml_subset_or_err(&text, &part)?;
         let v = parse_module_yaml(&text, &part)?;
@@ -673,15 +706,18 @@ fn parse_module_yaml(text: &str, path: &Path) -> Result<Value> {
     })
 }
 
-fn module_part_paths(module_path: &Path) -> Result<Vec<PathBuf>> {
+fn module_part_paths(module_path: &Path, flags: &CompilationFlags) -> Result<Vec<PathBuf>> {
     let mut paths = vec![module_path.to_path_buf()];
     let Some(parent) = module_path.parent() else {
         return Ok(paths);
     };
-    let Some(stem) = module_path.file_stem().and_then(|s| s.to_str()) else {
+    let Some(file_name) = module_path.file_name().and_then(|s| s.to_str()) else {
         return Ok(paths);
     };
-    let prefix = format!("{stem}.");
+    let Some(base) = vibra_file_stem(file_name) else {
+        return Ok(paths);
+    };
+    let prefix = format!("{base}.");
     for entry in fs::read_dir(parent).with_context(|| format!("read {}", parent.display()))? {
         let entry = entry?;
         let path = entry.path();
@@ -691,7 +727,17 @@ fn module_part_paths(module_path: &Path) -> Result<Vec<PathBuf>> {
         let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
-        if file_name.starts_with(&prefix) && is_vibra_file(&path) {
+        let Some(stem) = vibra_file_stem(file_name) else {
+            continue;
+        };
+        let Some(suffix) = stem.strip_prefix(&prefix) else {
+            continue;
+        };
+        if !suffix.is_empty()
+            && suffix
+                .split('.')
+                .all(|flag| !flag.is_empty() && flags.contains(flag))
+        {
             paths.push(fs::canonicalize(&path)?);
         }
     }
@@ -714,17 +760,25 @@ fn canonical_module_path(path: &Path) -> Result<PathBuf> {
     let Some((base, _)) = without_ext.split_once('.') else {
         return Ok(path);
     };
-    let candidate = path.with_file_name(format!("{base}.vibra"));
-    if candidate.exists() {
-        fs::canonicalize(candidate).with_context(|| format!("resolve base module for {file_name}"))
-    } else {
-        Ok(path)
+    for candidate_name in [format!("{base}.vibra"), format!("{base}.vibra.yaml")] {
+        let candidate = path.with_file_name(candidate_name);
+        if candidate.exists() {
+            return fs::canonicalize(candidate)
+                .with_context(|| format!("resolve base module for {file_name}"));
+        }
     }
+    Ok(path)
 }
 
 fn is_vibra_file(path: &Path) -> bool {
     let s = path.to_string_lossy();
     s.ends_with(".vibra") || s.ends_with(".vibra.yaml")
+}
+
+fn vibra_file_stem(file_name: &str) -> Option<&str> {
+    file_name
+        .strip_suffix(".vibra.yaml")
+        .or_else(|| file_name.strip_suffix(".vibra"))
 }
 
 fn key_as_str(k: &Value) -> Result<&str> {
