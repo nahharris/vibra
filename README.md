@@ -432,10 +432,11 @@ reported as skipped. See [`tests/README.md`](tests/README.md) for expected
 errors, typed assertion helpers, profile contracts, and the complete flag
 reference.
 
-Files named `foo.*.vibra` are loaded as parts of the same module as
-`foo.vibra` when `foo.vibra` exists. A common convention is to place unit
-tests beside the module in `foo.test.vibra`; the suffix is only a naming
-convention and does not carry special semantics.
+Files named `foo.<flag>.vibra` are conditional parts of `foo.vibra` when the
+base file exists. The base file is always loaded; a part is loaded only when
+all of its suffix flags are enabled. `vibra test` enables `test`, so unit tests
+can live beside their module in `foo.test.vibra` without entering normal
+compiler runs. See [the conditional compilation contract](docs/conditional-compilation.md).
 
 ## Build & test
 
