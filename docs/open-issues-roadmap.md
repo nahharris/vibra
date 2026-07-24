@@ -1,6 +1,6 @@
 # Open issue roadmap
 
-Snapshot: 2026-07-20. This roadmap orders the open GitHub issues by their
+Snapshot: 2026-07-24. This roadmap orders the open GitHub issues by their
 importance to Vibra's language/runtime kernel ("coreness"), their effect on
 other work, and whether their acceptance criteria can be verified locally.
 
@@ -17,6 +17,8 @@ flowchart TD
     P --> A
     N --> A
     A --> T["#106 deterministic testing/benchmarks"]
+    Q["#129 conditional compilation"] --> T
+    Q --> L
 
     D["dependency model #80"] --> F["#19 static wasm FFI"]
     F --> R["#63 runtime typed plugins"]
@@ -40,7 +42,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | 0 | #100, #101, #102 | kernel | Shared typed failure, I/O, time, environment, and path contracts. Verify the merged host-foundation implementation before adding work. |
 | 1 | #103, #104 | kernel host boundary | Depend on reusable I/O and lifecycle contracts; successful operations must return typed resources. |
-| 2 | #105, #106 | runtime architecture | Async/cancellation precedes deterministic concurrent testing and benchmarking. Both need explicit design contracts before broad implementation. |
+| 2 | #105, #129, #106 | compiler/runtime architecture | Async/cancellation and deterministic conditional source selection precede representative concurrent testing and benchmarking. `#129` also defines the compilation context consumed by tooling. |
 | 3 | #80, #19, #63 | package/ABI architecture | Version solving informs static artifact identity; static FFI informs the common typed-plugin abstraction. |
 | 4 | #72, #73 | compiler/product surface | Embedding is the primitive; templating should build on it rather than invent another file-loading path. |
 | 5 | #12, #13, #16 | tooling/adoption | LSP semantics and structured CLI/tool schemas precede MCP and comprehensive agent guidance. |
@@ -48,6 +50,11 @@ flowchart TD
 
 Within a wave, work is ordered by: blocking edges, security/capability impact,
 typed-contract stability, deterministic local testability, then adoption value.
+
+Issue #129 is a high-coreness source-graph concern. It is independent of the
+runtime host boundary, but blocks a principled `test` compilation mode and must
+be reflected by LSP/compiler invocations. Its initial loader/test foundation is
+specified in [conditional-compilation.md](conditional-compilation.md).
 
 ## Completion protocol
 

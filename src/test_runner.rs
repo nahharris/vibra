@@ -211,7 +211,8 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
 }
 
 pub fn run_single_test(path: &Path, name: &str, config: &runtime::RunConfig) -> ChildTestOutcome {
-    let program = match load::load_program(path) {
+    let program = match load::load_program_with_flags(path, &load::CompilationFlags::new(["test"]))
+    {
         Ok(program) => program,
         Err(error) => return failed_outcome(ChildFailurePhase::Load, error, Vec::new()),
     };
