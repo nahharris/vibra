@@ -367,6 +367,15 @@ enum Command {
         allow_random: bool,
         #[arg(long = "allow-sys-info")]
         allow_system_info: bool,
+        /// Private deterministic test-worker random state.
+        #[arg(long = "injected-random-state", hide = true)]
+        injected_random_state: Option<u64>,
+        /// Private deterministic test-worker wall clock.
+        #[arg(long = "injected-clock-unix-millis", hide = true)]
+        injected_clock_unix_millis: Option<u64>,
+        /// Private deterministic test-worker monotonic clock.
+        #[arg(long = "injected-clock-monotonic-millis", hide = true)]
+        injected_clock_monotonic_millis: Option<u64>,
         #[arg(long = "allow-all")]
         allow_all: bool,
         #[arg(long = "max-open-files", default_value_t = 1024)]
@@ -825,10 +834,13 @@ fn main() -> Result<()> {
             allow_clock,
             allow_random,
             allow_system_info,
+            injected_random_state,
+            injected_clock_unix_millis,
+            injected_clock_monotonic_millis,
             allow_all,
             max_open_files,
         } => {
-            let config = run_config(
+            let mut config = run_config(
                 preopen,
                 allow_read,
                 allow_write,
@@ -844,6 +856,23 @@ fn main() -> Result<()> {
                 allow_all,
                 max_open_files,
             );
+            if let Some(state) = injected_random_state {
+                config.injected_random = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                    runtime::InjectedRandom::new(state),
+                )));
+            }
+            match (injected_clock_unix_millis, injected_clock_monotonic_millis) {
+                (Some(unix_millis), Some(monotonic_millis)) => {
+                    config.injected_clock = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                        runtime::InjectedClock {
+                            unix_millis,
+                            monotonic_millis,
+                        },
+                    )));
+                }
+                (None, None) => {}
+                _ => anyhow::bail!("injected test clock requires both wall and monotonic values"),
+            }
             let outcome = test_runner::run_single_test(&path, &name, &config);
             let yaml = serde_yaml::to_string(&outcome)?;
             std::fs::write(&result_file, yaml)?;

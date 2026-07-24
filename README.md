@@ -84,7 +84,8 @@ are not a complete specification of compiler behavior.
   [`dependency-resolution.schema.json`](schemas/dependency-resolution.schema.json),
   [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
   [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
-  [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
+  [`diagnostic.schema.json`](schemas/diagnostic.schema.json),
+  [`test-report.schema.json`](schemas/test-report.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
 - **Structural code:** [`code-form.schema.json`](schemas/code-form.schema.json),
   [`code-path.schema.json`](schemas/code-path.schema.json),
@@ -428,6 +429,24 @@ explicit `--allow-*` flag. `workspace: temp` tests additionally need
 reported as skipped. See [`tests/README.md`](tests/README.md) for expected
 errors, typed assertion helpers, profile contracts, and the complete flag
 reference.
+
+Tests can replace ambient clock and random inputs with isolated fixtures.
+`random-seed` selects a reproducible non-cryptographic byte stream, while
+`clock` supplies wall and monotonic millisecond values; test sleeps advance
+both fake values without waiting. These fixtures grant only their declared
+test policy and require no `--allow-clock` or `--allow-random` flags:
+
+```yaml
+deterministic:
+  $test: core
+  random-seed: 42
+  clock: {unix-millis: 1000, monotonic-millis: 0}
+  policy:
+    $policy:
+      clock: [{requirement: mandatory, scopes: any}]
+      random: [{requirement: mandatory, scopes: any}]
+  do: [...]
+```
 
 Files named `foo.*.vibra` are loaded as parts of the same module as
 `foo.vibra` when `foo.vibra` exists. A common convention is to place unit
