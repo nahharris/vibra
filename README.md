@@ -255,9 +255,11 @@ workspace. Completion is not yet expression-type-aware.
 
 Syntax, style, and compile diagnostics use all open editor overlays. Compile
 checking runs in a temporary mirror of the project (excluding `.git` and
-`target`) and never rewrites the user's workspace. The advertised capability
-shape is
-documented by
+`target`) and never rewrites the user's workspace. Each edit republishes
+diagnostics for every open document so cleared errors do not remain stale.
+When a compiler message names a source symbol, its range is anchored to that
+definition or `$reference`; otherwise the compiler's fallback point is kept.
+The advertised capability shape is documented by
 [`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
 
 ### Executable application packages

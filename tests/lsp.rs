@@ -130,14 +130,14 @@ fn workspace_navigation_resolves_imported_package_symbols_and_open_overlays() {
     let mut output = Vec::new();
     vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
     let output = messages(&output);
-    assert_eq!(output[3]["result"]["uri"], util_uri);
-    assert_eq!(output[3]["result"]["range"]["start"]["line"], 0);
-    assert!(output[4]["result"]["contents"]["value"]
+    assert_eq!(output[4]["result"]["uri"], util_uri);
+    assert_eq!(output[4]["result"]["range"]["start"]["line"], 0);
+    assert!(output[5]["result"]["contents"]["value"]
         .as_str()
         .unwrap()
         .contains("Workspace greeting"));
-    assert_eq!(output[5]["result"].as_array().unwrap().len(), 1);
-    assert!(output[6]["result"]
+    assert_eq!(output[6]["result"].as_array().unwrap().len(), 1);
+    assert!(output[7]["result"]
         .as_array()
         .unwrap()
         .iter()
@@ -199,10 +199,12 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
         }
     };
     let root_uri = uri(workspace.path());
+    let main_uri = uri(&workspace.path().join("main.vibra"));
     let helper_uri = uri(&workspace.path().join("helper.vibra"));
     let mut input = Vec::new();
     for value in [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":main_uri,"text":main}}}),
         json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":helper_uri,"text":broken}}}),
         json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":helper_uri},"contentChanges":[{"text":valid}]}}),
         json!({"jsonrpc":"2.0","id":2,"method":"shutdown"}),
@@ -213,14 +215,24 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     let mut output = Vec::new();
     vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
     let output = messages(&output);
-    assert!(!output[1]["params"]["diagnostics"]
+    assert_eq!(output[2]["params"]["uri"], helper_uri);
+    let diagnostic = &output[2]["params"]["diagnostics"][0];
+    assert_eq!(
+        diagnostic["range"]["start"],
+        json!({"line":4,"character":6})
+    );
+    assert_eq!(diagnostic["range"]["end"], json!({"line":4,"character":14}));
+    assert_eq!(output[3]["params"]["uri"], main_uri);
+    assert!(output[3]["params"]["diagnostics"]
         .as_array()
         .unwrap()
         .is_empty());
-    assert!(output[2]["params"]["diagnostics"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    for notification in &output[4..=5] {
+        assert!(notification["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
     assert_eq!(
         std::fs::read_to_string(workspace.path().join("helper.vibra")).unwrap(),
         valid
@@ -270,4 +282,39 @@ fn semantic_navigation_resolves_transitive_import_aliases() {
         .unwrap()
         .iter()
         .any(|item| item["label"] == "mid.leaf.greet"));
+}
+
+#[test]
+fn semantic_navigation_resolves_project_at_imports() {
+    let workspace = tempfile::tempdir().unwrap();
+    let dependency = workspace.path().join("packages/util");
+    std::fs::create_dir_all(dependency.join("src")).unwrap();
+    let manifest="manifest-version: 1\npackage:\n  name: app\n  version: 0.1.0\ntargets:\n  bins:\n    - name: app\n      root: .\n      entry: main.vibra\ndependencies:\n  util:\n    path: packages/util\n";
+    let dependency_manifest="manifest-version: 1\npackage:\n  name: util\n  version: 0.1.0\ntargets:\n  libs:\n    - name: util\n      root: src\n      entry: greet.vibra\ndependencies: {}\n";
+    let main="util:\n  $import: '@util/greet.vibra'\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $util.greet: null\n";
+    let library="greet:\n  $function: $void\n  =doc: Dependency greeting\n  return: $void\n  do:\n    - $let:\n        value: 1\n";
+    let main_path = workspace.path().join("main.vibra");
+    let library_path = dependency.join("src/greet.vibra");
+    std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
+    std::fs::write(dependency.join("project.vibra"), dependency_manifest).unwrap();
+    std::fs::write(&main_path, main).unwrap();
+    std::fs::write(&library_path, library).unwrap();
+    let root_uri = path_uri(workspace.path());
+    let main_uri = path_uri(&main_path);
+    let library_uri = path_uri(&library_path);
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":main_uri,"text":main}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":main_uri},"position":{"line":6,"character":13}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    assert_eq!(output[2]["result"]["uri"], library_uri);
+    assert_eq!(output[2]["result"]["range"]["start"]["line"], 0);
 }
