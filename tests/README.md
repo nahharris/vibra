@@ -172,3 +172,29 @@ temporary directory.
 
 `--deny-warnings` turns a child test's compiler warnings into a failure. The
 warnings remain available in the YAML report for diagnosis.
+
+## Deterministic clock and random fixtures
+
+A test may declare `random-seed` and/or `clock` sibling metadata. The runner
+creates a fresh source for that child, grants the corresponding domain only
+through the test's declared `policy`, and never reads the OS random source or
+wall clock. The same seed always produces the same byte stream. Fake-clock
+sleep advances both values instead of blocking:
+
+```yaml
+reproducible:
+  $test: core
+  random-seed: 42
+  clock:
+    unix-millis: 1000
+    monotonic-millis: 0
+  policy:
+    $policy:
+      clock: [{requirement: mandatory, scopes: any}]
+      random: [{requirement: mandatory, scopes: any}]
+  do: [...]
+```
+
+These fixtures do not weaken ordinary execution: without the metadata,
+clock/random operations still require explicit host approval and use their
+production sources. The seeded generator is for tests, not cryptography.

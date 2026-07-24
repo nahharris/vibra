@@ -12,6 +12,7 @@ pub mod lower;
 pub mod lsp;
 pub mod macro_expand;
 pub mod package;
+pub mod plugin;
 pub mod project;
 pub mod runtime;
 pub mod test_runner;
