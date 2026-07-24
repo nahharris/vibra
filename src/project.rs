@@ -30,6 +30,20 @@ pub struct ProjectManifest {
     pub targets: Targets,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
+    #[serde(default, rename = "plugin-interfaces")]
+    pub plugin_interfaces: BTreeMap<String, PluginInterface>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PluginInterface {
+    pub functions: BTreeMap<String, PluginFunction>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PluginFunction {
+    #[serde(default)]
+    pub params: Vec<String>,
+    pub result: String,
 }
 
 #[derive(Debug, Deserialize)]
