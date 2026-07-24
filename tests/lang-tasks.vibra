@@ -30,3 +30,72 @@ structured-task-rejects-mutable-capture:
         count: {$mut: 0}
     - $task: [count]
       do: []
+
+spawned-task-handles-overlap-and-join-out-of-order:
+  $test: core
+  tags: [language, tasks]
+  do:
+    - $let:
+        base: 40
+    - $spawn: first
+      captures: [base]
+      value:
+        $add: [$base, 1]
+    - $spawn: second
+      captures: [base]
+      value:
+        $add: [$base, 2]
+    - $join: second
+      into: second-result
+    - $join: first
+      into: first-result
+    - $test.assert-eq-int:
+        actual: $second-result
+        expected: 42
+    - $test.assert-eq-int:
+        actual: $first-result
+        expected: 41
+
+spawned-task-handle-is-affine:
+  $test: core
+  tags: [language, tasks, diagnostics]
+  expect-error:
+    phase: compile
+    code: E-TASK-003
+    message-contains: unknown or was already joined
+  do:
+    - $spawn: answer
+      captures: []
+      value: 42
+    - $join: answer
+      into: once
+    - $join: answer
+      into: twice
+
+spawned-task-handle-cannot-be-copied:
+  $test: core
+  tags: [language, tasks, diagnostics]
+  expect-error:
+    phase: compile
+    code: E-TASK-003
+    message-contains: consume it with `$join`
+  do:
+    - $spawn: answer
+      captures: []
+      value: 42
+    - $let:
+        copy: $answer
+    - $join: answer
+      into: result
+
+spawned-task-must-be-joined-before-scope-exit:
+  $test: core
+  tags: [language, tasks, diagnostics]
+  expect-error:
+    phase: compile
+    code: E-TASK-003
+    message-contains: must be joined
+  do:
+    - $spawn: abandoned
+      captures: []
+      value: 42

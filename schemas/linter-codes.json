@@ -366,6 +366,11 @@
       "code": "E-TASK-002",
       "severity": "error",
       "summary": "Structured task body or control flow is malformed"
+    },
+    {
+      "code": "E-TASK-003",
+      "severity": "error",
+      "summary": "Affine task handle is copied, joined more than once, or leaves its scope unjoined"
     }
   ]
 }

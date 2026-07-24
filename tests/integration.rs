@@ -298,6 +298,61 @@ fn structured_task_lowers_and_rejects_mutable_reference_captures() {
 }
 
 #[test]
+fn spawned_task_handles_are_typed_affine_and_scheduler_backed() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        base: 40
+    - $spawn: first
+      captures: [base]
+      value: {$add: [$base, 1]}
+    - $spawn: second
+      captures: [base]
+      value: {$add: [$base, 2]}
+    - $join: second
+      into: second-result
+    - $join: first
+      into: first-result
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&loaded).expect("spawn/join program lowers");
+    let debug = format!("{lowered:?}");
+    assert!(debug.contains("Spawn"));
+    assert!(debug.contains("Join"));
+    let wasm = vibra::wasm_backend::emit_program_wasm(&lowered);
+    vibra::wasm_backend::run_wasm(&wasm, &vibra::runtime::RunConfig::default())
+        .expect("Wasm executes typed task results");
+
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $spawn: leaked
+      captures: []
+      value: 42
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(error.contains("E-TASK-003"), "unexpected error: {error}");
+    assert!(
+        error.contains("must be joined"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn set_rejects_immutable_binding() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
