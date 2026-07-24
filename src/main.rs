@@ -1248,6 +1248,7 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
                     visit_expr(source, pending);
                     visit_statements(body, pending);
                 }
+                Statement::Task { body, .. } => visit_statements(body, pending),
                 Statement::Break | Statement::Continue => {}
             }
         }

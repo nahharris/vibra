@@ -399,6 +399,8 @@ fn rule_summary(code: &str) -> &'static str {
         "E-REF-001" => "Malformed `$ref` wrapper",
         "E-REF-002" => "`$ref` target cannot be resolved",
         "E-REF-003" => "Invalid reference access mode",
+        "E-TASK-001" => "Structured task capture is not alias-safe",
+        "E-TASK-002" => "Structured task body is malformed",
         "E-MOD-003" => "Import cycle detected",
         "E-MOD-004" => "Import alias must be declared directly",
         "E-ONE-007" => "Structured `$match` form is not canonical",

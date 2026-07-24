@@ -248,6 +248,56 @@ fn mut_ref_and_set_forms_lower() {
 }
 
 #[test]
+fn structured_task_lowers_and_rejects_mutable_reference_captures() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        answer: 42
+    - $task: [answer]
+      do:
+        - $let:
+            snapshot: $answer
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&loaded).expect("immutable task capture lowers");
+    assert!(format!("{lowered:?}").contains("Task"));
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+        .expect("structured task executes in interpreter");
+    let wasm = vibra::wasm_backend::emit_program_wasm(&lowered);
+    vibra::wasm_backend::run_wasm(&wasm, &vibra::runtime::RunConfig::default())
+        .expect("structured task executes in Wasm backend");
+
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        count: {$mut: 0}
+    - $task: [count]
+      do: []
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(error.contains("E-TASK-001"), "unexpected error: {error}");
+    assert!(
+        error.contains("immutable snapshot"),
+        "missing migration guidance: {error}"
+    );
+}
+
+#[test]
 fn set_rejects_immutable_binding() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
