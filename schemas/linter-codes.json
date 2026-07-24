@@ -391,6 +391,16 @@
       "code": "E-ITER-005",
       "severity": "error",
       "summary": "Internal traversal index is negative or out of bounds"
+    },
+    {
+      "code": "E-TASK-001",
+      "severity": "error",
+      "summary": "Structured task capture is unknown, duplicated, mutable, or reference-typed"
+    },
+    {
+      "code": "E-TASK-002",
+      "severity": "error",
+      "summary": "Structured task body or control flow is malformed"
     }
   ]
 }

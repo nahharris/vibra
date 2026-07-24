@@ -1167,6 +1167,21 @@ fn exec_statement(
             }
             Ok(ExecFlow::Next)
         }
+        Statement::Task { captures, body } => {
+            let mut child = HashMap::new();
+            for name in captures {
+                let value = env
+                    .get(name)
+                    .with_context(|| format!("E-TASK-001: missing captured value `{name}`"))?;
+                child.insert(name.clone(), value.clone());
+            }
+            match run_block(body, program, &mut child, files, config)? {
+                ExecFlow::Next => Ok(ExecFlow::Next),
+                ExecFlow::Return(_) | ExecFlow::Break | ExecFlow::Continue => {
+                    bail!("E-TASK-002: task control escaped its structured boundary")
+                }
+            }
+        }
         Statement::Break => Ok(ExecFlow::Break),
         Statement::Continue => Ok(ExecFlow::Continue),
     }
