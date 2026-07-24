@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/test-report.schema.json",
+  "title": "Vibra test report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "total",
+    "passed",
+    "failed",
+    "timed_out",
+    "skipped",
+    "duration_ms",
+    "tests"
+  ],
+  "properties": {
+    "total": { "type": "integer", "minimum": 0 },
+    "passed": { "type": "integer", "minimum": 0 },
+    "failed": { "type": "integer", "minimum": 0 },
+    "timed_out": { "type": "integer", "minimum": 0 },
+    "skipped": { "type": "integer", "minimum": 0 },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "tests": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/testResult" }
+    }
+  },
+  "$defs": {
+    "testResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path",
+        "status",
+        "duration_ms",
+        "stdout",
+        "stderr",
+        "message",
+        "profile",
+        "tags",
+        "skip_reason",
+        "warnings"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "status": {
+          "enum": ["passed", "failed", "timed_out", "skipped"]
+        },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "message": { "type": "string" },
+        "profile": { "type": "string", "minLength": 1 },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "skip_reason": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "random_seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unix_millis", "monotonic_millis"],
+          "properties": {
+            "unix_millis": { "type": "integer", "minimum": 0 },
+            "monotonic_millis": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

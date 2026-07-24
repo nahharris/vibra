@@ -27,6 +27,9 @@ Project dependencies may also declare statically resolved WebAssembly
 libraries behind explicit typed `$wasm` wrappers. The supported scalar and
 caller-owned-buffer ABI is specified in [the static wasm FFI design](docs/static-wasm-ffi.md).
 
+Runtime-selected local wasm plugins use separately declared typed interfaces
+and dedicated load authority; see [the runtime plugin design](docs/runtime-plugins.md).
+
 ## Structural code tools
 
 `vibra code` queries and transactionally edits project-owned Vibra files through
@@ -84,7 +87,8 @@ are not a complete specification of compiler behavior.
   [`dependency-resolution.schema.json`](schemas/dependency-resolution.schema.json),
   [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
   [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
-  [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
+  [`diagnostic.schema.json`](schemas/diagnostic.schema.json),
+  [`test-report.schema.json`](schemas/test-report.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
 - **Structural code:** [`code-form.schema.json`](schemas/code-form.schema.json),
   [`code-path.schema.json`](schemas/code-path.schema.json),
@@ -443,10 +447,29 @@ reported as skipped. See [`tests/README.md`](tests/README.md) for expected
 errors, typed assertion helpers, profile contracts, and the complete flag
 reference.
 
-Files named `foo.*.vibra` are loaded as parts of the same module as
-`foo.vibra` when `foo.vibra` exists. A common convention is to place unit
-tests beside the module in `foo.test.vibra`; the suffix is only a naming
-convention and does not carry special semantics.
+Tests can replace ambient clock and random inputs with isolated fixtures.
+`random-seed` selects a reproducible non-cryptographic byte stream, while
+`clock` supplies wall and monotonic millisecond values; test sleeps advance
+both fake values without waiting. These fixtures grant only their declared
+test policy and require no `--allow-clock` or `--allow-random` flags:
+
+```yaml
+deterministic:
+  $test: core
+  random-seed: 42
+  clock: {unix-millis: 1000, monotonic-millis: 0}
+  policy:
+    $policy:
+      clock: [{requirement: mandatory, scopes: any}]
+      random: [{requirement: mandatory, scopes: any}]
+  do: [...]
+```
+
+Files named `foo.<flag>.vibra` are conditional parts of `foo.vibra` when the
+base file exists. The base file is always loaded; a part is loaded only when
+all of its suffix flags are enabled. `vibra test` enables `test`, so unit tests
+can live beside their module in `foo.test.vibra` without entering normal
+compiler runs. See [the conditional compilation contract](docs/conditional-compilation.md).
 
 ## Build & test
 

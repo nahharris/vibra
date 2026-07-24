@@ -75,10 +75,12 @@ Use `--filter`, `--jobs`, `--timeout-ms`, `--fail-fast`, and
 `--report yaml --report-file <path>` to control runner behavior. Permission
 flags are the same as `vibra run` and apply to each test case.
 
-Files named `foo.*.vibra` are module parts for `foo.vibra` when the base file
-exists. For example, `math.test.vibra` shares the same module scope as
-`math.vibra`, which makes it a useful convention for unit tests without adding
-special test-file semantics.
+Files named `foo.<flag>.vibra` are conditional module parts for `foo.vibra`
+when the base file exists. For example, `math.test.vibra` shares the same
+module scope as `math.vibra` and is included by `vibra test`, which enables the
+`test` compilation flag. Normal compiler runs use no flags by default. See
+[conditional-compilation.md](conditional-compilation.md) for multi-flag and
+tooling semantics.
 
 ## Imports
 

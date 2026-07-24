@@ -1,18 +1,121 @@
 test:
   $import: ../stdlib/src/test.vibra
-
+random:
+  $import: ../stdlib/src/random.vibra
+time:
+  $import: ../stdlib/src/time.vibra
 typed-equality-helpers:
   $test: core
   do:
-    - $test.assert-eq-bool:
-        actual: true
-        expected: true
-    - $test.assert-eq-int:
-        actual: 42
-        expected: 42
-    - $test.assert-eq-float:
-        actual: 1.5
-        expected: 1.5
-    - $test.assert-eq-str:
-        actual: vibra
-        expected: vibra
+  - $test.assert-eq-bool:
+      actual: true
+      expected: true
+  - $test.assert-eq-int:
+      actual: 42
+      expected: 42
+  - $test.assert-eq-float:
+      actual: 1.5
+      expected: 1.5
+  - $test.assert-eq-str:
+      actual: vibra
+      expected: vibra
+seeded-random-and-fake-clock:
+  $test: core
+  random-seed: 42
+  clock:
+    unix-millis: 1000
+    monotonic-millis: 40
+  policy:
+    $policy:
+      clock:
+      - requirement: mandatory
+        scopes: any
+      random:
+      - requirement: mandatory
+        scopes: any
+  do:
+  - $let:
+      random-capability:
+        $policy.narrow: $args.policy
+        into: $random.capability
+  - $let:
+      clock-capability:
+        $policy.narrow: $args.policy
+        into: $time.capability
+  - $let:
+      value:
+        $random.bytes: 8
+        capability: $random-capability
+  - $let:
+      raw:
+        $cast: $value
+        into:
+          $array: $uint8
+  - $match: $raw
+    when:
+    - case:
+        $array:
+        - 149
+        - 110
+        - 235
+        - 47
+        - 38
+        - 50
+        - 215
+        - 189
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: seeded random sequence changed
+  - $let:
+      wall:
+        $time.now-unix-millis:
+          capability: $clock-capability
+  - $match: $wall
+    when:
+    - case: 1000
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: fake wall clock did not use fixture
+  - $let:
+      before:
+        $time.monotonic-now:
+          capability: $clock-capability
+  - $time.sleep:
+      duration:
+        $time.milliseconds: 7
+      capability: $clock-capability
+  - $let:
+      after:
+        $time.monotonic-now:
+          capability: $clock-capability
+  - $let:
+      before-raw:
+        $cast: $before
+        into: $uint64
+  - $let:
+      after-raw:
+        $cast: $after
+        into: $uint64
+  - $match: $before-raw
+    when:
+    - case: 40
+      do:
+      - $match: $after-raw
+        when:
+        - case: 47
+          do:
+          - $test.assert: true
+        - case:
+            $wildcard: null
+          do:
+          - $test.fail: fake monotonic clock did not advance
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: fake monotonic clock did not use fixture

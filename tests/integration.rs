@@ -6909,7 +6909,7 @@ fn test_discovery_exposes_canonical_selection_metadata() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        "fast:\n  $test: core\n  tags: [language, fast]\n  timeout-ms: 25\n  do: []\nskipped:\n  $test: fs\n  tags: [filesystem]\n  skip: needs a sandbox\n  do: []\n",
+        "fast:\n  $test: core\n  tags: [language, fast]\n  timeout-ms: 25\n  random-seed: 42\n  clock:\n    unix-millis: 1000\n    monotonic-millis: 7\n  do: []\nskipped:\n  $test: fs\n  tags: [filesystem]\n  skip: needs a sandbox\n  do: []\n",
     )
     .unwrap();
     let program = vibra::load::load_program(&entry).unwrap();
@@ -6919,6 +6919,14 @@ fn test_discovery_exposes_canonical_selection_metadata() {
     assert_eq!(specs[0].profile, "core");
     assert_eq!(specs[0].tags, vec!["language", "fast"]);
     assert_eq!(specs[0].timeout_ms, Some(25));
+    assert_eq!(specs[0].random_seed, Some(42));
+    assert_eq!(
+        specs[0].clock,
+        Some(vibra::lower::TestClock {
+            unix_millis: 1000,
+            monotonic_millis: 7,
+        })
+    );
     assert_eq!(specs[1].skip.as_deref(), Some("needs a sandbox"));
     assert_eq!(
         vibra::lower::discover_test_names(&program).unwrap(),
@@ -6936,6 +6944,10 @@ fn test_discovery_rejects_invalid_selection_metadata() {
         "bad:\n  $test: core\n  timeout-ms: 0\n  do: []\n",
         "bad:\n  $test: core\n  skip: \"\"\n  do: []\n",
         "bad:\n  $test: core\n  skip: \"   \"\n  do: []\n",
+        "bad:\n  $test: core\n  random-seed: -1\n  do: []\n",
+        "bad:\n  $test: core\n  clock: nope\n  do: []\n",
+        "bad:\n  $test: core\n  clock: {unix-millis: 1}\n  do: []\n",
+        "bad:\n  $test: core\n  clock: {unix-millis: 1, monotonic-millis: 2, zone: UTC}\n  do: []\n",
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
@@ -6944,6 +6956,48 @@ fn test_discovery_rejects_invalid_selection_metadata() {
         };
         assert!(format!("{err:#}").contains("E-TEST-001"), "{err:#}");
     }
+}
+
+#[test]
+fn deterministic_test_fixtures_are_recorded_in_machine_readable_reports() {
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../schemas/test-report.schema.json")).unwrap();
+    assert_eq!(
+        schema["$id"],
+        "https://vibra.dev/schemas/test-report.schema.json"
+    );
+    assert_eq!(
+        schema["$defs"]["testResult"]["properties"]["random_seed"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        schema["$defs"]["testResult"]["properties"]["clock"]["additionalProperties"],
+        false
+    );
+
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/stdlib-test.vibra");
+    let output = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&source),
+            "--filter",
+            "seeded-random-and-fake-clock",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "test failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["passed"], 1);
+    assert_eq!(report["tests"][0]["random_seed"], 42);
+    assert_eq!(report["tests"][0]["clock"]["unix_millis"], 1000);
+    assert_eq!(report["tests"][0]["clock"]["monotonic_millis"], 40);
 }
 
 #[test]
