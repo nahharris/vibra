@@ -27,6 +27,9 @@ Project dependencies may also declare statically resolved WebAssembly
 libraries behind explicit typed `$wasm` wrappers. The supported scalar and
 caller-owned-buffer ABI is specified in [the static wasm FFI design](docs/static-wasm-ffi.md).
 
+Runtime-selected local wasm plugins use separately declared typed interfaces
+and dedicated load authority; see [the runtime plugin design](docs/runtime-plugins.md).
+
 ## Structural code tools
 
 `vibra code` queries and transactionally edits project-owned Vibra files through
