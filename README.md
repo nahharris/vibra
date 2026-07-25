@@ -87,6 +87,7 @@ are not a complete specification of compiler behavior.
   [`dependency-resolution.schema.json`](schemas/dependency-resolution.schema.json),
   [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
   [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
+  [`distribution-targets.schema.json`](schemas/distribution-targets.schema.json),
   [`diagnostic.schema.json`](schemas/diagnostic.schema.json),
   [`test-report.schema.json`](schemas/test-report.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
