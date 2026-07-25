@@ -32,7 +32,8 @@ tokens. `(` and `)` delimit lists.
 
 ```ebnf
 module       = trivia, { top-form, trivia }, EOF ;
-top-form     = import | definition | constant | function | test | private ;
+top-form     = import | definition | constant | function | macro | test
+             | private ;
 form         = atom | list ;
 list         = "(", trivia, symbol, { required-trivia, form }, trivia, ")" ;
 
@@ -115,14 +116,16 @@ constant   = "(", "const", symbol, type-expr, expr, { annotation }, ")" ;
 function   = "(", "fn", symbol, parameters, type-expr, body,
              { annotation }, ")" ;
 test       = "(", "test", symbol, symbol, body, { test-meta }, ")" ;
-private    = "(", "private", (definition | constant | function), ")" ;
+private    = "(", "private",
+             (definition | constant | function | macro), ")" ;
 parameters = "(", { "(", symbol, type-expr, ")" }, ")" ;
 body       = "(", "do", { expr }, ")" ;
 ```
 
 Imports are public module-local aliases but are never re-exported. Definitions,
-constants, functions, and tests are public unless wrapped by `private`.
-`private` accepts exactly one `def`, `const`, or `fn`; imports and tests cannot
+constants, functions, and macros are public unless wrapped by `private`. Tests
+are runner-discovered declarations rather than exported symbols. `private`
+accepts exactly one `def`, `const`, `fn`, or `macro`; imports and tests cannot
 be wrapped. `main` remains the program entrypoint.
 
 ```vibra
@@ -151,7 +154,7 @@ in type position is a type reference.
 
 ```ebnf
 type-expr = symbol
-          | "(", "inst", symbol, type-expr+, ")"
+          | "(", symbol, type-expr+, ")"
           | "(", "record", field-type*, ")"
           | "(", "tuple", type-expr*, ")"
           | "(", "array", type-expr, ")"
@@ -171,10 +174,16 @@ enum-tag         = "(", symbol, type-expr, ")" ;
 interface-member = "(", symbol, type-expr, ")" ;
 ```
 
-Generic instantiation is always `(inst constructor type...)`; a generic type
-constructor may not be referenced bare. Record field order, tuple order, enum
-tag order, and interface member order are source-significant exactly where the
-existing semantic model requires order.
+Generic type application uses the same direct, call-like list shape as other
+Vibra forms: `(constructor type...)`. There is no generic `inst` head. Type
+position makes `(option int64)` an application of the `option` type
+constructor, while expression and pattern positions continue to interpret list
+heads as runtime calls or enum constructors. A generic type constructor may
+not be referenced bare. Built-in type-form heads such as `record`, `tuple`,
+`array`, `map`, and `union` are recognized before user-defined type
+constructors. Record field order, tuple order, enum tag order, and interface
+member order are source-significant exactly where the existing semantic model
+requires order.
 
 Examples:
 
@@ -186,7 +195,7 @@ Examples:
   (doc "A value that may be absent."))
 
 (fn unwrap-or
-  ((input (inst option t)) (fallback t))
+  ((input (option t)) (fallback t))
   t
   (do
     (match input
@@ -360,8 +369,8 @@ Keeping this decoder does not make YAML a Vibra-owned syntax or output format.
 Applications may likewise parse YAML through a third-party runtime library.
 
 Templates use S-expression record and array values for `with` data. Inline
-compiler expressions accepted by `vibra exec`, code pipelines, and MCP tools
-use the same S-expression reader, never YAML.
+compiler expressions accepted by `vibra exec` and read-only MCP tools use the
+same S-expression reader, never YAML.
 
 ## Compiler-owned output
 
@@ -372,7 +381,7 @@ returns uninterpreted bytes, and SARIF remains for lint integrations.
 Program-owned stdout from `vibra run` is unchanged.
 
 The `yaml` format enum member and `--format yaml` are removed from every command,
-including `test`, `fmt`, `lint`, `docs`, `code`, `effects`, package, plugin,
+including `test`, `fmt`, `lint`, `docs`, `expand`, `effects`, package, plugin,
 status, and MCP-related commands. Report files contain JSON and examples use
 `.json`. A `.yaml` report path does not select YAML by extension.
 
@@ -417,27 +426,162 @@ is unchanged. Messages and examples must use the new spelling.
 
 Formatting is idempotent. There is no alternative flow/block style.
 
-## Structural tooling
+## Macros and expansion origins
 
-The source model becomes a lossless S-expression CST plus a typed AST. Public
-tooling must not expose `serde_yaml::Value`, mapping/sequence node kinds, YAML
-key paths, or JSON Patch as source edit primitives.
+Macros are compiler forms over typed syntax categories. They are not runtime
+source editors and have no filesystem, environment, process, network, clock, or
+random authority.
 
-A structural path is a sequence of stable role/index segments:
-
-```text
-top[2] / fn.body / do[1] / call.arg[0]
+```ebnf
+macro          = "(", "macro", symbol, macro-parameters, syntax-category,
+                 macro-body, { annotation }, ")" ;
+macro-parameters = "(", { "(", symbol, syntax-category, ")" }, ")" ;
+syntax-category = "expr-syntax" | "type-syntax" | "pattern-syntax"
+                | "definition-syntax" | "module-syntax" ;
+macro-body     = "(", "do", macro-expr+, ")" ;
+macro-expr     = atom
+               | "(", "let", symbol, macro-expr, ")"
+               | "(", "if", macro-expr, macro-body, macro-body, ")"
+               | "(", "quote", syntax-category, form, ")"
+               | "(", "unquote", symbol, ")"
+               | "(", "splice", symbol, ")"
+               | "(", "capture", symbol, ")" ;
 ```
 
-Roles name grammar children (`fn.name`, `fn.params`, `fn.return`, `fn.body`,
-`call.callee`, `call.arg`, `record.field`); indices distinguish repeated
-children. Query results include node kind, form head, source, fingerprint,
-semantic metadata, and byte span. Transactions require document revision and
-fingerprint, and edits replace byte ranges or grammar nodes. Line and column
-remain display metadata only.
+There is no `statement-syntax`: statements are expressions and sequencing is
+`do`. Macro arguments are positional. Invocation uses ordinary expression
+syntax and macro resolution precedes value-call resolution only in expression
+or definition positions:
 
-The formatter, code query/edit commands, LSP, and MCP all consume this single
-CST. No component reconstructs source through a generic JSON/YAML value tree.
+```vibra
+(macro unless
+  ((condition expr-syntax) (body expr-syntax))
+  expr-syntax
+  (do
+    (quote expr-syntax
+      (if (not (unquote condition))
+        (do (unquote body))
+        (do)))))
+
+(unless ready (io.println "not ready"))
+```
+
+`quote` requires an explicit result category. `unquote` inserts exactly one
+node of the category required by its grammar position. `splice` is legal only
+in a grammar-declared repeated-child position and requires a syntax list of
+the matching category. `capture` is the sole explicit opt-out from hygiene and
+resolves its symbol at the invocation site.
+
+Quoted binders and references use compiler symbol identities and lexical
+scopes, never textual suffixes. Free quoted names resolve in the macro
+definition's module. Imported macros retain that definition context. A macro
+and an ordinary value may not declare the same symbol in one module.
+
+Direct generic type syntax remains contextual: `(option int64)` in a type slot
+is a type application, while the same list shape in an expression slot is a
+value call or macro invocation. Macro resolution never intercepts a type
+application. Mandatory quote categories make quoted call-like lists
+unambiguous.
+
+Expansion remains deterministic and bounded by stable limits for recursion
+depth, evaluation steps, and generated nodes. Limit and category diagnostics
+name the macro invocation as the primary span and attach its definition and
+quote-template spans as related information.
+
+Every expanded AST node has an `OriginId` into an origin arena:
+
+```text
+Source {
+  document,
+  span
+}
+
+Expansion {
+  macro-symbol,
+  call-site: OriginId,
+  definition-site: SourceSpan,
+  template-site: SourceSpan,
+  parent: OriginId
+}
+```
+
+Quoted nodes originate at the quote template. Unquoted nodes retain their
+source origin and add the expansion as their parent. Expansion fingerprints
+include the macro definition, invocation syntax, resolved imports, and compiler
+version.
+
+`vibra expand <entry>` prints canonical expanded S-expression source.
+`--format json --origins` additionally emits modules, expanded node kinds and
+spans, and the origin arena. `--at <path>:<byte> --format json` returns the
+smallest expanded node at that source position and its complete origin chain.
+Source output may show origin comments only with explicit `--annotate`.
+
+The LSP exposes expansion origins through related diagnostic information and a
+read-only `vibra/expansionAt` request. MCP may wrap the same read-only compiler
+service. Generated expansion output is never an editable document.
+
+## Typed rewrites
+
+The source model is a lossless S-expression CST plus a typed AST. No public API
+exposes a generic syntax tree editor, structural query language, arbitrary tree
+patterns, mapping/key paths, JSON Patch, or runtime source mutation.
+
+Trusted compiler tooling may use an internal rewrite planner:
+
+```text
+WorkspaceSnapshot {
+  documents: DocumentId -> { revision, CST }
+}
+
+RewritePlan {
+  operation,
+  documents: [{ id, expected-revision }],
+  edits: [TypedEdit]
+}
+
+TypedEdit {
+  document,
+  target: AstId,
+  expected-fingerprint,
+  expected-kind,
+  replacement: ParsedFragment
+}
+```
+
+The initial operations are semantic symbol rename and compiler/linter-provided
+fixes. A plan resolves typed symbol identities, rejects targets that exist only
+in generated macro output, creates non-overlapping source byte edits, applies
+them in memory, reparses and retypechecks every affected module, and returns a
+canonical diff plus diagnostics. Writing rechecks all document revisions and
+node fingerprints and applies the complete workspace transaction atomically.
+There is no partial application.
+
+The public CLI is `vibra rewrite rename <path>:<byte> <new-name> [--write]`;
+preview is the default. A future `vibra fix` may apply diagnostics already
+produced by the compiler, but it must use the same planner. LSP
+`textDocument/rename` and code actions use the planner and return ordinary LSP
+workspace edits. Type applications, value calls, and macros with the same
+textual head are distinguished by their resolved `AstId` and kind.
+
+The existing generic code framework is removed:
+
+- delete the `vibra code` pipeline command and its preview/write pipeline;
+- delete generic `Form`, `Pattern`, `Query`, key/index `Path`, `Edit`,
+  `ChangeSet`, mapping insert/upsert/rename, sequence splice, copy, and move
+  APIs from `src/code`;
+- delete `stdlib/src/code.vibra`, all `vibra_code` host imports, and runtime
+  handles for documents, nodes, queries, edits, workspaces, and syntax wrappers;
+- delete `code-form.schema.json`, `code-path.schema.json`,
+  `code-query.schema.json`, and `code-change-set.schema.json`;
+- replace the YAML macro source schema with a JSON
+  `macro-expansion.schema.json` for expansion inspection output;
+- remove structural editor fields such as mapping keys, generic valid-child
+  keys, and YAML macro names from public query responses.
+
+The semantic index needed by compilation and LSP remains an internal compiler
+service over the shared CST/AST. MCP receives no arbitrary write tool. If a
+remote client needs rename, it may request a read-only rename plan; applying
+filesystem changes remains an explicit CLI or LSP workspace action.
 
 ## Mechanical migration table
 
@@ -461,7 +605,7 @@ CST. No component reconstructs source through a generic JSON/YAML value tree.
 | `$tuple: [a, b]` | `(tuple a b)` |
 | `$array: [a, b]` | `(array a b)` |
 | `$map: [{key: k, value: v}]` | `(map (k v))` |
-| `{$option: {t: $int64}}` | `(inst option int64)` |
+| `{$option: {t: $int64}}` | `(option int64)` |
 | `$task`/captures/do siblings | `(task (captures ...) (do ...))` |
 | `$spawn`/captures/value siblings | `(spawn handle (captures ...) value)` |
 | `$join`/into sibling | `(join handle result)` |
@@ -477,21 +621,32 @@ reviewable but the integration branch is not released until the final removal
 PR, because there is intentionally no dual-syntax supported state.
 
 1. **Reader, CST, spans, and formatter.** Add lexer/parser error recovery,
-   golden parser tests, formatter idempotence tests, and the neutral AST.
-2. **Lowering and compiler.** Lower the new AST directly, migrate macro and
-   annotation handling, and remove semantic dependence on YAML mappings.
-3. **Language corpus.** Mechanically migrate stdlib, language tests, examples,
-   fixtures, templates, and generated source. Add semantic parity tests.
-4. **Projects and packages.** Migrate `project.vibra`, introduce canonical JSON
+   golden parser tests, formatter idempotence tests, typed AST identities, and
+   the internal semantic index.
+2. **Lowering and compiler.** Lower the new AST directly, migrate annotations,
+   and remove semantic dependence on YAML mappings.
+3. **Macros and origins.** Reimplement macro collection, typed quote/unquote/
+   splice/capture, hygiene, limits, and the origin arena over the AST. Add
+   source and JSON expansion inspection.
+4. **Language corpus.** Mechanically migrate stdlib, language tests, examples,
+   fixtures, templates, macros, and generated source. Add semantic parity and
+   macro-origin tests.
+5. **Projects and packages.** Migrate `project.vibra`, introduce canonical JSON
    locks and package metadata, and update dependency, publish, and sync flows.
-5. **Tooling.** Move code query/edit, LSP, MCP, schemas, diagnostics, and inline
-   expression inputs to CST roles, fingerprints, and byte-range edits.
-6. **Output and embedding.** Make JSON/human/raw/SARIF exhaustive, remove YAML
+6. **LSP and rewrites.** Move LSP reads to the compiler snapshot, expose origin
+   diagnostics and `expansionAt`, then add the typed rename/fix planner, CLI
+   rename preview/write, and LSP rename.
+7. **Generic editor removal.** Delete the `vibra code` command, generic
+   `src/code` query/edit machinery, `stdlib/src/code.vibra`, `vibra_code` host
+   ABI, editor schemas, YAML pipeline tests, and editor documentation. Add no
+   arbitrary MCP write replacement.
+8. **Output and embedding.** Make JSON/human/raw/SARIF exhaustive, remove YAML
    report paths, isolate YAML to the external `embed` data decoder, and update
    container/distribution scripts.
-7. **Removal and documentation.** Delete the YAML validator/parser/formatter,
-   `.vibra.yaml` discovery, YAML dependencies that are no longer used, legacy
-   diagnostics, DRAFT YAML design, README examples, and compatibility tests.
+9. **Removal and documentation.** Delete the YAML source validator/parser/
+   formatter, `.vibra.yaml` discovery, YAML dependencies that are no longer
+   used, legacy diagnostics, DRAFT YAML design, README examples, and
+   compatibility tests.
 
 PRs must not add a hidden legacy feature flag. A one-shot external migration
 utility may be published separately, but it is not invoked by Vibra and is not
@@ -515,8 +670,20 @@ part of the supported compiler.
 - Embedded YAML has focused safe-data conversion tests and cannot be consumed
   as source, a manifest, a compiler directive, or an output serialization;
   text, binary, JSON, TOML, and XML retain focused tests.
-- Structural code, LSP, and MCP tests use CST role/index paths and byte-range
-  transactions; no public response describes YAML mapping paths.
+- Macro tests cover category/arity errors, imported definition-context
+  resolution, explicit capture, binder hygiene, legal and illegal splicing,
+  expansion limits, Unicode spans, origin chains, and related diagnostics.
+- Expansion inspection reports contextual AST kinds, so a direct generic type
+  application cannot be confused with a value call or macro invocation.
+- Rewrite tests cover stale revisions and fingerprints, overlapping edits,
+  atomic rollback, retypecheck failure, generated-only target rejection, and
+  cross-module semantic rename.
+- `vibra code`, generic structural patterns and edits, runtime code handles,
+  `stdlib/src/code.vibra`, its host ABI, and the four generic code schemas are
+  absent. No MCP tool provides arbitrary source writes.
+- LSP formatting, hover, definition, references, completion, rename, code
+  actions, origin-aware diagnostics, and `vibra/expansionAt` use the shared
+  compiler CST/AST service.
 - `rg` finds no user-facing claim that Vibra source or CLI output is YAML-first,
   no `.vibra.yaml` support, and no `E-YAML-*` diagnostic.
 - `yaml-edit` is absent from production dependencies. A YAML data library may
