@@ -178,7 +178,6 @@ pub fn load_legacy_yaml_inline_program(base_dir: &Path, root: Value) -> Result<L
 enum EmbedFormat {
     Text,
     Binary,
-    Yaml,
     Json,
     Toml,
     Xml,
@@ -605,11 +604,6 @@ fn load_embed(
             String::from_utf8(bytes).context("E-EMBED-004: text embed is not valid UTF-8")?,
         )),
         EmbedFormat::Binary => Ok(binary_expr(&bytes)),
-        EmbedFormat::Yaml => {
-            let parsed: Value =
-                serde_yaml::from_slice(&bytes).context("E-EMBED-004: parse embedded YAML")?;
-            structured_expr(parsed)
-        }
         EmbedFormat::Json => {
             let parsed: serde_json::Value =
                 serde_json::from_slice(&bytes).context("E-EMBED-004: parse embedded JSON")?;
@@ -641,12 +635,11 @@ fn parse_embed_format(requested: &str, path: &Path) -> Result<EmbedFormat> {
     match name.to_ascii_lowercase().as_str() {
         "text" | "txt" => Ok(EmbedFormat::Text),
         "binary" | "bin" => Ok(EmbedFormat::Binary),
-        "yaml" | "yml" => Ok(EmbedFormat::Yaml),
         "json" => Ok(EmbedFormat::Json),
         "toml" => Ok(EmbedFormat::Toml),
         "xml" => Ok(EmbedFormat::Xml),
         _ => bail!(
-            "E-EMBED-001: cannot infer embed format for {}; use text, binary, yaml, json, toml, or xml",
+            "E-EMBED-001: cannot infer embed format for {}; use text, binary, json, toml, or xml",
             path.display()
         ),
     }
