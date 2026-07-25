@@ -49,26 +49,17 @@ jobs:
             platform: linux/arm64
             suffix: linux-arm64
             dockerfile: containers/Dockerfile.linux
-          - runner: windows-2022
-            platform: windows/amd64
-            suffix: windows-amd64
-            dockerfile: containers/Dockerfile.windows
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           submodules: recursive
-      - if: runner.os == 'Windows'
-        run: '& $Env:ProgramFiles\Docker\Docker\DockerCli.exe -SwitchWindowsEngine'
-        shell: pwsh
       - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db
-        with:
-          driver: ${{ runner.os == 'Windows' && 'docker' || 'docker-container' }}
       - name: Build and push immutable staging images
         shell: bash
         run: |
@@ -107,16 +98,10 @@ jobs:
           image-ref: ${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
           severity: HIGH,CRITICAL
           exit-code: '1'
-      - if: runner.os != 'Windows'
-        shell: pwsh
+      - shell: pwsh
         run: |
           ./tests/container-smoke.ps1 -Image "${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -ExpectedVersion "${{ needs.validate.outputs.version }}" -ExpectedRevision "${{ github.sha }}"
           ./tests/container-smoke.ps1 -Image "${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -Dev -ExpectedVersion "${{ needs.validate.outputs.version }}" -ExpectedRevision "${{ github.sha }}"
-      - if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ./tests/container-smoke.ps1 -Image "${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -ExpectedVersion "${{ needs.validate.outputs.version }}" -ExpectedRevision "${{ github.sha }}"
-          ./tests/container-smoke.ps1 -Image "${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -Dev -ExpectedVersion "${{ needs.validate.outputs.version }}" -ExpectedRevision "${{ github.sha }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: platform-digests-${{ matrix.suffix }}
