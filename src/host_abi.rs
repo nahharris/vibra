@@ -61,20 +61,6 @@ pub enum ValueKind {
     Array,
     StringMap,
     Record,
-    CodeDocument,
-    CodeQuery,
-    CodeNode,
-    CodeForm,
-    CodeChangeSet,
-    CodePath,
-    CodePattern,
-    CodeSegment,
-    CodeForms,
-    CodeDocumentResult,
-    CodeNodeResult,
-    CodeNodesResult,
-    CodeMatchesResult,
-    CodeFormResult,
 }
 
 /// One entry of the versioned host ABI.
@@ -141,20 +127,6 @@ impl ValueKind {
             Self::Array => "array",
             Self::StringMap => "string-map",
             Self::Record => "record",
-            Self::CodeDocument => "code-document",
-            Self::CodeQuery => "code-query",
-            Self::CodeNode => "code-node",
-            Self::CodeForm => "code-form",
-            Self::CodeChangeSet => "code-change-set",
-            Self::CodePath => "code-path",
-            Self::CodePattern => "code-pattern",
-            Self::CodeSegment => "code-segment",
-            Self::CodeForms => "code-forms",
-            Self::CodeDocumentResult => "code-document-result",
-            Self::CodeNodeResult => "code-node-result",
-            Self::CodeNodesResult => "code-nodes-result",
-            Self::CodeMatchesResult => "code-matches-result",
-            Self::CodeFormResult => "code-form-result",
         }
     }
 }
@@ -751,143 +723,7 @@ pub const HOST_ABI: &[HostImport] = &[
         ValueKind::Void,
     ),
     entry("vibra_test", "assert-eq-str", &[STR, STR], ValueKind::Void),
-    // vibra_code: structural source editing over in-memory documents;
-    // capability-free.
-    entry("vibra_code", "parse", &[STR], ValueKind::CodeDocumentResult),
-    entry(
-        "vibra_code",
-        "make-query",
-        &[CodeParam::PATH, BOOL, STR, STR, CodeParam::PATTERN, U64],
-        ValueKind::CodeQuery,
-    ),
-    entry(
-        "vibra_code",
-        "capture-pattern",
-        &[CodeParam::PATTERN, STR],
-        ValueKind::CodePattern,
-    ),
-    entry("vibra_code", "emit", &[CodeParam::DOCUMENT], ValueKind::Str),
-    entry(
-        "vibra_code",
-        "root",
-        &[CodeParam::DOCUMENT],
-        ValueKind::CodeNodeResult,
-    ),
-    entry(
-        "vibra_code",
-        "at",
-        &[CodeParam::DOCUMENT, CodeParam::PATH],
-        ValueKind::CodeNodeResult,
-    ),
-    entry(
-        "vibra_code",
-        "parent",
-        &[CodeParam::NODE],
-        ValueKind::CodeNodeResult,
-    ),
-    entry(
-        "vibra_code",
-        "children",
-        &[CodeParam::NODE],
-        ValueKind::CodeNodesResult,
-    ),
-    entry(
-        "vibra_code",
-        "find",
-        &[CodeParam::DOCUMENT, CodeParam::QUERY],
-        ValueKind::CodeMatchesResult,
-    ),
-    entry("vibra_code", "source", &[CodeParam::NODE], ValueKind::Str),
-    entry(
-        "vibra_code",
-        "to-form",
-        &[CodeParam::NODE],
-        ValueKind::CodeFormResult,
-    ),
-    entry("vibra_code", "render", &[CodeParam::FORM], ValueKind::Str),
-    entry(
-        "vibra_code",
-        "replace",
-        &[CodeParam::DOCUMENT, CodeParam::NODE, CodeParam::FORM],
-        ValueKind::CodeDocumentResult,
-    ),
-    entry(
-        "vibra_code",
-        "delete",
-        &[CodeParam::DOCUMENT, CodeParam::NODE],
-        ValueKind::CodeDocumentResult,
-    ),
-    entry(
-        "vibra_code",
-        "upsert-mapping",
-        &[CodeParam::DOCUMENT, CodeParam::NODE, STR, CodeParam::FORM],
-        ValueKind::CodeDocumentResult,
-    ),
-    entry(
-        "vibra_code",
-        "insert-mapping",
-        &[CodeParam::DOCUMENT, CodeParam::NODE, STR, CodeParam::FORM],
-        ValueKind::CodeDocumentResult,
-    ),
-    entry(
-        "vibra_code",
-        "rename-key",
-        &[CodeParam::DOCUMENT, CodeParam::NODE, STR],
-        ValueKind::CodeDocumentResult,
-    ),
-    entry(
-        "vibra_code",
-        "insert-sequence",
-        &[CodeParam::DOCUMENT, CodeParam::NODE, U64, CodeParam::FORM],
-        ValueKind::CodeDocumentResult,
-    ),
-    entry(
-        "vibra_code",
-        "splice-sequence",
-        &[
-            CodeParam::DOCUMENT,
-            CodeParam::NODE,
-            U64,
-            U64,
-            CodeParam::FORMS,
-        ],
-        ValueKind::CodeDocumentResult,
-    ),
-    entry(
-        "vibra_code",
-        "copy",
-        &[
-            CodeParam::DOCUMENT,
-            CodeParam::NODE,
-            CodeParam::NODE,
-            CodeParam::SEGMENT,
-        ],
-        ValueKind::CodeDocumentResult,
-    ),
-    entry(
-        "vibra_code",
-        "move",
-        &[
-            CodeParam::DOCUMENT,
-            CodeParam::NODE,
-            CodeParam::NODE,
-            CodeParam::SEGMENT,
-        ],
-        ValueKind::CodeDocumentResult,
-    ),
 ];
-
-struct CodeParam;
-impl CodeParam {
-    const DOCUMENT: ParamKind = ParamKind::Value(ValueKind::CodeDocument);
-    const QUERY: ParamKind = ParamKind::Value(ValueKind::CodeQuery);
-    const NODE: ParamKind = ParamKind::Value(ValueKind::CodeNode);
-    const FORM: ParamKind = ParamKind::Value(ValueKind::CodeForm);
-    const PATH: ParamKind = ParamKind::Value(ValueKind::CodePath);
-    const PATTERN: ParamKind = ParamKind::Value(ValueKind::CodePattern);
-    const SEGMENT: ParamKind = ParamKind::Value(ValueKind::CodeSegment);
-    const FORMS: ParamKind = ParamKind::Value(ValueKind::CodeForms);
-}
 
 const fn entry(
     module: &'static str,
@@ -985,6 +821,9 @@ mod tests {
 
     #[test]
     fn registry_exposes_exact_value_and_return_shapes() {
+        assert!(lookup("vibra_code", "parse").is_none());
+        assert!(!is_host_module("vibra_code"));
+
         let import = lookup("vibra_v1", "random_bytes").unwrap();
         assert_eq!(import.params[0], ParamKind::Value(ValueKind::UInt64));
         assert_eq!(import.result, ValueKind::Bytes);

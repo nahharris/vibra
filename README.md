@@ -31,36 +31,6 @@ caller-owned-buffer ABI is specified in [the static wasm FFI design](docs/static
 Runtime-selected local wasm plugins use separately declared typed interfaces
 and dedicated load authority; see [the runtime plugin design](docs/runtime-plugins.md).
 
-## Structural code tools
-
-`vibra code` queries and transactionally edits project-owned Vibra files through
-typed structural paths. Pipelines can be inline, read from stdin, or loaded from
-a file:
-
-```sh
-vibra code '- $code.file: src/main.vibra
-- $code.at: [main, do, 0, "$io.println"]
-- $code.replace: Changed'
-
-vibra code - < refactor.vibra
-vibra code --file refactor.vibra --write
-```
-
-Path strings select mapping keys and non-negative integers select sequence
-indices. Query pipelines print JSON. Editing pipelines preview a structured
-report and unified diff; `--write` rechecks source revisions and applies every
-changed file atomically.
-
-Available stages include file/path navigation, children/parent traversal,
-structural find and projection, save/load, replace/delete, mapping
-insert/upsert/rename, sequence insert/splice, copy/move, and workspace-wide
-symbol or import-alias rename.
-
-The same structural model is exposed by [stdlib/src/code.vibra](stdlib/src/code.vibra)
-through forms, typed key/index paths, revision-bound nodes, structural patterns
-with captures, and every edit primitive. Recoverable operations return typed
-result enums rather than aborting execution.
-
 `vibra exec` remains available for evaluating a single Vibra expression:
 
 ```sh
@@ -73,8 +43,8 @@ provide its explicit inputs.
 ## Schemas and tooling contracts
 
 The JSON Schema files in [`schemas/`](schemas/) describe the machine-readable
-Vibra surface used by editors, LSP clients, structural-code tooling, and
-automation. They complement the language rules in [DRAFT.md](DRAFT.md); they
+Vibra surface used by editors, LSP clients, and automation. They complement
+the language rules in [DRAFT.md](DRAFT.md); they
 are not a complete specification of compiler behavior.
 
 - **Source surface:** [`module-surface.schema.json`](schemas/module-surface.schema.json),
@@ -92,10 +62,6 @@ are not a complete specification of compiler behavior.
   [`diagnostic.schema.json`](schemas/diagnostic.schema.json),
   [`test-report.schema.json`](schemas/test-report.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
-- **Structural code:** [`code-form.schema.json`](schemas/code-form.schema.json),
-  [`code-path.schema.json`](schemas/code-path.schema.json),
-  [`code-query.schema.json`](schemas/code-query.schema.json), and
-  [`code-change-set.schema.json`](schemas/code-change-set.schema.json).
 - **Editor and documentation queries:** [`query-response.schema.json`](schemas/query-response.schema.json)
   specifies the `vibra/contextAt` (and `vibra query`) response shape,
   [`lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json) and

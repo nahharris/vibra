@@ -12,7 +12,7 @@
         "required": ["source", "module", "name", "params", "return", "required-domains"],
         "properties": {
           "source": { "type": "string" },
-          "module": { "enum": ["vibra_v1", "vibra_test", "vibra_code"] },
+          "module": { "enum": ["vibra_v1", "vibra_test"] },
           "name": { "type": "string" },
           "params": { "type": "array" },
           "return": { "type": "string" },

@@ -113,9 +113,6 @@ a trailing newline for every vendored package: source identity, exact revision,
 SHA-256 of its own clean source tree, vendor path, and dependency alias edges.
 Commit this lock. Offline `check` and build operations use only the vendored
 graph and reject missing/stale lock entries or modified source.
-
-Vendored dependency and stdlib documents are visible to `vibra code` queries. They are read-only to code transactions; change the upstream source and resync instead.
-
 The design for a future SemVer-based resolver, including deterministic
 selection, lock migration, and offline behavior, is documented in
 [version-solving.md](version-solving.md). It is not part of manifest version 1.

@@ -4074,7 +4074,7 @@ fn validate_wasm_bodies(
                 );
             }
             bail!(
-                "E-WASM-002: `{key}` targets unknown host module `{}` (known host modules: vibra_v1, vibra_test, vibra_code)",
+                "E-WASM-002: `{key}` targets unknown host module `{}` (known host modules: vibra_v1, vibra_test)",
                 import.module
             );
         };
@@ -4215,20 +4215,6 @@ fn abi_value_type_matches(
         A::Record => matches!(resolved, TypeRef::Record(_)),
         A::OptionAny => instantiated("option").is_some(),
         A::ResultAny => instantiated("result").is_some(),
-        A::CodeDocument => named_ends("document"),
-        A::CodeQuery => named_ends("query"),
-        A::CodeNode => named_ends("node") || instantiated("option").is_some(),
-        A::CodeForm => named_ends("form"),
-        A::CodeChangeSet => named_ends("change-set") || instantiated("result").is_some(),
-        A::CodePath => named_ends("path"),
-        A::CodePattern => named_ends("pattern"),
-        A::CodeSegment => named_ends("segment"),
-        A::CodeForms => matches!(resolved, TypeRef::Array(inner) if abi_value_type_matches(A::CodeForm, inner, aliases)),
-        A::CodeDocumentResult => named_ends("document-result"),
-        A::CodeNodeResult => named_ends("node-result"),
-        A::CodeNodesResult => named_ends("nodes-result"),
-        A::CodeMatchesResult => named_ends("matches-result"),
-        A::CodeFormResult => named_ends("form-result"),
     }
 }
 
