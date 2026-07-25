@@ -46,7 +46,14 @@ pub fn resolve_entry(path: &Path, target: Option<&str>) -> Result<PathBuf> {
 
 /// Collect documented modules and symbols visible from an entry module.
 pub fn collect(entry: &Path) -> Result<Vec<Documentation>> {
-    let program = load::load_program(entry)?;
+    collect_with_flags(entry, &load::CompilationFlags::default())
+}
+
+pub fn collect_with_flags(
+    entry: &Path,
+    flags: &load::CompilationFlags,
+) -> Result<Vec<Documentation>> {
+    let program = load::load_program_with_flags(entry, flags)?;
     let project = project::find_project_for_file(&program.entry)?;
     let mut docs = BTreeMap::new();
     let mut visited = HashSet::new();

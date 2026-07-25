@@ -26,11 +26,30 @@ pub struct PackageMetadata {
     stdlib_git: String,
     stdlib_rev: String,
     entry: String,
+    #[serde(default)]
+    compilation_flags: Vec<String>,
+    #[serde(default)]
+    selected_sources: Vec<String>,
     files: BTreeMap<String, String>,
 }
 
 pub fn build(project_path: &Path, target_name: Option<&str>, output: &Path) -> Result<()> {
-    project::check_project(project_path).context("E-PKG-001: project is not buildable")?;
+    build_with_flags(
+        project_path,
+        target_name,
+        output,
+        &load::CompilationFlags::default(),
+    )
+}
+
+pub fn build_with_flags(
+    project_path: &Path,
+    target_name: Option<&str>,
+    output: &Path,
+    flags: &load::CompilationFlags,
+) -> Result<()> {
+    project::check_project_with_flags(project_path, flags)
+        .context("E-PKG-001: project is not buildable")?;
     let loaded = project::load_project(project_path)?;
     let target = match target_name {
         Some(name) => loaded
@@ -47,7 +66,8 @@ pub fn build(project_path: &Path, target_name: Option<&str>, output: &Path) -> R
         None => bail!("E-PKG-002: project has multiple bin targets; select one with --bin"),
     };
     let entry_path = loaded.root.join(&target.root).join(&target.entry);
-    let program = load::load_program(&entry_path).context("E-PKG-003: load application")?;
+    let program =
+        load::load_program_with_flags(&entry_path, flags).context("E-PKG-003: load application")?;
     let lowered = lower::lower_program(&program).context("E-PKG-003: lower application")?;
     let wasm = wasm_backend::emit_program_wasm(&lowered);
 
@@ -59,6 +79,14 @@ pub fn build(project_path: &Path, target_name: Option<&str>, output: &Path) -> R
         .map(|(name, bytes)| (name.clone(), sha256(bytes)))
         .collect();
     let entry = format!("source/{}/{}", slash(&target.root), slash(&target.entry));
+    let mut selected_sources = program
+        .module_parts
+        .values()
+        .flatten()
+        .map(|path| package_source_name(&loaded.root, path))
+        .collect::<Vec<_>>();
+    selected_sources.sort();
+    selected_sources.dedup();
     let metadata = PackageMetadata {
         format_version: 1,
         name: loaded.manifest.package.name,
@@ -69,6 +97,8 @@ pub fn build(project_path: &Path, target_name: Option<&str>, output: &Path) -> R
         stdlib_git: project::STDLIB_GIT.into(),
         stdlib_rev: project::STDLIB_REV.into(),
         entry,
+        compilation_flags: flags.iter().map(str::to_string).collect(),
+        selected_sources,
         files,
     };
     let metadata_bytes = serde_yaml::to_string(&metadata)?.into_bytes();
@@ -121,7 +151,9 @@ pub fn run(path: &Path, config: &RunConfig) -> Result<()> {
         .strip_prefix("source/")
         .context("E-PKG-006: invalid entry path")?;
     validate_archive_path(entry)?;
-    let program = load::load_program(&temp.path().join(entry))
+    let flags = load::CompilationFlags::try_new(metadata.compilation_flags.iter().cloned())
+        .context("E-PKG-006: invalid compilation flags")?;
+    let program = load::load_program_with_flags(&temp.path().join(entry), &flags)
         .context("E-PKG-011: load packaged application")?;
     let lowered =
         lower::lower_program(&program).context("E-PKG-011: lower packaged application")?;
@@ -130,6 +162,13 @@ pub fn run(path: &Path, config: &RunConfig) -> Result<()> {
         bail!("E-PKG-008: packaged Wasm does not match packaged sources");
     }
     wasm_backend::run_wasm(&expected, config)
+}
+
+fn package_source_name(root: &Path, path: &Path) -> String {
+    let canonical_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    path.strip_prefix(&canonical_root)
+        .map(|relative| format!("source/{}", slash(relative)))
+        .unwrap_or_else(|_| format!("external:{}", slash(path)))
 }
 
 fn open_verified(path: &Path) -> Result<(ZipArchive<File>, PackageMetadata)> {

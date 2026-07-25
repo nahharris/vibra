@@ -408,6 +408,26 @@
       "summary": "Affine task handle is copied, joined more than once, or leaves its scope unjoined"
     },
     {
+      "code": "E-FLAG-001",
+      "severity": "error",
+      "summary": "Compilation flag is not a kebab-case name"
+    },
+    {
+      "code": "E-FLAG-002",
+      "severity": "error",
+      "summary": "Conditional source filename contains a malformed flag suffix"
+    },
+    {
+      "code": "E-FLAG-003",
+      "severity": "error",
+      "summary": "Compilation flags were supplied while running a precompiled application"
+    },
+    {
+      "code": "E-FLAG-004",
+      "severity": "error",
+      "summary": "LSP compilation flag settings have an invalid structured shape"
+    },
+    {
       "code": "E-TEMPLATE-001",
       "severity": "error",
       "summary": "Compile-time template options are malformed"

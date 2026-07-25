@@ -35,7 +35,11 @@ enum Command {
         allow_test: bool,
     },
     /// Start the Language Server Protocol server over stdin/stdout.
-    Lsp,
+    Lsp {
+        /// Enable a conditional-compilation flag (repeatable).
+        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        flag: Vec<String>,
+    },
     /// Create a new Vibra project.
     Init {
         /// Project directory name to create.
@@ -68,6 +72,9 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
         format: StatusFormatArg,
+        /// Enable a conditional-compilation flag (repeatable).
+        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        flag: Vec<String>,
     },
     /// Inspect or verify a `.vapp` archive.
     Package {
@@ -81,6 +88,9 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
         format: StatusFormatArg,
+        /// Enable a conditional-compilation flag (repeatable).
+        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        flag: Vec<String>,
     },
     /// Validate and instantiate a typed local runtime plugin.
     Plugin {
@@ -108,6 +118,9 @@ enum Command {
         /// Documentation output format.
         #[arg(long, value_enum, default_value_t = DocsFormatArg::Plain)]
         format: DocsFormatArg,
+        /// Enable a conditional-compilation flag (repeatable).
+        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        flag: Vec<String>,
     },
     /// Check or rewrite canonical Vibra/YAML formatting.
     Fmt {
@@ -183,6 +196,9 @@ enum Command {
         /// Maximum number of concurrently open file handles (0 = unlimited).
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
+        /// Enable a conditional-compilation flag (repeatable).
+        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        flag: Vec<String>,
     },
     /// Print the statically referenced, typed host effect surface as YAML.
     Effects {
@@ -191,6 +207,9 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
         format: StructuredFormatArg,
+        /// Enable a conditional-compilation flag (repeatable).
+        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        flag: Vec<String>,
     },
     /// Expand compile-time macros and print canonical Vibra source.
     Expand {
@@ -199,6 +218,9 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
         format: StructuredFormatArg,
+        /// Enable a conditional-compilation flag (repeatable).
+        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        flag: Vec<String>,
     },
     /// Evaluate one inline Vibra expression for tooling workflows.
     Exec {
@@ -573,6 +595,20 @@ impl From<LintSeverityArg> for tooling::Severity {
     }
 }
 
+fn parse_compilation_flag(value: &str) -> std::result::Result<String, String> {
+    if load::is_compilation_flag(value) {
+        Ok(value.to_string())
+    } else {
+        Err(format!(
+            "E-FLAG-001: invalid compilation flag `{value}`; expected a kebab-case name"
+        ))
+    }
+}
+
+fn compilation_flags(flags: Vec<String>) -> Result<load::CompilationFlags> {
+    load::CompilationFlags::try_new(flags)
+}
+
 fn main() -> Result<()> {
     std::thread::Builder::new()
         .name("vibra-cli".into())
@@ -594,7 +630,9 @@ fn run_cli() -> Result<()> {
             allow_write,
             allow_test,
         })?,
-        Command::Lsp => lsp::run_stdio()?,
+        Command::Lsp { flag } => {
+            lsp::run_stdio_with_flags(compilation_flags(flag)?)?;
+        }
         Command::Init {
             name,
             template,
@@ -613,9 +651,10 @@ fn run_cli() -> Result<()> {
             bin,
             output,
             format,
+            flag,
         } => {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
-            package::build(&path, bin.as_deref(), &output)?;
+            package::build_with_flags(&path, bin.as_deref(), &output, &compilation_flags(flag)?)?;
             print_status("built", &output, format)?;
         }
         Command::Package { command } => match command {
@@ -628,9 +667,9 @@ fn run_cli() -> Result<()> {
                 print_status("verified", &path, format)?;
             }
         },
-        Command::Check { path, format } => {
+        Command::Check { path, format, flag } => {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
-            project::check_project(&path)?;
+            project::check_project_with_flags(&path, &compilation_flags(flag)?)?;
             print_status("checked", &path, format)?;
         }
         Command::Plugin {
@@ -649,10 +688,11 @@ fn run_cli() -> Result<()> {
             symbol,
             target,
             format,
+            flag,
         } => {
             let path = path.unwrap_or_else(|| PathBuf::from("."));
             let entry = docs::resolve_entry(&path, target.as_deref())?;
-            let available = docs::collect(&entry)?;
+            let available = docs::collect_with_flags(&entry, &compilation_flags(flag)?)?;
             print_docs(&available, symbol.as_deref(), format)?;
         }
         Command::Fmt {
@@ -703,6 +743,7 @@ fn run_cli() -> Result<()> {
             allow_system_info,
             allow_all,
             max_open_files,
+            flag,
         } => {
             let config = run_config(
                 preopen,
@@ -721,9 +762,14 @@ fn run_cli() -> Result<()> {
                 max_open_files,
             );
             if path.extension().and_then(|value| value.to_str()) == Some("vapp") {
+                if !flag.is_empty() {
+                    bail!(
+                        "E-FLAG-003: compilation flags cannot override a precompiled .vapp artifact"
+                    );
+                }
                 package::run(&path, &config)?;
             } else {
-                let program = load::load_program(&path)?;
+                let program = load::load_program_with_flags(&path, &compilation_flags(flag)?)?;
                 let lowered = lower::lower_program(&program)?;
                 for warning in &lowered.warnings {
                     eprintln!("warning: {warning}");
@@ -731,9 +777,11 @@ fn run_cli() -> Result<()> {
                 execute::run_lowered(&lowered, &config)?;
             }
         }
-        Command::Effects { path, format } => print_effects(&path, format)?,
-        Command::Expand { path, format } => {
-            let loaded = load::load_program(&path)?;
+        Command::Effects { path, format, flag } => {
+            print_effects(&path, format, &compilation_flags(flag)?)?
+        }
+        Command::Expand { path, format, flag } => {
+            let loaded = load::load_program_with_flags(&path, &compilation_flags(flag)?)?;
             let expanded = loaded
                 .modules
                 .get(&loaded.entry)
@@ -1185,8 +1233,12 @@ struct EffectParam {
     domains: Vec<String>,
 }
 
-fn print_effects(path: &std::path::Path, format: StructuredFormatArg) -> Result<()> {
-    let loaded = load::load_program(path)?;
+fn print_effects(
+    path: &std::path::Path,
+    format: StructuredFormatArg,
+    flags: &load::CompilationFlags,
+) -> Result<()> {
+    let loaded = load::load_program_with_flags(path, flags)?;
     let lowered = lower::lower_program(&loaded)?;
     let reachable = reachable_functions(&lowered);
     let mut functions = lowered
