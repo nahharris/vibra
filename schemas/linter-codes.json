@@ -436,6 +436,11 @@
       "code": "E-TEMPLATE-006",
       "severity": "error",
       "summary": "Compile-time template exceeds source, output, or nesting limits"
+    },
+    {
+      "code": "E-BENCH-001",
+      "severity": "error",
+      "summary": "Benchmark iteration configuration is invalid"
     }
   ]
 }

@@ -31,6 +31,9 @@ pub struct TestOptions {
     pub jobs: usize,
     pub timeout: Duration,
     pub fail_fast: bool,
+    pub benchmark: bool,
+    pub benchmark_iterations: usize,
+    pub benchmark_warmup: usize,
     pub report: ReportFormat,
     pub report_file: Option<PathBuf>,
     pub run_config: runtime::RunConfig,
@@ -117,6 +120,7 @@ pub enum ChildFailurePhase {
 
 #[derive(Debug, Serialize)]
 pub struct TestReport {
+    mode: String,
     total: usize,
     passed: usize,
     failed: usize,
@@ -145,6 +149,19 @@ pub struct TestResult {
     random_seed: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     clock: Option<TestClockReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    benchmark: Option<BenchmarkResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BenchmarkResult {
+    iterations: usize,
+    warmup_iterations: usize,
+    samples_ns: Vec<u128>,
+    min_ns: u128,
+    median_ns: u128,
+    max_ns: u128,
+    mean_ns: u128,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -154,6 +171,9 @@ struct TestClockReport {
 }
 
 pub fn run_tests(options: TestOptions) -> Result<bool> {
+    if options.benchmark {
+        return run_benchmarks(options);
+    }
     let started = Instant::now();
     let mut items = discover_tests(
         &options.path,
@@ -233,6 +253,7 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
     let timed_out = tests.iter().filter(|r| r.status == "timed_out").count();
     let skipped = tests.iter().filter(|r| r.status == "skipped").count();
     let report = TestReport {
+        mode: "test".to_string(),
         total,
         passed,
         failed,
@@ -242,6 +263,114 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
         tests,
     };
 
+    if options.report == ReportFormat::Human {
+        print_human_report(&report);
+    }
+    if options.report != ReportFormat::Human || options.report_file.is_some() {
+        let rendered = match options.report {
+            ReportFormat::Human | ReportFormat::Yaml => serde_yaml::to_string(&report)?,
+            ReportFormat::Json => serde_json::to_string_pretty(&report)? + "\n",
+        };
+        if let Some(path) = &options.report_file {
+            fs::write(path, &rendered).with_context(|| format!("write {}", path.display()))?;
+        } else {
+            print!("{rendered}");
+        }
+    }
+    Ok(report.failed == 0 && report.timed_out == 0 && (!options.deny_skips || report.skipped == 0))
+}
+
+fn run_benchmarks(options: TestOptions) -> Result<bool> {
+    if options.benchmark_iterations == 0 {
+        bail!("E-BENCH-001: --benchmark-iterations must be greater than zero");
+    }
+    let started = Instant::now();
+    let items = discover_tests(
+        &options.path,
+        options.filter.as_deref(),
+        &options.profiles,
+        &options.tags,
+        options.timeout,
+    )?;
+    if items.is_empty() {
+        bail!("no benchmarks discovered");
+    }
+    let mut tests = Vec::with_capacity(items.len());
+    for item in &items {
+        if item.skip_reason.is_some()
+            || (item.workspace.is_some() && options.allow_test_workspace.is_none())
+        {
+            let reason = item
+                .skip_reason
+                .as_deref()
+                .unwrap_or("requires --allow-test-workspace read, write, or read-write");
+            tests.push(skipped_result(item, reason));
+            continue;
+        }
+        for _ in 0..options.benchmark_warmup {
+            let warmup = run_one_child(
+                item,
+                item.timeout,
+                &options.run_config,
+                options.allow_test_workspace,
+                options.deny_warnings,
+            )?;
+            if warmup.status != "passed" {
+                tests.push(warmup);
+                break;
+            }
+        }
+        if tests
+            .last()
+            .is_some_and(|result| result.index == item.index && result.status != "passed")
+        {
+            continue;
+        }
+        let mut samples = Vec::with_capacity(options.benchmark_iterations);
+        let mut final_result = None;
+        for _ in 0..options.benchmark_iterations {
+            let sample_started = Instant::now();
+            let result = run_one_child(
+                item,
+                item.timeout,
+                &options.run_config,
+                options.allow_test_workspace,
+                options.deny_warnings,
+            )?;
+            if result.status != "passed" {
+                final_result = Some(result);
+                break;
+            }
+            samples.push(sample_started.elapsed().as_nanos());
+            final_result = Some(result);
+        }
+        let mut result = final_result.expect("positive benchmark iteration count");
+        if result.status == "passed" {
+            samples.sort_unstable();
+            let sum = samples.iter().copied().sum::<u128>();
+            result.benchmark = Some(BenchmarkResult {
+                iterations: samples.len(),
+                warmup_iterations: options.benchmark_warmup,
+                min_ns: samples[0],
+                median_ns: samples[samples.len() / 2],
+                max_ns: samples[samples.len() - 1],
+                mean_ns: sum / samples.len() as u128,
+                samples_ns: samples,
+            });
+        }
+        tests.push(result);
+    }
+    tests.sort_by_key(|result| result.index);
+    let report = TestReport {
+        mode: "benchmark".to_string(),
+        total: tests.len(),
+        passed: tests.iter().filter(|r| r.status == "passed").count(),
+        failed: tests.iter().filter(|r| r.status == "failed").count(),
+        timed_out: tests.iter().filter(|r| r.status == "timed_out").count(),
+        skipped: tests.iter().filter(|r| r.status == "skipped").count(),
+        duration_ms: started.elapsed().as_millis(),
+        tests,
+    };
     if options.report == ReportFormat::Human {
         print_human_report(&report);
     }
@@ -417,6 +546,7 @@ fn skipped_result(item: &TestPlanItem, reason: &str) -> TestResult {
         warnings: Vec::new(),
         random_seed: item.random_seed,
         clock: item.clock.map(clock_report),
+        benchmark: None,
     }
 }
 
@@ -566,6 +696,7 @@ fn run_one_child(
                 warnings,
                 random_seed: item.random_seed,
                 clock: item.clock.map(clock_report),
+                benchmark: None,
             });
         }
         if started.elapsed() >= timeout {
@@ -589,6 +720,7 @@ fn run_one_child(
                 warnings: Vec::new(),
                 random_seed: item.random_seed,
                 clock: item.clock.map(clock_report),
+                benchmark: None,
             });
         }
         thread::sleep(Duration::from_millis(10));
