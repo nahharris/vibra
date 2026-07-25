@@ -336,6 +336,15 @@ enum Command {
         /// Stop scheduling tests after the first failure.
         #[arg(long = "fail-fast")]
         fail_fast: bool,
+        /// Measure selected test declarations without changing normal test mode.
+        #[arg(long)]
+        benchmark: bool,
+        /// Number of measured executions per selected benchmark.
+        #[arg(long = "benchmark-iterations", default_value_t = 10)]
+        benchmark_iterations: usize,
+        /// Number of unmeasured warm-up executions per selected benchmark.
+        #[arg(long = "benchmark-warmup", default_value_t = 1)]
+        benchmark_warmup: usize,
         /// Structured report format.
         #[arg(long, visible_alias = "report", value_enum, default_value_t = ReportArg::Yaml)]
         format: ReportArg,
@@ -868,6 +877,9 @@ fn run_cli() -> Result<()> {
             jobs,
             timeout_ms,
             fail_fast,
+            benchmark,
+            benchmark_iterations,
+            benchmark_warmup,
             format,
             report_file,
             preopen,
@@ -914,6 +926,9 @@ fn run_cli() -> Result<()> {
                     .unwrap_or(1),
                 timeout: Duration::from_millis(timeout_ms),
                 fail_fast,
+                benchmark,
+                benchmark_iterations,
+                benchmark_warmup,
                 report: format.into(),
                 report_file,
                 run_config: config,
