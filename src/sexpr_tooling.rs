@@ -308,7 +308,8 @@ fn lint_type(path: &Path, source: &str, ty: &TypeExpr, diagnostics: &mut Vec<Dia
         TypeExprKind::Array(ty)
         | TypeExprKind::Newtype(ty)
         | TypeExprKind::Mutable(ty)
-        | TypeExprKind::Reference(ty) => lint_type(path, source, ty, diagnostics),
+        | TypeExprKind::Reference(ty)
+        | TypeExprKind::MutableReference(ty) => lint_type(path, source, ty, diagnostics),
         TypeExprKind::Map(key, value) => {
             lint_type(path, source, key, diagnostics);
             lint_type(path, source, value, diagnostics);
@@ -681,6 +682,15 @@ mod tests {
             .iter()
             .any(|value| value.message.contains("Local_Value")));
         assert!(diagnostics.iter().all(|value| value.code == "W-STYLE-001"));
+    }
+
+    #[test]
+    fn typed_lint_visits_mutable_reference_inner_types() {
+        let source = "(fn borrow ((value (mut-ref Bad_Type))) void (do unit))\n";
+        let diagnostics = staged_lint_sexpr(Path::new("lint.vibra"), source);
+        assert!(diagnostics
+            .iter()
+            .any(|value| value.message.contains("Bad_Type")));
     }
 
     #[test]

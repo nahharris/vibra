@@ -480,7 +480,8 @@ fn visit_type(ty: &TypeExpr, visitor: &mut impl FnMut(&str) -> Result<()>) -> Re
         TypeExprKind::Array(ty)
         | TypeExprKind::Newtype(ty)
         | TypeExprKind::Mutable(ty)
-        | TypeExprKind::Reference(ty) => visit_type(ty, visitor),
+        | TypeExprKind::Reference(ty)
+        | TypeExprKind::MutableReference(ty) => visit_type(ty, visitor),
         TypeExprKind::Map(key, value) => {
             visit_type(key, visitor)?;
             visit_type(value, visitor)

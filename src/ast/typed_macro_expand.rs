@@ -625,6 +625,9 @@ fn map_type_children(
         TypeExprKind::Newtype(value) => TypeExprKind::Newtype(Box::new(map(*value)?)),
         TypeExprKind::Mutable(value) => TypeExprKind::Mutable(Box::new(map(*value)?)),
         TypeExprKind::Reference(value) => TypeExprKind::Reference(Box::new(map(*value)?)),
+        TypeExprKind::MutableReference(value) => {
+            TypeExprKind::MutableReference(Box::new(map(*value)?))
+        }
         TypeExprKind::Intersect(values) => {
             TypeExprKind::Intersect(values.into_iter().map(&mut map).collect::<Result<_, _>>()?)
         }
@@ -1898,7 +1901,8 @@ fn qualify_generated_type_names(
         TypeExprKind::Array(value)
         | TypeExprKind::Newtype(value)
         | TypeExprKind::Mutable(value)
-        | TypeExprKind::Reference(value) => qualify_generated_type_names(
+        | TypeExprKind::Reference(value)
+        | TypeExprKind::MutableReference(value) => qualify_generated_type_names(
             value,
             definition_document,
             definition_span,
@@ -2221,7 +2225,8 @@ fn annotate_generated_type(
         TypeExprKind::Array(value)
         | TypeExprKind::Newtype(value)
         | TypeExprKind::Mutable(value)
-        | TypeExprKind::Reference(value) => {
+        | TypeExprKind::Reference(value)
+        | TypeExprKind::MutableReference(value) => {
             annotate_generated_type(value, definition, call, state)?;
         }
         TypeExprKind::Map(key, value) => {
@@ -2509,6 +2514,30 @@ mod tests {
             definition.body.origin,
             Origin::DocumentExpansion { .. }
         ));
+    }
+
+    #[test]
+    fn expands_and_annotates_mutable_reference_types() {
+        let source = "
+(macro exclusive ((value type-syntax)) type-syntax
+  (do (quote type-syntax (mut-ref (unquote value)))))
+(def exclusive-int (exclusive int64))";
+        let expanded = expand_typed_macros(module(source, 8)).unwrap();
+        let TopLevel::Definition(definition) = &expanded.forms[0] else {
+            panic!("expected definition");
+        };
+        let TypeExprKind::MutableReference(inner) = &definition.body.value else {
+            panic!("expected expanded mutable reference");
+        };
+        assert!(matches!(
+            inner.value,
+            TypeExprKind::Named(ref name) if name == "int64"
+        ));
+        assert!(matches!(
+            definition.body.origin,
+            Origin::DocumentExpansion { .. }
+        ));
+        assert_eq!(inner.origin.document_id(), Some(DocumentId::from_raw(8)));
     }
 
     #[test]

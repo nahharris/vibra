@@ -382,6 +382,7 @@ pub enum TypeExprKind {
     Newtype(Box<TypeExpr>),
     Mutable(Box<TypeExpr>),
     Reference(Box<TypeExpr>),
+    MutableReference(Box<TypeExpr>),
     Intersect(Vec<TypeExpr>),
     /// Capability, handle, policy, and ABI forms have a fixed semantic head,
     /// but their detailed inventory is owned by the type checker.
@@ -961,13 +962,14 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
                 result: Box::new(parse_type(args[1])?),
             }
         }
-        "newtype" | "mut" | "ref" => {
+        "newtype" | "mut" | "ref" | "mut-ref" => {
             exact_arity(&head.value, &args, 1, node.span)?;
             let inner = Box::new(parse_type(args[0])?);
             match head.value.as_str() {
                 "newtype" => TypeExprKind::Newtype(inner),
                 "mut" => TypeExprKind::Mutable(inner),
-                _ => TypeExprKind::Reference(inner),
+                "ref" => TypeExprKind::Reference(inner),
+                _ => TypeExprKind::MutableReference(inner),
             }
         }
         "intersect" => {
