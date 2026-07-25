@@ -7,8 +7,11 @@ use crate::ast::{
     Annotation, AnnotationKind, Definition, DocumentId, Function, ImplItem, MethodBinding, Module,
     TestMeta, TopLevel, TypeExpr, TypeExprKind, Visibility,
 };
-use crate::lower::{ImplBody, ImplKey, ImplMethodBinding, TypeAlias, TypeRef};
-use anyhow::{bail, Result};
+use crate::lower::{
+    CapabilityDomain, CapabilityType, HandleAccess, ImplBody, ImplKey, ImplMethodBinding,
+    PolicyType, TypeAlias, TypeRef,
+};
+use anyhow::{bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -96,6 +99,8 @@ pub fn lower_typed_signatures<'a>(
     for input in modules {
         lower_module(input, &declared_aliases, &mut index)?;
     }
+    resolve_impl_method_references(&mut index)?;
+    validate_index(&index)?;
     Ok(index)
 }
 
@@ -221,7 +226,7 @@ fn lower_definition(
     insert_visibility(index, key.clone(), definition.visibility)?;
 
     for function in annotations.definitions {
-        lower_function(
+        let function_key = lower_function(
             module_alias,
             function,
             &definition.name.value,
@@ -230,6 +235,7 @@ fn lower_definition(
             declared_aliases,
             index,
         )?;
+        insert_visibility(index, function_key, definition.visibility)?;
     }
     for implementation in annotations.implementations {
         lower_implementation(
@@ -509,20 +515,707 @@ pub(crate) fn lower_type(
             inner: Box::new(lower(inner)?),
         },
         TypeExprKind::Mutable(inner) => TypeRef::Mutable(Box::new(lower(inner)?)),
-        TypeExprKind::Reference(inner) => TypeRef::Reference {
-            inner: Box::new(lower(inner)?),
-            mutable: false,
+        TypeExprKind::Reference(inner) => match &inner.value {
+            TypeExprKind::Mutable(value) => {
+                if matches!(
+                    value.value,
+                    TypeExprKind::Mutable(_)
+                        | TypeExprKind::Reference(_)
+                        | TypeExprKind::MutableReference(_)
+                ) {
+                    bail!("typed `ref (mut ...)` cannot contain another mutable or reference type");
+                }
+                TypeRef::Reference {
+                    inner: Box::new(lower(value)?),
+                    mutable: true,
+                }
+            }
+            TypeExprKind::Reference(_) | TypeExprKind::MutableReference(_) => {
+                bail!("typed `ref` cannot wrap another reference type")
+            }
+            _ => TypeRef::Reference {
+                inner: Box::new(lower(inner)?),
+                mutable: false,
+            },
         },
+        TypeExprKind::MutableReference(inner) => {
+            if matches!(
+                inner.value,
+                TypeExprKind::Mutable(_)
+                    | TypeExprKind::Reference(_)
+                    | TypeExprKind::MutableReference(_)
+            ) {
+                bail!("typed `mut-ref` cannot wrap another mutable or reference type");
+            }
+            TypeRef::Reference {
+                inner: Box::new(lower(inner)?),
+                mutable: true,
+            }
+        }
         TypeExprKind::Intersect(items) => {
             TypeRef::Intersect(items.iter().map(lower).collect::<Result<_>>()?)
         }
-        TypeExprKind::Domain { head, .. } => {
-            bail!(
-                "typed signature lowering does not yet support domain type `{}`",
-                head.value
-            )
-        }
+        TypeExprKind::Domain { head, arguments } => lower_domain_type(
+            &head.value,
+            arguments,
+            generics,
+            module_alias,
+            declared_aliases,
+        )?,
     })
+}
+
+fn lower_domain_type(
+    head: &str,
+    arguments: &[TypeExpr],
+    generics: &BTreeSet<String>,
+    module_alias: &str,
+    declared_aliases: &BTreeSet<String>,
+) -> Result<TypeRef> {
+    let named_argument = |position: usize| -> Result<&str> {
+        let Some(argument) = arguments.get(position) else {
+            bail!(
+                "typed domain type `{head}` is missing argument {}",
+                position + 1
+            );
+        };
+        let TypeExprKind::Named(name) = &argument.value else {
+            bail!(
+                "typed domain type `{head}` argument {} must be a name",
+                position + 1
+            );
+        };
+        Ok(name)
+    };
+    match head {
+        "capability" => {
+            if arguments.len() != 1 {
+                bail!("typed `capability` expects exactly one domain name");
+            }
+            let domain = named_argument(0)?
+                .parse::<CapabilityDomain>()
+                .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?;
+            Ok(TypeRef::Capability(CapabilityType {
+                domain,
+                groups: Vec::new(),
+            }))
+        }
+        "handle" => {
+            if arguments.len() != 1 {
+                bail!("typed `handle` expects exactly one access name");
+            }
+            let access = match named_argument(0)? {
+                "read" => HandleAccess::Read,
+                "write" => HandleAccess::Write,
+                "read-write" => HandleAccess::ReadWrite,
+                "process" => HandleAccess::Process,
+                other => bail!("E-CAP-004: unknown opaque handle type `handle {other}`"),
+            };
+            Ok(TypeRef::HostHandle(access))
+        }
+        "policy" => {
+            if arguments.is_empty() {
+                bail!("typed `policy` expects at least one domain name");
+            }
+            let mut domains = BTreeMap::new();
+            for position in 0..arguments.len() {
+                let domain = named_argument(position)?
+                    .parse::<CapabilityDomain>()
+                    .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?;
+                if domains.insert(domain, Vec::new()).is_some() {
+                    bail!("typed `policy` repeats domain `{domain}`");
+                }
+            }
+            Ok(TypeRef::Policy(PolicyType { domains }))
+        }
+        "wasm" => {
+            if arguments.len() != 1 {
+                bail!("typed `wasm` expects exactly one scalar type");
+            }
+            let ty = match &arguments[0].value {
+                TypeExprKind::Named(name) => match name.as_str() {
+                    "i32" => TypeRef::Int32,
+                    "i64" => TypeRef::Int64,
+                    "f32" => TypeRef::Float32,
+                    "f64" => TypeRef::Float64,
+                    _ => lower_type(&arguments[0], generics, module_alias, declared_aliases)?,
+                },
+                _ => lower_type(&arguments[0], generics, module_alias, declared_aliases)?,
+            };
+            if !matches!(
+                ty,
+                TypeRef::Bool
+                    | TypeRef::Int32
+                    | TypeRef::UInt32
+                    | TypeRef::Int64
+                    | TypeRef::UInt64
+                    | TypeRef::Float32
+                    | TypeRef::Float64
+                    | TypeRef::Void
+            ) {
+                bail!("typed `wasm` type must wrap an ABI scalar, got {ty:?}");
+            }
+            Ok(ty)
+        }
+        _ => unreachable!("surface parser only creates known domain heads"),
+    }
+}
+
+fn resolve_impl_method_references(index: &mut TypedSignatureIndex) -> Result<()> {
+    let functions = &index.functions;
+    let visibility = &index.visibility;
+    let imports = &index.imports;
+    for (key, implementation) in &mut index.impls {
+        let owner_alias = index
+            .aliases
+            .get(&key.implementing_type)
+            .map(|owner| owner.alias.as_str())
+            .unwrap_or_default();
+        for binding in implementation.methods.values_mut() {
+            let ImplMethodBinding::Alias(reference) = binding else {
+                continue;
+            };
+            let local = qualify(owner_alias, reference);
+            let resolved = if functions.contains_key(&local) {
+                local
+            } else if functions.contains_key(reference) {
+                reference.clone()
+            } else {
+                bail!("E-IMPL-006: impl method references unknown function `{reference}`");
+            };
+            let target = &functions[&resolved];
+            if target.alias != owner_alias {
+                let import_alias = resolved.split('.').next().unwrap_or(&resolved);
+                let imported = imports
+                    .keys()
+                    .any(|(module, alias)| module.alias == owner_alias && alias == import_alias);
+                if !imported {
+                    bail!(
+                        "E-IMPL-006: referenced method `{resolved}` is outside the import scope of `{owner_alias}`"
+                    );
+                }
+                if visibility.get(&resolved) != Some(&Visibility::Public) {
+                    bail!("E-IMPL-006: referenced method `{resolved}` is not publicly visible");
+                }
+            }
+            *reference = resolved;
+        }
+    }
+    Ok(())
+}
+
+fn validate_index(index: &TypedSignatureIndex) -> Result<()> {
+    for (key, alias) in &index.aliases {
+        validate_bounds(key, &alias.type_params, &alias.type_param_bounds, index)?;
+        validate_type(
+            &alias.body,
+            &alias.type_params,
+            &alias.type_param_bounds,
+            key,
+            index,
+        )?;
+    }
+    for (key, function) in &index.functions {
+        validate_bounds(
+            key,
+            &function.type_params,
+            &function.type_param_bounds,
+            index,
+        )?;
+        for ty in function.arg_types.iter().chain([&function.return_type]) {
+            validate_type(
+                ty,
+                &function.type_params,
+                &function.type_param_bounds,
+                key,
+                index,
+            )?;
+        }
+    }
+    for (key, ty) in &index.constants {
+        validate_type(ty, &[], &[], key, index)?;
+    }
+    for (key, implementation) in &index.impls {
+        let Some(owner) = index.aliases.get(&key.implementing_type) else {
+            bail!(
+                "E-IMPL-007: implementation owner `{}` is not a local type",
+                key.implementing_type
+            );
+        };
+        let Some(interface) = index.aliases.get(&key.interface) else {
+            bail!("E-IMPL-002: unknown typed interface `{}`", key.interface);
+        };
+        let TypeRef::Interface(required_methods) = &interface.body else {
+            bail!(
+                "E-IMPL-002: typed implementation target `{}` is not an interface",
+                key.interface
+            );
+        };
+        if implementation.interface_args.len() != interface.type_params.len() {
+            bail!(
+                "E-TYPE-ARITY: interface `{}` expects {} type arguments, got {}",
+                key.interface,
+                interface.type_params.len(),
+                implementation.interface_args.len()
+            );
+        }
+        for (position, argument) in implementation.interface_args.iter().enumerate() {
+            for required in interface
+                .type_param_bounds
+                .get(position)
+                .into_iter()
+                .flatten()
+            {
+                if !satisfies_bound(
+                    argument,
+                    required,
+                    &implementation.impl_type_params,
+                    &owner.type_param_bounds,
+                    index,
+                ) {
+                    bail!(
+                        "E-BOUND-001: interface argument `{argument:?}` for `{}.{}` does not satisfy `{required:?}`",
+                        key.interface,
+                        interface.type_params[position]
+                    );
+                }
+            }
+        }
+        let actual_methods: BTreeSet<_> = implementation.methods.keys().cloned().collect();
+        let expected_methods: BTreeSet<_> = required_methods.keys().cloned().collect();
+        if actual_methods != expected_methods {
+            bail!(
+                "E-IMPL-003: implementation `{}` for `{}` must bind methods {:?}, got {:?}",
+                key.interface,
+                key.implementing_type,
+                expected_methods,
+                actual_methods
+            );
+        }
+        // Implementations are attached to a declaration, so the owner side of
+        // the orphan rule must belong to the declaring module.
+        if !key
+            .implementing_type
+            .strip_prefix(&owner.alias)
+            .is_some_and(|suffix| owner.alias.is_empty() || suffix.starts_with('.'))
+        {
+            bail!(
+                "E-IMPL-007: implementation owner `{}` is foreign to module `{}`",
+                key.implementing_type,
+                owner.alias
+            );
+        }
+        for ty in &implementation.interface_args {
+            validate_type(
+                ty,
+                &implementation.impl_type_params,
+                &owner.type_param_bounds,
+                &format!("impl {} for {}", key.interface, key.implementing_type),
+                index,
+            )?;
+        }
+        let substitutions: HashMap<_, _> = interface
+            .type_params
+            .iter()
+            .cloned()
+            .zip(implementation.interface_args.iter().cloned())
+            .collect();
+        let self_type = if owner.type_params.is_empty() {
+            TypeRef::Named(key.implementing_type.clone())
+        } else {
+            TypeRef::Instantiated {
+                base: key.implementing_type.clone(),
+                type_args: owner
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .map(TypeRef::Generic)
+                    .collect(),
+            }
+        };
+        for (method, expected) in required_methods {
+            let TypeRef::FnType { args, return_type } =
+                substitute_type(expected, &substitutions, &self_type)
+            else {
+                bail!(
+                    "E-IMPL-005: interface method `{}.{method}` is not a function type",
+                    key.interface
+                );
+            };
+            let binding = &implementation.methods[method];
+            let signature_key = match binding {
+                ImplMethodBinding::Alias(key) | ImplMethodBinding::Fresh(key) => key,
+            };
+            let actual = index.functions.get(signature_key).with_context(|| {
+                format!("E-IMPL-006: implementation method `{signature_key}` is not registered")
+            })?;
+            let expected_args = match *args {
+                TypeRef::Tuple(args) => args,
+                other => vec![other],
+            };
+            let args_match = actual
+                .arg_types
+                .iter()
+                .zip(&expected_args)
+                .all(|(actual, expected)| equivalent_type(actual, expected, index));
+            if actual.arg_types.len() != expected_args.len()
+                || !args_match
+                || !equivalent_type(&actual.return_type, &return_type, index)
+            {
+                bail!(
+                    "E-IMPL-005: signature of `{signature_key}` does not match `{}.{method}`; expected {:?} -> {:?}, got {:?} -> {:?}",
+                    key.interface,
+                    expected_args,
+                    return_type,
+                    actual.arg_types,
+                    actual.return_type
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn equivalent_type(left: &TypeRef, right: &TypeRef, index: &TypedSignatureIndex) -> bool {
+    normalize_type(left, index, &mut BTreeSet::new())
+        == normalize_type(right, index, &mut BTreeSet::new())
+}
+
+fn normalize_type(
+    ty: &TypeRef,
+    index: &TypedSignatureIndex,
+    visiting: &mut BTreeSet<String>,
+) -> TypeRef {
+    match ty {
+        TypeRef::Named(name) => {
+            let Some(alias) = index.aliases.get(name) else {
+                return ty.clone();
+            };
+            if !alias.type_params.is_empty() || !visiting.insert(name.clone()) {
+                return ty.clone();
+            }
+            let normalized = normalize_type(&alias.body, index, visiting);
+            visiting.remove(name);
+            normalized
+        }
+        TypeRef::Instantiated { base, type_args } => {
+            let Some(alias) = index.aliases.get(base) else {
+                return ty.clone();
+            };
+            if alias.type_params.len() != type_args.len() || !visiting.insert(base.clone()) {
+                return ty.clone();
+            }
+            let substitutions = alias
+                .type_params
+                .iter()
+                .cloned()
+                .zip(type_args.iter().cloned())
+                .collect();
+            let expanded = substitute_type(&alias.body, &substitutions, &TypeRef::SelfType);
+            let normalized = normalize_type(&expanded, index, visiting);
+            visiting.remove(base);
+            normalized
+        }
+        TypeRef::Mutable(inner) => {
+            TypeRef::Mutable(Box::new(normalize_type(inner, index, visiting)))
+        }
+        TypeRef::Reference { inner, mutable } => TypeRef::Reference {
+            inner: Box::new(normalize_type(inner, index, visiting)),
+            mutable: *mutable,
+        },
+        TypeRef::Tuple(items) => TypeRef::Tuple(
+            items
+                .iter()
+                .map(|item| normalize_type(item, index, visiting))
+                .collect(),
+        ),
+        TypeRef::Array(inner) => TypeRef::Array(Box::new(normalize_type(inner, index, visiting))),
+        TypeRef::Map { key, value } => TypeRef::Map {
+            key: Box::new(normalize_type(key, index, visiting)),
+            value: Box::new(normalize_type(value, index, visiting)),
+        },
+        TypeRef::FnType { args, return_type } => TypeRef::FnType {
+            args: Box::new(normalize_type(args, index, visiting)),
+            return_type: Box::new(normalize_type(return_type, index, visiting)),
+        },
+        _ => ty.clone(),
+    }
+}
+
+fn substitute_type(
+    ty: &TypeRef,
+    substitutions: &HashMap<String, TypeRef>,
+    self_type: &TypeRef,
+) -> TypeRef {
+    let substitute = |ty| substitute_type(ty, substitutions, self_type);
+    match ty {
+        TypeRef::Generic(name) => substitutions
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| ty.clone()),
+        TypeRef::SelfType => self_type.clone(),
+        TypeRef::Mutable(inner) => TypeRef::Mutable(Box::new(substitute(inner))),
+        TypeRef::Reference { inner, mutable } => TypeRef::Reference {
+            inner: Box::new(substitute(inner)),
+            mutable: *mutable,
+        },
+        TypeRef::Newtype { name, inner } => TypeRef::Newtype {
+            name: name.clone(),
+            inner: Box::new(substitute(inner)),
+        },
+        TypeRef::JoinHandle(inner) => TypeRef::JoinHandle(Box::new(substitute(inner))),
+        TypeRef::Instantiated { base, type_args } => TypeRef::Instantiated {
+            base: base.clone(),
+            type_args: type_args.iter().map(substitute).collect(),
+        },
+        TypeRef::Record(fields) => TypeRef::Record(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), substitute(ty)))
+                .collect(),
+        ),
+        TypeRef::Tuple(items) => TypeRef::Tuple(items.iter().map(substitute).collect()),
+        TypeRef::Array(inner) => TypeRef::Array(Box::new(substitute(inner))),
+        TypeRef::Map { key, value } => TypeRef::Map {
+            key: Box::new(substitute(key)),
+            value: Box::new(substitute(value)),
+        },
+        TypeRef::Union(items) => TypeRef::Union(items.iter().map(substitute).collect()),
+        TypeRef::Enum(fields) => TypeRef::Enum(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), substitute(ty)))
+                .collect(),
+        ),
+        TypeRef::Interface(fields) => TypeRef::Interface(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), substitute(ty)))
+                .collect(),
+        ),
+        TypeRef::Intersect(items) => TypeRef::Intersect(items.iter().map(substitute).collect()),
+        TypeRef::FnType { args, return_type } => TypeRef::FnType {
+            args: Box::new(substitute(args)),
+            return_type: Box::new(substitute(return_type)),
+        },
+        _ => ty.clone(),
+    }
+}
+
+fn validate_bounds(
+    context: &str,
+    parameters: &[String],
+    bounds: &[Vec<TypeRef>],
+    index: &TypedSignatureIndex,
+) -> Result<()> {
+    if bounds.len() != parameters.len() {
+        bail!(
+            "E-WHERE-001: `{context}` has {} type parameters but {} bound lists",
+            parameters.len(),
+            bounds.len()
+        );
+    }
+    for (parameter, list) in parameters.iter().zip(bounds) {
+        for bound in list {
+            if !is_interface_type(bound, index, &mut BTreeSet::new()) {
+                bail!(
+                    "E-WHERE-002: bound for `{parameter}` of `{context}` is not an interface: {bound:?}"
+                );
+            }
+            validate_type(bound, parameters, bounds, context, index)?;
+        }
+    }
+    Ok(())
+}
+
+fn is_interface_type(
+    ty: &TypeRef,
+    index: &TypedSignatureIndex,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    match ty {
+        TypeRef::Interface(_) => true,
+        TypeRef::Named(name) | TypeRef::Instantiated { base: name, .. } => {
+            if !visiting.insert(name.clone()) {
+                return false;
+            }
+            let result = index
+                .aliases
+                .get(name)
+                .is_some_and(|alias| is_interface_type(&alias.body, index, visiting));
+            visiting.remove(name);
+            result
+        }
+        TypeRef::Intersect(parts) => {
+            !parts.is_empty()
+                && parts
+                    .iter()
+                    .all(|part| is_interface_type(part, index, visiting))
+        }
+        _ => false,
+    }
+}
+
+fn validate_type(
+    ty: &TypeRef,
+    parameters: &[String],
+    bounds: &[Vec<TypeRef>],
+    context: &str,
+    index: &TypedSignatureIndex,
+) -> Result<()> {
+    match ty {
+        TypeRef::Named(name) => {
+            if let Some(alias) = index.aliases.get(name) {
+                if !alias.type_params.is_empty() {
+                    bail!(
+                        "E-TYPE-ARITY: `{name}` expects {} type arguments, got 0 in `{context}`",
+                        alias.type_params.len()
+                    );
+                }
+            }
+        }
+        TypeRef::Instantiated { base, type_args } => {
+            let Some(alias) = index.aliases.get(base) else {
+                bail!("E-TYPE-UNKNOWN: unknown type application `{base}` in `{context}`");
+            };
+            if type_args.len() != alias.type_params.len() {
+                bail!(
+                    "E-TYPE-ARITY: `{base}` expects {} type arguments, got {} in `{context}`",
+                    alias.type_params.len(),
+                    type_args.len()
+                );
+            }
+            for (position, argument) in type_args.iter().enumerate() {
+                for required in alias.type_param_bounds.get(position).into_iter().flatten() {
+                    if !satisfies_bound(argument, required, parameters, bounds, index) {
+                        bail!(
+                            "E-BOUND-001: `{argument:?}` does not satisfy `{required:?}` for `{base}` in `{context}`"
+                        );
+                    }
+                }
+            }
+            for argument in type_args {
+                validate_type(argument, parameters, bounds, context, index)?;
+            }
+        }
+        TypeRef::Mutable(inner)
+        | TypeRef::Array(inner)
+        | TypeRef::JoinHandle(inner)
+        | TypeRef::Newtype { inner, .. }
+        | TypeRef::Reference { inner, .. } => {
+            validate_type(inner, parameters, bounds, context, index)?
+        }
+        TypeRef::Map { key, value } => {
+            validate_type(key, parameters, bounds, context, index)?;
+            validate_type(value, parameters, bounds, context, index)?;
+        }
+        TypeRef::Record(fields) | TypeRef::Enum(fields) | TypeRef::Interface(fields) => {
+            for member in fields.values() {
+                validate_type(member, parameters, bounds, context, index)?;
+            }
+        }
+        TypeRef::Tuple(items) | TypeRef::Union(items) | TypeRef::Intersect(items) => {
+            for item in items {
+                validate_type(item, parameters, bounds, context, index)?;
+            }
+        }
+        TypeRef::FnType { args, return_type } => {
+            validate_type(args, parameters, bounds, context, index)?;
+            validate_type(return_type, parameters, bounds, context, index)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn satisfies_bound(
+    argument: &TypeRef,
+    required: &TypeRef,
+    parameters: &[String],
+    bounds: &[Vec<TypeRef>],
+    index: &TypedSignatureIndex,
+) -> bool {
+    let required_interfaces = interface_requirements(required, index);
+    match argument {
+        TypeRef::Named(name) | TypeRef::Instantiated { base: name, .. } => {
+            required_interfaces
+                .iter()
+                .all(|(interface, required_args)| {
+                    index
+                        .impls
+                        .get(&ImplKey {
+                            implementing_type: name.clone(),
+                            interface: interface.clone(),
+                        })
+                        .is_some_and(|implementation| {
+                            implementation.interface_args.len() == required_args.len()
+                                && implementation.interface_args.iter().zip(required_args).all(
+                                    |(actual, required)| equivalent_type(actual, required, index),
+                                )
+                        })
+                })
+        }
+        TypeRef::Generic(name) => {
+            let Some(position) = parameters.iter().position(|parameter| parameter == name) else {
+                return false;
+            };
+            let provided: Vec<_> = bounds
+                .get(position)
+                .into_iter()
+                .flatten()
+                .flat_map(|bound| interface_requirements(bound, index))
+                .collect();
+            required_interfaces.iter().all(|required| {
+                provided.iter().any(|candidate| {
+                    candidate.0 == required.0
+                        && candidate.1.len() == required.1.len()
+                        && candidate
+                            .1
+                            .iter()
+                            .zip(&required.1)
+                            .all(|(left, right)| equivalent_type(left, right, index))
+                })
+            })
+        }
+        _ => false,
+    }
+}
+
+fn interface_requirements(
+    ty: &TypeRef,
+    index: &TypedSignatureIndex,
+) -> Vec<(String, Vec<TypeRef>)> {
+    match ty {
+        TypeRef::Named(name) => index
+            .aliases
+            .get(name)
+            .map_or_else(Vec::new, |alias| match &alias.body {
+                TypeRef::Interface(_) => vec![(name.clone(), Vec::new())],
+                TypeRef::Intersect(parts) => parts
+                    .iter()
+                    .flat_map(|part| interface_requirements(part, index))
+                    .collect(),
+                _ => Vec::new(),
+            }),
+        TypeRef::Instantiated { base, type_args } => {
+            index
+                .aliases
+                .get(base)
+                .map_or_else(Vec::new, |alias| match &alias.body {
+                    TypeRef::Interface(_) => vec![(base.clone(), type_args.clone())],
+                    TypeRef::Intersect(parts) => parts
+                        .iter()
+                        .flat_map(|part| interface_requirements(part, index))
+                        .collect(),
+                    _ => Vec::new(),
+                })
+        }
+        TypeRef::Intersect(parts) => parts
+            .iter()
+            .flat_map(|part| interface_requirements(part, index))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn named_application(ty: &TypeRef) -> Result<(String, Vec<TypeRef>)> {
@@ -608,6 +1301,7 @@ mod tests {
     fn lowers_identity_bearing_modules_and_direct_applications_without_yaml() {
         let entry = module(
             r#"(import model "./model.vibra")
+(def option (union t void) where: ((t)))
 (fn unwrap ((input (option int64))) int64
   (do (return 0))
   doc: "Typed signature.")"#,
@@ -651,13 +1345,16 @@ mod tests {
     #[test]
     fn registers_labels_defs_and_impls_as_non_executable_signatures() {
         let source = module(
-            r#"(def box (record (value t))
+            r#"(def comparable (interface))
+(def display (interface (show (fn-type (self) str))) where: ((t)))
+(fn show-box ((value (box t))) str (do (return "box")) where: ((t comparable)))
+(def box (record (value t))
   where: ((t comparable))
   doc: "A box."
   defs: ((fn get ((input self)) t (do (return unit))))
   impls: ((impl display
     types: (t)
-    methods: ((method show display.show)))))
+    methods: ((method show show-box)))))
 (private (const limit int64 10))
 (test works core (do unit) tags: (fast typed))"#,
             3,
@@ -671,7 +1368,7 @@ mod tests {
         assert!(index.functions.contains_key("pkg.box.get"));
         assert!(index.impls.contains_key(&ImplKey {
             implementing_type: "pkg.box".into(),
-            interface: "display".into(),
+            interface: "pkg.display".into(),
         }));
         assert_eq!(index.constants["pkg.limit"], TypeRef::Int64);
         assert_eq!(index.tests["pkg.works"].tags, ["fast", "typed"]);
@@ -704,5 +1401,253 @@ mod tests {
         }])
         .unwrap_err();
         assert!(error.to_string().contains("cannot combine"));
+    }
+
+    #[test]
+    fn lowers_domain_reference_and_wasm_types_without_yaml_adapters() {
+        let source = module(
+            r#"(fn host-types
+  ((cap (capability fs-read))
+   (input (handle read))
+   (shared (ref str))
+   (exclusive (mut-ref int64))
+   (raw (wasm i32)))
+  (policy clock random)
+  (do (return unit)))"#,
+            6,
+        );
+        let index = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &source,
+        }])
+        .unwrap();
+        let signature = &index.functions["host-types"];
+        assert_eq!(
+            signature.arg_types[0],
+            TypeRef::Capability(CapabilityType {
+                domain: CapabilityDomain::FsRead,
+                groups: Vec::new(),
+            })
+        );
+        assert_eq!(
+            signature.arg_types[1],
+            TypeRef::HostHandle(HandleAccess::Read)
+        );
+        assert_eq!(
+            signature.arg_types[2],
+            TypeRef::Reference {
+                inner: Box::new(TypeRef::Str),
+                mutable: false,
+            }
+        );
+        assert_eq!(
+            signature.arg_types[3],
+            TypeRef::Reference {
+                inner: Box::new(TypeRef::Int64),
+                mutable: true,
+            }
+        );
+        assert_eq!(signature.arg_types[4], TypeRef::Int32);
+        assert!(matches!(signature.return_type, TypeRef::Policy(_)));
+    }
+
+    #[test]
+    fn validates_alias_arity_bounds_and_complete_interfaces() {
+        let wrong_arity = module(
+            r#"(def pair (record (left t) (right t)) where: ((t)))
+(fn bad ((value pair)) void (do (return unit)))"#,
+            7,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &wrong_arity,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-TYPE-ARITY"));
+
+        let unsatisfied_bound = module(
+            r#"(def display (interface (show (fn-type (self) str))))
+(def printable-box (record (value t)) where: ((t display)))
+(def plain (record (value str)))
+(fn bad ((value (printable-box plain))) void (do (return unit)))"#,
+            8,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &unsatisfied_bound,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-BOUND-001"));
+
+        let incomplete_impl = module(
+            r#"(def display (interface
+  (show (fn-type (self) str))
+  (debug (fn-type (self) str))))
+(fn show-item ((value item)) str (do (return "item")))
+(def item (record (value str))
+  impls: ((impl display
+    methods: ((method show show-item)))))"#,
+            9,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &incomplete_impl,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-IMPL-003"));
+    }
+
+    #[test]
+    fn rejects_unknown_applications_bad_impl_signatures_and_nested_mutability() {
+        let unknown = module(
+            "(fn bad ((value (missing int64))) void (do (return unit)))",
+            10,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &unknown,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-TYPE-UNKNOWN"));
+
+        let mismatch = module(
+            r#"(def display (interface (show (fn-type (self) str))))
+(fn wrong ((value int64)) int64 (do (return value)))
+(def item (record (value str))
+  impls: ((impl display methods: ((method show wrong)))))"#,
+            11,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &mismatch,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-IMPL-005"));
+
+        let fresh_mismatch = module(
+            r#"(def display (interface (show (fn-type (self) str))))
+(def item (record (value str))
+  impls: ((impl display
+    methods: ((method show
+      (fn wrong ((value int64)) int64 (do (return value))))))))"#,
+            16,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &fresh_mismatch,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-IMPL-005"));
+
+        let nested = module(
+            "(fn bad ((value (mut-ref (ref int64)))) void (do (return unit)))",
+            12,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &nested,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("cannot wrap"));
+
+        let hidden_nested = module(
+            "(fn bad ((value (ref (mut (ref int64))))) void (do (return unit)))",
+            20,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &hidden_nested,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("cannot contain"));
+
+        let normalized = module(
+            "(fn borrow ((value (ref (mut int64)))) void (do (return unit)))",
+            13,
+        );
+        let index = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &normalized,
+        }])
+        .unwrap();
+        assert_eq!(
+            index.functions["borrow"].arg_types,
+            [TypeRef::Reference {
+                inner: Box::new(TypeRef::Int64),
+                mutable: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn enforces_interface_argument_bounds_and_referenced_method_scope() {
+        let bound = module(
+            r#"(def display (interface (show (fn-type (self) str))))
+(def factory (interface) where: ((t display)))
+(def plain (record (value str)))
+(def maker (record)
+  impls: ((impl factory types: (plain) methods: ())))"#,
+            14,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &bound,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-BOUND-001"));
+
+        let parameterized_bound = module(
+            r#"(def relates (interface) where: ((u)))
+(def displayable (interface) where: ((t (relates int64))))
+(def plain (record)
+  impls: ((impl relates types: (bool) methods: ())))
+(def holder (record)
+  impls: ((impl displayable types: (plain) methods: ())))"#,
+            17,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &parameterized_bound,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-BOUND-001"));
+
+        let unresolved = module(
+            r#"(def display (interface (show (fn-type (self) str))))
+(def item (record)
+  impls: ((impl display methods: ((method show missing)))))"#,
+            15,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &unresolved,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-IMPL-006"));
+
+        let library = module(
+            r#"(private (def item (record)
+  defs: ((fn show ((value self)) str (do (return "private"))))))"#,
+            18,
+        );
+        let consumer = module(
+            r#"(import lib "./lib.vibra")
+(def display (interface (show (fn-type (self) str))))
+(def item (record)
+  impls: ((impl display methods: ((method show lib.item.show)))))"#,
+            19,
+        );
+        let error = lower_typed_signatures([
+            TypedModuleInput {
+                alias: "lib",
+                module: &library,
+            },
+            TypedModuleInput {
+                alias: "",
+                module: &consumer,
+            },
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("not publicly visible"));
     }
 }
