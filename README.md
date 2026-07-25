@@ -216,6 +216,37 @@ the deterministic compiler fingerprint; no runtime filesystem grant is needed.
 Malformed content uses `E-EMBED-004`, invalid structured shapes use
 `E-EMBED-005`, and path/sandbox failures use `E-EMBED-002`/`E-EMBED-003`.
 
+### Compile-time text templates
+
+`$template` renders a package-owned UTF-8 text file while loading the module
+and produces a `$str`. It uses the same normalized-path and package sandbox as
+`$embed`, and template bytes participate in the compiler fingerprint:
+
+```yaml
+page:
+  $template:
+    path: templates/team.txt
+    with:
+      title: Compiler team
+      people:
+        - {name: Ada, active: true}
+        - {name: Lin, active: false}
+```
+
+Templates are deterministic and logicless. `{{name}}` performs strict scalar
+lookup, dotted names such as `{{user.name}}` traverse mappings, and `{{.}}`
+refers to the current section item. `{{#items}}...{{/items}}` iterates
+sequences or conditionally renders truthy values; `{{^items}}...{{/items}}`
+renders when the value is false, null, or an empty sequence. `{{! comment }}`
+is ignored. The `with` mapping is static JSON-shaped YAML data, not runtime
+expressions. Interpolation (including the accepted `{{{name}}}` / `{{&name}}`
+aliases) is verbatim and context-neutral; templates that emit HTML, shell, SQL,
+or another escaped language must pass already escaped data. Missing values,
+compound-value interpolation, malformed tags, invalid UTF-8, and package
+escapes are compile errors (`E-TEMPLATE-001` through `E-TEMPLATE-005`). Source,
+output, and section-nesting bounds report `E-TEMPLATE-006`. Rendering never
+needs a runtime filesystem grant.
+
 ### Symbol documentation
 
 Use `vibra docs` to read compile-time `=doc` annotations without running a
