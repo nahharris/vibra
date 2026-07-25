@@ -1,12 +1,29 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Binary,
-    [Parameter(Mandatory)][ValidateSet('linux-amd64','linux-arm64','windows-amd64')][string]$Platform,
+    [Parameter(Mandatory)][ValidateSet('linux-amd64','linux-arm64','windows-amd64','macos-amd64','macos-arm64')][string]$Platform,
+    [Parameter(Mandatory)][ValidateSet(
+        'x86_64-unknown-linux-gnu',
+        'aarch64-unknown-linux-gnu',
+        'x86_64-pc-windows-msvc',
+        'x86_64-apple-darwin',
+        'aarch64-apple-darwin'
+    )][string]$TargetTriple,
     [Parameter(Mandatory)][string]$Version,
     [Parameter(Mandatory)][string]$Revision,
     [Parameter(Mandatory)][string]$OutputDirectory
 )
 $ErrorActionPreference = 'Stop'
+$expectedTargets = @{
+    'linux-amd64' = 'x86_64-unknown-linux-gnu'
+    'linux-arm64' = 'aarch64-unknown-linux-gnu'
+    'windows-amd64' = 'x86_64-pc-windows-msvc'
+    'macos-amd64' = 'x86_64-apple-darwin'
+    'macos-arm64' = 'aarch64-apple-darwin'
+}
+if ($expectedTargets[$Platform] -ne $TargetTriple) {
+    throw "Platform $Platform requires target triple $($expectedTargets[$Platform]), not $TargetTriple."
+}
 # Canonical relocatable layout: bin/vibra[.exe] beside stdlib/.
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $stdlib = Join-Path $root 'stdlib'
@@ -39,6 +56,7 @@ format-version: 1
 version: $Version
 revision: $Revision
 platform: $Platform
+target-triple: $TargetTriple
 stdlib-git: https://github.com/nahharris/vibra-stdlib.git
 stdlib-rev: $stdlibRev
 stdlib-sha256: $digest
@@ -50,7 +68,14 @@ if ($Platform -eq 'windows-amd64') {
     Compress-Archive -LiteralPath $stage -DestinationPath $archive -CompressionLevel Optimal
 } else {
     $archive = Join-Path $OutputDirectory "$name.tar.gz"
-    & tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf $archive -C $OutputDirectory $name
+    $tarVersion = (& tar --version 2>&1 | Out-String)
+    if ($tarVersion -match 'GNU tar') {
+        & tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf $archive -C $OutputDirectory $name
+    } else {
+        # macOS ships bsdtar. Its archive preserves the executable bit but does
+        # not accept GNU tar's reproducibility flags.
+        & tar -czf $archive -C $OutputDirectory $name
+    }
     if ($LASTEXITCODE -ne 0) { throw 'tar archive creation failed.' }
 }
 Write-Output $archive

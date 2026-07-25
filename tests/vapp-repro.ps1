@@ -21,6 +21,8 @@ function Build-Fixture([string]$Root) {
             if ($LASTEXITCODE -ne 0) { throw 'vibra build failed' }
             & $vibraPath package verify sample.vapp | Out-Host
             if ($LASTEXITCODE -ne 0) { throw 'vibra package verify failed' }
+            & $vibraPath run sample.vapp | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'vibra .vapp execution failed' }
             return (Resolve-Path -LiteralPath sample.vapp).Path
         } finally {
             Pop-Location

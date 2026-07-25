@@ -8,6 +8,7 @@ A vibe-coding-first programming language: **YAML** surface (strict subset), **st
 - **Examples:** [examples/](examples/)
 - **[Container images](docs/containers.md)**
 - **[Native toolchain archives](docs/distribution.md)**
+- **[Agent skills](docs/agent-skills.md)**
 
 ## Run (MVP)
 
@@ -87,6 +88,7 @@ are not a complete specification of compiler behavior.
   [`dependency-resolution.schema.json`](schemas/dependency-resolution.schema.json),
   [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
   [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
+  [`distribution-targets.schema.json`](schemas/distribution-targets.schema.json),
   [`diagnostic.schema.json`](schemas/diagnostic.schema.json),
   [`test-report.schema.json`](schemas/test-report.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
@@ -95,9 +97,14 @@ are not a complete specification of compiler behavior.
   [`code-query.schema.json`](schemas/code-query.schema.json), and
   [`code-change-set.schema.json`](schemas/code-change-set.schema.json).
 - **Editor and documentation queries:** [`query-response.schema.json`](schemas/query-response.schema.json)
-  specifies the `vibra/contextAt` (and `vibra query`) response shape, and
+  specifies the `vibra/contextAt` (and `vibra query`) response shape,
+  [`lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json) and
+  [`lsp-compilation-options.schema.json`](schemas/lsp-compilation-options.schema.json)
+  define the editor protocol shapes, and
   [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
   `vibra docs --format yaml|json`.
+- **Agent protocol:** [`mcp-tool-result.schema.json`](schemas/mcp-tool-result.schema.json)
+  specifies the shared `vibra mcp` tool result and structured error envelope.
 - **Async conformance:** [`async-task-trace.schema.json`](schemas/async-task-trace.schema.json)
   defines deterministic structured-task traces and
   [`async-host-operation.schema.json`](schemas/async-host-operation.schema.json)
@@ -216,6 +223,37 @@ the deterministic compiler fingerprint; no runtime filesystem grant is needed.
 Malformed content uses `E-EMBED-004`, invalid structured shapes use
 `E-EMBED-005`, and path/sandbox failures use `E-EMBED-002`/`E-EMBED-003`.
 
+### Compile-time text templates
+
+`$template` renders a package-owned UTF-8 text file while loading the module
+and produces a `$str`. It uses the same normalized-path and package sandbox as
+`$embed`, and template bytes participate in the compiler fingerprint:
+
+```yaml
+page:
+  $template:
+    path: templates/team.txt
+    with:
+      title: Compiler team
+      people:
+        - {name: Ada, active: true}
+        - {name: Lin, active: false}
+```
+
+Templates are deterministic and logicless. `{{name}}` performs strict scalar
+lookup, dotted names such as `{{user.name}}` traverse mappings, and `{{.}}`
+refers to the current section item. `{{#items}}...{{/items}}` iterates
+sequences or conditionally renders truthy values; `{{^items}}...{{/items}}`
+renders when the value is false, null, or an empty sequence. `{{! comment }}`
+is ignored. The `with` mapping is static JSON-shaped YAML data, not runtime
+expressions. Interpolation (including the accepted `{{{name}}}` / `{{&name}}`
+aliases) is verbatim and context-neutral; templates that emit HTML, shell, SQL,
+or another escaped language must pass already escaped data. Missing values,
+compound-value interpolation, malformed tags, invalid UTF-8, and package
+escapes are compile errors (`E-TEMPLATE-001` through `E-TEMPLATE-005`). Source,
+output, and section-nesting bounds report `E-TEMPLATE-006`. Rendering never
+needs a runtime filesystem grant.
+
 ### Symbol documentation
 
 Use `vibra docs` to read compile-time `=doc` annotations without running a
@@ -265,6 +303,25 @@ When a compiler message names a source symbol, its range is anchored to that
 definition or `$reference`; otherwise the compiler's fallback point is kept.
 The advertised capability shape is documented by
 [`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
+Conditional compilation uses `initializationOptions.compilationFlags`; clients
+may replace the active set through `workspace/didChangeConfiguration` at
+`settings.vibra.compilationFlags`. Both fields use the shape documented by
+[`schemas/lsp-compilation-options.schema.json`](schemas/lsp-compilation-options.schema.json).
+Ready-to-copy Visual Studio Code and Neovim setup, multi-package workspace
+guidance, and the measured medium-project performance contract are in
+[`docs/editor-support.md`](docs/editor-support.md).
+
+### Model Context Protocol server
+
+Run `vibra mcp --workspace .` to expose project inspection, test discovery,
+check, docs, formatting, and lint tools over MCP stdio. The server is read-only
+and does not execute project tests by default. `--allow-write` narrowly enables
+formatter writes and builds inside the workspace; `--allow-test` enables
+capability-free test execution. Paths are canonicalized and confined to the
+workspace, and clients cannot submit arbitrary commands or capability flags.
+
+See [the MCP guide](docs/mcp.md) for tool mappings, schemas, agent
+configuration, security boundaries, and the stable error model.
 
 ### Executable application packages
 
@@ -455,9 +512,11 @@ deterministic:
 
 Files named `foo.<flag>.vibra` are conditional parts of `foo.vibra` when the
 base file exists. The base file is always loaded; a part is loaded only when
-all of its suffix flags are enabled. `vibra test` enables `test`, so unit tests
-can live beside their module in `foo.test.vibra` without entering normal
-compiler runs. See [the conditional compilation contract](docs/conditional-compilation.md).
+all of its suffix flags are enabled. Pass repeatable `--flag <kebab-name>`
+arguments to `build`, `check`, `run`, `docs`, `effects`, `expand`, or `lsp`.
+`vibra test` enables `test` automatically, so unit tests can live beside their
+module in `foo.test.vibra` without entering normal compiler runs. See
+[the conditional compilation contract](docs/conditional-compilation.md).
 
 ## Build & test
 

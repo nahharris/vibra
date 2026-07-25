@@ -252,10 +252,24 @@ child task and implicitly joins it before the following statement. Captures are
 explicit immutable snapshots. Mutable values and all reference-typed values
 are rejected with `E-TASK-001`; callers must snapshot the underlying value
 first. Task-local bindings do not escape. `$return`, `$break`, and `$continue`
-cannot cross the task boundary (`E-TASK-002`). This first source form is a
-deterministic task boundary in both interpreter and Wasm backends; overlapping
-tasks and explicit affine join handles will extend it without weakening capture
-safety.
+cannot cross the task boundary (`E-TASK-002`).
+
+`$spawn: handle` starts a result-producing child computation. Its sibling
+`captures:` sequence defines the only local values visible to `value:`:
+
+```yaml
+- $spawn: first
+  captures: [base]
+  value: {$add: [$base, 1]}
+- $join: first
+  into: result
+```
+
+Several handles may be live at once and may be joined in any order. Each handle
+is statically typed by its result, is affine, and must be consumed exactly once
+before leaving its scope. Copying, rejoining, or abandoning a handle is
+`E-TASK-003`. Handles cannot be captured by another task or passed as ordinary
+values.
 
 `$str` values are always valid UTF-8. `text.scalar-len`, `text.scalar-at`, and
 `text.find` use Unicode-scalar units, matching `$for`; `text.byte-len` is the
