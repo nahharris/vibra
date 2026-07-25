@@ -48,6 +48,31 @@
       "summary": "Unclosed S-expression list"
     },
     {
+      "code": "E-SYN-007",
+      "severity": "error",
+      "summary": "Invalid top-level S-expression form"
+    },
+    {
+      "code": "E-SYN-008",
+      "severity": "error",
+      "summary": "Unknown or misplaced semantic form head"
+    },
+    {
+      "code": "E-SYN-009",
+      "severity": "error",
+      "summary": "S-expression form has the wrong number of operands"
+    },
+    {
+      "code": "E-SYN-010",
+      "severity": "error",
+      "summary": "S-expression child has the wrong grammar kind"
+    },
+    {
+      "code": "E-SYN-011",
+      "severity": "error",
+      "summary": "Unknown, duplicate, missing, or misplaced trailing labeled attribute"
+    },
+    {
       "code": "E-OP-001",
       "severity": "error",
       "summary": "Primitive operation has invalid arity, operand types, or mixed types"
