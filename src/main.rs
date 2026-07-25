@@ -1334,6 +1334,8 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
                     visit_statements(body, pending);
                 }
                 Statement::Task { body, .. } => visit_statements(body, pending),
+                Statement::Spawn { value, .. } => visit_expr(value, pending),
+                Statement::Join { .. } => {}
                 Statement::Break | Statement::Continue => {}
             }
         }
@@ -1419,6 +1421,9 @@ fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
         }
         RuntimeValue::HostHandle(_) => {
             bail!("opaque host handles cannot be rendered as source values")
+        }
+        RuntimeValue::JoinHandle(_) => {
+            bail!("affine task handles cannot be rendered as source values")
         }
         RuntimeValue::Enum {
             enum_key,
