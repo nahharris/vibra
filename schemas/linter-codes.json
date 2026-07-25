@@ -73,6 +73,21 @@
       "summary": "Unknown, duplicate, missing, or misplaced trailing labeled attribute"
     },
     {
+      "code": "E-SYN-012",
+      "severity": "error",
+      "summary": "Unsupported source extension for the S-expression frontend"
+    },
+    {
+      "code": "E-FRONT-001",
+      "severity": "error",
+      "summary": "Macro expansion has not been cut over to the typed S-expression frontend"
+    },
+    {
+      "code": "E-FRONT-002",
+      "severity": "error",
+      "summary": "Embed or template expansion has not been cut over to the typed S-expression frontend"
+    },
+    {
       "code": "E-OP-001",
       "severity": "error",
       "summary": "Primitive operation has invalid arity, operand types, or mixed types"

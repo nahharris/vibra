@@ -951,7 +951,7 @@ fn validate_target_imports(
         .chain(project.manifest.targets.bins.iter())
     {
         let entry = project.root.join(&target.root).join(&target.entry);
-        crate::load::load_program_with_flags(&entry, flags)
+        crate::load::load_legacy_yaml_program(&entry, flags)
             .map(|_| ())
             .with_context(|| format!("validate imports for target `{}`", target.name))?;
     }

@@ -82,11 +82,22 @@ pub fn is_compilation_flag(flag: &str) -> bool {
         })
 }
 
+/// Compatibility wrapper for callers that still consume the legacy YAML tree.
+#[doc(hidden)]
 pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
-    load_program_with_flags(entry, &CompilationFlags::default())
+    load_legacy_yaml_program(entry, &CompilationFlags::default())
 }
 
+/// Compatibility wrapper for callers that still consume the legacy YAML tree.
+#[doc(hidden)]
 pub fn load_program_with_flags(entry: &Path, flags: &CompilationFlags) -> Result<LoadedProgram> {
+    load_legacy_yaml_program(entry, flags)
+}
+
+/// Temporary compilation-only seam while the staged typed frontend in
+/// [`crate::frontend`] is integrated with lowering.
+#[doc(hidden)]
+pub fn load_legacy_yaml_program(entry: &Path, flags: &CompilationFlags) -> Result<LoadedProgram> {
     flags.validate()?;
     let entry = fs::canonicalize(entry)
         .with_context(|| format!("cannot open entry module {}", entry.display()))?;
@@ -122,7 +133,15 @@ pub fn load_entry_module_for_test_discovery(entry: &Path) -> Result<(PathBuf, Va
     Ok((entry, root))
 }
 
+/// Compatibility wrapper for callers that still consume the legacy YAML tree.
+#[doc(hidden)]
 pub fn load_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram> {
+    load_legacy_yaml_inline_program(base_dir, root)
+}
+
+/// Temporary YAML-backed `vibra exec` seam pending typed expression lowering.
+#[doc(hidden)]
+pub fn load_legacy_yaml_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram> {
     let base_dir = fs::canonicalize(base_dir)
         .with_context(|| format!("resolve inline base directory {}", base_dir.display()))?;
     let entry = base_dir.join("__vibra_exec__.vibra");

@@ -53,7 +53,7 @@ pub fn collect_with_flags(
     entry: &Path,
     flags: &load::CompilationFlags,
 ) -> Result<Vec<Documentation>> {
-    let program = load::load_program_with_flags(entry, flags)?;
+    let program = load::load_legacy_yaml_program(entry, flags)?;
     let project = project::find_project_for_file(&program.entry)?;
     let mut docs = BTreeMap::new();
     let mut visited = HashSet::new();
