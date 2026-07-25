@@ -1,0 +1,9 @@
+greeting:
+  $import: '@greeting/greet.vibra'
+
+main:
+  $function: $void
+  return: $void
+  do:
+    - $greeting.greet: null
+

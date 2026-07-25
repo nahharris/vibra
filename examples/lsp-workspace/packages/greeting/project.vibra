@@ -1,0 +1,11 @@
+manifest-version: 1
+package:
+  name: greeting
+  version: 0.1.0
+targets:
+  libs:
+    - name: greeting
+      root: src
+      entry: greet.vibra
+dependencies: {}
+
