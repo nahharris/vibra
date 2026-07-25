@@ -288,8 +288,14 @@ fn load_template(
     if bytes.len() > MAX_TEMPLATE_SOURCE_BYTES {
         bail!("E-TEMPLATE-006: template source exceeds {MAX_TEMPLATE_SOURCE_BYTES} bytes");
     }
-    embedded.insert(resolved.clone(), format!("{:x}", Sha256::digest(&bytes)));
     let source = String::from_utf8(bytes).context("E-TEMPLATE-003: template is not valid UTF-8")?;
+    // Text templates are source inputs, so checkout line endings must not change
+    // either their rendered program or the reproducibility fingerprint.
+    let source = source.replace("\r\n", "\n");
+    embedded.insert(
+        resolved.clone(),
+        format!("{:x}", Sha256::digest(source.as_bytes())),
+    );
     let nodes = parse_template(&source)?;
     let root = Value::Mapping(data.clone());
     let rendered = render_template(&nodes, &[&root])?;
