@@ -1,41 +1,24 @@
 # Vibra project layout
 
-`project.vibra` is the canonical project manifest. It is YAML like Vibra source, but it is metadata, not a source module.
+`project.vibra` is the canonical project manifest. It uses a dedicated typed
+S-expression grammar and is metadata, not a source module.
 
-```yaml
-manifest-version: 1
-package:
-  name: hello
-  version: 0.1.0
-
-targets:
-  libs:
-    - name: core
-      root: src/core
-      entry: lib.vibra
-  bins:
-    - name: hello
-      root: src/hello
-      entry: main.vibra
-
-dependencies:
-  std:
-    git: https://github.com/nahharris/vibra-stdlib.git
-    rev: 6b9fa5838e4f4122ff141e13a5ef737e99955dad
-  math:
-    git: https://github.com/example/vibra-math.git
-    rev: 0123456789abcdef0123456789abcdef01234567
-  local-utils:
-    path: ../local-utils
+```vibra
+(project
+  (package "hello" "0.1.0")
+  (target core kind: lib root: "src/core" entry: "lib.vibra")
+  (target hello kind: bin root: "src/hello" entry: "main.vibra")
+  (dependency std
+    git: "https://github.com/nahharris/vibra-stdlib.git"
+    rev: "6b9fa5838e4f4122ff141e13a5ef737e99955dad")
+  (dependency local-utils path: "../local-utils"))
 ```
 
 ## Fields
 
-- `manifest-version`: must be `1`.
-- `package.name`: kebab-case project name.
-- `package.version`: package version string.
-- `targets.libs` and `targets.bins`: named source roots. A project must declare at least one target.
-- `dependencies`: named local or git dependencies.
+- `(package <name> <version>)` declares package identity.
+- `(target <name> kind: <bin|lib> root: <root> entry: <entry>)` declares a source target.
+- `(dependency <alias> ...)` declares a local, Git, or static Wasm dependency.
 
 Target names and dependency names share one namespace. A name can be used once.
 
@@ -106,19 +89,16 @@ core:
 
 Local dependencies:
 
-```yaml
-dependencies:
-  local-utils:
-    path: ../local-utils
+```vibra
+(dependency local-utils path: "../local-utils")
 ```
 
 Git dependencies:
 
-```yaml
-dependencies:
-  math:
-    git: https://github.com/example/vibra-math.git
-    rev: 0123456789abcdef0123456789abcdef01234567
+```vibra
+(dependency math
+  git: "https://github.com/example/vibra-math.git"
+  rev: "0123456789abcdef0123456789abcdef01234567")
 ```
 
 A path or Git dependency may expose a static WebAssembly library with a
@@ -128,7 +108,11 @@ exports through `$wasm.import.module: "@dependency-name"`; see
 
 Git dependencies must pin a full 40-hex `rev`. `vibra sync` recursively exports clean source trees into package-local `dep/<name>` directories; nested repositories use their own `dep/` directories, so diamond edges may select different revisions without a global namespace collision. Exported trees contain no `.git` metadata. Local dependencies are not copied and published Git dependencies may not declare path dependencies.
 
-Sync writes deterministic `project.lock.vibra` metadata for every vendored package: source identity, exact revision, SHA-256 of its own clean source tree, vendor path, and dependency alias edges. Commit this lock. Offline `check` and build operations use only the vendored graph and reject missing/stale lock entries or modified source. Until the future solver in issue #80 exists, all `std` edges must select one exact revision.
+Sync writes deterministic `vibra.lock.json` metadata with sorted object keys and
+a trailing newline for every vendored package: source identity, exact revision,
+SHA-256 of its own clean source tree, vendor path, and dependency alias edges.
+Commit this lock. Offline `check` and build operations use only the vendored
+graph and reject missing/stale lock entries or modified source.
 
 Vendored dependency and stdlib documents are visible to `vibra code` queries. They are read-only to code transactions; change the upstream source and resync instead.
 
@@ -138,11 +122,10 @@ selection, lock migration, and offline behavior, is documented in
 
 `vibra init` seeds the current toolchain stdlib into `dep/std` for immediate offline use and records its canonical source and exact revision as:
 
-```yaml
-dependencies:
-  std:
-    git: https://github.com/nahharris/vibra-stdlib.git
-    rev: 6b9fa5838e4f4122ff141e13a5ef737e99955dad
+```vibra
+(dependency std
+  git: "https://github.com/nahharris/vibra-stdlib.git"
+  rev: "6b9fa5838e4f4122ff141e13a5ef737e99955dad")
 ```
 
 The compiler source tree pins the same revision through its `stdlib` Git submodule.

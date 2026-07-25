@@ -5836,18 +5836,10 @@ also-passes:
     .unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: tests
-      entry: basic.vibra
-dependencies:
-  std:
-    path: dep/std
+        r#"(project
+  (package "app" "0.1.0")
+  (target app kind: bin root: "tests" entry: "basic.vibra")
+  (dependency std path: "dep/std"))
 "#,
     )
     .unwrap();
@@ -5887,18 +5879,10 @@ fails:
     .unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: tests
-      entry: fails.vibra
-dependencies:
-  std:
-    path: dep/std
+        r#"(project
+  (package "app" "0.1.0")
+  (target app kind: bin root: "tests" entry: "fails.vibra")
+  (dependency std path: "dep/std"))
 "#,
     )
     .unwrap();
@@ -5939,18 +5923,10 @@ fails:
     .unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: tests
-      entry: fails.vibra
-dependencies:
-  std:
-    path: dep/std
+        r#"(project
+  (package "app" "0.1.0")
+  (target app kind: bin root: "tests" entry: "fails.vibra")
+  (dependency std path: "dep/std"))
 "#,
     )
     .unwrap();
@@ -5989,18 +5965,10 @@ passes:
     .unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: tests
-      entry: basic.vibra
-dependencies:
-  std:
-    path: dep/std
+        r#"(project
+  (package "app" "0.1.0")
+  (target app kind: bin root: "tests" entry: "basic.vibra")
+  (dependency std path: "dep/std"))
 "#,
     )
     .unwrap();
@@ -6062,18 +6030,10 @@ uses-base-function:
     .unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: tests
-      entry: math.vibra
-dependencies:
-  std:
-    path: dep/std
+        r#"(project
+  (package "app" "0.1.0")
+  (target app kind: bin root: "tests" entry: "math.vibra")
+  (dependency std path: "dep/std"))
 "#,
     )
     .unwrap();

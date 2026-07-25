@@ -13,7 +13,7 @@ fn write_project(root: &Path) -> PathBuf {
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(
         root.join("project.vibra"),
-        "manifest-version: 1\npackage:\n  name: flags\n  version: 0.1.0\ntargets:\n  bins:\n    - name: flags\n      root: src\n      entry: main.vibra\ndependencies: {}\n",
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     let entry = root.join("src/main.vibra");
@@ -75,7 +75,7 @@ fn check_and_effects_compile_only_the_selected_parts() {
     let entry = root.path().join("src/main.vibra");
     std::fs::write(
         root.path().join("project.vibra"),
-        "manifest-version: 1\npackage:\n  name: flags\n  version: 0.1.0\ntargets:\n  bins:\n    - name: flags\n      root: src\n      entry: main.vibra\ndependencies: {}\n",
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     std::fs::write(

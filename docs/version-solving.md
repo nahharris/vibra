@@ -16,19 +16,18 @@ Resolution uses semantic versions as specified by SemVer 2.0.0. Normal ranges
 use the familiar comparator syntax (`>=1.2.0 <2.0.0`), with `^1.2.3` and
 `~1.2.3` as sugar. The manifest addition is:
 
-```yaml
-dependencies:
-  math:
-    git: https://github.com/example/vibra-math.git
-    version: ^1.2.0
-  parser:
-    git: https://github.com/example/mono.git
-    subdir: packages/parser
-    version: ">=2.0.0 <3.0.0"
+```vibra
+(dependency math
+  git: "https://github.com/example/vibra-math.git"
+  version: "^1.2.0")
+(dependency parser
+  git: "https://github.com/example/mono.git"
+  subdir: "packages/parser"
+  version: ">=2.0.0 <3.0.0")
 ```
 
-Exactly one of `rev` and `version` is allowed. Existing `rev` dependencies are
-exact constraints and continue to work unchanged. `subdir` is a clean relative
+Exactly one of `rev:` and `version:` is allowed. Existing `rev:` dependencies are
+exact constraints and continue to work unchanged. `subdir:` is a clean relative
 path with `/` separators; `.` and `..` segments are forbidden.
 
 ### Package identity

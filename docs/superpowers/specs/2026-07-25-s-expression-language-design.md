@@ -362,6 +362,12 @@ an executable module.
   (dependency std path: "../stdlib"))
 ```
 
+Targets use a positional name followed by required `kind:`, `root:`, and
+`entry:` labels. Optional package documentation uses trailing `doc:`.
+Dependencies accept trailing `path:`, `git:`, `rev:`, and `wasm:` labels.
+Plugin interfaces use repeated
+`(function <name> params: (...) result: ...)` children.
+
 The dependency lock becomes `vibra.lock.json`, canonical UTF-8 JSON with sorted
 object keys and a trailing newline. Package and release metadata embedded in
 `.vapp` artifacts become canonical JSON. JSON is chosen for these generated

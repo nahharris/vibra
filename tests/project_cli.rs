@@ -104,19 +104,10 @@ fn docs_reads_package_docs_and_requires_a_target_when_ambiguous() {
     std::fs::create_dir_all(dir.path().join("src/two")).unwrap();
     std::fs::write(
         dir.path().join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: docs-sample
-  version: 0.1.0
-  =doc: Package-level documentation.
-targets:
-  libs:
-    - name: one
-      root: src/one
-      entry: lib.vibra
-    - name: two
-      root: src/two
-      entry: lib.vibra
+        r#"(project
+  (package "docs-sample" "0.1.0" doc: "Package-level documentation.")
+  (target one kind: lib root: "src/one" entry: "lib.vibra")
+  (target two kind: lib root: "src/two" entry: "lib.vibra"))
 "#,
     )
     .unwrap();
@@ -180,13 +171,13 @@ fn project_init_bin_template_creates_valid_project() {
     let project = dir.path().join("hello");
     let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
     let main = std::fs::read_to_string(project.join("src/hello/main.vibra")).unwrap();
-    assert!(manifest.contains("manifest-version: 1"));
+    assert!(manifest.starts_with("(project"));
     assert!(main.contains("@std/io.vibra"));
     assert!(project.join("src/hello/main.vibra").exists());
     assert!(project.join("dep/std/src/io.vibra").exists());
     assert!(!project.join("dep/std/.git").exists());
-    assert!(manifest.contains("git: https://github.com/nahharris/vibra-stdlib.git"));
-    assert!(manifest.contains("rev: 6b9fa5838e4f4122ff141e13a5ef737e99955dad"));
+    assert!(manifest.contains("git: \"https://github.com/nahharris/vibra-stdlib.git\""));
+    assert!(manifest.contains("rev: \"6b9fa5838e4f4122ff141e13a5ef737e99955dad\""));
 
     let check = vibra_cmd()
         .current_dir(dir.path())
@@ -388,22 +379,11 @@ fn project_check_rejects_invalid_manifest_shapes() {
     .unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: bad
-  version: 0.1.0
-targets:
-  libs:
-    - name: dup
-      root: src/a
-      entry: main.vibra
-  bins:
-    - name: dup
-      root: /tmp/outside
-      entry: main.vibra
-dependencies:
-  remote:
-    git: https://example.com/remote.git
+        r#"(project
+  (package "bad" "0.1.0")
+  (target dup kind: lib root: "src/a" entry: "main.vibra")
+  (target dup kind: bin root: "/tmp/outside" entry: "main.vibra")
+  (dependency remote git: "https://example.com/remote.git"))
 "#,
     )
     .unwrap();
@@ -431,19 +411,10 @@ fn project_check_rejects_abbreviated_git_revisions() {
     std::fs::write(project.join("src/app/main.vibra"), "main: 1\n").unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: short-rev
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: src/app
-      entry: main.vibra
-dependencies:
-  dep:
-    git: https://example.test/dep.git
-    rev: deadbee
+        r#"(project
+  (package "short-rev" "0.1.0")
+  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (dependency dep git: "https://example.test/dep.git" rev: "deadbee"))
 "#,
     )
     .unwrap();
@@ -470,7 +441,7 @@ fn project_check_resolves_local_dependency_without_copying_it() {
         "io:\n  $import: \"@std/io.vibra\"\nanswer: 42\n",
     )
     .unwrap();
-    let stdlib = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
+    let stdlib = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src");
 
     let project = dir.path().join("app");
     std::fs::create_dir_all(project.join("src/app")).unwrap();
@@ -482,20 +453,11 @@ fn project_check_resolves_local_dependency_without_copying_it() {
     std::fs::write(
         project.join("project.vibra"),
         format!(
-            r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: src/app
-      entry: main.vibra
-dependencies:
-  std:
-    path: {}
-  local-utils:
-    path: {}
+            r#"(project
+  (package "app" "0.1.0")
+  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (dependency std path: "{}")
+  (dependency local-utils path: "{}"))
 "#,
             path_str(&stdlib),
             path_str(&dep)
@@ -535,15 +497,9 @@ fn project_check_resolves_dependency_library_source_root() {
     std::fs::write(dep.join("src/util.vibra"), "answer: 42\n").unwrap();
     std::fs::write(
         dep.join("project.vibra"),
-        r#"manifest-version: 1
-package:
-  name: packaged-utils
-  version: 0.1.0
-targets:
-  libs:
-    - name: packaged-utils
-      root: src
-      entry: util.vibra
+        r#"(project
+  (package "packaged-utils" "0.1.0")
+  (target packaged-utils kind: lib root: "src" entry: "util.vibra"))
 "#,
     )
     .unwrap();
@@ -558,18 +514,10 @@ targets:
     std::fs::write(
         project.join("project.vibra"),
         format!(
-            r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: src/app
-      entry: main.vibra
-dependencies:
-  packaged-utils:
-    path: {}
+            r#"(project
+  (package "app" "0.1.0")
+  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (dependency packaged-utils path: "{}"))
 "#,
             path_str(&dep)
         ),
@@ -641,19 +589,10 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
     std::fs::write(
         project.join("project.vibra"),
         format!(
-            r#"manifest-version: 1
-package:
-  name: app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: src/app
-      entry: main.vibra
-dependencies:
-  math:
-    git: {}
-    rev: {}
+            r#"(project
+  (package "app" "0.1.0")
+  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (dependency math git: "{}" rev: "{}"))
 "#,
             path_str(&remote),
             rev
@@ -673,11 +612,13 @@ dependencies:
     );
     assert!(project.join("dep/math/math.vibra").exists());
     assert!(!project.join("dep/math/.git").exists());
-    let lock = std::fs::read_to_string(project.join("project.lock.vibra")).unwrap();
-    assert!(lock.contains("lock-version: 1"));
-    assert!(lock.contains(&format!("rev: {rev}")));
-    assert!(lock.contains("tree-sha256:"));
-    assert!(lock.contains("vendor-path: dep/math"));
+    let lock = std::fs::read_to_string(project.join("vibra.lock.json")).unwrap();
+    let lock_value: serde_json::Value = serde_json::from_str(&lock).unwrap();
+    assert_eq!(lock_value["lock-version"], 1);
+    assert_eq!(lock_value["packages"][0]["rev"], rev);
+    assert!(lock_value["packages"][0]["tree-sha256"].is_string());
+    assert_eq!(lock_value["packages"][0]["vendor-path"], "dep/math");
+    assert!(lock.ends_with('\n'));
     std::fs::write(project.join("dep/math/math.vibra"), "dirty: 0\n").unwrap();
 
     let dirty_check = vibra_cmd()
@@ -707,7 +648,7 @@ dependencies:
         "pi: 3\n"
     );
     assert_eq!(
-        std::fs::read_to_string(project.join("project.lock.vibra")).unwrap(),
+        std::fs::read_to_string(project.join("vibra.lock.json")).unwrap(),
         lock
     );
 
@@ -729,7 +670,7 @@ fn project_sync_vendors_nested_diamond_dependencies_package_locally() {
     let leaf = dir.path().join("leaf");
     let leaf_rev = create_git_package(&leaf, "leaf", "");
     let leaf_dependency = format!(
-        "  leaf:\n    git: {}\n    rev: {}\n",
+        "  (dependency leaf git: {:?} rev: {:?})\n",
         path_str(&leaf),
         leaf_rev
     );
@@ -744,22 +685,11 @@ fn project_sync_vendors_nested_diamond_dependencies_package_locally() {
     std::fs::write(
         project.join("project.vibra"),
         format!(
-            r#"manifest-version: 1
-package:
-  name: diamond-app
-  version: 0.1.0
-targets:
-  bins:
-    - name: app
-      root: src/app
-      entry: main.vibra
-dependencies:
-  left:
-    git: {}
-    rev: {}
-  right:
-    git: {}
-    rev: {}
+            r#"(project
+  (package "diamond-app" "0.1.0")
+  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (dependency left git: "{}" rev: "{}")
+  (dependency right git: "{}" rev: "{}"))
 "#,
             path_str(&left),
             left_rev,
@@ -782,7 +712,7 @@ dependencies:
     assert!(project.join("dep/right/dep/leaf/src/lib.vibra").exists());
     assert!(!project.join("dep/left/.git").exists());
     assert!(!project.join("dep/left/dep/leaf/.git").exists());
-    let lock = std::fs::read_to_string(project.join("project.lock.vibra")).unwrap();
+    let lock = std::fs::read_to_string(project.join("vibra.lock.json")).unwrap();
     assert!(lock.contains("dep/left/dep/leaf"));
     assert!(lock.contains("dep/right/dep/leaf"));
 
@@ -803,7 +733,7 @@ fn create_git_package(path: &Path, name: &str, dependencies: &str) -> String {
     std::fs::write(
         path.join("project.vibra"),
         format!(
-            "manifest-version: 1\npackage:\n  name: {name}\n  version: 0.1.0\ntargets:\n  libs:\n    - name: {name}\n      root: src\n      entry: lib.vibra\ndependencies:\n{dependencies}"
+            "(project\n  (package {name:?} \"0.1.0\")\n  (target {name} kind: lib root: \"src\" entry: \"lib.vibra\")\n{dependencies})\n"
         ),
     )
     .unwrap();
@@ -896,7 +826,7 @@ fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
     std::fs::write(project.join("foreign/math.wasm"), scalar_ffi_module(0)).unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        "manifest-version: 1\npackage:\n  name: ffi-app\n  version: 0.1.0\ntargets:\n  bins:\n    - name: ffi-app\n      root: src\n      entry: main.vibra\ndependencies:\n  math:\n    path: foreign\n    wasm: math.wasm\n",
+        "(project\n  (package \"ffi-app\" \"0.1.0\")\n  (target ffi-app kind: bin root: \"src\" entry: \"main.vibra\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
@@ -1061,7 +991,7 @@ fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
     std::fs::write(project.join("foreign/text.wasm"), buffer_ffi_module()).unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        "manifest-version: 1\npackage:\n  name: ffi-buffer-app\n  version: 0.1.0\ntargets:\n  bins:\n    - name: ffi-buffer-app\n      root: src\n      entry: main.vibra\ndependencies:\n  text-ffi:\n    path: foreign\n    wasm: text.wasm\n",
+        "(project\n  (package \"ffi-buffer-app\" \"0.1.0\")\n  (target ffi-buffer-app kind: bin root: \"src\" entry: \"main.vibra\")\n  (dependency text-ffi path: \"foreign\" wasm: \"text.wasm\"))\n",
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
@@ -1147,7 +1077,7 @@ fn runtime_plugin_load_is_capability_gated_typed_and_deterministic() {
     std::fs::write(project.join("plugins/math.wasm"), scalar_ffi_module(0)).unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        "manifest-version: 1\npackage:\n  name: plugin-host\n  version: 0.1.0\ntargets:\n  bins:\n    - name: plugin-host\n      root: src\n      entry: main.vibra\nplugin-interfaces:\n  arithmetic:\n    functions:\n      sum:\n        params: [int32, int32]\n        result: int32\n",
+        "(project\n  (package \"plugin-host\" \"0.1.0\")\n  (target plugin-host kind: bin root: \"src\" entry: \"main.vibra\")\n  (plugin-interface arithmetic\n    (function sum params: (int32 int32) result: int32)))\n",
     ).unwrap();
     let plugin = project.join("plugins/math.wasm");
     let base = vec![
@@ -1181,7 +1111,7 @@ fn runtime_plugin_load_is_capability_gated_typed_and_deterministic() {
     let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        manifest.replace("params: [int32, int32]", "params: [int64, int64]"),
+        manifest.replace("(int32 int32)", "(int64 int64)"),
     )
     .unwrap();
     let mismatch = vibra_cmd().args(&approved_args).output().unwrap();

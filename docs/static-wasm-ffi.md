@@ -4,14 +4,11 @@ Vibra's first foreign-function boundary is static WebAssembly linking. It does
 not load code at runtime and does not define a native ABI. A project dependency
 may expose one package-relative `.wasm` artifact:
 
-```yaml
-dependencies:
-  math:
-    path: foreign/math
-    wasm: math.wasm
+```vibra
+(dependency math path: "foreign/math" wasm: "math.wasm")
 ```
 
-Git dependencies use the same `wasm` field alongside `git` and exact `rev`;
+Git dependencies use the same `wasm:` label alongside `git:` and exact `rev:`;
 the artifact is resolved inside the synced `dep/<alias>` tree. Absolute paths
 and traversal are rejected. The dependency alias is the stable module name:
 

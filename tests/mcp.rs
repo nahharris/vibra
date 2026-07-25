@@ -48,7 +48,7 @@ fn write_project(root: &Path) {
     std::fs::create_dir_all(root.join("tests")).unwrap();
     std::fs::write(
         root.join("project.vibra"),
-        "manifest-version: 1\npackage:\n  name: mcp-fixture\n  version: 0.1.0\ntargets:\n  bins:\n    - name: app\n      root: src\n      entry: main.vibra\n",
+        "(project\n  (package \"mcp-fixture\" \"0.1.0\")\n  (target app kind: bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     std::fs::write(
