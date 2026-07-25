@@ -1,0 +1,8 @@
+greet:
+  $function: $void
+  =doc: Greets from a local package.
+  return: $void
+  do:
+    - $let:
+        value: 1
+

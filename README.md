@@ -306,6 +306,9 @@ Conditional compilation uses `initializationOptions.compilationFlags`; clients
 may replace the active set through `workspace/didChangeConfiguration` at
 `settings.vibra.compilationFlags`. Both fields use the shape documented by
 [`schemas/lsp-compilation-options.schema.json`](schemas/lsp-compilation-options.schema.json).
+Ready-to-copy Visual Studio Code and Neovim setup, multi-package workspace
+guidance, and the measured medium-project performance contract are in
+[`docs/editor-support.md`](docs/editor-support.md).
 
 ### Model Context Protocol server
 
