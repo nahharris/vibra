@@ -1,5 +1,8 @@
 //! Formatter and JSON-first linter support for the Vibra CLI.
 
+pub use crate::diagnostics::{
+    file_uri, Category, Diagnostic, Position, RelatedDiagnostic, Severity, Span,
+};
 use crate::{load, lower};
 use anyhow::{bail, Context, Result};
 use glob::glob;
@@ -20,57 +23,6 @@ pub enum ToolOutputFormat {
 pub enum LintOutputFormat {
     Json,
     Sarif,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Error,
-    Warning,
-    Info,
-    Hint,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Category {
-    Style,
-    Syntax,
-    Compile,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Position {
-    pub line: usize,
-    pub column: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub offset: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Span {
-    pub uri: String,
-    pub start: Position,
-    pub end: Position,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RelatedDiagnostic {
-    pub message: String,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Diagnostic {
-    pub code: String,
-    pub message: String,
-    pub severity: Severity,
-    pub span: Span,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub related: Option<Vec<RelatedDiagnostic>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fix: Option<Vec<serde_json::Value>>,
-    #[serde(skip)]
-    pub category: Category,
 }
 
 #[derive(Debug, Serialize)]
@@ -765,28 +717,6 @@ fn is_vibra_file(path: &Path) -> bool {
 
 fn display_path(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
-}
-
-fn file_uri(path: &Path) -> String {
-    let absolute = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let mut s = absolute.display().to_string().replace('\\', "/");
-    if !s.starts_with('/') {
-        s = format!("/{s}");
-    }
-    format!("file://{}", percent_encode_uri_path(&s))
-}
-
-fn percent_encode_uri_path(path: &str) -> String {
-    let mut out = String::new();
-    for byte in path.as_bytes() {
-        match *byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
-                out.push(char::from(*byte))
-            }
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
 }
 
 #[derive(Debug, Default)]
