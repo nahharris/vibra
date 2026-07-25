@@ -16,7 +16,7 @@ use super::{
     lower_expression_node_with_id, lower_pattern_node_with_id, lower_top_level_node_with_id,
     lower_type_node_with_id, AstError, DocumentId, Expr, ExprKind, Function, Macro, MacroExpr,
     MacroExprKind, Module, Origin, Pattern, PatternKind, SourceLocation, Spanned, SyntaxCategory,
-    TopLevel, TypeExpr, TypeExprKind, Visibility,
+    TopLevel, TypeExpr, TypeExprKind, Visibility, WasmArgument,
 };
 
 // Keep recursive expansion below the smallest supported native thread stack.
@@ -490,6 +490,16 @@ fn expand_expr(
             value: Box::new(expand_expr(*value, macros, state, depth)?),
             into: expand_type(into, macros, state, depth)?,
         },
+        ExprKind::Template { path, bindings } => ExprKind::Template {
+            path,
+            bindings: bindings
+                .into_iter()
+                .map(|mut binding| {
+                    binding.value = expand_expr(binding.value, macros, state, depth)?;
+                    Ok(binding)
+                })
+                .collect::<Result<_, _>>()?,
+        },
         ExprKind::Task { captures, body } => ExprKind::Task {
             captures,
             body: expand_exprs(body, macros, state, depth)?,
@@ -631,13 +641,10 @@ fn map_type_children(
         TypeExprKind::Intersect(values) => {
             TypeExprKind::Intersect(values.into_iter().map(&mut map).collect::<Result<_, _>>()?)
         }
-        TypeExprKind::Domain { head, arguments } => TypeExprKind::Domain {
-            head,
-            arguments: arguments
-                .into_iter()
-                .map(&mut map)
-                .collect::<Result<_, _>>()?,
-        },
+        TypeExprKind::Policy(domains) => TypeExprKind::Policy(domains),
+        TypeExprKind::Capability { domain, groups } => TypeExprKind::Capability { domain, groups },
+        TypeExprKind::Handle(access) => TypeExprKind::Handle(access),
+        TypeExprKind::WasmValue(name) => TypeExprKind::WasmValue(name),
         other => other,
     })
 }
@@ -1189,6 +1196,16 @@ fn substitute_expr_kind(
             value: Box::new(one(*value)?),
             into: substitute_type(into, environment)?,
         },
+        ExprKind::Template { path, bindings } => ExprKind::Template {
+            path,
+            bindings: bindings
+                .into_iter()
+                .map(|mut binding| {
+                    binding.value = one(binding.value)?;
+                    Ok(binding)
+                })
+                .collect::<Result<_, _>>()?,
+        },
         ExprKind::Task { captures, body } => ExprKind::Task {
             captures,
             body: substitute_exprs(body, environment, call_origin)?,
@@ -1698,6 +1715,33 @@ fn hygienize_expr(
                 definition_symbols,
             );
         }
+        ExprKind::Template {
+            bindings: fields, ..
+        } => {
+            for field in fields {
+                let mut field_scope = bindings.clone();
+                hygienize_expr(
+                    &mut field.value,
+                    definition_document,
+                    definition_span,
+                    hygiene_id,
+                    &mut field_scope,
+                    caller_alias,
+                    definition_symbols,
+                );
+            }
+        }
+        ExprKind::Wasm { arguments, .. } => {
+            for argument in arguments {
+                if let WasmArgument::Parameter(name) = argument {
+                    if generated {
+                        if let Some(replacement) = bindings.get(&name.value) {
+                            name.value = replacement.clone();
+                        }
+                    }
+                }
+            }
+        }
         ExprKind::Task { captures, body } => {
             for capture in captures {
                 if generated {
@@ -1943,21 +1987,11 @@ fn qualify_generated_type_names(
                 definition_symbols,
             );
         }
-        TypeExprKind::Domain { head, arguments } => {
-            if generated {
-                qualify_definition_reference(&mut head.value, caller_alias, definition_symbols);
-            }
-            for argument in arguments {
-                qualify_generated_type_names(
-                    argument,
-                    definition_document,
-                    definition_span,
-                    caller_alias,
-                    definition_symbols,
-                );
-            }
-        }
-        TypeExprKind::Named(_) => {}
+        TypeExprKind::Policy(_)
+        | TypeExprKind::Capability { .. }
+        | TypeExprKind::WasmValue(_)
+        | TypeExprKind::Handle(_)
+        | TypeExprKind::Named(_) => {}
     }
 }
 
@@ -2158,6 +2192,34 @@ fn annotate_generated_expr(
             annotate_generated_expr(value, definition, call, state)?;
             annotate_generated_type(into, definition, call, state)?;
         }
+        ExprKind::Embed { path, format } => {
+            annotate_generated_name(path, definition, call, state)?;
+            annotate_generated_origin(&mut format.origin, definition, call, state)?;
+        }
+        ExprKind::Template { path, bindings } => {
+            annotate_generated_name(path, definition, call, state)?;
+            for binding in bindings {
+                annotate_generated_name(&mut binding.name, definition, call, state)?;
+                annotate_generated_expr(&mut binding.value, definition, call, state)?;
+            }
+        }
+        ExprKind::Wasm { import, arguments } => {
+            annotate_generated_name(&mut import.module, definition, call, state)?;
+            annotate_generated_name(&mut import.name, definition, call, state)?;
+            for argument in arguments {
+                match argument {
+                    WasmArgument::Parameter(name) => {
+                        annotate_generated_name(name, definition, call, state)?;
+                    }
+                    WasmArgument::ConstInt(value) => {
+                        annotate_generated_origin(&mut value.origin, definition, call, state)?;
+                    }
+                    WasmArgument::ConstString(value) => {
+                        annotate_generated_name(value, definition, call, state)?;
+                    }
+                }
+            }
+        }
         ExprKind::Task { captures, body } => {
             for capture in captures {
                 annotate_generated_name(capture, definition, call, state)?;
@@ -2239,11 +2301,57 @@ fn annotate_generated_type(
             }
             annotate_generated_type(result, definition, call, state)?;
         }
-        TypeExprKind::Domain { head, arguments } => {
-            annotate_generated_name(head, definition, call, state)?;
-            for argument in arguments {
-                annotate_generated_type(argument, definition, call, state)?;
+        TypeExprKind::Policy(domains) => {
+            for domain in domains {
+                annotate_generated_origin(&mut domain.origin, definition, call, state)?;
+                annotate_generated_name(&mut domain.name, definition, call, state)?;
+                for group in &mut domain.groups {
+                    annotate_generated_origin(&mut group.origin, definition, call, state)?;
+                    annotate_generated_origin(
+                        &mut group.requirement.origin,
+                        definition,
+                        call,
+                        state,
+                    )?;
+                    for scope in &mut group.scopes {
+                        annotate_generated_origin(&mut scope.origin, definition, call, state)?;
+                        match &mut scope.value {
+                            super::PolicyScopeKind::Any => {}
+                            super::PolicyScopeKind::File(value)
+                            | super::PolicyScopeKind::Dir(value)
+                            | super::PolicyScopeKind::Exact(value)
+                            | super::PolicyScopeKind::Prefix(value) => {
+                                annotate_generated_name(value, definition, call, state)?;
+                            }
+                        }
+                    }
+                }
             }
+        }
+        TypeExprKind::Capability { domain, groups } => {
+            annotate_generated_name(domain, definition, call, state)?;
+            for group in groups {
+                annotate_generated_origin(&mut group.origin, definition, call, state)?;
+                annotate_generated_origin(&mut group.requirement.origin, definition, call, state)?;
+                for scope in &mut group.scopes {
+                    annotate_generated_origin(&mut scope.origin, definition, call, state)?;
+                    match &mut scope.value {
+                        super::PolicyScopeKind::Any => {}
+                        super::PolicyScopeKind::File(value)
+                        | super::PolicyScopeKind::Dir(value)
+                        | super::PolicyScopeKind::Exact(value)
+                        | super::PolicyScopeKind::Prefix(value) => {
+                            annotate_generated_name(value, definition, call, state)?;
+                        }
+                    }
+                }
+            }
+        }
+        TypeExprKind::WasmValue(name) => {
+            annotate_generated_name(name, definition, call, state)?;
+        }
+        TypeExprKind::Handle(access) => {
+            annotate_generated_origin(&mut access.origin, definition, call, state)?;
         }
         TypeExprKind::Named(_) => {}
     }
@@ -2538,6 +2646,148 @@ mod tests {
             Origin::DocumentExpansion { .. }
         ));
         assert_eq!(inner.origin.document_id(), Some(DocumentId::from_raw(8)));
+    }
+
+    #[test]
+    fn expands_detailed_security_types_with_nested_origins() {
+        let source = r#"
+(macro secure ((ignored type-syntax)) type-syntax
+  (do (quote type-syntax
+    (policy
+      (fs-read
+        (group requirement: mandatory scopes: ((dir "src"))))))))
+(def root-policy (secure int64))
+"#;
+        let expanded = expand_typed_macros(module(source, 31)).unwrap();
+        let TopLevel::Definition(definition) = &expanded.forms[0] else {
+            panic!("expected definition");
+        };
+        let TypeExprKind::Policy(domains) = &definition.body.value else {
+            panic!("expected expanded policy");
+        };
+        assert_eq!(domains[0].name.value, "fs-read");
+        assert!(matches!(
+            domains[0].groups[0].scopes[0].value,
+            super::super::PolicyScopeKind::Dir(ref value) if value.value == "src"
+        ));
+        assert!(matches!(
+            domains[0].name.origin,
+            Origin::DocumentExpansion { .. }
+        ));
+        assert!(matches!(
+            domains[0].groups[0].scopes[0].origin,
+            Origin::DocumentExpansion { .. }
+        ));
+        assert!(matches!(
+            domains[0].groups[0].origin,
+            Origin::DocumentExpansion { .. }
+        ));
+        assert!(matches!(
+            domains[0].groups[0].requirement.origin,
+            Origin::DocumentExpansion { .. }
+        ));
+    }
+
+    #[test]
+    fn imported_macros_never_qualify_closed_semantic_type_tokens() {
+        let helper_path = PathBuf::from("helper.vibra");
+        let caller_path = PathBuf::from("main.vibra");
+        let helper = module(
+            r#"
+(def fs-read int64)
+(def i32 int64)
+(macro host-types ((ignored type-syntax)) type-syntax
+  (do (quote type-syntax
+    (tuple
+      (policy (fs-read (group requirement: mandatory scopes: ((any)))))
+      (capability fs-read)
+      (wasm i32)))))
+"#,
+            41,
+        );
+        let caller = module(
+            r#"(import helper "helper.vibra")
+(def host (helper.host-types int64))
+"#,
+            42,
+        );
+        let expanded = expand_typed_macro_program(
+            BTreeMap::from([
+                (helper_path.clone(), vec![helper]),
+                (caller_path.clone(), vec![caller]),
+            ]),
+            &BTreeMap::from([(
+                caller_path.clone(),
+                BTreeMap::from([("helper".to_string(), helper_path)]),
+            )]),
+        )
+        .unwrap();
+        let TopLevel::Definition(definition) = &expanded[&caller_path][0].forms[1] else {
+            panic!("expected definition");
+        };
+        let TypeExprKind::Tuple(types) = &definition.body.value else {
+            panic!("expected tuple");
+        };
+        let TypeExprKind::Policy(domains) = &types[0].value else {
+            panic!("expected policy");
+        };
+        assert_eq!(domains[0].name.value, "fs-read");
+        assert!(matches!(
+            types[1].value,
+            TypeExprKind::Capability { ref domain, .. } if domain.value == "fs-read"
+        ));
+        assert!(matches!(
+            types[2].value,
+            TypeExprKind::WasmValue(ref name) if name.value == "i32"
+        ));
+    }
+
+    #[test]
+    fn expands_compile_time_forms_and_traverses_template_and_wasm_children() {
+        let source = r#"
+(macro resources ((value expr-syntax)) expr-syntax
+  (do (quote expr-syntax
+    (do
+      (let output (unquote value))
+      (embed "message.txt" format: text)
+      (template "message.mustache" with: (record (name (unquote value))))
+      (wasm
+        import: (import "vibra:host/abi@1" "io_write")
+        args: ((arg output) (const 1)))))))
+(fn main () void (do (resources "Vibra")))
+"#;
+        let expanded = expand_typed_macros(module(source, 32)).unwrap();
+        let TopLevel::Function(function) = &expanded.forms[0] else {
+            panic!("expected function");
+        };
+        let ExprKind::Do(values) = &function.body[0].value else {
+            panic!("expected expanded body");
+        };
+        let ExprKind::Let { name, .. } = &values[0].value else {
+            panic!("expected generated binding");
+        };
+        assert_eq!(name.value, "output--macro-1");
+        let ExprKind::Template { bindings, .. } = &values[2].value else {
+            panic!("expected template");
+        };
+        assert!(matches!(
+            bindings[0].value.value,
+            ExprKind::Literal(super::super::Literal::String(ref value)) if value == "Vibra"
+        ));
+        let ExprKind::Wasm { arguments, .. } = &values[3].value else {
+            panic!("expected wasm body");
+        };
+        assert!(matches!(
+            arguments[0],
+            WasmArgument::Parameter(ref name) if name.value == "output--macro-1"
+        ));
+        assert!(matches!(values[1].origin, Origin::DocumentExpansion { .. }));
+        let ExprKind::Embed { format, .. } = &values[1].value else {
+            panic!("expected embed");
+        };
+        assert!(matches!(format.origin, Origin::DocumentExpansion { .. }));
+        assert!(matches!(values[2].origin, Origin::DocumentExpansion { .. }));
+        assert!(matches!(values[3].origin, Origin::DocumentExpansion { .. }));
     }
 
     #[test]

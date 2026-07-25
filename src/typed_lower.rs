@@ -9,7 +9,8 @@ use crate::ast::{
 };
 use crate::lower::{
     CapabilityDomain, CapabilityType, HandleAccess, ImplBody, ImplKey, ImplMethodBinding,
-    PolicyType, TypeAlias, TypeRef,
+    PolicyGroup as LowerPolicyGroup, PolicyRequirement as LowerPolicyRequirement,
+    PolicyScope as LowerPolicyScope, PolicyType, TypeAlias, TypeRef,
 };
 use anyhow::{bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -555,110 +556,75 @@ pub(crate) fn lower_type(
         TypeExprKind::Intersect(items) => {
             TypeRef::Intersect(items.iter().map(lower).collect::<Result<_>>()?)
         }
-        TypeExprKind::Domain { head, arguments } => lower_domain_type(
-            &head.value,
-            arguments,
-            generics,
-            module_alias,
-            declared_aliases,
-        )?,
+        TypeExprKind::Policy(policy_domains) => {
+            let mut domains = BTreeMap::new();
+            for domain in policy_domains {
+                let name = domain
+                    .name
+                    .value
+                    .parse::<CapabilityDomain>()
+                    .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?;
+                if domains
+                    .insert(name, lower_policy_groups(&domain.groups))
+                    .is_some()
+                {
+                    bail!("typed `policy` repeats domain `{name}`");
+                }
+            }
+            TypeRef::Policy(PolicyType { domains })
+        }
+        TypeExprKind::Capability { domain, groups } => TypeRef::Capability(CapabilityType {
+            domain: domain
+                .value
+                .parse::<CapabilityDomain>()
+                .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?,
+            groups: lower_policy_groups(groups),
+        }),
+        TypeExprKind::Handle(access) => TypeRef::HostHandle(match access.value {
+            crate::ast::HandleAccess::Read => HandleAccess::Read,
+            crate::ast::HandleAccess::Write => HandleAccess::Write,
+            crate::ast::HandleAccess::ReadWrite => HandleAccess::ReadWrite,
+            crate::ast::HandleAccess::Process => HandleAccess::Process,
+        }),
+        TypeExprKind::WasmValue(name) => match name.value.as_str() {
+            "i32" => TypeRef::Int32,
+            "i64" => TypeRef::Int64,
+            "f32" => TypeRef::Float32,
+            "f64" => TypeRef::Float64,
+            other => bail!("typed `wasm` type must name an ABI scalar, got `{other}`"),
+        },
     })
 }
 
-fn lower_domain_type(
-    head: &str,
-    arguments: &[TypeExpr],
-    generics: &BTreeSet<String>,
-    module_alias: &str,
-    declared_aliases: &BTreeSet<String>,
-) -> Result<TypeRef> {
-    let named_argument = |position: usize| -> Result<&str> {
-        let Some(argument) = arguments.get(position) else {
-            bail!(
-                "typed domain type `{head}` is missing argument {}",
-                position + 1
-            );
-        };
-        let TypeExprKind::Named(name) = &argument.value else {
-            bail!(
-                "typed domain type `{head}` argument {} must be a name",
-                position + 1
-            );
-        };
-        Ok(name)
-    };
-    match head {
-        "capability" => {
-            if arguments.len() != 1 {
-                bail!("typed `capability` expects exactly one domain name");
-            }
-            let domain = named_argument(0)?
-                .parse::<CapabilityDomain>()
-                .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?;
-            Ok(TypeRef::Capability(CapabilityType {
-                domain,
-                groups: Vec::new(),
-            }))
-        }
-        "handle" => {
-            if arguments.len() != 1 {
-                bail!("typed `handle` expects exactly one access name");
-            }
-            let access = match named_argument(0)? {
-                "read" => HandleAccess::Read,
-                "write" => HandleAccess::Write,
-                "read-write" => HandleAccess::ReadWrite,
-                "process" => HandleAccess::Process,
-                other => bail!("E-CAP-004: unknown opaque handle type `handle {other}`"),
-            };
-            Ok(TypeRef::HostHandle(access))
-        }
-        "policy" => {
-            if arguments.is_empty() {
-                bail!("typed `policy` expects at least one domain name");
-            }
-            let mut domains = BTreeMap::new();
-            for position in 0..arguments.len() {
-                let domain = named_argument(position)?
-                    .parse::<CapabilityDomain>()
-                    .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?;
-                if domains.insert(domain, Vec::new()).is_some() {
-                    bail!("typed `policy` repeats domain `{domain}`");
-                }
-            }
-            Ok(TypeRef::Policy(PolicyType { domains }))
-        }
-        "wasm" => {
-            if arguments.len() != 1 {
-                bail!("typed `wasm` expects exactly one scalar type");
-            }
-            let ty = match &arguments[0].value {
-                TypeExprKind::Named(name) => match name.as_str() {
-                    "i32" => TypeRef::Int32,
-                    "i64" => TypeRef::Int64,
-                    "f32" => TypeRef::Float32,
-                    "f64" => TypeRef::Float64,
-                    _ => lower_type(&arguments[0], generics, module_alias, declared_aliases)?,
-                },
-                _ => lower_type(&arguments[0], generics, module_alias, declared_aliases)?,
-            };
-            if !matches!(
-                ty,
-                TypeRef::Bool
-                    | TypeRef::Int32
-                    | TypeRef::UInt32
-                    | TypeRef::Int64
-                    | TypeRef::UInt64
-                    | TypeRef::Float32
-                    | TypeRef::Float64
-                    | TypeRef::Void
-            ) {
-                bail!("typed `wasm` type must wrap an ABI scalar, got {ty:?}");
-            }
-            Ok(ty)
-        }
-        _ => unreachable!("surface parser only creates known domain heads"),
-    }
+fn lower_policy_groups(groups: &[crate::ast::PolicyGroup]) -> Vec<LowerPolicyGroup> {
+    groups
+        .iter()
+        .map(|group| LowerPolicyGroup {
+            requirement: match group.requirement.value {
+                crate::ast::PolicyRequirement::Mandatory => LowerPolicyRequirement::Mandatory,
+                crate::ast::PolicyRequirement::Optional => LowerPolicyRequirement::Optional,
+            },
+            scopes: group
+                .scopes
+                .iter()
+                .map(|scope| match &scope.value {
+                    crate::ast::PolicyScopeKind::Any => LowerPolicyScope::Any,
+                    crate::ast::PolicyScopeKind::File(value) => {
+                        LowerPolicyScope::File(value.value.clone())
+                    }
+                    crate::ast::PolicyScopeKind::Dir(value) => {
+                        LowerPolicyScope::Dir(value.value.clone())
+                    }
+                    crate::ast::PolicyScopeKind::Exact(value) => {
+                        LowerPolicyScope::Exact(value.value.clone())
+                    }
+                    crate::ast::PolicyScopeKind::Prefix(value) => {
+                        LowerPolicyScope::Prefix(value.value.clone())
+                    }
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 fn resolve_impl_method_references(index: &mut TypedSignatureIndex) -> Result<()> {
@@ -1412,7 +1378,7 @@ mod tests {
    (shared (ref str))
    (exclusive (mut-ref int64))
    (raw (wasm i32)))
-  (policy clock random)
+  (policy (clock) (random))
   (do (return unit)))"#,
             6,
         );

@@ -16,7 +16,6 @@ use crate::ast::{
 };
 use crate::frontend::{SourceModule, SurfaceProgram};
 use crate::project_context::{self, ProjectImportContext};
-use crate::syntax::Node;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedTypedDocumentation {
@@ -36,16 +35,24 @@ pub struct StagedSourceLocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StagedExpectedError {
-    pub phase: String,
-    pub code: String,
-    pub message: Option<String>,
+pub enum StagedExpectedError {
+    Load {
+        code: String,
+        message: Option<String>,
+    },
+    Compile {
+        code: String,
+        message: Option<String>,
+    },
+    Runtime {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedTestClock {
-    pub mode: String,
-    pub millis: i64,
+    pub unix_millis: i64,
+    pub monotonic_millis: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,9 +63,6 @@ pub struct StagedTypedTest {
     pub expect_error: Option<StagedExpectedError>,
     pub clock: Option<StagedTestClock>,
     pub workspace: Option<String>,
-    /// The typed surface deliberately retains benchmark configuration as CST
-    /// until the benchmark schema is migrated.
-    pub benchmark: Option<Node>,
     pub module: PathBuf,
     pub source_part: PathBuf,
     pub source: StagedSourceLocation,
@@ -68,18 +72,20 @@ pub struct StagedTypedTest {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StagedTestMetadata {
     Tags(Vec<StagedMetadataValue<String>>),
-    ExpectError {
-        phase: StagedMetadataValue<String>,
+    LoadError {
         code: StagedMetadataValue<String>,
         message: Option<StagedMetadataValue<String>>,
     },
-    Clock {
-        mode: StagedMetadataValue<String>,
-        millis: StagedMetadataValue<i64>,
+    CompileError {
+        code: StagedMetadataValue<String>,
+        message: Option<StagedMetadataValue<String>>,
     },
-    Benchmark {
-        node: Node,
-        source: StagedSourceLocation,
+    RuntimeError {
+        message: StagedMetadataValue<String>,
+    },
+    Clock {
+        unix_millis: StagedMetadataValue<i64>,
+        monotonic_millis: StagedMetadataValue<i64>,
     },
     Workspace(StagedMetadataValue<String>),
 }
@@ -128,7 +134,6 @@ pub fn staged_discover_typed_tests(program: &SurfaceProgram) -> Result<Vec<Stage
                 expect_error: None,
                 clock: None,
                 workspace: None,
-                benchmark: None,
                 module: module.path.clone(),
                 source_part: part.path.clone(),
                 source: StagedSourceLocation {
@@ -147,42 +152,54 @@ pub fn staged_discover_typed_tests(program: &SurfaceProgram) -> Result<Vec<Stage
                                 .collect(),
                         ));
                     }
-                    TestMeta::ExpectError {
-                        phase,
-                        code,
-                        message,
+                    TestMeta::ExpectError(expected) => match expected {
+                        crate::ast::ExpectedError::Load { code, message } => {
+                            discovered.expect_error = Some(StagedExpectedError::Load {
+                                code: code.value.clone(),
+                                message: message.as_ref().map(|value| value.value.clone()),
+                            });
+                            discovered.metadata.push(StagedTestMetadata::LoadError {
+                                code: metadata_value(part.module.document_id, code),
+                                message: message
+                                    .as_ref()
+                                    .map(|value| metadata_value(part.module.document_id, value)),
+                            });
+                        }
+                        crate::ast::ExpectedError::Compile { code, message } => {
+                            discovered.expect_error = Some(StagedExpectedError::Compile {
+                                code: code.value.clone(),
+                                message: message.as_ref().map(|value| value.value.clone()),
+                            });
+                            discovered.metadata.push(StagedTestMetadata::CompileError {
+                                code: metadata_value(part.module.document_id, code),
+                                message: message
+                                    .as_ref()
+                                    .map(|value| metadata_value(part.module.document_id, value)),
+                            });
+                        }
+                        crate::ast::ExpectedError::Runtime { message } => {
+                            discovered.expect_error = Some(StagedExpectedError::Runtime {
+                                message: message.value.clone(),
+                            });
+                            discovered.metadata.push(StagedTestMetadata::RuntimeError {
+                                message: metadata_value(part.module.document_id, message),
+                            });
+                        }
+                    },
+                    TestMeta::Clock {
+                        unix_millis,
+                        monotonic_millis,
                     } => {
-                        discovered.expect_error = Some(StagedExpectedError {
-                            phase: phase.value.clone(),
-                            code: code.value.clone(),
-                            message: message.as_ref().map(|message| message.value.clone()),
-                        });
-                        discovered.metadata.push(StagedTestMetadata::ExpectError {
-                            phase: metadata_value(part.module.document_id, phase),
-                            code: metadata_value(part.module.document_id, code),
-                            message: message
-                                .as_ref()
-                                .map(|value| metadata_value(part.module.document_id, value)),
-                        });
-                    }
-                    TestMeta::Clock { mode, millis } => {
                         discovered.clock = Some(StagedTestClock {
-                            mode: mode.value.clone(),
-                            millis: millis.value,
+                            unix_millis: unix_millis.value,
+                            monotonic_millis: monotonic_millis.value,
                         });
                         discovered.metadata.push(StagedTestMetadata::Clock {
-                            mode: metadata_value(part.module.document_id, mode),
-                            millis: metadata_value(part.module.document_id, millis),
-                        });
-                    }
-                    TestMeta::Benchmark(node) => {
-                        discovered.benchmark = Some(node.clone());
-                        discovered.metadata.push(StagedTestMetadata::Benchmark {
-                            node: node.clone(),
-                            source: StagedSourceLocation {
-                                document: part.module.document_id,
-                                span: node.span,
-                            },
+                            unix_millis: metadata_value(part.module.document_id, unix_millis),
+                            monotonic_millis: metadata_value(
+                                part.module.document_id,
+                                monotonic_millis,
+                            ),
                         });
                     }
                     TestMeta::Workspace(name) => {
@@ -194,6 +211,10 @@ pub fn staged_discover_typed_tests(program: &SurfaceProgram) -> Result<Vec<Stage
                                 name,
                             )));
                     }
+                    TestMeta::TimeoutMillis(_)
+                    | TestMeta::RandomSeed(_)
+                    | TestMeta::Skip(_)
+                    | TestMeta::Policy(_) => {}
                 }
             }
             tests.push(discovered);
@@ -535,8 +556,7 @@ mod tests {
             "(test measured core (do unit)\n\
              tags: (slow arithmetic)\n\
              expect-error: (compile E-OP-002 \"overflow\")\n\
-             clock: (fixed 42)\n\
-             benchmark: (iterations 100)\n\
+             clock: (fixed 42 7)\n\
              workspace: temp)\n",
         );
         write(
@@ -558,8 +578,7 @@ mod tests {
         assert_eq!(measured.tags, ["slow", "arithmetic"]);
         assert_eq!(
             measured.expect_error,
-            Some(StagedExpectedError {
-                phase: "compile".into(),
+            Some(StagedExpectedError::Compile {
                 code: "E-OP-002".into(),
                 message: Some("overflow".into()),
             })
@@ -567,13 +586,11 @@ mod tests {
         assert_eq!(
             measured.clock,
             Some(StagedTestClock {
-                mode: "fixed".into(),
-                millis: 42,
+                unix_millis: 42,
+                monotonic_millis: 7,
             })
         );
         assert_eq!(measured.workspace.as_deref(), Some("temp"));
-        let benchmark = measured.benchmark.as_ref().unwrap();
-        assert!(matches!(benchmark.kind, crate::syntax::NodeKind::List(_)));
         assert!(measured.source_part.ends_with("main.test.vibra"));
         assert_eq!(
             measured.source.document,
@@ -582,9 +599,10 @@ mod tests {
         assert!(measured.metadata.iter().all(|metadata| {
             let source = match metadata {
                 StagedTestMetadata::Tags(values) => values[0].source,
-                StagedTestMetadata::ExpectError { phase, .. } => phase.source,
-                StagedTestMetadata::Clock { mode, .. } => mode.source,
-                StagedTestMetadata::Benchmark { source, .. } => *source,
+                StagedTestMetadata::LoadError { code, .. }
+                | StagedTestMetadata::CompileError { code, .. } => code.source,
+                StagedTestMetadata::RuntimeError { message } => message.source,
+                StagedTestMetadata::Clock { unix_millis, .. } => unix_millis.source,
                 StagedTestMetadata::Workspace(value) => value.source,
             };
             source.document == measured.source.document && source.span.end > source.span.start
