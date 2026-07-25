@@ -28,6 +28,11 @@ fn main() -> Result<()> {
     let mut report = Report::default();
     for path in files {
         report.scanned += 1;
+        let display = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
         let source = fs::read_to_string(&path)?;
         if source.trim_start().starts_with('(') {
             report.already_sexpr += 1;
@@ -40,11 +45,14 @@ fn main() -> Result<()> {
                     Ok(()) => report.valid += 1,
                     Err(error) => record_issue(
                         &mut report,
-                        format!("typed-validation: {}", first_line(&error.to_string())),
+                        format!(
+                            "{display}: typed-validation: {}",
+                            first_line(&error.to_string())
+                        ),
                     ),
                 }
             }
-            Err(error) => record_issue(&mut report, format!("{error:#}")),
+            Err(error) => record_issue(&mut report, format!("{display}: {error:#}")),
         }
     }
 
@@ -185,14 +193,14 @@ fn test_form(name: &str, profile: &Value, map: &Mapping) -> Result<String> {
             attrs.push(format!("{key}: {}", metadata_value(key, value)?));
         }
     }
-    if get(map, "expect-error").is_some() {
-        bail!("unsupported-test-expect-error");
+    if let Some(value) = get(map, "expect-error") {
+        attrs.push(format!("expect-error: {}", expected_error(value)?));
     }
-    if get(map, "clock").is_some() {
-        bail!("unsupported-test-clock");
+    if let Some(value) = get(map, "clock") {
+        attrs.push(format!("clock: {}", clock(value)?));
     }
-    if get(map, "policy").is_some() {
-        bail!("unsupported-test-policy");
+    if let Some(value) = get(map, "policy") {
+        attrs.push(format!("policy: {}", ty(value)?));
     }
     Ok(format!(
         "(test {} {} {}{})",
@@ -203,6 +211,48 @@ fn test_form(name: &str, profile: &Value, map: &Mapping) -> Result<String> {
             .into_iter()
             .map(|v| format!(" {v}"))
             .collect::<String>()
+    ))
+}
+
+fn expected_error(value: &Value) -> Result<String> {
+    let map = value.as_mapping().context("expect-error-not-mapping")?;
+    only_known(map, &["phase", "code", "message-contains"])?;
+    let phase = as_str(
+        get(map, "phase").context("expect-error-missing-phase")?,
+        "phase",
+    )?;
+    match phase {
+        "load" | "compile" => {
+            let code = sym(as_str(
+                get(map, "code").context("expect-error-missing-code")?,
+                "code",
+            )?);
+            Ok(match get(map, "message-contains") {
+                Some(message) => format!(
+                    "({phase} {code} {})",
+                    quoted(as_str(message, "message-contains")?)
+                ),
+                None => format!("({phase} {code})"),
+            })
+        }
+        "runtime" => Ok(format!(
+            "(runtime {})",
+            quoted(as_str(
+                get(map, "message-contains").context("runtime-missing-message")?,
+                "message-contains"
+            )?)
+        )),
+        _ => bail!("unknown-expect-error-phase-{phase}"),
+    }
+}
+
+fn clock(value: &Value) -> Result<String> {
+    let map = value.as_mapping().context("clock-not-mapping")?;
+    only_known(map, &["unix-millis", "monotonic-millis"])?;
+    Ok(format!(
+        "(fixed {} {})",
+        expr(get(map, "unix-millis").context("clock-missing-unix-millis")?)?,
+        expr(get(map, "monotonic-millis").context("clock-missing-monotonic-millis")?)?
     ))
 }
 
@@ -295,6 +345,20 @@ fn statement(value: &Value) -> Result<String> {
             .collect::<Result<Vec<_>>>()?
             .join(" ");
         return Ok(format!("(match {} {cases})", expr(target)?));
+    }
+    if let Some(captures) = get(map, "$task") {
+        only_known(map, &["$task", "do"])?;
+        let captures = captures
+            .as_sequence()
+            .context("task-captures-not-sequence")?;
+        return Ok(format!(
+            "(task (captures{}) {})",
+            captures
+                .iter()
+                .map(|capture| Ok(format!(" {}", sym(as_str(capture, "task-capture")?))))
+                .collect::<Result<String>>()?,
+            body_form(get(map, "do").context("task-missing-do")?)?
+        ));
     }
     if map.len() != 1 {
         bail!("multi-key-statement")
@@ -510,6 +574,24 @@ fn ty(value: &Value) -> Result<String> {
 
 fn type_form(head: &str, payload: &Value) -> Result<String> {
     let head = sym(head.trim_start_matches('$'));
+    if head == "policy" {
+        return policy_type(payload);
+    }
+    if head == "capability" {
+        if let Some(domain) = payload.as_str() {
+            return Ok(format!("(capability {})", sym(domain)));
+        }
+        let map = payload.as_mapping().context("capability-not-mapping")?;
+        if map.len() != 1 {
+            bail!("capability-domain-count")
+        }
+        let (domain, groups) = map.iter().next().unwrap();
+        return Ok(format!(
+            "(capability {}{})",
+            sym(as_str(domain, "capability-domain")?),
+            policy_groups(groups)?
+        ));
+    }
     match payload {
         Value::Null => Ok(head),
         Value::String(value) if value == "$void" => Ok(format!("({head})")),
@@ -552,6 +634,72 @@ fn type_form(head: &str, payload: &Value) -> Result<String> {
         )),
         _ => Ok(format!("({head} {})", ty(payload)?)),
     }
+}
+
+fn policy_type(payload: &Value) -> Result<String> {
+    let domains = payload.as_mapping().context("policy-domains-not-mapping")?;
+    Ok(format!(
+        "(policy{})",
+        domains
+            .iter()
+            .map(|(domain, groups)| {
+                Ok(format!(
+                    " ({}{})",
+                    sym(as_str(domain, "policy-domain")?),
+                    policy_groups(groups)?
+                ))
+            })
+            .collect::<Result<String>>()?
+    ))
+}
+
+fn policy_groups(value: &Value) -> Result<String> {
+    if value.is_null() {
+        return Ok(String::new());
+    }
+    value
+        .as_sequence()
+        .context("policy-groups-not-sequence")?
+        .iter()
+        .map(|group| {
+            let map = group.as_mapping().context("policy-group-not-mapping")?;
+            only_known(map, &["requirement", "scopes"])?;
+            Ok(format!(
+                " (group requirement: {} scopes: {})",
+                sym(as_str(
+                    get(map, "requirement").context("policy-group-missing-requirement")?,
+                    "requirement"
+                )?),
+                policy_scopes(get(map, "scopes").context("policy-group-missing-scopes")?)?
+            ))
+        })
+        .collect()
+}
+
+fn policy_scopes(value: &Value) -> Result<String> {
+    if value.as_str() == Some("any") {
+        return Ok("((any))".into());
+    }
+    let scopes = value.as_sequence().context("policy-scopes-not-sequence")?;
+    Ok(format!(
+        "({})",
+        scopes
+            .iter()
+            .map(|scope| {
+                let map = scope.as_mapping().context("policy-scope-not-mapping")?;
+                if map.len() != 1 {
+                    bail!("policy-scope-selector-count")
+                }
+                let (selector, value) = map.iter().next().unwrap();
+                Ok(format!(
+                    "({} {})",
+                    sym(as_str(selector, "policy-scope-selector")?),
+                    quoted(as_str(value, "policy-scope-value")?)
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .join(" ")
+    ))
 }
 
 fn declaration_annotations(map: &Mapping) -> Result<String> {
@@ -650,8 +798,8 @@ works:
     }
 
     #[test]
-    fn rejects_unmapped_test_authority_instead_of_dumping_yaml() {
-        let error = migrate(
+    fn migrates_test_authority_with_explicit_policy_domains() {
+        let output = migrate(
             r#"
 privileged:
   $test: fs
@@ -659,7 +807,8 @@ privileged:
   do: []
 "#,
         )
-        .unwrap_err();
-        assert!(format!("{error:#}").contains("unsupported-test-policy"));
+        .unwrap();
+        assert!(output.contains("policy: (policy (fs-read))"));
+        validate(&output).unwrap();
     }
 }
