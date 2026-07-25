@@ -52,9 +52,10 @@ Require-Content $publish 'staging' 'Immutable staging tags'
 Require-Content $publish 'github\.run_id' 'Publish attempt-unique staging run id'
 Require-Content $publish 'github\.run_attempt' 'Publish attempt-unique staging run attempt'
 Require-Content $publish 'container-smoke\.ps1' 'Publish staged-image smoke test'
-Require-Content $publish '-Platform windows' 'Publish Windows staged-image smoke test'
 Require-Content $publish '-Dev' 'Publish development staged-image smoke test'
-Require-Content $publish 'driver:\s*\$\{\{.*Windows.*docker' 'Windows-native Buildx driver'
+if ($publish -match 'windows-2022|windows/amd64|-Platform windows') {
+    throw 'Publish workflow must only advertise platforms available on GitHub-hosted container runners'
+}
 Require-Content $publish 'upload-artifact' 'Platform digest artifact upload'
 Require-Content $publish 'needs:.*scan' 'Promotion waits for scan jobs'
 Require-Content $publish 'imagetools create' 'Multi-platform index promotion'

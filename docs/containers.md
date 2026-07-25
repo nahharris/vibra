@@ -12,9 +12,10 @@ platform build tools needed to work on Vibra itself.
 
 ## Platforms and standard library
 
-Runtime and development tags are published for Linux amd64, Linux arm64, and
-Windows LTSC 2022 amd64. Windows ARM is deferred until the base image and CI
-support are available. Pull the variant matching the host's container mode.
+Runtime and development tags are published for Linux amd64 and Linux arm64.
+The repository also maintains a Windows LTSC 2022 Dockerfile for source builds,
+but GitHub-hosted Windows runners do not provide a Windows container engine, so
+Windows images are not part of the official registry indexes.
 
 The standard library is part of each image artifact rather than an incidental
 source checkout. Linux images keep it in `/opt/vibra/stdlib`; Windows images
@@ -35,15 +36,9 @@ docker run --rm ghcr.io/nahharris/vibra@sha256:<manifest-digest> --version
 docker run --rm -v "$PWD:/work" -w /work ghcr.io/nahharris/vibra:latest check .
 ```
 
-On Windows, Docker Desktop must be switched to **Windows containers**. The
-host and container must be compatible with the LTSC 2022 base image; use a
-current Windows Server 2022 or compatible Windows 11 Docker Desktop host.
-PowerShell example:
-
-```powershell
-docker run --rm ghcr.io/nahharris/vibra:latest --version
-docker run --rm -v "${PWD}:C:\work" -w C:\work ghcr.io/nahharris/vibra:latest check .
-```
+Windows hosts can run the official Linux images through Docker Desktop's Linux
+container mode. Native Windows containers must be built locally from
+`containers/Dockerfile.windows`.
 
 Use the development image when a workflow needs Cargo:
 
@@ -74,7 +69,7 @@ version tag only; they do not move these stable aliases. Never rely on a moving
 alias when reproducibility matters.
 
 The monthly rebuild workflow creates the next `-rN` revision after it has
-rebuilt, scanned, smoke-tested, and attested every supported platform. Exact
+rebuilt, scanned, smoke-tested, and attested every published platform. Exact
 source-version and revision tags remain immutable.
 
 ## Supply chain and maintenance
