@@ -576,16 +576,9 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 
 ## 11. Tooling and diagnostics
 
-- **Schemas:** See [`schemas/`](schemas/) — including
-  `code-path.schema.json`, `code-form.schema.json`, `code-query.schema.json`,
-  `code-change-set.schema.json`, `macro.schema.json`, and the diagnostic,
-  module, function, type, and expression schemas.
+- **Schemas:** See [`schemas/`](schemas/) — including `macro.schema.json` and
+  the diagnostic, module, function, type, expression, and editor query schemas.
 - **Stable errors:** Each diagnostic has **`code`**, **`message`**, **`severity`**, **`span`**, optional **`related`**, optional **`fix`** (JSON Patch RFC 6902).
-- **Structural tooling / `vibra code`:** Queries return canonical key/index
-  paths, node fingerprints, forms, source, and semantic metadata. Transactions
-  require exact document revisions and fingerprints; line/column is diagnostic
-  metadata only and is never an edit locator.
-
 **Annotation / generics codes (added with §13):**
 
 | Code | Severity | Summary |
