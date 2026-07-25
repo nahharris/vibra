@@ -12,6 +12,9 @@ $ci = Join-Path $repoRoot '.github/workflows/container-ci.yml'
 $publish = Join-Path $repoRoot '.github/workflows/publish-containers.yml'
 $rebuild = Join-Path $repoRoot '.github/workflows/rebuild-containers.yml'
 $dependabot = Join-Path $repoRoot '.github/dependabot.yml'
+$linuxDockerfile = Join-Path $repoRoot 'containers/Dockerfile.linux'
+
+Require-Content $linuxDockerfile 'apt-get upgrade --yes' 'Current Linux security packages'
 
 Require-Content $ci '^permissions:\s*\r?$' 'CI default permissions block'
 Require-Content $ci '^\s+contents: read\s*$' 'CI contents-read permission'
