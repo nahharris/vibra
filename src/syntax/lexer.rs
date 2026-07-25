@@ -11,6 +11,7 @@ pub enum TokenKind {
     OpenParen,
     CloseParen,
     Symbol(String),
+    Label(String),
     String(String),
     Int(i64),
     Float(f64),
@@ -201,6 +202,11 @@ impl<'a> Lexer<'a> {
             "false" => Ok(TokenKind::Bool(false)),
             "unit" => Ok(TokenKind::Unit),
             _ if looks_numeric(text) => parse_number(text, Span::new(start, self.offset)),
+            _ if text.strip_suffix(':').is_some_and(is_label_name) => Ok(TokenKind::Label(
+                text.strip_suffix(':')
+                    .expect("suffix was checked")
+                    .to_string(),
+            )),
             _ if is_symbol(text) => Ok(TokenKind::Symbol(text.to_string())),
             _ => Err(SyntaxError::new(
                 "E-SYN-001",
@@ -253,6 +259,29 @@ fn is_symbol(text: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | '?' | '!'))
 }
 
+/// Labels are intentionally narrower than symbols: they are configuration
+/// names, always written in canonical kebab-case and never qualified.
+fn is_label_name(text: &str) -> bool {
+    let mut segments = text.split('-');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    !first.is_empty()
+        && first
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+        && first
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && segments.all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
+}
+
 fn parse_number(text: &str, span: Span) -> Result<TokenKind, SyntaxError> {
     if text.contains(['.', 'e', 'E']) {
         let value = text.parse::<f64>().map_err(|_| {
@@ -295,7 +324,8 @@ mod tests {
 
     #[test]
     fn lexes_every_token_kind_and_byte_span() {
-        let tokens = lex("(hello \"a\\n\\u{03bb}\" -12 +2.5e1 true false unit) ; note").unwrap();
+        let tokens =
+            lex("(hello doc: \"a\\n\\u{03bb}\" -12 +2.5e1 true false unit) ; note").unwrap();
         assert_eq!(tokens[0].span, Span::new(0, 1));
         assert_eq!(tokens[1].span, Span::new(1, 6));
         assert_eq!(
@@ -303,6 +333,7 @@ mod tests {
             vec![
                 &TokenKind::OpenParen,
                 &TokenKind::Symbol("hello".into()),
+                &TokenKind::Label("doc".into()),
                 &TokenKind::String("a\nλ".into()),
                 &TokenKind::Int(-12),
                 &TokenKind::Float(25.0),
@@ -356,7 +387,6 @@ mod tests {
         );
         for source in [
             "$legacy",
-            "name:",
             "with@sign",
             ".leading",
             "/leading",
@@ -371,6 +401,22 @@ mod tests {
                 "source: {source}"
             );
         }
+    }
+
+    #[test]
+    fn labels_are_distinct_canonical_kebab_tokens() {
+        assert_eq!(
+            kinds("doc: expect-error: benchmark2:"),
+            vec![
+                TokenKind::Label("doc".into()),
+                TokenKind::Label("expect-error".into()),
+                TokenKind::Label("benchmark2".into()),
+            ]
+        );
+        for source in ["Doc:", "bad_label:", "-bad:", "bad--label:", "module.name:"] {
+            assert_eq!(lex(source).unwrap_err().code, "E-SYN-001", "{source}");
+        }
+        assert_eq!(lex("doc:").unwrap()[0].span, Span::new(0, 4));
     }
 
     #[test]
