@@ -91,6 +91,8 @@ jobs:
         run: |
           # Release sources remain pinned to vX.Y.Z; reviewed base digests come from main.
           test -f "$BASE_IMAGES_FILE"
+          source_revision=$(git -C source rev-parse HEAD)
+          source_date_epoch=$(git -C source show -s --format=%ct HEAD)
           set -a
           source "$BASE_IMAGES_FILE"
           set +a
@@ -101,7 +103,18 @@ jobs:
           done < "$BASE_IMAGES_FILE"
           for kind in runtime dev; do
             if [[ "$kind" == runtime ]]; then image=ghcr.io/nahharris/vibra; else image=ghcr.io/nahharris/vibra-dev; fi
-            docker buildx build "${build_args[@]}" --platform '${{ matrix.platform }}' --file '${{ matrix.dockerfile }}' --target "$kind" --push --sbom=true --provenance=true --tag "$image:staging-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.suffix }}" source
+            docker buildx build "${build_args[@]}" --platform '${{ matrix.platform }}' --file '${{ matrix.dockerfile }}' --target "$kind" --push \
+              --sbom=true --provenance=true \
+              --build-arg VIBRA_VERSION='${{ needs.select-release.outputs.version }}' \
+              --build-arg VIBRA_REVISION="$source_revision" \
+              --build-arg SOURCE_DATE_EPOCH="$source_date_epoch" \
+              --label org.opencontainers.image.source="${{ github.server_url }}/${{ github.repository }}" \
+              --label org.opencontainers.image.title="$(basename "$image")" \
+              --label org.opencontainers.image.description="Vibra statically typed language toolchain" \
+              --label org.opencontainers.image.licenses=MIT \
+              --label org.opencontainers.image.version='${{ needs.select-release.outputs.version }}' \
+              --label org.opencontainers.image.revision="$source_revision" \
+              --tag "$image:staging-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.suffix }}" source
           done
       - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
         with:
@@ -116,13 +129,15 @@ jobs:
       - if: runner.os != 'Windows'
         shell: pwsh
         run: |
-          ./source/tests/container-smoke.ps1 -Image "ghcr.io/nahharris/vibra:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux
-          ./source/tests/container-smoke.ps1 -Image "ghcr.io/nahharris/vibra-dev:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -Dev
+          $revision = git -C source rev-parse HEAD
+          ./source/tests/container-smoke.ps1 -Image "ghcr.io/nahharris/vibra:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -ExpectedVersion "${{ needs.select-release.outputs.version }}" -ExpectedRevision $revision
+          ./source/tests/container-smoke.ps1 -Image "ghcr.io/nahharris/vibra-dev:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -Dev -ExpectedVersion "${{ needs.select-release.outputs.version }}" -ExpectedRevision $revision
       - if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          ./source/tests/container-smoke.ps1 -Image "ghcr.io/nahharris/vibra:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows
-          ./source/tests/container-smoke.ps1 -Image "ghcr.io/nahharris/vibra-dev:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -Dev
+          $revision = git -C source rev-parse HEAD
+          ./source/tests/container-smoke.ps1 -Image "ghcr.io/nahharris/vibra:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -ExpectedVersion "${{ needs.select-release.outputs.version }}" -ExpectedRevision $revision
+          ./source/tests/container-smoke.ps1 -Image "ghcr.io/nahharris/vibra-dev:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -Dev -ExpectedVersion "${{ needs.select-release.outputs.version }}" -ExpectedRevision $revision
       - name: Gather immutable digests
         shell: bash
         run: |
@@ -178,3 +193,10 @@ jobs:
           subject-name: ghcr.io/nahharris/vibra-dev
           subject-digest: ${{ steps.promoted.outputs.dev }}
           push-to-registry: true
+      - name: Verify promoted image attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh attestation verify "oci://ghcr.io/nahharris/vibra@${{ steps.promoted.outputs.runtime }}" --repo "${GITHUB_REPOSITORY}"
+          gh attestation verify "oci://ghcr.io/nahharris/vibra-dev@${{ steps.promoted.outputs.dev }}" --repo "${GITHUB_REPOSITORY}"

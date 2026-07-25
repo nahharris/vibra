@@ -1,8 +1,15 @@
 # escape=`
 ARG WINDOWS_BUILDER_IMAGE=mcr.microsoft.com/windows/servercore:ltsc2022-amd64@sha256:c747aa0e4668af32773f6f81220fb95d49e2e55237d07fbc18a8138d1b0e4de7
 ARG WINDOWS_RUNTIME_IMAGE=mcr.microsoft.com/windows/nanoserver:ltsc2022-amd64@sha256:132929c393e0d188628033604fe7a6ec4a5fc446546d90c2226bb56ce48d4c9a
+ARG VIBRA_VERSION=0.1.0
+ARG VIBRA_REVISION=0000000000000000000000000000000000000000
+ARG SOURCE_DATE_EPOCH=0
 
 FROM ${WINDOWS_BUILDER_IMAGE} AS builder
+ARG VIBRA_VERSION
+ARG VIBRA_REVISION
+ARG SOURCE_DATE_EPOCH
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
 SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
 RUN function Assert-TrustedSignature([string]$Path, [string]$Publisher) { $signature = Get-AuthenticodeSignature -FilePath $Path; if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike "*$Publisher*") { throw "Installer signature validation failed for $Path; expected trusted publisher $Publisher." } }; `
@@ -31,7 +38,7 @@ RUN New-Item -ItemType Directory -Force C:\Vibra\bin, C:\Vibra\stdlib | Out-Null
     [string[]]$lines = Get-ChildItem C:\Vibra\stdlib -File -Recurse | ForEach-Object { $relative = [IO.Path]::GetRelativePath('C:\Vibra\stdlib', $_.FullName).Replace('\','/'); "$relative $((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())" }; `
     [Array]::Sort($lines, [StringComparer]::Ordinal); $bytes = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n") + "`n"); $sha = [Security.Cryptography.SHA256]::Create(); $digest = ([Convert]::ToHexString($sha.ComputeHash($bytes))).ToLowerInvariant(); $sha.Dispose(); `
     $stdrev = [regex]::Match((Get-Content -Raw C:\src\src\project.rs), 'STDLIB_REV: &str = "([0-9a-f]{40})"').Groups[1].Value; `
-    @("format-version: 1", "version: 0.1.0", "revision: 0000000000000000000000000000000000000000", "platform: windows-container", "stdlib-git: https://github.com/nahharris/vibra-stdlib.git", "stdlib-rev: $stdrev", "stdlib-sha256: $digest") | Set-Content C:\Vibra\release.vibra -Encoding utf8
+    @("format-version: 1", "version: $env:VIBRA_VERSION", "revision: $env:VIBRA_REVISION", "platform: windows-container", "stdlib-git: https://github.com/nahharris/vibra-stdlib.git", "stdlib-rev: $stdrev", "stdlib-sha256: $digest") | Set-Content C:\Vibra\release.vibra -Encoding utf8
 
 FROM builder AS dev
 RUN cmd /S /C "C:\Vibra\devcmd.cmd cargo --version"; `

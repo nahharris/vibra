@@ -24,6 +24,8 @@ foreach ($needle in @(
     'docker desktop',
     'Windows containers',
     'gh attestation verify',
+    'embedded release metadata',
+    'SOURCE_DATE_EPOCH',
     'Dependabot',
     '-rN',
     'docker run',

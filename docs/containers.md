@@ -83,7 +83,11 @@ The Dockerfiles pin their base images by digest. Dependabot proposes monthly
 updates for Docker base images and GitHub Actions; review those updates, then
 let CI rebuild and smoke-test every platform before merging. Each published
 image is scanned for HIGH and CRITICAL vulnerabilities, has an SPDX SBOM, and
-receives GitHub build provenance.
+receives GitHub build provenance. Promotion then verifies the registry-backed
+attestation for both image indexes before the release job succeeds. The image's
+embedded release metadata records the exact semantic version and source commit;
+builds also derive `SOURCE_DATE_EPOCH` from that source commit instead of the
+wall clock.
 
 Verify an image's provenance before promoting it:
 
@@ -91,6 +95,11 @@ Verify an image's provenance before promoting it:
 gh attestation verify oci://ghcr.io/nahharris/vibra@sha256:<manifest-digest> \
   --repo nahharris/vibra
 ```
+
+The digest in that command is the promoted multi-platform index digest. This
+verification covers the signed index selected by immutable tag or digest, while
+the BuildKit provenance and SPDX SBOM attached during each platform build cover
+the concrete platform manifests.
 
 Repository maintainers should make each GHCR package public after its first
 publish (Package settings → Change visibility) and link it to this repository.

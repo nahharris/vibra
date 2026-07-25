@@ -8,7 +8,10 @@ param(
     [string]$Platform,
 
     [switch]$Dev,
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+
+    [string]$ExpectedVersion,
+    [string]$ExpectedRevision
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +65,60 @@ function Invoke-Docker {
     }
 }
 
+function Assert-ReleaseContract {
+    param(
+        [string]$Image,
+        [string]$Platform,
+        [string]$ExpectedVersion,
+        [string]$ExpectedRevision,
+        [string]$TempRoot
+    )
+
+    if ([string]::IsNullOrEmpty($ExpectedVersion) -xor [string]::IsNullOrEmpty($ExpectedRevision)) {
+        throw 'ExpectedVersion and ExpectedRevision must be supplied together.'
+    }
+    if ($ExpectedRevision -and $ExpectedRevision -notmatch '^[0-9a-f]{40}$') {
+        throw "ExpectedRevision must be a lowercase 40-character Git SHA: $ExpectedRevision"
+    }
+
+    $containerName = "vibra-release-contract-$([guid]::NewGuid().ToString('N'))"
+    $metadataPath = if ($Platform -eq 'linux') { '/opt/vibra/release.vibra' } else { 'C:\Vibra\release.vibra' }
+    $metadataCopy = Join-Path $TempRoot 'release.vibra'
+    try {
+        & docker create --name $containerName $Image --version *> $null
+        if ($LASTEXITCODE -ne 0) { throw "Could not create metadata probe container from $Image." }
+        Invoke-Docker @('cp', "${containerName}:${metadataPath}", $metadataCopy)
+    }
+    finally {
+        & docker rm --force $containerName *> $null
+    }
+
+    $metadata = Get-Content -Raw -LiteralPath $metadataCopy
+    foreach ($field in @('format-version: 1', 'version:', 'revision:', 'stdlib-rev:', 'stdlib-sha256:')) {
+        if ($metadata -notmatch "(?m)^$([regex]::Escape($field))") {
+            throw "Image release metadata is missing $field"
+        }
+    }
+
+    if ($ExpectedVersion) {
+        if ($metadata -notmatch "(?m)^version: $([regex]::Escape($ExpectedVersion))$") {
+            throw "Embedded version does not match $ExpectedVersion."
+        }
+        if ($metadata -notmatch "(?m)^revision: $ExpectedRevision$") {
+            throw "Embedded revision does not match $ExpectedRevision."
+        }
+
+        $versionLabel = & docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' $Image
+        if ($LASTEXITCODE -ne 0 -or $versionLabel -ne $ExpectedVersion) {
+            throw "OCI version label does not match $ExpectedVersion."
+        }
+        $revisionLabel = & docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' $Image
+        if ($LASTEXITCODE -ne 0 -or $revisionLabel -ne $ExpectedRevision) {
+            throw "OCI revision label does not match $ExpectedRevision."
+        }
+    }
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("vibra-container-smoke-" + [guid]::NewGuid())
 $workspace = if ($Platform -eq 'linux') { '/workspace' } else { 'C:\workspace' }
 $project = if ($Platform -eq 'linux') { '/workspace/smoke' } else { 'C:\workspace\smoke' }
@@ -73,6 +130,7 @@ try {
         Set-LinuxMountPermissions -Path $tempRoot
     }
 
+    Assert-ReleaseContract -Image $Image -Platform $Platform -ExpectedVersion $ExpectedVersion -ExpectedRevision $ExpectedRevision -TempRoot $tempRoot
     Invoke-Docker @('run', '--rm', $Image, '--version')
     Invoke-Docker @('run', '--rm', $Image, '--help')
     Invoke-Docker @('run', '--rm', '--mount', $mount, '-w', $workspace, $Image, 'init', 'smoke')
