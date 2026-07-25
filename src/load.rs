@@ -9,6 +9,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const MAX_TEMPLATE_SOURCE_BYTES: usize = 1_048_576;
+const MAX_TEMPLATE_RENDERED_BYTES: usize = 16_777_216;
+const MAX_TEMPLATE_SECTION_DEPTH: usize = 64;
+
 /// Canonical path → parsed YAML root mapping.
 #[derive(Debug)]
 pub struct LoadedProgram {
@@ -16,8 +20,8 @@ pub struct LoadedProgram {
     pub modules: HashMap<PathBuf, Value>,
     pub sources: SourceDatabase,
     pub module_parts: HashMap<PathBuf, Vec<PathBuf>>,
-    /// Canonical embedded-file path to raw-content SHA-256. This is part of the
-    /// compiler fingerprint even when two structured files decode identically.
+    /// Canonical compile-time input path to raw-content SHA-256. This is part
+    /// of the compiler fingerprint even when two inputs produce equal values.
     pub embedded_files: BTreeMap<PathBuf, String>,
 }
 
@@ -179,6 +183,10 @@ fn expand_embeds_in_value(
                 *value = load_embed(spec, module_path, package_root, embedded)?;
                 return Ok(());
             }
+            if let Some(spec) = map_get_str(map, "$template") {
+                *value = load_template(spec, module_path, package_root, embedded)?;
+                return Ok(());
+            }
         }
     }
     match value {
@@ -195,6 +203,296 @@ fn expand_embeds_in_value(
         _ => {}
     }
     Ok(())
+}
+
+#[derive(Debug, PartialEq)]
+enum TemplateNode {
+    Text(String),
+    Variable(String),
+    Section {
+        name: String,
+        inverted: bool,
+        children: Vec<TemplateNode>,
+    },
+}
+
+fn load_template(
+    spec: &Value,
+    module_path: &Path,
+    package_root: &Path,
+    embedded: &mut BTreeMap<PathBuf, String>,
+) -> Result<Value> {
+    let options = spec
+        .as_mapping()
+        .context("E-TEMPLATE-001: `$template` must be a `{path, with}` mapping")?;
+    for key in options.keys() {
+        let key = key
+            .as_str()
+            .context("E-TEMPLATE-001: `$template` option keys must be strings")?;
+        if !matches!(key, "path" | "with") {
+            bail!("E-TEMPLATE-001: unknown `$template` option `{key}`");
+        }
+    }
+    let path = map_get_str(options, "path")
+        .and_then(Value::as_str)
+        .context("E-TEMPLATE-001: `$template.path` must be a string")?;
+    let data = map_get_str(options, "with")
+        .and_then(Value::as_mapping)
+        .context("E-TEMPLATE-001: `$template.with` must be a mapping")?;
+    let resolved = resolve_package_file(
+        path,
+        module_path,
+        package_root,
+        "E-TEMPLATE-002",
+        "E-TEMPLATE-003",
+        "template",
+    )?;
+    let bytes = fs::read(&resolved)
+        .with_context(|| format!("E-TEMPLATE-003: read template {}", resolved.display()))?;
+    if bytes.len() > MAX_TEMPLATE_SOURCE_BYTES {
+        bail!("E-TEMPLATE-006: template source exceeds {MAX_TEMPLATE_SOURCE_BYTES} bytes");
+    }
+    embedded.insert(resolved.clone(), format!("{:x}", Sha256::digest(&bytes)));
+    let source = String::from_utf8(bytes).context("E-TEMPLATE-003: template is not valid UTF-8")?;
+    let nodes = parse_template(&source)?;
+    let root = Value::Mapping(data.clone());
+    let rendered = render_template(&nodes, &[&root])?;
+    Ok(literal_string(rendered))
+}
+
+fn resolve_package_file(
+    path: &str,
+    module_path: &Path,
+    package_root: &Path,
+    path_code: &str,
+    read_code: &str,
+    kind: &str,
+) -> Result<PathBuf> {
+    let relative = Path::new(path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        bail!("{path_code}: {kind} path must be a normalized relative path: `{path}`");
+    }
+    let base = module_path
+        .parent()
+        .with_context(|| format!("{path_code}: module has no parent"))?;
+    let resolved = fs::canonicalize(base.join(relative)).with_context(|| {
+        format!(
+            "{read_code}: cannot read {kind} file `{path}` from {}",
+            module_path.display()
+        )
+    })?;
+    if !resolved.starts_with(package_root) || !resolved.is_file() {
+        bail!(
+            "{path_code}: {kind} file `{}` escapes package root {}",
+            resolved.display(),
+            package_root.display()
+        );
+    }
+    Ok(resolved)
+}
+
+fn parse_template(source: &str) -> Result<Vec<TemplateNode>> {
+    let (nodes, offset) = parse_template_nodes(source, 0, None, 0)?;
+    debug_assert_eq!(offset, source.len());
+    Ok(nodes)
+}
+
+fn parse_template_nodes(
+    source: &str,
+    mut offset: usize,
+    closing: Option<&str>,
+    depth: usize,
+) -> Result<(Vec<TemplateNode>, usize)> {
+    if depth > MAX_TEMPLATE_SECTION_DEPTH {
+        bail!("E-TEMPLATE-006: template section nesting exceeds {MAX_TEMPLATE_SECTION_DEPTH}");
+    }
+    let mut nodes = Vec::new();
+    while offset < source.len() {
+        let Some(relative_open) = source[offset..].find("{{") else {
+            nodes.push(TemplateNode::Text(source[offset..].to_string()));
+            offset = source.len();
+            break;
+        };
+        let open = offset + relative_open;
+        if open > offset {
+            nodes.push(TemplateNode::Text(source[offset..open].to_string()));
+        }
+        if source[open..].starts_with("{{{") {
+            let content_start = open + 3;
+            let close = source[content_start..]
+                .find("}}}")
+                .map(|relative| content_start + relative)
+                .context("E-TEMPLATE-004: unclosed triple-brace variable")?;
+            let name = template_name(&source[content_start..close], "variable")?;
+            nodes.push(TemplateNode::Variable(name));
+            offset = close + 3;
+            continue;
+        }
+        let content_start = open + 2;
+        let close = source[content_start..]
+            .find("}}")
+            .map(|relative| content_start + relative)
+            .context("E-TEMPLATE-004: unclosed template tag")?;
+        let tag = source[content_start..close].trim();
+        offset = close + 2;
+        if let Some(name) = tag.strip_prefix('/') {
+            let name = template_name(name, "closing section")?;
+            if closing == Some(name.as_str()) {
+                return Ok((nodes, offset));
+            }
+            bail!("E-TEMPLATE-004: unexpected closing section `{name}`");
+        }
+        if let Some(raw_name) = tag.strip_prefix('#').or_else(|| tag.strip_prefix('^')) {
+            let name = template_name(raw_name, "section")?;
+            let (children, next) = parse_template_nodes(source, offset, Some(&name), depth + 1)?;
+            nodes.push(TemplateNode::Section {
+                name,
+                inverted: tag.starts_with('^'),
+                children,
+            });
+            offset = next;
+            continue;
+        }
+        if tag.starts_with('!') {
+            continue;
+        }
+        let name = template_name(tag.strip_prefix('&').unwrap_or(tag), "variable")?;
+        nodes.push(TemplateNode::Variable(name));
+    }
+    if let Some(name) = closing {
+        bail!("E-TEMPLATE-004: unclosed section `{name}`");
+    }
+    Ok((nodes, offset))
+}
+
+fn template_name(raw: &str, kind: &str) -> Result<String> {
+    let name = raw.trim();
+    if name.is_empty()
+        || (name != "."
+            && name
+                .split('.')
+                .any(|segment| segment.is_empty() || !is_template_identifier(segment)))
+    {
+        bail!("E-TEMPLATE-004: invalid {kind} name `{name}`");
+    }
+    Ok(name.to_string())
+}
+
+fn is_template_identifier(value: &str) -> bool {
+    value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+}
+
+fn render_template(nodes: &[TemplateNode], contexts: &[&Value]) -> Result<String> {
+    let mut output = String::new();
+    render_template_into(nodes, contexts, &mut output)?;
+    Ok(output)
+}
+
+fn render_template_into(
+    nodes: &[TemplateNode],
+    contexts: &[&Value],
+    output: &mut String,
+) -> Result<()> {
+    for node in nodes {
+        match node {
+            TemplateNode::Text(text) => append_template_output(output, text)?,
+            TemplateNode::Variable(name) => {
+                let value = lookup_template_value(contexts, name)
+                    .with_context(|| format!("E-TEMPLATE-005: unknown template value `{name}`"))?;
+                append_template_output(output, &render_template_scalar(name, value)?)?;
+            }
+            TemplateNode::Section {
+                name,
+                inverted,
+                children,
+            } => {
+                let value = lookup_template_value(contexts, name).with_context(|| {
+                    format!("E-TEMPLATE-005: unknown template section `{name}`")
+                })?;
+                let truthy = template_truthy(value);
+                if *inverted {
+                    if !truthy {
+                        render_template_into(children, contexts, output)?;
+                    }
+                } else if truthy {
+                    match value {
+                        Value::Sequence(items) => {
+                            for item in items {
+                                let mut nested = contexts.to_vec();
+                                nested.push(item);
+                                render_template_into(children, &nested, output)?;
+                            }
+                        }
+                        _ => {
+                            let mut nested = contexts.to_vec();
+                            nested.push(value);
+                            render_template_into(children, &nested, output)?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn append_template_output(output: &mut String, value: &str) -> Result<()> {
+    let length = output
+        .len()
+        .checked_add(value.len())
+        .context("E-TEMPLATE-006: rendered template size overflow")?;
+    if length > MAX_TEMPLATE_RENDERED_BYTES {
+        bail!("E-TEMPLATE-006: rendered template exceeds {MAX_TEMPLATE_RENDERED_BYTES} bytes");
+    }
+    output.push_str(value);
+    Ok(())
+}
+
+fn lookup_template_value<'a>(contexts: &[&'a Value], name: &str) -> Option<&'a Value> {
+    if name == "." {
+        return contexts.last().copied();
+    }
+    let mut segments = name.split('.');
+    let first = segments.next()?;
+    for context in contexts.iter().rev() {
+        let Some(mut value) = context
+            .as_mapping()
+            .and_then(|mapping| mapping.get(Value::String(first.to_string())))
+        else {
+            continue;
+        };
+        for segment in segments.clone() {
+            value = value
+                .as_mapping()?
+                .get(Value::String(segment.to_string()))?;
+        }
+        return Some(value);
+    }
+    None
+}
+
+fn render_template_scalar(name: &str, value: &Value) -> Result<String> {
+    match value {
+        Value::Null => Ok(String::new()),
+        Value::Bool(value) => Ok(value.to_string()),
+        Value::Number(value) => Ok(value.to_string()),
+        Value::String(value) => Ok(value.clone()),
+        _ => bail!("E-TEMPLATE-005: template value `{name}` must be a scalar"),
+    }
+}
+
+fn template_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null | Value::Bool(false) => false,
+        Value::Sequence(items) => !items.is_empty(),
+        _ => true,
+    }
 }
 
 fn load_embed(
@@ -229,30 +527,14 @@ fn load_embed(
             .unwrap_or("auto");
         (path, format)
     };
-    let relative = Path::new(path);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|part| !matches!(part, std::path::Component::Normal(_)))
-    {
-        bail!("E-EMBED-002: embedded path must be a normalized relative path: `{path}`");
-    }
-    let base = module_path
-        .parent()
-        .context("E-EMBED-002: module has no parent")?;
-    let resolved = fs::canonicalize(base.join(relative)).with_context(|| {
-        format!(
-            "E-EMBED-003: cannot read embedded file `{path}` from {}",
-            module_path.display()
-        )
-    })?;
-    if !resolved.starts_with(package_root) || !resolved.is_file() {
-        bail!(
-            "E-EMBED-002: embedded file `{}` escapes package root {}",
-            resolved.display(),
-            package_root.display()
-        );
-    }
+    let resolved = resolve_package_file(
+        path,
+        module_path,
+        package_root,
+        "E-EMBED-002",
+        "E-EMBED-003",
+        "embedded",
+    )?;
     let bytes = fs::read(&resolved)
         .with_context(|| format!("E-EMBED-003: read embedded file {}", resolved.display()))?;
     embedded.insert(resolved.clone(), format!("{:x}", Sha256::digest(&bytes)));
