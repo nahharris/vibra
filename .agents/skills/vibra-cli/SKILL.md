@@ -14,8 +14,7 @@ binary, replace `vibra` with `cargo run --`.
    optional flags; the toolchain is evolving.
 2. Read [references/cli-workflows.md](references/cli-workflows.md) for command
    selection, dependency operations, and the end-to-end workflow.
-3. Prefer YAML output for agent workflows. Request JSON only when another tool
-   requires it.
+3. Prefer JSON output for agent workflows.
 4. Run format checks, lint, tests, and build in that order.
 5. Grant host capabilities only when the program or test declares and needs
    them; keep allowed paths, commands, hosts, and environment names narrow.

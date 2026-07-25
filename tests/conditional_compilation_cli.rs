@@ -57,7 +57,8 @@ fn run_expand_and_docs_receive_repeatable_compilation_flags() {
         .output()
         .unwrap();
     assert!(expanded.status.success());
-    assert!(String::from_utf8_lossy(&expanded.stdout).contains("enabled:"));
+    let expanded: serde_json::Value = serde_json::from_slice(&expanded.stdout).unwrap();
+    assert!(expanded.get("enabled").is_some(), "{expanded}");
 
     let docs = vibra_cmd()
         .args(["docs", &path(&entry), "enabled", "--flag", "release"])

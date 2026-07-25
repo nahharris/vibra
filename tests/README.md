@@ -159,7 +159,7 @@ vibra test --allow-test-workspace read-write # enable an isolated temp cwd and f
 vibra test --jobs 4                      # parallel workers
 vibra test --fail-fast                   # stop after first failure
 vibra test --timeout-ms 30000            # per-test timeout
-vibra test --format yaml --report-file report.yaml
+vibra test --format json --report-file report.json
 ```
 
 `workspace: temp` is test metadata, not a profile capability. It creates an
@@ -171,7 +171,7 @@ policy for workspace tests, then approves only the selected access mode on that
 temporary directory.
 
 `--deny-warnings` turns a child test's compiler warnings into a failure. The
-warnings remain available in the YAML report for diagnosis.
+warnings remain available in the JSON report for diagnosis.
 
 ## Deterministic clock and random fixtures
 

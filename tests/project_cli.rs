@@ -89,22 +89,12 @@ main:
                 .contains("friendly greeting")
     }));
 
-    let yaml = vibra_cmd()
-        .args(["docs", &path_str(&main), "helper.greet", "--format", "yaml"])
+    let unsupported = vibra_cmd()
+        .args(["docs", &path_str(&main), "--format", "yaml"])
         .output()
         .unwrap();
-    assert!(
-        yaml.status.success(),
-        "{}",
-        String::from_utf8_lossy(&yaml.stderr)
-    );
-    let yaml: serde_yaml::Value = serde_yaml::from_slice(&yaml.stdout).unwrap();
-    assert_eq!(yaml["symbol"], "helper.greet");
-    assert_eq!(yaml["kind"], "function");
-    assert!(yaml["documentation"]
-        .as_str()
-        .unwrap()
-        .contains("friendly greeting"));
+    assert!(!unsupported.status.success());
+    assert!(String::from_utf8_lossy(&unsupported.stderr).contains("invalid value 'yaml'"));
 }
 
 #[test]
@@ -183,7 +173,7 @@ fn project_init_bin_template_creates_valid_project() {
         "init failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let init_report: serde_yaml::Value = serde_yaml::from_slice(&output.stdout).unwrap();
+    let init_report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(init_report["status"], "created");
     assert_eq!(init_report["path"], "hello");
 
@@ -1169,10 +1159,10 @@ fn runtime_plugin_load_is_capability_gated_typed_and_deterministic() {
         String::from_utf8_lossy(&first.stderr)
     );
     assert_eq!(first.stdout, second.stdout);
-    let report = String::from_utf8(first.stdout).unwrap();
-    assert!(report.contains("interface: arithmetic"));
-    assert!(report.contains("instantiated: true"));
-    assert!(report.contains("sha256:"));
+    let report: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(report["interface"], "arithmetic");
+    assert_eq!(report["instantiated"], true);
+    assert!(report["sha256"].is_string());
 
     let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
     std::fs::write(

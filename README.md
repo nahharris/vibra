@@ -47,7 +47,7 @@ vibra code --file refactor.vibra --write
 ```
 
 Path strings select mapping keys and non-negative integers select sequence
-indices. Query pipelines print YAML. Editing pipelines preview a structured
+indices. Query pipelines print JSON. Editing pipelines preview a structured
 report and unified diff; `--write` rechecks source revisions and applies every
 changed file atomically.
 
@@ -102,7 +102,7 @@ are not a complete specification of compiler behavior.
   [`lsp-compilation-options.schema.json`](schemas/lsp-compilation-options.schema.json)
   define the editor protocol shapes, and
   [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
-  `vibra docs --format yaml|json`.
+  `vibra docs --format json`.
 - **Agent protocol:** [`mcp-tool-result.schema.json`](schemas/mcp-tool-result.schema.json)
   specifies the shared `vibra mcp` tool result and structured error envelope.
 - **Async conformance:** [`async-task-trace.schema.json`](schemas/async-task-trace.schema.json)
@@ -141,9 +141,13 @@ Macro execution is deterministic and limited to 64 nested expansions,
 
 ## Format and lint
 
-Vibra's CLI is YAML-first: every command that emits CLI-owned output uses structured YAML by default. Use `--format yaml` to request it explicitly, or select a supported alternative such as `json`, `human`, `raw`, or `sarif`. Program-owned stdout from `vibra run` is passed through unchanged.
+Vibra's CLI uses JSON by default for structured machine-readable output. Commands
+with presentation-oriented output also support formats such as `human`, `raw`,
+`markdown`, or `sarif`. Program-owned stdout from `vibra run` is passed through
+unchanged.
 
-`vibra fmt` and `vibra lint` follow the same convention. JSON and SARIF remain opt-in compatibility formats for external automation.
+`vibra fmt` and `vibra lint` follow the same convention. Lint also supports
+SARIF for external automation.
 
 ```sh
 vibra fmt                 # check every .vibra/.vibra.yaml file under .
@@ -259,13 +263,12 @@ needs a runtime filesystem grant.
 Use `vibra docs` to read compile-time `=doc` annotations without running a
 program. Pass a source module or a project directory, followed by an optional
 qualified symbol. Plain output is the default; Markdown preserves examples and
-other formatting from the annotation, while YAML and JSON are intended for
-tooling.
+other formatting from the annotation, while JSON is intended for tooling.
 
 ```sh
 vibra docs src/app/main.vibra main
 vibra docs src/app/main.vibra io.println --format markdown
-vibra docs src/app/main.vibra --format yaml
+vibra docs src/app/main.vibra --format json
 vibra docs . --target app --format json
 ```
 
@@ -481,7 +484,7 @@ vibra test --filter truth
 vibra test --profile core --tag language
 vibra test --deny-skips --deny-warnings
 vibra test --jobs 4 --timeout-ms 30000 --fail-fast
-vibra test --format yaml --report-file report.yaml
+vibra test --format json --report-file report.json
 ```
 
 Profiles and tags only select tests; they never confer host permissions.
@@ -530,7 +533,7 @@ cargo test
 MIT OR Apache-2.0 (see `Cargo.toml`).
 Test declarations can be measured explicitly with `vibra test --benchmark`;
 warm-up and iteration counts are controlled by `--benchmark-warmup` and
-`--benchmark-iterations`. JSON/YAML reports distinguish `test` and `benchmark`
+`--benchmark-iterations`. JSON reports distinguish `test` and `benchmark`
 mode and expose the stable sample/statistics contract documented in
 [`tests/README.md`](tests/README.md). Normal `vibra test` execution remains a
 single pass with unchanged semantics.

@@ -26,7 +26,7 @@
       "enum": ["module", "import-alias", "value", "type", "macro", "builtin", null]
     },
     "typeExpr": {
-      "description": "JSON/YAML-serialized type at this node, if known",
+      "description": "JSON-serialized type at this node, if known",
       "type": ["object", "string", "null"]
     },
     "expectedKeys": {

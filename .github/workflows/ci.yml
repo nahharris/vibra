@@ -47,7 +47,7 @@ jobs:
       - name: Lint Vibra tests
         run: cargo run -- lint tests --deny-warnings
       - name: Run Vibra suite
-        run: cargo run -- test --report yaml
+        run: cargo run -- test --report json
 
   vapp-repro:
     name: .vapp reproducibility (${{ matrix.platform }})

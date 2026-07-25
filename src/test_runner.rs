@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportFormat {
     Human,
-    Yaml,
     Json,
 }
 
@@ -268,8 +267,9 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
     }
     if options.report != ReportFormat::Human || options.report_file.is_some() {
         let rendered = match options.report {
-            ReportFormat::Human | ReportFormat::Yaml => serde_yaml::to_string(&report)?,
-            ReportFormat::Json => serde_json::to_string_pretty(&report)? + "\n",
+            ReportFormat::Human | ReportFormat::Json => {
+                serde_json::to_string_pretty(&report)? + "\n"
+            }
         };
         if let Some(path) = &options.report_file {
             fs::write(path, &rendered).with_context(|| format!("write {}", path.display()))?;
@@ -376,8 +376,9 @@ fn run_benchmarks(options: TestOptions) -> Result<bool> {
     }
     if options.report != ReportFormat::Human || options.report_file.is_some() {
         let rendered = match options.report {
-            ReportFormat::Human | ReportFormat::Yaml => serde_yaml::to_string(&report)?,
-            ReportFormat::Json => serde_json::to_string_pretty(&report)? + "\n",
+            ReportFormat::Human | ReportFormat::Json => {
+                serde_json::to_string_pretty(&report)? + "\n"
+            }
         };
         if let Some(path) = &options.report_file {
             fs::write(path, &rendered).with_context(|| format!("write {}", path.display()))?;
@@ -655,7 +656,7 @@ fn run_one_child(
             let outcome = fs::read_to_string(result_path)
                 .with_context(|| format!("read child result for test `{}`", item.name))
                 .and_then(|text| {
-                    serde_yaml::from_str::<ChildTestOutcome>(&text)
+                    serde_json::from_str::<ChildTestOutcome>(&text)
                         .context("decode child test result")
                 });
             let _ = result_file.close();
