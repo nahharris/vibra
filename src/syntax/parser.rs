@@ -24,6 +24,7 @@ pub enum NodeKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Atom {
     Symbol(String),
+    Label(String),
     String(String),
     Int(i64),
     Float(f64),
@@ -103,6 +104,7 @@ impl Parser {
                 ));
             }
             TokenKind::Symbol(value) => NodeKind::Atom(Atom::Symbol(value)),
+            TokenKind::Label(value) => NodeKind::Atom(Atom::Label(value)),
             TokenKind::String(value) => NodeKind::Atom(Atom::String(value)),
             TokenKind::Int(value) => NodeKind::Atom(Atom::Int(value)),
             TokenKind::Float(value) => NodeKind::Atom(Atom::Float(value)),
@@ -154,6 +156,19 @@ mod tests {
         assert!(matches!(module[1].kind, NodeKind::Comment(_)));
         assert_eq!(document.nodes[0].span.range(), 0..39);
         assert!(matches!(document.nodes[1].kind, NodeKind::Atom(Atom::Unit)));
+    }
+
+    #[test]
+    fn preserves_labels_as_structural_atoms() {
+        let document = parse("(def option doc: \"Maybe\")").unwrap();
+        let NodeKind::List(children) = &document.nodes[0].kind else {
+            panic!("expected list");
+        };
+        assert!(matches!(
+            &children[2].kind,
+            NodeKind::Atom(Atom::Label(label)) if label == "doc"
+        ));
+        assert_eq!(children[2].span, Span::new(12, 16));
     }
 
     #[test]

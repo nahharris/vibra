@@ -37,9 +37,10 @@ top-form     = import | definition | constant | function | macro | test
 form         = atom | list ;
 list         = "(", trivia, symbol, { required-trivia, form }, trivia, ")" ;
 
-atom         = string | boolean | integer | float | unit | symbol ;
+atom         = string | boolean | integer | float | unit | label | symbol ;
 boolean      = "true" | "false" ;
 unit         = "unit" ;
+label        = kebab-name, ":" ;
 symbol       = symbol-start, { symbol-rest } ;
 symbol-start = letter | "_" | "-" ;
 symbol-rest  = symbol-start | digit | "." | "/" | "?" | "!" ;
@@ -72,11 +73,35 @@ strings are syntax errors.
 
 Semicolon comments end at a line ending. Comments are trivia, do not enter the
 semantic tree, and may appear wherever whitespace is accepted. Documentation
-that tools retain uses `(doc "...")`; comments are not annotations.
+that tools retain uses `doc: "..."`; comments are not attributes.
 
 Square brackets, braces, commas, colons, quote-reader macros, dotted pairs,
-keywords such as `:name`, and YAML document markers are invalid. Vibra does not
-implement a general-purpose Lisp reader.
+prefix keywords such as `:name`, and YAML document markers are invalid. A colon
+is valid only as the final character of a canonical kebab-case label token.
+Vibra does not implement a general-purpose Lisp reader.
+
+## Labeled attributes
+
+Trailing labeled attributes configure their containing form:
+
+```vibra
+(def option
+  (enum (some t) (none void))
+  where: ((t))
+  doc: "A value that may be absent.")
+```
+
+The governing rule is: required, ordered, evaluated input is positional;
+optional, unordered configuration of the containing form is labeled. A label
+is a reader-level structural atom, not a runtime value or Erlang-style atom.
+Each label consumes exactly one following form.
+
+All positional operands must precede the first labeled attribute. Attributes
+are semantically unordered unless a form explicitly documents otherwise. The
+typed grammar rejects unknown, duplicate, missing-value, and misplaced labels.
+Ordinary function calls remain positional; labels do not create named
+arguments. The lossless CST preserves labels and source order for macros and
+formatting.
 
 ## Names, values, and calls
 
@@ -111,11 +136,11 @@ Partial type application and named type arguments are invalid.
 
 ```ebnf
 import     = "(", "import", symbol, string, ")" ;
-definition = "(", "def", symbol, type-expr, { annotation }, ")" ;
-constant   = "(", "const", symbol, type-expr, expr, { annotation }, ")" ;
+definition = "(", "def", symbol, type-expr, { attribute }, ")" ;
+constant   = "(", "const", symbol, type-expr, expr, { attribute }, ")" ;
 function   = "(", "fn", symbol, parameters, type-expr, body,
-             { annotation }, ")" ;
-test       = "(", "test", symbol, symbol, body, { test-meta }, ")" ;
+             { attribute }, ")" ;
+test       = "(", "test", symbol, symbol, body, { attribute }, ")" ;
 private    = "(", "private",
              (definition | constant | function | macro), ")" ;
 parameters = "(", { "(", symbol, type-expr, ")" }, ")" ;
@@ -188,11 +213,11 @@ requires order.
 Examples:
 
 ```vibra
-(def pair (tuple a b) (where (a) (b)))
+(def pair (tuple a b) where: ((a) (b)))
 (def option
   (enum (some t) (none void))
-  (where (t))
-  (doc "A value that may be absent."))
+  where: ((t))
+  doc: "A value that may be absent.")
 
 (fn unwrap-or
   ((input (option t)) (fallback t))
@@ -201,7 +226,7 @@ Examples:
     (match input
       (case (option.some (bind value)) (do (return value)))
       (case (option.none) (do (return fallback)))))
-  (where (t)))
+  where: ((t)))
 ```
 
 Capability, handle, policy, function-interface, and WebAssembly signature
@@ -277,28 +302,29 @@ expression. A payload-free tag is `(option.none)`. `_` is the sole wildcard
 form. Bindings use `(bind name)`. Exhaustiveness and binding-scope rules do not
 change.
 
-## Annotations and implementations
+## Definition attributes and implementations
 
-Annotations are explicit trailing children of `def` and `fn`:
+Definition attributes trail all positional operands:
 
 ```ebnf
-annotation = "(", "doc", string, ")"
-           | "(", "where", type-param*, ")"
-           | "(", "defs", function*, ")"
-           | "(", "impl", type-expr, impl-item*, ")" ;
+attribute  = label, required-trivia, form ;
 type-param = "(", symbol, type-expr*, ")" ;
-impl-item  = "(", "types", type-expr*, ")"
-           | "(", "method", symbol, (qualified-symbol | function), ")" ;
+impl       = "(", "impl", type-expr,
+             [ "types:", "(", type-expr*, ")" ],
+             [ "methods:", "(", method*, ")" ], ")" ;
+method     = "(", "method", symbol, (qualified-symbol | function), ")" ;
 ```
 
-`where` lists type parameters in declaration order. Each following type is an
-interface bound; no following types means unbounded. `defs` contains named
-functions using ordinary `fn` syntax. `impl` names the interface, supplies
-interface type arguments in declaration order with `(types ...)`, and provides
-one `(method name binding)` per method. A binding is either a qualified function
-symbol or an inline `fn`. Existing nominal dispatch and orphan rules remain.
+The known definition/function/macro attributes are `doc: string`, `where:
+(type-param*)`, `defs: (function*)`, and `impls: (impl*)`. `where:` lists type
+parameters in declaration order inside its single list value. Each following
+type is an interface bound; no following types means unbounded. `defs:`
+contains named functions using ordinary `fn` syntax. An `impl` keeps its
+required interface positional, then uses `types:` and `methods:` for optional
+configuration. A method binding is either a qualified function symbol or an
+inline `fn`. Existing nominal dispatch and orphan rules remain.
 
-`comment` and `lint` annotations are removed. Lint suppression moves to CLI or
+`comment:` and `lint:` attributes do not exist. Lint suppression moves to CLI or
 project configuration so source semantics do not contain diagnostic policy.
 
 ## Tests and metadata
@@ -308,15 +334,16 @@ The canonical test form is:
 ```vibra
 (test addition-is-checked core
   (do (test.assert-eq-int (add 1 1) 2))
-  (tags language arithmetic)
-  (expect-error compile E-OP-002 "overflow")
-  (clock fixed 0))
+  tags: (language arithmetic)
+  expect-error: (compile E-OP-002 "overflow")
+  clock: (fixed 0))
 ```
 
-Each metadata form has exactly one positional schema. Profiles and tags still
+Each metadata label consumes one value with its own positional schema. Known
+labels are `tags:`, `expect-error:`, `clock:`, `benchmark:`, and `workspace:`.
+Profiles and tags still
 select tests and never grant capabilities. Workspace and capability policy
-remain explicit runner options. Metadata is placed after the body in canonical
-order: `tags`, `expect-error`, `clock`, benchmark metadata, then extensions.
+remain explicit runner options. Metadata is unordered and must follow the body.
 
 ## Source files, manifests, locks, and packages
 
@@ -331,8 +358,8 @@ an executable module.
 ```vibra
 (project
   (package "example" "0.1.0")
-  (target app "src/main.vibra")
-  (dependency std (path "../stdlib")))
+  (target app kind: bin root: "src" entry: "main.vibra")
+  (dependency std path: "../stdlib"))
 ```
 
 The dependency lock becomes `vibra.lock.json`, canonical UTF-8 JSON with sorted
@@ -352,12 +379,13 @@ format:
 
 ```vibra
 (embed "assets/message.txt")
-(embed "assets/config.json" json)
+(embed "assets/config.json" format: json)
 ```
 
 Supported formats are `text`, `binary`, `yaml`, `json`, `toml`, and `xml`.
 `yaml` is an external data-interoperability format only. It is accepted by
-explicit `(embed "path" yaml)` and may be inferred from `.yaml` or `.yml`.
+explicit `(embed "path" format: yaml)` and may be inferred from `.yaml` or
+`.yml`.
 The decoder accepts the library's safe data model, rejects tags and non-string
 record keys, and converts mappings, sequences, strings, booleans, numbers, and
 null into the same record, array, and scalar values produced by the JSON/TOML/
@@ -434,7 +462,7 @@ random authority.
 
 ```ebnf
 macro          = "(", "macro", symbol, macro-parameters, syntax-category,
-                 macro-body, { annotation }, ")" ;
+                 macro-body, { attribute }, ")" ;
 macro-parameters = "(", { "(", symbol, syntax-category, ")" }, ")" ;
 syntax-category = "expr-syntax" | "type-syntax" | "pattern-syntax"
                 | "definition-syntax" | "module-syntax" ;
@@ -612,7 +640,7 @@ filesystem changes remains an explicit CLI or LSP workspace action.
 | `$convert`/into/or siblings | `(convert value Type fallback)` |
 | `$cast`/into sibling | `(cast value Type)` |
 | leading `-private-name` | `(private (fn private-name ...))` |
-| `=doc`, `=where`, `=defs`, `=impl` | trailing `(doc ...)`, `(where ...)`, `(defs ...)`, `(impl ...)` |
+| `=doc`, `=where`, `=defs`, `=impl` | trailing `doc:`, `where:`, `defs:`, `impls:` attributes |
 
 ## Implementation and PR plan
 
@@ -623,7 +651,7 @@ PR, because there is intentionally no dual-syntax supported state.
 1. **Reader, CST, spans, and formatter.** Add lexer/parser error recovery,
    golden parser tests, formatter idempotence tests, typed AST identities, and
    the internal semantic index.
-2. **Lowering and compiler.** Lower the new AST directly, migrate annotations,
+2. **Lowering and compiler.** Lower the new AST directly, migrate attributes,
    and remove semantic dependence on YAML mappings.
 3. **Macros and origins.** Reimplement macro collection, typed quote/unquote/
    splice/capture, hygiene, limits, and the origin arena over the AST. Add
@@ -658,7 +686,7 @@ part of the supported compiler.
   grammar in this document.
 - The parser rejects YAML source and `.vibra.yaml` discovery is absent.
 - Positional calls, generic `apply`, atoms, strings, escapes, comments,
-  definitions, visibility, types, expressions, patterns, annotations, and tests
+  definitions, visibility, types, expressions, patterns, attributes, and tests
   have focused positive and negative parser tests.
 - Parser and diagnostic tests verify exact half-open byte spans, including
   Unicode and recovery after malformed forms.

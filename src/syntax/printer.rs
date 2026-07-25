@@ -46,10 +46,23 @@ fn print_node(node: &Node, indent: usize, output: &mut String) {
             if let Some(head) = head {
                 print_node(head, indent + 1, output);
             }
-            for child in tail {
+            let mut tail_nodes = tail.iter().peekable();
+            while let Some(child) = tail_nodes.next() {
                 output.push('\n');
                 output.push_str(&" ".repeat(indent + INDENT));
                 print_node(child, indent + INDENT, output);
+                if matches!(child.kind, NodeKind::Atom(Atom::Label(_))) {
+                    if let Some(value) = tail_nodes.peek() {
+                        if !matches!(value.kind, NodeKind::Comment(_)) {
+                            output.push(' ');
+                            print_node(
+                                tail_nodes.next().expect("peeked attribute value"),
+                                indent + INDENT,
+                                output,
+                            );
+                        }
+                    }
+                }
             }
             if !children.is_empty() {
                 output.push('\n');
@@ -85,6 +98,7 @@ fn inline_len(children: &[Node]) -> usize {
 fn atom_len(atom: &Atom) -> usize {
     match atom {
         Atom::Symbol(value) => value.len(),
+        Atom::Label(value) => value.len() + 1,
         Atom::String(value) => escaped_string(value).len(),
         Atom::Int(value) => value.to_string().len(),
         Atom::Float(value) => float_text(*value).len(),
@@ -97,6 +111,10 @@ fn atom_len(atom: &Atom) -> usize {
 fn print_atom(atom: &Atom, output: &mut String) {
     match atom {
         Atom::Symbol(value) => output.push_str(value),
+        Atom::Label(value) => {
+            output.push_str(value);
+            output.push(':');
+        }
         Atom::String(value) => output.push_str(&escaped_string(value)),
         Atom::Int(value) => write!(output, "{value}").expect("write to String"),
         Atom::Float(value) => output.push_str(&float_text(*value)),
@@ -139,11 +157,11 @@ mod tests {
 
     #[test]
     fn canonical_print_is_idempotent_and_preserves_values() {
-        let source = "(say \"line\\nλ\" 1 2.0 true unit)\n; keep me\n";
+        let source = "(def answer 42 doc: \"line\\nλ\")\n; keep me\n";
         let once = print(&parse(source).unwrap());
         let twice = print(&parse(&once).unwrap());
         assert_eq!(once, twice);
-        assert_eq!(once, "(say \"line\\nλ\" 1 2.0 true unit)\n; keep me\n");
+        assert_eq!(once, "(def answer 42 doc: \"line\\nλ\")\n; keep me\n");
     }
 
     #[test]
@@ -153,6 +171,15 @@ mod tests {
             print(&parse(source).unwrap()),
             "(module\n  ; note\n  (a\n    very-long-symbol-name-that-makes-this-list-exceed-the-canonical-inline-width\n    another-long-symbol-name\n  )\n)\n"
         );
+    }
+
+    #[test]
+    fn multiline_attributes_keep_each_label_with_its_value() {
+        let source = "(def option (enum (some type-with-a-very-long-name-that-forces-multiline-layout) (none void)) where: ((type-with-a-very-long-name-that-forces-multiline-layout)) doc: \"Maybe\")";
+        let printed = print(&parse(source).unwrap());
+        assert!(printed.contains("\n  where: ("));
+        assert!(printed.contains("\n  doc: \"Maybe\"\n"));
+        assert_eq!(print(&parse(&printed).unwrap()), printed);
     }
 
     #[test]
