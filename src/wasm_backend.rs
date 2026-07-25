@@ -959,6 +959,8 @@ fn collect_calls_in_statements(statements: &[Statement], calls: &mut Vec<Call>) 
                 collect_calls_in_statements(body, calls);
             }
             Statement::Task { body, .. } => collect_calls_in_statements(body, calls),
+            Statement::Spawn { value, .. } => collect_calls_in_expr(value, calls),
+            Statement::Join { .. } => {}
             Statement::Break | Statement::Continue => {}
         }
     }
@@ -1370,6 +1372,20 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.for_depth -= 1;
             }
             Statement::Task { body, .. } => self.emit_statements(body),
+            Statement::Spawn { handle, value, .. } => {
+                // The deterministic Wasm executor runs the child computation
+                // to its first (currently terminal) result, then retains that
+                // value in the opaque handle local until `$join`.
+                self.emit_expr(value);
+                self.function
+                    .instruction(&Instruction::LocalSet(self.locals[handle]));
+            }
+            Statement::Join { handle, var } => {
+                self.function
+                    .instruction(&Instruction::LocalGet(self.locals[handle]));
+                self.function
+                    .instruction(&Instruction::LocalSet(self.locals[var]));
+            }
             Statement::Break => {
                 let (target, _) = self.loop_stack.last().expect("validated loop control");
                 self.function
@@ -1565,6 +1581,8 @@ fn collect_locals(statements: &[Statement], names: &mut Vec<String>) {
                 collect_locals(body, names);
             }
             Statement::Task { body, .. } => collect_locals(body, names),
+            Statement::Spawn { handle, .. } => names.push(handle.clone()),
+            Statement::Join { var, .. } => names.push(var.clone()),
             _ => {}
         }
     }
@@ -1596,6 +1614,7 @@ fn count_pattern_bindings(statements: &[Statement]) -> usize {
             Statement::While { body, .. } => count += count_pattern_bindings(body),
             Statement::For { body, .. } => count += count_pattern_bindings(body),
             Statement::Task { body, .. } => count += count_pattern_bindings(body),
+            Statement::Spawn { .. } | Statement::Join { .. } => {}
             _ => {}
         }
     }
@@ -1608,6 +1627,7 @@ fn max_for_depth(statements: &[Statement]) -> usize {
         .map(|statement| match statement {
             Statement::For { body, .. } => 1 + max_for_depth(body),
             Statement::Task { body, .. } => max_for_depth(body),
+            Statement::Spawn { .. } | Statement::Join { .. } => 0,
             Statement::While { body, .. } => max_for_depth(body),
             Statement::If {
                 then_body,

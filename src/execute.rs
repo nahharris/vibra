@@ -1,5 +1,6 @@
 //! Execute lowered Vibra programs with stdlib io/fs support.
 
+use crate::async_runtime::{JoinHandle as RuntimeJoinHandle, Scheduler, TaskOutcome};
 use crate::lower::{
     Call, CapabilityDomain, CapabilityType, CapabilityValue, Expr, FunctionBody, HandleAccess,
     HostHandle, LetValue, LoweredExec, LoweredProgram, Pattern, PolicyGroup, PolicyRequirement,
@@ -24,6 +25,7 @@ pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
 
 #[cfg(test)]
 pub(crate) fn run_lowered_interpreted(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
+    reset_source_tasks();
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     seed_main_args(program, config, &mut env)?;
     let mut files = FileTable::new(config.max_open_files);
@@ -1076,6 +1078,62 @@ enum ExecFlow {
     Continue,
 }
 
+struct SourceTaskRuntime {
+    scheduler: Scheduler,
+    next_handle: u64,
+    handles: HashMap<u64, RuntimeJoinHandle>,
+    results: HashMap<u64, RuntimeValue>,
+}
+
+impl SourceTaskRuntime {
+    fn new() -> Self {
+        Self {
+            scheduler: Scheduler::new([]),
+            next_handle: 1,
+            handles: HashMap::new(),
+            results: HashMap::new(),
+        }
+    }
+
+    fn spawn(&mut self, result: RuntimeValue) -> Result<u64> {
+        let id = self.next_handle;
+        self.next_handle += 1;
+        let handle = self
+            .scheduler
+            .spawn_scripted(
+                self.scheduler.root(),
+                self.scheduler.now(),
+                TaskOutcome::Completed(format!("source-task-{id}")),
+            )
+            .map_err(|error| anyhow::anyhow!("E-TASK-004: task admission failed: {error:?}"))?;
+        self.handles.insert(id, handle);
+        self.results.insert(id, result);
+        Ok(id)
+    }
+
+    fn join(&mut self, id: u64) -> Result<RuntimeValue> {
+        let mut handle = self.handles.remove(&id).with_context(|| {
+            format!("E-TASK-003: task handle `{id}` is unknown or already joined")
+        })?;
+        self.scheduler.advance_to(self.scheduler.now());
+        self.scheduler
+            .join(&mut handle)
+            .map_err(|error| anyhow::anyhow!("E-TASK-004: task join failed: {error:?}"))?;
+        self.results
+            .remove(&id)
+            .with_context(|| format!("E-TASK-004: task `{id}` completed without a retained result"))
+    }
+}
+
+thread_local! {
+    static SOURCE_TASKS: RefCell<SourceTaskRuntime> = RefCell::new(SourceTaskRuntime::new());
+}
+
+#[allow(dead_code)]
+fn reset_source_tasks() {
+    SOURCE_TASKS.with(|tasks| *tasks.borrow_mut() = SourceTaskRuntime::new());
+}
+
 fn exec_statement(
     stmt: &Statement,
     program: &LoweredProgram,
@@ -1181,6 +1239,34 @@ fn exec_statement(
                     bail!("E-TASK-002: task control escaped its structured boundary")
                 }
             }
+        }
+        Statement::Spawn {
+            handle,
+            captures,
+            value,
+            ..
+        } => {
+            let mut child = HashMap::new();
+            for name in captures {
+                let value = env
+                    .get(name)
+                    .with_context(|| format!("E-TASK-001: missing captured value `{name}`"))?;
+                child.insert(name.clone(), value.clone());
+            }
+            let result = eval_expr(value, &child, program, files, config)?;
+            let id = SOURCE_TASKS.with(|tasks| tasks.borrow_mut().spawn(result))?;
+            env.insert(handle.clone(), RuntimeValue::JoinHandle(id));
+            Ok(ExecFlow::Next)
+        }
+        Statement::Join { handle, var } => {
+            let id = match env.remove(handle) {
+                Some(RuntimeValue::JoinHandle(id)) => id,
+                Some(_) => bail!("E-TASK-003: symbol `{handle}` is not a task join handle"),
+                None => bail!("E-TASK-003: task handle `{handle}` is unknown or already joined"),
+            };
+            let result = SOURCE_TASKS.with(|tasks| tasks.borrow_mut().join(id))?;
+            env.insert(var.clone(), result);
+            Ok(ExecFlow::Next)
         }
         Statement::Break => Ok(ExecFlow::Break),
         Statement::Continue => Ok(ExecFlow::Continue),
@@ -4013,8 +4099,15 @@ fn exec_vibra_v1(
             let len = checked_alloc_len(len, config)
                 .map_err(|(tag, msg)| anyhow::anyhow!("random_bytes {tag}: {msg}"))?;
             let mut buf = vec![0u8; len];
-            getrandom::getrandom(&mut buf)
-                .map_err(|err| anyhow::anyhow!("random_bytes unavailable: {err}"))?;
+            if let Some(random) = &config.injected_random {
+                random
+                    .lock()
+                    .expect("injected random source poisoned")
+                    .fill_bytes(&mut buf);
+            } else {
+                getrandom::getrandom(&mut buf)
+                    .map_err(|err| anyhow::anyhow!("random_bytes unavailable: {err}"))?;
+            }
             Ok(RuntimeValue::Array(
                 buf.into_iter()
                     .map(|byte| RuntimeValue::Int(i64::from(byte)))
@@ -4468,6 +4561,66 @@ fn exec_vibra_code(
             })
         }
         other => bail!("unsupported vibra_code import `{other}`"),
+    }
+}
+
+#[cfg(test)]
+mod source_task_tests {
+    use super::*;
+    use crate::async_runtime::EventKind;
+
+    #[test]
+    fn source_spawn_join_uses_scheduler_and_consumes_handles() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(
+            &entry,
+            r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $spawn: first
+      captures: []
+      value: 41
+    - $spawn: second
+      captures: []
+      value: 42
+    - $join: second
+      into: second-result
+    - $join: first
+      into: first-result
+"#,
+        )
+        .unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        let lowered = crate::lower::lower_program(&loaded).unwrap();
+        run_lowered_interpreted(&lowered, &RunConfig::default()).unwrap();
+
+        SOURCE_TASKS.with(|tasks| {
+            let tasks = tasks.borrow();
+            assert!(tasks.handles.is_empty());
+            assert!(tasks.results.is_empty());
+            let kinds: Vec<_> = tasks
+                .scheduler
+                .trace()
+                .iter()
+                .map(|event| event.kind.clone())
+                .collect();
+            assert_eq!(
+                kinds
+                    .iter()
+                    .filter(|kind| **kind == EventKind::TaskCreated)
+                    .count(),
+                2
+            );
+            assert_eq!(
+                kinds
+                    .iter()
+                    .filter(|kind| **kind == EventKind::JoinCompleted)
+                    .count(),
+                2
+            );
+        });
     }
 }
 

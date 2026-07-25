@@ -11,6 +11,7 @@ pub mod load;
 pub mod lower;
 pub mod lsp;
 pub mod macro_expand;
+pub mod mcp;
 pub mod package;
 pub mod plugin;
 pub mod project;

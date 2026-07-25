@@ -88,6 +88,9 @@ pub enum RuntimeValue {
     Policy(PolicyValue),
     Capability(CapabilityValue),
     HostHandle(HostHandle),
+    /// Interpreter-only identity for an affine source-level task handle.
+    /// Wasm represents the same handle in a compiler-owned local.
+    JoinHandle(u64),
     Enum {
         enum_key: String,
         tag: String,
@@ -260,6 +263,9 @@ pub enum TypeRef {
     /// An opaque runtime-minted host resource handle. No source expression,
     /// literal, or cast can construct a value of this type.
     HostHandle(HandleAccess),
+    /// An affine handle to a structured child task producing `T`.
+    /// This type has no source spelling and can only be created by `$spawn`.
+    JoinHandle(Box<TypeRef>),
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
     /// A use of a generic type alias with explicit type arguments. `type_args`
@@ -519,6 +525,19 @@ pub enum Statement {
         captures: Vec<String>,
         body: Vec<Statement>,
     },
+    /// Start a child computation with immutable snapshots. Its typed result is
+    /// retained behind an affine handle until a matching `Join`.
+    Spawn {
+        handle: String,
+        captures: Vec<String>,
+        value: Expr,
+        result_type: TypeRef,
+    },
+    /// Consume an affine task handle and bind its result.
+    Join {
+        handle: String,
+        var: String,
+    },
     Break,
     Continue,
 }
@@ -599,12 +618,21 @@ pub struct TestSpec {
     pub skip: Option<String>,
     pub expect_error: Option<ExpectedTestError>,
     pub workspace: Option<TestWorkspace>,
+    pub random_seed: Option<u64>,
+    pub clock: Option<TestClock>,
 }
 
 /// An isolated workspace requested by a `$test` declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestWorkspace {
     Temp,
+}
+
+/// Deterministic clock state requested by a `$test` declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TestClock {
+    pub unix_millis: u64,
+    pub monotonic_millis: u64,
 }
 
 /// The failure a `$test` is intended to exercise.
@@ -661,6 +689,8 @@ struct DefEnvelope<'a> {
     test_skip: Option<&'a Value>,
     test_expect_error: Option<&'a Value>,
     test_workspace: Option<&'a Value>,
+    test_random_seed: Option<&'a Value>,
+    test_clock: Option<&'a Value>,
 }
 
 /// Synthetic field name for the `$function` payload in module-level functions.
@@ -692,6 +722,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut test_skip: Option<&'a Value> = None;
     let mut test_expect_error: Option<&'a Value> = None;
     let mut test_workspace: Option<&'a Value> = None;
+    let mut test_random_seed: Option<&'a Value> = None;
+    let mut test_clock: Option<&'a Value> = None;
 
     for (k, val) in m {
         let ks = k.as_str().context("definition key must be a string")?;
@@ -796,6 +828,16 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 bail!("E-TEST-001: duplicate `workspace` key on definition");
             }
             test_workspace = Some(val);
+        } else if ks == "random-seed" {
+            if test_random_seed.is_some() {
+                bail!("E-TEST-001: duplicate `random-seed` key on definition");
+            }
+            test_random_seed = Some(val);
+        } else if ks == "clock" {
+            if test_clock.is_some() {
+                bail!("E-TEST-001: duplicate `clock` key on definition");
+            }
+            test_clock = Some(val);
         } else if ks == "where" || ks == "doc" {
             bail!(
                 "E-ANNO-002: annotation `{ks}` must use the `=` prefix; rename it to `={ks}` (annotations are now `=`-prefixed in v1)"
@@ -829,6 +871,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             || test_skip.is_some()
             || test_expect_error.is_some()
             || test_workspace.is_some()
+            || test_random_seed.is_some()
+            || test_clock.is_some()
         {
             bail!("E-TEST-001: test metadata is only valid on `$test`");
         }
@@ -852,6 +896,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             || test_skip.is_some()
             || test_expect_error.is_some()
             || test_workspace.is_some()
+            || test_random_seed.is_some()
+            || test_clock.is_some()
         {
             bail!("E-TEST-001: test metadata is only valid on `$test`");
         }
@@ -880,6 +926,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             test_skip,
             test_expect_error,
             test_workspace,
+            test_random_seed,
+            test_clock,
         )?;
     }
 
@@ -917,6 +965,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         test_skip,
         test_expect_error,
         test_workspace,
+        test_random_seed,
+        test_clock,
     })
 }
 
@@ -927,12 +977,16 @@ fn parse_test_metadata(
     skip_value: Option<&Value>,
     expect_error_value: Option<&Value>,
     workspace_value: Option<&Value>,
+    random_seed_value: Option<&Value>,
+    clock_value: Option<&Value>,
 ) -> Result<(
     Vec<String>,
     Option<u64>,
     Option<String>,
     Option<ExpectedTestError>,
     Option<TestWorkspace>,
+    Option<u64>,
+    Option<TestClock>,
 )> {
     if !is_kebab_case(profile) {
         bail!("E-TEST-001: `$test` profile must be a non-empty kebab-case scalar, got `{profile}`");
@@ -991,7 +1045,59 @@ fn parse_test_metadata(
         },
         None => None,
     };
-    Ok((tags, timeout_ms, skip, expect_error, workspace))
+    let random_seed = match random_seed_value {
+        Some(value) => Some(
+            value
+                .as_u64()
+                .context("E-TEST-001: `random-seed` must be an unsigned integer")?,
+        ),
+        None => None,
+    };
+    let clock = match clock_value {
+        Some(value) => Some(parse_test_clock(value)?),
+        None => None,
+    };
+    Ok((
+        tags,
+        timeout_ms,
+        skip,
+        expect_error,
+        workspace,
+        random_seed,
+        clock,
+    ))
+}
+
+fn parse_test_clock(value: &Value) -> Result<TestClock> {
+    let map = value
+        .as_mapping()
+        .context("E-TEST-001: `clock` must be a mapping")?;
+    let mut unix_millis = None;
+    let mut monotonic_millis = None;
+    for (key, value) in map {
+        let key = key
+            .as_str()
+            .context("E-TEST-001: `clock` keys must be strings")?;
+        let slot = match key {
+            "unix-millis" => &mut unix_millis,
+            "monotonic-millis" => &mut monotonic_millis,
+            _ => bail!(
+                "E-TEST-001: unknown `clock` key `{key}`; expected `unix-millis` or `monotonic-millis`"
+            ),
+        };
+        if slot.is_some() {
+            bail!("E-TEST-001: duplicate `clock.{key}` key");
+        }
+        *slot =
+            Some(value.as_u64().with_context(|| {
+                format!("E-TEST-001: `clock.{key}` must be an unsigned integer")
+            })?);
+    }
+    Ok(TestClock {
+        unix_millis: unix_millis.context("E-TEST-001: `clock.unix-millis` is required")?,
+        monotonic_millis: monotonic_millis
+            .context("E-TEST-001: `clock.monotonic-millis` is required")?,
+    })
 }
 
 fn parse_expected_test_error(value: &Value) -> Result<ExpectedTestError> {
@@ -2675,6 +2781,8 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
             None,
         )?);
     }
+    validate_affine_task_handles(&statements)
+        .context("E-TASK-003: invalid task-handle lifetime in `main`")?;
 
     // Phase 5c: every `=where` bound element must resolve to an interface
     // (anonymous inline `$interface` or an alias whose body is one). Phase
@@ -2838,6 +2946,8 @@ fn lower_single_test_body(
             None,
         )?);
     }
+    validate_affine_task_handles(&statements)
+        .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in test `{name}`"))?;
     validate_all_where_bounds(&ctx.type_aliases, &ctx.sigs, &ctx.enums)?;
     validate_all_instantiation_bounds(
         &ctx.type_aliases,
@@ -3009,14 +3119,17 @@ pub fn discover_test_specs_in_entry(
             .form_value
             .as_str()
             .expect("$test envelope validated profile scalar");
-        let (tags, timeout_ms, skip, expect_error, workspace) = parse_test_metadata(
-            profile,
-            env.test_tags,
-            env.test_timeout_ms,
-            env.test_skip,
-            env.test_expect_error,
-            env.test_workspace,
-        )?;
+        let (tags, timeout_ms, skip, expect_error, workspace, random_seed, clock) =
+            parse_test_metadata(
+                profile,
+                env.test_tags,
+                env.test_timeout_ms,
+                env.test_skip,
+                env.test_expect_error,
+                env.test_workspace,
+                env.test_random_seed,
+                env.test_clock,
+            )?;
         specs.push(TestSpec {
             name: name.to_string(),
             profile: profile.to_string(),
@@ -3025,6 +3138,8 @@ pub fn discover_test_specs_in_entry(
             skip,
             expect_error,
             workspace,
+            random_seed,
+            clock,
         });
     }
     if specs.is_empty() {
@@ -3263,6 +3378,8 @@ fn lower_pending_user_functions(
         }
         validate_user_function_body(&statements, &sig.return_type)
             .with_context(|| format!("user function `{key}`"))?;
+        validate_affine_task_handles(&statements)
+            .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in `{key}`"))?;
         let fs = sigs
             .get_mut(&key)
             .with_context(|| format!("internal: sig disappeared for `{key}`"))?;
@@ -3278,6 +3395,85 @@ fn validate_user_function_body(stmts: &[Statement], return_type: &TypeRef) -> Re
     if !user_body_terminates(stmts) {
         bail!(
             "non-void function must end with `$return`, or with `$match` whose every arm ends with `$return`"
+        );
+    }
+    Ok(())
+}
+
+fn validate_affine_task_handles(stmts: &[Statement]) -> Result<()> {
+    fn walk(
+        stmts: &[Statement],
+        mut live: std::collections::BTreeSet<String>,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        for stmt in stmts {
+            match stmt {
+                Statement::Spawn { handle, .. } => {
+                    if !live.insert(handle.clone()) {
+                        bail!("task handle `{handle}` is spawned more than once");
+                    }
+                }
+                Statement::Join { handle, .. } => {
+                    if !live.remove(handle) {
+                        bail!("task handle `{handle}` is joined more than once or outside its lifetime");
+                    }
+                }
+                Statement::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    let then_live = walk(then_body, live.clone())?;
+                    let else_live = walk(else_body, live.clone())?;
+                    if then_live != else_live {
+                        bail!("both `$if` branches must consume the same task handles");
+                    }
+                    live = then_live;
+                }
+                Statement::Match { arms, .. } => {
+                    let mut merged = None;
+                    for arm in arms {
+                        let arm_live = walk(&arm.body, live.clone())?;
+                        if merged.as_ref().is_some_and(|prior| prior != &arm_live) {
+                            bail!("every `$match` arm must consume the same task handles");
+                        }
+                        merged = Some(arm_live);
+                    }
+                    if let Some(arm_live) = merged {
+                        live = arm_live;
+                    }
+                }
+                Statement::While { body, .. } | Statement::For { body, .. } => {
+                    let after = walk(body, live.clone())?;
+                    if after != live {
+                        bail!("loops cannot create or consume task handles across iterations");
+                    }
+                }
+                Statement::Task { body, .. } => {
+                    let nested = walk(body, std::collections::BTreeSet::new())?;
+                    if !nested.is_empty() {
+                        bail!(
+                            "nested task left unjoined handles: {}",
+                            nested.into_iter().collect::<Vec<_>>().join(", ")
+                        );
+                    }
+                }
+                Statement::Call(_)
+                | Statement::Let { .. }
+                | Statement::Set { .. }
+                | Statement::Return(_)
+                | Statement::Eval(_)
+                | Statement::Break
+                | Statement::Continue => {}
+            }
+        }
+        Ok(live)
+    }
+
+    let live = walk(stmts, std::collections::BTreeSet::new())?;
+    if !live.is_empty() {
+        bail!(
+            "task handles must be joined before leaving their scope: {}",
+            live.into_iter().collect::<Vec<_>>().join(", ")
         );
     }
     Ok(())
@@ -3302,6 +3498,8 @@ fn user_body_terminates(stmts: &[Statement]) -> bool {
         | Statement::While { .. }
         | Statement::For { .. }
         | Statement::Task { .. }
+        | Statement::Spawn { .. }
+        | Statement::Join { .. }
         | Statement::Break
         | Statement::Continue => false,
     }
@@ -3325,9 +3523,12 @@ fn task_body_has_escaping_control(statement: &Statement) -> bool {
         Statement::While { body, .. }
         | Statement::For { body, .. }
         | Statement::Task { body, .. } => body.iter().any(task_body_has_escaping_control),
-        Statement::Eval(_) | Statement::Call(_) | Statement::Let { .. } | Statement::Set { .. } => {
-            false
-        }
+        Statement::Eval(_)
+        | Statement::Call(_)
+        | Statement::Let { .. }
+        | Statement::Set { .. }
+        | Statement::Spawn { .. }
+        | Statement::Join { .. } => false,
     }
 }
 
@@ -5530,6 +5731,19 @@ fn check_statements_call_bounds(
                 referrer_owner,
                 context,
             )?,
+            Statement::Spawn { value, .. } => {
+                check_expr_call_bounds(
+                    value,
+                    sigs,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    referrer_owner,
+                    context,
+                )?;
+            }
+            Statement::Join { .. } => {}
             Statement::Break | Statement::Continue => {}
         }
     }
@@ -5915,7 +6129,94 @@ fn lower_statement(
     let stmt = step.as_mapping().context("statement must be a mapping")?;
     let home = stmt_home_module(fn_ctx);
 
-    if map_get_str(stmt, "$task").is_some() {
+    if map_get_str(stmt, "$spawn").is_some() {
+        verify_stmt_keys(stmt, &["$spawn", "captures", "value"])?;
+        let handle = map_get_str(stmt, "$spawn")
+            .context("E-TASK-003: `$spawn` missing handle name")?
+            .as_str()
+            .context("E-TASK-003: `$spawn` must name its join handle")?
+            .to_string();
+        maybe_warn_kebab(&handle, "task handle", warnings);
+        if locals.contains_key(&handle) {
+            bail!("E-TASK-003: task handle `{handle}` would shadow an existing symbol");
+        }
+        let capture_values = map_get_str(stmt, "captures")
+            .context("E-TASK-001: `$spawn` missing `captures` sequence")?
+            .as_sequence()
+            .context("E-TASK-001: `$spawn.captures` must be a sequence of symbol names")?;
+        let mut captures = Vec::with_capacity(capture_values.len());
+        let mut task_locals = HashMap::new();
+        for value in capture_values {
+            let name = value
+                .as_str()
+                .context("E-TASK-001: task captures must be symbol-name strings")?;
+            if captures.iter().any(|capture| capture == name) {
+                bail!("E-TASK-001: duplicate task capture `{name}`");
+            }
+            let ty = locals
+                .get(name)
+                .with_context(|| format!("E-TASK-001: unknown task capture `{name}`"))?;
+            if matches!(
+                ty,
+                TypeRef::Mutable(_) | TypeRef::Reference { .. } | TypeRef::JoinHandle(_)
+            ) {
+                bail!("E-TASK-001: task capture `{name}` has mutable, reference, or affine handle type {ty:?}; move an immutable snapshot into the task instead");
+            }
+            captures.push(name.to_string());
+            task_locals.insert(name.to_string(), ty.clone());
+        }
+        let value = parse_expr(
+            map_get_str(stmt, "value").context("E-TASK-002: `$spawn` missing result `value`")?,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            &task_locals,
+            home,
+            warnings,
+        )
+        .context("E-TASK-002: invalid spawned computation")?;
+        let result_type = infer_expr_type(&value, constants, &task_locals, type_aliases, enums)
+            .context("E-TASK-002: could not infer spawned result type")?;
+        if result_type == TypeRef::Void {
+            bail!("E-TASK-002: `$spawn.value` must produce a non-void result");
+        }
+        locals.insert(
+            handle.clone(),
+            TypeRef::JoinHandle(Box::new(result_type.clone())),
+        );
+        Ok(Statement::Spawn {
+            handle,
+            captures,
+            value,
+            result_type,
+        })
+    } else if map_get_str(stmt, "$join").is_some() {
+        verify_stmt_keys(stmt, &["$join", "into"])?;
+        let handle = map_get_str(stmt, "$join")
+            .context("E-TASK-003: `$join` missing handle")?
+            .as_str()
+            .context("E-TASK-003: `$join` must name a task handle")?
+            .to_string();
+        let var = map_get_str(stmt, "into")
+            .context("E-TASK-003: `$join` missing `into` result binding")?
+            .as_str()
+            .context("E-TASK-003: `$join.into` must be a symbol name")?
+            .to_string();
+        maybe_warn_kebab(&var, "local variable", warnings);
+        if locals.contains_key(&var) {
+            bail!("E-TASK-003: join result `{var}` would shadow an existing symbol");
+        }
+        let handle_type = locals.remove(&handle).with_context(|| {
+            format!("E-TASK-003: task handle `{handle}` is unknown or was already joined")
+        })?;
+        let TypeRef::JoinHandle(result_type) = handle_type else {
+            bail!("E-TASK-003: symbol `{handle}` is not a task join handle");
+        };
+        locals.insert(var.clone(), *result_type);
+        Ok(Statement::Join { handle, var })
+    } else if map_get_str(stmt, "$task").is_some() {
         verify_stmt_keys(stmt, &["$task", "do"])?;
         let capture_values = map_get_str(stmt, "$task")
             .context("E-TASK-001: `$task` missing capture sequence")?
@@ -6014,6 +6315,9 @@ fn lower_statement(
             )?;
             let expr_ty = infer_expr_type(&expr, constants, locals, type_aliases, enums)
                 .context("could not infer type for $let expression")?;
+            if matches!(expr_ty, TypeRef::JoinHandle(_)) {
+                bail!("E-TASK-003: affine task handles cannot be copied or rebound; consume the handle with `$join`");
+            }
             if expr_ty == TypeRef::Void {
                 bail!("cannot bind void expression in $let");
             }
@@ -7798,6 +8102,9 @@ fn parse_expr(
                     bail!("constructor `{s}` requires payload; use mapping form `{{{s}: ...}}`");
                 }
             }
+            if matches!(locals.get(var), Some(TypeRef::JoinHandle(_))) {
+                bail!("E-TASK-003: affine task handle `{var}` is opaque; consume it with `$join`");
+            }
             if let Some(c) = constants.get(var) {
                 return Ok(Expr::Value(c.clone()));
             }
@@ -7979,6 +8286,7 @@ fn infer_expr_type(
             Some(TypeRef::Capability(value.capability.clone()))
         }
         Expr::Value(RuntimeValue::HostHandle(value)) => Some(TypeRef::HostHandle(value.access)),
+        Expr::Value(RuntimeValue::JoinHandle(_)) => None,
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
         Expr::Value(RuntimeValue::Enum { enum_key, .. }) => Some(TypeRef::Named(enum_key.clone())),
         Expr::Value(RuntimeValue::Mutable(cell)) => infer_expr_type(
