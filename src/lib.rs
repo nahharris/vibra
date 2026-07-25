@@ -22,6 +22,7 @@ pub mod syntax;
 pub mod test_runner;
 pub mod test_support;
 pub mod tooling;
+pub mod typed_lower;
 pub mod wasm_abi;
 pub mod wasm_backend;
 pub mod yaml_subset;
