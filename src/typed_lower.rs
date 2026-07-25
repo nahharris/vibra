@@ -444,7 +444,7 @@ fn annotations<'a>(
     Ok(result)
 }
 
-fn lower_type(
+pub(crate) fn lower_type(
     ty: &TypeExpr,
     generics: &BTreeSet<String>,
     module_alias: &str,
@@ -569,7 +569,7 @@ fn identity(input: &TypedModuleInput<'_>) -> TypedModuleIdentity {
     }
 }
 
-fn qualify(module_alias: &str, name: &str) -> String {
+pub(crate) fn qualify(module_alias: &str, name: &str) -> String {
     if module_alias.is_empty() {
         name.to_string()
     } else {
