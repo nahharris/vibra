@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vibra Coding"
+  short_description: "Write idiomatic, statically typed Vibra code"
+  default_prompt: "Use $vibra-coding to implement and test this Vibra language change."

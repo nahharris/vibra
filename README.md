@@ -8,6 +8,7 @@ A vibe-coding-first programming language: **YAML** surface (strict subset), **st
 - **Examples:** [examples/](examples/)
 - **[Container images](docs/containers.md)**
 - **[Native toolchain archives](docs/distribution.md)**
+- **[Agent skills](docs/agent-skills.md)**
 
 ## Run (MVP)
 
