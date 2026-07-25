@@ -89,12 +89,16 @@ jobs:
             printf '%s@%s\n' "$image" "$digest" > "digests/$(basename "$image")-${{ matrix.suffix }}.txt"
           done
       - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        env:
+          TRIVY_PLATFORM: ${{ matrix.platform }}
         with:
           version: v0.72.0
           image-ref: ${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
           severity: HIGH,CRITICAL
           exit-code: '1'
       - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        env:
+          TRIVY_PLATFORM: ${{ matrix.platform }}
         with:
           version: v0.72.0
           image-ref: ${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
@@ -157,3 +161,6 @@ jobs:
         run: |
           gh attestation verify "oci://${RUNTIME_IMAGE}@${{ steps.promoted.outputs.runtime }}" --repo "${GITHUB_REPOSITORY}"
           gh attestation verify "oci://${DEV_IMAGE}@${{ steps.promoted.outputs.dev }}" --repo "${GITHUB_REPOSITORY}"
+      - name: Verify documented digest-pinned runtime example
+        shell: bash
+        run: docker run --rm "${RUNTIME_IMAGE}@${{ steps.promoted.outputs.runtime }}" --version

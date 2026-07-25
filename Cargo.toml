@@ -1,6 +1,6 @@
 [package]
 name = "vibra"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 rust-version = "1.94.1"
 description = "Vibe-coding-first language: YAML surface, static types, compiles to WebAssembly"
