@@ -20,7 +20,32 @@
     {
       "code": "E-SYN-001",
       "severity": "error",
-      "summary": "Invalid $-callee name (e.g. punctuation-only like $+); use identifier forms such as $add"
+      "summary": "Invalid token or character in native S-expression syntax"
+    },
+    {
+      "code": "E-SYN-002",
+      "severity": "error",
+      "summary": "Unterminated string literal or unescaped newline in a string"
+    },
+    {
+      "code": "E-SYN-003",
+      "severity": "error",
+      "summary": "Invalid string escape"
+    },
+    {
+      "code": "E-SYN-004",
+      "severity": "error",
+      "summary": "Malformed, non-finite, or out-of-range numeric literal"
+    },
+    {
+      "code": "E-SYN-005",
+      "severity": "error",
+      "summary": "Unexpected closing parenthesis"
+    },
+    {
+      "code": "E-SYN-006",
+      "severity": "error",
+      "summary": "Unclosed S-expression list"
     },
     {
       "code": "E-OP-001",

@@ -16,6 +16,7 @@ pub mod package;
 pub mod plugin;
 pub mod project;
 pub mod runtime;
+pub mod syntax;
 pub mod test_runner;
 pub mod test_support;
 pub mod tooling;
