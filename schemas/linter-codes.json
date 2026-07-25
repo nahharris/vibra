@@ -78,14 +78,64 @@
       "summary": "Unsupported source extension for the S-expression frontend"
     },
     {
-      "code": "E-FRONT-001",
-      "severity": "error",
-      "summary": "Macro expansion has not been cut over to the typed S-expression frontend"
-    },
-    {
       "code": "E-FRONT-002",
       "severity": "error",
       "summary": "Embed or template expansion has not been cut over to the typed S-expression frontend"
+    },
+    {
+      "code": "E-MACRO-001",
+      "severity": "error",
+      "summary": "Typed macro invocation has the wrong number of arguments"
+    },
+    {
+      "code": "E-MACRO-002",
+      "severity": "error",
+      "summary": "Typed macro syntax category does not match its parameter, result, or invocation position"
+    },
+    {
+      "code": "E-MACRO-003",
+      "severity": "error",
+      "summary": "Typed macro body produced no syntax"
+    },
+    {
+      "code": "E-MACRO-004",
+      "severity": "error",
+      "summary": "Typed macro compile-time binding or expression is invalid"
+    },
+    {
+      "code": "E-MACRO-005",
+      "severity": "error",
+      "summary": "Typed macro conditional does not contain boolean syntax"
+    },
+    {
+      "code": "E-MACRO-006",
+      "severity": "error",
+      "summary": "Typed macro expansion exceeded its recursion depth"
+    },
+    {
+      "code": "E-MACRO-007",
+      "severity": "error",
+      "summary": "Typed unquote, splice, or capture is malformed or misplaced"
+    },
+    {
+      "code": "E-MACRO-008",
+      "severity": "error",
+      "summary": "Typed macro evaluation exceeded its step budget"
+    },
+    {
+      "code": "E-MACRO-009",
+      "severity": "error",
+      "summary": "Typed macro expansion exceeded its generated-node budget"
+    },
+    {
+      "code": "E-MACRO-010",
+      "severity": "error",
+      "summary": "Imported macro is private to its defining module"
+    },
+    {
+      "code": "E-MACRO-011",
+      "severity": "error",
+      "summary": "Typed macro uses an explicitly unsupported definition or module syntax category"
     },
     {
       "code": "E-OP-001",

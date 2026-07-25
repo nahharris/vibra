@@ -606,6 +606,38 @@ pub fn lower_document_with_id(
     })
 }
 
+pub(crate) fn lower_expression_node_with_id(
+    node: &Node,
+    document_id: DocumentId,
+) -> Result<Expr, AstError> {
+    let _guard = DocumentGuard::enter(document_id);
+    parse_expr(node)
+}
+
+pub(crate) fn lower_type_node_with_id(
+    node: &Node,
+    document_id: DocumentId,
+) -> Result<TypeExpr, AstError> {
+    let _guard = DocumentGuard::enter(document_id);
+    parse_type(node)
+}
+
+pub(crate) fn lower_pattern_node_with_id(
+    node: &Node,
+    document_id: DocumentId,
+) -> Result<Pattern, AstError> {
+    let _guard = DocumentGuard::enter(document_id);
+    parse_pattern(node)
+}
+
+pub(crate) fn lower_top_level_node_with_id(
+    node: &Node,
+    document_id: DocumentId,
+) -> Result<TopLevel, AstError> {
+    let _guard = DocumentGuard::enter(document_id);
+    parse_top(node)
+}
+
 fn parse_top(node: &Node) -> Result<TopLevel, AstError> {
     let (head, args) = headed(node)?;
     match head.value.as_str() {

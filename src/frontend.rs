@@ -1,8 +1,10 @@
 //! Staged typed S-expression frontend foundation.
 //!
 //! This module owns physical source selection, parsing, typed surface
-//! validation, deterministic module-part merging, and import discovery. It
-//! deliberately has no conversion to the legacy YAML value tree.
+//! validation, deterministic module-part merging, import discovery, and typed
+//! macro expansion. Post-expansion symbol/import validation runs before the
+//! remaining compile-time phases. This module deliberately has no conversion
+//! to the legacy YAML value tree.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -53,7 +55,45 @@ pub fn load_surface_program(entry: &Path, flags: &CompilationFlags) -> Result<Su
     let mut modules = BTreeMap::new();
     let mut visiting = Vec::new();
     load_recursive(&entry, project.as_ref(), flags, &mut modules, &mut visiting)?;
+    let imports = modules
+        .iter()
+        .map(|(path, module)| {
+            Ok((
+                path.clone(),
+                resolved_module_imports(module, project.as_ref())?,
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let typed_modules = modules
+        .iter()
+        .map(|(path, module)| {
+            (
+                path.clone(),
+                module
+                    .parts
+                    .iter()
+                    .map(|part| part.module.clone())
+                    .collect(),
+            )
+        })
+        .collect();
+    let mut expanded = ast::expand_typed_macro_program(typed_modules, &imports)
+        .context("expand typed S-expression macros")?;
+    for (path, module) in &mut modules {
+        let expanded_parts = expanded
+            .remove(path)
+            .with_context(|| format!("missing expanded module {}", path.display()))?;
+        for (part, expanded_part) in module.parts.iter_mut().zip(expanded_parts) {
+            part.module = expanded_part;
+        }
+    }
+    validate_unique_symbols(&modules)?;
     validate_direct_import_aliases(&modules)?;
+    for module in modules.values() {
+        for part in &module.parts {
+            reject_uncut_phases(&part.module, &part.path)?;
+        }
+    }
     let module_parts = modules
         .iter()
         .map(|(path, module)| {
@@ -113,7 +153,6 @@ fn load_source_module(path: &Path, flags: &CompilationFlags) -> Result<SourceMod
         let document_id = DocumentId::from_path(&part_path);
         let module = ast::lower_document_with_id(&document, document_id)
             .with_context(|| format!("validate typed source {}", part_path.display()))?;
-        reject_uncut_phases(&module, &part_path)?;
         for form in &module.forms {
             if let Some(name) = top_level_name(form) {
                 if !symbols.insert(name.to_string()) {
@@ -138,16 +177,6 @@ fn load_source_module(path: &Path, flags: &CompilationFlags) -> Result<SourceMod
 }
 
 fn reject_uncut_phases(module: &Module, path: &Path) -> Result<()> {
-    if module
-        .forms
-        .iter()
-        .any(|form| matches!(form, TopLevel::Macro(_)))
-    {
-        bail!(
-            "E-FRONT-001: macro expansion is not active in the S-expression frontend ({})",
-            path.display()
-        );
-    }
     for form in &module.forms {
         visit_top_level_exprs(form, &mut |expr| {
             if let ExprKind::Call { callee, .. } = &expr.value {
@@ -257,11 +286,23 @@ fn module_imports(
     module: &SourceModule,
     project: Option<&project::LoadedProject>,
 ) -> Result<Vec<PathBuf>> {
+    let mut imports = resolved_module_imports(module, project)?
+        .into_values()
+        .collect::<Vec<_>>();
+    imports.sort();
+    imports.dedup();
+    Ok(imports)
+}
+
+fn resolved_module_imports(
+    module: &SourceModule,
+    project: Option<&project::LoadedProject>,
+) -> Result<BTreeMap<String, PathBuf>> {
     let parent = module
         .path
         .parent()
         .with_context(|| format!("{} has no parent directory", module.path.display()))?;
-    let mut imports = Vec::new();
+    let mut imports = BTreeMap::new();
     for form in module.forms() {
         let TopLevel::Import(import) = form else {
             continue;
@@ -278,17 +319,33 @@ fn module_imports(
         } else {
             parent.join(&import.path.value)
         };
-        imports.push(canonical_module_path(&resolved).with_context(|| {
+        let resolved = canonical_module_path(&resolved).with_context(|| {
             format!(
                 "{}: cannot resolve import `{}`",
                 module.path.display(),
                 import.path.value
             )
-        })?);
+        })?;
+        imports.insert(import.alias.value.clone(), resolved);
     }
-    imports.sort();
-    imports.dedup();
     Ok(imports)
+}
+
+fn validate_unique_symbols(modules: &BTreeMap<PathBuf, SourceModule>) -> Result<()> {
+    for module in modules.values() {
+        let mut symbols = BTreeSet::new();
+        for form in module.forms() {
+            if let Some(name) = top_level_name(form) {
+                if !symbols.insert(name) {
+                    bail!(
+                        "E-MOD-002: duplicate top-level symbol `{name}` across module parts of {}",
+                        module.path.display()
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_direct_import_aliases(modules: &BTreeMap<PathBuf, SourceModule>) -> Result<()> {
@@ -668,10 +725,6 @@ mod tests {
     #[test]
     fn rejects_phases_that_are_not_cut_over() {
         for (source, code) in [
-            (
-                "(macro m () expr-syntax (do (quote expr-syntax unit)))\n",
-                "E-FRONT-001",
-            ),
             ("(const x str (embed \"x.txt\"))\n", "E-FRONT-002"),
             ("(fn f () str (do (template \"x\")))\n", "E-FRONT-002"),
         ] {
@@ -683,6 +736,66 @@ mod tests {
                 .to_string();
             assert!(error.contains(code), "{source}: {error}");
         }
+    }
+
+    #[test]
+    fn expands_local_cross_part_and_imported_macros_before_validation() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vibra");
+        write(
+            &entry,
+            "(import helpers \"helpers.vibra\")\n\
+             (fn main ((caller int64)) int64\n\
+               (do (local caller) (helpers.use-helper caller)))\n",
+        );
+        write(
+            &temp.path().join("main.test.vibra"),
+            "(macro local ((value expr-syntax)) expr-syntax\n\
+               (do (quote expr-syntax (unquote value))))\n",
+        );
+        write(
+            &temp.path().join("helpers.vibra"),
+            "(fn helper ((value int64)) int64 (do value))\n\
+             (macro use-helper ((value expr-syntax)) expr-syntax\n\
+               (do (quote expr-syntax (helper (unquote value)))))\n",
+        );
+        let program = load_surface_program(&entry, &CompilationFlags::new(["test"])).unwrap();
+        let module = &program.modules[&program.entry];
+        assert!(module
+            .forms()
+            .all(|form| !matches!(form, TopLevel::Macro(_))));
+        let TopLevel::Function(function) = module
+            .forms()
+            .find(|form| matches!(form, TopLevel::Function(_)))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let ExprKind::Call { callee, .. } = &function.body[1].value else {
+            panic!("expected imported macro expansion call");
+        };
+        assert_eq!(callee.value, "helpers.helper");
+    }
+
+    #[test]
+    fn imported_private_macros_are_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vibra");
+        write(
+            &entry,
+            "(import helpers \"helpers.vibra\")\n\
+             (fn main () void (do (helpers.secret unit)))\n",
+        );
+        write(
+            &temp.path().join("helpers.vibra"),
+            "(private (macro secret ((value expr-syntax)) expr-syntax\n\
+               (do (unquote value))))\n",
+        );
+        let error = format!(
+            "{:#}",
+            load_surface_program(&entry, &CompilationFlags::default()).unwrap_err()
+        );
+        assert!(error.contains("E-MACRO-010"), "{error}");
     }
 
     #[test]
