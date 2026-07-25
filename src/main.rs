@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use vibra::lower::{RuntimeValue, TypeRef};
 use vibra::{
-    code, docs, execute, load, lower, lsp, package, plugin, project, runtime, test_runner, tooling,
+    code, docs, execute, load, lower, lsp, mcp, package, plugin, project, runtime, test_runner,
+    tooling,
 };
 
 #[derive(Parser)]
@@ -21,6 +22,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Start the Model Context Protocol server over stdin/stdout.
+    Mcp {
+        /// Workspace root visible to MCP tools.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+        /// Permit tools that rewrite source or create build artifacts.
+        #[arg(long)]
+        allow_write: bool,
+        /// Permit the test tool to execute untrusted project code.
+        #[arg(long)]
+        allow_test: bool,
+    },
     /// Start the Language Server Protocol server over stdin/stdout.
     Lsp,
     /// Create a new Vibra project.
@@ -572,6 +585,15 @@ fn main() -> Result<()> {
 fn run_cli() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Mcp {
+            workspace,
+            allow_write,
+            allow_test,
+        } => mcp::run_stdio(mcp::ServerOptions {
+            workspace,
+            allow_write,
+            allow_test,
+        })?,
         Command::Lsp => lsp::run_stdio()?,
         Command::Init {
             name,
