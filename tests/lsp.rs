@@ -53,7 +53,7 @@ fn compilation_flags_flow_from_initialization_and_configuration_changes() {
     let main = "main:\n  $function: $void\n  return: $void\n  do:\n    - $enabled: null\n";
     std::fs::write(
         workspace.path().join("project.vibra"),
-        "manifest-version: 1\npackage:\n  name: flags\n  version: 0.1.0\ntargets:\n  bins:\n    - name: flags\n      root: .\n      entry: main.vibra\ndependencies: {}\n",
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: bin root: \".\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     std::fs::write(&main_path, main).unwrap();
@@ -244,7 +244,7 @@ fn path_uri(path: &std::path::Path) -> String {
 #[test]
 fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     let workspace = tempfile::tempdir().unwrap();
-    let manifest = "manifest-version: 1\npackage:\n  name: overlay-test\n  version: 0.1.0\ntargets:\n  bins:\n    - name: app\n      root: .\n      entry: main.vibra\ndependencies: {}\n";
+    let manifest = "(project\n  (package \"overlay-test\" \"0.1.0\")\n  (target app kind: bin root: \".\" entry: \"main.vibra\"))\n";
     let main = "helper:\n  $import: helper.vibra\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $helper.run: null\n";
     let valid = "run:\n  $function: $void\n  return: $void\n  do:\n    - $let:\n        value: 1\n";
     let broken = valid.replace("    - $let:", "    - $missing: null\n    - $let:");
@@ -350,8 +350,9 @@ fn semantic_navigation_resolves_project_at_imports() {
     let workspace = tempfile::tempdir().unwrap();
     let dependency = workspace.path().join("packages/util");
     std::fs::create_dir_all(dependency.join("src")).unwrap();
-    let manifest="manifest-version: 1\npackage:\n  name: app\n  version: 0.1.0\ntargets:\n  bins:\n    - name: app\n      root: .\n      entry: main.vibra\ndependencies:\n  util:\n    path: packages/util\n";
-    let dependency_manifest="manifest-version: 1\npackage:\n  name: util\n  version: 0.1.0\ntargets:\n  libs:\n    - name: util\n      root: src\n      entry: greet.vibra\ndependencies: {}\n";
+    let manifest="(project\n  (package \"app\" \"0.1.0\")\n  (target app kind: bin root: \".\" entry: \"main.vibra\")\n  (dependency util path: \"packages/util\"))\n";
+    let dependency_manifest =
+        "(project\n  (package \"util\" \"0.1.0\")\n  (target util kind: lib root: \"src\" entry: \"greet.vibra\"))\n";
     let main="util:\n  $import: '@util/greet.vibra'\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $util.greet: null\n";
     let library="greet:\n  $function: $void\n  =doc: Dependency greeting\n  return: $void\n  do:\n    - $let:\n        value: 1\n";
     let main_path = workspace.path().join("main.vibra");

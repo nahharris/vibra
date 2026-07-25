@@ -195,7 +195,7 @@ core:
   $import: "@core/lib.vibra"
 ```
 
-Use `vibra sync` to export exact Git revisions recursively into package-local `dep/<name>` trees and write the committed `project.lock.vibra`. Exported trees contain no Git metadata. The lock records identities, exact revisions, SHA-256 tree hashes, vendor paths, and alias edges. `vibra check` validates the lock, rejects modified vendor trees, and then validates targets, dependencies, and `@` imports:
+Use `vibra sync` to export exact Git revisions recursively into package-local `dep/<name>` trees and write the committed `vibra.lock.json`. Exported trees contain no Git metadata. The canonical JSON lock records identities, exact revisions, SHA-256 tree hashes, vendor paths, and alias edges. `vibra check` validates the lock, rejects modified vendor trees, and then validates targets, dependencies, and `@` imports:
 
 ```sh
 vibra sync hello

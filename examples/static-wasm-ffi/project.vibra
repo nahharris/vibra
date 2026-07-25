@@ -1,13 +1,4 @@
-manifest-version: 1
-package:
-  name: static-wasm-ffi
-  version: 0.1.0
-targets:
-  bins:
-    - name: static-wasm-ffi
-      root: src
-      entry: main.vibra
-dependencies:
-  math:
-    path: foreign
-    wasm: math.wasm
+(project
+  (package "static-wasm-ffi" "0.1.0")
+  (target static-wasm-ffi kind: bin root: "src" entry: "main.vibra")
+  (dependency math path: "foreign" wasm: "math.wasm"))

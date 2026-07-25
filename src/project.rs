@@ -10,7 +10,8 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 pub const MANIFEST_FILE: &str = "project.vibra";
-pub const LOCK_FILE: &str = "project.lock.vibra";
+pub const LOCK_FILE: &str = "vibra.lock.json";
+pub const LEGACY_LOCK_FILE: &str = "project.lock.vibra";
 pub const STDLIB_GIT: &str = "https://github.com/nahharris/vibra-stdlib.git";
 pub const STDLIB_REV: &str = "6b9fa5838e4f4122ff141e13a5ef737e99955dad";
 
@@ -125,6 +126,10 @@ pub fn init_project(path: &Path, template: InitTemplate) -> Result<()> {
     fs::create_dir_all(path.join("dep")).with_context(|| "create dep directory")?;
     copy_clean_repository_tree(&locate_stdlib_package()?, &path.join("dep/std"))
         .context("copy stdlib into dep/std")?;
+    fs::write(
+        path.join("dep/std").join(MANIFEST_FILE),
+        "(project\n  (package \"std\" \"0.1.0\")\n  (target std kind: lib root: \"src\" entry: \"lib.vibra\"))\n",
+    )?;
 
     let name = path
         .file_name()
@@ -173,7 +178,7 @@ pub fn sync_project(path: &Path) -> Result<()> {
         fs::remove_dir_all(&dep_root).context("replace existing vendored dependency graph")?;
     }
     fs::rename(&staged_dep, &dep_root).context("install vendored dependency graph")?;
-    let lock_text = serde_yaml::to_string(&lock).context("serialize dependency lock")?;
+    let lock_text = canonical_json(&lock).context("serialize dependency lock")?;
     fs::write(project.root.join(LOCK_FILE), lock_text).context("write dependency lock")?;
     Ok(())
 }
@@ -196,8 +201,8 @@ pub fn load_project(path: &Path) -> Result<LoadedProject> {
     let manifest_path = resolve_manifest_path(path)?;
     let text = fs::read_to_string(&manifest_path)
         .with_context(|| format!("read {}", manifest_path.display()))?;
-    let manifest: ProjectManifest = serde_yaml::from_str(&text)
-        .with_context(|| format!("parse {}", manifest_path.display()))?;
+    let manifest =
+        parse_manifest(&text).with_context(|| format!("parse {}", manifest_path.display()))?;
     let root = manifest_path
         .parent()
         .context("manifest path has no parent")?
@@ -207,6 +212,232 @@ pub fn load_project(path: &Path) -> Result<LoadedProject> {
         manifest_path,
         manifest,
     })
+}
+
+fn parse_manifest(source: &str) -> Result<ProjectManifest> {
+    if source.trim_start().starts_with("manifest-version:") {
+        bail!("E-PROJECT-001: legacy YAML project manifests are unsupported; rewrite `project.vibra` as `(project ...)`");
+    }
+    let document =
+        crate::syntax::parse(source).map_err(|error| anyhow::anyhow!("E-PROJECT-001: {error}"))?;
+    let roots: Vec<_> = document
+        .nodes
+        .iter()
+        .filter(|node| !matches!(node.kind, crate::syntax::NodeKind::Comment(_)))
+        .collect();
+    if roots.len() != 1 {
+        bail!("E-PROJECT-001: manifest must contain exactly one `(project ...)` root");
+    }
+    let root = list(roots[0], "project root")?;
+    if symbol(root.first(), "project root")? != "project" {
+        bail!("E-PROJECT-001: manifest root must be `(project ...)`");
+    }
+    let mut package = None;
+    let mut targets = Targets::default();
+    let mut dependencies = HashMap::new();
+    let mut plugin_interfaces = BTreeMap::new();
+    for child in forms(&root[1..]) {
+        let form = list(child, "project child")?;
+        match symbol(form.first(), "project child")? {
+            "package" => {
+                if form.len() < 3 {
+                    bail!("E-PROJECT-001: package requires name and version");
+                }
+                if package.is_some() {
+                    bail!("E-PROJECT-001: duplicate `(package ...)` form");
+                }
+                let attrs = attributes(&form[3..], &["doc"], &[], "package")?;
+                let doc = attrs
+                    .get("doc")
+                    .map(|node| string(node, "package doc").map(str::to_owned))
+                    .transpose()?;
+                package = Some(Package {
+                    name: scalar_text(&form[1], "package name")?,
+                    version: scalar_text(&form[2], "package version")?,
+                    doc,
+                });
+            }
+            "target" => {
+                if form.len() < 2 {
+                    bail!("E-PROJECT-001: target requires a name");
+                }
+                let name = scalar_text(&form[1], "target name")?;
+                let attrs = attributes(
+                    &form[2..],
+                    &["kind", "root", "entry"],
+                    &["kind", "root", "entry"],
+                    "target",
+                )?;
+                let kind = symbol(attrs.get("kind").copied(), "target kind")?;
+                let root = PathBuf::from(string(attrs["root"], "target root")?);
+                let entry = PathBuf::from(string(attrs["entry"], "target entry")?);
+                let target = Target { name, root, entry };
+                match kind {
+                    "lib" => targets.libs.push(target),
+                    "bin" => targets.bins.push(target),
+                    other => {
+                        bail!("E-PROJECT-001: target kind must be `lib` or `bin`, found `{other}`")
+                    }
+                }
+            }
+            "dependency" => {
+                if form.len() < 2 {
+                    bail!("E-PROJECT-001: dependency requires an alias");
+                }
+                let alias = scalar_text(&form[1], "dependency alias")?;
+                let attrs = attributes(
+                    &form[2..],
+                    &["path", "git", "rev", "wasm"],
+                    &[],
+                    "dependency",
+                )?;
+                let path = attrs
+                    .get("path")
+                    .map(|node| string(node, "dependency path").map(PathBuf::from))
+                    .transpose()?;
+                let git = attrs
+                    .get("git")
+                    .map(|node| string(node, "dependency git").map(str::to_owned))
+                    .transpose()?;
+                let rev = attrs
+                    .get("rev")
+                    .map(|node| string(node, "dependency revision").map(str::to_owned))
+                    .transpose()?;
+                let wasm = attrs
+                    .get("wasm")
+                    .map(|node| string(node, "dependency wasm").map(PathBuf::from))
+                    .transpose()?;
+                if path.is_none() && git.is_none() {
+                    bail!("E-PROJECT-001: dependency requires `path:` or `git:`");
+                }
+                let dependency = Dependency {
+                    path,
+                    git,
+                    rev,
+                    wasm,
+                };
+                if dependencies.insert(alias.clone(), dependency).is_some() {
+                    bail!("E-PROJECT-001: duplicate dependency `{alias}`");
+                }
+            }
+            "plugin-interface" => {
+                if form.len() < 2 {
+                    bail!("E-PROJECT-001: plugin interface requires a name");
+                }
+                let name = scalar_text(&form[1], "plugin interface name")?;
+                let mut functions = BTreeMap::new();
+                for function in forms(&form[2..]) {
+                    let function = list(function, "plugin function")?;
+                    if function.len() < 2
+                        || symbol(function.first(), "plugin function")? != "function"
+                    {
+                        bail!("E-PROJECT-001: plugin interface children must be `(function ...)`");
+                    }
+                    let function_name = scalar_text(&function[1], "plugin function name")?;
+                    let attrs = attributes(
+                        &function[2..],
+                        &["params", "result"],
+                        &["result"],
+                        "plugin function",
+                    )?;
+                    let params = attrs
+                        .get("params")
+                        .map(|node| {
+                            forms(list(node, "plugin params")?)
+                                .map(|node| scalar_text(node, "plugin parameter"))
+                                .collect::<Result<Vec<_>>>()
+                        })
+                        .transpose()?
+                        .unwrap_or_default();
+                    let result = scalar_text(attrs["result"], "plugin result")?;
+                    functions.insert(function_name, PluginFunction { params, result });
+                }
+                plugin_interfaces.insert(name, PluginInterface { functions });
+            }
+            other => bail!("E-PROJECT-001: unknown project form `{other}`"),
+        }
+    }
+    Ok(ProjectManifest {
+        manifest_version: 1,
+        package: package
+            .context("E-PROJECT-001: manifest requires `(package <name> <version>)`")?,
+        targets,
+        dependencies,
+        plugin_interfaces,
+    })
+}
+
+fn forms(nodes: &[crate::syntax::Node]) -> impl Iterator<Item = &crate::syntax::Node> {
+    nodes
+        .iter()
+        .filter(|node| !matches!(node.kind, crate::syntax::NodeKind::Comment(_)))
+}
+
+fn list<'a>(node: &'a crate::syntax::Node, context: &str) -> Result<&'a [crate::syntax::Node]> {
+    match &node.kind {
+        crate::syntax::NodeKind::List(items) => Ok(items),
+        _ => bail!("E-PROJECT-001: {context} must be a list"),
+    }
+}
+
+fn symbol<'a>(node: Option<&'a crate::syntax::Node>, context: &str) -> Result<&'a str> {
+    match node.map(|node| &node.kind) {
+        Some(crate::syntax::NodeKind::Atom(crate::syntax::Atom::Symbol(value))) => Ok(value),
+        _ => bail!("E-PROJECT-001: {context} must start with a symbol"),
+    }
+}
+
+fn string<'a>(node: &'a crate::syntax::Node, context: &str) -> Result<&'a str> {
+    match &node.kind {
+        crate::syntax::NodeKind::Atom(crate::syntax::Atom::String(value)) => Ok(value),
+        _ => bail!("E-PROJECT-001: {context} must be a string"),
+    }
+}
+
+fn scalar_text(node: &crate::syntax::Node, context: &str) -> Result<String> {
+    match &node.kind {
+        crate::syntax::NodeKind::Atom(crate::syntax::Atom::String(value))
+        | crate::syntax::NodeKind::Atom(crate::syntax::Atom::Symbol(value)) => Ok(value.clone()),
+        _ => bail!("E-PROJECT-001: {context} must be a symbol or string"),
+    }
+}
+
+fn attributes<'a>(
+    nodes: &'a [crate::syntax::Node],
+    allowed: &[&str],
+    required: &[&str],
+    context: &str,
+) -> Result<BTreeMap<String, &'a crate::syntax::Node>> {
+    let nodes: Vec<_> = forms(nodes).collect();
+    if nodes.len() % 2 != 0 {
+        bail!("E-PROJECT-001: `{context}` labels must each have exactly one value");
+    }
+    let mut values = BTreeMap::new();
+    for pair in nodes.chunks_exact(2) {
+        let label = match &pair[0].kind {
+            crate::syntax::NodeKind::Atom(crate::syntax::Atom::Label(label)) => label.as_str(),
+            _ => {
+                bail!("E-PROJECT-001: `{context}` attributes must be trailing `label: value` pairs")
+            }
+        };
+        if !allowed.contains(&label) {
+            bail!("E-PROJECT-001: unknown `{context}` label `{label}:`");
+        }
+        if values.insert(label.to_owned(), pair[1]).is_some() {
+            bail!("E-PROJECT-001: duplicate `{context}` label `{label}:`");
+        }
+    }
+    for label in required {
+        if !values.contains_key(*label) {
+            bail!("E-PROJECT-001: `{context}` requires `{label}:`");
+        }
+    }
+    Ok(values)
+}
+
+fn canonical_json<T: Serialize>(value: &T) -> Result<String> {
+    let value = serde_json::to_value(value)?;
+    Ok(serde_json::to_string_pretty(&value)? + "\n")
 }
 
 pub fn find_project_for_file(path: &Path) -> Result<Option<LoadedProject>> {
@@ -885,7 +1116,7 @@ fn copy_clean_repository_tree(source: &Path, destination: &Path) -> Result<()> {
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let name = entry.file_name();
-        if name == ".git" || name == "dep" || name == LOCK_FILE {
+        if name == ".git" || name == "dep" || name == LOCK_FILE || name == LEGACY_LOCK_FILE {
             continue;
         }
         let from = entry.path();
@@ -931,7 +1162,7 @@ fn hash_directory(base: &Path, directory: &Path, hasher: &mut Sha256) -> Result<
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let name = entry.file_name();
-        if name == ".git" || name == "dep" || name == LOCK_FILE {
+        if name == ".git" || name == "dep" || name == LOCK_FILE || name == LEGACY_LOCK_FILE {
             continue;
         }
         let path = entry.path();
@@ -979,13 +1210,23 @@ fn validate_project_lock(project: &LoadedProject) -> Result<()> {
         return Ok(());
     }
     let lock_path = project.root.join(LOCK_FILE);
+    let legacy_lock = project.root.join(LEGACY_LOCK_FILE);
+    if !lock_path.exists() && legacy_lock.exists() {
+        bail!(
+            "E-DEP-003: legacy YAML dependency lock `{}` is unsupported; run `vibra sync`",
+            legacy_lock.display()
+        );
+    }
     let text = fs::read_to_string(&lock_path).with_context(|| {
         format!(
             "E-DEP-003: dependency lock `{}` is missing; run `vibra sync`",
             lock_path.display()
         )
     })?;
-    let lock: ProjectLock = serde_yaml::from_str(&text)
+    if text.trim_start().starts_with("lock-version:") {
+        bail!("E-DEP-003: legacy YAML dependency locks are unsupported; run `vibra sync` to create `{LOCK_FILE}`");
+    }
+    let lock: ProjectLock = serde_json::from_str(&text)
         .with_context(|| format!("E-DEP-003: parse dependency lock `{}`", lock_path.display()))?;
     if lock.lock_version != 1 {
         bail!("E-DEP-003: dependency lock version must be 1");
@@ -1186,7 +1427,7 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
-        manifest_text(name, "", &[(name, &format!("src/{name}"), "main.vibra")]),
+        manifest_text(name, &[("bin", name, &format!("src/{name}"), "main.vibra")]),
     )?;
     Ok(())
 }
@@ -1197,11 +1438,7 @@ fn write_lib_template(root: &Path, name: &str) -> Result<()> {
     fs::write(src.join("lib.vibra"), "answer: 42\n")?;
     fs::write(
         root.join(MANIFEST_FILE),
-        manifest_text(
-            name,
-            &format!("    - name: {name}\n      root: src/{name}\n      entry: lib.vibra\n"),
-            &[],
-        ),
+        manifest_text(name, &[("lib", name, &format!("src/{name}"), "lib.vibra")]),
     )?;
     Ok(())
 }
@@ -1221,30 +1458,24 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
         root.join(MANIFEST_FILE),
         manifest_text(
             name,
-            "    - name: core\n      root: src/core\n      entry: lib.vibra\n",
-            &[(name, &format!("src/{name}"), "main.vibra")],
+            &[
+                ("lib", "core", "src/core", "lib.vibra"),
+                ("bin", name, &format!("src/{name}"), "main.vibra"),
+            ],
         ),
     )?;
     Ok(())
 }
 
-fn manifest_text(name: &str, libs: &str, bins: &[(&str, &str, &str)]) -> String {
-    let mut text =
-        format!("manifest-version: 1\npackage:\n  name: {name}\n  version: 0.1.0\n\ntargets:\n");
-    if !libs.is_empty() {
-        text.push_str("  libs:\n");
-        text.push_str(libs);
-    }
-    if !bins.is_empty() {
-        text.push_str("  bins:\n");
-        for (bin_name, root, entry) in bins {
-            text.push_str(&format!(
-                "    - name: {bin_name}\n      root: {root}\n      entry: {entry}\n"
-            ));
-        }
+fn manifest_text(name: &str, targets: &[(&str, &str, &str, &str)]) -> String {
+    let mut text = format!("(project\n  (package \"{name}\" \"0.1.0\")\n");
+    for (kind, target_name, root, entry) in targets {
+        text.push_str(&format!(
+            "  (target {target_name} kind: {kind} root: \"{root}\" entry: \"{entry}\")\n"
+        ));
     }
     text.push_str(&format!(
-        "\ndependencies:\n  std:\n    git: {STDLIB_GIT}\n    rev: {STDLIB_REV}\n"
+        "  (dependency std git: \"{STDLIB_GIT}\" rev: \"{STDLIB_REV}\"))\n"
     ));
     text
 }
@@ -1264,7 +1495,7 @@ fn write_seeded_stdlib_lock(project_root: &Path) -> Result<()> {
             dependencies: BTreeMap::new(),
         }],
     };
-    fs::write(project_root.join(LOCK_FILE), serde_yaml::to_string(&lock)?)?;
+    fs::write(project_root.join(LOCK_FILE), canonical_json(&lock)?)?;
     Ok(())
 }
 
@@ -1314,13 +1545,10 @@ fn validate_relative_source_path(path: &Path, context: &str) -> Result<()> {
 
 fn validate_vibra_extension(path: &Path) -> Result<()> {
     let s = path.to_string_lossy();
-    if s.ends_with(".vibra") || s.ends_with(".vibra.yaml") {
+    if s.ends_with(".vibra") {
         Ok(())
     } else {
-        bail!(
-            "source `{}` must end in .vibra or .vibra.yaml",
-            path.display()
-        );
+        bail!("source `{}` must end in .vibra", path.display());
     }
 }
 
@@ -1335,6 +1563,75 @@ fn resolve_project_path(root: &Path, path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_sources_reject_the_legacy_yaml_extension() {
+        validate_vibra_extension(Path::new("src/main.vibra")).unwrap();
+        let error = validate_vibra_extension(Path::new("src/main.vibra.yaml")).unwrap_err();
+        assert!(error.to_string().contains("must end in .vibra"));
+    }
+
+    #[test]
+    fn manifest_parser_is_typed_and_rejects_legacy_yaml() {
+        let manifest = parse_manifest(
+            r#"(project
+  (package "sample" "0.1.0" doc: "Sample package.")
+  (target core kind: lib root: "src/core" entry: "lib.vibra")
+  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (dependency local path: "../local")
+  (dependency remote git: "https://example.invalid/remote.git" rev: "0123456789abcdef0123456789abcdef01234567" wasm: "remote.wasm")
+  (plugin-interface arithmetic
+    (function sum params: (int32 int32) result: int32)))"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.package.name, "sample");
+        assert_eq!(manifest.package.doc.as_deref(), Some("Sample package."));
+        assert_eq!(manifest.targets.libs[0].root, Path::new("src/core"));
+        assert_eq!(manifest.targets.bins[0].entry, Path::new("main.vibra"));
+        assert_eq!(
+            manifest.dependencies["remote"].wasm.as_deref(),
+            Some(Path::new("remote.wasm"))
+        );
+        assert_eq!(
+            manifest.plugin_interfaces["arithmetic"].functions["sum"].params,
+            ["int32", "int32"]
+        );
+
+        let error = parse_manifest("manifest-version: 1\npackage: {}\n").unwrap_err();
+        assert!(error.to_string().contains("legacy YAML"));
+
+        for invalid in [
+            "(project (package \"x\" \"1\") (target app kind: bin root: \"src\"))",
+            "(project (package \"x\" \"1\") (target app kind: bin kind: lib root: \"src\" entry: \"main.vibra\"))",
+            "(project (package \"x\" \"1\") (target app kind: bin root: \"src\" entry: \"main.vibra\" extra: true))",
+            "(project (package name: \"x\" \"1\") (target app kind: bin root: \"src\" entry: \"main.vibra\"))",
+        ] {
+            assert!(parse_manifest(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn lock_json_is_sorted_and_newline_terminated() {
+        let lock = ProjectLock {
+            lock_version: 1,
+            packages: vec![LockedPackage {
+                name: "sample".into(),
+                identity: "git#rev".into(),
+                git: "git".into(),
+                rev: "rev".into(),
+                tree_sha256: "hash".into(),
+                vendor_path: "dep/sample".into(),
+                dependencies: BTreeMap::from([
+                    ("z".into(), "dep/sample/dep/z".into()),
+                    ("a".into(), "dep/sample/dep/a".into()),
+                ]),
+            }],
+        };
+        let json = canonical_json(&lock).unwrap();
+        assert!(json.ends_with('\n'));
+        assert!(json.find("\"dependencies\"").unwrap() < json.find("\"git\"").unwrap());
+        assert!(json.find("\"a\"").unwrap() < json.find("\"z\"").unwrap());
+    }
 
     #[test]
     fn recursive_vendor_rejects_dependency_cycles_before_fetching() {
@@ -1461,7 +1758,7 @@ mod tests {
         }
         fs::write(
             temp.path().join(MANIFEST_FILE),
-            "manifest-version: 1\npackage:\n  name: ffi-test\n  version: 0.1.0\ntargets:\n  bins:\n    - name: ffi-test\n      root: src\n      entry: main.vibra\ndependencies:\n  math:\n    path: foreign\n    wasm: math.wasm\n",
+            "(project\n  (package \"ffi-test\" \"0.1.0\")\n  (target ffi-test kind: bin root: \"src\" entry: \"main.vibra\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
         ).unwrap();
         temp
     }

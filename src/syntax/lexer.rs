@@ -387,6 +387,7 @@ mod tests {
         );
         for source in [
             "$legacy",
+            "na:me",
             "with@sign",
             ".leading",
             "/leading",
