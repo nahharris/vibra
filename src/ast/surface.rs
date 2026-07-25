@@ -1,13 +1,74 @@
-use std::{collections::BTreeSet, fmt, sync::Arc};
+use std::{cell::Cell, collections::BTreeSet, fmt, path::Path, sync::Arc};
 
 use crate::syntax::{Atom, Document, Node, NodeKind, Span};
 
+/// Stable identity for a source document across snapshots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DocumentId(u64);
+
+impl DocumentId {
+    pub const ANONYMOUS: Self = Self(0);
+
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+
+    /// Derive a deterministic ID from a normalized document path.
+    pub fn from_path(path: &Path) -> Self {
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        Self(stable_hash(normalized.as_bytes()))
+    }
+}
+
+/// Stable identity of one typed node within a parsed document snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AstId(u64);
+
+impl AstId {
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+
+    fn from_span(span: Span) -> Self {
+        let mut bytes = [0_u8; 16];
+        bytes[..8].copy_from_slice(&(span.start as u64).to_le_bytes());
+        bytes[8..].copy_from_slice(&(span.end as u64).to_le_bytes());
+        Self(stable_hash(&bytes))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceLocation {
+    pub document: DocumentId,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
+    /// Compatibility origin for callers constructing detached AST fragments.
     Source(Span),
+    DocumentSource {
+        document: DocumentId,
+        ast_id: AstId,
+        span: Span,
+    },
     Expansion {
         call_site: Span,
         definition: Span,
+        parent: Arc<Origin>,
+    },
+    DocumentExpansion {
+        ast_id: AstId,
+        call_site: SourceLocation,
+        definition: SourceLocation,
         parent: Arc<Origin>,
     },
 }
@@ -16,8 +77,53 @@ impl Origin {
     pub fn primary_span(&self) -> Span {
         match self {
             Self::Source(span) => *span,
+            Self::DocumentSource { span, .. } => *span,
             Self::Expansion { call_site, .. } => *call_site,
+            Self::DocumentExpansion { call_site, .. } => call_site.span,
         }
+    }
+
+    pub fn document_id(&self) -> Option<DocumentId> {
+        match self {
+            Self::DocumentSource { document, .. } => Some(*document),
+            Self::DocumentExpansion { call_site, .. } => Some(call_site.document),
+            Self::Source(_) | Self::Expansion { .. } => None,
+        }
+    }
+
+    pub fn ast_id(&self) -> Option<AstId> {
+        match self {
+            Self::DocumentSource { ast_id, .. } | Self::DocumentExpansion { ast_id, .. } => {
+                Some(*ast_id)
+            }
+            Self::Source(_) | Self::Expansion { .. } => None,
+        }
+    }
+}
+
+thread_local! {
+    static CURRENT_DOCUMENT: Cell<DocumentId> = const { Cell::new(DocumentId::ANONYMOUS) };
+}
+
+struct DocumentGuard(DocumentId);
+
+impl DocumentGuard {
+    fn enter(document: DocumentId) -> Self {
+        Self(CURRENT_DOCUMENT.with(|current| current.replace(document)))
+    }
+}
+
+impl Drop for DocumentGuard {
+    fn drop(&mut self) {
+        CURRENT_DOCUMENT.with(|current| current.set(self.0));
+    }
+}
+
+fn source_origin(span: Span) -> Origin {
+    Origin::DocumentSource {
+        document: CURRENT_DOCUMENT.with(Cell::get),
+        ast_id: AstId::from_span(span),
+        span,
     }
 }
 
@@ -33,7 +139,7 @@ impl<T> Spanned<T> {
         Self {
             value,
             span,
-            origin: Origin::Source(span),
+            origin: source_origin(span),
         }
     }
 
@@ -64,9 +170,32 @@ impl<T> Spanned<T> {
         }
     }
 
+    pub fn expanded_in(
+        value: T,
+        span: Span,
+        call_site: SourceLocation,
+        definition: SourceLocation,
+        parent: Origin,
+    ) -> Self {
+        Self {
+            value,
+            span,
+            origin: Origin::DocumentExpansion {
+                ast_id: AstId::from_span(span),
+                call_site,
+                definition,
+                parent: Arc::new(parent),
+            },
+        }
+    }
+
     pub fn with_origin(mut self, origin: Origin) -> Self {
         self.origin = origin;
         self
+    }
+
+    pub fn ast_id(&self) -> Option<AstId> {
+        self.origin.ast_id()
     }
 }
 
@@ -81,6 +210,7 @@ pub type MacroExpr = Spanned<MacroExprKind>;
 pub struct Module {
     pub forms: Vec<TopLevel>,
     pub span: Span,
+    pub document_id: DocumentId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -457,6 +587,14 @@ impl fmt::Display for AstError {
 impl std::error::Error for AstError {}
 
 pub fn lower_document(document: &Document) -> Result<Module, AstError> {
+    lower_document_with_id(document, DocumentId::ANONYMOUS)
+}
+
+pub fn lower_document_with_id(
+    document: &Document,
+    document_id: DocumentId,
+) -> Result<Module, AstError> {
+    let _guard = DocumentGuard::enter(document_id);
     let mut forms = Vec::new();
     for node in semantic_nodes(&document.nodes) {
         forms.push(parse_top(node)?);
@@ -464,6 +602,7 @@ pub fn lower_document(document: &Document) -> Result<Module, AstError> {
     Ok(Module {
         forms,
         span: document.span,
+        document_id,
     })
 }
 
@@ -492,7 +631,7 @@ fn parse_import<'a>(node: &Node, args: impl AsRef<[&'a Node]>) -> Result<Import,
         alias: name(args[0])?,
         path: string(args[1])?,
         span: node.span,
-        origin: Origin::Source(node.span),
+        origin: source_origin(node.span),
     })
 }
 
@@ -509,7 +648,7 @@ fn parse_definition<'a>(
         body: parse_type(args[1])?,
         annotations: parse_annotations(&attributes)?,
         span: node.span,
-        origin: Origin::Source(node.span),
+        origin: source_origin(node.span),
     })
 }
 
@@ -527,7 +666,7 @@ fn parse_constant<'a>(
         value: parse_expr(args[2])?,
         annotations: parse_annotations(&attributes)?,
         span: node.span,
-        origin: Origin::Source(node.span),
+        origin: source_origin(node.span),
     })
 }
 
@@ -546,7 +685,7 @@ fn parse_function<'a>(
         body: parse_body(args[3])?,
         annotations: parse_annotations(&attributes)?,
         span: node.span,
-        origin: Origin::Source(node.span),
+        origin: source_origin(node.span),
     })
 }
 
@@ -565,7 +704,7 @@ fn parse_macro<'a>(
         body: parse_macro_body(args[3])?,
         annotations: parse_annotations(&attributes)?,
         span: node.span,
-        origin: Origin::Source(node.span),
+        origin: source_origin(node.span),
     })
 }
 
@@ -684,25 +823,25 @@ fn parse_private<'a>(node: &Node, args: impl AsRef<[&'a Node]>) -> Result<TopLev
         "def" => {
             let mut definition = parse_definition(inner, inner_args, Visibility::Private)?;
             definition.span = node.span;
-            definition.origin = Origin::Source(node.span);
+            definition.origin = source_origin(node.span);
             Ok(TopLevel::Definition(definition))
         }
         "const" => {
             let mut constant = parse_constant(inner, inner_args, Visibility::Private)?;
             constant.span = node.span;
-            constant.origin = Origin::Source(node.span);
+            constant.origin = source_origin(node.span);
             Ok(TopLevel::Constant(constant))
         }
         "fn" => {
             let mut function = parse_function(inner, inner_args, Visibility::Private)?;
             function.span = node.span;
-            function.origin = Origin::Source(node.span);
+            function.origin = source_origin(node.span);
             Ok(TopLevel::Function(function))
         }
         "macro" => {
             let mut definition = parse_macro(inner, inner_args, Visibility::Private)?;
             definition.span = node.span;
-            definition.origin = Origin::Source(node.span);
+            definition.origin = source_origin(node.span);
             Ok(TopLevel::Macro(definition))
         }
         _ => Err(AstError::new(
@@ -725,7 +864,7 @@ fn parse_test<'a>(node: &Node, args: impl AsRef<[&'a Node]>) -> Result<Test, Ast
             .map(parse_test_meta)
             .collect::<Result<_, _>>()?,
         span: node.span,
-        origin: Origin::Source(node.span),
+        origin: source_origin(node.span),
     })
 }
 
@@ -1482,6 +1621,17 @@ fn expected_head(expected: &str, actual: &Name) -> AstError {
     )
 }
 
+fn stable_hash(bytes: &[u8]) -> u64 {
+    // FNV-1a is deliberately fixed here: IDs must not depend on Rust's
+    // randomized HashMap state or compiler version.
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1731,5 +1881,85 @@ mod tests {
         assert_eq!(test.metadata.len(), 5);
         assert!(matches!(test.metadata[3], TestMeta::Benchmark(_)));
         assert!(matches!(test.metadata[4], TestMeta::Workspace(_)));
+    }
+
+    #[test]
+    fn document_and_ast_ids_are_stable_per_snapshot_and_document_qualified() {
+        let syntax = parse("(fn main () void (do (return)))").unwrap();
+        let document_a = DocumentId::from_raw(41);
+        let document_b = DocumentId::from_raw(42);
+
+        let first = lower_document_with_id(&syntax, document_a).unwrap();
+        let second = lower_document_with_id(&syntax, document_a).unwrap();
+        let other_document = lower_document_with_id(&syntax, document_b).unwrap();
+
+        let TopLevel::Function(first_fn) = &first.forms[0] else {
+            panic!("expected function");
+        };
+        let TopLevel::Function(second_fn) = &second.forms[0] else {
+            panic!("expected function");
+        };
+        let TopLevel::Function(other_fn) = &other_document.forms[0] else {
+            panic!("expected function");
+        };
+
+        assert_eq!(first.document_id, document_a);
+        assert_eq!(first_fn.origin.document_id(), Some(document_a));
+        assert_eq!(other_fn.origin.document_id(), Some(document_b));
+        assert_eq!(first_fn.origin.ast_id(), second_fn.origin.ast_id());
+        assert_eq!(first_fn.origin.ast_id(), other_fn.origin.ast_id());
+        assert_eq!(
+            first_fn.body[0].ast_id(),
+            second_fn.body[0].ast_id(),
+            "the same snapshot assigns the same node identity"
+        );
+        assert_ne!(
+            first_fn.origin.ast_id(),
+            first_fn.body[0].ast_id(),
+            "distinct source nodes have distinct identities"
+        );
+    }
+
+    #[test]
+    fn document_expansion_retains_both_document_locations() {
+        let call_site = SourceLocation {
+            document: DocumentId::from_raw(1),
+            span: Span::new(10, 20),
+        };
+        let definition = SourceLocation {
+            document: DocumentId::from_raw(2),
+            span: Span::new(30, 40),
+        };
+        let expanded = Spanned::expanded_in(
+            ExprKind::Break,
+            Span::new(100, 107),
+            call_site,
+            definition,
+            Origin::Source(definition.span),
+        );
+        let Origin::DocumentExpansion {
+            call_site: actual_call,
+            definition: actual_definition,
+            ..
+        } = &expanded.origin
+        else {
+            panic!("expected document-qualified expansion");
+        };
+        assert_eq!(*actual_call, call_site);
+        assert_eq!(*actual_definition, definition);
+        assert_eq!(expanded.origin.document_id(), Some(call_site.document));
+        assert!(expanded.ast_id().is_some());
+    }
+
+    #[test]
+    fn path_document_ids_are_separator_normalized() {
+        assert_eq!(
+            DocumentId::from_path(Path::new("src\\main.vibra")),
+            DocumentId::from_path(Path::new("src/main.vibra"))
+        );
+        assert_ne!(
+            DocumentId::from_path(Path::new("src/main.vibra")),
+            DocumentId::from_path(Path::new("src/other.vibra"))
+        );
     }
 }
