@@ -44,6 +44,11 @@ Require-Content $linuxDockerfile 'FROM \$\{LINUX_RUNTIME_IMAGE\} AS runtime' 'Li
 Require-Content $linuxDockerfile '^USER nonroot$' 'Linux runtime nonroot user'
 Require-Content $linuxDockerfile 'ENTRYPOINT.*vibra' 'Linux vibra entrypoint'
 Require-Content $linuxDockerfile 'CMD.*--help' 'Linux help default'
+Require-Content $linuxDockerfile 'ARG VIBRA_VERSION' 'Linux embedded release version argument'
+Require-Content $linuxDockerfile 'ARG VIBRA_REVISION' 'Linux embedded source revision argument'
+Require-Content $linuxDockerfile 'ENV SOURCE_DATE_EPOCH=' 'Linux reproducible build epoch'
+Require-Content $linuxDockerfile 'version: %s.*VIBRA_VERSION' 'Linux release metadata version'
+Require-Content $linuxDockerfile 'revision: %s.*VIBRA_REVISION' 'Linux release metadata revision'
 
 $linuxContents = Get-Content -Raw $linuxDockerfile
 $dependencyBuild = $linuxContents.IndexOf('cargo build --release --locked')
@@ -75,6 +80,11 @@ Require-Content $windowsDockerfile 'FROM \$\{WINDOWS_RUNTIME_IMAGE\} AS runtime'
 Require-Content $windowsDockerfile '^USER ContainerUser$' 'Windows runtime ContainerUser'
 Require-Content $windowsDockerfile 'ENTRYPOINT.*vibra\.exe' 'Windows vibra.exe entrypoint'
 Require-Content $windowsDockerfile 'CMD.*--help' 'Windows help default'
+Require-Content $windowsDockerfile 'ARG VIBRA_VERSION' 'Windows embedded release version argument'
+Require-Content $windowsDockerfile 'ARG VIBRA_REVISION' 'Windows embedded source revision argument'
+Require-Content $windowsDockerfile 'ENV SOURCE_DATE_EPOCH=' 'Windows reproducible build epoch'
+Require-Content $windowsDockerfile 'version: \$env:VIBRA_VERSION' 'Windows release metadata version'
+Require-Content $windowsDockerfile 'revision: \$env:VIBRA_REVISION' 'Windows release metadata revision'
 
 Require-Content $dockerIgnore '^target$' 'Docker target exclusion'
 Require-Content $dockerIgnore '^\.git$' 'Docker Git exclusion'
@@ -100,5 +110,10 @@ Require-Content $smokeTest 'cargo check --quiet --offline' 'Linux development im
 Require-Content $smokeTest 'Set-LinuxMountPermissions' 'Container smoke test Linux mount permission helper'
 Require-Content $smokeTest 'chmod 777' 'Container smoke test Linux writable mount permissions'
 Require-Content $smokeTest "'-w', 'C:\\src'" 'Container smoke test Windows dev source workdir'
+Require-Content $smokeTest 'Assert-ReleaseContract' 'Container embedded release metadata verification'
+Require-Content $smokeTest 'docker image inspect' 'Container OCI label verification'
+Require-Content $smokeTest "@\('cp'," 'Container release metadata extraction'
+Require-Content $smokeTest 'ExpectedVersion' 'Container expected release version'
+Require-Content $smokeTest 'ExpectedRevision' 'Container expected source revision'
 
 Write-Host 'Container layout checks passed.'

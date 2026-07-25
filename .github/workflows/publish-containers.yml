@@ -72,11 +72,18 @@ jobs:
       - name: Build and push immutable staging images
         shell: bash
         run: |
+          source_date_epoch=$(git show -s --format=%ct "${GITHUB_SHA}")
           for kind in runtime dev; do
             if [[ "$kind" == runtime ]]; then image='${{ env.RUNTIME_IMAGE }}'; else image='${{ env.DEV_IMAGE }}'; fi
             docker buildx build --platform '${{ matrix.platform }}' --file '${{ matrix.dockerfile }}' --target "$kind" --push \
               --sbom=true --provenance=true \
+              --build-arg VIBRA_VERSION='${{ needs.validate.outputs.version }}' \
+              --build-arg VIBRA_REVISION='${{ github.sha }}' \
+              --build-arg SOURCE_DATE_EPOCH="$source_date_epoch" \
               --label org.opencontainers.image.source="${{ github.server_url }}/${{ github.repository }}" \
+              --label org.opencontainers.image.title="$(basename "$image")" \
+              --label org.opencontainers.image.description="Vibra statically typed language toolchain" \
+              --label org.opencontainers.image.licenses=MIT \
               --label org.opencontainers.image.version='${{ needs.validate.outputs.version }}' \
               --label org.opencontainers.image.revision='${{ github.sha }}' \
               --tag "$image:staging-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.suffix }}" .
@@ -103,13 +110,13 @@ jobs:
       - if: runner.os != 'Windows'
         shell: pwsh
         run: |
-          ./tests/container-smoke.ps1 -Image "${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux
-          ./tests/container-smoke.ps1 -Image "${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -Dev
+          ./tests/container-smoke.ps1 -Image "${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -ExpectedVersion "${{ needs.validate.outputs.version }}" -ExpectedRevision "${{ github.sha }}"
+          ./tests/container-smoke.ps1 -Image "${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform linux -Dev -ExpectedVersion "${{ needs.validate.outputs.version }}" -ExpectedRevision "${{ github.sha }}"
       - if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          ./tests/container-smoke.ps1 -Image "${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows
-          ./tests/container-smoke.ps1 -Image "${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -Dev
+          ./tests/container-smoke.ps1 -Image "${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -ExpectedVersion "${{ needs.validate.outputs.version }}" -ExpectedRevision "${{ github.sha }}"
+          ./tests/container-smoke.ps1 -Image "${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}" -Platform windows -Dev -ExpectedVersion "${{ needs.validate.outputs.version }}" -ExpectedRevision "${{ github.sha }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: platform-digests-${{ matrix.suffix }}
@@ -156,3 +163,10 @@ jobs:
           subject-name: ${{ env.DEV_IMAGE }}
           subject-digest: ${{ steps.promoted.outputs.dev }}
           push-to-registry: true
+      - name: Verify promoted image attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh attestation verify "oci://${RUNTIME_IMAGE}@${{ steps.promoted.outputs.runtime }}" --repo "${GITHUB_REPOSITORY}"
+          gh attestation verify "oci://${DEV_IMAGE}@${{ steps.promoted.outputs.dev }}" --repo "${GITHUB_REPOSITORY}"
