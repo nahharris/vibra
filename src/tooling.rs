@@ -1,4 +1,4 @@
-//! YAML-first formatter and linter support for the Vibra CLI.
+//! Formatter and JSON-first linter support for the Vibra CLI.
 
 use crate::{load, lower};
 use anyhow::{bail, Context, Result};
@@ -13,13 +13,11 @@ use yaml_edit::Document;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolOutputFormat {
-    Yaml,
     Json,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintOutputFormat {
-    Yaml,
     Json,
     Sarif,
 }
@@ -281,9 +279,6 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
 
 fn print_structured_report<T: Serialize>(report: &T, format: ToolOutputFormat) -> Result<()> {
     match format {
-        ToolOutputFormat::Yaml => {
-            print!("{}", serde_yaml::to_string(report)?);
-        }
         ToolOutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(report)?);
         }
@@ -293,9 +288,6 @@ fn print_structured_report<T: Serialize>(report: &T, format: ToolOutputFormat) -
 
 fn print_lint_report(report: &LintReport, format: LintOutputFormat) -> Result<()> {
     match format {
-        LintOutputFormat::Yaml => {
-            print!("{}", serde_yaml::to_string(report)?);
-        }
         LintOutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(report)?);
         }

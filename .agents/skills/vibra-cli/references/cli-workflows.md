@@ -110,12 +110,12 @@ Read `=doc` annotations without executing code:
 
 ```sh
 vibra docs .
-vibra docs . symbol-name --format yaml
+vibra docs . symbol-name --format json
 ```
 
 Run `vibra lsp` over stdin/stdout and configure the editor as a standard LSP
 client. Run `vibra mcp` over stdin/stdout for MCP clients; it exposes typed
 project inspection, diagnostics, docs, effects, tests, builds, and
 transactional structural-code tools. See the MCP contract above for
-initialization and mutation opt-in. Structured YAML/JSON CLI responses are
+initialization and mutation opt-in. Structured JSON CLI responses are
 preferable to scraping human text.

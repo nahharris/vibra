@@ -48,7 +48,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = TemplateArg::Bin)]
         template: TemplateArg,
         /// Output format.
-        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
         format: StatusFormatArg,
     },
     /// Clone/fetch pinned git dependencies into dep/.
@@ -56,7 +56,7 @@ enum Command {
         /// Project directory or project.vibra path.
         path: Option<PathBuf>,
         /// Output format.
-        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
         format: StatusFormatArg,
     },
     /// Build a deterministic executable `.vapp` archive.
@@ -70,7 +70,7 @@ enum Command {
         #[arg(short, long)]
         output: PathBuf,
         /// Output format.
-        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
         format: StatusFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
         #[arg(long = "flag", value_parser = parse_compilation_flag)]
@@ -86,7 +86,7 @@ enum Command {
         /// Project directory or project.vibra path.
         path: Option<PathBuf>,
         /// Output format.
-        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
         format: StatusFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
         #[arg(long = "flag", value_parser = parse_compilation_flag)]
@@ -130,7 +130,7 @@ enum Command {
         #[arg(long)]
         write: bool,
         /// Structured output format.
-        #[arg(long, visible_alias = "output", value_enum, default_value_t = ToolOutputArg::Yaml)]
+        #[arg(long, visible_alias = "output", value_enum, default_value_t = ToolOutputArg::Json)]
         format: ToolOutputArg,
     },
     /// Emit Vibra diagnostics for source files.
@@ -138,7 +138,7 @@ enum Command {
         /// Files, directories, or globs to lint. Defaults to the current directory.
         path: Vec<PathBuf>,
         /// Structured output format.
-        #[arg(long, value_enum, default_value_t = LintFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = LintFormatArg::Json)]
         format: LintFormatArg,
         /// Diagnostic category to include. Repeat to include multiple categories.
         #[arg(long = "category", value_enum)]
@@ -200,12 +200,12 @@ enum Command {
         #[arg(long = "flag", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
-    /// Print the statically referenced, typed host effect surface as YAML.
+    /// Print the statically referenced, typed host effect surface as JSON.
     Effects {
         /// Entry module path.
         path: PathBuf,
         /// Output format.
-        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Json)]
         format: StructuredFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
         #[arg(long = "flag", value_parser = parse_compilation_flag)]
@@ -216,7 +216,7 @@ enum Command {
         /// Entry module to expand.
         path: PathBuf,
         /// Output format.
-        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Json)]
         format: StructuredFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
         #[arg(long = "flag", value_parser = parse_compilation_flag)]
@@ -236,7 +236,7 @@ enum Command {
         #[arg(long = "import")]
         import: Vec<String>,
         /// Output format.
-        #[arg(long, value_enum, default_value_t = ExecFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = ExecFormatArg::Json)]
         format: ExecFormatArg,
         /// Preopen a host directory for WASI mapping; does not approve host ABI access.
         #[arg(long = "preopen")]
@@ -302,7 +302,7 @@ enum Command {
         #[arg(long)]
         test: bool,
         /// Output format.
-        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Json)]
         format: StructuredFormatArg,
     },
     /// Discover and run `$test` declarations.
@@ -346,7 +346,7 @@ enum Command {
         #[arg(long = "benchmark-warmup", default_value_t = 1)]
         benchmark_warmup: usize,
         /// Structured report format.
-        #[arg(long, visible_alias = "report", value_enum, default_value_t = ReportArg::Yaml)]
+        #[arg(long, visible_alias = "report", value_enum, default_value_t = ReportArg::Json)]
         format: ReportArg,
         /// Write structured report to this path.
         #[arg(long = "report-file")]
@@ -446,13 +446,13 @@ enum PackageCommand {
     /// Print canonical package metadata.
     Inspect {
         path: PathBuf,
-        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Json)]
         format: StructuredFormatArg,
     },
     /// Verify package structure and content hashes.
     Verify {
         path: PathBuf,
-        #[arg(long, value_enum, default_value_t = StatusFormatArg::Yaml)]
+        #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
         format: StatusFormatArg,
     },
 }
@@ -467,19 +467,16 @@ enum TemplateArg {
 #[derive(Clone, Copy, ValueEnum)]
 enum ReportArg {
     Human,
-    Yaml,
     Json,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum StructuredFormatArg {
-    Yaml,
     Json,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum StatusFormatArg {
-    Yaml,
     Json,
     Human,
 }
@@ -493,13 +490,11 @@ enum TestWorkspaceAccessArg {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum ToolOutputArg {
-    Yaml,
     Json,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum LintFormatArg {
-    Yaml,
     Json,
     Sarif,
 }
@@ -522,7 +517,6 @@ enum LintSeverityArg {
 #[derive(Clone, Copy, ValueEnum)]
 enum ExecFormatArg {
     Raw,
-    Yaml,
     Json,
 }
 
@@ -530,7 +524,6 @@ enum ExecFormatArg {
 enum DocsFormatArg {
     Plain,
     Markdown,
-    Yaml,
     Json,
 }
 
@@ -538,7 +531,6 @@ impl From<ReportArg> for test_runner::ReportFormat {
     fn from(value: ReportArg) -> Self {
         match value {
             ReportArg::Human => test_runner::ReportFormat::Human,
-            ReportArg::Yaml => test_runner::ReportFormat::Yaml,
             ReportArg::Json => test_runner::ReportFormat::Json,
         }
     }
@@ -567,7 +559,6 @@ impl From<TemplateArg> for project::InitTemplate {
 impl From<ToolOutputArg> for tooling::ToolOutputFormat {
     fn from(value: ToolOutputArg) -> Self {
         match value {
-            ToolOutputArg::Yaml => tooling::ToolOutputFormat::Yaml,
             ToolOutputArg::Json => tooling::ToolOutputFormat::Json,
         }
     }
@@ -576,7 +567,6 @@ impl From<ToolOutputArg> for tooling::ToolOutputFormat {
 impl From<LintFormatArg> for tooling::LintOutputFormat {
     fn from(value: LintFormatArg) -> Self {
         match value {
-            LintFormatArg::Yaml => tooling::LintOutputFormat::Yaml,
             LintFormatArg::Json => tooling::LintOutputFormat::Json,
             LintFormatArg::Sarif => tooling::LintOutputFormat::Sarif,
         }
@@ -689,7 +679,7 @@ fn run_cli() -> Result<()> {
         } => {
             print!(
                 "{}",
-                plugin::load_yaml(&project, &interface, &path, &allow_plugin_load)?
+                plugin::load(&project, &interface, &path, &allow_plugin_load)?
             );
         }
         Command::Docs {
@@ -993,8 +983,8 @@ fn run_cli() -> Result<()> {
                 _ => anyhow::bail!("injected test clock requires both wall and monotonic values"),
             }
             let outcome = test_runner::run_single_test(&path, &name, &config);
-            let yaml = serde_yaml::to_string(&outcome)?;
-            std::fs::write(&result_file, yaml)?;
+            let json = serde_json::to_string(&outcome)?;
+            std::fs::write(&result_file, json)?;
         }
     }
     Ok(())
@@ -1111,14 +1101,10 @@ fn print_exec_value(value: RuntimeValue, format: ExecFormatArg) -> Result<()> {
             let s = raw_exec_string(value)?;
             print!("{s}");
         }
-        ExecFormatArg::Yaml => {
-            let yaml = serde_yaml::to_string(&runtime_value_to_yaml(value)?)?;
-            print!("{yaml}");
-        }
         ExecFormatArg::Json => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&runtime_value_to_yaml(value)?)?
+                serde_json::to_string_pretty(&runtime_value_to_json(value)?)?
             );
         }
     }
@@ -1137,7 +1123,6 @@ fn print_status(status: &str, path: &std::path::Path, format: StatusFormatArg) -
         path: path.display().to_string(),
     };
     match format {
-        StatusFormatArg::Yaml => print!("{}", serde_yaml::to_string(&report)?),
         StatusFormatArg::Json => println!("{}", serde_json::to_string_pretty(&report)?),
         StatusFormatArg::Human => println!("{status} {}", path.display()),
     }
@@ -1146,7 +1131,6 @@ fn print_status(status: &str, path: &std::path::Path, format: StatusFormatArg) -
 
 fn print_structured<T: serde::Serialize>(value: &T, format: StructuredFormatArg) -> Result<()> {
     match format {
-        StructuredFormatArg::Yaml => print!("{}", serde_yaml::to_string(value)?),
         StructuredFormatArg::Json => println!("{}", serde_json::to_string_pretty(value)?),
     }
     Ok(())
@@ -1168,13 +1152,6 @@ fn print_docs(
     };
 
     match format {
-        DocsFormatArg::Yaml => {
-            if symbol.is_some() {
-                print!("{}", serde_yaml::to_string(selected[0])?);
-            } else {
-                print!("{}", serde_yaml::to_string(&selected)?);
-            }
-        }
         DocsFormatArg::Json => {
             if symbol.is_some() {
                 println!("{}", serde_json::to_string_pretty(selected[0])?);
@@ -1424,67 +1401,53 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
     reachable
 }
 
-fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
+fn runtime_value_to_json(value: RuntimeValue) -> Result<serde_json::Value> {
     let value = vibra::execute::materialize_runtime_value(value);
     Ok(match value {
-        RuntimeValue::Bool(b) => Value::Bool(b),
-        RuntimeValue::Int(i) => Value::Number(i.into()),
-        RuntimeValue::Float(f) => serde_yaml::to_value(f)?,
-        RuntimeValue::Str(s) => Value::String(s),
-        RuntimeValue::Array(items) => Value::Sequence(
+        RuntimeValue::Bool(b) => serde_json::Value::Bool(b),
+        RuntimeValue::Int(i) => serde_json::Value::Number(i.into()),
+        RuntimeValue::Float(f) => serde_json::to_value(f)?,
+        RuntimeValue::Str(s) => serde_json::Value::String(s),
+        RuntimeValue::Array(items) => serde_json::Value::Array(
             items
                 .into_iter()
-                .map(runtime_value_to_yaml)
+                .map(runtime_value_to_json)
                 .collect::<Result<Vec<_>>>()?,
         ),
         RuntimeValue::Record(fields) => {
-            let mut map = Mapping::new();
+            let mut map = serde_json::Map::new();
             for (key, value) in fields {
-                map.insert(Value::String(key), runtime_value_to_yaml(value)?);
+                map.insert(key, runtime_value_to_json(value)?);
             }
-            Value::Mapping(map)
+            serde_json::Value::Object(map)
         }
-        RuntimeValue::Tuple(items) => Value::Sequence(
+        RuntimeValue::Tuple(items) => serde_json::Value::Array(
             items
                 .into_iter()
-                .map(runtime_value_to_yaml)
+                .map(runtime_value_to_json)
                 .collect::<Result<Vec<_>>>()?,
         ),
-        RuntimeValue::Map(items) => Value::Sequence(
+        RuntimeValue::Map(items) => serde_json::Value::Array(
             items
                 .into_iter()
                 .map(|(key, value)| {
-                    let mut map = Mapping::new();
-                    map.insert(Value::String("key".into()), runtime_value_to_yaml(key)?);
-                    map.insert(Value::String("value".into()), runtime_value_to_yaml(value)?);
-                    Ok(Value::Mapping(map))
+                    Ok(serde_json::json!({
+                        "key": runtime_value_to_json(key)?,
+                        "value": runtime_value_to_json(value)?,
+                    }))
                 })
                 .collect::<Result<Vec<_>>>()?,
         ),
-        RuntimeValue::Range { start, end, step } => {
-            let mut range = Mapping::new();
-            range.insert(Value::String("start".into()), Value::Number(start.into()));
-            range.insert(Value::String("end".into()), Value::Number(end.into()));
-            range.insert(Value::String("step".into()), Value::Number(step.into()));
-            let mut value = Mapping::new();
-            value.insert(Value::String("$range".into()), Value::Mapping(range));
-            Value::Mapping(value)
-        }
-        RuntimeValue::Typed { type_ref, value } => {
-            let mut map = Mapping::new();
-            map.insert(
-                Value::String("type".into()),
-                Value::String(format!("{type_ref:?}")),
-            );
-            map.insert(
-                Value::String("value".into()),
-                runtime_value_to_yaml(*value)?,
-            );
-            Value::Mapping(map)
-        }
-        RuntimeValue::Policy(policy) => Value::String(format!("{:?}", policy.policy)),
+        RuntimeValue::Range { start, end, step } => serde_json::json!({
+            "$range": {"start": start, "end": end, "step": step}
+        }),
+        RuntimeValue::Typed { type_ref, value } => serde_json::json!({
+            "type": format!("{type_ref:?}"),
+            "value": runtime_value_to_json(*value)?,
+        }),
+        RuntimeValue::Policy(policy) => serde_json::Value::String(format!("{:?}", policy.policy)),
         RuntimeValue::Capability(capability) => {
-            Value::String(format!("{:?}", capability.capability))
+            serde_json::Value::String(format!("{:?}", capability.capability))
         }
         RuntimeValue::HostHandle(_) => {
             bail!("opaque host handles cannot be rendered as source values")
@@ -1496,20 +1459,15 @@ fn runtime_value_to_yaml(value: RuntimeValue) -> Result<Value> {
             enum_key,
             tag,
             payload,
-        } => {
-            let mut map = Mapping::new();
-            map.insert(Value::String("enum".into()), Value::String(enum_key));
-            map.insert(Value::String("tag".into()), Value::String(tag));
-            map.insert(
-                Value::String("payload".into()),
-                match payload {
-                    Some(payload) => runtime_value_to_yaml(*payload)?,
-                    None => Value::Null,
-                },
-            );
-            Value::Mapping(map)
-        }
-        RuntimeValue::Void => Value::Null,
+        } => serde_json::json!({
+            "enum": enum_key,
+            "tag": tag,
+            "payload": match payload {
+                Some(payload) => runtime_value_to_json(*payload)?,
+                None => serde_json::Value::Null,
+            },
+        }),
+        RuntimeValue::Void => serde_json::Value::Null,
         RuntimeValue::Mutable(_) | RuntimeValue::Reference { .. } => {
             unreachable!("runtime place handles are materialized before rendering")
         }

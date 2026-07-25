@@ -1969,11 +1969,12 @@ fn effects_command_reports_typed_host_surface_deterministically() {
         String::from_utf8_lossy(&first.stderr)
     );
     assert_eq!(first.stdout, second.stdout);
-    let yaml = String::from_utf8(first.stdout).unwrap();
-    assert!(yaml.contains("module: vibra_v1"), "{yaml}");
-    assert!(yaml.contains("name: stdout_open"), "{yaml}");
-    assert!(yaml.contains("return: write-handle"), "{yaml}");
-    assert!(yaml.contains("root-policy:"), "{yaml}");
+    let report: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    let json = report.to_string();
+    assert!(json.contains("vibra_v1"), "{json}");
+    assert!(json.contains("stdout_open"), "{json}");
+    assert!(json.contains("write-handle"), "{json}");
+    assert!(report.get("root-policy").is_some(), "{report}");
 }
 
 #[test]
@@ -5969,11 +5970,11 @@ dependencies:
 }
 
 #[test]
-fn vibra_test_writes_yaml_report_file() {
+fn vibra_test_writes_json_report_file() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("app");
     let tests_dir = project.join("tests");
-    let report = dir.path().join("report.yaml");
+    let report = dir.path().join("report.json");
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
         tests_dir.join("basic.vibra"),
@@ -6011,7 +6012,7 @@ dependencies:
             "test",
             "app",
             "--format",
-            "yaml",
+            "json",
             "--report-file",
             &path_str(&report),
         ])
@@ -6022,10 +6023,11 @@ dependencies:
         "test failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let yaml = std::fs::read_to_string(report).unwrap();
-    assert!(yaml.contains("total: 1"), "unexpected yaml: {yaml}");
-    assert!(yaml.contains("passed: 1"), "unexpected yaml: {yaml}");
-    assert!(yaml.contains("status: passed"), "unexpected yaml: {yaml}");
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+    assert_eq!(report["total"], 1);
+    assert_eq!(report["passed"], 1);
+    assert_eq!(report["tests"][0]["status"], "passed");
 }
 
 #[test]
@@ -6168,8 +6170,9 @@ fn vibra_code_inline_previews_and_write_is_explicit() {
         String::from_utf8_lossy(&preview.stdout),
         String::from_utf8_lossy(&preview.stderr)
     );
-    let stdout = String::from_utf8_lossy(&preview.stdout);
-    assert!(stdout.contains("status: preview"), "output: {stdout}");
+    let report: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert_eq!(report["status"], "preview");
+    let stdout = report.to_string();
     assert!(
         stdout.contains("+    - $io.println: Changed"),
         "output: {stdout}"
@@ -6526,7 +6529,7 @@ main:
 }
 
 #[test]
-fn vibra_fmt_defaults_to_yaml_check_mode_and_write_is_explicit() {
+fn vibra_fmt_defaults_to_json_check_mode_and_write_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("messy.vibra");
     let original = "main:\n    $function: $void\n    return: $void\n    do: []\n";
@@ -6537,16 +6540,9 @@ fn vibra_fmt_defaults_to_yaml_check_mode_and_write_is_explicit() {
         .output()
         .unwrap();
     assert!(!check.status.success(), "fmt check should fail for drift");
-    let stdout = String::from_utf8_lossy(&check.stdout);
-    assert!(stdout.contains("files:"), "expected yaml output: {stdout}");
-    assert!(
-        stdout.contains("summary:"),
-        "expected yaml summary: {stdout}"
-    );
-    assert!(
-        stdout.contains("status: changed"),
-        "expected changed status: {stdout}"
-    );
+    let report: serde_json::Value = serde_json::from_slice(&check.stdout).unwrap();
+    assert_eq!(report["files"][0]["status"], "changed");
+    assert!(report.get("summary").is_some());
     assert_eq!(std::fs::read_to_string(&source).unwrap(), original);
 
     let write = vibra_cmd()
@@ -6569,11 +6565,8 @@ fn vibra_fmt_defaults_to_yaml_check_mode_and_write_is_explicit() {
         "formatted file should pass check: {}",
         String::from_utf8_lossy(&recheck.stdout)
     );
-    let stdout = String::from_utf8_lossy(&recheck.stdout);
-    assert!(
-        stdout.contains("status: unchanged"),
-        "expected unchanged status: {stdout}"
-    );
+    let report: serde_json::Value = serde_json::from_slice(&recheck.stdout).unwrap();
+    assert_eq!(report["files"][0]["status"], "unchanged");
 }
 
 #[test]
@@ -6616,7 +6609,7 @@ fn vibra_fmt_json_output_is_explicit() {
 }
 
 #[test]
-fn vibra_lint_defaults_to_yaml_and_reports_kebab_case_locations() {
+fn vibra_lint_defaults_to_json_and_reports_kebab_case_locations() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("style.vibra");
     std::fs::write(&source, "BadName: 1\n").unwrap();
@@ -6629,18 +6622,12 @@ fn vibra_lint_defaults_to_yaml_and_reports_kebab_case_locations() {
         output.status.success(),
         "warning-only lint should pass without --deny-warnings"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.starts_with("diagnostics:"),
-        "default lint output should be yaml: {stdout}"
-    );
-    assert!(stdout.contains("code: W-STYLE-001"), "stdout: {stdout}");
-    assert!(stdout.contains("line: 0"), "stdout: {stdout}");
-    assert!(stdout.contains("column: 0"), "stdout: {stdout}");
-    assert!(
-        !stdout.contains("offset:"),
-        "offset should be omitted when not guaranteed: {stdout}"
-    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let diagnostic = &report["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "W-STYLE-001");
+    assert_eq!(diagnostic["span"]["start"]["line"], 0);
+    assert_eq!(diagnostic["span"]["start"]["column"], 0);
+    assert!(diagnostic["span"]["start"].get("offset").is_none());
 }
 
 #[test]
@@ -6770,7 +6757,7 @@ fn vibra_lint_json_and_sarif_outputs_are_explicit() {
 }
 
 #[test]
-fn vibra_lint_reports_parse_and_compile_errors_as_structured_yaml() {
+fn vibra_lint_reports_parse_and_compile_errors_as_structured_json() {
     let dir = tempfile::tempdir().unwrap();
     let bad_yaml = dir.path().join("bad-yaml.vibra");
     let bad_compile = dir.path().join("bad-compile.vibra");
@@ -6786,21 +6773,18 @@ fn vibra_lint_reports_parse_and_compile_errors_as_structured_yaml() {
         .output()
         .unwrap();
     assert!(!syntax.status.success());
-    let stdout = String::from_utf8_lossy(&syntax.stdout);
-    assert!(stdout.contains("code: E-YAML-001"), "stdout: {stdout}");
-    assert!(stdout.contains("line:"), "stdout: {stdout}");
+    let report: serde_json::Value = serde_json::from_slice(&syntax.stdout).unwrap();
+    assert_eq!(report["diagnostics"][0]["code"], "E-YAML-001");
+    assert!(report["diagnostics"][0]["span"]["start"]["line"].is_number());
 
     let compile = vibra_cmd()
         .args(["lint", &path_str(&bad_compile), "--category", "compile"])
         .output()
         .unwrap();
     assert!(!compile.status.success());
-    let stdout = String::from_utf8_lossy(&compile.stdout);
-    assert!(stdout.contains("diagnostics:"), "stdout: {stdout}");
-    assert!(
-        stdout.contains("severity: error"),
-        "expected compile error diagnostic: {stdout}"
-    );
+    let report: serde_json::Value = serde_json::from_slice(&compile.stdout).unwrap();
+    assert!(report["diagnostics"].is_array());
+    assert_eq!(report["diagnostics"][0]["severity"], "error");
 }
 
 #[test]
@@ -6814,9 +6798,10 @@ fn vibra_lint_rejects_yaml_anchors_and_aliases() {
         .output()
         .unwrap();
     assert!(!output.status.success(), "anchors/aliases should fail lint");
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let stdout = report.to_string();
     assert!(
-        stdout.contains("code: E-YAML-001"),
+        stdout.contains("E-YAML-001"),
         "expected E-YAML-001 for anchors/aliases: {stdout}"
     );
     assert!(
@@ -6877,8 +6862,9 @@ main:
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("code: E-MOD-004"), "stdout: {stdout}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let stdout = report.to_string();
+    assert!(stdout.contains("E-MOD-004"), "stdout: {stdout}");
     assert!(stdout.contains("leaf"), "stdout: {stdout}");
 }
 
@@ -6894,8 +6880,9 @@ fn vibra_lint_compile_checks_library_files_without_main() {
         .unwrap();
 
     assert!(!output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("code: E-OPTION-001"), "stdout: {stdout}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let stdout = report.to_string();
+    assert!(stdout.contains("E-OPTION-001"), "stdout: {stdout}");
 }
 
 #[test]
@@ -7326,7 +7313,7 @@ fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
 fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("selection.vibra");
-    let report = dir.path().join("report.yaml");
+    let report = dir.path().join("report.json");
     std::fs::write(
         &entry,
         "core-language:\n  $test: core\n  tags: [language, fast]\n  do: []\nfs-language:\n  $test: fs\n  tags: [language, filesystem]\n  do: []\nskipped-core:\n  $test: core\n  tags: [language]\n  skip: external fixture unavailable\n  do: []\n",
@@ -7339,7 +7326,7 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
             "--tag",
             "language",
             "--format",
-            "yaml",
+            "json",
             "--report-file",
             &path_str(&report),
         ])
@@ -7350,14 +7337,16 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let yaml = std::fs::read_to_string(&report).unwrap();
-    assert!(yaml.contains("passed: 1"), "{yaml}");
-    assert!(yaml.contains("skipped: 1"), "{yaml}");
-    assert!(yaml.contains("profile: core"), "{yaml}");
-    assert!(
-        yaml.contains("skip_reason: external fixture unavailable"),
-        "{yaml}"
-    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+    assert_eq!(report["passed"], 1);
+    assert_eq!(report["skipped"], 1);
+    assert_eq!(report["tests"][0]["profile"], "core");
+    assert!(report["tests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|test| { test["skip_reason"] == "external fixture unavailable" }));
 
     let output = vibra_cmd()
         .args([
@@ -7487,10 +7476,10 @@ fn vibra_test_workspace_metadata_rejects_unknown_values() {
 }
 
 #[test]
-fn vibra_test_deny_warnings_fails_and_emits_warnings_in_yaml_report() {
+fn vibra_test_deny_warnings_fails_and_emits_warnings_in_json_report() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("warnings.vibra");
-    let report = dir.path().join("report.yaml");
+    let report = dir.path().join("report.json");
     std::fs::write(&entry, "BadName: 1\npasses:\n  $test: core\n  do: []\n").unwrap();
 
     let allowed = vibra_cmd()
@@ -7509,7 +7498,7 @@ fn vibra_test_deny_warnings_fails_and_emits_warnings_in_yaml_report() {
             &path_str(&entry),
             "--deny-warnings",
             "--format",
-            "yaml",
+            "json",
             "--report-file",
             &path_str(&report),
         ])
@@ -7519,9 +7508,14 @@ fn vibra_test_deny_warnings_fails_and_emits_warnings_in_yaml_report() {
         !denied.status.success(),
         "--deny-warnings should fail warning tests"
     );
-    let yaml = std::fs::read_to_string(report).unwrap();
-    assert!(yaml.contains("warnings:"), "{yaml}");
-    assert!(yaml.contains("BadName"), "{yaml}");
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+    assert!(report["tests"].as_array().unwrap().iter().any(|test| {
+        test["warnings"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    }));
+    assert!(report.to_string().contains("BadName"));
 }
 
 #[test]
@@ -7744,7 +7738,7 @@ fn vibra_test_drains_large_child_output_without_timing_out() {
     let io_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap());
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("large-output.vibra");
-    let report = dir.path().join("large-output-report.yaml");
+    let report = dir.path().join("large-output-report.json");
     let payload = "x".repeat(128 * 1024);
     std::fs::write(
         &entry,
@@ -7761,7 +7755,7 @@ fn vibra_test_drains_large_child_output_without_timing_out() {
             "--timeout-ms",
             "1000",
             "--format",
-            "yaml",
+            "json",
             "--report-file",
             &path_str(&report),
         ])
@@ -8517,7 +8511,7 @@ fn forged_stdin_read_file_handle_requires_allow_stdin() {
             "--import",
             &format!("result={}", path_str(&result)),
             "--format",
-            "yaml",
+            "json",
         ])
         .output()
         .unwrap();

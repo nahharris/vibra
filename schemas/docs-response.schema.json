@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/docs-response.schema.json",
   "title": "VibraDocsResponse",
-  "description": "Structured YAML or JSON output from `vibra docs`. A symbol lookup returns one record; browse mode returns an array.",
+  "description": "Structured JSON output from `vibra docs`. A symbol lookup returns one record; browse mode returns an array.",
   "oneOf": [
     { "$ref": "#/$defs/documentation" },
     {

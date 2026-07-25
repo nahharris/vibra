@@ -17,7 +17,7 @@ pub struct PluginLoadReport {
     instantiated: bool,
 }
 
-pub fn load_yaml(
+pub fn load(
     project_path: &Path,
     interface_name: &str,
     plugin_path: &Path,
@@ -100,7 +100,9 @@ pub fn load_yaml(
         functions,
         instantiated: true,
     };
-    serde_yaml::to_string(&report).context("serialize plugin load report")
+    serde_json::to_string_pretty(&report)
+        .map(|json| json + "\n")
+        .context("serialize plugin load report")
 }
 
 fn scalar_type(value: &str) -> Result<wasmer::Type> {
