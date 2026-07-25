@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vibra CLI"
+  short_description: "Operate Vibra projects and toolchain workflows"
+  default_prompt: "Use $vibra-cli to scaffold, validate, test, and build this Vibra project."
