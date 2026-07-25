@@ -5,5 +5,7 @@
 //! instead of addressing generic mapping keys or sequence indices.
 
 mod surface;
+mod typed_macro_expand;
 
 pub use surface::*;
+pub use typed_macro_expand::*;
