@@ -9,21 +9,38 @@ use std::path::PathBuf;
 
 use crate::code::{SemanticIndex, SemanticKind, SourceDatabase};
 
-#[derive(Default)]
 struct Server {
     root: Option<PathBuf>,
     documents: BTreeMap<String, String>,
+    compilation_flags: crate::load::CompilationFlags,
     shutdown: bool,
 }
 
 /// Serve LSP over stdin/stdout until an `exit` notification is received.
 pub fn run_stdio() -> Result<()> {
-    serve(std::io::stdin().lock(), std::io::stdout().lock())
+    run_stdio_with_flags(crate::load::CompilationFlags::default())
+}
+
+pub fn run_stdio_with_flags(flags: crate::load::CompilationFlags) -> Result<()> {
+    serve_with_flags(std::io::stdin().lock(), std::io::stdout().lock(), flags)
 }
 
 pub fn serve<R: Read, W: Write>(input: R, mut output: W) -> Result<()> {
+    serve_with_flags(input, &mut output, crate::load::CompilationFlags::default())
+}
+
+pub fn serve_with_flags<R: Read, W: Write>(
+    input: R,
+    mut output: W,
+    flags: crate::load::CompilationFlags,
+) -> Result<()> {
     let mut input = BufReader::new(input);
-    let mut server = Server::default();
+    let mut server = Server {
+        root: None,
+        documents: BTreeMap::new(),
+        compilation_flags: flags,
+        shutdown: false,
+    };
     while let Some(message) = read_message(&mut input)? {
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         let id = message.get("id").cloned();
@@ -62,6 +79,12 @@ impl Server {
                     .get("rootUri")
                     .and_then(Value::as_str)
                     .and_then(uri_path);
+                if let Some(flags) = params
+                    .pointer("/initializationOptions/compilationFlags")
+                    .filter(|value| !value.is_null())
+                {
+                    self.compilation_flags = compilation_flags(flags)?;
+                }
                 Ok(json!({
                     "serverInfo":{"name":"vibra","version":env!("CARGO_PKG_VERSION")},
                     "capabilities":{
@@ -75,6 +98,17 @@ impl Server {
                 }))
             }
             "initialized" => Ok(json!([])),
+            "workspace/didChangeConfiguration" => {
+                let flags = params
+                    .pointer("/settings/vibra/compilationFlags")
+                    .or_else(|| params.pointer("/settings/compilationFlags"))
+                    .context("E-FLAG-004: LSP settings require `compilationFlags`")?;
+                self.compilation_flags = compilation_flags(flags)?;
+                match self.documents.keys().next().cloned() {
+                    Some(uri) => self.diagnostic_notifications(uri),
+                    None => Ok(json!([])),
+                }
+            }
             "shutdown" => {
                 self.shutdown = true;
                 Ok(Value::Null)
@@ -214,7 +248,8 @@ impl Server {
         let entry = mirrored_project_entry(mirror.path()).unwrap_or(mirrored_document);
         let mirror_text = mirror.path().to_string_lossy();
         let root_text = root.to_string_lossy();
-        let mut diagnostics = crate::tooling::compile_diagnostics(&entry);
+        let mut diagnostics =
+            crate::tooling::compile_diagnostics_with_flags(&entry, &self.compilation_flags);
         for diagnostic in &mut diagnostics {
             diagnostic.message = diagnostic
                 .message
@@ -511,6 +546,23 @@ fn string(value: &Value) -> Result<String> {
         .map(str::to_string)
         .context("expected string")
 }
+
+fn compilation_flags(value: &Value) -> Result<crate::load::CompilationFlags> {
+    let values = value
+        .as_array()
+        .context("E-FLAG-004: `compilationFlags` must be an array of strings")?;
+    let flags = values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .context("E-FLAG-004: every compilation flag must be a string")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    crate::load::CompilationFlags::try_new(flags)
+}
+
 fn uri_path(uri: &str) -> Option<PathBuf> {
     let value = uri.strip_prefix("file://")?;
     let value = value

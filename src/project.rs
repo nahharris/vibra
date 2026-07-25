@@ -179,12 +179,16 @@ pub fn sync_project(path: &Path) -> Result<()> {
 }
 
 pub fn check_project(path: &Path) -> Result<()> {
+    check_project_with_flags(path, &crate::load::CompilationFlags::default())
+}
+
+pub fn check_project_with_flags(path: &Path, flags: &crate::load::CompilationFlags) -> Result<()> {
     let project = load_project(path)?;
     validate_manifest_shape(&project)?;
     validate_dependency_paths(&project)?;
     validate_project_lock(&project)?;
     validate_external_wasm_imports(&project)?;
-    validate_target_imports(&project)?;
+    validate_target_imports(&project, flags)?;
     Ok(())
 }
 
@@ -704,9 +708,10 @@ fn validate_dependency_paths(project: &LoadedProject) -> Result<()> {
     Ok(())
 }
 
-fn validate_target_imports(project: &LoadedProject) -> Result<()> {
-    let namespaces = namespace_roots(project)?;
-    let mut seen = HashSet::new();
+fn validate_target_imports(
+    project: &LoadedProject,
+    flags: &crate::load::CompilationFlags,
+) -> Result<()> {
     for target in project
         .manifest
         .targets
@@ -715,54 +720,9 @@ fn validate_target_imports(project: &LoadedProject) -> Result<()> {
         .chain(project.manifest.targets.bins.iter())
     {
         let entry = project.root.join(&target.root).join(&target.entry);
-        validate_module_imports(&entry, &namespaces, &mut seen)
+        crate::load::load_program_with_flags(&entry, flags)
+            .map(|_| ())
             .with_context(|| format!("validate imports for target `{}`", target.name))?;
-    }
-    Ok(())
-}
-
-fn validate_module_imports(
-    path: &Path,
-    namespaces: &HashMap<String, PathBuf>,
-    seen: &mut HashSet<PathBuf>,
-) -> Result<()> {
-    let path = fs::canonicalize(path).with_context(|| format!("resolve {}", path.display()))?;
-    if !seen.insert(path.clone()) {
-        return Ok(());
-    }
-    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let value: Value =
-        serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
-    let Some(map) = value.as_mapping() else {
-        bail!("{}: module root must be a mapping", path.display());
-    };
-    let parent = path.parent().context("module path has no parent")?;
-    for (key, value) in map {
-        if key.as_str().is_none() {
-            bail!("{}: module keys must be strings", path.display());
-        }
-        let Some(import) = value
-            .as_mapping()
-            .and_then(|m| m.get(Value::String("$import".into())))
-        else {
-            continue;
-        };
-        let import = import
-            .as_str()
-            .with_context(|| format!("{}: $import must be a string", path.display()))?;
-        let resolved = if import.starts_with('@') {
-            resolve_at_import(import, namespaces)?
-        } else {
-            parent.join(import)
-        };
-        if !resolved.exists() {
-            bail!(
-                "{}: import `{import}` resolves to missing `{}`",
-                path.display(),
-                resolved.display()
-            );
-        }
-        validate_module_imports(&resolved, namespaces, seen)?;
     }
     Ok(())
 }
