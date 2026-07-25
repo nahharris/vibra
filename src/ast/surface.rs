@@ -341,17 +341,31 @@ pub struct Test {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TestMeta {
     Tags(Vec<Name>),
-    ExpectError {
-        phase: Name,
+    TimeoutMillis(Spanned<i64>),
+    RandomSeed(Spanned<i64>),
+    Skip(Spanned<String>),
+    ExpectError(ExpectedError),
+    Clock {
+        unix_millis: Spanned<i64>,
+        monotonic_millis: Spanned<i64>,
+    },
+    Workspace(Name),
+    Policy(TypeExpr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExpectedError {
+    Load {
         code: Name,
         message: Option<Spanned<String>>,
     },
-    Clock {
-        mode: Name,
-        millis: Spanned<i64>,
+    Compile {
+        code: Name,
+        message: Option<Spanned<String>>,
     },
-    Benchmark(Node),
-    Workspace(Name),
+    Runtime {
+        message: Spanned<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -384,12 +398,54 @@ pub enum TypeExprKind {
     Reference(Box<TypeExpr>),
     MutableReference(Box<TypeExpr>),
     Intersect(Vec<TypeExpr>),
-    /// Capability, handle, policy, and ABI forms have a fixed semantic head,
-    /// but their detailed inventory is owned by the type checker.
-    Domain {
-        head: Name,
-        arguments: Vec<TypeExpr>,
+    Policy(Vec<PolicyDomain>),
+    Capability {
+        domain: Name,
+        groups: Vec<PolicyGroup>,
     },
+    Handle(Spanned<HandleAccess>),
+    WasmValue(Name),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolicyDomain {
+    pub name: Name,
+    pub groups: Vec<PolicyGroup>,
+    pub span: Span,
+    pub origin: Origin,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolicyGroup {
+    pub requirement: Spanned<PolicyRequirement>,
+    pub scopes: Vec<PolicyScope>,
+    pub span: Span,
+    pub origin: Origin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyRequirement {
+    Mandatory,
+    Optional,
+}
+
+pub type PolicyScope = Spanned<PolicyScopeKind>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PolicyScopeKind {
+    Any,
+    File(Spanned<String>),
+    Dir(Spanned<String>),
+    Exact(Spanned<String>),
+    Prefix(Spanned<String>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandleAccess {
+    Read,
+    Write,
+    ReadWrite,
+    Process,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -463,6 +519,18 @@ pub enum ExprKind {
         value: Box<Expr>,
         into: TypeExpr,
     },
+    Embed {
+        path: Spanned<String>,
+        format: Spanned<EmbedFormat>,
+    },
+    Template {
+        path: Spanned<String>,
+        bindings: Vec<ExprField>,
+    },
+    Wasm {
+        import: WasmImport,
+        arguments: Vec<WasmArgument>,
+    },
     Task {
         captures: Vec<Name>,
         body: Vec<Expr>,
@@ -476,6 +544,30 @@ pub enum ExprKind {
         handle: Name,
         binding: Name,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbedFormat {
+    Auto,
+    Text,
+    Binary,
+    Json,
+    Toml,
+    Xml,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WasmImport {
+    pub module: Spanned<String>,
+    pub name: Spanned<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum WasmArgument {
+    Parameter(Name),
+    ConstInt(Spanned<i64>),
+    ConstString(Spanned<String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -976,10 +1068,25 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
             min_arity("intersect", &args, 1, node.span)?;
             TypeExprKind::Intersect(parse_types(args)?)
         }
-        "capability" | "handle" | "policy" | "wasm" => TypeExprKind::Domain {
-            head,
-            arguments: parse_types(args)?,
-        },
+        "policy" => TypeExprKind::Policy(parse_policy_domains(&args)?),
+        "capability" => {
+            min_arity("capability", &args, 1, node.span)?;
+            TypeExprKind::Capability {
+                domain: name(args[0])?,
+                groups: args[1..]
+                    .iter()
+                    .map(|node| parse_policy_group(node))
+                    .collect::<Result<_, _>>()?,
+            }
+        }
+        "handle" => {
+            exact_arity("handle", &args, 1, node.span)?;
+            TypeExprKind::Handle(parse_handle_access(args[0])?)
+        }
+        "wasm" => {
+            exact_arity("wasm type", &args, 1, node.span)?;
+            TypeExprKind::WasmValue(name(args[0])?)
+        }
         "inst" => {
             return Err(AstError::new(
                 "E-SYN-008",
@@ -996,6 +1103,131 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
         }
     };
     Ok(Spanned::source(value, node.span))
+}
+
+fn parse_policy_domains(args: &[&Node]) -> Result<Vec<PolicyDomain>, AstError> {
+    args.iter()
+        .map(|node| {
+            let values = semantic_nodes(list(node)?).collect::<Vec<_>>();
+            min_arity("policy domain", &values, 1, node.span)?;
+            Ok(PolicyDomain {
+                name: name(values[0])?,
+                groups: values[1..]
+                    .iter()
+                    .map(|node| parse_policy_group(node))
+                    .collect::<Result<_, _>>()?,
+                span: node.span,
+                origin: source_origin(node.span),
+            })
+        })
+        .collect()
+}
+
+fn parse_policy_group(node: &Node) -> Result<PolicyGroup, AstError> {
+    let (head, args) = headed(node)?;
+    if head.value != "group" {
+        return Err(expected_head("group", &head));
+    }
+    let attributes = trailing_attributes("group", &args, 0, node.span)?;
+    let mut requirement = None;
+    let mut scopes = None;
+    for attribute in attributes {
+        let label = label(attribute.label)?;
+        match label.value.as_str() {
+            "requirement" => {
+                requirement = Some(Spanned::source(
+                    match symbol(attribute.value) {
+                        Some("mandatory") => PolicyRequirement::Mandatory,
+                        Some("optional") => PolicyRequirement::Optional,
+                        _ => {
+                            return Err(AstError::new(
+                                "E-SYN-008",
+                                "policy requirement must be `mandatory` or `optional`",
+                                attribute.value.span,
+                            ));
+                        }
+                    },
+                    attribute.value.span,
+                ));
+            }
+            "scopes" => {
+                scopes = Some(
+                    semantic_nodes(list(attribute.value)?)
+                        .map(parse_policy_scope)
+                        .collect::<Result<_, _>>()?,
+                );
+            }
+            _ => {
+                return Err(AstError::new(
+                    "E-SYN-011",
+                    format!("unknown policy group attribute `{}:`", label.value),
+                    label.span,
+                ));
+            }
+        }
+    }
+    Ok(PolicyGroup {
+        requirement: requirement.ok_or_else(|| {
+            AstError::new(
+                "E-SYN-011",
+                "policy group is missing `requirement:`",
+                node.span,
+            )
+        })?,
+        scopes: scopes.ok_or_else(|| {
+            AstError::new("E-SYN-011", "policy group is missing `scopes:`", node.span)
+        })?,
+        span: node.span,
+        origin: source_origin(node.span),
+    })
+}
+
+fn parse_policy_scope(node: &Node) -> Result<PolicyScope, AstError> {
+    let (head, args) = headed(node)?;
+    let value = match head.value.as_str() {
+        "any" => {
+            exact_arity("any scope", &args, 0, node.span)?;
+            PolicyScopeKind::Any
+        }
+        "file" | "dir" | "exact" | "prefix" => {
+            exact_arity("policy scope", &args, 1, node.span)?;
+            let value = string(args[0])?;
+            match head.value.as_str() {
+                "file" => PolicyScopeKind::File(value),
+                "dir" => PolicyScopeKind::Dir(value),
+                "exact" => PolicyScopeKind::Exact(value),
+                _ => PolicyScopeKind::Prefix(value),
+            }
+        }
+        _ => {
+            return Err(AstError::new(
+                "E-SYN-008",
+                format!("unknown policy scope selector `{}`", head.value),
+                head.span,
+            ));
+        }
+    };
+    Ok(Spanned::source(value, node.span))
+}
+
+fn parse_handle_access(node: &Node) -> Result<Spanned<HandleAccess>, AstError> {
+    let access = match symbol(node) {
+        Some("read") => Ok(HandleAccess::Read),
+        Some("write") => Ok(HandleAccess::Write),
+        Some("read-write") => Ok(HandleAccess::ReadWrite),
+        Some("process") => Ok(HandleAccess::Process),
+        Some(access) => Err(AstError::new(
+            "E-SYN-008",
+            format!("unknown opaque handle access `{access}`"),
+            node.span,
+        )),
+        None => Err(AstError::new(
+            "E-SYN-010",
+            "handle access must be a symbol",
+            node.span,
+        )),
+    }?;
+    Ok(Spanned::source(access, node.span))
 }
 
 fn parse_type_members<'a>(args: impl AsRef<[&'a Node]>) -> Result<Vec<TypeMember>, AstError> {
@@ -1145,6 +1377,69 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
                 into: parse_type(args[1])?,
             }
         }
+        "embed" => {
+            let attributes = trailing_attributes("embed", &args, 1, node.span)?;
+            let path = string(args[0])?;
+            let mut format = Spanned::source(EmbedFormat::Auto, path.span);
+            for attribute in attributes {
+                let attribute_name = label(attribute.label)?;
+                if attribute_name.value != "format" {
+                    return Err(AstError::new(
+                        "E-SYN-011",
+                        format!("unknown embed attribute `{}:`", attribute_name.value),
+                        attribute_name.span,
+                    ));
+                }
+                format = parse_embed_format(attribute.value)?;
+            }
+            if format.value == EmbedFormat::Auto
+                && matches!(
+                    Path::new(&path.value)
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .map(str::to_ascii_lowercase)
+                        .as_deref(),
+                    Some("yaml" | "yml")
+                )
+            {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "YAML embed format was removed",
+                    path.span,
+                ));
+            }
+            ExprKind::Embed { path, format }
+        }
+        "template" => {
+            let attributes = trailing_attributes("template", &args, 1, node.span)?;
+            let mut bindings = None;
+            for attribute in attributes {
+                let attribute_name = label(attribute.label)?;
+                if attribute_name.value != "with" {
+                    return Err(AstError::new(
+                        "E-SYN-011",
+                        format!("unknown template attribute `{}:`", attribute_name.value),
+                        attribute_name.span,
+                    ));
+                }
+                let (record_head, record_args) = headed(attribute.value)?;
+                if record_head.value != "record" {
+                    return Err(expected_head("record", &record_head));
+                }
+                bindings = Some(parse_expr_fields(record_args)?);
+            }
+            ExprKind::Template {
+                path: string(args[0])?,
+                bindings: bindings.ok_or_else(|| {
+                    AstError::new(
+                        "E-SYN-011",
+                        "template is missing required `with:` attribute",
+                        node.span,
+                    )
+                })?,
+            }
+        }
+        "wasm" => parse_wasm_expr(node, &args)?,
         "task" => {
             exact_arity("task", &args, 2, node.span)?;
             ExprKind::Task {
@@ -1173,6 +1468,105 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
         },
     };
     Ok(Spanned::source(value, node.span))
+}
+
+fn parse_embed_format(node: &Node) -> Result<Spanned<EmbedFormat>, AstError> {
+    let format = match symbol(node) {
+        Some("auto") => Ok(EmbedFormat::Auto),
+        Some("text") => Ok(EmbedFormat::Text),
+        Some("binary") => Ok(EmbedFormat::Binary),
+        Some("json") => Ok(EmbedFormat::Json),
+        Some("toml") => Ok(EmbedFormat::Toml),
+        Some("xml") => Ok(EmbedFormat::Xml),
+        Some("yaml" | "yml") => Err(AstError::new(
+            "E-SYN-008",
+            "YAML embed format was removed",
+            node.span,
+        )),
+        Some(format) => Err(AstError::new(
+            "E-SYN-008",
+            format!("unknown embed format `{format}`"),
+            node.span,
+        )),
+        None => Err(AstError::new(
+            "E-SYN-010",
+            "embed format must be a symbol",
+            node.span,
+        )),
+    }?;
+    Ok(Spanned::source(format, node.span))
+}
+
+fn parse_wasm_expr(node: &Node, args: &[&Node]) -> Result<ExprKind, AstError> {
+    let attributes = trailing_attributes("wasm", args, 0, node.span)?;
+    let mut import = None;
+    let mut arguments = None;
+    for attribute in attributes {
+        let attribute_name = label(attribute.label)?;
+        match attribute_name.value.as_str() {
+            "import" => {
+                let (head, values) = headed(attribute.value)?;
+                if head.value != "import" {
+                    return Err(expected_head("import", &head));
+                }
+                exact_arity("wasm import", &values, 2, attribute.value.span)?;
+                import = Some(WasmImport {
+                    module: string(values[0])?,
+                    name: string(values[1])?,
+                    span: attribute.value.span,
+                });
+            }
+            "args" => {
+                arguments = Some(
+                    semantic_nodes(list(attribute.value)?)
+                        .map(parse_wasm_argument)
+                        .collect::<Result<_, _>>()?,
+                );
+            }
+            _ => {
+                return Err(AstError::new(
+                    "E-SYN-011",
+                    format!("unknown wasm attribute `{}:`", attribute_name.value),
+                    attribute_name.span,
+                ));
+            }
+        }
+    }
+    Ok(ExprKind::Wasm {
+        import: import.ok_or_else(|| {
+            AstError::new("E-SYN-011", "wasm body is missing `import:`", node.span)
+        })?,
+        arguments: arguments
+            .ok_or_else(|| AstError::new("E-SYN-011", "wasm body is missing `args:`", node.span))?,
+    })
+}
+
+fn parse_wasm_argument(node: &Node) -> Result<WasmArgument, AstError> {
+    let (head, args) = headed(node)?;
+    exact_arity("wasm argument", &args, 1, node.span)?;
+    match head.value.as_str() {
+        "arg" => Ok(WasmArgument::Parameter(name(args[0])?)),
+        "const" => match &args[0].kind {
+            NodeKind::Atom(Atom::Int(value)) => Ok(WasmArgument::ConstInt(Spanned::source(
+                *value,
+                args[0].span,
+            ))),
+            NodeKind::Atom(Atom::String(value)) => Ok(WasmArgument::ConstString(Spanned::source(
+                value.clone(),
+                args[0].span,
+            ))),
+            _ => Err(AstError::new(
+                "E-SYN-010",
+                "wasm constant must be an integer or string literal",
+                args[0].span,
+            )),
+        },
+        _ => Err(AstError::new(
+            "E-SYN-008",
+            "wasm argument must use `arg` or `const`",
+            head.span,
+        )),
+    }
 }
 
 fn parse_exprs<'a>(args: impl AsRef<[&'a Node]>) -> Result<Vec<Expr>, AstError> {
@@ -1422,28 +1816,122 @@ fn parse_test_meta(attribute: &AttributeRef<'_>) -> Result<TestMeta, AstError> {
                 .map(name)
                 .collect::<Result<_, _>>()?,
         )),
+        "timeout-ms" => {
+            let value = integer(attribute.value)?;
+            if value.value <= 0 {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "`timeout-ms:` must be greater than zero",
+                    value.span,
+                ));
+            }
+            Ok(TestMeta::TimeoutMillis(value))
+        }
+        "random-seed" => {
+            let value = integer(attribute.value)?;
+            if value.value < 0 {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "`random-seed:` must be non-negative",
+                    value.span,
+                ));
+            }
+            Ok(TestMeta::RandomSeed(value))
+        }
+        "skip" => {
+            let reason = string(attribute.value)?;
+            if reason.value.is_empty() {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "`skip:` must be a non-empty string",
+                    reason.span,
+                ));
+            }
+            Ok(TestMeta::Skip(reason))
+        }
         "expect-error" => {
             let args = semantic_nodes(list(attribute.value)?).collect::<Vec<_>>();
-            range_arity("expect-error", &args, 2, 3, attribute.span)?;
-            Ok(TestMeta::ExpectError {
-                phase: name(args[0])?,
-                code: name(args[1])?,
-                message: args.get(2).map(|node| string(node)).transpose()?,
-            })
+            min_arity("expect-error", &args, 1, attribute.span)?;
+            let expected = match symbol(args[0]) {
+                Some("load") | Some("compile") => {
+                    range_arity("load/compile expect-error", &args, 2, 3, attribute.span)?;
+                    let code = name(args[1])?;
+                    let message = args
+                        .get(2)
+                        .map(|node| non_empty_string(node, "`expect-error` message"))
+                        .transpose()?;
+                    if symbol(args[0]) == Some("load") {
+                        ExpectedError::Load { code, message }
+                    } else {
+                        ExpectedError::Compile { code, message }
+                    }
+                }
+                Some("runtime") => {
+                    exact_arity("runtime expect-error", &args, 2, attribute.span)?;
+                    ExpectedError::Runtime {
+                        message: non_empty_string(args[1], "`expect-error` message")?,
+                    }
+                }
+                _ => {
+                    return Err(AstError::new(
+                        "E-SYN-008",
+                        "expected-error phase must be `load`, `compile`, or `runtime`",
+                        args[0].span,
+                    ));
+                }
+            };
+            Ok(TestMeta::ExpectError(expected))
         }
         "clock" => {
             let args = semantic_nodes(list(attribute.value)?).collect::<Vec<_>>();
-            exact_arity("clock", &args, 2, attribute.span)?;
+            exact_arity("clock", &args, 3, attribute.span)?;
+            if symbol(args[0]) != Some("fixed") {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "clock mode must be `fixed`",
+                    args[0].span,
+                ));
+            }
+            let unix_millis = integer(args[1])?;
+            let monotonic_millis = integer(args[2])?;
+            if unix_millis.value < 0 || monotonic_millis.value < 0 {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "fixed clock milliseconds must be non-negative",
+                    if unix_millis.value < 0 {
+                        unix_millis.span
+                    } else {
+                        monotonic_millis.span
+                    },
+                ));
+            }
             Ok(TestMeta::Clock {
-                mode: name(args[0])?,
-                millis: integer(args[1])?,
+                unix_millis,
+                monotonic_millis,
             })
         }
-        "benchmark" => {
-            list(attribute.value)?;
-            Ok(TestMeta::Benchmark(attribute.value.clone()))
+        "workspace" => {
+            let workspace = name(attribute.value)?;
+            if workspace.value != "temp" {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "workspace mode must be `temp`",
+                    workspace.span,
+                ));
+            }
+            Ok(TestMeta::Workspace(workspace))
         }
-        "workspace" => Ok(TestMeta::Workspace(name(attribute.value)?)),
+        "policy" => {
+            let policy = parse_type(attribute.value)?;
+            if !matches!(policy.value, TypeExprKind::Policy(_)) {
+                return Err(AstError::new(
+                    "E-SYN-010",
+                    "`policy:` requires a `(policy ...)` type",
+                    attribute.value.span,
+                ));
+            }
+            Ok(TestMeta::Policy(policy))
+        }
         _ => Err(AstError::new(
             "E-SYN-011",
             format!("unknown test attribute `{}:`", label.value),
@@ -1585,6 +2073,18 @@ fn string(node: &Node) -> Result<Spanned<String>, AstError> {
     }
 }
 
+fn non_empty_string(node: &Node, field: &str) -> Result<Spanned<String>, AstError> {
+    let value = string(node)?;
+    if value.value.is_empty() {
+        return Err(AstError::new(
+            "E-SYN-008",
+            format!("{field} must be a non-empty string"),
+            value.span,
+        ));
+    }
+    Ok(value)
+}
+
 fn integer(node: &Node) -> Result<Spanned<i64>, AstError> {
     match &node.kind {
         NodeKind::Atom(Atom::Int(value)) => Ok(Spanned::source(*value, node.span)),
@@ -1683,7 +2183,7 @@ mod tests {
 (private (const limit int64 10))
 (fn choose ((value bool) (fallback bool)) bool
   (do (if value (do (return value)) (do (return fallback)))))
-(test works core (do (test.assert true)) tags: (fast language) clock: (fixed 0))
+(test works core (do (test.assert true)) tags: (fast language) clock: (fixed 0 0))
 "#;
         let module = module(source).unwrap();
         assert_eq!(module.forms.len(), 5);
@@ -1699,6 +2199,191 @@ mod tests {
         };
         assert_eq!(function.parameters.len(), 2);
         assert_eq!(function.span, function.origin.primary_span());
+    }
+
+    #[test]
+    fn lowers_embed_template_and_wasm_bodies_as_typed_nodes() {
+        let parsed = module(
+            r#"
+(fn assets () void
+  (do
+    (embed "message.txt" format: text)
+    (template "message.mustache" with: (record (name "Vibra")))
+    (wasm
+      import: (import "vibra:host/abi@1" "io_write")
+      args: ((arg output) (const 1) (const "suffix")))))
+"#,
+        )
+        .unwrap();
+        let TopLevel::Function(function) = &parsed.forms[0] else {
+            panic!("expected function");
+        };
+        assert!(matches!(
+            function.body[0].value,
+            ExprKind::Embed {
+                format: Spanned {
+                    value: EmbedFormat::Text,
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            function.body[1].value,
+            ExprKind::Template { ref bindings, .. } if bindings.len() == 1
+        ));
+        assert!(matches!(
+            function.body[2].value,
+            ExprKind::Wasm { ref arguments, .. } if arguments.len() == 3
+        ));
+
+        let yaml =
+            module(r#"(fn bad () void (do (embed "legacy.yaml" format: yaml)))"#).unwrap_err();
+        assert_eq!(yaml.code, "E-SYN-008");
+        assert_eq!(
+            module(r#"(fn bad () void (do (embed "legacy.YML")))"#)
+                .unwrap_err()
+                .code,
+            "E-SYN-008"
+        );
+    }
+
+    #[test]
+    fn lowers_explicit_security_types_and_validates_their_closed_shapes() {
+        let parsed = module(
+            r#"
+(def root-policy
+  (policy
+    (fs-read
+      (group requirement: mandatory scopes: ((dir "src") (dir "tests"))))
+    (clock
+      (group requirement: optional scopes: ((any))))))
+(def read-capability
+  (capability fs-read
+    (group requirement: mandatory scopes: ((dir "src")))))
+(def input-handle (handle read))
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            parsed.forms[0],
+            TopLevel::Definition(Definition {
+                body: Spanned {
+                    value: TypeExprKind::Policy(ref domains),
+                    ..
+                },
+                ..
+            }) if domains.len() == 2
+        ));
+        assert!(matches!(
+            parsed.forms[1],
+            TopLevel::Definition(Definition {
+                body: Spanned {
+                    value: TypeExprKind::Capability { ref groups, .. },
+                    ..
+                },
+                ..
+            }) if groups.len() == 1
+        ));
+        assert!(matches!(
+            parsed.forms[2],
+            TopLevel::Definition(Definition {
+                body: Spanned {
+                    value: TypeExprKind::Handle(Spanned {
+                        value: HandleAccess::Read,
+                        ..
+                    }),
+                    ..
+                },
+                ..
+            })
+        ));
+
+        let error = module(
+            "(def invalid (policy (fs-read (group scopes: ((dir \"src\")) requirement: required))))",
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "E-SYN-008");
+
+        let scopes = module(
+            r#"(def all-scopes
+              (policy (fs-read (group requirement: optional
+                scopes: ((any) (file "a") (dir "b") (exact "c") (prefix "d"))))))"#,
+        )
+        .unwrap();
+        let TopLevel::Definition(definition) = &scopes.forms[0] else {
+            panic!("expected definition");
+        };
+        let TypeExprKind::Policy(domains) = &definition.body.value else {
+            panic!("expected policy");
+        };
+        assert!(matches!(
+            domains[0].groups[0].scopes[0].value,
+            PolicyScopeKind::Any
+        ));
+        assert!(matches!(
+            domains[0].groups[0].scopes[4].value,
+            PolicyScopeKind::Prefix(ref value) if value.value == "d"
+        ));
+    }
+
+    #[test]
+    fn lowers_complete_test_metadata_with_trailing_labels() {
+        let parsed = module(
+            r#"
+(test complete fs (do (test.assert true))
+  tags: (filesystem)
+  timeout-ms: 25
+  random-seed: 42
+  skip: "sandbox unavailable"
+  expect-error: (compile E-FS-001 "denied")
+  clock: (fixed 1000 7)
+  workspace: temp
+  policy: (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
+"#,
+        )
+        .unwrap();
+        let TopLevel::Test(test) = &parsed.forms[0] else {
+            panic!("expected test");
+        };
+        assert_eq!(test.metadata.len(), 8);
+        assert!(matches!(test.metadata[1], TestMeta::TimeoutMillis(_)));
+        assert!(matches!(test.metadata[2], TestMeta::RandomSeed(_)));
+        assert!(matches!(test.metadata[3], TestMeta::Skip(_)));
+        assert!(matches!(test.metadata[7], TestMeta::Policy(_)));
+
+        assert_eq!(
+            module("(test bad core (do) timeout-ms: 0)")
+                .unwrap_err()
+                .code,
+            "E-SYN-008"
+        );
+        assert_eq!(
+            module(r#"(test bad core (do) expect-error: (runtime E-RUN "boom"))"#)
+                .unwrap_err()
+                .code,
+            "E-SYN-009"
+        );
+        let runtime = module(r#"(test runtime core (do) expect-error: (runtime "boom"))"#).unwrap();
+        let TopLevel::Test(runtime) = &runtime.forms[0] else {
+            panic!("expected test");
+        };
+        assert!(matches!(
+            runtime.metadata[0],
+            TestMeta::ExpectError(ExpectedError::Runtime { .. })
+        ));
+        for source in [
+            r#"(test bad core (do) expect-error: (runtime ""))"#,
+            r#"(test bad core (do) expect-error: (load E-LOAD-001 ""))"#,
+            r#"(test bad core (do) expect-error: (compile E-COMPILE-001 ""))"#,
+        ] {
+            let error = module(source).unwrap_err();
+            assert_eq!(error.code, "E-SYN-008");
+            assert_eq!(
+                error.message,
+                "`expect-error` message must be a non-empty string"
+            );
+        }
     }
 
     #[test]
@@ -1904,17 +2589,15 @@ mod tests {
             "(test measured core (do)\n\
              tags: (fast arithmetic)\n\
              expect-error: (compile E-OP-002 \"overflow\")\n\
-             clock: (fixed 0)\n\
-             benchmark: (iterations 100)\n\
+             clock: (fixed 0 0)\n\
              workspace: temp)",
         )
         .unwrap();
         let TopLevel::Test(test) = &parsed.forms[0] else {
             panic!("expected test");
         };
-        assert_eq!(test.metadata.len(), 5);
-        assert!(matches!(test.metadata[3], TestMeta::Benchmark(_)));
-        assert!(matches!(test.metadata[4], TestMeta::Workspace(_)));
+        assert_eq!(test.metadata.len(), 4);
+        assert!(matches!(test.metadata[3], TestMeta::Workspace(_)));
     }
 
     #[test]

@@ -179,14 +179,16 @@ fn load_source_module(path: &Path, flags: &CompilationFlags) -> Result<SourceMod
 fn reject_uncut_phases(module: &Module, path: &Path) -> Result<()> {
     for form in &module.forms {
         visit_top_level_exprs(form, &mut |expr| {
-            if let ExprKind::Call { callee, .. } = &expr.value {
-                if matches!(callee.value.as_str(), "embed" | "template") {
-                    bail!(
-                        "E-FRONT-002: `{}` expansion is not active in the S-expression frontend ({})",
-                        callee.value,
-                        path.display()
-                    );
-                }
+            let phase = match &expr.value {
+                ExprKind::Embed { .. } => Some("embed"),
+                ExprKind::Template { .. } => Some("template"),
+                _ => None,
+            };
+            if let Some(phase) = phase {
+                bail!(
+                    "E-FRONT-002: `{phase}` expansion is not active in the S-expression frontend ({})",
+                    path.display()
+                );
             }
             Ok(())
         })?;
@@ -272,12 +274,20 @@ fn visit_expr(expr: &Expr, visitor: &mut impl FnMut(&Expr) -> Result<()>) -> Res
         ExprKind::Convert { value, .. } | ExprKind::Cast { value, .. } => {
             visit_expr(value, visitor)
         }
+        ExprKind::Template { bindings, .. } => {
+            for binding in bindings {
+                visit_expr(&binding.value, visitor)?;
+            }
+            Ok(())
+        }
         ExprKind::Task { body, .. } => visit_exprs(body, visitor),
         ExprKind::Spawn { value, .. } => visit_expr(value, visitor),
         ExprKind::Literal(_)
         | ExprKind::Reference(_)
         | ExprKind::Break
         | ExprKind::Continue
+        | ExprKind::Embed { .. }
+        | ExprKind::Wasm { .. }
         | ExprKind::Join { .. } => Ok(()),
     }
 }
@@ -492,13 +502,16 @@ fn visit_type(ty: &TypeExpr, visitor: &mut impl FnMut(&str) -> Result<()>) -> Re
             }
             Ok(())
         }
-        TypeExprKind::Domain { head, arguments } => {
-            visitor(&head.value)?;
-            for argument in arguments {
-                visit_type(argument, visitor)?;
+        TypeExprKind::Policy(domains) => {
+            for domain in domains {
+                visitor(&domain.name.value)?;
             }
             Ok(())
         }
+        TypeExprKind::Capability { domain, .. } | TypeExprKind::WasmValue(domain) => {
+            visitor(&domain.value)
+        }
+        TypeExprKind::Handle(_) => Ok(()),
     }
 }
 
@@ -727,7 +740,10 @@ mod tests {
     fn rejects_phases_that_are_not_cut_over() {
         for (source, code) in [
             ("(const x str (embed \"x.txt\"))\n", "E-FRONT-002"),
-            ("(fn f () str (do (template \"x\")))\n", "E-FRONT-002"),
+            (
+                "(fn f () str (do (template \"x\" with: (record))))\n",
+                "E-FRONT-002",
+            ),
         ] {
             let temp = tempfile::tempdir().unwrap();
             let entry = temp.path().join("main.vibra");

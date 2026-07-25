@@ -189,16 +189,15 @@ fn lint_module_names(
                                 lint_name(path, source, name, "test tag", diagnostics);
                             }
                         }
-                        TestMeta::ExpectError { phase, .. } => {
-                            lint_name(path, source, phase, "test phase", diagnostics)
-                        }
+                        TestMeta::ExpectError(_) => {}
                         TestMeta::Workspace(name) => {
                             lint_name(path, source, name, "workspace mode", diagnostics)
                         }
-                        TestMeta::Clock { mode, .. } => {
-                            lint_name(path, source, mode, "clock mode", diagnostics)
-                        }
-                        TestMeta::Benchmark(_) => {}
+                        TestMeta::Clock { .. }
+                        | TestMeta::TimeoutMillis(_)
+                        | TestMeta::RandomSeed(_)
+                        | TestMeta::Skip(_)
+                        | TestMeta::Policy(_) => {}
                     }
                 }
                 for expression in &value.body {
@@ -320,12 +319,18 @@ fn lint_type(path: &Path, source: &str, ty: &TypeExpr, diagnostics: &mut Vec<Dia
             }
             lint_type(path, source, result, diagnostics);
         }
-        TypeExprKind::Domain { head, arguments } => {
-            lint_name(path, source, head, "domain type", diagnostics);
-            for argument in arguments {
-                lint_type(path, source, argument, diagnostics);
+        TypeExprKind::Policy(domains) => {
+            for domain in domains {
+                lint_name(path, source, &domain.name, "policy domain", diagnostics);
             }
         }
+        TypeExprKind::Capability { domain, .. } => {
+            lint_name(path, source, domain, "capability domain", diagnostics)
+        }
+        TypeExprKind::WasmValue(name) => {
+            lint_name(path, source, name, "wasm value type", diagnostics)
+        }
+        TypeExprKind::Handle(_) => {}
     }
 }
 
@@ -410,6 +415,13 @@ fn lint_expr(path: &Path, source: &str, expr: &Expr, diagnostics: &mut Vec<Diagn
         ExprKind::Convert { value, into, .. } | ExprKind::Cast { value, into } => {
             lint_expr(path, source, value, diagnostics);
             lint_type(path, source, into, diagnostics);
+        }
+        ExprKind::Embed { .. } | ExprKind::Wasm { .. } => {}
+        ExprKind::Template { bindings, .. } => {
+            for binding in bindings {
+                lint_name(path, source, &binding.name, "template binding", diagnostics);
+                lint_expr(path, source, &binding.value, diagnostics);
+            }
         }
         ExprKind::Task { captures, body } => {
             lint_names(path, source, captures, "task capture", diagnostics);

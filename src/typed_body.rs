@@ -441,6 +441,9 @@ fn lower_expr(
         ExprKind::Convert { .. } => {
             bail!("typed `convert` lowering requires explicit fallback semantics")
         }
+        ExprKind::Embed { .. } | ExprKind::Template { .. } | ExprKind::Wasm { .. } => {
+            bail!("typed compile-time expression lowering is not active")
+        }
         ExprKind::Do(_)
         | ExprKind::Let { .. }
         | ExprKind::Set { .. }
