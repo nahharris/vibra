@@ -12,7 +12,7 @@
     {
       "type": "object",
       "additionalProperties": { "$ref": "#" },
-      "description": "Includes compile-time {$embed: path} or {$embed: {path, format}} expressions. Formats: auto, text, binary, yaml, json, toml, xml."
+      "description": "Includes compile-time {$embed: path} / {$embed: {path, format}} expressions and deterministic {$template: {path, with}} text rendering. Embed formats: auto, text, binary, yaml, json, toml, xml."
     }
   ]
 }

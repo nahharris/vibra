@@ -1,0 +1,23 @@
+test:
+  $import: ../stdlib/src/test.vibra
+compile-time-template-renders-sections:
+  $test: core
+  do:
+  - $let:
+      rendered:
+        $template:
+          path: template-assets/greeting.txt
+          with:
+            greeting: Hello
+            people:
+            - name: Ada
+            - name: Lin
+  - $match: $rendered
+    when:
+    - case: "Hello: Ada, Lin, \n"
+      do:
+      - $test.assert: true
+    - case:
+        $wildcard: null
+      do:
+      - $test.fail: compile-time template rendered unexpected text

@@ -8542,3 +8542,96 @@ fn compile_time_embed_rejects_escape_and_fingerprints_raw_content() {
     let second = vibra::wasm_backend::emit_program_wasm(&second);
     assert_ne!(first, second);
 }
+
+#[test]
+fn compile_time_template_renders_nested_values_and_logicless_sections() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("message.txt"),
+        "{{title}}\n{{#people}}- {{name}} ({{meta.role}}){{#active}} active{{/active}}\n{{/people}}{{^people}}nobody\n{{/people}}{{! ignored }}",
+    )
+    .unwrap();
+    let entry = dir.path().join("main.vibra");
+    std::fs::write(
+        &entry,
+        r#"main:
+  $function: $void
+  return: $void
+  do:
+    - $let:
+        rendered:
+          $template:
+            path: message.txt
+            with:
+              title: Team
+              people:
+                - name: Ada
+                  active: true
+                  meta: {role: compiler}
+                - name: Lin
+                  active: false
+                  meta: {role: runtime}
+"#,
+    )
+    .unwrap();
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    assert_eq!(loaded.embedded_files.len(), 1);
+    let module = loaded.modules.get(&loaded.entry).unwrap();
+    let value = module["main"]["do"][0]["$let"]["rendered"]["$literal"]
+        .as_str()
+        .unwrap();
+    assert_eq!(value, "Team\n- Ada (compiler) active\n- Lin (runtime)\n");
+    vibra::lower::lower_program(&loaded).unwrap();
+}
+
+#[test]
+fn compile_time_template_is_strict_sandboxed_and_fingerprinted() {
+    let outer = tempfile::tempdir().unwrap();
+    let package = outer.path().join("package");
+    std::fs::create_dir(&package).unwrap();
+    std::fs::write(outer.path().join("secret.txt"), "{{secret}}").unwrap();
+    let entry = package.join("main.vibra");
+    let program = |path: &str, data: &str| {
+        format!(
+            "main:\n  $function: $void\n  return: $void\n  do:\n    - $let:\n        rendered:\n          $template:\n            path: {path}\n            with: {data}\n"
+        )
+    };
+
+    std::fs::write(&entry, program("../secret.txt", "{secret: no}")).unwrap();
+    let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(error.contains("E-TEMPLATE-002"), "{error}");
+
+    let template = package.join("message.txt");
+    std::fs::write(&template, "Hello {{name}}").unwrap();
+    std::fs::write(&entry, program("message.txt", "{name: Ada}")).unwrap();
+    let first = vibra::load::load_program(&entry).unwrap();
+    let first_wasm =
+        vibra::wasm_backend::emit_program_wasm(&vibra::lower::lower_program(&first).unwrap());
+    std::fs::write(&template, "Welcome {{name}}").unwrap();
+    let second = vibra::load::load_program(&entry).unwrap();
+    let second_wasm =
+        vibra::wasm_backend::emit_program_wasm(&vibra::lower::lower_program(&second).unwrap());
+    assert_ne!(first_wasm, second_wasm);
+
+    std::fs::write(&template, "{{missing}}").unwrap();
+    let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(error.contains("E-TEMPLATE-005"), "{error}");
+
+    std::fs::write(&template, "{{#name}}unclosed").unwrap();
+    let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(error.contains("E-TEMPLATE-004"), "{error}");
+
+    std::fs::write(
+        &template,
+        format!(
+            "{}value{}",
+            "{{#enabled}}".repeat(65),
+            "{{/enabled}}".repeat(65)
+        ),
+    )
+    .unwrap();
+    std::fs::write(&entry, program("message.txt", "{enabled: true}")).unwrap();
+    let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(error.contains("E-TEMPLATE-006"), "{error}");
+}
