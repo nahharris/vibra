@@ -534,7 +534,7 @@ pub fn compile_diagnostics_with_flags(
     path: &Path,
     flags: &load::CompilationFlags,
 ) -> Vec<Diagnostic> {
-    let result = load::load_program_with_flags(path, flags).and_then(|program| {
+    let result = load::load_legacy_yaml_program(path, flags).and_then(|program| {
         let Some(entry) = program.modules.get(&program.entry) else {
             return Ok(());
         };

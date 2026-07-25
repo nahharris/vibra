@@ -68,8 +68,8 @@ pub fn build_with_flags(
         None => bail!("E-PKG-002: project has multiple bin targets; select one with --bin"),
     };
     let entry_path = loaded.root.join(&target.root).join(&target.entry);
-    let program =
-        load::load_program_with_flags(&entry_path, flags).context("E-PKG-003: load application")?;
+    let program = load::load_legacy_yaml_program(&entry_path, flags)
+        .context("E-PKG-003: load application")?;
     let lowered = lower::lower_program(&program).context("E-PKG-003: lower application")?;
     let wasm = wasm_backend::emit_program_wasm(&lowered);
 
@@ -155,7 +155,7 @@ pub fn run(path: &Path, config: &RunConfig) -> Result<()> {
     validate_archive_path(entry)?;
     let flags = load::CompilationFlags::try_new(metadata.compilation_flags.iter().cloned())
         .context("E-PKG-006: invalid compilation flags")?;
-    let program = load::load_program_with_flags(&temp.path().join(entry), &flags)
+    let program = load::load_legacy_yaml_program(&temp.path().join(entry), &flags)
         .context("E-PKG-011: load packaged application")?;
     let lowered =
         lower::lower_program(&program).context("E-PKG-011: lower packaged application")?;

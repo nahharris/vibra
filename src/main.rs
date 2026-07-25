@@ -742,7 +742,7 @@ fn run_cli() -> Result<()> {
                 }
                 package::run(&path, &config)?;
             } else {
-                let program = load::load_program_with_flags(&path, &compilation_flags(flag)?)?;
+                let program = load::load_legacy_yaml_program(&path, &compilation_flags(flag)?)?;
                 let lowered = lower::lower_program(&program)?;
                 for warning in &lowered.warnings {
                     eprintln!("warning: {warning}");
@@ -754,7 +754,7 @@ fn run_cli() -> Result<()> {
             print_effects(&path, format, &compilation_flags(flag)?)?
         }
         Command::Expand { path, format, flag } => {
-            let loaded = load::load_program_with_flags(&path, &compilation_flags(flag)?)?;
+            let loaded = load::load_legacy_yaml_program(&path, &compilation_flags(flag)?)?;
             let expanded = loaded
                 .modules
                 .get(&loaded.entry)
@@ -786,7 +786,7 @@ fn run_cli() -> Result<()> {
             let expr_value: Value = serde_yaml::from_str(&expr).context("parse exec expression")?;
             let root = exec_root(import)?;
             let cwd = std::env::current_dir().context("resolve current directory")?;
-            let program = load::load_inline_program(&cwd, Value::Mapping(root))?;
+            let program = load::load_legacy_yaml_inline_program(&cwd, Value::Mapping(root))?;
             let lowered = lower::lower_exec_expr(&program, &expr_value, &local_types)?;
             for warning in &lowered.program.warnings {
                 eprintln!("warning: {warning}");
@@ -1167,7 +1167,7 @@ fn print_effects(
     format: StructuredFormatArg,
     flags: &load::CompilationFlags,
 ) -> Result<()> {
-    let loaded = load::load_program_with_flags(path, flags)?;
+    let loaded = load::load_legacy_yaml_program(path, flags)?;
     let lowered = lower::lower_program(&loaded)?;
     let reachable = reachable_functions(&lowered);
     let mut functions = lowered
