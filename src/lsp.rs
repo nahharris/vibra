@@ -151,23 +151,37 @@ impl Server {
     }
 
     fn diagnostic_notifications(&self, uri: String) -> Result<Value> {
-        let source = self.documents.get(&uri).context("open document missing")?;
-        let path = uri_path(&uri).unwrap_or_else(|| PathBuf::from("document.vibra"));
-        let mut diagnostics = crate::tooling::diagnostics_for_source(&path, source);
-        if !diagnostics
-            .iter()
-            .any(|item| item.severity == crate::tooling::Severity::Error)
-        {
-            diagnostics.extend(self.overlay_compile_diagnostics(&path)?);
+        let path = uri_path(&uri).context("diagnostics require a file URI")?;
+        let mut reports = BTreeMap::new();
+        let mut syntax_error = false;
+        for (open_uri, source) in &self.documents {
+            let open_path = uri_path(open_uri).unwrap_or_else(|| PathBuf::from("document.vibra"));
+            let diagnostics = crate::tooling::diagnostics_for_source(&open_path, source);
+            syntax_error |= diagnostics
+                .iter()
+                .any(|item| item.severity == crate::tooling::Severity::Error);
+            reports.insert(open_uri.clone(), diagnostics);
         }
-        let diagnostics = diagnostics.into_iter().map(|d| json!({
-            "range":{"start":{"line":d.span.start.line,"character":d.span.start.column},"end":{"line":d.span.end.line,"character":d.span.end.column}},
-            "severity":match d.severity { crate::tooling::Severity::Error=>1, crate::tooling::Severity::Warning=>2, crate::tooling::Severity::Info=>3, crate::tooling::Severity::Hint=>4 },
-            "code":d.code,"source":"vibra","message":d.message
-        })).collect::<Vec<_>>();
-        Ok(
-            json!([{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":uri,"diagnostics":diagnostics}}]),
-        )
+        if !syntax_error {
+            for mut diagnostic in self.overlay_compile_diagnostics(&path)? {
+                let target = best_diagnostic_document(&diagnostic.message, &self.documents)
+                    .unwrap_or_else(|| uri.clone());
+                if let Some(source) = self.documents.get(&target) {
+                    if let Some((line, column, length)) =
+                        locate_diagnostic(&diagnostic.message, source)
+                    {
+                        diagnostic.span.start.line = line;
+                        diagnostic.span.start.column = column;
+                        diagnostic.span.end.line = line;
+                        diagnostic.span.end.column = column + length;
+                    }
+                }
+                reports.entry(target).or_default().push(diagnostic);
+            }
+        }
+        Ok(Value::Array(reports.into_iter().map(|(uri, diagnostics)| {
+            json!({"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":uri,"diagnostics":diagnostics.into_iter().map(lsp_diagnostic).collect::<Vec<_>>()}})
+        }).collect()))
     }
 
     fn overlay_compile_diagnostics(
@@ -608,6 +622,61 @@ fn mirrored_project_entry(root: &std::path::Path) -> Option<PathBuf> {
         .first()
         .or_else(|| project.manifest.targets.libs.first())?;
     Some(project.root.join(&target.root).join(&target.entry))
+}
+fn lsp_diagnostic(diagnostic: crate::tooling::Diagnostic) -> Value {
+    json!({
+        "range":{"start":{"line":diagnostic.span.start.line,"character":diagnostic.span.start.column},"end":{"line":diagnostic.span.end.line,"character":diagnostic.span.end.column}},
+        "severity":match diagnostic.severity { crate::tooling::Severity::Error=>1, crate::tooling::Severity::Warning=>2, crate::tooling::Severity::Info=>3, crate::tooling::Severity::Hint=>4 },
+        "code":diagnostic.code,"source":"vibra","message":diagnostic.message
+    })
+}
+fn diagnostic_candidates(message: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut rest = message;
+    while let Some(start) = rest.find('`') {
+        rest = &rest[start + 1..];
+        let Some(end) = rest.find('`') else { break };
+        let value = rest[..end].trim_start_matches('$');
+        if !value.is_empty() {
+            candidates.push(value.to_string());
+        }
+        rest = &rest[end + 1..];
+    }
+    if let Some(prefix) = message.split(':').next() {
+        candidates.extend(
+            prefix
+                .split('.')
+                .rev()
+                .filter(|part| {
+                    !part.is_empty() && part.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+                })
+                .map(str::to_string),
+        );
+    }
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.len()));
+    candidates.dedup();
+    candidates
+}
+fn locate_diagnostic(message: &str, source: &str) -> Option<(usize, usize, usize)> {
+    for candidate in diagnostic_candidates(message) {
+        for needle in [format!("${candidate}"), format!("{candidate}:")] {
+            for (line, row) in source.lines().enumerate() {
+                if let Some(column) = row.find(&needle) {
+                    return Some((line, column, needle.len()));
+                }
+            }
+        }
+    }
+    None
+}
+fn best_diagnostic_document(message: &str, documents: &BTreeMap<String, String>) -> Option<String> {
+    documents
+        .iter()
+        .filter_map(|(uri, source)| {
+            locate_diagnostic(message, source).map(|(_, _, length)| (length, uri.clone()))
+        })
+        .max_by(|left, right| left.0.cmp(&right.0).then_with(|| right.1.cmp(&left.1)))
+        .map(|(_, uri)| uri)
 }
 fn read_message<R: BufRead>(input: &mut R) -> Result<Option<Value>> {
     let mut length = None;

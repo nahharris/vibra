@@ -27,6 +27,9 @@ Project dependencies may also declare statically resolved WebAssembly
 libraries behind explicit typed `$wasm` wrappers. The supported scalar and
 caller-owned-buffer ABI is specified in [the static wasm FFI design](docs/static-wasm-ffi.md).
 
+Runtime-selected local wasm plugins use separately declared typed interfaces
+and dedicated load authority; see [the runtime plugin design](docs/runtime-plugins.md).
+
 ## Structural code tools
 
 `vibra code` queries and transactionally edits project-owned Vibra files through
@@ -84,7 +87,8 @@ are not a complete specification of compiler behavior.
   [`dependency-resolution.schema.json`](schemas/dependency-resolution.schema.json),
   [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
   [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
-  [`diagnostic.schema.json`](schemas/diagnostic.schema.json), and the stable
+  [`diagnostic.schema.json`](schemas/diagnostic.schema.json),
+  [`test-report.schema.json`](schemas/test-report.schema.json), and the stable
   code registry in [`linter-codes.json`](schemas/linter-codes.json).
 - **Structural code:** [`code-form.schema.json`](schemas/code-form.schema.json),
   [`code-path.schema.json`](schemas/code-path.schema.json),
@@ -94,6 +98,8 @@ are not a complete specification of compiler behavior.
   specifies the `vibra/contextAt` (and `vibra query`) response shape, and
   [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
   `vibra docs --format yaml|json`.
+- **Agent protocol:** [`mcp-tool-result.schema.json`](schemas/mcp-tool-result.schema.json)
+  specifies the shared `vibra mcp` tool result and structured error envelope.
 - **Async conformance:** [`async-task-trace.schema.json`](schemas/async-task-trace.schema.json)
   defines deterministic structured-task traces and
   [`async-host-operation.schema.json`](schemas/async-host-operation.schema.json)
@@ -255,10 +261,24 @@ workspace. Completion is not yet expression-type-aware.
 
 Syntax, style, and compile diagnostics use all open editor overlays. Compile
 checking runs in a temporary mirror of the project (excluding `.git` and
-`target`) and never rewrites the user's workspace. The advertised capability
-shape is
-documented by
+`target`) and never rewrites the user's workspace. Each edit republishes
+diagnostics for every open document so cleared errors do not remain stale.
+When a compiler message names a source symbol, its range is anchored to that
+definition or `$reference`; otherwise the compiler's fallback point is kept.
+The advertised capability shape is documented by
 [`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
+
+### Model Context Protocol server
+
+Run `vibra mcp --workspace .` to expose project inspection, test discovery,
+check, docs, formatting, and lint tools over MCP stdio. The server is read-only
+and does not execute project tests by default. `--allow-write` narrowly enables
+formatter writes and builds inside the workspace; `--allow-test` enables
+capability-free test execution. Paths are canonicalized and confined to the
+workspace, and clients cannot submit arbitrary commands or capability flags.
+
+See [the MCP guide](docs/mcp.md) for tool mappings, schemas, agent
+configuration, security boundaries, and the stable error model.
 
 ### Executable application packages
 
@@ -429,10 +449,29 @@ reported as skipped. See [`tests/README.md`](tests/README.md) for expected
 errors, typed assertion helpers, profile contracts, and the complete flag
 reference.
 
-Files named `foo.*.vibra` are loaded as parts of the same module as
-`foo.vibra` when `foo.vibra` exists. A common convention is to place unit
-tests beside the module in `foo.test.vibra`; the suffix is only a naming
-convention and does not carry special semantics.
+Tests can replace ambient clock and random inputs with isolated fixtures.
+`random-seed` selects a reproducible non-cryptographic byte stream, while
+`clock` supplies wall and monotonic millisecond values; test sleeps advance
+both fake values without waiting. These fixtures grant only their declared
+test policy and require no `--allow-clock` or `--allow-random` flags:
+
+```yaml
+deterministic:
+  $test: core
+  random-seed: 42
+  clock: {unix-millis: 1000, monotonic-millis: 0}
+  policy:
+    $policy:
+      clock: [{requirement: mandatory, scopes: any}]
+      random: [{requirement: mandatory, scopes: any}]
+  do: [...]
+```
+
+Files named `foo.<flag>.vibra` are conditional parts of `foo.vibra` when the
+base file exists. The base file is always loaded; a part is loaded only when
+all of its suffix flags are enabled. `vibra test` enables `test`, so unit tests
+can live beside their module in `foo.test.vibra` without entering normal
+compiler runs. See [the conditional compilation contract](docs/conditional-compilation.md).
 
 ## Build & test
 

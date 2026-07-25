@@ -618,12 +618,21 @@ pub struct TestSpec {
     pub skip: Option<String>,
     pub expect_error: Option<ExpectedTestError>,
     pub workspace: Option<TestWorkspace>,
+    pub random_seed: Option<u64>,
+    pub clock: Option<TestClock>,
 }
 
 /// An isolated workspace requested by a `$test` declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestWorkspace {
     Temp,
+}
+
+/// Deterministic clock state requested by a `$test` declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TestClock {
+    pub unix_millis: u64,
+    pub monotonic_millis: u64,
 }
 
 /// The failure a `$test` is intended to exercise.
@@ -680,6 +689,8 @@ struct DefEnvelope<'a> {
     test_skip: Option<&'a Value>,
     test_expect_error: Option<&'a Value>,
     test_workspace: Option<&'a Value>,
+    test_random_seed: Option<&'a Value>,
+    test_clock: Option<&'a Value>,
 }
 
 /// Synthetic field name for the `$function` payload in module-level functions.
@@ -711,6 +722,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut test_skip: Option<&'a Value> = None;
     let mut test_expect_error: Option<&'a Value> = None;
     let mut test_workspace: Option<&'a Value> = None;
+    let mut test_random_seed: Option<&'a Value> = None;
+    let mut test_clock: Option<&'a Value> = None;
 
     for (k, val) in m {
         let ks = k.as_str().context("definition key must be a string")?;
@@ -815,6 +828,16 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 bail!("E-TEST-001: duplicate `workspace` key on definition");
             }
             test_workspace = Some(val);
+        } else if ks == "random-seed" {
+            if test_random_seed.is_some() {
+                bail!("E-TEST-001: duplicate `random-seed` key on definition");
+            }
+            test_random_seed = Some(val);
+        } else if ks == "clock" {
+            if test_clock.is_some() {
+                bail!("E-TEST-001: duplicate `clock` key on definition");
+            }
+            test_clock = Some(val);
         } else if ks == "where" || ks == "doc" {
             bail!(
                 "E-ANNO-002: annotation `{ks}` must use the `=` prefix; rename it to `={ks}` (annotations are now `=`-prefixed in v1)"
@@ -848,6 +871,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             || test_skip.is_some()
             || test_expect_error.is_some()
             || test_workspace.is_some()
+            || test_random_seed.is_some()
+            || test_clock.is_some()
         {
             bail!("E-TEST-001: test metadata is only valid on `$test`");
         }
@@ -871,6 +896,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             || test_skip.is_some()
             || test_expect_error.is_some()
             || test_workspace.is_some()
+            || test_random_seed.is_some()
+            || test_clock.is_some()
         {
             bail!("E-TEST-001: test metadata is only valid on `$test`");
         }
@@ -899,6 +926,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             test_skip,
             test_expect_error,
             test_workspace,
+            test_random_seed,
+            test_clock,
         )?;
     }
 
@@ -936,6 +965,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         test_skip,
         test_expect_error,
         test_workspace,
+        test_random_seed,
+        test_clock,
     })
 }
 
@@ -946,12 +977,16 @@ fn parse_test_metadata(
     skip_value: Option<&Value>,
     expect_error_value: Option<&Value>,
     workspace_value: Option<&Value>,
+    random_seed_value: Option<&Value>,
+    clock_value: Option<&Value>,
 ) -> Result<(
     Vec<String>,
     Option<u64>,
     Option<String>,
     Option<ExpectedTestError>,
     Option<TestWorkspace>,
+    Option<u64>,
+    Option<TestClock>,
 )> {
     if !is_kebab_case(profile) {
         bail!("E-TEST-001: `$test` profile must be a non-empty kebab-case scalar, got `{profile}`");
@@ -1010,7 +1045,59 @@ fn parse_test_metadata(
         },
         None => None,
     };
-    Ok((tags, timeout_ms, skip, expect_error, workspace))
+    let random_seed = match random_seed_value {
+        Some(value) => Some(
+            value
+                .as_u64()
+                .context("E-TEST-001: `random-seed` must be an unsigned integer")?,
+        ),
+        None => None,
+    };
+    let clock = match clock_value {
+        Some(value) => Some(parse_test_clock(value)?),
+        None => None,
+    };
+    Ok((
+        tags,
+        timeout_ms,
+        skip,
+        expect_error,
+        workspace,
+        random_seed,
+        clock,
+    ))
+}
+
+fn parse_test_clock(value: &Value) -> Result<TestClock> {
+    let map = value
+        .as_mapping()
+        .context("E-TEST-001: `clock` must be a mapping")?;
+    let mut unix_millis = None;
+    let mut monotonic_millis = None;
+    for (key, value) in map {
+        let key = key
+            .as_str()
+            .context("E-TEST-001: `clock` keys must be strings")?;
+        let slot = match key {
+            "unix-millis" => &mut unix_millis,
+            "monotonic-millis" => &mut monotonic_millis,
+            _ => bail!(
+                "E-TEST-001: unknown `clock` key `{key}`; expected `unix-millis` or `monotonic-millis`"
+            ),
+        };
+        if slot.is_some() {
+            bail!("E-TEST-001: duplicate `clock.{key}` key");
+        }
+        *slot =
+            Some(value.as_u64().with_context(|| {
+                format!("E-TEST-001: `clock.{key}` must be an unsigned integer")
+            })?);
+    }
+    Ok(TestClock {
+        unix_millis: unix_millis.context("E-TEST-001: `clock.unix-millis` is required")?,
+        monotonic_millis: monotonic_millis
+            .context("E-TEST-001: `clock.monotonic-millis` is required")?,
+    })
 }
 
 fn parse_expected_test_error(value: &Value) -> Result<ExpectedTestError> {
@@ -3032,14 +3119,17 @@ pub fn discover_test_specs_in_entry(
             .form_value
             .as_str()
             .expect("$test envelope validated profile scalar");
-        let (tags, timeout_ms, skip, expect_error, workspace) = parse_test_metadata(
-            profile,
-            env.test_tags,
-            env.test_timeout_ms,
-            env.test_skip,
-            env.test_expect_error,
-            env.test_workspace,
-        )?;
+        let (tags, timeout_ms, skip, expect_error, workspace, random_seed, clock) =
+            parse_test_metadata(
+                profile,
+                env.test_tags,
+                env.test_timeout_ms,
+                env.test_skip,
+                env.test_expect_error,
+                env.test_workspace,
+                env.test_random_seed,
+                env.test_clock,
+            )?;
         specs.push(TestSpec {
             name: name.to_string(),
             profile: profile.to_string(),
@@ -3048,6 +3138,8 @@ pub fn discover_test_specs_in_entry(
             skip,
             expect_error,
             workspace,
+            random_seed,
+            clock,
         });
     }
     if specs.is_empty() {

@@ -307,7 +307,9 @@ fn compiler_loading_retains_physical_module_part_origins() {
     std::fs::write(&base, "value: 1\n").unwrap();
     std::fs::write(&part, "other: 2\n").unwrap();
 
-    let loaded = vibra::load::load_program(&base).unwrap();
+    let loaded =
+        vibra::load::load_program_with_flags(&base, &vibra::load::CompilationFlags::new(["test"]))
+            .unwrap();
     let canonical_base = std::fs::canonicalize(&base).unwrap();
     let canonical_part = std::fs::canonicalize(&part).unwrap();
 
@@ -319,6 +321,53 @@ fn compiler_loading_retains_physical_module_part_origins() {
     );
     assert!(loaded.sources.document(&canonical_base).is_ok());
     assert!(loaded.sources.document(&canonical_part).is_ok());
+}
+
+#[test]
+fn compiler_loading_filters_conditional_module_parts() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("math.vibra");
+    let test_part = dir.path().join("math.test.vibra");
+    let debug_part = dir.path().join("math.unix.debug.vibra.yaml");
+    std::fs::write(&base, "base: 1\n").unwrap();
+    std::fs::write(&test_part, "test-only: 2\n").unwrap();
+    std::fs::write(&debug_part, "debug-only: 3\n").unwrap();
+
+    let default = vibra::load::load_program(&base).unwrap();
+    let canonical_base = std::fs::canonicalize(&base).unwrap();
+    assert_eq!(
+        default.module_parts.get(&canonical_base),
+        Some(&vec![canonical_base.clone()])
+    );
+
+    let test =
+        vibra::load::load_program_with_flags(&base, &vibra::load::CompilationFlags::new(["test"]))
+            .unwrap();
+    assert_eq!(test.module_parts[&canonical_base].len(), 2);
+
+    let unix_only =
+        vibra::load::load_program_with_flags(&base, &vibra::load::CompilationFlags::new(["unix"]))
+            .unwrap();
+    assert_eq!(unix_only.module_parts[&canonical_base].len(), 1);
+
+    let unix_debug = vibra::load::load_program_with_flags(
+        &base,
+        &vibra::load::CompilationFlags::new(["unix", "debug"]),
+    )
+    .unwrap();
+    assert_eq!(unix_debug.module_parts[&canonical_base].len(), 2);
+
+    let yaml_base = dir.path().join("config.vibra.yaml");
+    let yaml_part = dir.path().join("config.test.vibra.yaml");
+    std::fs::write(&yaml_base, "base: 1\n").unwrap();
+    std::fs::write(&yaml_part, "test-only: 2\n").unwrap();
+    let from_part = vibra::load::load_program_with_flags(
+        &yaml_part,
+        &vibra::load::CompilationFlags::new(["test"]),
+    )
+    .unwrap();
+    assert_eq!(from_part.entry, std::fs::canonicalize(yaml_base).unwrap());
+    assert_eq!(from_part.module_parts[&from_part.entry].len(), 2);
 }
 
 #[test]

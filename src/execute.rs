@@ -4099,8 +4099,15 @@ fn exec_vibra_v1(
             let len = checked_alloc_len(len, config)
                 .map_err(|(tag, msg)| anyhow::anyhow!("random_bytes {tag}: {msg}"))?;
             let mut buf = vec![0u8; len];
-            getrandom::getrandom(&mut buf)
-                .map_err(|err| anyhow::anyhow!("random_bytes unavailable: {err}"))?;
+            if let Some(random) = &config.injected_random {
+                random
+                    .lock()
+                    .expect("injected random source poisoned")
+                    .fill_bytes(&mut buf);
+            } else {
+                getrandom::getrandom(&mut buf)
+                    .map_err(|err| anyhow::anyhow!("random_bytes unavailable: {err}"))?;
+            }
             Ok(RuntimeValue::Array(
                 buf.into_iter()
                     .map(|byte| RuntimeValue::Int(i64::from(byte)))

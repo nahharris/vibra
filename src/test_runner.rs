@@ -56,6 +56,45 @@ struct TestPlanItem {
     skip_reason: Option<String>,
     expect_error: Option<lower::ExpectedTestError>,
     workspace: Option<lower::TestWorkspace>,
+    random_seed: Option<u64>,
+    clock: Option<lower::TestClock>,
+}
+
+/// Stable discovery metadata used by non-executing tooling such as MCP.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredTest {
+    pub path: String,
+    pub name: String,
+    pub profile: String,
+    pub tags: Vec<String>,
+    pub timeout_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
+    pub requires_workspace: bool,
+}
+
+/// Discover tests without executing project code or granting capabilities.
+pub fn list_tests(
+    path: &Path,
+    filter: Option<&str>,
+    profiles: &[String],
+    tags: &[String],
+) -> Result<Vec<DiscoveredTest>> {
+    discover_tests(path, filter, profiles, tags, Duration::from_secs(30)).map(|items| {
+        items
+            .into_iter()
+            .map(|item| DiscoveredTest {
+                path: item.display_path,
+                name: item.name,
+                profile: item.profile,
+                tags: item.tags,
+                timeout_ms: item.timeout.as_millis().min(u128::from(u64::MAX)) as u64,
+                skip_reason: item.skip_reason,
+                requires_workspace: item.workspace.is_some(),
+            })
+            .collect()
+    })
 }
 
 /// A machine-readable result emitted by the isolated test worker. The parent
@@ -102,6 +141,16 @@ pub struct TestResult {
     tags: Vec<String>,
     skip_reason: Option<String>,
     warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    random_seed: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clock: Option<TestClockReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TestClockReport {
+    unix_millis: u64,
+    monotonic_millis: u64,
 }
 
 pub fn run_tests(options: TestOptions) -> Result<bool> {
@@ -211,7 +260,8 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
 }
 
 pub fn run_single_test(path: &Path, name: &str, config: &runtime::RunConfig) -> ChildTestOutcome {
-    let program = match load::load_program(path) {
+    let program = match load::load_program_with_flags(path, &load::CompilationFlags::new(["test"]))
+    {
         Ok(program) => program,
         Err(error) => return failed_outcome(ChildFailurePhase::Load, error, Vec::new()),
     };
@@ -335,6 +385,8 @@ fn discover_tests(
                 skip_reason: spec.skip,
                 expect_error: spec.expect_error,
                 workspace: spec.workspace,
+                random_seed: spec.random_seed,
+                clock: spec.clock,
             });
         }
     }
@@ -363,6 +415,8 @@ fn skipped_result(item: &TestPlanItem, reason: &str) -> TestResult {
         tags: item.tags.clone(),
         skip_reason: Some(reason.to_string()),
         warnings: Vec::new(),
+        random_seed: item.random_seed,
+        clock: item.clock.map(clock_report),
     }
 }
 
@@ -422,13 +476,25 @@ fn run_one_child(
         .is_some()
         .then(tempfile::tempdir)
         .transpose()?;
-    let child_config = match (temp_workspace.as_ref(), allow_test_workspace) {
+    let mut child_config = match (temp_workspace.as_ref(), allow_test_workspace) {
         (Some(workspace), Some(access)) => {
             isolated_workspace_config(config, workspace.path(), access)
         }
         (Some(_), None) => bail!("workspace test was scheduled without workspace access"),
         (None, _) => config.clone(),
     };
+    if let Some(seed) = item.random_seed {
+        child_config.allow_random = true;
+        child_config.injected_random =
+            Some(Arc::new(Mutex::new(runtime::InjectedRandom::new(seed))));
+    }
+    if let Some(clock) = item.clock {
+        child_config.allow_clock = true;
+        child_config.injected_clock = Some(Arc::new(Mutex::new(runtime::InjectedClock {
+            unix_millis: clock.unix_millis,
+            monotonic_millis: clock.monotonic_millis,
+        })));
+    }
     if let Some(workspace) = &temp_workspace {
         cmd.current_dir(workspace.path());
     }
@@ -498,6 +564,8 @@ fn run_one_child(
                 tags: item.tags.clone(),
                 skip_reason: None,
                 warnings,
+                random_seed: item.random_seed,
+                clock: item.clock.map(clock_report),
             });
         }
         if started.elapsed() >= timeout {
@@ -519,9 +587,18 @@ fn run_one_child(
                 tags: item.tags.clone(),
                 skip_reason: None,
                 warnings: Vec::new(),
+                random_seed: item.random_seed,
+                clock: item.clock.map(clock_report),
             });
         }
         thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn clock_report(clock: lower::TestClock) -> TestClockReport {
+    TestClockReport {
+        unix_millis: clock.unix_millis,
+        monotonic_millis: clock.monotonic_millis,
     }
 }
 
@@ -679,6 +756,18 @@ fn append_run_config_args(cmd: &mut Command, config: &runtime::RunConfig) {
     }
     if config.allow_system_info {
         cmd.arg("--allow-sys-info");
+    }
+    if let Some(random) = &config.injected_random {
+        let random = random.lock().expect("injected random source poisoned");
+        cmd.arg("--injected-random-state")
+            .arg(random.state_for_worker().to_string());
+    }
+    if let Some(clock) = &config.injected_clock {
+        let clock = clock.lock().expect("injected clock poisoned");
+        cmd.arg("--injected-clock-unix-millis")
+            .arg(clock.unix_millis.to_string())
+            .arg("--injected-clock-monotonic-millis")
+            .arg(clock.monotonic_millis.to_string());
     }
     cmd.arg("--max-open-files")
         .arg(config.max_open_files.to_string());
