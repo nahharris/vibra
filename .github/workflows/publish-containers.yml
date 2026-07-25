@@ -90,11 +90,13 @@ jobs:
           done
       - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
         with:
+          version: v0.72.0
           image-ref: ${{ env.RUNTIME_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
           severity: HIGH,CRITICAL
           exit-code: '1'
       - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
         with:
+          version: v0.72.0
           image-ref: ${{ env.DEV_IMAGE }}:staging-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suffix }}
           severity: HIGH,CRITICAL
           exit-code: '1'
