@@ -24,8 +24,9 @@ vibra plugin . --interface arithmetic --path ./plugins/math.wasm \
 `--allow-read` is intentionally irrelevant: executing bytes requires
 `--allow-plugin-load` for the canonical file or an ancestor directory. The
 loader reads the bytes once, hashes them with SHA-256, validates every declared
-function and exact scalar signature, and instantiates the module. The YAML
-report is deterministic in declared function-name order.
+function and exact scalar signature, and instantiates the module. The compact
+JSON report is deterministic in declared function-name order and ends with one
+LF.
 
 The loaded module must have no imports. Consequently loading cannot mint
 filesystem, network, process, environment, clock, random, static FFI, or Vibra

@@ -1,9 +1,9 @@
 # `.vapp` executable format
 
-A `.vapp` is a deterministic, stored (uncompressed) ZIP archive. Version 1 has
+A `.vapp` is a deterministic, stored (uncompressed) ZIP archive. Version 2 has
 these entries:
 
-- `package.vibra`: canonical YAML metadata and the SHA-256 inventory.
+- `package.json`: canonical compact JSON metadata and the SHA-256 inventory.
 - `program.wasm`: the application module for runtime ABI `vibra-v1`.
 - `source/`: the complete project, lockfile, and package-local `dep/` graph.
 
@@ -14,10 +14,16 @@ different deterministic archive identities. Verification recompiles sources
 with the recorded flags; runtime callers cannot override them.
 
 Archive paths use `/`, are relative, and may contain only normal path
-components. Entries are lexically ordered after `package.vibra`, use the ZIP
+components. Entries are lexically ordered after `package.json`, use the ZIP
 epoch timestamp, mode `0644`, and stored compression. Every entry except the
 metadata itself must appear exactly once in the metadata inventory; extra and
 duplicate entries are invalid.
+
+Canonical metadata is UTF-8 compact JSON with a single trailing LF. Object
+members use the schema/serializer order, and the `files` inventory is sorted
+lexically. Verifiers reject non-canonical JSON even when it decodes to the same
+values. Format 1 archives containing YAML `package.vibra` metadata are rejected
+and must be rebuilt.
 
 The runtime verifies the complete inventory before extracting sources. It then
 loads the declared entry, emits its Wasm again, checks that it matches

@@ -11,8 +11,10 @@ use std::path::{Component, Path};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-const METADATA: &str = "package.vibra";
+const METADATA: &str = "package.json";
+const LEGACY_METADATA: &str = "package.vibra";
 const WASM: &str = "program.wasm";
+const FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -88,7 +90,7 @@ pub fn build_with_flags(
     selected_sources.sort();
     selected_sources.dedup();
     let metadata = PackageMetadata {
-        format_version: 1,
+        format_version: FORMAT_VERSION,
         name: loaded.manifest.package.name,
         version: loaded.manifest.package.version,
         target: target.name.clone(),
@@ -101,7 +103,7 @@ pub fn build_with_flags(
         selected_sources,
         files,
     };
-    let metadata_bytes = serde_yaml::to_string(&metadata)?.into_bytes();
+    let metadata_bytes = canonical_json(&metadata)?;
     let file =
         File::create(output).with_context(|| format!("E-PKG-004: create {}", output.display()))?;
     let mut zip = ZipWriter::new(file);
@@ -121,7 +123,7 @@ pub fn build_with_flags(
 
 pub fn inspect(path: &Path) -> Result<String> {
     let (_, metadata) = open_verified(path)?;
-    serde_yaml::to_string(&metadata).context("serialize package metadata")
+    String::from_utf8(canonical_json(&metadata)?).context("serialize package metadata")
 }
 
 pub fn verify(path: &Path) -> Result<()> {
@@ -174,10 +176,18 @@ fn package_source_name(root: &Path, path: &Path) -> String {
 fn open_verified(path: &Path) -> Result<(ZipArchive<File>, PackageMetadata)> {
     let file = File::open(path).with_context(|| format!("E-PKG-005: open {}", path.display()))?;
     let mut archive = ZipArchive::new(file).context("E-PKG-005: invalid .vapp ZIP")?;
+    if archive.by_name(LEGACY_METADATA).is_ok() {
+        bail!(
+            "E-PKG-007: package format 1 metadata `{LEGACY_METADATA}` is no longer supported; rebuild the .vapp"
+        );
+    }
     let metadata_bytes = read_entry(&mut archive, METADATA)?;
-    let metadata: PackageMetadata =
-        serde_yaml::from_slice(&metadata_bytes).context("E-PKG-006: invalid package metadata")?;
-    if metadata.format_version != 1 || metadata.runtime_abi != "vibra-v1" {
+    let metadata: PackageMetadata = serde_json::from_slice(&metadata_bytes)
+        .context("E-PKG-006: invalid package JSON metadata")?;
+    if canonical_json(&metadata)? != metadata_bytes {
+        bail!("E-PKG-006: package metadata is not canonical JSON");
+    }
+    if metadata.format_version != FORMAT_VERSION || metadata.runtime_abi != "vibra-v1" {
         bail!("E-PKG-007: incompatible package format or runtime ABI");
     }
     let mut actual = BTreeMap::<String, usize>::new();
@@ -272,4 +282,37 @@ fn slash(path: &Path) -> String {
 }
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec(value).context("serialize canonical package JSON")?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_yaml_metadata_is_rejected_as_format_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("legacy.vapp");
+        let file = File::create(&path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        zip.start_file(LEGACY_METADATA, SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"format-version: 1\n").unwrap();
+        zip.finish().unwrap();
+
+        let error = verify(&path).unwrap_err().to_string();
+        assert!(error.contains("E-PKG-007"), "{error}");
+        assert!(error.contains("rebuild"), "{error}");
+    }
+
+    #[test]
+    fn canonical_json_is_compact_and_lf_terminated() {
+        let value = BTreeMap::from([("a", 1), ("b", 2)]);
+        assert_eq!(canonical_json(&value).unwrap(), b"{\"a\":1,\"b\":2}\n");
+    }
 }

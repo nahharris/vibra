@@ -1110,11 +1110,11 @@ fn locate_stdlib_package() -> Result<PathBuf> {
             for ancestor in parent.ancestors() {
                 let candidate = ancestor.join("stdlib");
                 if candidate.join("src/io.vibra").exists() {
-                    let release = ancestor.join("release.vibra");
+                    let release = ancestor.join("release.json");
                     if release.exists() {
                         validate_distributed_stdlib(&candidate, &release)?;
                     } else if candidate != Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib") {
-                        bail!("E-DIST-002: installed toolchain is missing `release.vibra` beside its bundled stdlib");
+                        bail!("E-DIST-002: installed toolchain is missing `release.json` beside its bundled stdlib");
                     }
                     return Ok(candidate);
                 }
@@ -1132,7 +1132,7 @@ fn locate_stdlib_package() -> Result<PathBuf> {
 fn validate_distributed_stdlib(stdlib: &Path, release: &Path) -> Result<()> {
     let text = fs::read_to_string(release)
         .with_context(|| format!("E-DIST-002: read release metadata `{}`", release.display()))?;
-    let metadata: ReleaseMetadata = serde_yaml::from_str(&text)
+    let metadata: ReleaseMetadata = serde_json::from_str(&text)
         .with_context(|| format!("E-DIST-002: parse release metadata `{}`", release.display()))?;
     if metadata.format_version != 1
         || metadata.stdlib_git != STDLIB_GIT
@@ -1379,8 +1379,8 @@ mod tests {
         fs::create_dir(&stdlib).unwrap();
         fs::write(stdlib.join("io.vibra"), "io: true\n").unwrap();
         let digest = hash_release_stdlib(&stdlib).unwrap();
-        let release = temp.path().join("release.vibra");
-        fs::write(&release, format!("format-version: 1\nstdlib-git: {STDLIB_GIT}\nstdlib-rev: {STDLIB_REV}\nstdlib-sha256: {digest}\n")).unwrap();
+        let release = temp.path().join("release.json");
+        fs::write(&release, format!("{{\"format-version\":1,\"stdlib-git\":\"{STDLIB_GIT}\",\"stdlib-rev\":\"{STDLIB_REV}\",\"stdlib-sha256\":\"{digest}\"}}\n")).unwrap();
         validate_distributed_stdlib(&stdlib, &release).unwrap();
 
         fs::write(stdlib.join("io.vibra"), "tampered: true\n").unwrap();
@@ -1388,7 +1388,7 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("E-DIST-004"));
-        fs::write(&release, format!("format-version: 1\nstdlib-git: {STDLIB_GIT}\nstdlib-rev: 0000000000000000000000000000000000000000\nstdlib-sha256: {digest}\n")).unwrap();
+        fs::write(&release, format!("{{\"format-version\":1,\"stdlib-git\":\"{STDLIB_GIT}\",\"stdlib-rev\":\"0000000000000000000000000000000000000000\",\"stdlib-sha256\":\"{digest}\"}}\n")).unwrap();
         assert!(validate_distributed_stdlib(&stdlib, &release)
             .unwrap_err()
             .to_string()

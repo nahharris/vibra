@@ -82,8 +82,8 @@ function Assert-ReleaseContract {
     }
 
     $containerName = "vibra-release-contract-$([guid]::NewGuid().ToString('N'))"
-    $metadataPath = if ($Platform -eq 'linux') { '/opt/vibra/release.vibra' } else { 'C:\Vibra\release.vibra' }
-    $metadataCopy = Join-Path $TempRoot 'release.vibra'
+    $metadataPath = if ($Platform -eq 'linux') { '/opt/vibra/release.json' } else { 'C:\Vibra\release.json' }
+    $metadataCopy = Join-Path $TempRoot 'release.json'
     try {
         & docker create --name $containerName $Image --version *> $null
         if ($LASTEXITCODE -ne 0) { throw "Could not create metadata probe container from $Image." }
@@ -94,17 +94,18 @@ function Assert-ReleaseContract {
     }
 
     $metadata = Get-Content -Raw -LiteralPath $metadataCopy
-    foreach ($field in @('format-version: 1', 'version:', 'revision:', 'stdlib-rev:', 'stdlib-sha256:')) {
-        if ($metadata -notmatch "(?m)^$([regex]::Escape($field))") {
+    $release = $metadata | ConvertFrom-Json
+    foreach ($field in @('format-version', 'version', 'revision', 'stdlib-rev', 'stdlib-sha256')) {
+        if ($null -eq $release.PSObject.Properties[$field]) {
             throw "Image release metadata is missing $field"
         }
     }
 
     if ($ExpectedVersion) {
-        if ($metadata -notmatch "(?m)^version: $([regex]::Escape($ExpectedVersion))$") {
+        if ($release.version -ne $ExpectedVersion) {
             throw "Embedded version does not match $ExpectedVersion."
         }
-        if ($metadata -notmatch "(?m)^revision: $ExpectedRevision$") {
+        if ($release.revision -ne $ExpectedRevision) {
             throw "Embedded revision does not match $ExpectedRevision."
         }
 

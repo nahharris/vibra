@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/release-metadata.schema.json",
-  "title": "Vibra native toolchain release metadata",
+  "title": "Vibra native toolchain release JSON metadata",
+  "description": "Deterministic UTF-8 JSON stored as release.json in native toolchain and container distributions.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format-version", "version", "revision", "platform", "target-triple", "stdlib-git", "stdlib-rev", "stdlib-sha256"],

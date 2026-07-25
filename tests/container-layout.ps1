@@ -31,7 +31,7 @@ Require-Content $toolchain 'channel\s*=\s*"1\.94\.1"' 'Rust toolchain channel pi
 Require-Content $toolchain 'profile\s*=\s*"minimal"' 'Rust toolchain minimal profile'
 
 Require-Content $linuxDockerfile 'COPY.*stdlib.*\/opt\/vibra\/stdlib' 'Linux stdlib runtime copy'
-Require-Content $linuxDockerfile 'release\.vibra.*\/opt\/vibra\/release\.vibra' 'Linux release metadata copy'
+Require-Content $linuxDockerfile 'release\.json.*\/opt\/vibra\/release\.json' 'Linux release metadata copy'
 Require-Content $linuxDockerfile '\/opt\/vibra\/bin' 'Linux binary layout'
 Require-Content $linuxDockerfile 'ARG RUST_BUILDER_IMAGE=rust:1\.94\.1-slim-bookworm@sha256:cf9dd0ec73e75f827fe59123fff9dc65af1a1c8363c3c31ee8d7f8ad0b6a5fb2' 'Pinned Linux Rust builder build argument default'
 Require-Content $linuxDockerfile 'FROM \$\{RUST_BUILDER_IMAGE\} AS builder' 'Linux Rust builder build argument use'
@@ -51,8 +51,8 @@ Require-Content $linuxDockerfile 'CMD.*--help' 'Linux help default'
 Require-Content $linuxDockerfile 'ARG VIBRA_VERSION' 'Linux embedded release version argument'
 Require-Content $linuxDockerfile 'ARG VIBRA_REVISION' 'Linux embedded source revision argument'
 Require-Content $linuxDockerfile 'ENV SOURCE_DATE_EPOCH=' 'Linux reproducible build epoch'
-Require-Content $linuxDockerfile 'version: %s.*VIBRA_VERSION' 'Linux release metadata version'
-Require-Content $linuxDockerfile 'revision: %s.*VIBRA_REVISION' 'Linux release metadata revision'
+Require-Content $linuxDockerfile '"version":"%s".*VIBRA_VERSION' 'Linux release metadata version'
+Require-Content $linuxDockerfile '"revision":"%s".*VIBRA_REVISION' 'Linux release metadata revision'
 
 $linuxContents = Get-Content -Raw $linuxDockerfile
 $dependencyBuild = $linuxContents.IndexOf('cargo build --release --locked')
@@ -62,7 +62,7 @@ if ($dependencyBuild -lt 0 -or $sourceCopy -lt 0 -or $dependencyBuild -gt $sourc
 }
 
 Require-Content $windowsDockerfile 'COPY.*stdlib.*C:\\Vibra\\stdlib' 'Windows stdlib runtime copy'
-Require-Content $windowsDockerfile 'release\.vibra.*C:\\Vibra\\release\.vibra' 'Windows release metadata copy'
+Require-Content $windowsDockerfile 'release\.json.*C:\\Vibra\\release\.json' 'Windows release metadata copy'
 Require-Content $windowsDockerfile 'C:\\Vibra\\bin' 'Windows binary layout'
 Require-Content $windowsDockerfile 'ARG WINDOWS_BUILDER_IMAGE=mcr\.microsoft\.com/windows/servercore:ltsc2022-amd64@sha256:c747aa0e4668af32773f6f81220fb95d49e2e55237d07fbc18a8138d1b0e4de7' 'Pinned Windows builder build argument default'
 Require-Content $windowsDockerfile 'FROM \$\{WINDOWS_BUILDER_IMAGE\} AS builder' 'Windows builder build argument use'
@@ -87,8 +87,8 @@ Require-Content $windowsDockerfile 'CMD.*--help' 'Windows help default'
 Require-Content $windowsDockerfile 'ARG VIBRA_VERSION' 'Windows embedded release version argument'
 Require-Content $windowsDockerfile 'ARG VIBRA_REVISION' 'Windows embedded source revision argument'
 Require-Content $windowsDockerfile 'ENV SOURCE_DATE_EPOCH=' 'Windows reproducible build epoch'
-Require-Content $windowsDockerfile 'version: \$env:VIBRA_VERSION' 'Windows release metadata version'
-Require-Content $windowsDockerfile 'revision: \$env:VIBRA_REVISION' 'Windows release metadata revision'
+Require-Content $windowsDockerfile 'version=\$env:VIBRA_VERSION' 'Windows release metadata version'
+Require-Content $windowsDockerfile 'revision=\$env:VIBRA_REVISION' 'Windows release metadata revision'
 
 Require-Content $dockerIgnore '^target$' 'Docker target exclusion'
 Require-Content $dockerIgnore '^\.git$' 'Docker Git exclusion'

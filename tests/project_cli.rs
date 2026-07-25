@@ -292,6 +292,19 @@ fn project_builds_verifies_inspects_and_runs_deterministic_vapp() {
         std::fs::read(&first).unwrap(),
         std::fs::read(&second).unwrap()
     );
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&first).unwrap()).unwrap();
+    assert!(archive.by_name("package.vibra").is_err());
+    let mut package_json = String::new();
+    std::io::Read::read_to_string(
+        &mut archive.by_name("package.json").unwrap(),
+        &mut package_json,
+    )
+    .unwrap();
+    assert!(package_json.ends_with('\n'));
+    assert!(!package_json.contains('\r'));
+    let decoded: serde_json::Value = serde_json::from_str(&package_json).unwrap();
+    assert_eq!(decoded["format-version"], 2);
+    assert!(package_json.starts_with("{\"format-version\":2,"));
 
     let verify = vibra_cmd()
         .args(["package", "verify", &path_str(&first)])
@@ -312,7 +325,7 @@ fn project_builds_verifies_inspects_and_runs_deterministic_vapp() {
         String::from_utf8_lossy(&inspect.stderr)
     );
     let metadata: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
-    assert_eq!(metadata["format-version"], 1);
+    assert_eq!(metadata["format-version"], 2);
     assert_eq!(metadata["runtime-abi"], "vibra-v1");
     assert_eq!(
         metadata["stdlib-rev"],
@@ -1162,7 +1175,8 @@ fn runtime_plugin_load_is_capability_gated_typed_and_deterministic() {
     let report: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
     assert_eq!(report["interface"], "arithmetic");
     assert_eq!(report["instantiated"], true);
-    assert!(report["sha256"].is_string());
+    assert_eq!(report["report-version"], 1);
+    assert_eq!(report["sha256"].as_str().unwrap().len(), 64);
 
     let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
     std::fs::write(
