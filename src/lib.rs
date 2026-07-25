@@ -3,6 +3,7 @@
 pub mod annotations;
 pub mod ast;
 pub mod async_runtime;
+pub(crate) mod body_semantics;
 pub mod code;
 pub mod diagnostics;
 pub mod docs;

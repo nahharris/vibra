@@ -2781,7 +2781,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
             None,
         )?);
     }
-    validate_affine_task_handles(&statements)
+    crate::body_semantics::validate_task_handles(&statements)
         .context("E-TASK-003: invalid task-handle lifetime in `main`")?;
 
     // Phase 5c: every `=where` bound element must resolve to an interface
@@ -2946,7 +2946,7 @@ fn lower_single_test_body(
             None,
         )?);
     }
-    validate_affine_task_handles(&statements)
+    crate::body_semantics::validate_task_handles(&statements)
         .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in test `{name}`"))?;
     validate_all_where_bounds(&ctx.type_aliases, &ctx.sigs, &ctx.enums)?;
     validate_all_instantiation_bounds(
@@ -3376,9 +3376,9 @@ fn lower_pending_user_functions(
                 Some(&fn_ctx),
             )?);
         }
-        validate_user_function_body(&statements, &sig.return_type)
+        crate::body_semantics::validate_function_body(&statements, &sig.return_type)
             .with_context(|| format!("user function `{key}`"))?;
-        validate_affine_task_handles(&statements)
+        crate::body_semantics::validate_task_handles(&statements)
             .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in `{key}`"))?;
         let fs = sigs
             .get_mut(&key)
@@ -3386,123 +3386,6 @@ fn lower_pending_user_functions(
         fs.body = FunctionBody::User { statements };
     }
     Ok(())
-}
-
-fn validate_user_function_body(stmts: &[Statement], return_type: &TypeRef) -> Result<()> {
-    if *return_type == TypeRef::Void {
-        return Ok(());
-    }
-    if !user_body_terminates(stmts) {
-        bail!(
-            "non-void function must end with `$return`, or with `$match` whose every arm ends with `$return`"
-        );
-    }
-    Ok(())
-}
-
-fn validate_affine_task_handles(stmts: &[Statement]) -> Result<()> {
-    fn walk(
-        stmts: &[Statement],
-        mut live: std::collections::BTreeSet<String>,
-    ) -> Result<std::collections::BTreeSet<String>> {
-        for stmt in stmts {
-            match stmt {
-                Statement::Spawn { handle, .. } => {
-                    if !live.insert(handle.clone()) {
-                        bail!("task handle `{handle}` is spawned more than once");
-                    }
-                }
-                Statement::Join { handle, .. } => {
-                    if !live.remove(handle) {
-                        bail!("task handle `{handle}` is joined more than once or outside its lifetime");
-                    }
-                }
-                Statement::If {
-                    then_body,
-                    else_body,
-                    ..
-                } => {
-                    let then_live = walk(then_body, live.clone())?;
-                    let else_live = walk(else_body, live.clone())?;
-                    if then_live != else_live {
-                        bail!("both `$if` branches must consume the same task handles");
-                    }
-                    live = then_live;
-                }
-                Statement::Match { arms, .. } => {
-                    let mut merged = None;
-                    for arm in arms {
-                        let arm_live = walk(&arm.body, live.clone())?;
-                        if merged.as_ref().is_some_and(|prior| prior != &arm_live) {
-                            bail!("every `$match` arm must consume the same task handles");
-                        }
-                        merged = Some(arm_live);
-                    }
-                    if let Some(arm_live) = merged {
-                        live = arm_live;
-                    }
-                }
-                Statement::While { body, .. } | Statement::For { body, .. } => {
-                    let after = walk(body, live.clone())?;
-                    if after != live {
-                        bail!("loops cannot create or consume task handles across iterations");
-                    }
-                }
-                Statement::Task { body, .. } => {
-                    let nested = walk(body, std::collections::BTreeSet::new())?;
-                    if !nested.is_empty() {
-                        bail!(
-                            "nested task left unjoined handles: {}",
-                            nested.into_iter().collect::<Vec<_>>().join(", ")
-                        );
-                    }
-                }
-                Statement::Call(_)
-                | Statement::Let { .. }
-                | Statement::Set { .. }
-                | Statement::Return(_)
-                | Statement::Eval(_)
-                | Statement::Break
-                | Statement::Continue => {}
-            }
-        }
-        Ok(live)
-    }
-
-    let live = walk(stmts, std::collections::BTreeSet::new())?;
-    if !live.is_empty() {
-        bail!(
-            "task handles must be joined before leaving their scope: {}",
-            live.into_iter().collect::<Vec<_>>().join(", ")
-        );
-    }
-    Ok(())
-}
-
-fn user_body_terminates(stmts: &[Statement]) -> bool {
-    if stmts.is_empty() {
-        return false;
-    }
-    match stmts.last().expect("non-empty") {
-        Statement::Return(_) => true,
-        Statement::Match { arms, .. } => arms.iter().all(|a| user_body_terminates(&a.body)),
-        Statement::If {
-            then_body,
-            else_body,
-            ..
-        } => user_body_terminates(then_body) && user_body_terminates(else_body),
-        Statement::Eval(_)
-        | Statement::Call(_)
-        | Statement::Let { .. }
-        | Statement::Set { .. }
-        | Statement::While { .. }
-        | Statement::For { .. }
-        | Statement::Task { .. }
-        | Statement::Spawn { .. }
-        | Statement::Join { .. }
-        | Statement::Break
-        | Statement::Continue => false,
-    }
 }
 
 fn task_body_has_escaping_control(statement: &Statement) -> bool {
@@ -8212,7 +8095,7 @@ fn iface_impl_primary_field_name(expected_fn_type: &TypeRef) -> Result<String> {
         .context("interface method must declare at least one argument")
 }
 
-fn infer_expr_type(
+pub(crate) fn infer_expr_type(
     expr: &Expr,
     constants: &HashMap<String, RuntimeValue>,
     locals: &HashMap<String, TypeRef>,
