@@ -198,3 +198,25 @@ reproducible:
 These fixtures do not weaken ordinary execution: without the metadata,
 clock/random operations still require explicit host approval and use their
 production sources. The seeded generator is for tests, not cryptography.
+
+## Table/property helpers and benchmarks
+
+Embedders can use `vibra::test_support::check_table` for named table cases and
+`check_int_property` for deterministic generated integer cases. Property
+generation always requires an explicit seed and reports the seed, case index,
+original value, and a counterexample deterministically shrunk toward zero.
+This makes failures replayable without random or clock authority.
+
+Any selected `$test` declaration can also be measured as a benchmark:
+
+```sh
+vibra test --filter parse-table --benchmark \
+  --benchmark-warmup 2 --benchmark-iterations 20 --format json
+```
+
+Benchmark mode uses the same discovery, profiles, tags, capability policy,
+fixtures, timeout, and isolated worker as normal tests. Warm-ups are unmeasured;
+the stable report contract records sorted nanosecond samples plus minimum,
+median, maximum, and integer mean. `--benchmark-iterations 0` fails with
+`E-BENCH-001`. Without `--benchmark`, each test still runs exactly once and
+normal pass/fail semantics are unchanged.

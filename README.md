@@ -528,3 +528,9 @@ cargo test
 ## License
 
 MIT OR Apache-2.0 (see `Cargo.toml`).
+Test declarations can be measured explicitly with `vibra test --benchmark`;
+warm-up and iteration counts are controlled by `--benchmark-warmup` and
+`--benchmark-iterations`. JSON/YAML reports distinguish `test` and `benchmark`
+mode and expose the stable sample/statistics contract documented in
+[`tests/README.md`](tests/README.md). Normal `vibra test` execution remains a
+single pass with unchanged semantics.

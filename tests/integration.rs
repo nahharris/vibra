@@ -7029,6 +7029,11 @@ fn deterministic_test_fixtures_are_recorded_in_machine_readable_reports() {
         schema["$defs"]["testResult"]["properties"]["clock"]["additionalProperties"],
         false
     );
+    assert_eq!(schema["properties"]["mode"]["enum"][1], "benchmark");
+    assert_eq!(
+        schema["$defs"]["testResult"]["properties"]["benchmark"]["additionalProperties"],
+        false
+    );
 
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/stdlib-test.vibra");
     let output = vibra_cmd()
@@ -7050,9 +7055,67 @@ fn deterministic_test_fixtures_are_recorded_in_machine_readable_reports() {
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["passed"], 1);
+    assert_eq!(report["mode"], "test");
     assert_eq!(report["tests"][0]["random_seed"], 42);
     assert_eq!(report["tests"][0]["clock"]["unix_millis"], 1000);
     assert_eq!(report["tests"][0]["clock"]["monotonic_millis"], 40);
+}
+
+#[test]
+fn benchmark_mode_emits_stable_machine_readable_statistics() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/stdlib-test.vibra");
+    let output = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&source),
+            "--filter",
+            "typed-equality-helpers",
+            "--benchmark",
+            "--benchmark-warmup",
+            "0",
+            "--benchmark-iterations",
+            "2",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "benchmark failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["mode"], "benchmark");
+    assert_eq!(report["passed"], 1);
+    let benchmark = &report["tests"][0]["benchmark"];
+    assert_eq!(benchmark["iterations"], 2);
+    assert_eq!(benchmark["warmup_iterations"], 0);
+    assert_eq!(benchmark["samples_ns"].as_array().unwrap().len(), 2);
+    assert!(benchmark["min_ns"].as_u64().is_some());
+    assert!(benchmark["median_ns"].as_u64().is_some());
+    assert!(benchmark["max_ns"].as_u64().is_some());
+    assert!(benchmark["mean_ns"].as_u64().is_some());
+
+    let invalid = vibra_cmd()
+        .args([
+            "test",
+            &path_str(&source),
+            "--filter",
+            "typed-equality-helpers",
+            "--benchmark",
+            "--benchmark-iterations",
+            "0",
+        ])
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success());
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("E-BENCH-001"),
+        "{}",
+        String::from_utf8_lossy(&invalid.stderr)
+    );
 }
 
 #[test]
