@@ -17,7 +17,7 @@ use crate::ast::{
     TypeExprKind,
 };
 use crate::load::{is_compilation_flag, CompilationFlags};
-use crate::project;
+use crate::project_context::{self, ProjectImportContext};
 use crate::syntax::{self, Document};
 
 #[derive(Debug, Clone)]
@@ -51,7 +51,7 @@ pub struct SurfaceProgram {
 
 pub fn load_surface_program(entry: &Path, flags: &CompilationFlags) -> Result<SurfaceProgram> {
     let entry = canonical_module_path(entry)?;
-    let project = project::find_project_for_file(&entry)?;
+    let project = project_context::discover_project_import_context(&entry)?;
     let mut modules = BTreeMap::new();
     let mut visiting = Vec::new();
     load_recursive(&entry, project.as_ref(), flags, &mut modules, &mut visiting)?;
@@ -118,7 +118,7 @@ pub fn load_surface_entry_for_test_discovery(entry: &Path) -> Result<(PathBuf, S
 
 fn load_recursive(
     path: &Path,
-    project: Option<&project::LoadedProject>,
+    project: Option<&ProjectImportContext>,
     flags: &CompilationFlags,
     modules: &mut BTreeMap<PathBuf, SourceModule>,
     visiting: &mut Vec<PathBuf>,
@@ -284,7 +284,7 @@ fn visit_expr(expr: &Expr, visitor: &mut impl FnMut(&Expr) -> Result<()>) -> Res
 
 fn module_imports(
     module: &SourceModule,
-    project: Option<&project::LoadedProject>,
+    project: Option<&ProjectImportContext>,
 ) -> Result<Vec<PathBuf>> {
     let mut imports = resolved_module_imports(module, project)?
         .into_values()
@@ -296,7 +296,7 @@ fn module_imports(
 
 fn resolved_module_imports(
     module: &SourceModule,
-    project: Option<&project::LoadedProject>,
+    project: Option<&ProjectImportContext>,
 ) -> Result<BTreeMap<String, PathBuf>> {
     let parent = module
         .path
@@ -315,7 +315,7 @@ fn resolved_module_imports(
                     import.path.value
                 )
             })?;
-            project::resolve_project_import(project, &import.path.value)?
+            project_context::resolve_project_import(project, &import.path.value)?
         } else {
             parent.join(&import.path.value)
         };
