@@ -403,6 +403,11 @@
       "summary": "Structured task body or control flow is malformed"
     },
     {
+      "code": "E-TASK-003",
+      "severity": "error",
+      "summary": "Affine task handle is copied, joined more than once, or leaves its scope unjoined"
+    },
+    {
       "code": "E-TEMPLATE-001",
       "severity": "error",
       "summary": "Compile-time template options are malformed"

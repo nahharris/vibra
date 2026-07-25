@@ -60,6 +60,43 @@ struct TestPlanItem {
     clock: Option<lower::TestClock>,
 }
 
+/// Stable discovery metadata used by non-executing tooling such as MCP.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredTest {
+    pub path: String,
+    pub name: String,
+    pub profile: String,
+    pub tags: Vec<String>,
+    pub timeout_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
+    pub requires_workspace: bool,
+}
+
+/// Discover tests without executing project code or granting capabilities.
+pub fn list_tests(
+    path: &Path,
+    filter: Option<&str>,
+    profiles: &[String],
+    tags: &[String],
+) -> Result<Vec<DiscoveredTest>> {
+    discover_tests(path, filter, profiles, tags, Duration::from_secs(30)).map(|items| {
+        items
+            .into_iter()
+            .map(|item| DiscoveredTest {
+                path: item.display_path,
+                name: item.name,
+                profile: item.profile,
+                tags: item.tags,
+                timeout_ms: item.timeout.as_millis().min(u128::from(u64::MAX)) as u64,
+                skip_reason: item.skip_reason,
+                requires_workspace: item.workspace.is_some(),
+            })
+            .collect()
+    })
+}
+
 /// A machine-readable result emitted by the isolated test worker. The parent
 /// consumes this file instead of inferring a failure phase from process status.
 #[derive(Debug, Clone, Serialize, Deserialize)]

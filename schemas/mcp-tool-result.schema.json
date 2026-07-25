@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/mcp-tool-result.schema.json",
+  "title": "Vibra MCP tool result",
+  "type": "object",
+  "required": ["content", "structuredContent", "isError"],
+  "properties": {
+    "content": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "text"],
+        "properties": {
+          "type": {"const": "text"},
+          "text": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "structuredContent": {
+      "type": "object"
+    },
+    "isError": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "toolError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "tool-not-found",
+            "invalid-arguments",
+            "permission-denied",
+            "path-not-found",
+            "path-outside-workspace",
+            "path-symlink-unsupported",
+            "operation-failed",
+            "command-unavailable",
+            "command-failed",
+            "invalid-command-output"
+          ]
+        },
+        "message": {"type": "string"},
+        "data": {}
+      },
+      "additionalProperties": false
+    }
+  }
+}

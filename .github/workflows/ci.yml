@@ -50,12 +50,17 @@ jobs:
         run: cargo run -- test --report yaml
 
   vapp-repro:
-    name: .vapp reproducibility (${{ matrix.os }})
+    name: .vapp reproducibility (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022]
-    runs-on: ${{ matrix.os }}
+        include:
+          - { runner: ubuntu-latest, platform: linux-amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux-arm64 }
+          - { runner: windows-2022, platform: windows-amd64 }
+          - { runner: macos-15-intel, platform: macos-amd64 }
+          - { runner: macos-15, platform: macos-arm64 }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -70,7 +75,7 @@ jobs:
           ./tests/vapp-repro.ps1 -Vibra $binary -Output artifacts/sample.vapp
       - uses: actions/upload-artifact@v4
         with:
-          name: vapp-${{ runner.os }}
+          name: vapp-${{ matrix.platform }}
           path: artifacts/sample.vapp
 
   vapp-cross-host:
@@ -82,5 +87,10 @@ jobs:
         with:
           pattern: vapp-*
           path: artifacts
-      - name: Compare Linux and Windows output
-        run: cmp artifacts/vapp-Linux/sample.vapp artifacts/vapp-Windows/sample.vapp
+      - name: Compare every supported host output
+        shell: bash
+        run: |
+          baseline=artifacts/vapp-linux-amd64/sample.vapp
+          for artifact in artifacts/vapp-*/sample.vapp; do
+            cmp "$baseline" "$artifact"
+          done

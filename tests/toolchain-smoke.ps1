@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Archive, [Parameter(Mandatory)][ValidateSet('linux-amd64','linux-arm64','windows-amd64')][string]$Platform)
+param([Parameter(Mandatory)][string]$Archive, [Parameter(Mandatory)][ValidateSet('linux-amd64','linux-arm64','windows-amd64','macos-amd64','macos-arm64')][string]$Platform)
 $ErrorActionPreference = 'Stop'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("vibra-toolchain-smoke-" + [guid]::NewGuid())
 try {
