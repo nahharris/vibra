@@ -176,8 +176,9 @@ exact-revision workflow.
 ### Compile-time file embedding
 
 `$embed` turns a package-owned file into a Vibra expression while loading the
-module. A string value uses the file extension to select `txt`, `bin`, `yaml`,
-`json`, `toml`, or `xml`; use the mapping form when the extension is ambiguous:
+module. A string value uses the file extension to select `txt`, `bin`, `json`,
+`toml`, or `xml`; YAML is intentionally not an embedded data format.
+Use the mapping form when the extension is ambiguous:
 
 ```yaml
 message: {$embed: assets/message.txt}

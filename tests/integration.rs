@@ -8284,7 +8284,6 @@ fn compile_time_embed_supports_text_binary_and_structured_formats() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("message.txt"), "$literal-looking text\n").unwrap();
     std::fs::write(dir.path().join("payload.bin"), [0_u8, 127, 255]).unwrap();
-    std::fs::write(dir.path().join("data.yaml"), "name: yaml\ncount: 2\n").unwrap();
     std::fs::write(dir.path().join("data.json"), r#"{"name":"json","count":3}"#).unwrap();
     std::fs::write(dir.path().join("data.toml"), "name = 'toml'\ncount = 4\n").unwrap();
     std::fs::write(
@@ -8301,7 +8300,6 @@ fn compile_time_embed_supports_text_binary_and_structured_formats() {
   do:
     - $let: {text: {$embed: message.txt}}
     - $let: {binary: {$embed: payload.bin}}
-    - $let: {yaml: {$embed: data.yaml}}
     - $let: {json: {$embed: data.json}}
     - $let: {toml: {$embed: data.toml}}
     - $let: {xml: {$embed: data.xml}}
@@ -8310,15 +8308,32 @@ fn compile_time_embed_supports_text_binary_and_structured_formats() {
     .unwrap();
 
     let loaded = vibra::load::load_program(&entry).unwrap();
-    assert_eq!(loaded.embedded_files.len(), 6);
+    assert_eq!(loaded.embedded_files.len(), 5);
     let expanded = serde_yaml::to_string(loaded.modules.get(&loaded.entry).unwrap()).unwrap();
     assert!(expanded.contains("$literal-looking text"));
     assert!(expanded.contains("$uint8"));
-    assert!(expanded.contains("yaml"));
     assert!(expanded.contains("json"));
     assert!(expanded.contains("toml"));
     assert!(expanded.contains("xml"));
     vibra::lower::lower_program(&loaded).unwrap();
+}
+
+#[test]
+fn compile_time_embed_rejects_yaml_as_a_data_format() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("data.yaml"), "name: yaml\n").unwrap();
+    let entry = dir.path().join("main.vibra");
+    std::fs::write(
+        &entry,
+        "main:\n  $function: $void\n  return: $void\n  do:\n    - $let: {value: {$embed: data.yaml}}\n",
+    )
+    .unwrap();
+    let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(error.contains("E-EMBED-001"), "{error}");
+    assert!(
+        error.contains("text, binary, json, toml, or xml"),
+        "{error}"
+    );
 }
 
 #[test]
