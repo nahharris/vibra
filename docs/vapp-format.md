@@ -7,6 +7,12 @@ these entries:
 - `program.wasm`: the application module for runtime ABI `vibra-v1`.
 - `source/`: the complete project, lockfile, and package-local `dep/` graph.
 
+Metadata also records the sorted `compilation-flags` used for the build and
+the sorted `selected-sources` physical-file inventory. These fields make the
+compilation context inspectable and ensure different flag sets produce
+different deterministic archive identities. Verification recompiles sources
+with the recorded flags; runtime callers cannot override them.
+
 Archive paths use `/`, are relative, and may contain only normal path
 components. Entries are lexically ordered after `package.vibra`, use the ZIP
 epoch timestamp, mode `0644`, and stored compression. Every entry except the

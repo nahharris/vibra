@@ -34,26 +34,31 @@ artifact identity whenever it changes selected source.
 The foundational API is `load_program_with_flags`. `load_program` supplies the
 empty set. The test runner supplies `test` for both discovery and isolated
 execution, standardizing the former `.test.vibra` convention as an actual
-compilation mode.
+compilation mode. All other compiler-facing CLI commands accept repeatable
+`--flag <kebab-name>` arguments: `build`, `check`, `run`, `docs`, `effects`,
+and `expand`. Unknown well-formed names are intentionally accepted; flags are
+open invocation inputs rather than manifest declarations.
 
-## Remaining command and tooling surface
+`vibra lsp --flag <name>` provides an initial server-side set. An LSP client
+can replace it at initialization with `initializationOptions.compilationFlags`
+and later through `workspace/didChangeConfiguration` using
+`settings.vibra.compilationFlags`. A settings change recompiles the overlay and
+republishes diagnostics for every open document.
 
-The issue is not complete until all compiler entry points carry an explicit
-compilation context:
+## Identity and diagnostics
 
-- expose repeatable `--flag <kebab-name>` options on compile-oriented commands
-  (`run`, `build`, `check`, `docs`, `effects`, and `expand`);
-- reserve automatic `test` activation for `vibra test` while still treating
-  permissions and test profiles as separate selection mechanisms;
-- include enabled flags and selected physical files in deterministic `.vapp`
-  build identity and inspection metadata;
-- make the LSP compile overlays with the client's active flag set and
-  re-publish diagnostics when that set changes;
-- define editor/client configuration and structured request/schema fields for
-  compilation flags;
-- reject empty, malformed, or repeated-dot suffixes with stable diagnostics,
-  and decide whether unknown CLI flags are accepted or must be declared by a
-  future manifest version.
+`.vapp` metadata records the sorted `compilation-flags` set and sorted
+`selected-sources` inventory. Both participate in deterministic archive bytes;
+two builds with different active sets cannot share an artifact identity even
+when no conditional file happens to match. Packaged execution reconstructs the
+same compilation context while verifying the embedded Wasm. Passing `--flag`
+to an already compiled `.vapp` is rejected instead of pretending to recompile
+it.
+
+Flags and suffix segments must be kebab-case names. `E-FLAG-001` reports an
+invalid invocation flag, `E-FLAG-002` reports malformed conditional filenames
+(including repeated dots), `E-FLAG-003` reports an attempted packaged-artifact
+override, and `E-FLAG-004` reports malformed LSP settings.
 
 Manifest version 1 needs no change for the foundational slice because flags are
 invocation inputs, not declared project metadata. Adding declarations,

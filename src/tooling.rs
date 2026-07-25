@@ -535,7 +535,14 @@ fn style_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
 /// Embedders that use in-memory documents should call this against an isolated
 /// workspace mirror rather than modifying the user's files.
 pub fn compile_diagnostics(path: &Path) -> Vec<Diagnostic> {
-    let result = load::load_program(path).and_then(|program| {
+    compile_diagnostics_with_flags(path, &load::CompilationFlags::default())
+}
+
+pub fn compile_diagnostics_with_flags(
+    path: &Path,
+    flags: &load::CompilationFlags,
+) -> Vec<Diagnostic> {
+    let result = load::load_program_with_flags(path, flags).and_then(|program| {
         let Some(entry) = program.modules.get(&program.entry) else {
             return Ok(());
         };

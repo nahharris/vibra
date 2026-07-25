@@ -42,9 +42,44 @@ impl CompilationFlags {
         }
     }
 
+    pub fn try_new(flags: impl IntoIterator<Item = impl Into<String>>) -> Result<Self> {
+        let flags = Self::new(flags);
+        flags.validate()?;
+        Ok(flags)
+    }
+
     pub fn contains(&self, flag: &str) -> bool {
         self.enabled.contains(flag)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.enabled.iter().map(String::as_str)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.enabled.is_empty()
+    }
+
+    fn validate(&self) -> Result<()> {
+        for flag in &self.enabled {
+            if !is_compilation_flag(flag) {
+                bail!("E-FLAG-001: invalid compilation flag `{flag}`; expected a kebab-case name");
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn is_compilation_flag(flag: &str) -> bool {
+    flag.bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_lowercase())
+        && flag.split('-').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
 }
 
 pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
@@ -52,6 +87,7 @@ pub fn load_program(entry: &Path) -> Result<LoadedProgram> {
 }
 
 pub fn load_program_with_flags(entry: &Path, flags: &CompilationFlags) -> Result<LoadedProgram> {
+    flags.validate()?;
     let entry = fs::canonicalize(entry)
         .with_context(|| format!("cannot open entry module {}", entry.display()))?;
     let project = project::find_project_for_file(&entry)?;
@@ -252,8 +288,14 @@ fn load_template(
     if bytes.len() > MAX_TEMPLATE_SOURCE_BYTES {
         bail!("E-TEMPLATE-006: template source exceeds {MAX_TEMPLATE_SOURCE_BYTES} bytes");
     }
-    embedded.insert(resolved.clone(), format!("{:x}", Sha256::digest(&bytes)));
     let source = String::from_utf8(bytes).context("E-TEMPLATE-003: template is not valid UTF-8")?;
+    // Text templates are source inputs, so checkout line endings must not change
+    // either their rendered program or the reproducibility fingerprint.
+    let source = source.replace("\r\n", "\n");
+    embedded.insert(
+        resolved.clone(),
+        format!("{:x}", Sha256::digest(source.as_bytes())),
+    );
     let nodes = parse_template(&source)?;
     let root = Value::Mapping(data.clone());
     let rendered = render_template(&nodes, &[&root])?;
@@ -1015,11 +1057,13 @@ fn module_part_paths(module_path: &Path, flags: &CompilationFlags) -> Result<Vec
         let Some(suffix) = stem.strip_prefix(&prefix) else {
             continue;
         };
-        if !suffix.is_empty()
-            && suffix
-                .split('.')
-                .all(|flag| !flag.is_empty() && flags.contains(flag))
-        {
+        let suffix_flags = suffix.split('.').collect::<Vec<_>>();
+        if suffix.is_empty() || suffix_flags.iter().any(|flag| !is_compilation_flag(flag)) {
+            bail!(
+                "E-FLAG-002: malformed conditional source suffix in `{file_name}`; expected one or more dot-separated kebab-case flags"
+            );
+        }
+        if suffix_flags.iter().all(|flag| flags.contains(flag)) {
             paths.push(fs::canonicalize(&path)?);
         }
     }

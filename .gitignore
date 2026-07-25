@@ -1,6 +1,8 @@
 /target
 .worktrees/
-.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
 skills-lock.json
 *.rs.bk
 .DS_Store

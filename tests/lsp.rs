@@ -46,6 +46,66 @@ fn lifecycle_and_capabilities_use_lsp_framing() {
 }
 
 #[test]
+fn compilation_flags_flow_from_initialization_and_configuration_changes() {
+    let workspace = tempfile::tempdir().unwrap();
+    let main_path = workspace.path().join("main.vibra");
+    let main = "main:\n  $function: $void\n  return: $void\n  do:\n    - $enabled: null\n";
+    std::fs::write(
+        workspace.path().join("project.vibra"),
+        "manifest-version: 1\npackage:\n  name: flags\n  version: 0.1.0\ntargets:\n  bins:\n    - name: flags\n      root: .\n      entry: main.vibra\ndependencies: {}\n",
+    )
+    .unwrap();
+    std::fs::write(&main_path, main).unwrap();
+    std::fs::write(
+        workspace.path().join("main.release.vibra"),
+        "enabled:\n  $function: $void\n  return: $void\n  do:\n    - $let:\n        value: 1\n",
+    )
+    .unwrap();
+    let root_uri = path_uri(workspace.path());
+    let main_uri = path_uri(&main_path);
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri,"initializationOptions":{"compilationFlags":[]}}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":main_uri,"text":main}}}),
+        json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"vibra":{"compilationFlags":["release"]}}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    assert!(output[1]["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("enabled")));
+    assert!(output[2]["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn malformed_lsp_compilation_flags_return_stable_errors() {
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///tmp/demo","initializationOptions":{"compilationFlags":["Bad..flag"]}}}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    assert!(output[0]["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("E-FLAG-001"));
+}
+
+#[test]
 fn open_document_publishes_diagnostics_and_semantic_requests_work() {
     let workspace = tempfile::tempdir().unwrap();
     let uri = format!(

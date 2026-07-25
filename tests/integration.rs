@@ -8611,7 +8611,7 @@ fn compile_time_template_renders_nested_values_and_logicless_sections() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("message.txt"),
-        "{{title}}\n{{#people}}- {{name}} ({{meta.role}}){{#active}} active{{/active}}\n{{/people}}{{^people}}nobody\n{{/people}}{{! ignored }}",
+        "{{title}}\r\n{{#people}}- {{name}} ({{meta.role}}){{#active}} active{{/active}}\r\n{{/people}}{{^people}}nobody\r\n{{/people}}{{! ignored }}",
     )
     .unwrap();
     let entry = dir.path().join("main.vibra");
