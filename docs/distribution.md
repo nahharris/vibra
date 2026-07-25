@@ -21,7 +21,7 @@ published binary, CI gate, or compatibility commitment.
 The machine-readable source of truth is
 [`distribution/targets.json`](../distribution/targets.json), validated against
 [`distribution-targets.schema.json`](../schemas/distribution-targets.schema.json).
-Each archive repeats its canonical Rust target triple in `release.vibra`.
+Each archive repeats its canonical Rust target triple in `release.json`.
 
 The archive root contains:
 
@@ -30,10 +30,10 @@ vibra-X.Y.Z-<platform>/
   bin/vibra[.exe]
   stdlib/
   LICENSE
-  release.vibra
+  release.json
 ```
 
-`release.vibra` binds the compiler revision to the canonical stdlib Git
+`release.json` is canonical compact JSON that binds the compiler revision to the canonical stdlib Git
 revision and a SHA-256 digest of every bundled stdlib file. `vibra init` checks
 that identity and digest before copying the stdlib and reports `E-DIST-003` for
 an incompatible revision or `E-DIST-004` for damaged content.

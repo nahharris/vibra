@@ -658,7 +658,7 @@ fn run_cli() -> Result<()> {
         }
         Command::Package { command } => match command {
             PackageCommand::Inspect { path, format } => {
-                let metadata: Value = serde_yaml::from_str(&package::inspect(&path)?)?;
+                let metadata: serde_json::Value = serde_json::from_str(&package::inspect(&path)?)?;
                 print_structured(&metadata, format)?;
             }
             PackageCommand::Verify { path, format } => {

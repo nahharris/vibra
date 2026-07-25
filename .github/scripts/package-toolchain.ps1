@@ -51,16 +51,17 @@ Copy-Item -LiteralPath $Binary -Destination (Join-Path (Join-Path $stage 'bin') 
 Copy-Item -Path (Join-Path $stdlib '*') -Destination (Join-Path $stage 'stdlib') -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
 $digest = Get-TreeDigest $stdlib
-@"
-format-version: 1
-version: $Version
-revision: $Revision
-platform: $Platform
-target-triple: $TargetTriple
-stdlib-git: https://github.com/nahharris/vibra-stdlib.git
-stdlib-rev: $stdlibRev
-stdlib-sha256: $digest
-"@ | Set-Content -LiteralPath (Join-Path $stage 'release.vibra') -Encoding utf8NoBOM
+$releaseMetadata = [ordered]@{
+    'format-version' = 1
+    version = $Version
+    revision = $Revision
+    platform = $Platform
+    'target-triple' = $TargetTriple
+    'stdlib-git' = 'https://github.com/nahharris/vibra-stdlib.git'
+    'stdlib-rev' = $stdlibRev
+    'stdlib-sha256' = $digest
+}
+$releaseMetadata | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $stage 'release.json') -Encoding utf8NoBOM
 
 if ($Platform -eq 'windows-amd64') {
     $archive = Join-Path $OutputDirectory "$name.zip"

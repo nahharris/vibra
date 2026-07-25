@@ -31,7 +31,7 @@ COPY stdlib ./stdlib
 RUN files="$(find stdlib -type f -printf '%P\n' | LC_ALL=C sort)" \
     && digest="$(printf '%s\n' "$files" | while IFS= read -r file; do printf '%s %s\n' "$file" "$(sha256sum "stdlib/$file" | cut -d' ' -f1)"; done | sha256sum | cut -d' ' -f1)" \
     && stdrev="$(sed -n 's/.*STDLIB_REV: &str = "\([0-9a-f]*\)".*/\1/p' src/project.rs)" \
-    && printf 'format-version: 1\nversion: %s\nrevision: %s\nplatform: linux-container\nstdlib-git: https://github.com/nahharris/vibra-stdlib.git\nstdlib-rev: %s\nstdlib-sha256: %s\n' "$VIBRA_VERSION" "$VIBRA_REVISION" "$stdrev" "$digest" > release.vibra
+    && printf '{"format-version":1,"version":"%s","revision":"%s","platform":"linux-container","stdlib-git":"https://github.com/nahharris/vibra-stdlib.git","stdlib-rev":"%s","stdlib-sha256":"%s"}\n' "$VIBRA_VERSION" "$VIBRA_REVISION" "$stdrev" "$digest" > release.json
 
 FROM ${RUST_DEV_IMAGE} AS dev-builder
 ENV LLVM_CONFIG_PATH=/usr/bin/llvm21-config
@@ -48,7 +48,7 @@ COPY src ./src
 RUN touch src/lib.rs src/main.rs \
     && cargo build --release --locked
 COPY stdlib ./stdlib
-COPY --from=builder /src/release.vibra ./release.vibra
+COPY --from=builder /src/release.json ./release.json
 
 FROM ${RUST_DEV_IMAGE} AS dev
 ENV LLVM_CONFIG_PATH=/usr/bin/llvm21-config
@@ -57,7 +57,7 @@ RUN apk upgrade --no-cache \
     && install -d /opt/vibra/bin /opt/vibra/stdlib
 COPY --from=dev-builder /src/target/release/vibra /opt/vibra/bin/vibra
 COPY --from=dev-builder /src/stdlib /opt/vibra/stdlib
-COPY --from=dev-builder /src/release.vibra /opt/vibra/release.vibra
+COPY --from=dev-builder /src/release.json /opt/vibra/release.json
 RUN cargo --version \
     && dirname "$(command -v cargo)" > /opt/vibra/cargo-bin \
     && git --version
@@ -69,7 +69,7 @@ CMD ["--help"]
 FROM ${LINUX_RUNTIME_IMAGE} AS runtime
 COPY --from=builder --chown=nonroot:nonroot /src/target/release/vibra /opt/vibra/bin/vibra
 COPY --from=builder --chown=nonroot:nonroot /src/stdlib /opt/vibra/stdlib
-COPY --from=builder --chown=nonroot:nonroot /src/release.vibra /opt/vibra/release.vibra
+COPY --from=builder --chown=nonroot:nonroot /src/release.json /opt/vibra/release.json
 ENV PATH="/opt/vibra/bin"
 USER nonroot
 ENTRYPOINT ["/opt/vibra/bin/vibra"]

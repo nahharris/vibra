@@ -26,7 +26,7 @@ try {
     Add-Content -LiteralPath (Join-Path $relocated 'stdlib/src/io.vibra') -Value "`ntampered: true"
     & $exe init damaged 2>&1 | Out-String -OutVariable damagedError | Out-Null
     if ($LASTEXITCODE -eq 0 -or $damagedError -notmatch 'E-DIST-004') { throw 'Tampered stdlib did not fail with E-DIST-004.' }
-    Remove-Item -LiteralPath (Join-Path $relocated 'release.vibra')
+    Remove-Item -LiteralPath (Join-Path $relocated 'release.json')
     & $exe init missing-metadata 2>&1 | Out-String -OutVariable missingError | Out-Null
     if ($LASTEXITCODE -eq 0 -or $missingError -notmatch 'E-DIST-002') { throw 'Missing release metadata did not fail with E-DIST-002.' }
     Pop-Location

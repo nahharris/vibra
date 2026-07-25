@@ -330,8 +330,9 @@ configuration, security boundaries, and the stable error model.
 
 `vibra build` produces a deterministic `.vapp` ZIP containing the selected bin's
 `program.wasm`, its complete project and vendored dependency source graph, and a
-SHA-256 inventory in `package.vibra`. Timestamps, permissions, compression, and
-entry ordering are fixed, so identical inputs produce identical bytes:
+SHA-256 inventory in canonical `package.json`. Timestamps, permissions,
+compression, and entry ordering are fixed, so identical inputs produce
+identical bytes:
 
 ```sh
 vibra build hello --output hello.vapp
