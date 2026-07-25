@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use std::io::Cursor;
+use std::time::{Duration, Instant};
 
 fn frame(value: Value) -> Vec<u8> {
     let body = serde_json::to_vec(&value).unwrap();
@@ -377,4 +378,102 @@ fn semantic_navigation_resolves_project_at_imports() {
     let output = messages(&output);
     assert_eq!(output[2]["result"]["uri"], library_uri);
     assert_eq!(output[2]["result"]["range"]["start"]["line"], 0);
+}
+
+#[test]
+fn checked_in_multi_package_sample_supports_core_editor_features() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lsp-workspace");
+    let main_path = root.join("main.vibra");
+    let library_path = root.join("packages/greeting/src/greet.vibra");
+    let main = std::fs::read_to_string(&main_path).unwrap();
+    let library = std::fs::read_to_string(&library_path).unwrap();
+    let root_uri = path_uri(&root);
+    let main_uri = path_uri(&main_path);
+    let library_uri = path_uri(&library_path);
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":main_uri,"languageId":"vibra","version":1,"text":main}}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":library_uri,"languageId":"vibra","version":1,"text":library}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":main_uri},"position":{"line":7,"character":18}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":main_uri},"position":{"line":7,"character":18}}}),
+        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/references","params":{"textDocument":{"uri":library_uri},"position":{"line":0,"character":2}}}),
+        json!({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":main_uri},"position":{"line":7,"character":18}}}),
+        json!({"jsonrpc":"2.0","id":6,"method":"textDocument/formatting","params":{"textDocument":{"uri":main_uri},"options":{"tabSize":2,"insertSpaces":true}}}),
+        json!({"jsonrpc":"2.0","id":7,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    assert!(output.iter().any(|message| {
+        message["result"]["contents"]["value"]
+            .as_str()
+            .is_some_and(|value| value.contains("Greets from a local package"))
+    }));
+    assert!(output
+        .iter()
+        .any(|message| message["result"]["uri"] == library_uri));
+    assert!(output.iter().any(|message| {
+        message["result"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["label"] == "greeting.greet"))
+    }));
+    assert!(output.iter().any(|message| {
+        message["result"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["uri"] == main_uri))
+    }));
+    assert!(output.iter().any(|message| {
+        message["method"] == "textDocument/publishDiagnostics"
+            && message["params"]["diagnostics"]
+                .as_array()
+                .is_some_and(Vec::is_empty)
+    }));
+}
+
+#[test]
+fn medium_workspace_semantic_request_meets_performance_contract() {
+    let workspace = tempfile::tempdir().unwrap();
+    let document_count = 250;
+    for index in 0..document_count {
+        std::fs::write(
+            workspace.path().join(format!("module-{index}.vibra")),
+            format!(
+                "function-{index}:\n  $function: $void\n  =doc: Medium workspace symbol {index}\n  return: $void\n  do:\n    - $let:\n        value: {index}\n"
+            ),
+        )
+        .unwrap();
+    }
+    let main_path = workspace.path().join("main.vibra");
+    let main = "module:\n  $import: module-249.vibra\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $module.function-249: null\n";
+    std::fs::write(&main_path, main).unwrap();
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":path_uri(workspace.path())}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":path_uri(&main_path),"text":main}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":path_uri(&main_path)},"position":{"line":7,"character":26}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let started = Instant::now();
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let elapsed = started.elapsed();
+    eprintln!("medium LSP workspace ({document_count} files): {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "medium workspace request took {elapsed:?}"
+    );
+    assert!(messages(&output).iter().any(|message| {
+        message["result"].as_array().is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item["label"] == "module.function-249")
+        })
+    }));
 }

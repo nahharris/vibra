@@ -1,0 +1,13 @@
+manifest-version: 1
+package:
+  name: lsp-app
+  version: 0.1.0
+targets:
+  bins:
+    - name: lsp-app
+      root: .
+      entry: main.vibra
+dependencies:
+  greeting:
+    path: packages/greeting
+
