@@ -96,7 +96,10 @@ are not a complete specification of compiler behavior.
   [`code-query.schema.json`](schemas/code-query.schema.json), and
   [`code-change-set.schema.json`](schemas/code-change-set.schema.json).
 - **Editor and documentation queries:** [`query-response.schema.json`](schemas/query-response.schema.json)
-  specifies the `vibra/contextAt` (and `vibra query`) response shape, and
+  specifies the `vibra/contextAt` (and `vibra query`) response shape,
+  [`lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json) and
+  [`lsp-compilation-options.schema.json`](schemas/lsp-compilation-options.schema.json)
+  define the editor protocol shapes, and
   [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
   `vibra docs --format yaml|json`.
 - **Agent protocol:** [`mcp-tool-result.schema.json`](schemas/mcp-tool-result.schema.json)
@@ -268,6 +271,10 @@ When a compiler message names a source symbol, its range is anchored to that
 definition or `$reference`; otherwise the compiler's fallback point is kept.
 The advertised capability shape is documented by
 [`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
+Conditional compilation uses `initializationOptions.compilationFlags`; clients
+may replace the active set through `workspace/didChangeConfiguration` at
+`settings.vibra.compilationFlags`. Both fields use the shape documented by
+[`schemas/lsp-compilation-options.schema.json`](schemas/lsp-compilation-options.schema.json).
 
 ### Model Context Protocol server
 
@@ -470,9 +477,11 @@ deterministic:
 
 Files named `foo.<flag>.vibra` are conditional parts of `foo.vibra` when the
 base file exists. The base file is always loaded; a part is loaded only when
-all of its suffix flags are enabled. `vibra test` enables `test`, so unit tests
-can live beside their module in `foo.test.vibra` without entering normal
-compiler runs. See [the conditional compilation contract](docs/conditional-compilation.md).
+all of its suffix flags are enabled. Pass repeatable `--flag <kebab-name>`
+arguments to `build`, `check`, `run`, `docs`, `effects`, `expand`, or `lsp`.
+`vibra test` enables `test` automatically, so unit tests can live beside their
+module in `foo.test.vibra` without entering normal compiler runs. See
+[the conditional compilation contract](docs/conditional-compilation.md).
 
 ## Build & test
 
