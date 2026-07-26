@@ -412,7 +412,9 @@ fn lint_expr(path: &Path, source: &str, expr: &Expr, diagnostics: &mut Vec<Diagn
             lint_expr(path, source, end, diagnostics);
             lint_expr(path, source, step, diagnostics);
         }
-        ExprKind::Convert { value, into, .. } | ExprKind::Cast { value, into } => {
+        ExprKind::Convert { value, into, .. }
+        | ExprKind::Cast { value, into }
+        | ExprKind::PolicyNarrow { value, into } => {
             lint_expr(path, source, value, diagnostics);
             lint_type(path, source, into, diagnostics);
         }

@@ -383,7 +383,9 @@ fn expand_expr(
             expand_expr(end, module_path, package_root, embedded)?;
             expand_expr(step, module_path, package_root, embedded)?;
         }
-        ExprKind::Convert { value, .. } | ExprKind::Cast { value, .. } => {
+        ExprKind::Convert { value, .. }
+        | ExprKind::Cast { value, .. }
+        | ExprKind::PolicyNarrow { value, .. } => {
             expand_expr(value, module_path, package_root, embedded)?
         }
         ExprKind::Template { bindings, .. } => {
@@ -1042,9 +1044,9 @@ fn visit_expr(expr: &Expr, visitor: &mut impl FnMut(&Expr) -> Result<()>) -> Res
             visit_expr(end, visitor)?;
             visit_expr(step, visitor)
         }
-        ExprKind::Convert { value, .. } | ExprKind::Cast { value, .. } => {
-            visit_expr(value, visitor)
-        }
+        ExprKind::Convert { value, .. }
+        | ExprKind::Cast { value, .. }
+        | ExprKind::PolicyNarrow { value, .. } => visit_expr(value, visitor),
         ExprKind::Template { bindings, .. } => {
             for binding in bindings {
                 visit_expr(&binding.value, visitor)?;
@@ -1215,9 +1217,9 @@ fn visit_expr_aliases(expr: &Expr, visitor: &mut impl FnMut(&str) -> Result<()>)
                     visit_pattern(&case.pattern, visitor)?;
                 }
             }
-            ExprKind::Convert { into, .. } | ExprKind::Cast { into, .. } => {
-                visit_type(into, visitor)?
-            }
+            ExprKind::Convert { into, .. }
+            | ExprKind::Cast { into, .. }
+            | ExprKind::PolicyNarrow { into, .. } => visit_type(into, visitor)?,
             _ => {}
         }
         Ok(())

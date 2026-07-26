@@ -490,6 +490,10 @@ fn expand_expr(
             value: Box::new(expand_expr(*value, macros, state, depth)?),
             into: expand_type(into, macros, state, depth)?,
         },
+        ExprKind::PolicyNarrow { value, into } => ExprKind::PolicyNarrow {
+            value: Box::new(expand_expr(*value, macros, state, depth)?),
+            into: expand_type(into, macros, state, depth)?,
+        },
         ExprKind::Template { path, bindings } => ExprKind::Template {
             path,
             bindings: bindings
@@ -1196,6 +1200,10 @@ fn substitute_expr_kind(
             value: Box::new(one(*value)?),
             into: substitute_type(into, environment)?,
         },
+        ExprKind::PolicyNarrow { value, into } => ExprKind::PolicyNarrow {
+            value: Box::new(one(*value)?),
+            into: substitute_type(into, environment)?,
+        },
         ExprKind::Template { path, bindings } => ExprKind::Template {
             path,
             bindings: bindings
@@ -1697,7 +1705,9 @@ fn hygienize_expr(
                 );
             }
         }
-        ExprKind::Convert { value, into, .. } | ExprKind::Cast { value, into } => {
+        ExprKind::Convert { value, into, .. }
+        | ExprKind::Cast { value, into }
+        | ExprKind::PolicyNarrow { value, into } => {
             hygienize_expr(
                 value,
                 definition_document,
@@ -2188,7 +2198,9 @@ fn annotate_generated_expr(
             annotate_generated_expr(end, definition, call, state)?;
             annotate_generated_expr(step, definition, call, state)?;
         }
-        ExprKind::Convert { value, into, .. } | ExprKind::Cast { value, into } => {
+        ExprKind::Convert { value, into, .. }
+        | ExprKind::Cast { value, into }
+        | ExprKind::PolicyNarrow { value, into } => {
             annotate_generated_expr(value, definition, call, state)?;
             annotate_generated_type(into, definition, call, state)?;
         }
