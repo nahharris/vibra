@@ -5,13 +5,13 @@
 
 use crate::ast::{
     AnnotationKind, Expr as AstExpr, ExprKind, Function, Literal, Module, Origin,
-    Pattern as AstPattern, PatternKind, SourceLocation, TopLevel,
+    Pattern as AstPattern, PatternKind, SourceLocation, TopLevel, WasmArgument,
 };
 use crate::body_semantics::{validate_function_body, validate_task_handles};
 use crate::lower::{
     infer_expr_type, primitive_integer, primitive_numeric, typed_primitive_op, Call, EnumDef, Expr,
-    FunctionBody, FunctionSig, LetValue, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement,
-    TypeRef,
+    FunctionBody, FunctionSig, ImportTarget, LetValue, MatchArm, Pattern, PrimitiveOp,
+    RuntimeValue, Statement, TypeAlias, TypeRef, WasmArgSpec,
 };
 use crate::type_semantics::{capability_body, policy_body, policy_type_is_subset, type_compatible};
 use crate::typed_lower::{
@@ -168,46 +168,106 @@ pub fn materialize_typed_functions(
             for ty in signature.arg_types.iter().chain([&signature.return_type]) {
                 ensure_safe_type(ty, key, &location)?;
             }
-            let FunctionBody::User { statements } = body else {
-                bail!("typed staged body `{key}` unexpectedly contains a wasm import {location}");
-            };
-            let mut locals: HashMap<_, _> = signature
-                .arg_names
-                .iter()
-                .cloned()
-                .zip(signature.arg_types.iter().cloned())
-                .collect();
-            let mut origins = OriginCursor::new(
-                bodies
-                    .node_origins
-                    .get(key)
-                    .with_context(|| format!("typed body `{key}` has no node origins"))?,
-            );
-            let checked = validate_statements(
-                statements,
-                &mut locals,
-                &constants,
-                signatures,
-                bodies.let_types.get(key).unwrap_or(&HashMap::new()),
-                &signature.return_type,
-                0,
-                false,
-                key,
-                &mut origins,
-            )
-            .map_err(|error| origins.annotate(error))
-            .with_context(|| format!("validating typed function `{key}`"))?;
-            origins.finish()?;
-            validate_function_body(&checked, &signature.return_type)
-                .with_context(|| format!("validating returns in typed function `{key}`"))?;
-            validate_task_handles(&checked)
-                .with_context(|| format!("validating task handles in typed function `{key}`"))?;
-            let checked = FunctionBody::User {
-                statements: checked,
+            let checked = match body {
+                FunctionBody::Wasm { import, wasm_args } => {
+                    // No `Statement`/`Expr` IR nodes are produced for a wasm
+                    // import body, so no origins were recorded for it either
+                    // (see `lower_function`); confirm that invariant instead
+                    // of walking a cursor that would never advance.
+                    let node_origins = bodies
+                        .node_origins
+                        .get(key)
+                        .with_context(|| format!("typed body `{key}` has no node origins"))?;
+                    if !node_origins.is_empty() {
+                        bail!(
+                            "typed wasm import body `{key}` unexpectedly recorded {} node origins",
+                            node_origins.len()
+                        );
+                    }
+                    validate_wasm_import_body(
+                        key,
+                        signature,
+                        import,
+                        wasm_args,
+                        &signatures.aliases,
+                        &location,
+                    )?;
+                    FunctionBody::Wasm {
+                        import: import.clone(),
+                        wasm_args: wasm_args.clone(),
+                    }
+                }
+                FunctionBody::User { statements } => {
+                    let mut locals: HashMap<_, _> = signature
+                        .arg_names
+                        .iter()
+                        .cloned()
+                        .zip(signature.arg_types.iter().cloned())
+                        .collect();
+                    let mut origins = OriginCursor::new(
+                        bodies
+                            .node_origins
+                            .get(key)
+                            .with_context(|| format!("typed body `{key}` has no node origins"))?,
+                    );
+                    let checked = validate_statements(
+                        statements,
+                        &mut locals,
+                        &constants,
+                        signatures,
+                        bodies.let_types.get(key).unwrap_or(&HashMap::new()),
+                        &signature.return_type,
+                        0,
+                        false,
+                        key,
+                        &mut origins,
+                    )
+                    .map_err(|error| origins.annotate(error))
+                    .with_context(|| format!("validating typed function `{key}`"))?;
+                    origins.finish()?;
+                    validate_function_body(&checked, &signature.return_type)
+                        .with_context(|| format!("validating returns in typed function `{key}`"))?;
+                    validate_task_handles(&checked).with_context(|| {
+                        format!("validating task handles in typed function `{key}`")
+                    })?;
+                    FunctionBody::User {
+                        statements: checked,
+                    }
+                }
             };
             Ok((key.clone(), materialize(signature, checked)))
         })
         .collect()
+}
+
+/// Validate a `$wasm`-only typed body against the versioned host ABI
+/// registry. Delegates to `crate::lower::validate_wasm_bodies`, the exact
+/// legacy YAML-path check (`E-WASM-002`/`E-WASM-003`/`E-WASM-004`/
+/// `E-WASM-007`/`E-CAP-002`), against a single-entry signature map built for
+/// this function alone -- this is a trust boundary (host imports call out to
+/// the runtime), so it must reuse the strict legacy rule rather than a
+/// best-effort typed re-derivation.
+fn validate_wasm_import_body(
+    key: &str,
+    signature: &TypedFunctionSignature,
+    import: &ImportTarget,
+    wasm_args: &[WasmArgSpec],
+    aliases: &HashMap<String, TypeAlias>,
+    location: &str,
+) -> Result<()> {
+    let mut sigs = HashMap::new();
+    sigs.insert(
+        key.to_string(),
+        materialize(
+            signature,
+            FunctionBody::Wasm {
+                import: import.clone(),
+                wasm_args: wasm_args.to_vec(),
+            },
+        ),
+    );
+    crate::lower::validate_wasm_bodies(&sigs, aliases)
+        .with_context(|| format!("validating typed wasm import `{key}` {location}"))
 }
 
 fn materialize_constants(
@@ -984,6 +1044,47 @@ fn lower_function(
     declared_aliases: &BTreeSet<String>,
     bodies: &mut TypedBodyIndex,
 ) -> Result<()> {
+    // A `$wasm`-only body is a distinct function *body kind* (like legacy
+    // `is_wasm_only_body`/`extract_wasm_body`), not an ordinary statement
+    // sequence: it commits only when the entire body is a single `(wasm
+    // import: ... args: ...)` form. It produces no `Statement`/`Expr` IR, so
+    // it skips `lower_statements`, `collect_body_metadata`, and origin
+    // collection entirely -- there is nothing for those passes to walk.
+    if let [AstExpr {
+        value: ExprKind::Wasm { import, arguments },
+        ..
+    }] = function.body.as_slice()
+    {
+        let wasm_import = ImportTarget {
+            module: import.module.value.clone(),
+            name: import.name.value.clone(),
+        };
+        let wasm_args = arguments.iter().map(lower_wasm_argument).collect();
+        if bodies
+            .functions
+            .insert(
+                key.to_string(),
+                FunctionBody::Wasm {
+                    import: wasm_import,
+                    wasm_args,
+                },
+            )
+            .is_some()
+        {
+            bail!("duplicate typed function body `{key}`");
+        }
+        let location = SourceLocation {
+            document: function.origin.document_id().unwrap_or(module.document_id),
+            span: function.origin.primary_span(),
+        };
+        bodies.origins.insert(key.to_string(), location);
+        bodies.let_types.insert(key.to_string(), HashMap::new());
+        bodies
+            .lexical_bindings
+            .insert(key.to_string(), BTreeSet::new());
+        bodies.node_origins.insert(key.to_string(), Vec::new());
+        return Ok(());
+    }
     let generic_names = signatures
         .functions
         .get(key)
@@ -1030,6 +1131,20 @@ fn lower_function(
         .insert(key.to_string(), lexical_bindings);
     bodies.node_origins.insert(key.to_string(), node_origins);
     Ok(())
+}
+
+/// Lower one `$wasm.args` forwarding spec. `WasmArgument::Parameter` names a
+/// function argument by its bare name (the same convention every other
+/// argument reference in the typed surface uses, e.g. `self` not
+/// `args.self`); legacy `parse_wasm_arg_spec` strips its own `$args.`
+/// marker down to the same bare name, so both paths agree on
+/// `WasmArgSpec::Arg` holding the caller's plain argument name.
+fn lower_wasm_argument(argument: &WasmArgument) -> WasmArgSpec {
+    match argument {
+        WasmArgument::Parameter(name) => WasmArgSpec::Arg(name.value.clone()),
+        WasmArgument::ConstInt(value) => WasmArgSpec::ConstInt(value.value),
+        WasmArgument::ConstString(value) => WasmArgSpec::ConstStr(value.value.clone()),
+    }
 }
 
 fn runtime_name(name: &str, context: &str, signatures: &TypedSignatureIndex) -> String {
@@ -1644,8 +1759,18 @@ fn lower_expr(
         ExprKind::Convert { .. } => {
             bail!("typed `convert` lowering requires explicit fallback semantics")
         }
-        ExprKind::Embed { .. } | ExprKind::Template { .. } | ExprKind::Wasm { .. } => {
+        ExprKind::Embed { .. } | ExprKind::Template { .. } => {
             bail!("typed compile-time expression lowering is not active")
+        }
+        // A `$wasm` form is a function *body kind*, not a general
+        // expression: `lower_function` recognizes and lowers it only when
+        // it is the function's sole body form. Reaching this generic
+        // expression-position dispatch means it was nested inside a larger
+        // body (e.g. alongside other statements, or inside an `if`), which
+        // has no legacy equivalent and stays rejected explicitly rather
+        // than silently accepted.
+        ExprKind::Wasm { .. } => {
+            bail!("typed `wasm` import body must be a function's entire body, not a nested expression")
         }
         ExprKind::If {
             condition,
@@ -3256,5 +3381,121 @@ mod tests {
             materialize_typed_functions(&signatures, &bodies).unwrap_err()
         );
         assert!(error.contains("unknown or was already joined"), "{error}");
+    }
+
+    #[test]
+    fn wasm_import_body_lowers_with_correct_signature_and_executes_in_both_backends() {
+        let source = module(
+            r#"(fn scalar-len ((value str)) uint64
+  (do (wasm import: (import "vibra_v1" "str_scalar_len") args: ((arg value)))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+
+        // The staged IR is a `FunctionBody::Wasm`, not a statement sequence,
+        // and it recorded no node origins (there is no `Statement`/`Expr`
+        // walk for a wasm-only body -- see `lower_function`).
+        let FunctionBody::Wasm { import, wasm_args } = &bodies.functions["scalar-len"] else {
+            panic!("expected a wasm import body");
+        };
+        assert_eq!(import.module, "vibra_v1");
+        assert_eq!(import.name, "str_scalar_len");
+        assert_eq!(wasm_args.len(), 1);
+        assert!(matches!(&wasm_args[0], WasmArgSpec::Arg(name) if name == "value"));
+        assert!(bodies.node_origins["scalar-len"].is_empty());
+
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        assert!(matches!(
+            &functions["scalar-len"].body,
+            FunctionBody::Wasm { import, .. }
+                if import.module == "vibra_v1" && import.name == "str_scalar_len"
+        ));
+
+        let program = LoweredProgram {
+            statements: vec![Statement::Call(Call {
+                callee_key: "scalar-len".into(),
+                type_args: Vec::new(),
+                args: vec![Expr::Value(RuntimeValue::Str("hi".into()))],
+            })],
+            main_arg_bindings: Vec::new(),
+            constants: HashMap::new(),
+            functions,
+            impls: HashMap::new(),
+            warnings: Vec::new(),
+            foreign_modules: BTreeMap::new(),
+        };
+        crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        crate::wasm_backend::run_lowered(&program, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn wasm_import_argument_type_mismatch_is_rejected() {
+        // `str_scalar_len` requires a `str` in position 0; `bool` must be
+        // rejected the same way the legacy `$wasm` path rejects it
+        // (`E-WASM-003`), not silently coerced or accepted.
+        let source = module(
+            r#"(fn bad ((value bool)) uint64
+  (do (wasm import: (import "vibra_v1" "str_scalar_len") args: ((arg value)))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-WASM-003"), "{error}");
+    }
+
+    #[test]
+    fn wasm_import_targeting_an_unknown_host_module_is_rejected() {
+        // A malformed import declaration -- one that names no registered
+        // host module -- must fail strictly (`E-WASM-002`) rather than be
+        // accepted on the strength of syntactic well-formedness alone; a
+        // `$wasm` body crosses a trust boundary out to host functions.
+        let source = module(
+            r#"(fn bad () void
+  (do (wasm import: (import "not-a-real-host-module" "whatever") args: ())))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-WASM-002"), "{error}");
+    }
+
+    #[test]
+    fn wasm_import_nested_in_a_larger_body_is_rejected_explicitly() {
+        // `$wasm` is a function *body kind*, matching the legacy path's
+        // `is_wasm_only_body`/`extract_wasm_body`: it only lowers when it is
+        // the function's entire body. Appearing alongside another statement
+        // has no legacy equivalent and must fail explicitly, not be
+        // silently accepted or panic.
+        let source = module(
+            r#"(fn bad ((flag bool)) void
+  (do
+    (wasm import: (import "vibra_test" "assert") args: ((arg flag)))
+    (wasm import: (import "vibra_test" "assert") args: ((arg flag)))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("entire body"), "{error}");
     }
 }
