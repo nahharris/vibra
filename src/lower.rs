@@ -3391,7 +3391,11 @@ fn extract_wasm_body(step: &Value) -> Result<(ImportTarget, Vec<WasmArgSpec>)> {
 ///
 /// Together with the unforgeability of `$policy` values this bounds a
 /// program's authority by the policy types declared on its roots.
-fn validate_wasm_bodies(
+///
+/// `pub(crate)` so the typed S-expression body lowerer (`typed_body.rs`) can
+/// reuse this exact validation for `$wasm`-only bodies reached through the
+/// typed frontend, rather than duplicating the E-WASM-*/E-CAP-002 rules.
+pub(crate) fn validate_wasm_bodies(
     sigs: &HashMap<String, FunctionSig>,
     type_aliases: &HashMap<String, TypeAlias>,
 ) -> Result<()> {
