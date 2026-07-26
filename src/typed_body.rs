@@ -2294,15 +2294,39 @@ mod tests {
     }
 
     #[test]
-    fn declaring_a_function_named_after_a_primitive_is_rejected() {
-        let source = module("(fn add ((a int64) (b int64)) int64 (do (return a)))");
+    fn declaring_a_function_named_after_a_primitive_is_permitted() {
+        // The standard library names combinators `option.and`, `option.or`,
+        // `result.and`, and `result.or`. Those declarations are reachable
+        // through their qualified names, so rejecting them would be wrong.
+        let source = module("(fn and ((a int64) (b int64)) int64 (do (return a)))");
+        let inputs = [TypedModuleInput {
+            alias: "lib",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs)
+            .expect("a declaration named after a primitive is reachable when qualified");
+        assert!(signatures.functions.contains_key("lib.and"));
+    }
+
+    #[test]
+    fn unqualified_primitive_head_wins_over_a_local_declaration_of_that_name() {
+        // Primitive availability is uniform across modules: it must not depend
+        // on what the enclosing module happens to declare. Inside a module that
+        // declares `and`, an unqualified `(and ...)` is still the primitive.
+        let source = module(
+            "(fn and ((a bool) (b bool)) bool (do (return a)))\n\
+             (fn use-it ((x bool) (y bool)) bool (do (return (and x y))))",
+        );
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
         }];
-        let error = crate::typed_lower::lower_typed_signatures(inputs)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("add"), "{error}");
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let Expr::Primitive { op, .. } = primitive_return(&functions, "use-it") else {
+            unreachable!()
+        };
+        assert_eq!(op, PrimitiveOp::And);
     }
 }
