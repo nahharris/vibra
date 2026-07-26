@@ -2,10 +2,13 @@ use anyhow::{bail, Context, Result};
 use serde_yaml::{Mapping, Value};
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet, VecDeque},
     env, fs,
     path::{Path, PathBuf},
 };
+use vibra::ast::{DocumentId, Module, TopLevel};
+use vibra::typed_body;
+use vibra::typed_lower::{self, TypedModuleInput};
 
 #[derive(Clone, Debug)]
 struct CallSignature {
@@ -29,8 +32,35 @@ struct Report {
     scanned: usize,
     already_sexpr: usize,
     converted: usize,
-    valid: usize,
-    unsupported: BTreeMap<String, usize>,
+    /// Conversion (legacy-YAML-to-S-expression) failures. Renamed from the
+    /// original single-tier `unsupported` bucket now that validation is
+    /// staged: this bucket only covers the syntactic rewrite, not
+    /// compileability.
+    conversion_failures: BTreeMap<String, usize>,
+    /// `project.vibra` package manifests use their own top-level grammar
+    /// (`(project ...)`, parsed by `project_context.rs`), not the module
+    /// grammar `ast::lower_document` expects. They are excluded from the
+    /// module-lowering tiers below rather than counted as surface failures:
+    /// that would be a validator/category mismatch, not a real language-path
+    /// gap. Step 5 ("Projects and packages") is already done and validated
+    /// elsewhere.
+    project_manifests: usize,
+    /// Tier 1: the S-expression source parses (reader/CST) and lowers into a
+    /// well-shaped typed surface AST. Proves shape only, not compileability.
+    surface_valid: usize,
+    surface_failures: BTreeMap<String, usize>,
+    /// Tier 2: typed signature lowering succeeds for the file treated as the
+    /// entry point of its own program, pulling in its transitive relative
+    /// imports so cross-module type references resolve as they would for a
+    /// real build.
+    signature_valid: usize,
+    signature_failures: BTreeMap<String, usize>,
+    /// Tier 3: typed body lowering succeeds against the signature index from
+    /// tier 2. This is the tier that actually proves cutover readiness; it is
+    /// expected to fail widely until `Expr::Primitive` lands on the typed
+    /// path (tracked on a separate branch).
+    body_valid: usize,
+    body_failures: BTreeMap<String, usize>,
 }
 
 fn main() -> Result<()> {
@@ -44,48 +74,222 @@ fn main() -> Result<()> {
     let signature_index = build_signature_index(&files)?;
 
     let mut report = Report::default();
-    for path in files {
+    let mut displays: BTreeMap<PathBuf, String> = BTreeMap::new();
+    let mut sexpr_sources: BTreeMap<PathBuf, String> = BTreeMap::new();
+
+    for path in &files {
         report.scanned += 1;
         let display = path
             .strip_prefix(&root)
-            .unwrap_or(&path)
+            .unwrap_or(path)
             .display()
             .to_string();
-        let source = fs::read_to_string(&path)?;
+        let canonical = fs::canonicalize(path)?;
+        displays.insert(canonical.clone(), display.clone());
+        let source = fs::read_to_string(path)?;
         if source.trim_start().starts_with('(') {
             report.already_sexpr += 1;
+            sexpr_sources.insert(canonical, source);
             continue;
         }
-        match migrate_for_path(&source, &path, &signature_index) {
+        match migrate_for_path(&source, path, &signature_index) {
             Ok(output) => {
                 report.converted += 1;
-                match validate(&output) {
-                    Ok(()) => report.valid += 1,
-                    Err(error) => record_issue(
-                        &mut report,
-                        format!(
-                            "{display}: typed-validation: {}",
-                            first_line(&error.to_string())
-                        ),
-                    ),
-                }
+                sexpr_sources.insert(canonical, output);
             }
-            Err(error) => record_issue(&mut report, format!("{display}: {error:#}")),
+            Err(error) => record_issue(
+                &mut report.conversion_failures,
+                format!("{display}: {error:#}"),
+            ),
         }
     }
 
+    // Tier 1 (surface-valid): the S-expression source parses and lowers into
+    // a well-shaped typed surface AST. This is the check the migrator used
+    // to call "typed-valid"; it proves shape only, not compileability.
+    let mut modules: BTreeMap<PathBuf, Module> = BTreeMap::new();
+    for (canonical, source) in &sexpr_sources {
+        if is_project_manifest(canonical) {
+            report.project_manifests += 1;
+            continue;
+        }
+        let display = displays.get(canonical).cloned().unwrap_or_default();
+        match surface_module(source, canonical) {
+            Ok(module) => {
+                report.surface_valid += 1;
+                modules.insert(canonical.clone(), module);
+            }
+            Err(error) => record_issue(
+                &mut report.surface_failures,
+                format!("{display}: {}", first_line(&format!("{error:#}"))),
+            ),
+        }
+    }
+
+    // Tier 2 (signature-valid) and tier 3 (body-valid): only attempted for
+    // files whose surface AST is valid. Each file is validated as if it were
+    // the entry point of its own program, pulling in its transitive relative
+    // imports so cross-module type and call references resolve the same way
+    // a real build would see them. Tier 3 is expected to fail widely: the
+    // typed path does not implement `Expr::Primitive` yet (tracked on a
+    // separate branch), and almost every non-trivial body uses a primitive.
+    for canonical in modules.keys() {
+        let display = displays.get(canonical).cloned().unwrap_or_default();
+        let graph = match build_typed_graph(canonical, &modules) {
+            Ok(graph) => graph,
+            Err(error) => {
+                record_issue(
+                    &mut report.signature_failures,
+                    format!("{display}: {}", first_line(&format!("{error:#}"))),
+                );
+                continue;
+            }
+        };
+        let inputs: Vec<TypedModuleInput> = graph
+            .iter()
+            .map(|(alias, path)| TypedModuleInput {
+                alias: alias.as_str(),
+                module: &modules[path],
+            })
+            .collect();
+        match typed_lower::lower_typed_signatures(inputs.iter().copied()) {
+            Ok(signature_index) => {
+                report.signature_valid += 1;
+                match typed_body::lower_typed_bodies(inputs.iter().copied(), &signature_index) {
+                    Ok(_) => report.body_valid += 1,
+                    Err(error) => record_issue(
+                        &mut report.body_failures,
+                        format!("{display}: {}", first_line(&format!("{error:#}"))),
+                    ),
+                }
+            }
+            Err(error) => record_issue(
+                &mut report.signature_failures,
+                format!("{display}: {}", first_line(&format!("{error:#}"))),
+            ),
+        }
+    }
+
+    let candidates = report.converted + report.already_sexpr - report.project_manifests;
     println!("scanned: {}", report.scanned);
     println!("already-sexpr: {}", report.already_sexpr);
     println!("converted: {}", report.converted);
-    println!("typed-valid: {}", report.valid);
     println!(
         "unsupported: {}",
-        report.unsupported.values().sum::<usize>()
+        report.conversion_failures.values().sum::<usize>()
     );
-    for (reason, count) in report.unsupported {
+    for (reason, count) in &report.conversion_failures {
+        println!("  {count:>3}  {reason}");
+    }
+    println!(
+        "project-manifests-excluded: {} (own grammar, validated by project_context.rs, not a module-lowering tier)",
+        report.project_manifests
+    );
+    println!();
+    println!("surface-valid: {}/{}", report.surface_valid, candidates);
+    println!(
+        "surface-invalid: {}",
+        report.surface_failures.values().sum::<usize>()
+    );
+    for (reason, count) in &report.surface_failures {
+        println!("  {count:>3}  {reason}");
+    }
+    println!();
+    println!(
+        "signature-valid: {}/{}",
+        report.signature_valid, report.surface_valid
+    );
+    println!(
+        "signature-invalid: {}",
+        report.signature_failures.values().sum::<usize>()
+    );
+    for (reason, count) in &report.signature_failures {
+        println!("  {count:>3}  {reason}");
+    }
+    println!();
+    println!(
+        "body-valid: {}/{}",
+        report.body_valid, report.signature_valid
+    );
+    println!(
+        "body-invalid: {}",
+        report.body_failures.values().sum::<usize>()
+    );
+    for (reason, count) in &report.body_failures {
         println!("  {count:>3}  {reason}");
     }
     Ok(())
+}
+
+/// `project.vibra` is the fixed manifest file name recognized by
+/// `project_context::PROJECT_MANIFEST`. It is a package descriptor, not a
+/// language module, and uses a different top-level grammar.
+fn is_project_manifest(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()) == Some("project.vibra")
+}
+
+/// Parse and lower a single S-expression source into a typed surface AST
+/// module, identified by its own canonical path (tier 1: surface-valid).
+fn surface_module(source: &str, path: &Path) -> Result<Module> {
+    let document = vibra::syntax::parse(source).map_err(|errors| anyhow::anyhow!("{errors:?}"))?;
+    let document_id = DocumentId::from_path(path);
+    vibra::ast::lower_document_with_id(&document, document_id)
+        .map_err(|error| anyhow::anyhow!("{error}"))
+}
+
+/// Build the transitive typed-module graph for `entry`, treating it as the
+/// entry point of its own program: entry gets the empty (root) alias, and
+/// each relatively-imported module is added under the exact alias its
+/// importer declared for it. The same physical file can legitimately appear
+/// more than once under different aliases (the corpus does this, e.g.
+/// `stdlib/src/fs.vibra` imports `./error.vibra` twice, as `error` and
+/// `error-lib`), so edges are deduplicated on `(alias, path)`, not on `path`
+/// alone. `@`-prefixed project imports are skipped: this standalone tool has
+/// no `project.vibra` resolution, matching the same limitation the migrator
+/// already accepts for named-call signature discovery.
+fn build_typed_graph(
+    entry: &Path,
+    modules: &BTreeMap<PathBuf, Module>,
+) -> Result<Vec<(String, PathBuf)>> {
+    let mut order = Vec::new();
+    let mut visited = BTreeSet::new();
+    let mut queue = VecDeque::new();
+    queue.push_back((String::new(), entry.to_path_buf()));
+    while let Some((alias, path)) = queue.pop_front() {
+        if !visited.insert((alias.clone(), path.clone())) {
+            continue;
+        }
+        if visited.len() > 2000 {
+            bail!(
+                "typed module graph exceeded its safety cap while resolving {}",
+                entry.display()
+            );
+        }
+        let module = modules
+            .get(&path)
+            .with_context(|| format!("module {} is not surface-valid", path.display()))?;
+        let Some(parent) = path.parent() else {
+            order.push((alias, path));
+            continue;
+        };
+        for form in &module.forms {
+            let TopLevel::Import(import) = form else {
+                continue;
+            };
+            if import.path.value.starts_with('@') {
+                continue;
+            }
+            let Ok(target) = fs::canonicalize(parent.join(&import.path.value)) else {
+                continue;
+            };
+            if !modules.contains_key(&target) {
+                continue;
+            }
+            queue.push_back((import.alias.value.clone(), target));
+        }
+        order.push((alias, path));
+    }
+    Ok(order)
 }
 
 fn collect(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
@@ -1322,6 +1526,12 @@ fn infer_type(value: &Value) -> Result<&'static str> {
     }
 }
 
+/// Surface-tier check used only by the unit tests below, which validate
+/// in-memory conversion output that has no real file path (and therefore no
+/// meaningful document identity for the tiered pipeline `main` runs). Kept
+/// separate from `surface_module`, which the CLI report uses and which needs
+/// a path to derive a stable `DocumentId`.
+#[cfg(test)]
 fn validate(source: &str) -> Result<()> {
     let document = vibra::syntax::parse(source).map_err(|errors| anyhow::anyhow!("{errors:?}"))?;
     vibra::ast::lower_document(&document).map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -1356,8 +1566,8 @@ fn quoted(value: &str) -> String {
     format!("{value:?}")
 }
 
-fn record_issue(report: &mut Report, reason: String) {
-    *report.unsupported.entry(reason).or_default() += 1;
+fn record_issue(bucket: &mut BTreeMap<String, usize>, reason: String) {
+    *bucket.entry(reason).or_default() += 1;
 }
 
 fn first_line(value: &str) -> &str {
