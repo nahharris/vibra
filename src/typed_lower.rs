@@ -262,6 +262,15 @@ fn lower_function(
     declared_aliases: &BTreeSet<String>,
     index: &mut TypedSignatureIndex,
 ) -> Result<String> {
+    if crate::lower::typed_primitive_op(&function.name.value).is_some() {
+        bail!(
+            "typed function `{}` cannot be named `{}`: unqualified calls to that name always \
+             resolve to the built-in primitive operator, so the declaration would be permanently \
+             unreachable",
+            qualify(module_alias, &function.name.value),
+            function.name.value
+        );
+    }
     let inherited_generics = inherited_parameters.iter().cloned().collect();
     let annotations = annotations(
         &function.annotations,
