@@ -21,6 +21,7 @@ pub mod plugin;
 pub mod project;
 pub mod project_context;
 pub mod runtime;
+pub mod sexpr_semantic;
 pub mod sexpr_tooling;
 pub mod syntax;
 pub mod test_runner;

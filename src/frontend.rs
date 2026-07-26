@@ -51,6 +51,10 @@ pub struct SurfaceProgram {
     pub module_parts: BTreeMap<PathBuf, Vec<PathBuf>>,
     /// Canonical compile-time input path to its raw-content SHA-256.
     pub embedded_files: BTreeMap<PathBuf, String>,
+    /// Resolved import alias -> target module path, keyed by module path.
+    /// Reused by editor tooling (e.g. the S-expression semantic index) so
+    /// import resolution has exactly one implementation.
+    pub imports: BTreeMap<PathBuf, BTreeMap<String, PathBuf>>,
 }
 
 const MAX_TEMPLATE_SOURCE_BYTES: usize = 1_048_576;
@@ -113,6 +117,7 @@ pub fn load_surface_program(entry: &Path, flags: &CompilationFlags) -> Result<Su
         modules,
         module_parts,
         embedded_files,
+        imports,
     })
 }
 
