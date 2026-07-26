@@ -26,7 +26,7 @@ pub struct TypedBodyIndex {
     constants: HashMap<String, Expr>,
     tests: HashMap<String, Vec<Statement>>,
     origins: HashMap<String, SourceLocation>,
-    expression_origins: HashMap<String, Vec<Origin>>,
+    node_origins: HashMap<String, Vec<Origin>>,
     let_types: HashMap<String, HashMap<String, TypeRef>>,
     lexical_bindings: HashMap<String, BTreeSet<String>>,
 }
@@ -158,11 +158,6 @@ pub fn materialize_typed_functions(
                 .get(key)
                 .map(format_location)
                 .unwrap_or_else(|| "at unknown source".to_string());
-            let origin_chain = bodies
-                .expression_origins
-                .get(key)
-                .map(|origins| format!("; expression origins {origins:?}"))
-                .unwrap_or_default();
             if !signature.type_params.is_empty() {
                 bail!(
                     "typed executable subset does not support generic function `{key}` {location}"
@@ -180,6 +175,12 @@ pub fn materialize_typed_functions(
                 .cloned()
                 .zip(signature.arg_types.iter().cloned())
                 .collect();
+            let mut origins = OriginCursor::new(
+                bodies
+                    .node_origins
+                    .get(key)
+                    .with_context(|| format!("typed body `{key}` has no node origins"))?,
+            );
             let checked = validate_statements(
                 statements,
                 &mut locals,
@@ -190,10 +191,11 @@ pub fn materialize_typed_functions(
                 0,
                 false,
                 key,
+                &mut origins,
             )
-            .with_context(|| {
-                format!("validating typed function `{key}` {location}{origin_chain}")
-            })?;
+            .map_err(|error| origins.annotate(error))
+            .with_context(|| format!("validating typed function `{key}`"))?;
+            origins.finish()?;
             validate_function_body(&checked, &signature.return_type)
                 .with_context(|| format!("validating returns in typed function `{key}`"))?;
             validate_task_handles(&checked)
@@ -280,25 +282,43 @@ fn validate_statements(
     loop_depth: usize,
     in_task: bool,
     context: &str,
+    origins: &mut OriginCursor<'_>,
 ) -> Result<Vec<Statement>> {
     let mut checked = Vec::with_capacity(statements.len());
     for statement in statements {
+        let statement_origin = origins.enter()?;
         let statement = match statement {
-            Statement::Call(call) => {
-                Statement::Call(validate_call(call, locals, constants, signatures, context)?)
-            }
+            Statement::Call(call) => Statement::Call(validate_call(
+                call,
+                locals,
+                constants,
+                signatures,
+                context,
+                origins,
+                &statement_origin,
+            )?),
             Statement::Let { var, value } => {
                 if locals.contains_key(var) {
                     bail!("typed local `{var}` is already bound in `{context}`");
                 }
                 let (value, ty) = match value {
                     LetValue::Expr(expr) => {
-                        let expr = validate_expr(expr, locals, constants, signatures, context)?;
+                        let expr =
+                            validate_expr(expr, locals, constants, signatures, context, origins)?;
                         let ty = infer(&expr, locals, constants, context)?;
                         (LetValue::Expr(expr), ty)
                     }
                     LetValue::Call(call) => {
-                        let call = validate_call(call, locals, constants, signatures, context)?;
+                        let call_origin = origins.enter()?;
+                        let call = validate_call(
+                            call,
+                            locals,
+                            constants,
+                            signatures,
+                            context,
+                            origins,
+                            &call_origin,
+                        )?;
                         let ty = signatures.functions[&call.callee_key].return_type.clone();
                         (LetValue::Call(call), ty)
                     }
@@ -331,7 +351,7 @@ fn validate_statements(
                     } => inner.as_ref(),
                     _ => bail!("E-SET-002: typed symbol `{var}` is not writable"),
                 };
-                let value = validate_expr(value, locals, constants, signatures, context)?;
+                let value = validate_expr(value, locals, constants, signatures, context, origins)?;
                 let actual = infer(&value, locals, constants, context)?;
                 if writable != &actual {
                     bail!(
@@ -347,7 +367,7 @@ fn validate_statements(
                 if in_task {
                     bail!("typed task bodies cannot return from their enclosing function");
                 }
-                let expr = validate_expr(expr, locals, constants, signatures, context)?;
+                let expr = validate_expr(expr, locals, constants, signatures, context, origins)?;
                 let actual = infer(&expr, locals, constants, context)?;
                 if &actual != return_type {
                     bail!("typed return in `{context}` expects {return_type:?}, got {actual:?}");
@@ -359,7 +379,7 @@ fn validate_statements(
                 then_body,
                 else_body,
             } => {
-                let cond = validate_expr(cond, locals, constants, signatures, context)?;
+                let cond = validate_expr(cond, locals, constants, signatures, context, origins)?;
                 if infer(&cond, locals, constants, context)? != TypeRef::Bool {
                     bail!("typed if condition in `{context}` must be bool");
                 }
@@ -373,6 +393,7 @@ fn validate_statements(
                     loop_depth,
                     in_task,
                     context,
+                    origins,
                 )?;
                 let else_body = validate_statements(
                     else_body,
@@ -384,6 +405,7 @@ fn validate_statements(
                     loop_depth,
                     in_task,
                     context,
+                    origins,
                 )?;
                 Statement::If {
                     cond,
@@ -392,7 +414,7 @@ fn validate_statements(
                 }
             }
             Statement::While { cond, body } => {
-                let cond = validate_expr(cond, locals, constants, signatures, context)?;
+                let cond = validate_expr(cond, locals, constants, signatures, context, origins)?;
                 if infer(&cond, locals, constants, context)? != TypeRef::Bool {
                     bail!("typed while condition in `{context}` must be bool");
                 }
@@ -406,20 +428,24 @@ fn validate_statements(
                     loop_depth + 1,
                     in_task,
                     context,
+                    origins,
                 )?;
                 Statement::While { cond, body }
             }
             Statement::For { var, source, body } => {
-                let source = validate_expr(source, locals, constants, signatures, context)?;
+                let source =
+                    validate_expr(source, locals, constants, signatures, context, origins)?;
                 let item = match infer(&source, locals, constants, context)? {
                     TypeRef::Array(item) => *item,
                     TypeRef::Range => TypeRef::Int64,
                     other => bail!("typed for source must be array or range, got {other:?}"),
                 };
                 let mut nested = locals.clone();
-                if nested.insert(var.clone(), item).is_some() {
+                if nested.contains_key(var) {
+                    origins.select(&statement_origin);
                     bail!("typed for binding `{var}` shadows an existing local");
                 }
+                nested.insert(var.clone(), item);
                 let body = validate_statements(
                     body,
                     &mut nested,
@@ -430,6 +456,7 @@ fn validate_statements(
                     loop_depth + 1,
                     in_task,
                     context,
+                    origins,
                 )?;
                 Statement::For {
                     var: var.clone(),
@@ -461,6 +488,7 @@ fn validate_statements(
                     0,
                     true,
                     context,
+                    origins,
                 )?;
                 let runtime_captures = captures
                     .iter()
@@ -477,9 +505,9 @@ fn validate_statements(
                 }
                 statement.clone()
             }
-            Statement::Eval(expr) => {
-                Statement::Eval(validate_expr(expr, locals, constants, signatures, context)?)
-            }
+            Statement::Eval(expr) => Statement::Eval(validate_expr(
+                expr, locals, constants, signatures, context, origins,
+            )?),
             Statement::Match { .. } => {
                 bail!("typed match remains staged with enum and interface semantics")
             }
@@ -498,7 +526,10 @@ fn validate_call(
     constants: &HashMap<String, RuntimeValue>,
     signatures: &TypedSignatureIndex,
     context: &str,
+    origins: &mut OriginCursor<'_>,
+    call_origin: &Origin,
 ) -> Result<Call> {
+    origins.select(call_origin);
     if !call.type_args.is_empty() {
         bail!("typed generic calls remain staged");
     }
@@ -547,7 +578,8 @@ fn validate_call(
         .iter()
         .zip(&signature.arg_types)
         .map(|(argument, expected)| {
-            let argument = validate_expr(argument, locals, constants, signatures, context)?;
+            let argument =
+                validate_expr(argument, locals, constants, signatures, context, origins)?;
             let actual = infer(&argument, locals, constants, context)?;
             if &actual != expected {
                 bail!(
@@ -571,9 +603,10 @@ fn validate_expr(
     constants: &HashMap<String, RuntimeValue>,
     signatures: &TypedSignatureIndex,
     context: &str,
+    origins: &mut OriginCursor<'_>,
 ) -> Result<Expr> {
-    let recurse = |expr| validate_expr(expr, locals, constants, signatures, context);
-    Ok(match expr {
+    let expression_origin = origins.enter()?;
+    let validated = match expr {
         Expr::Value(_) => expr.clone(),
         Expr::VarRef(name) => {
             if locals.contains_key(name) {
@@ -611,33 +644,75 @@ fn validate_expr(
             }
         }
         Expr::Call { call, return_type } => Expr::Call {
-            call: Box::new(validate_call(call, locals, constants, signatures, context)?),
+            call: Box::new(validate_call(
+                call,
+                locals,
+                constants,
+                signatures,
+                context,
+                origins,
+                &expression_origin,
+            )?),
             return_type: return_type.clone(),
         },
         Expr::Record(fields) => Expr::Record(
             fields
                 .iter()
-                .map(|(name, value)| Ok((name.clone(), recurse(value)?)))
+                .map(|(name, value)| {
+                    Ok((
+                        name.clone(),
+                        validate_expr(value, locals, constants, signatures, context, origins)?,
+                    ))
+                })
                 .collect::<Result<_>>()?,
         ),
-        Expr::Tuple(items) => Expr::Tuple(items.iter().map(recurse).collect::<Result<_>>()?),
-        Expr::Array(items) => Expr::Array(items.iter().map(recurse).collect::<Result<_>>()?),
+        Expr::Tuple(items) => Expr::Tuple(
+            items
+                .iter()
+                .map(|item| validate_expr(item, locals, constants, signatures, context, origins))
+                .collect::<Result<_>>()?,
+        ),
+        Expr::Array(items) => Expr::Array(
+            items
+                .iter()
+                .map(|item| validate_expr(item, locals, constants, signatures, context, origins))
+                .collect::<Result<_>>()?,
+        ),
         Expr::Map(items) => Expr::Map(
             items
                 .iter()
-                .map(|(key, value)| Ok((recurse(key)?, recurse(value)?)))
+                .map(|(key, value)| {
+                    Ok((
+                        validate_expr(key, locals, constants, signatures, context, origins)?,
+                        validate_expr(value, locals, constants, signatures, context, origins)?,
+                    ))
+                })
                 .collect::<Result<_>>()?,
         ),
-        Expr::Mutable(inner) => Expr::Mutable(Box::new(recurse(inner)?)),
+        Expr::Mutable(inner) => Expr::Mutable(Box::new(validate_expr(
+            inner, locals, constants, signatures, context, origins,
+        )?)),
         Expr::Reference { target, mutable } => Expr::Reference {
-            target: Box::new(recurse(target)?),
+            target: Box::new(validate_expr(
+                target, locals, constants, signatures, context, origins,
+            )?),
             mutable: *mutable,
         },
         Expr::Range { start, end, step } => {
-            let start = recurse(start)?;
-            let end = recurse(end)?;
-            let step = recurse(step)?;
-            for value in [&start, &end, &step] {
+            let start = validate_expr(start, locals, constants, signatures, context, origins)?;
+            let start_origin = origins.selected().cloned();
+            let end = validate_expr(end, locals, constants, signatures, context, origins)?;
+            let end_origin = origins.selected().cloned();
+            let step = validate_expr(step, locals, constants, signatures, context, origins)?;
+            let step_origin = origins.selected().cloned();
+            for (value, origin) in [
+                (&start, start_origin.as_ref()),
+                (&end, end_origin.as_ref()),
+                (&step, step_origin.as_ref()),
+            ] {
+                if let Some(origin) = origin {
+                    origins.select(origin);
+                }
                 if infer(value, locals, constants, context)? != TypeRef::Int64 {
                     bail!("typed range bounds in `{context}` must be int64");
                 }
@@ -653,7 +728,9 @@ fn validate_expr(
         Expr::Cast { .. } | Expr::PolicyNarrow { .. } | Expr::If { .. } => {
             bail!("typed cast, policy, and expression-if forms remain staged")
         }
-    })
+    };
+    origins.select(&expression_origin);
+    Ok(validated)
 }
 
 fn infer(
@@ -728,7 +805,6 @@ fn lower_function(
     .with_context(|| format!("lowering typed function `{key}`"))?;
     let mut let_types = HashMap::new();
     let mut lexical_bindings = BTreeSet::new();
-    let mut expression_origins = Vec::new();
     collect_body_metadata(
         &function.body,
         module_alias,
@@ -736,8 +812,9 @@ fn lower_function(
         &generic_names,
         &mut let_types,
         &mut lexical_bindings,
-        &mut expression_origins,
     )?;
+    let mut node_origins = Vec::new();
+    collect_statement_origins(&function.body, &mut node_origins);
     if bodies
         .functions
         .insert(key.to_string(), FunctionBody::User { statements })
@@ -754,9 +831,7 @@ fn lower_function(
     bodies
         .lexical_bindings
         .insert(key.to_string(), lexical_bindings);
-    bodies
-        .expression_origins
-        .insert(key.to_string(), expression_origins);
+    bodies.node_origins.insert(key.to_string(), node_origins);
     Ok(())
 }
 
@@ -779,10 +854,8 @@ fn collect_body_metadata(
     generics: &BTreeSet<String>,
     let_types: &mut HashMap<String, TypeRef>,
     bindings: &mut BTreeSet<String>,
-    origins: &mut Vec<Origin>,
 ) -> Result<()> {
     for expression in expressions {
-        origins.push(expression.origin.clone());
         match &expression.value {
             ExprKind::Do(body) | ExprKind::While { body, .. } | ExprKind::Task { body, .. } => {
                 collect_body_metadata(
@@ -792,7 +865,6 @@ fn collect_body_metadata(
                     generics,
                     let_types,
                     bindings,
-                    origins,
                 )?
             }
             ExprKind::If {
@@ -807,7 +879,6 @@ fn collect_body_metadata(
                     generics,
                     let_types,
                     bindings,
-                    origins,
                 )?;
                 collect_body_metadata(
                     else_body,
@@ -816,7 +887,6 @@ fn collect_body_metadata(
                     generics,
                     let_types,
                     bindings,
-                    origins,
                 )?;
             }
             ExprKind::Match { cases, .. } => {
@@ -828,7 +898,6 @@ fn collect_body_metadata(
                         generics,
                         let_types,
                         bindings,
-                        origins,
                     )?;
                 }
             }
@@ -855,7 +924,6 @@ fn collect_body_metadata(
                 generics,
                 let_types,
                 bindings,
-                origins,
             )?,
             ExprKind::For { binding, body, .. } => {
                 if !bindings.insert(binding.value.clone()) {
@@ -871,13 +939,212 @@ fn collect_body_metadata(
                     generics,
                     let_types,
                     bindings,
-                    origins,
                 )?;
             }
             _ => {}
         }
     }
     Ok(())
+}
+
+struct OriginCursor<'a> {
+    origins: &'a [Origin],
+    next: usize,
+    selected: Option<Origin>,
+}
+
+impl<'a> OriginCursor<'a> {
+    fn new(origins: &'a [Origin]) -> Self {
+        Self {
+            origins,
+            next: 0,
+            selected: None,
+        }
+    }
+
+    fn enter(&mut self) -> Result<Origin> {
+        let origin = self.origins.get(self.next).cloned().with_context(|| {
+            format!(
+                "typed IR node {} has no corresponding source origin ({} available)",
+                self.next,
+                self.origins.len()
+            )
+        })?;
+        self.next += 1;
+        self.selected = Some(origin.clone());
+        Ok(origin)
+    }
+
+    fn select(&mut self, origin: &Origin) {
+        self.selected = Some(origin.clone());
+    }
+
+    fn selected(&self) -> Option<&Origin> {
+        self.selected.as_ref()
+    }
+
+    fn annotate(&self, error: anyhow::Error) -> anyhow::Error {
+        match &self.selected {
+            Some(origin) => error.context(format_origin(origin)),
+            None => error.context("at unknown typed IR node"),
+        }
+    }
+
+    fn finish(&self) -> Result<()> {
+        if self.next != self.origins.len() {
+            bail!(
+                "typed IR/source origin mismatch: consumed {} of {} node origins",
+                self.next,
+                self.origins.len()
+            );
+        }
+        Ok(())
+    }
+}
+
+fn collect_statement_origins(expressions: &[AstExpr], origins: &mut Vec<Origin>) {
+    for expression in expressions {
+        if let ExprKind::Do(items) = &expression.value {
+            collect_statement_origins(items, origins);
+        } else {
+            collect_statement_origin(expression, origins);
+        }
+    }
+}
+
+fn collect_statement_origin(expression: &AstExpr, origins: &mut Vec<Origin>) {
+    origins.push(expression.origin.clone());
+    match &expression.value {
+        ExprKind::Call { arguments, .. } => collect_expr_origins(arguments, origins),
+        ExprKind::Let { value, .. } | ExprKind::Set { value, .. } => {
+            collect_expr_origin(value, origins)
+        }
+        ExprKind::Return(Some(value)) => collect_expr_origin(value, origins),
+        // A source-level bare return lowers to a synthetic `unit` IR
+        // expression. Give that child the statement origin so the one-to-one
+        // IR mapping remains total.
+        ExprKind::Return(None) => origins.push(expression.origin.clone()),
+        ExprKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_expr_origin(condition, origins);
+            collect_statement_origins(then_body, origins);
+            collect_statement_origins(else_body, origins);
+        }
+        ExprKind::While { condition, body } => {
+            collect_expr_origin(condition, origins);
+            collect_statement_origins(body, origins);
+        }
+        ExprKind::For { source, body, .. } => {
+            collect_expr_origin(source, origins);
+            collect_statement_origins(body, origins);
+        }
+        ExprKind::Match { target, cases } => {
+            collect_expr_origin(target, origins);
+            for case in cases {
+                collect_statement_origins(&case.body, origins);
+            }
+        }
+        ExprKind::Task { body, .. } => collect_statement_origins(body, origins),
+        ExprKind::Break | ExprKind::Continue | ExprKind::Join { .. } | ExprKind::Spawn { .. } => {}
+        _ => {
+            // Expression statements lower to an `Eval` statement containing
+            // a distinct expression IR node.
+            origins.push(expression.origin.clone());
+            collect_expr_children(expression, origins);
+        }
+    }
+}
+
+fn collect_expr_origins(expressions: &[AstExpr], origins: &mut Vec<Origin>) {
+    for expression in expressions {
+        collect_expr_origin(expression, origins);
+    }
+}
+
+fn collect_expr_origin(expression: &AstExpr, origins: &mut Vec<Origin>) {
+    origins.push(expression.origin.clone());
+    collect_expr_children(expression, origins);
+}
+
+fn collect_expr_children(expression: &AstExpr, origins: &mut Vec<Origin>) {
+    match &expression.value {
+        ExprKind::Call { arguments, .. } => collect_expr_origins(arguments, origins),
+        ExprKind::Record(fields) => {
+            for field in fields {
+                collect_expr_origin(&field.value, origins);
+            }
+        }
+        ExprKind::Tuple(items) | ExprKind::Array(items) => collect_expr_origins(items, origins),
+        ExprKind::Map(items) => {
+            for (key, value) in items {
+                collect_expr_origin(key, origins);
+                collect_expr_origin(value, origins);
+            }
+        }
+        ExprKind::Mutable(value) | ExprKind::ReferenceOf(value) | ExprKind::Cast { value, .. } => {
+            collect_expr_origin(value, origins)
+        }
+        ExprKind::Range(start, end, step) => {
+            collect_expr_origin(start, origins);
+            collect_expr_origin(end, origins);
+            collect_expr_origin(step, origins);
+        }
+        ExprKind::Literal(_) | ExprKind::Reference(_) => {}
+        _ => {}
+    }
+}
+
+fn format_origin(origin: &Origin) -> String {
+    fn append(origin: &Origin, output: &mut String) {
+        match origin {
+            Origin::Source(span) => {
+                output.push_str(&format!("source bytes {}..{}", span.start, span.end));
+            }
+            Origin::DocumentSource { document, span, .. } => {
+                output.push_str(&format!(
+                    "document {} bytes {}..{}",
+                    document.raw(),
+                    span.start,
+                    span.end
+                ));
+            }
+            Origin::Expansion {
+                call_site,
+                definition,
+                parent,
+            } => {
+                output.push_str(&format!(
+                    "macro call bytes {}..{}; macro definition bytes {}..{}; generated from ",
+                    call_site.start, call_site.end, definition.start, definition.end
+                ));
+                append(parent, output);
+            }
+            Origin::DocumentExpansion {
+                call_site,
+                definition,
+                parent,
+                ..
+            } => {
+                output.push_str(&format!(
+                    "macro call document {} bytes {}..{}; macro definition document {} bytes {}..{}; generated from ",
+                    call_site.document.raw(),
+                    call_site.span.start,
+                    call_site.span.end,
+                    definition.document.raw(),
+                    definition.span.start,
+                    definition.span.end
+                ));
+                append(parent, output);
+            }
+        }
+    }
+
+    let mut output = String::from("at ");
+    append(origin, &mut output);
+    output
 }
 
 fn lower_statements(
@@ -1454,11 +1721,22 @@ mod tests {
     #[test]
     fn validation_diagnostics_retain_macro_expansion_origins() {
         let expanded = crate::ast::expand_typed_macros(module(
-            r#"(macro wrong () expr-syntax
+            r#"(macro unrelated () expr-syntax
+  (do (quote expr-syntax 1)))
+(macro wrong () expr-syntax
   (do (quote expr-syntax true)))
-(fn bad () int64 (do (return (wrong))))"#,
+(fn bad () int64 (do (unrelated) (return (wrong))))"#,
         ))
         .unwrap();
+        let TopLevel::Function(function) = &expanded.forms[0] else {
+            panic!("expected expanded function");
+        };
+        let unrelated_origin = &function.body[0].origin;
+        let ExprKind::Return(Some(wrong)) = &function.body[1].value else {
+            panic!("expected return");
+        };
+        let expected_origin = format_origin(&wrong.origin);
+        let unrelated_origin = format_origin(unrelated_origin);
         let inputs = [TypedModuleInput {
             alias: "",
             module: &expanded,
@@ -1466,6 +1744,70 @@ mod tests {
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
         let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
         let error = materialize_typed_functions(&signatures, &bodies).unwrap_err();
-        assert!(format!("{error:#}").contains("DocumentExpansion"));
+        let error = format!("{error:#}");
+        assert!(error.contains(&expected_origin), "{error}");
+        assert!(!error.contains(&unrelated_origin), "{error}");
+        assert!(!error.contains("expression origins"), "{error}");
+    }
+
+    #[test]
+    fn for_shadowing_selects_binding_statement_after_macro_source_validation() {
+        let expanded = crate::ast::expand_typed_macros(module(
+            r#"(macro source () expr-syntax
+  (do (quote expr-syntax (array 1))))
+(fn bad ((item int64)) void
+  (do (for item (source) (do unit))))"#,
+        ))
+        .unwrap();
+        let TopLevel::Function(function) = &expanded.forms[0] else {
+            panic!("expected expanded function");
+        };
+        let statement_origin = format_origin(&function.body[0].origin);
+        let ExprKind::For { source, .. } = &function.body[0].value else {
+            panic!("expected for statement");
+        };
+        let source_origin = format_origin(&source.origin);
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &expanded,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains(&statement_origin), "{error}");
+        assert!(!error.contains(&source_origin), "{error}");
+    }
+
+    #[test]
+    fn range_validation_selects_the_exact_failing_bound_origin() {
+        let expanded = crate::ast::expand_typed_macros(module(
+            r#"(macro wrong-bound () expr-syntax
+  (do (quote expr-syntax true)))
+(fn bad () void (do (range 0 (wrong-bound) 1)))"#,
+        ))
+        .unwrap();
+        let TopLevel::Function(function) = &expanded.forms[0] else {
+            panic!("expected expanded function");
+        };
+        let range_origin = format_origin(&function.body[0].origin);
+        let ExprKind::Range(_, end, _) = &function.body[0].value else {
+            panic!("expected range expression");
+        };
+        let bound_origin = format_origin(&end.origin);
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &expanded,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains(&bound_origin), "{error}");
+        assert!(!error.contains(&range_origin), "{error}");
     }
 }
