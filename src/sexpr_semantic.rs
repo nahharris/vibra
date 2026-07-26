@@ -375,7 +375,9 @@ fn visit_expr(expr: &Expr, context: &DocContext<'_>, facts: &mut Vec<SemanticFac
             visit_expr(end, context, facts);
             visit_expr(step, context, facts);
         }
-        ExprKind::Convert { value, into, .. } | ExprKind::Cast { value, into } => {
+        ExprKind::Convert { value, into, .. }
+        | ExprKind::Cast { value, into }
+        | ExprKind::PolicyNarrow { value, into } => {
             visit_expr(value, context, facts);
             visit_type(into, context, facts);
         }

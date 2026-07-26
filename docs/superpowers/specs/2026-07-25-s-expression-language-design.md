@@ -263,6 +263,7 @@ expr = atom
      | "(", "range", expr, expr, expr, ")"
      | "(", "convert", expr, type-expr, literal, ")"
      | "(", "cast", expr, type-expr, ")"
+     | "(", "policy.narrow", expr, type-expr, ")"
      | "(", "task", captures, body, ")"
      | "(", "spawn", symbol, captures, expr, ")"
      | "(", "join", symbol, symbol, ")" ;
@@ -293,6 +294,29 @@ are named and called. Only the unqualified spelling is unavailable, and within
 the declaring module an unqualified `and` therefore means the primitive rather
 than the local combinator. Primitive availability is uniform across every
 module and never depends on what a module happens to declare.
+
+Enum constructors have the same ambiguity to resolve, since ordinary call
+syntax makes `(mytype.tag ...)` indistinguishable from a qualified call to a
+function literally named `tag`. Resolution commits to the enum-constructor
+reading only on a full match: the qualified prefix must name a registered
+enum type, *and* the suffix must be one of that enum's declared tags. A
+prefix match alone (the type exists, but the suffix is not one of its tags)
+falls through to ordinary call resolution rather than raising an enum-tag
+error -- otherwise a function that merely shares a name with an enum type,
+such as the standard library's `option.empty`, could never be called.
+
+`policy.narrow` is a distinct expression head, not a spelling of `cast`.
+Narrowing a `policy` value into a `capability` (or a more specific `policy`)
+requires subsumption checking -- the target's authority must already be
+covered by the source's -- which is a different rule from `cast`'s newtype
+conversion. Overloading `cast` on whether its target happens to be a
+policy/capability type would reintroduce shape-dependent meaning the rest of
+this contract removes; a distinct head also keeps the diagnostic honest when
+a narrow's target is not a policy or capability type at all, rather than
+letting it silently succeed or fail as an ordinary cast. `policy.narrow`
+target normalization and subsumption reuse the same relation module `cast`
+and `convert` use for their own checks, so all three stay defined in terms of
+one shared implementation rather than three separate ones.
 
 The current structured-concurrency, reference, mutation, range, conversion,
 cast, collection, checked-arithmetic, and scope rules remain unchanged.
@@ -659,6 +683,7 @@ filesystem changes remains an explicit CLI or LSP workspace action.
 | `$join`/into sibling | `(join handle result)` |
 | `$convert`/into/or siblings | `(convert value Type fallback)` |
 | `$cast`/into sibling | `(cast value Type)` |
+| `$policy.narrow`/into sibling | `(policy.narrow value Type)` |
 | leading `-private-name` | `(private (fn private-name ...))` |
 | `=doc`, `=where`, `=defs`, `=impl` | trailing `doc:`, `where:`, `defs:`, `impls:` attributes |
 

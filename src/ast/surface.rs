@@ -519,6 +519,10 @@ pub enum ExprKind {
         value: Box<Expr>,
         into: TypeExpr,
     },
+    PolicyNarrow {
+        value: Box<Expr>,
+        into: TypeExpr,
+    },
     Embed {
         path: Spanned<String>,
         format: Spanned<EmbedFormat>,
@@ -1373,6 +1377,13 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
         "cast" => {
             exact_arity("cast", &args, 2, node.span)?;
             ExprKind::Cast {
+                value: Box::new(parse_expr(args[0])?),
+                into: parse_type(args[1])?,
+            }
+        }
+        "policy.narrow" => {
+            exact_arity("policy.narrow", &args, 2, node.span)?;
+            ExprKind::PolicyNarrow {
                 value: Box::new(parse_expr(args[0])?),
                 into: parse_type(args[1])?,
             }

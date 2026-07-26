@@ -1114,6 +1114,7 @@ fn collect_body_metadata(
             | ExprKind::Mutable(value)
             | ExprKind::ReferenceOf(value)
             | ExprKind::Cast { value, .. }
+            | ExprKind::PolicyNarrow { value, .. }
             | ExprKind::Convert { value, .. } => collect_body_metadata(
                 std::slice::from_ref(value.as_ref()),
                 module_alias,
@@ -1306,9 +1307,10 @@ fn collect_expr_children(expression: &AstExpr, origins: &mut Vec<Origin>) {
                 collect_expr_origin(value, origins);
             }
         }
-        ExprKind::Mutable(value) | ExprKind::ReferenceOf(value) | ExprKind::Cast { value, .. } => {
-            collect_expr_origin(value, origins)
-        }
+        ExprKind::Mutable(value)
+        | ExprKind::ReferenceOf(value)
+        | ExprKind::Cast { value, .. }
+        | ExprKind::PolicyNarrow { value, .. } => collect_expr_origin(value, origins),
         ExprKind::Range(start, end, step) => {
             collect_expr_origin(start, origins);
             collect_expr_origin(end, origins);
@@ -1609,15 +1611,20 @@ fn lower_expr(
             end: Box::new(lower(end)?),
             step: Box::new(lower(step)?),
         },
-        ExprKind::Cast { value, into } => {
+        ExprKind::Cast { value, into } => Expr::Cast {
+            from: Box::new(lower(value)?),
+            target: lower_type(into, generics, module_alias, declared_aliases)?,
+        },
+        ExprKind::PolicyNarrow { value, into } => {
             let target = lower_type(into, generics, module_alias, declared_aliases)?;
             let from = Box::new(lower(value)?);
-            // The typed grammar has one sigil-free `cast` form; the legacy
-            // path split narrowing into a distinct `$policy.narrow` envelope
-            // because a capability/policy target requires subsumption
-            // checking (`policy_type_is_subset`) instead of the newtype-cast
-            // rule (`valid_cast_path`). Dispatch on the resolved target here
-            // so both frontends share one surface spelling.
+            // `policy.narrow` is its own head, distinct from `cast`: a
+            // capability/policy target needs subsumption checking
+            // (`policy_type_is_subset`) instead of the newtype-cast rule
+            // (`valid_cast_path`), so it must not be silently inferred from
+            // the target type of an otherwise-ordinary `cast`. Normalize a
+            // named alias down to the concrete `Capability`/`Policy` variant
+            // here, matching the legacy `$policy.narrow` envelope.
             if let Some(capability) = capability_body(&target, &signatures.aliases).cloned() {
                 Expr::PolicyNarrow {
                     from,
@@ -1629,7 +1636,9 @@ fn lower_expr(
                     target: TypeRef::Policy(policy),
                 }
             } else {
-                Expr::Cast { from, target }
+                bail!(
+                    "typed `policy.narrow` target must be a capability or policy type, got {target:?}"
+                );
             }
         }
         ExprKind::Convert { .. } => {
@@ -1778,10 +1787,19 @@ fn typed_primitive_head(callee: &str) -> Option<(PrimitiveOp, usize)> {
 }
 
 /// Resolve a call head as an enum constructor reference: the surface grammar
-/// has no dedicated constructor syntax, so `(mytype.tag ...)` is recognized
-/// as one only when the qualified prefix names a registered enum type alias.
-/// Does not check that the tag itself is defined; callers must check that
-/// against the returned enum's tags.
+/// has no dedicated constructor syntax, so `(mytype.tag ...)` is ambiguous
+/// with an ordinary qualified call to a function named `tag` declared under
+/// (or imported as) `mytype`. The stdlib itself has exactly this shape:
+/// `option` is a real enum, but `option.empty` is an ordinary function, not
+/// its `empty` tag (`option` only declares `some`/`none`).
+///
+/// Resolution therefore commits to the enum-constructor interpretation only
+/// on a *full* match: the qualified prefix must name a registered enum type
+/// alias, *and* the suffix must be one of that enum's declared tags. A
+/// prefix match alone (enum exists, tag does not) must fall through to
+/// ordinary call resolution rather than foreclosing it with a hard error --
+/// otherwise a real function that merely shares a name with an enum module
+/// can never be called.
 fn typed_enum_constructor_head(
     callee: &str,
     module_alias: &str,
@@ -1796,17 +1814,22 @@ fn typed_enum_constructor_head(
     } else {
         qualify(module_alias, enum_name)
     };
-    match signatures.aliases.get(&enum_key) {
-        Some(alias) if matches!(alias.body, TypeRef::Enum(_)) => Some((enum_key, tag.to_string())),
-        _ => None,
+    let alias = signatures.aliases.get(&enum_key)?;
+    let TypeRef::Enum(tags) = &alias.body else {
+        return None;
+    };
+    if !tags.contains_key(tag) {
+        return None;
     }
+    Some((enum_key, tag.to_string()))
 }
 
-/// Lower an enum-constructor call. Structural checks (enum/tag existence,
-/// payload arity) happen here, since the typed alias table is already fully
-/// populated by the time bodies are lowered; payload *type* compatibility is
-/// deferred to `validate_expr`, once locals/constants are available for
-/// inference.
+/// Lower an enum-constructor call. `typed_enum_constructor_head` already
+/// confirmed the enum and tag both exist, so the lookups below cannot
+/// meaningfully fail; they stay defensive rather than `.expect()` so a
+/// future change to that resolver fails as a diagnostic, not a panic.
+/// Payload arity is checked here; payload *type* compatibility is deferred
+/// to `validate_expr`, once locals/constants are available for inference.
 #[allow(clippy::too_many_arguments)]
 fn lower_enum_constructor_call(
     module_alias: &str,
@@ -2798,7 +2821,12 @@ mod tests {
     }
 
     #[test]
-    fn enum_constructor_unknown_tag_is_rejected_at_lowering_time() {
+    fn enum_constructor_unknown_tag_falls_through_to_ordinary_call_and_still_errors() {
+        // `color` is a real enum, but `mystery` is not one of its tags and
+        // `bad` never declares a `mystery` function either. A prefix match
+        // on the enum alone must not foreclose ordinary call resolution: it
+        // falls through and fails there, as a genuinely unresolvable callee,
+        // rather than misreporting an "unknown enum tag".
         let source = module(
             r#"(def color (enum (red void)))
 (fn bad () int64 (do (let chosen (color.mystery)) (return 1)))"#,
@@ -2809,8 +2837,41 @@ mod tests {
         }];
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
         let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
-        assert!(error.contains("unknown typed enum tag"), "{error}");
-        assert!(error.contains("mystery"), "{error}");
+        assert!(error.contains("unknown typed callee"), "{error}");
+        assert!(error.contains("color.mystery"), "{error}");
+    }
+
+    #[test]
+    fn enum_constructor_prefix_match_falls_through_to_a_real_qualified_function() {
+        // Mirrors the exact stdlib shape that motivated this fallthrough:
+        // `option.vibra` is compiled under its own import alias (`option`,
+        // matching how importers refer to it), declares an enum named
+        // `option` (tags `some`/`none`), and separately declares an
+        // ordinary function named `empty`. Its own code then calls that
+        // function via the fully self-qualified `(option.empty ...)` --
+        // exactly the shape the corpus migrator emits for the legacy
+        // `$option.empty: ...` call. This must resolve to the function, not
+        // hard-error as a bogus `empty` tag on the `option` enum.
+        let source = module(
+            "(def option (enum (some int64) (none void)))
+(fn empty ((ignored bool)) int64 (do (return 0)))
+(fn caller () int64 (do (return (option.empty true))))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "option",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let FunctionBody::User { statements } = &functions["option.caller"].body else {
+            panic!("expected user body");
+        };
+        assert!(
+            matches!(statements[0], Statement::Return(Expr::Call { .. })),
+            "expected an ordinary call to `option.empty`, got {:?}",
+            statements[0]
+        );
     }
 
     #[test]
@@ -2952,9 +3013,10 @@ mod tests {
     // once a policy-typed value can legally reach a typed function body.
 
     #[test]
-    fn policy_narrow_lowers_via_the_shared_cast_form_and_accepts_a_covering_narrow() {
-        let source =
-            module("(fn narrow () bool (do (return (cast subject (capability fs-read)))))");
+    fn policy_narrow_lowers_as_its_own_head_and_accepts_a_covering_narrow() {
+        let source = module(
+            "(fn narrow () bool (do (return (policy.narrow subject (capability fs-read)))))",
+        );
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -2963,12 +3025,12 @@ mod tests {
         let TopLevel::Function(function) = &source.forms[0] else {
             panic!("expected function");
         };
-        let ExprKind::Return(Some(cast_expr)) = &function.body[0].value else {
+        let ExprKind::Return(Some(narrow_expr)) = &function.body[0].value else {
             panic!("expected return");
         };
         let lowered = lower_expr(
             "",
-            cast_expr,
+            narrow_expr,
             &signatures,
             &BTreeSet::new(),
             &BTreeSet::new(),
@@ -2988,7 +3050,7 @@ mod tests {
         );
         let constants = HashMap::new();
         let mut node_origins = Vec::new();
-        collect_expr_origin(cast_expr, &mut node_origins);
+        collect_expr_origin(narrow_expr, &mut node_origins);
         let mut origins = OriginCursor::new(&node_origins);
         let validated = validate_expr(
             &lowered,
@@ -3005,8 +3067,9 @@ mod tests {
 
     #[test]
     fn policy_narrow_rejects_widening_authority() {
-        let source =
-            module("(fn narrow () bool (do (return (cast subject (capability net-connect)))))");
+        let source = module(
+            "(fn narrow () bool (do (return (policy.narrow subject (capability net-connect)))))",
+        );
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3015,12 +3078,12 @@ mod tests {
         let TopLevel::Function(function) = &source.forms[0] else {
             panic!("expected function");
         };
-        let ExprKind::Return(Some(cast_expr)) = &function.body[0].value else {
+        let ExprKind::Return(Some(narrow_expr)) = &function.body[0].value else {
             panic!("expected return");
         };
         let lowered = lower_expr(
             "",
-            cast_expr,
+            narrow_expr,
             &signatures,
             &BTreeSet::new(),
             &BTreeSet::new(),
@@ -3038,7 +3101,7 @@ mod tests {
         );
         let constants = HashMap::new();
         let mut node_origins = Vec::new();
-        collect_expr_origin(cast_expr, &mut node_origins);
+        collect_expr_origin(narrow_expr, &mut node_origins);
         let mut origins = OriginCursor::new(&node_origins);
         let error = format!(
             "{:#}",
@@ -3053,6 +3116,47 @@ mod tests {
             .unwrap_err()
         );
         assert!(error.contains("cannot widen authority"), "{error}");
+    }
+
+    #[test]
+    fn policy_narrow_on_a_non_policy_target_is_a_distinct_diagnostic() {
+        // `policy.narrow` is a distinct head from `cast` precisely so a
+        // narrow into a non-policy type stays honest: it must not silently
+        // succeed as an ordinary cast, nor be misreported as a widening
+        // failure -- it is a shape error on the target type itself.
+        let source = module("(fn bad () int64 (do (return (policy.narrow subject int64))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(
+            error.contains("must be a capability or policy type"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn cast_to_a_capability_type_is_not_silently_reinterpreted_as_policy_narrow() {
+        // Regression guard: `cast` must stay a plain cast even when its
+        // target happens to be a capability/policy type. Only the explicit
+        // `policy.narrow` head performs subsumption checking. `cast`
+        // remains staged, so this must fail as a (still-staged) cast, not
+        // succeed as an implicit narrow.
+        let source = module("(fn bad () bool (do (return (cast subject (capability fs-read)))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["bad"] else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::Cast { .. }) = &statements[0] else {
+            panic!("expected a plain cast, got {:?}", statements[0]);
+        };
     }
 
     // ---- Statement::Spawn / Statement::Join ----
