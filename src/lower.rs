@@ -7248,7 +7248,7 @@ fn primitive_op(name: &str) -> Option<(PrimitiveOp, usize)> {
     })
 }
 
-fn primitive_numeric(ty: &TypeRef) -> bool {
+pub(crate) fn primitive_numeric(ty: &TypeRef) -> bool {
     matches!(
         ty,
         TypeRef::Int8
@@ -7264,8 +7264,45 @@ fn primitive_numeric(ty: &TypeRef) -> bool {
     )
 }
 
-fn primitive_integer(ty: &TypeRef) -> bool {
+pub(crate) fn primitive_integer(ty: &TypeRef) -> bool {
     primitive_numeric(ty) && !matches!(ty, TypeRef::Float32 | TypeRef::Float64)
+}
+
+/// Sigil-free primitive operator table for the typed S-expression path.
+///
+/// The legacy YAML surface keys primitive operations with a `$` sigil (see
+/// `primitive_op` above); the typed S-expression surface drops the sigil, so
+/// heads are spelled bare, e.g. `(add 1 1)`. This table is otherwise the same
+/// name -> (op, arity) mapping. See the resolution-rule amendment in
+/// `docs/superpowers/specs/2026-07-25-s-expression-language-design.md` for
+/// how an unqualified call head is disambiguated from a user function of the
+/// same name.
+pub(crate) fn typed_primitive_op(name: &str) -> Option<(PrimitiveOp, usize)> {
+    use PrimitiveOp::*;
+    Some(match name {
+        "add" => (Add, 2),
+        "subtract" => (Subtract, 2),
+        "multiply" => (Multiply, 2),
+        "divide" => (Divide, 2),
+        "remainder" => (Remainder, 2),
+        "negate" => (Negate, 1),
+        "equal" => (Equal, 2),
+        "not-equal" => (NotEqual, 2),
+        "less-than" => (LessThan, 2),
+        "less-or-equal" => (LessOrEqual, 2),
+        "greater-than" => (GreaterThan, 2),
+        "greater-or-equal" => (GreaterOrEqual, 2),
+        "and" => (And, 2),
+        "or" => (Or, 2),
+        "not" => (Not, 1),
+        "bit-and" => (BitAnd, 2),
+        "bit-or" => (BitOr, 2),
+        "bit-xor" => (BitXor, 2),
+        "bit-not" => (BitNot, 1),
+        "shift-left" => (ShiftLeft, 2),
+        "shift-right" => (ShiftRight, 2),
+        _ => return None,
+    })
 }
 
 fn conversion_fallback_fits(expr: &Expr, target: &TypeRef) -> bool {

@@ -9,8 +9,9 @@ use crate::ast::{
 };
 use crate::body_semantics::{validate_function_body, validate_task_handles};
 use crate::lower::{
-    infer_expr_type, Call, Expr, FunctionBody, FunctionSig, LetValue, MatchArm, Pattern,
-    RuntimeValue, Statement, TypeRef,
+    infer_expr_type, primitive_integer, primitive_numeric, typed_primitive_op, Call, Expr,
+    FunctionBody, FunctionSig, LetValue, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement,
+    TypeRef,
 };
 use crate::typed_lower::{
     lower_type, qualify, TypedFunctionSignature, TypedModuleInput, TypedSignatureIndex,
@@ -723,7 +724,36 @@ fn validate_expr(
                 step: Box::new(step),
             }
         }
-        Expr::Primitive { .. } => bail!("typed primitive operations remain staged"),
+        Expr::Primitive { op, args, .. } => {
+            let args: Vec<Expr> = args
+                .iter()
+                .map(|arg| validate_expr(arg, locals, constants, signatures, context, origins))
+                .collect::<Result<_>>()?;
+            let types = args
+                .iter()
+                .map(|arg| infer(arg, locals, constants, context))
+                .collect::<Result<Vec<_>>>()?;
+            let operand_type = types[0].clone();
+            if types.iter().any(|ty| ty != &operand_type) {
+                bail!(
+                    "E-OP-001: `{}` operands must have the same primitive type; explicit `cast` is required",
+                    typed_primitive_name(*op)
+                );
+            }
+            if !typed_primitive_valid_for(*op, &operand_type) {
+                bail!(
+                    "E-OP-001: `{}` is not defined for {operand_type:?}",
+                    typed_primitive_name(*op)
+                );
+            }
+            let return_type = typed_primitive_return_type(*op, &operand_type);
+            Expr::Primitive {
+                op: *op,
+                args,
+                operand_type,
+                return_type,
+            }
+        }
         Expr::EnumConstructor { .. } => bail!("typed enum constructors remain staged"),
         Expr::Cast { .. } | Expr::PolicyNarrow { .. } | Expr::If { .. } => {
             bail!("typed cast, policy, and expression-if forms remain staged")
@@ -1015,7 +1045,17 @@ fn collect_statement_origins(expressions: &[AstExpr], origins: &mut Vec<Origin>)
 fn collect_statement_origin(expression: &AstExpr, origins: &mut Vec<Origin>) {
     origins.push(expression.origin.clone());
     match &expression.value {
-        ExprKind::Call { arguments, .. } => collect_expr_origins(arguments, origins),
+        ExprKind::Call { callee, arguments } => {
+            if typed_primitive_head(&callee.value).is_some() {
+                // Primitive calls in statement position lower to
+                // `Statement::Eval`, which validates the wrapped expression
+                // through the generic `validate_expr` path and therefore
+                // consumes one extra origin for the expression node itself,
+                // matching the default arm below.
+                origins.push(expression.origin.clone());
+            }
+            collect_expr_origins(arguments, origins)
+        }
         ExprKind::Let { value, .. } | ExprKind::Set { value, .. } => {
             collect_expr_origin(value, origins)
         }
@@ -1184,27 +1224,51 @@ fn lower_statement(
         lower_statements(module_alias, values, signatures, declared_aliases, generics)
     };
     Ok(match &expression.value {
-        ExprKind::Call { callee, arguments } => Statement::Call(lower_call(
-            module_alias,
-            &callee.value,
-            arguments,
-            signatures,
-            declared_aliases,
-            generics,
-        )?),
+        ExprKind::Call { callee, arguments } => match typed_primitive_head(&callee.value) {
+            Some((op, arity)) => Statement::Eval(lower_primitive_call(
+                module_alias,
+                &callee.value,
+                op,
+                arity,
+                arguments,
+                signatures,
+                declared_aliases,
+                generics,
+            )?),
+            None => Statement::Call(lower_call(
+                module_alias,
+                &callee.value,
+                arguments,
+                signatures,
+                declared_aliases,
+                generics,
+            )?),
+        },
         ExprKind::Let { name, ty, value } => {
             if let Some(ty) = ty {
                 let _ = lower_type(ty, generics, module_alias, declared_aliases)?;
             }
             let value = match &value.value {
-                ExprKind::Call { callee, arguments } => LetValue::Call(lower_call(
-                    module_alias,
-                    &callee.value,
-                    arguments,
-                    signatures,
-                    declared_aliases,
-                    generics,
-                )?),
+                ExprKind::Call { callee, arguments } => match typed_primitive_head(&callee.value) {
+                    Some((op, arity)) => LetValue::Expr(lower_primitive_call(
+                        module_alias,
+                        &callee.value,
+                        op,
+                        arity,
+                        arguments,
+                        signatures,
+                        declared_aliases,
+                        generics,
+                    )?),
+                    None => LetValue::Call(lower_call(
+                        module_alias,
+                        &callee.value,
+                        arguments,
+                        signatures,
+                        declared_aliases,
+                        generics,
+                    )?),
+                },
                 _ => LetValue::Expr(expr(value)?),
             };
             Statement::Let {
@@ -1294,26 +1358,43 @@ fn lower_expr(
     Ok(match &expression.value {
         ExprKind::Literal(value) => Expr::Value(lower_literal(value)),
         ExprKind::Reference(name) => Expr::VarRef(name.clone()),
-        ExprKind::Call { callee, arguments } => {
-            let call = lower_call(
+        ExprKind::Call { callee, arguments } => match typed_primitive_head(&callee.value) {
+            Some((op, arity)) => lower_primitive_call(
                 module_alias,
                 &callee.value,
+                op,
+                arity,
                 arguments,
                 signatures,
                 declared_aliases,
                 generics,
-            )?;
-            let return_type = signatures
-                .functions
-                .get(&call.callee_key)
-                .expect("resolved typed call")
-                .return_type
-                .clone();
-            Expr::Call {
-                call: Box::new(call),
-                return_type,
+            )?,
+            None => {
+                let call = lower_call(
+                    module_alias,
+                    &callee.value,
+                    arguments,
+                    signatures,
+                    declared_aliases,
+                    generics,
+                )?;
+                let return_type = signatures
+                    .functions
+                    .get(&call.callee_key)
+                    .with_context(|| {
+                        format!(
+                            "typed call resolved to callee `{}`, which has no signature",
+                            call.callee_key
+                        )
+                    })?
+                    .return_type
+                    .clone();
+                Expr::Call {
+                    call: Box::new(call),
+                    return_type,
+                }
             }
-        }
+        },
         ExprKind::Record(fields) => Expr::Record(
             fields
                 .iter()
@@ -1398,6 +1479,133 @@ fn lower_call(
             })
             .collect::<Result<_>>()?,
     })
+}
+
+/// Resolution rule: an unqualified call head matching one of the 22 typed
+/// primitive names always resolves to the primitive, never to a user
+/// function of the same name (declaring one is rejected at signature time in
+/// `typed_lower.rs`). A qualified head (e.g. `mymod.add`) is never a
+/// primitive, regardless of its suffix.
+fn typed_primitive_head(callee: &str) -> Option<(PrimitiveOp, usize)> {
+    if callee.contains('.') {
+        None
+    } else {
+        typed_primitive_op(callee)
+    }
+}
+
+/// Lower a primitive-operator call. Only the structural arity is checked
+/// here; operand-type validity and the return type are computed later in
+/// `validate_expr`, once locals and constants are available for inference.
+#[allow(clippy::too_many_arguments)]
+fn lower_primitive_call(
+    module_alias: &str,
+    callee: &str,
+    op: PrimitiveOp,
+    arity: usize,
+    arguments: &[AstExpr],
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+) -> Result<Expr> {
+    if arguments.len() != arity {
+        bail!(
+            "E-OP-001: `{callee}` requires exactly {arity} operand{}, got {}",
+            if arity == 1 { "" } else { "s" },
+            arguments.len()
+        );
+    }
+    let args = arguments
+        .iter()
+        .map(|argument| {
+            lower_expr(
+                module_alias,
+                argument,
+                signatures,
+                declared_aliases,
+                generics,
+            )
+        })
+        .collect::<Result<_>>()?;
+    Ok(Expr::Primitive {
+        op,
+        args,
+        // Placeholders: replaced with the inferred operand/return types by
+        // `validate_expr`, which runs once locals/constants are available.
+        operand_type: TypeRef::Void,
+        return_type: TypeRef::Void,
+    })
+}
+
+/// The bare surface name for a primitive op, for diagnostics. Inverse of
+/// `typed_primitive_op`.
+fn typed_primitive_name(op: PrimitiveOp) -> &'static str {
+    use PrimitiveOp::*;
+    match op {
+        Convert => unreachable!("$convert uses a dedicated envelope, not `PrimitiveOp` dispatch"),
+        Add => "add",
+        Subtract => "subtract",
+        Multiply => "multiply",
+        Divide => "divide",
+        Remainder => "remainder",
+        Negate => "negate",
+        Equal => "equal",
+        NotEqual => "not-equal",
+        LessThan => "less-than",
+        LessOrEqual => "less-or-equal",
+        GreaterThan => "greater-than",
+        GreaterOrEqual => "greater-or-equal",
+        And => "and",
+        Or => "or",
+        Not => "not",
+        BitAnd => "bit-and",
+        BitOr => "bit-or",
+        BitXor => "bit-xor",
+        BitNot => "bit-not",
+        ShiftLeft => "shift-left",
+        ShiftRight => "shift-right",
+    }
+}
+
+/// Per-op validity on the common operand type, ported from the legacy
+/// `parse_primitive_expr` in `lower.rs`.
+fn typed_primitive_valid_for(op: PrimitiveOp, operand_type: &TypeRef) -> bool {
+    use PrimitiveOp::*;
+    match op {
+        Convert => unreachable!("$convert uses a dedicated envelope, not `PrimitiveOp` dispatch"),
+        Add | Subtract | Multiply | Divide | Remainder | Negate => {
+            primitive_numeric(operand_type)
+                && !(matches!(op, Negate)
+                    && matches!(
+                        operand_type,
+                        TypeRef::UInt8 | TypeRef::UInt16 | TypeRef::UInt32 | TypeRef::UInt64
+                    ))
+        }
+        Equal | NotEqual => {
+            primitive_numeric(operand_type) || matches!(operand_type, TypeRef::Bool | TypeRef::Str)
+        }
+        LessThan | LessOrEqual | GreaterThan | GreaterOrEqual => {
+            primitive_numeric(operand_type) || operand_type == &TypeRef::Str
+        }
+        And | Or | Not => operand_type == &TypeRef::Bool,
+        BitAnd | BitOr | BitXor | BitNot | ShiftLeft | ShiftRight => {
+            primitive_integer(operand_type)
+        }
+    }
+}
+
+/// Return type for a primitive op given its common operand type, ported from
+/// the legacy `parse_primitive_expr` in `lower.rs`.
+fn typed_primitive_return_type(op: PrimitiveOp, operand_type: &TypeRef) -> TypeRef {
+    use PrimitiveOp::*;
+    if matches!(
+        op,
+        Equal | NotEqual | LessThan | LessOrEqual | GreaterThan | GreaterOrEqual | And | Or | Not
+    ) {
+        TypeRef::Bool
+    } else {
+        operand_type.clone()
+    }
 }
 
 fn lower_pattern(
@@ -1809,5 +2017,292 @@ mod tests {
         );
         assert!(error.contains(&bound_origin), "{error}");
         assert!(!error.contains(&range_origin), "{error}");
+    }
+
+    fn primitive_return(functions: &HashMap<String, FunctionSig>, key: &str) -> Expr {
+        let FunctionBody::User { statements } = &functions[key].body else {
+            panic!("expected user body for `{key}`");
+        };
+        let Statement::Return(expr) = &statements[0] else {
+            panic!("expected a return statement in `{key}`");
+        };
+        assert!(
+            matches!(expr, Expr::Primitive { .. }),
+            "expected a primitive expression in `{key}`, got {expr:?}"
+        );
+        expr.clone()
+    }
+
+    #[test]
+    fn primitive_arithmetic_and_bitwise_ops_lower_with_operand_and_return_type() {
+        let source = module(
+            r#"(fn addition ((a int64) (b int64)) int64 (do (return (add a b))))
+(fn subtraction ((a int64) (b int64)) int64 (do (return (subtract a b))))
+(fn multiplication ((a int64) (b int64)) int64 (do (return (multiply a b))))
+(fn division ((a int64) (b int64)) int64 (do (return (divide a b))))
+(fn remaindering ((a int64) (b int64)) int64 (do (return (remainder a b))))
+(fn negation ((a int64)) int64 (do (return (negate a))))
+(fn bitwise-and ((a int64) (b int64)) int64 (do (return (bit-and a b))))
+(fn bitwise-or ((a int64) (b int64)) int64 (do (return (bit-or a b))))
+(fn bitwise-xor ((a int64) (b int64)) int64 (do (return (bit-xor a b))))
+(fn bitwise-not ((a int64)) int64 (do (return (bit-not a))))
+(fn shift-left-by ((a int64) (b int64)) int64 (do (return (shift-left a b))))
+(fn shift-right-by ((a int64) (b int64)) int64 (do (return (shift-right a b))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        for key in [
+            "addition",
+            "subtraction",
+            "multiplication",
+            "division",
+            "remaindering",
+            "negation",
+            "bitwise-and",
+            "bitwise-or",
+            "bitwise-xor",
+            "bitwise-not",
+            "shift-left-by",
+            "shift-right-by",
+        ] {
+            let Expr::Primitive {
+                operand_type,
+                return_type,
+                ..
+            } = primitive_return(&functions, key)
+            else {
+                unreachable!()
+            };
+            assert_eq!(operand_type, TypeRef::Int64, "{key}");
+            assert_eq!(
+                return_type,
+                TypeRef::Int64,
+                "{key} (arithmetic returns operand type)"
+            );
+        }
+    }
+
+    #[test]
+    fn primitive_comparison_and_logical_ops_return_bool() {
+        let source = module(
+            r#"(fn less ((a int64) (b int64)) bool (do (return (less-than a b))))
+(fn less-eq ((a int64) (b int64)) bool (do (return (less-or-equal a b))))
+(fn greater ((a int64) (b int64)) bool (do (return (greater-than a b))))
+(fn greater-eq ((a int64) (b int64)) bool (do (return (greater-or-equal a b))))
+(fn eq ((a int64) (b int64)) bool (do (return (equal a b))))
+(fn not-eq ((a int64) (b int64)) bool (do (return (not-equal a b))))
+(fn str-cmp ((a str) (b str)) bool (do (return (less-than a b))))
+(fn either ((a bool) (b bool)) bool (do (return (or a b))))
+(fn both ((a bool) (b bool)) bool (do (return (and a b))))
+(fn negation ((a bool)) bool (do (return (not a))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        for key in [
+            "less",
+            "less-eq",
+            "greater",
+            "greater-eq",
+            "eq",
+            "not-eq",
+            "str-cmp",
+            "either",
+            "both",
+            "negation",
+        ] {
+            let Expr::Primitive { return_type, .. } = primitive_return(&functions, key) else {
+                unreachable!()
+            };
+            assert_eq!(return_type, TypeRef::Bool, "{key}");
+        }
+    }
+
+    #[test]
+    fn primitive_call_as_a_let_value_and_as_a_bare_statement_lowers_and_executes() {
+        let source = module(
+            r#"(fn compute ((a int64) (b int64)) int64
+  (do (let sum (add a b)) (add a b) (return sum)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let program = LoweredProgram {
+            statements: vec![Statement::Call(Call {
+                callee_key: "compute".into(),
+                type_args: Vec::new(),
+                args: vec![
+                    Expr::Value(RuntimeValue::Int(3)),
+                    Expr::Value(RuntimeValue::Int(4)),
+                ],
+            })],
+            main_arg_bindings: Vec::new(),
+            constants: HashMap::new(),
+            functions,
+            impls: HashMap::new(),
+            warnings: Vec::new(),
+            foreign_modules: BTreeMap::new(),
+        };
+        crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        crate::wasm_backend::run_lowered(&program, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn primitive_arity_mismatch_is_rejected_at_lowering_time() {
+        for source in [
+            "(fn bad () int64 (do (return (add 1))))",
+            "(fn bad () int64 (do (return (negate 1 2))))",
+            "(fn bad () bool (do (return (not true false))))",
+        ] {
+            let source = module(source);
+            let inputs = [TypedModuleInput {
+                alias: "",
+                module: &source,
+            }];
+            let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+            let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+            assert!(error.contains("E-OP-001"), "{error}");
+            assert!(error.contains("operand"), "{error}");
+        }
+    }
+
+    #[test]
+    fn primitive_mixed_operand_types_require_an_explicit_cast() {
+        let source = module("(fn bad ((a int64) (b bool)) int64 (do (return (add a b))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-OP-001"), "{error}");
+        assert!(error.contains("cast"), "{error}");
+        assert!(!error.contains("$cast"), "{error}");
+    }
+
+    #[test]
+    fn negate_on_unsigned_operand_is_rejected() {
+        let source = module("(fn bad ((a uint32)) uint32 (do (return (negate a))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-OP-001"), "{error}");
+        assert!(error.contains("not defined for"), "{error}");
+        assert!(error.contains("UInt32"), "{error}");
+    }
+
+    #[test]
+    fn and_on_non_bool_operand_is_rejected() {
+        let source = module("(fn bad ((a int64) (b int64)) bool (do (return (and a b))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-OP-001"), "{error}");
+        assert!(error.contains("not defined for"), "{error}");
+        assert!(error.contains("Int64"), "{error}");
+    }
+
+    #[test]
+    fn bitwise_on_float_operand_is_rejected() {
+        let source =
+            module("(fn bad ((a float64) (b float64)) float64 (do (return (bit-and a b))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-OP-001"), "{error}");
+        assert!(error.contains("not defined for"), "{error}");
+        assert!(error.contains("Float64"), "{error}");
+    }
+
+    #[test]
+    fn qualified_callee_is_never_treated_as_a_primitive() {
+        // `lib` never declares `add`, so a qualified `lib.add` call must not
+        // silently resolve to the `add` primitive: it must fail as an
+        // unresolved callee.
+        let library = module("(fn echo ((value int64)) int64 (do (return value)))");
+        let entry = module(
+            r#"(import lib "./lib.vibra")
+(fn bad ((value int64)) int64 (do (return (lib.add value 1))))"#,
+        );
+        let inputs = [
+            TypedModuleInput {
+                alias: "lib",
+                module: &library,
+            },
+            TypedModuleInput {
+                alias: "",
+                module: &entry,
+            },
+        ];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("lib.add"), "{error}");
+        assert!(error.contains("unknown"), "{error}");
+    }
+
+    #[test]
+    fn unresolved_callee_in_expression_position_is_a_diagnostic_not_a_panic() {
+        // Exercises the branch that previously read
+        // `signatures.functions.get(&call.callee_key).expect("resolved typed
+        // call")`: this must surface as an `Err`, never as a panic.
+        let source = module("(fn bad () int64 (do (return (totally-unknown-fn))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("totally-unknown-fn"), "{error}");
+    }
+
+    #[test]
+    fn declaring_a_function_named_after_a_primitive_is_rejected() {
+        let source = module("(fn add ((a int64) (b int64)) int64 (do (return a)))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let error = crate::typed_lower::lower_typed_signatures(inputs)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("add"), "{error}");
     }
 }

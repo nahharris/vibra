@@ -280,6 +280,14 @@ operations (`add`, `equal`, `not`, and peers), enum constructors, imported
 functions, inherent operations, and interface dispatch all use ordinary call
 syntax.
 
+Dropping the `$` sigil makes a primitive name syntactically indistinguishable
+from a user function of the same name, which the legacy `$`-prefixed table
+never had to resolve. The adopted rule: an unqualified call head matching one
+of the 22 primitive names resolves to the primitive; a qualified head (e.g.
+`mymod.add`) is never a primitive, regardless of its suffix; and declaring a
+function whose bare name is a primitive name is a compile error, since such a
+declaration would be permanently unreachable through an unqualified call.
+
 The current structured-concurrency, reference, mutation, range, conversion,
 cast, collection, checked-arithmetic, and scope rules remain unchanged.
 
