@@ -1,0 +1,1648 @@
+use anyhow::{bail, Context, Result};
+use serde_yaml::{Mapping, Value};
+use std::{
+    cell::RefCell,
+    collections::BTreeMap,
+    env, fs,
+    path::{Path, PathBuf},
+};
+
+#[derive(Clone, Debug)]
+struct CallSignature {
+    type_args: Vec<String>,
+    value_args: Vec<String>,
+}
+
+thread_local! {
+    static CALL_SIGNATURES: RefCell<BTreeMap<String, CallSignature>> = RefCell::new(BTreeMap::new());
+    static TYPE_SIGNATURES: RefCell<BTreeMap<String, Vec<String>>> = RefCell::new(BTreeMap::new());
+}
+
+#[derive(Default)]
+struct SignatureIndex {
+    calls: BTreeMap<PathBuf, BTreeMap<String, CallSignature>>,
+    types: BTreeMap<PathBuf, BTreeMap<String, Vec<String>>>,
+}
+
+#[derive(Default)]
+struct Report {
+    scanned: usize,
+    already_sexpr: usize,
+    converted: usize,
+    valid: usize,
+    unsupported: BTreeMap<String, usize>,
+}
+
+fn main() -> Result<()> {
+    let root = env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or(env::current_dir()?);
+    let mut files = Vec::new();
+    collect(&root, &mut files)?;
+    files.sort();
+    let signature_index = build_signature_index(&files)?;
+
+    let mut report = Report::default();
+    for path in files {
+        report.scanned += 1;
+        let display = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let source = fs::read_to_string(&path)?;
+        if source.trim_start().starts_with('(') {
+            report.already_sexpr += 1;
+            continue;
+        }
+        match migrate_for_path(&source, &path, &signature_index) {
+            Ok(output) => {
+                report.converted += 1;
+                match validate(&output) {
+                    Ok(()) => report.valid += 1,
+                    Err(error) => record_issue(
+                        &mut report,
+                        format!(
+                            "{display}: typed-validation: {}",
+                            first_line(&error.to_string())
+                        ),
+                    ),
+                }
+            }
+            Err(error) => record_issue(&mut report, format!("{display}: {error:#}")),
+        }
+    }
+
+    println!("scanned: {}", report.scanned);
+    println!("already-sexpr: {}", report.already_sexpr);
+    println!("converted: {}", report.converted);
+    println!("typed-valid: {}", report.valid);
+    println!(
+        "unsupported: {}",
+        report.unsupported.values().sum::<usize>()
+    );
+    for (reason, count) in report.unsupported {
+        println!("  {count:>3}  {reason}");
+    }
+    Ok(())
+}
+
+fn collect(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            if !is_excluded_dir(&path) {
+                collect(&path, files)?;
+            }
+        } else if path.extension().and_then(|v| v.to_str()) == Some("vibra") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn is_excluded_dir(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|value| value.to_str()),
+        Some("target" | ".git" | ".worktrees" | "worktrees")
+    )
+}
+
+#[cfg(test)]
+fn migrate(source: &str) -> Result<String> {
+    let root: Value = serde_yaml::from_str(source).context("yaml-parse")?;
+    let map = root.as_mapping().context("root-not-mapping")?;
+    let signatures = discover_local_signatures(map)?;
+    let type_signatures = discover_local_type_signatures(map)?;
+    migrate_with_signatures(map, signatures, type_signatures)
+}
+
+fn migrate_for_path(source: &str, path: &Path, signature_index: &SignatureIndex) -> Result<String> {
+    let root: Value = serde_yaml::from_str(source).context("yaml-parse")?;
+    let map = root.as_mapping().context("root-not-mapping")?;
+    let mut signatures = discover_local_signatures(map)?;
+    let mut type_signatures = discover_local_type_signatures(map)?;
+    if let Some(module_name) = path.file_stem().and_then(|name| name.to_str()) {
+        for (name, signature) in signatures.clone() {
+            signatures.insert(format!("{module_name}.{name}"), signature);
+        }
+        for (name, parameters) in type_signatures.clone() {
+            type_signatures.insert(format!("{module_name}.{name}"), parameters);
+        }
+    }
+    for (alias, definition) in map {
+        let Some(alias) = alias.as_str() else {
+            continue;
+        };
+        let Some(import) = definition
+            .as_mapping()
+            .and_then(|definition| get(definition, "$import"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        if import.starts_with('@') {
+            continue;
+        }
+        let Some(parent) = path.parent() else {
+            continue;
+        };
+        let Ok(imported_path) = fs::canonicalize(parent.join(import)) else {
+            continue;
+        };
+        let Some(imported) = signature_index.calls.get(&imported_path) else {
+            continue;
+        };
+        for (name, signature) in imported {
+            signatures.insert(format!("{alias}.{name}"), signature.clone());
+        }
+        if let Some(imported_types) = signature_index.types.get(&imported_path) {
+            for (name, parameters) in imported_types {
+                type_signatures.insert(format!("{alias}.{name}"), parameters.clone());
+            }
+        }
+    }
+    migrate_with_signatures(map, signatures, type_signatures)
+}
+
+fn migrate_with_signatures(
+    map: &Mapping,
+    signatures: BTreeMap<String, CallSignature>,
+    type_signatures: BTreeMap<String, Vec<String>>,
+) -> Result<String> {
+    CALL_SIGNATURES.with(|slot| *slot.borrow_mut() = signatures);
+    TYPE_SIGNATURES.with(|slot| *slot.borrow_mut() = type_signatures);
+    let mut forms = Vec::new();
+    for (key, value) in map {
+        let name = key.as_str().context("non-string-top-level-name")?;
+        if matches!(name, "=comment" | "=doc" | "=lint") {
+            continue;
+        }
+        forms.push(top_level(name, value).with_context(|| format!("top-level `{name}`"))?);
+    }
+    Ok(forms.join("\n"))
+}
+
+fn build_signature_index(files: &[PathBuf]) -> Result<SignatureIndex> {
+    let mut index = SignatureIndex::default();
+    for path in files {
+        let source = fs::read_to_string(path)?;
+        if source.trim_start().starts_with('(') {
+            continue;
+        }
+        let Ok(root) = serde_yaml::from_str::<Value>(&source) else {
+            continue;
+        };
+        let Some(map) = root.as_mapping() else {
+            continue;
+        };
+        let Ok(signatures) = discover_local_signatures(map) else {
+            continue;
+        };
+        let canonical = fs::canonicalize(path)?;
+        index.calls.insert(canonical.clone(), signatures);
+        index
+            .types
+            .insert(canonical, discover_local_type_signatures(map)?);
+    }
+    Ok(index)
+}
+
+fn discover_local_type_signatures(map: &Mapping) -> Result<BTreeMap<String, Vec<String>>> {
+    let mut signatures = BTreeMap::new();
+    for (name, value) in map {
+        let (Some(name), Some(definition)) = (name.as_str(), value.as_mapping()) else {
+            continue;
+        };
+        let parameters = where_names(definition)?;
+        if !parameters.is_empty()
+            && definition
+                .keys()
+                .any(|key| key.as_str().is_some_and(|key| key.starts_with('$')))
+        {
+            signatures.insert(name.to_string(), parameters);
+        }
+    }
+    Ok(signatures)
+}
+
+fn where_names(map: &Mapping) -> Result<Vec<String>> {
+    match get(map, "=where") {
+        Some(value) => value
+            .as_mapping()
+            .context("where-not-mapping")?
+            .keys()
+            .map(|name| Ok(as_str(name, "type-parameter")?.to_string()))
+            .collect(),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn discover_local_signatures(map: &Mapping) -> Result<BTreeMap<String, CallSignature>> {
+    let mut signatures = BTreeMap::new();
+    for (name, value) in map {
+        let Some(name) = name.as_str() else {
+            continue;
+        };
+        let Some(definition) = value.as_mapping() else {
+            continue;
+        };
+        if let Some(primary) = get(definition, "$function").or_else(|| get(definition, "$fn")) {
+            let value_args = parameter_entries(primary, get(definition, "args"))?
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            let type_args = match get(definition, "=where") {
+                Some(value) => value
+                    .as_mapping()
+                    .context("where-not-mapping")?
+                    .keys()
+                    .map(|name| Ok(as_str(name, "type-parameter")?.to_string()))
+                    .collect::<Result<Vec<_>>>()?,
+                None => Vec::new(),
+            };
+            signatures.insert(
+                name.to_string(),
+                CallSignature {
+                    type_args,
+                    value_args,
+                },
+            );
+        }
+        if let Some(definitions) = get(definition, "=defs").and_then(Value::as_mapping) {
+            let enclosing_type_args = where_names(definition)?;
+            for (method_name, method) in definitions {
+                let method_name = as_str(method_name, "def-name")?;
+                let method = method.as_mapping().context("def-not-mapping")?;
+                let primary = get(method, "$function")
+                    .or_else(|| get(method, "$fn"))
+                    .context("def-not-function")?;
+                signatures.insert(
+                    format!("{name}.{method_name}"),
+                    CallSignature {
+                        type_args: enclosing_type_args
+                            .iter()
+                            .cloned()
+                            .chain(where_names(method)?)
+                            .collect(),
+                        value_args: parameter_entries(primary, get(method, "args"))?
+                            .into_iter()
+                            .map(|(name, _)| name)
+                            .collect(),
+                    },
+                );
+            }
+        }
+        if let Some(interface) = get(definition, "$interface").and_then(Value::as_mapping) {
+            let enclosing_type_args = where_names(definition)?;
+            for (method_name, method_type) in interface {
+                let method_name = as_str(method_name, "interface-method-name")?;
+                let method_type = method_type
+                    .as_mapping()
+                    .and_then(|method| get(method, "$fn-type"))
+                    .and_then(Value::as_mapping)
+                    .context("interface-method-not-fn-type")?;
+                let args = get(method_type, "args").context("interface-method-missing-args")?;
+                let value_args = if let Some(args) = args
+                    .as_mapping()
+                    .and_then(|args| get(args, "$record"))
+                    .and_then(Value::as_mapping)
+                {
+                    args.keys()
+                        .map(|name| Ok(as_str(name, "interface-method-arg")?.to_string()))
+                        .collect::<Result<Vec<_>>>()?
+                } else {
+                    vec!["input".to_string()]
+                };
+                signatures.insert(
+                    format!("{name}.{method_name}"),
+                    CallSignature {
+                        type_args: enclosing_type_args.clone(),
+                        value_args,
+                    },
+                );
+            }
+        }
+    }
+    Ok(signatures)
+}
+
+fn top_level(name: &str, value: &Value) -> Result<String> {
+    let Some(map) = value.as_mapping() else {
+        return Ok(format!(
+            "(const {} {} {})",
+            sym(name),
+            infer_type(value)?,
+            expr(value)?
+        ));
+    };
+    if let Some(import) = get(map, "$import") {
+        only_known(map, &["$import"])?;
+        return Ok(format!(
+            "(import {} {})",
+            sym(name),
+            quoted(as_str(import, "$import")?)
+        ));
+    }
+    if let Some(profile) = get(map, "$test") {
+        return test_form(name, profile, map);
+    }
+    if let Some(primary) = get(map, "$function").or_else(|| get(map, "$fn")) {
+        return function_form(name, primary, map);
+    }
+    let dollar = map
+        .iter()
+        .filter_map(|(key, value)| {
+            key.as_str()
+                .filter(|key| key.starts_with('$'))
+                .map(|key| (key, value))
+        })
+        .collect::<Vec<_>>();
+    if dollar.len() == 1 {
+        let (head, payload) = dollar[0];
+        let annotations = declaration_annotations(map)?;
+        return Ok(format!(
+            "(def {} {}{})",
+            sym(name),
+            type_form(head, payload)?,
+            annotations
+        ));
+    }
+    bail!("unsupported-top-level-envelope")
+}
+
+fn function_form(name: &str, primary: &Value, map: &Mapping) -> Result<String> {
+    only_known(
+        map,
+        &["$function", "$fn", "args", "return", "do", "=doc", "=where"],
+    )?;
+    let params = parameters(primary, get(map, "args"))?;
+    let result = get(map, "return").context("function-missing-return")?;
+    let body = get(map, "do").context("function-missing-do")?;
+    Ok(format!(
+        "(fn {} {} {} {}{})",
+        sym(name),
+        params,
+        ty(result)?,
+        body_form(body)?,
+        declaration_annotations(map)?
+    ))
+}
+
+fn test_form(name: &str, profile: &Value, map: &Mapping) -> Result<String> {
+    only_known(
+        map,
+        &[
+            "$test",
+            "do",
+            "tags",
+            "timeout-ms",
+            "random-seed",
+            "skip",
+            "expect-error",
+            "clock",
+            "workspace",
+            "policy",
+        ],
+    )?;
+    let body = body_form(get(map, "do").context("test-missing-do")?)?;
+    let mut attrs = Vec::new();
+    for key in ["tags", "timeout-ms", "random-seed", "skip", "workspace"] {
+        if let Some(value) = get(map, key) {
+            attrs.push(format!("{key}: {}", metadata_value(key, value)?));
+        }
+    }
+    if let Some(value) = get(map, "expect-error") {
+        attrs.push(format!("expect-error: {}", expected_error(value)?));
+    }
+    if let Some(value) = get(map, "clock") {
+        attrs.push(format!("clock: {}", clock(value)?));
+    }
+    if let Some(value) = get(map, "policy") {
+        attrs.push(format!("policy: {}", ty(value)?));
+    }
+    Ok(format!(
+        "(test {} {} {}{})",
+        sym(name),
+        sym(as_str(profile, "$test")?),
+        body,
+        attrs
+            .into_iter()
+            .map(|v| format!(" {v}"))
+            .collect::<String>()
+    ))
+}
+
+fn expected_error(value: &Value) -> Result<String> {
+    let map = value.as_mapping().context("expect-error-not-mapping")?;
+    only_known(map, &["phase", "code", "message-contains"])?;
+    let phase = as_str(
+        get(map, "phase").context("expect-error-missing-phase")?,
+        "phase",
+    )?;
+    match phase {
+        "load" | "compile" => {
+            let code = sym(as_str(
+                get(map, "code").context("expect-error-missing-code")?,
+                "code",
+            )?);
+            Ok(match get(map, "message-contains") {
+                Some(message) => format!(
+                    "({phase} {code} {})",
+                    quoted(as_str(message, "message-contains")?)
+                ),
+                None => format!("({phase} {code})"),
+            })
+        }
+        "runtime" => Ok(format!(
+            "(runtime {})",
+            quoted(as_str(
+                get(map, "message-contains").context("runtime-missing-message")?,
+                "message-contains"
+            )?)
+        )),
+        _ => bail!("unknown-expect-error-phase-{phase}"),
+    }
+}
+
+fn clock(value: &Value) -> Result<String> {
+    let map = value.as_mapping().context("clock-not-mapping")?;
+    only_known(map, &["unix-millis", "monotonic-millis"])?;
+    Ok(format!(
+        "(fixed {} {})",
+        expr(get(map, "unix-millis").context("clock-missing-unix-millis")?)?,
+        expr(get(map, "monotonic-millis").context("clock-missing-monotonic-millis")?)?
+    ))
+}
+
+fn metadata_value(key: &str, value: &Value) -> Result<String> {
+    match key {
+        "tags" => Ok(format!(
+            "({})",
+            value
+                .as_sequence()
+                .context("tags-not-sequence")?
+                .iter()
+                .map(|v| Ok(sym(as_str(v, "tag")?)))
+                .collect::<Result<Vec<_>>>()?
+                .join(" ")
+        )),
+        "workspace" => Ok(sym(as_str(value, "workspace")?)),
+        _ => expr(value),
+    }
+}
+
+fn parameters(primary: &Value, additional: Option<&Value>) -> Result<String> {
+    Ok(format!(
+        "({})",
+        parameter_entries(primary, additional)?
+            .into_iter()
+            .map(|(name, value)| Ok(format!("({} {})", sym(&name), ty(value)?)))
+            .collect::<Result<Vec<_>>>()?
+            .join(" ")
+    ))
+}
+
+fn parameter_entries<'a>(
+    primary: &'a Value,
+    additional: Option<&'a Value>,
+) -> Result<Vec<(String, &'a Value)>> {
+    let mut entries = Vec::new();
+    if matches!(primary.as_str(), Some("$self" | "self")) {
+        entries.push(("self".to_string(), primary));
+    } else if !matches!(primary.as_str(), Some("$void" | "void")) {
+        let map = primary.as_mapping().context("parameters-not-mapping")?;
+        for (name, value) in map {
+            entries.push((as_str(name, "parameter")?.to_string(), value));
+        }
+    }
+    if let Some(additional) = additional {
+        let map = additional
+            .as_mapping()
+            .context("additional-parameters-not-mapping")?;
+        for (name, value) in map {
+            let name = as_str(name, "parameter")?.to_string();
+            if entries.iter().any(|(existing, _)| existing == &name) {
+                bail!("duplicate-parameter-{name}");
+            }
+            entries.push((name, value));
+        }
+    }
+    Ok(entries)
+}
+
+fn body_form(value: &Value) -> Result<String> {
+    let values = value.as_sequence().context("body-not-sequence")?;
+    Ok(format!(
+        "(do{})",
+        values
+            .iter()
+            .map(statement)
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .map(|value| format!(" {value}"))
+            .collect::<String>()
+    ))
+}
+
+fn statement(value: &Value) -> Result<String> {
+    let Some(map) = value.as_mapping() else {
+        return expr(value);
+    };
+    if let Some(condition) = get(map, "$if") {
+        only_known(map, &["$if", "then", "else"])?;
+        return Ok(format!(
+            "(if {} {} {})",
+            expr(condition)?,
+            body_form(get(map, "then").context("if-missing-then")?)?,
+            body_form(get(map, "else").context("if-missing-else")?)?
+        ));
+    }
+    if let Some(condition) = get(map, "$while") {
+        only_known(map, &["$while", "do"])?;
+        return Ok(format!(
+            "(while {} {})",
+            expr(condition)?,
+            body_form(get(map, "do").context("while-missing-do")?)?
+        ));
+    }
+    if let Some(binding) = get(map, "$for") {
+        only_known(map, &["$for", "in", "do"])?;
+        return Ok(format!(
+            "(for {} {} {})",
+            sym(as_str(binding, "for-binding")?),
+            expr(get(map, "in").context("for-missing-in")?)?,
+            body_form(get(map, "do").context("for-missing-do")?)?
+        ));
+    }
+    if let Some(target) = get(map, "$match") {
+        only_known(map, &["$match", "when"])?;
+        let cases = get(map, "when")
+            .and_then(Value::as_sequence)
+            .context("match-when-not-sequence")?
+            .iter()
+            .map(match_case)
+            .collect::<Result<Vec<_>>>()?
+            .join(" ");
+        return Ok(format!("(match {} {cases})", expr(target)?));
+    }
+    if let Some(captures) = get(map, "$task") {
+        only_known(map, &["$task", "do"])?;
+        let captures = captures
+            .as_sequence()
+            .context("task-captures-not-sequence")?;
+        return Ok(format!(
+            "(task (captures{}) {})",
+            captures
+                .iter()
+                .map(|capture| Ok(format!(" {}", sym(as_str(capture, "task-capture")?))))
+                .collect::<Result<String>>()?,
+            body_form(get(map, "do").context("task-missing-do")?)?
+        ));
+    }
+    if let Some(handle) = get(map, "$spawn") {
+        only_known(map, &["$spawn", "captures", "value"])?;
+        let captures = get(map, "captures")
+            .and_then(Value::as_sequence)
+            .context("spawn-captures-not-sequence")?
+            .iter()
+            .map(|capture| Ok(sym(as_str(capture, "spawn-capture")?)))
+            .collect::<Result<Vec<_>>>()?
+            .join(" ");
+        return Ok(format!(
+            "(spawn {} (captures {}) {})",
+            sym(as_str(handle, "spawn-handle")?),
+            captures,
+            expr(get(map, "value").context("spawn-missing-value")?)?
+        ));
+    }
+    if let Some(handle) = get(map, "$join") {
+        only_known(map, &["$join", "into"])?;
+        return Ok(format!(
+            "(join {} {})",
+            sym(as_str(handle, "join-handle")?),
+            sym(as_str(
+                get(map, "into").context("join-missing-result")?,
+                "join-result"
+            )?)
+        ));
+    }
+    if map.len() != 1 {
+        return expr(value);
+    }
+    let (key, payload) = map.iter().next().unwrap();
+    let head = as_str(key, "statement-key")?.trim_start_matches('$');
+    match head {
+        "let" => {
+            let binding = payload.as_mapping().context("let-not-mapping")?;
+            if binding.len() != 1 {
+                bail!("let-not-single-binding")
+            }
+            let (name, value) = binding.iter().next().unwrap();
+            Ok(format!(
+                "(let {} {})",
+                sym(as_str(name, "let-name")?),
+                expr(value)?
+            ))
+        }
+        "set" => {
+            let binding = payload.as_mapping().context("set-not-mapping")?;
+            if binding.len() != 1 {
+                bail!("set-not-single-binding")
+            }
+            let (name, value) = binding.iter().next().unwrap();
+            Ok(format!(
+                "(set {} {})",
+                sym(as_str(name, "set-name")?),
+                expr(value)?
+            ))
+        }
+        "return" => Ok(format!("(return {})", expr(payload)?)),
+        "break" | "continue" if payload.is_null() => Ok(format!("({head})")),
+        _ => expr(value),
+    }
+}
+
+fn match_case(value: &Value) -> Result<String> {
+    let map = value.as_mapping().context("match-case-not-mapping")?;
+    only_known(map, &["case", "do"])?;
+    Ok(format!(
+        "(case {} {})",
+        pattern(get(map, "case").context("match-case-missing-pattern")?)?,
+        body_form(get(map, "do").context("match-case-missing-do")?)?
+    ))
+}
+
+fn pattern(value: &Value) -> Result<String> {
+    if let Some(map) = value.as_mapping() {
+        if map.len() != 1 {
+            bail!("pattern-multi-key")
+        }
+        let (key, payload) = map.iter().next().unwrap();
+        let head = as_str(key, "pattern-head")?.trim_start_matches('$');
+        return match head {
+            "$wildcard" => Ok("_".into()),
+            "$bind" => Ok(format!("(bind {})", sym(as_str(payload, "bind-name")?))),
+            "wildcard" => Ok("_".into()),
+            "bind" => Ok(format!("(bind {})", sym(as_str(payload, "bind-name")?))),
+            "array" | "tuple" => Ok(format!(
+                "({head}{})",
+                payload
+                    .as_sequence()
+                    .context("pattern-items-not-sequence")?
+                    .iter()
+                    .map(pattern)
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
+                    .map(|item| format!(" {item}"))
+                    .collect::<String>()
+            )),
+            "record" => {
+                let fields = payload.as_mapping().context("record-pattern-not-mapping")?;
+                Ok(format!(
+                    "(record{})",
+                    fields
+                        .iter()
+                        .map(|(name, value)| Ok(format!(
+                            " ({} {})",
+                            sym(as_str(name, "record-pattern-field")?),
+                            pattern(value)?
+                        )))
+                        .collect::<Result<String>>()?
+                ))
+            }
+            "map" => {
+                let pairs = payload.as_sequence().context("map-pattern-not-sequence")?;
+                Ok(format!(
+                    "(map{})",
+                    pairs
+                        .iter()
+                        .map(|pair| {
+                            let pair = pair.as_mapping().context("map-pattern-pair-not-mapping")?;
+                            only_known(pair, &["key", "value"])?;
+                            Ok(format!(
+                                " ({} {})",
+                                pattern(get(pair, "key").context("map-pattern-missing-key")?)?,
+                                pattern(get(pair, "value").context("map-pattern-missing-value")?)?
+                            ))
+                        })
+                        .collect::<Result<String>>()?
+                ))
+            }
+            "newtype" | "interface" => {
+                let fields = payload
+                    .as_mapping()
+                    .context("wrapped-pattern-not-mapping")?;
+                Ok(format!(
+                    "({head} {} {})",
+                    ty(get(fields, "type").context("wrapped-pattern-missing-type")?)?,
+                    pattern(
+                        get(fields, "value")
+                            .or_else(|| get(fields, "inner"))
+                            .context("wrapped-pattern-missing-value")?
+                    )?
+                ))
+            }
+            _ => {
+                let arguments = if payload.is_null() {
+                    String::new()
+                } else if let Some(values) = payload.as_sequence() {
+                    values
+                        .iter()
+                        .map(pattern)
+                        .collect::<Result<Vec<_>>>()?
+                        .into_iter()
+                        .map(|item| format!(" {item}"))
+                        .collect()
+                } else {
+                    format!(" {}", pattern(payload)?)
+                };
+                Ok(format!("({}{} )", sym(head), arguments).replace(" )", ")"))
+            }
+        };
+    }
+    expr(value)
+}
+
+fn expr(value: &Value) -> Result<String> {
+    match value {
+        Value::Null => Ok("unit".into()),
+        Value::Bool(value) => Ok(value.to_string()),
+        Value::Number(value) => Ok(value.to_string()),
+        Value::String(value) if value.starts_with('$') => Ok(sym(value.trim_start_matches('$'))),
+        Value::String(value) => Ok(quoted(value)),
+        Value::Sequence(values) => Ok(format!(
+            "(array{})",
+            values
+                .iter()
+                .map(expr)
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .map(|value| format!(" {value}"))
+                .collect::<String>()
+        )),
+        Value::Mapping(map) => expression_mapping(map),
+        Value::Tagged(_) => bail!("yaml-tag"),
+    }
+}
+
+fn expression_mapping(map: &Mapping) -> Result<String> {
+    if map.len() != 1 {
+        let calls = map
+            .iter()
+            .filter_map(|(key, payload)| {
+                key.as_str()
+                    .filter(|key| key.starts_with('$'))
+                    .map(|key| (key, payload))
+            })
+            .collect::<Vec<_>>();
+        if calls.len() == 1 {
+            let (call, primary) = calls[0];
+            let head = sym(call);
+            if matches!(head.as_str(), "cast" | "policy.narrow") {
+                only_known(map, &[call, "into"])?;
+                return Ok(format!(
+                    "({head} {} {})",
+                    expr(primary)?,
+                    ty(get(map, "into").context("typed-operation-missing-into")?)?
+                ));
+            }
+            if head == "convert" {
+                only_known(map, &[call, "into", "or"])?;
+                return Ok(format!(
+                    "(convert {} {} {})",
+                    expr(primary)?,
+                    ty(get(map, "into").context("convert-missing-into")?)?,
+                    expr(get(map, "or").context("convert-missing-fallback")?)?
+                ));
+            }
+            let signature = CALL_SIGNATURES
+                .with(|slot| slot.borrow().get(&head).cloned())
+                .with_context(|| format!("multi-key-call-unresolved-callee-{head}"))?;
+            let Some(primary_name) = signature.value_args.first() else {
+                bail!("multi-key-call-has-no-primary-argument-{head}");
+            };
+            let mut arguments = Mapping::new();
+            arguments.insert(Value::String(primary_name.clone()), primary.clone());
+            for (key, value) in map {
+                if key.as_str() != Some(call) {
+                    arguments.insert(key.clone(), value.clone());
+                }
+            }
+            return named_call(&head, &arguments);
+        }
+        return record(map);
+    }
+    let (key, payload) = map.iter().next().unwrap();
+    let Some(key) = key.as_str() else {
+        return record(map);
+    };
+    if !key.starts_with('$') {
+        return record(map);
+    }
+    let head = sym(key.trim_start_matches('$'));
+    match head.as_str() {
+        "if" | "while" | "for" | "match" | "task" | "spawn" | "join" | "convert" => {
+            bail!("unsupported-expression-{head}")
+        }
+        "range" => {
+            if let Some(values) = payload.as_sequence() {
+                if !(2..=3).contains(&values.len()) {
+                    bail!("range-arity")
+                }
+                let step = if values.len() == 3 {
+                    expr(&values[2])?
+                } else {
+                    "1".into()
+                };
+                Ok(format!(
+                    "(range {} {} {step})",
+                    expr(&values[0])?,
+                    expr(&values[1])?
+                ))
+            } else {
+                let fields = payload
+                    .as_mapping()
+                    .context("range-not-sequence-or-mapping")?;
+                only_known(fields, &["start", "end", "step"])?;
+                Ok(format!(
+                    "(range {} {} {})",
+                    expr(get(fields, "start").context("range-missing-start")?)?,
+                    expr(get(fields, "end").context("range-missing-end")?)?,
+                    expr(get(fields, "step").unwrap_or(&Value::Number(1.into())))?
+                ))
+            }
+        }
+        "mutable" | "mut" => Ok(format!("(mut {})", expr(payload)?)),
+        "ref" => Ok(format!("(ref {})", expr(payload)?)),
+        "not" => Ok(format!("(not {})", expr(payload)?)),
+        "record" => {
+            let fields = payload.as_mapping().context("record-not-mapping")?;
+            record(fields)
+        }
+        "map" => {
+            let pairs = payload.as_sequence().context("map-not-sequence")?;
+            Ok(format!(
+                "(map{})",
+                pairs
+                    .iter()
+                    .map(|pair| {
+                        let pair = pair.as_mapping().context("map-pair-not-mapping")?;
+                        only_known(pair, &["key", "value"])?;
+                        Ok(format!(
+                            " ({} {})",
+                            expr(get(pair, "key").context("map-missing-key")?)?,
+                            expr(get(pair, "value").context("map-missing-value")?)?
+                        ))
+                    })
+                    .collect::<Result<String>>()?
+            ))
+        }
+        "template" => template_expression(payload),
+        "wasm" => wasm_expression(payload),
+        _ if payload.as_mapping().is_some_and(|arguments| {
+            arguments
+                .keys()
+                .any(|key| key.as_str().is_some_and(|key| key.starts_with('$')))
+        }) =>
+        {
+            Ok(format!("({head} {})", expr(payload)?))
+        }
+        _ => match payload {
+            Value::Null => Ok(format!("({head})")),
+            Value::Sequence(values) => Ok(format!(
+                "({head}{})",
+                values
+                    .iter()
+                    .map(expr)
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
+                    .map(|v| format!(" {v}"))
+                    .collect::<String>()
+            )),
+            Value::Mapping(arguments) => named_call(&head, arguments),
+            _ => Ok(format!("({head} {})", expr(payload)?)),
+        },
+    }
+}
+
+fn template_expression(payload: &Value) -> Result<String> {
+    let fields = payload.as_mapping().context("template-not-mapping")?;
+    only_known(fields, &["path", "with"])?;
+    let path = quoted(as_str(
+        get(fields, "path").context("template-missing-path")?,
+        "template-path",
+    )?);
+    let bindings = get(fields, "with")
+        .and_then(Value::as_mapping)
+        .context("template-with-not-mapping")?;
+    Ok(format!("(template {path} with: {})", record(bindings)?))
+}
+
+fn wasm_expression(payload: &Value) -> Result<String> {
+    let fields = payload.as_mapping().context("wasm-not-mapping")?;
+    only_known(fields, &["import", "args"])?;
+    let import = get(fields, "import")
+        .and_then(Value::as_mapping)
+        .context("wasm-import-not-mapping")?;
+    only_known(import, &["module", "name"])?;
+    let module = quoted(as_str(
+        get(import, "module").context("wasm-import-missing-module")?,
+        "wasm-module",
+    )?);
+    let name = quoted(as_str(
+        get(import, "name").context("wasm-import-missing-name")?,
+        "wasm-name",
+    )?);
+    let args = get(fields, "args")
+        .and_then(Value::as_sequence)
+        .context("wasm-args-not-sequence")?
+        .iter()
+        .map(|value| match value {
+            Value::String(value) if value.starts_with('$') => Ok(format!("(arg {})", sym(value))),
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                Ok(format!("(const {})", expr(value)?))
+            }
+            _ => bail!("wasm-arg-not-reference-or-literal"),
+        })
+        .collect::<Result<Vec<_>>>()?
+        .join(" ");
+    Ok(format!(
+        "(wasm import: (import {module} {name}) args: ({args}))"
+    ))
+}
+
+fn named_call(head: &str, arguments: &Mapping) -> Result<String> {
+    let signature = CALL_SIGNATURES
+        .with(|slot| slot.borrow().get(head).cloned())
+        .with_context(|| {
+            if head.contains('.') {
+                format!("named-call-unresolved-qualified-callee-{head}")
+            } else {
+                format!("named-call-unresolved-local-callee-{head}")
+            }
+        })?;
+    let ordered = signature
+        .type_args
+        .iter()
+        .chain(&signature.value_args)
+        .collect::<Vec<_>>();
+    if signature.type_args.is_empty()
+        && signature.value_args.len() == 1
+        && arguments
+            .keys()
+            .any(|key| key.as_str().is_some_and(|key| key.starts_with('$')))
+    {
+        return Ok(format!("({head} {})", expression_mapping(arguments)?));
+    }
+    for key in arguments.keys() {
+        let key = as_str(key, "named-call-argument")?;
+        if !ordered.iter().any(|expected| expected.as_str() == key) {
+            bail!("named-call-unknown-argument-{head}-{key}");
+        }
+    }
+    let mut values = Vec::with_capacity(ordered.len());
+    for name in ordered {
+        let value = get(arguments, name)
+            .with_context(|| format!("named-call-missing-argument-{head}-{name}"))?;
+        values.push(expr(value)?);
+    }
+    Ok(format!(
+        "({head}{})",
+        values
+            .into_iter()
+            .map(|value| format!(" {value}"))
+            .collect::<String>()
+    ))
+}
+
+fn record(map: &Mapping) -> Result<String> {
+    Ok(format!(
+        "(record{})",
+        map.iter()
+            .map(|(key, value)| Ok(format!(
+                " ({} {})",
+                sym(as_str(key, "record-key")?),
+                expr(value)?
+            )))
+            .collect::<Result<Vec<_>>>()?
+            .join("")
+    ))
+}
+
+fn ty(value: &Value) -> Result<String> {
+    match value {
+        Value::String(value) => Ok(sym(value.trim_start_matches('$'))),
+        Value::Mapping(map) if map.len() == 1 => {
+            let (key, payload) = map.iter().next().unwrap();
+            type_form(as_str(key, "type-head")?, payload)
+        }
+        _ => bail!("unsupported-type"),
+    }
+}
+
+fn type_form(head: &str, payload: &Value) -> Result<String> {
+    let head = sym(head.trim_start_matches('$'));
+    if head == "fn-type" {
+        let fields = payload.as_mapping().context("fn-type-not-mapping")?;
+        only_known(fields, &["args", "return"])?;
+        let args = get(fields, "args").context("fn-type-missing-args")?;
+        let args = if matches!(args.as_str(), Some("$void" | "void")) {
+            Vec::new()
+        } else if let Some(record) = args
+            .as_mapping()
+            .and_then(|args| get(args, "$record"))
+            .and_then(Value::as_mapping)
+        {
+            record.values().map(ty).collect::<Result<Vec<_>>>()?
+        } else {
+            vec![ty(args)?]
+        };
+        return Ok(format!(
+            "(fn-type ({}) {})",
+            args.join(" "),
+            ty(get(fields, "return").context("fn-type-missing-return")?)?
+        ));
+    }
+    if matches!(
+        head.as_str(),
+        "newtype" | "array" | "mut" | "ref" | "mut-ref"
+    ) {
+        return Ok(format!("({head} {})", ty(payload)?));
+    }
+    if head == "policy" {
+        return policy_type(payload);
+    }
+    if head == "capability" {
+        if let Some(domain) = payload.as_str() {
+            return Ok(format!("(capability {})", sym(domain)));
+        }
+        let map = payload.as_mapping().context("capability-not-mapping")?;
+        if map.len() != 1 {
+            bail!("capability-domain-count")
+        }
+        let (domain, groups) = map.iter().next().unwrap();
+        return Ok(format!(
+            "(capability {}{})",
+            sym(as_str(domain, "capability-domain")?),
+            policy_groups(groups)?
+        ));
+    }
+    match payload {
+        Value::Null => Ok(head),
+        Value::String(value) if value == "$void" => Ok(format!("({head})")),
+        Value::Sequence(values) => Ok(format!(
+            "({head}{})",
+            values
+                .iter()
+                .map(ty)
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .map(|v| format!(" {v}"))
+                .collect::<String>()
+        )),
+        Value::Mapping(fields)
+            if matches!(head.as_str(), "record" | "enum" | "iface" | "interface") =>
+        {
+            let canonical = if head == "iface" { "interface" } else { &head };
+            Ok(format!(
+                "({canonical}{})",
+                fields
+                    .iter()
+                    .map(|(key, value)| Ok(format!(
+                        " ({} {})",
+                        sym(as_str(key, "type-member")?),
+                        ty(value)?
+                    )))
+                    .collect::<Result<Vec<_>>>()?
+                    .join("")
+            ))
+        }
+        Value::Mapping(arguments) => {
+            let parameters = TYPE_SIGNATURES.with(|slot| slot.borrow().get(&head).cloned());
+            let parameters = match parameters {
+                Some(parameters) => parameters,
+                None if head == "map" => vec!["key".to_string(), "value".to_string()],
+                None => bail!("type-application-unresolved-parameters-{head}"),
+            };
+            for key in arguments.keys() {
+                let key = as_str(key, "type-argument")?;
+                if !parameters.iter().any(|parameter| parameter == key) {
+                    bail!("type-application-unknown-argument-{head}-{key}");
+                }
+            }
+            let values = parameters
+                .iter()
+                .map(|parameter| {
+                    ty(get(arguments, parameter).with_context(|| {
+                        format!("type-application-missing-argument-{head}-{parameter}")
+                    })?)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(format!(
+                "({head}{})",
+                values
+                    .into_iter()
+                    .map(|value| format!(" {value}"))
+                    .collect::<String>()
+            ))
+        }
+        _ => Ok(format!("({head} {})", ty(payload)?)),
+    }
+}
+
+fn policy_type(payload: &Value) -> Result<String> {
+    let domains = payload.as_mapping().context("policy-domains-not-mapping")?;
+    Ok(format!(
+        "(policy{})",
+        domains
+            .iter()
+            .map(|(domain, groups)| {
+                Ok(format!(
+                    " ({}{})",
+                    sym(as_str(domain, "policy-domain")?),
+                    policy_groups(groups)?
+                ))
+            })
+            .collect::<Result<String>>()?
+    ))
+}
+
+fn policy_groups(value: &Value) -> Result<String> {
+    if value.is_null() {
+        return Ok(String::new());
+    }
+    value
+        .as_sequence()
+        .context("policy-groups-not-sequence")?
+        .iter()
+        .map(|group| {
+            let map = group.as_mapping().context("policy-group-not-mapping")?;
+            only_known(map, &["requirement", "scopes"])?;
+            Ok(format!(
+                " (group requirement: {} scopes: {})",
+                sym(as_str(
+                    get(map, "requirement").context("policy-group-missing-requirement")?,
+                    "requirement"
+                )?),
+                policy_scopes(get(map, "scopes").context("policy-group-missing-scopes")?)?
+            ))
+        })
+        .collect()
+}
+
+fn policy_scopes(value: &Value) -> Result<String> {
+    if value.as_str() == Some("any") {
+        return Ok("((any))".into());
+    }
+    let scopes = value.as_sequence().context("policy-scopes-not-sequence")?;
+    Ok(format!(
+        "({})",
+        scopes
+            .iter()
+            .map(|scope| {
+                let map = scope.as_mapping().context("policy-scope-not-mapping")?;
+                if map.len() != 1 {
+                    bail!("policy-scope-selector-count")
+                }
+                let (selector, value) = map.iter().next().unwrap();
+                Ok(format!(
+                    "({} {})",
+                    sym(as_str(selector, "policy-scope-selector")?),
+                    quoted(as_str(value, "policy-scope-value")?)
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .join(" ")
+    ))
+}
+
+fn declaration_annotations(map: &Mapping) -> Result<String> {
+    let mut output = String::new();
+    if let Some(doc) = get(map, "=doc") {
+        output.push_str(&format!(" doc: {}", quoted(as_str(doc, "=doc")?)));
+    }
+    if let Some(where_clause) = get(map, "=where") {
+        let parameters = where_clause.as_mapping().context("where-not-mapping")?;
+        output.push_str(&format!(
+            " where: ({})",
+            parameters
+                .iter()
+                .map(|(name, bounds)| {
+                    let name = sym(as_str(name, "type-parameter")?);
+                    let bounds = bounds.as_sequence().context("where-bounds-not-sequence")?;
+                    Ok(format!(
+                        "({}{})",
+                        name,
+                        bounds
+                            .iter()
+                            .map(ty)
+                            .collect::<Result<Vec<_>>>()?
+                            .into_iter()
+                            .map(|bound| format!(" {bound}"))
+                            .collect::<String>()
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?
+                .join(" ")
+        ));
+    }
+    if let Some(definitions) = get(map, "=defs") {
+        let definitions = definitions.as_mapping().context("defs-not-mapping")?;
+        output.push_str(&format!(
+            " defs: ({})",
+            definitions
+                .iter()
+                .map(|(name, definition)| {
+                    let name = as_str(name, "def-name")?;
+                    let definition = definition.as_mapping().context("def-not-mapping")?;
+                    let primary = get(definition, "$function")
+                        .or_else(|| get(definition, "$fn"))
+                        .context("def-not-function")?;
+                    function_form(name, primary, definition)
+                })
+                .collect::<Result<Vec<_>>>()?
+                .join(" ")
+        ));
+    }
+    if let Some(implementations) = get(map, "=impl") {
+        let implementations = implementations.as_mapping().context("impl-not-mapping")?;
+        output.push_str(&format!(
+            " impls: ({})",
+            implementations
+                .iter()
+                .map(|(interface, methods)| {
+                    let interface = ty(interface)?;
+                    let methods = methods.as_mapping().context("impl-methods-not-mapping")?;
+                    Ok(format!(
+                        "(impl {interface} methods: ({}))",
+                        methods
+                            .iter()
+                            .map(|(name, method)| {
+                                let name = as_str(name, "method-name")?;
+                                if let Some(reference) = method.as_str() {
+                                    return Ok(format!(
+                                        "(method {} {})",
+                                        sym(name),
+                                        sym(reference)
+                                    ));
+                                }
+                                let method = method.as_mapping().context("method-not-mapping")?;
+                                let primary = get(method, "$function")
+                                    .or_else(|| get(method, "$fn"))
+                                    .context("method-not-function")?;
+                                Ok(format!(
+                                    "(method {} {})",
+                                    sym(name),
+                                    function_form(name, primary, method)?
+                                ))
+                            })
+                            .collect::<Result<Vec<_>>>()?
+                            .join(" ")
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?
+                .join(" ")
+        ));
+    }
+    Ok(output)
+}
+
+fn infer_type(value: &Value) -> Result<&'static str> {
+    match value {
+        Value::Bool(_) => Ok("bool"),
+        Value::Number(number) if number.is_i64() || number.is_u64() => Ok("int64"),
+        Value::Number(_) => Ok("float64"),
+        Value::String(_) => Ok("str"),
+        _ => bail!("cannot-infer-constant-type"),
+    }
+}
+
+fn validate(source: &str) -> Result<()> {
+    let document = vibra::syntax::parse(source).map_err(|errors| anyhow::anyhow!("{errors:?}"))?;
+    vibra::ast::lower_document(&document).map_err(|error| anyhow::anyhow!("{error}"))?;
+    Ok(())
+}
+
+fn get<'a>(map: &'a Mapping, key: &str) -> Option<&'a Value> {
+    map.get(Value::String(key.into()))
+}
+
+fn only_known(map: &Mapping, known: &[&str]) -> Result<()> {
+    for key in map.keys() {
+        let key = as_str(key, "mapping-key")?;
+        if !known.contains(&key) {
+            bail!("unsupported-key-{key}")
+        }
+    }
+    Ok(())
+}
+
+fn as_str<'a>(value: &'a Value, context: &str) -> Result<&'a str> {
+    value
+        .as_str()
+        .with_context(|| format!("{context}-not-string"))
+}
+
+fn sym(value: &str) -> String {
+    value.trim().trim_start_matches('$').to_string()
+}
+
+fn quoted(value: &str) -> String {
+    format!("{value:?}")
+}
+
+fn record_issue(report: &mut Report, reason: String) {
+    *report.unsupported.entry(reason).or_default() += 1;
+}
+
+fn first_line(value: &str) -> &str {
+    value.lines().next().unwrap_or(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrates_direct_generic_heads_calls_and_trailing_metadata() {
+        let output = migrate(
+            r#"
+test:
+  $import: ../stdlib/src/test.vibra
+answer:
+  $function:
+    value: $int64
+  return: $array
+  do:
+    - $return:
+        $array: [$args.value]
+works:
+  $test: core
+  tags: [fast]
+  do:
+    - $test.assert: true
+"#,
+        )
+        .unwrap();
+        assert!(output.contains("(import test \"../stdlib/src/test.vibra\")"));
+        assert!(output.contains("(fn answer ((value int64)) array"));
+        assert!(output.contains("(array args.value)"));
+        assert!(output.contains("tags: (fast)"));
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn migrates_test_authority_with_explicit_policy_domains() {
+        let output = migrate(
+            r#"
+privileged:
+  $test: fs
+  policy: {$policy: {fs-read: null}}
+  do: []
+"#,
+        )
+        .unwrap();
+        assert!(output.contains("policy: (policy (fs-read))"));
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn named_calls_follow_declared_type_and_value_argument_order() {
+        let output = migrate(
+            r#"
+combine:
+  =where:
+    item: []
+  $function:
+    left: $int64
+  args:
+    right: $int64
+  return: $int64
+  do:
+    - $return: $args.left
+main:
+  $function: $void
+  return: $int64
+  do:
+    - $return:
+        $combine:
+          right: 2
+          item: $int64
+          left: 1
+"#,
+        )
+        .unwrap();
+        assert!(output.contains("(fn combine ((left int64) (right int64)) int64"));
+        assert!(output.contains("(combine int64 1 2)"));
+        assert!(!output.contains("(combine (record"));
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn named_calls_fail_closed_without_a_safe_signature() {
+        let qualified = migrate(
+            r#"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $remote.call: {value: 1}
+"#,
+        )
+        .unwrap_err();
+        let qualified = format!("{qualified:#}");
+        assert!(qualified.contains("named-call-unresolved-qualified-callee-remote.call"));
+
+        let local = migrate(
+            r#"
+main:
+  $function: $void
+  return: $void
+  do:
+    - $unknown: {value: 1}
+"#,
+        )
+        .unwrap_err();
+        let local = format!("{local:#}");
+        assert!(local.contains("named-call-unresolved-local-callee-unknown"));
+    }
+
+    #[test]
+    fn qualified_calls_use_scanned_relative_import_signatures() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = temp.path().join("lib.vibra");
+        let main = temp.path().join("main.vibra");
+        fs::write(
+            &library,
+            r#"
+combine:
+  $function:
+    left: $int64
+  args:
+    right: $int64
+  return: $int64
+  do:
+    - $return: $args.left
+"#,
+        )
+        .unwrap();
+        let source = r#"
+lib:
+  $import: ./lib.vibra
+main:
+  $function: $void
+  return: $int64
+  do:
+    - $return:
+        $lib.combine:
+          right: 2
+          left: 1
+"#;
+        fs::write(&main, source).unwrap();
+        let index = build_signature_index(&[library, main.clone()]).unwrap();
+        let output = migrate_for_path(source, &main, &index).unwrap();
+        assert!(output.contains("(lib.combine 1 2)"));
+        assert!(!output.contains("(lib.combine (record"));
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn migrates_schema_known_record_template_and_wasm_expressions() {
+        let output = migrate(
+            r#"
+assets:
+  $function: $void
+  return: $void
+  do:
+    - $record: {name: Vibra}
+    - $template:
+        path: greeting.txt
+        with: {name: Vibra}
+    - $wasm:
+        import: {module: vibra_v1, name: io_write}
+        args: [$args.output, 1, suffix]
+"#,
+        )
+        .unwrap();
+        assert!(output.contains("(record (name \"Vibra\"))"));
+        assert!(output.contains("(template \"greeting.txt\" with: (record (name \"Vibra\")))"));
+        assert!(output.contains(
+            "(wasm import: (import \"vibra_v1\" \"io_write\") args: ((arg args.output) (const 1) (const \"suffix\")))"
+        ));
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn generic_type_and_owned_method_arguments_follow_declaration_order() {
+        let output = migrate(
+            r#"
+pairing:
+  $tuple: [$left, $right]
+  =where:
+    left: []
+    right: []
+box:
+  $newtype: $t
+  =where:
+    t: []
+  =defs:
+    replace:
+      =where:
+        u: []
+      $function: $self
+      args:
+        value: $u
+      return: $u
+      do:
+        - $return: $args.value
+mapper:
+  $interface:
+    map:
+      $fn-type:
+        args:
+          $record:
+            self: $self
+            value: $t
+        return: $t
+  =where:
+    t: []
+demo:
+  $function: $void
+  return:
+    $pairing:
+      right: $str
+      left: $int64
+  do:
+    - $box.replace:
+        value: ok
+        u: $str
+        self: $boxed
+        t: $int64
+    - $mapper.map:
+        value: 1
+        self: $mapped
+        t: $int64
+"#,
+        )
+        .unwrap();
+        assert!(output.contains("(pairing int64 str)"));
+        assert!(output.contains("(box.replace int64 str boxed \"ok\")"));
+        assert!(output.contains("(mapper.map int64 mapped 1)"));
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn scan_covers_repository_source_kinds_and_excludes_work_areas() {
+        let temp = tempfile::tempdir().unwrap();
+        let included = [
+            "tests/case.vibra",
+            "examples/demo.vibra",
+            "stdlib/src/core.vibra",
+            "fixtures/input.vibra",
+            "templates/app.vibra",
+            "macros/expanded.vibra",
+            "generated/source.vibra",
+            "dep/package/lib.vibra",
+        ];
+        let excluded = [
+            "target/debug/build.vibra",
+            ".git/objects/fake.vibra",
+            ".worktrees/other/test.vibra",
+            "worktrees/other/test.vibra",
+        ];
+        for relative in included.iter().chain(excluded.iter()) {
+            let path = temp.path().join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "(const x int64 1)").unwrap();
+        }
+        let mut files = Vec::new();
+        collect(temp.path(), &mut files).unwrap();
+        files.sort();
+        let relative = files
+            .iter()
+            .map(|path| {
+                path.strip_prefix(temp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect::<Vec<_>>();
+        for expected in included {
+            assert!(
+                relative.contains(&expected.to_string()),
+                "missing {expected}"
+            );
+        }
+        for unexpected in excluded {
+            assert!(
+                !relative.contains(&unexpected.to_string()),
+                "included {unexpected}"
+            );
+        }
+    }
+}
