@@ -283,10 +283,16 @@ syntax.
 Dropping the `$` sigil makes a primitive name syntactically indistinguishable
 from a user function of the same name, which the legacy `$`-prefixed table
 never had to resolve. The adopted rule: an unqualified call head matching one
-of the 22 primitive names resolves to the primitive; a qualified head (e.g.
-`mymod.add`) is never a primitive, regardless of its suffix; and declaring a
-function whose bare name is a primitive name is a compile error, since such a
-declaration would be permanently unreachable through an unqualified call.
+of the 22 primitive names resolves to the primitive, and a qualified head (e.g.
+`mymod.add`) is never a primitive, regardless of its suffix.
+
+Declaring a function whose bare name is a primitive name is **permitted**. Such
+a function is reachable through its qualified name, which is how the standard
+library's `option.and`, `option.or`, `result.and`, and `result.or` combinators
+are named and called. Only the unqualified spelling is unavailable, and within
+the declaring module an unqualified `and` therefore means the primitive rather
+than the local combinator. Primitive availability is uniform across every
+module and never depends on what a module happens to declare.
 
 The current structured-concurrency, reference, mutation, range, conversion,
 cast, collection, checked-arithmetic, and scope rules remain unchanged.
