@@ -8,3 +8,6 @@ publish = false
 anyhow = "1"
 serde_yaml = "0.9"
 vibra = { path = "../.." }
+
+[dev-dependencies]
+tempfile = "3"
