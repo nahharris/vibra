@@ -7,7 +7,7 @@
 use crate::lower::{
     CapabilityType, LiteralType, PolicyGroup, PolicyScope, PolicyType, TypeAlias, TypeRef,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
@@ -81,34 +81,64 @@ pub(crate) fn substitute(
     }
 }
 
+/// Normalize `ty` by inlining non-generic, non-newtype aliases.
+///
+/// Guards against directly or mutually self-referential aliases (a type
+/// alias, not wrapped in `Newtype`, whose body eventually names itself
+/// again) by tracking which alias names are currently being expanded on
+/// this call stack. Re-entering an alias that is already being expanded
+/// stops the inlining for that occurrence and returns it unexpanded,
+/// rather than recursing without bound.
 pub(crate) fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> TypeRef {
+    normalize_type_ref_guarded(ty, aliases, &mut BTreeSet::new())
+}
+
+fn normalize_type_ref_guarded(
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+    visiting: &mut BTreeSet<String>,
+) -> TypeRef {
     match ty {
         TypeRef::Named(name) => match aliases.get(name) {
             Some(alias)
                 if alias.type_params.is_empty()
                     && !matches!(alias.body, TypeRef::Newtype { .. }) =>
             {
-                normalize_type_ref(&alias.body, aliases)
+                if !visiting.insert(name.clone()) {
+                    return ty.clone();
+                }
+                let normalized = normalize_type_ref_guarded(&alias.body, aliases, visiting);
+                visiting.remove(name);
+                normalized
             }
             _ => ty.clone(),
         },
         TypeRef::Instantiated { base, type_args } => {
             let args: Vec<_> = type_args
                 .iter()
-                .map(|arg| normalize_type_ref(arg, aliases))
+                .map(|arg| normalize_type_ref_guarded(arg, aliases, visiting))
                 .collect();
             match aliases.get(base) {
                 Some(alias)
                     if !matches!(alias.body, TypeRef::Newtype { .. })
                         && alias.type_params.len() == args.len() =>
                 {
+                    if !visiting.insert(base.clone()) {
+                        return TypeRef::Instantiated {
+                            base: base.clone(),
+                            type_args: args,
+                        };
+                    }
                     let substitutions = alias
                         .type_params
                         .iter()
                         .cloned()
                         .zip(args.iter().cloned())
                         .collect();
-                    normalize_type_ref(&substitute_type(&alias.body, &substitutions), aliases)
+                    let expanded = substitute_type(&alias.body, &substitutions);
+                    let normalized = normalize_type_ref_guarded(&expanded, aliases, visiting);
+                    visiting.remove(base);
+                    normalized
                 }
                 _ => TypeRef::Instantiated {
                     base: base.clone(),
@@ -116,62 +146,81 @@ pub(crate) fn normalize_type_ref(ty: &TypeRef, aliases: &HashMap<String, TypeAli
                 },
             }
         }
-        TypeRef::Mutable(inner) => TypeRef::Mutable(Box::new(normalize_type_ref(inner, aliases))),
+        TypeRef::Mutable(inner) => TypeRef::Mutable(Box::new(normalize_type_ref_guarded(
+            inner, aliases, visiting,
+        ))),
         TypeRef::Reference { inner, mutable } => TypeRef::Reference {
-            inner: Box::new(normalize_type_ref(inner, aliases)),
+            inner: Box::new(normalize_type_ref_guarded(inner, aliases, visiting)),
             mutable: *mutable,
         },
-        TypeRef::JoinHandle(inner) => {
-            TypeRef::JoinHandle(Box::new(normalize_type_ref(inner, aliases)))
-        }
+        TypeRef::JoinHandle(inner) => TypeRef::JoinHandle(Box::new(normalize_type_ref_guarded(
+            inner, aliases, visiting,
+        ))),
         TypeRef::Union(items) => TypeRef::Union(
             items
                 .iter()
-                .map(|item| normalize_type_ref(item, aliases))
+                .map(|item| normalize_type_ref_guarded(item, aliases, visiting))
                 .collect(),
         ),
         TypeRef::Enum(fields) => TypeRef::Enum(
             fields
                 .iter()
-                .map(|(name, ty)| (name.clone(), normalize_type_ref(ty, aliases)))
+                .map(|(name, ty)| {
+                    (
+                        name.clone(),
+                        normalize_type_ref_guarded(ty, aliases, visiting),
+                    )
+                })
                 .collect(),
         ),
         TypeRef::Record(fields) => TypeRef::Record(
             fields
                 .iter()
-                .map(|(name, ty)| (name.clone(), normalize_type_ref(ty, aliases)))
+                .map(|(name, ty)| {
+                    (
+                        name.clone(),
+                        normalize_type_ref_guarded(ty, aliases, visiting),
+                    )
+                })
                 .collect(),
         ),
         TypeRef::Tuple(items) => TypeRef::Tuple(
             items
                 .iter()
-                .map(|item| normalize_type_ref(item, aliases))
+                .map(|item| normalize_type_ref_guarded(item, aliases, visiting))
                 .collect(),
         ),
-        TypeRef::Array(inner) => TypeRef::Array(Box::new(normalize_type_ref(inner, aliases))),
+        TypeRef::Array(inner) => TypeRef::Array(Box::new(normalize_type_ref_guarded(
+            inner, aliases, visiting,
+        ))),
         TypeRef::Map { key, value } => TypeRef::Map {
-            key: Box::new(normalize_type_ref(key, aliases)),
-            value: Box::new(normalize_type_ref(value, aliases)),
+            key: Box::new(normalize_type_ref_guarded(key, aliases, visiting)),
+            value: Box::new(normalize_type_ref_guarded(value, aliases, visiting)),
         },
         TypeRef::Interface(fields) => TypeRef::Interface(
             fields
                 .iter()
-                .map(|(name, ty)| (name.clone(), normalize_type_ref(ty, aliases)))
+                .map(|(name, ty)| {
+                    (
+                        name.clone(),
+                        normalize_type_ref_guarded(ty, aliases, visiting),
+                    )
+                })
                 .collect(),
         ),
         TypeRef::Intersect(items) => TypeRef::Intersect(
             items
                 .iter()
-                .map(|item| normalize_type_ref(item, aliases))
+                .map(|item| normalize_type_ref_guarded(item, aliases, visiting))
                 .collect(),
         ),
         TypeRef::FnType { args, return_type } => TypeRef::FnType {
-            args: Box::new(normalize_type_ref(args, aliases)),
-            return_type: Box::new(normalize_type_ref(return_type, aliases)),
+            args: Box::new(normalize_type_ref_guarded(args, aliases, visiting)),
+            return_type: Box::new(normalize_type_ref_guarded(return_type, aliases, visiting)),
         },
         TypeRef::Newtype { name, inner } => TypeRef::Newtype {
             name: name.clone(),
-            inner: Box::new(normalize_type_ref(inner, aliases)),
+            inner: Box::new(normalize_type_ref_guarded(inner, aliases, visiting)),
         },
         _ => ty.clone(),
     }
@@ -599,5 +648,36 @@ mod tests {
             &TypeRef::Named("read-policy".into()),
             &aliases
         ));
+    }
+
+    #[test]
+    fn self_referential_non_newtype_aliases_terminate_without_expanding() {
+        // A directly self-referential alias body that is not wrapped in
+        // `Newtype` must not be inlined without bound: absent the cycle
+        // guard, this recurses forever and overflows the stack. This
+        // exercises the `Named` alias-expansion branch.
+        let named_ty = TypeRef::Named("self-ref".into());
+        let aliases = HashMap::from([("self-ref".into(), alias("self-ref", named_ty.clone()))]);
+        assert_eq!(normalize_type_ref(&named_ty, &aliases), named_ty);
+
+        // Same hazard through the `Instantiated` branch: a generic alias
+        // whose body instantiates itself with its own type parameter.
+        let mut list_alias = alias(
+            "list",
+            TypeRef::Instantiated {
+                base: "list".into(),
+                type_args: vec![TypeRef::Generic("t".into())],
+            },
+        );
+        list_alias.type_params = vec!["t".into()];
+        let instantiated_ty = TypeRef::Instantiated {
+            base: "list".into(),
+            type_args: vec![TypeRef::Int64],
+        };
+        let aliases = HashMap::from([("list".into(), list_alias)]);
+        assert_eq!(
+            normalize_type_ref(&instantiated_ty, &aliases),
+            instantiated_ty
+        );
     }
 }
