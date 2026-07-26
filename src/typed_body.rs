@@ -9,10 +9,11 @@ use crate::ast::{
 };
 use crate::body_semantics::{validate_function_body, validate_task_handles};
 use crate::lower::{
-    infer_expr_type, primitive_integer, primitive_numeric, typed_primitive_op, Call, Expr,
+    infer_expr_type, primitive_integer, primitive_numeric, typed_primitive_op, Call, EnumDef, Expr,
     FunctionBody, FunctionSig, LetValue, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement,
     TypeRef,
 };
+use crate::type_semantics::{capability_body, policy_body, policy_type_is_subset, type_compatible};
 use crate::typed_lower::{
     lower_type, qualify, TypedFunctionSignature, TypedModuleInput, TypedSignatureIndex,
 };
@@ -306,7 +307,7 @@ fn validate_statements(
                     LetValue::Expr(expr) => {
                         let expr =
                             validate_expr(expr, locals, constants, signatures, context, origins)?;
-                        let ty = infer(&expr, locals, constants, context)?;
+                        let ty = infer(&expr, locals, constants, signatures, context)?;
                         (LetValue::Expr(expr), ty)
                     }
                     LetValue::Call(call) => {
@@ -353,7 +354,7 @@ fn validate_statements(
                     _ => bail!("E-SET-002: typed symbol `{var}` is not writable"),
                 };
                 let value = validate_expr(value, locals, constants, signatures, context, origins)?;
-                let actual = infer(&value, locals, constants, context)?;
+                let actual = infer(&value, locals, constants, signatures, context)?;
                 if writable != &actual {
                     bail!(
                         "E-SET-003: typed assignment to `{var}` expects {writable:?}, got {actual:?}"
@@ -369,7 +370,7 @@ fn validate_statements(
                     bail!("typed task bodies cannot return from their enclosing function");
                 }
                 let expr = validate_expr(expr, locals, constants, signatures, context, origins)?;
-                let actual = infer(&expr, locals, constants, context)?;
+                let actual = infer(&expr, locals, constants, signatures, context)?;
                 if &actual != return_type {
                     bail!("typed return in `{context}` expects {return_type:?}, got {actual:?}");
                 }
@@ -381,7 +382,7 @@ fn validate_statements(
                 else_body,
             } => {
                 let cond = validate_expr(cond, locals, constants, signatures, context, origins)?;
-                if infer(&cond, locals, constants, context)? != TypeRef::Bool {
+                if infer(&cond, locals, constants, signatures, context)? != TypeRef::Bool {
                     bail!("typed if condition in `{context}` must be bool");
                 }
                 let then_body = validate_statements(
@@ -416,7 +417,7 @@ fn validate_statements(
             }
             Statement::While { cond, body } => {
                 let cond = validate_expr(cond, locals, constants, signatures, context, origins)?;
-                if infer(&cond, locals, constants, context)? != TypeRef::Bool {
+                if infer(&cond, locals, constants, signatures, context)? != TypeRef::Bool {
                     bail!("typed while condition in `{context}` must be bool");
                 }
                 let body = validate_statements(
@@ -436,7 +437,7 @@ fn validate_statements(
             Statement::For { var, source, body } => {
                 let source =
                     validate_expr(source, locals, constants, signatures, context, origins)?;
-                let item = match infer(&source, locals, constants, context)? {
+                let item = match infer(&source, locals, constants, signatures, context)? {
                     TypeRef::Array(item) => *item,
                     TypeRef::Range => TypeRef::Int64,
                     other => bail!("typed for source must be array or range, got {other:?}"),
@@ -512,8 +513,72 @@ fn validate_statements(
             Statement::Match { .. } => {
                 bail!("typed match remains staged with enum and interface semantics")
             }
-            Statement::Spawn { .. } | Statement::Join { .. } => {
-                bail!("typed spawn/join remains staged until affine result typing is complete")
+            Statement::Spawn {
+                handle,
+                captures,
+                value,
+                ..
+            } => {
+                if locals.contains_key(handle) {
+                    bail!(
+                        "E-TASK-003: typed task handle `{handle}` would shadow an existing local"
+                    );
+                }
+                let mut task_locals = HashMap::new();
+                for capture in captures {
+                    let ty = locals.get(capture).with_context(|| {
+                        format!("E-TASK-001: unknown typed task capture `{capture}`")
+                    })?;
+                    if matches!(
+                        ty,
+                        TypeRef::Mutable(_) | TypeRef::Reference { .. } | TypeRef::JoinHandle(_)
+                    ) {
+                        bail!(
+                            "E-TASK-001: typed task capture `{capture}` has mutable, reference, \
+                             or affine handle type {ty:?}; move an immutable snapshot into the \
+                             task instead"
+                        );
+                    }
+                    task_locals.insert(capture.clone(), ty.clone());
+                }
+                let value =
+                    validate_expr(value, &task_locals, constants, signatures, context, origins)?;
+                let result_type = infer(&value, &task_locals, constants, signatures, context)?;
+                if result_type == TypeRef::Void {
+                    bail!("E-TASK-002: typed `spawn` value must produce a non-void result");
+                }
+                locals.insert(
+                    handle.clone(),
+                    TypeRef::JoinHandle(Box::new(result_type.clone())),
+                );
+                let runtime_captures = captures
+                    .iter()
+                    .map(|capture| runtime_name(capture, context, signatures))
+                    .collect();
+                Statement::Spawn {
+                    handle: handle.clone(),
+                    captures: runtime_captures,
+                    value,
+                    result_type,
+                }
+            }
+            Statement::Join { handle, var } => {
+                if locals.contains_key(var) {
+                    bail!("E-TASK-003: typed join result `{var}` would shadow an existing local");
+                }
+                let handle_type = locals.remove(handle).with_context(|| {
+                    format!(
+                        "E-TASK-003: typed task handle `{handle}` is unknown or was already joined"
+                    )
+                })?;
+                let TypeRef::JoinHandle(result_type) = handle_type else {
+                    bail!("E-TASK-003: typed symbol `{handle}` is not a task join handle");
+                };
+                locals.insert(var.clone(), *result_type);
+                Statement::Join {
+                    handle: handle.clone(),
+                    var: var.clone(),
+                }
             }
         };
         checked.push(statement);
@@ -581,7 +646,7 @@ fn validate_call(
         .map(|(argument, expected)| {
             let argument =
                 validate_expr(argument, locals, constants, signatures, context, origins)?;
-            let actual = infer(&argument, locals, constants, context)?;
+            let actual = infer(&argument, locals, constants, signatures, context)?;
             if &actual != expected {
                 bail!(
                     "typed call `{}` expects {expected:?}, got {actual:?}",
@@ -714,7 +779,7 @@ fn validate_expr(
                 if let Some(origin) = origin {
                     origins.select(origin);
                 }
-                if infer(value, locals, constants, context)? != TypeRef::Int64 {
+                if infer(value, locals, constants, signatures, context)? != TypeRef::Int64 {
                     bail!("typed range bounds in `{context}` must be int64");
                 }
             }
@@ -731,7 +796,7 @@ fn validate_expr(
                 .collect::<Result<_>>()?;
             let types = args
                 .iter()
-                .map(|arg| infer(arg, locals, constants, context))
+                .map(|arg| infer(arg, locals, constants, signatures, context))
                 .collect::<Result<Vec<_>>>()?;
             let operand_type = types[0].clone();
             if types.iter().any(|ty| ty != &operand_type) {
@@ -754,9 +819,85 @@ fn validate_expr(
                 return_type,
             }
         }
-        Expr::EnumConstructor { .. } => bail!("typed enum constructors remain staged"),
-        Expr::Cast { .. } | Expr::PolicyNarrow { .. } | Expr::If { .. } => {
-            bail!("typed cast, policy, and expression-if forms remain staged")
+        Expr::EnumConstructor {
+            enum_key,
+            tag,
+            payload,
+        } => {
+            let payload = payload
+                .as_ref()
+                .map(|payload| {
+                    validate_expr(payload, locals, constants, signatures, context, origins)
+                })
+                .transpose()?
+                .map(Box::new);
+            let alias = signatures
+                .aliases
+                .get(enum_key)
+                .with_context(|| format!("unknown typed enum `{enum_key}`"))?;
+            let TypeRef::Enum(tags) = &alias.body else {
+                bail!("typed constructor target `{enum_key}` is not an enum");
+            };
+            let payload_ty = tags
+                .get(tag)
+                .with_context(|| format!("unknown typed enum tag `{tag}` for enum `{enum_key}`"))?;
+            match (&payload, payload_ty) {
+                (None, ty) if ty == &TypeRef::Void => {}
+                (Some(payload), ty) if ty != &TypeRef::Void => {
+                    let actual = infer(payload, locals, constants, signatures, context)?;
+                    if !type_compatible(ty, &actual, &signatures.aliases) {
+                        bail!(
+                            "constructor `{enum_key}.{tag}` payload type mismatch: expected {ty:?}, got {actual:?}"
+                        );
+                    }
+                }
+                _ => bail!(
+                    "constructor `{enum_key}.{tag}` payload arity does not match its declared tag"
+                ),
+            }
+            Expr::EnumConstructor {
+                enum_key: enum_key.clone(),
+                tag: tag.clone(),
+                payload,
+            }
+        }
+        Expr::Cast { .. } => bail!("typed cast forms remain staged"),
+        Expr::PolicyNarrow { from, target } => {
+            let from = validate_expr(from, locals, constants, signatures, context, origins)?;
+            let source = infer(&from, locals, constants, signatures, context)?;
+            if !policy_type_is_subset(&source, target, &signatures.aliases) {
+                bail!("policy narrowing cannot widen authority");
+            }
+            Expr::PolicyNarrow {
+                from: Box::new(from),
+                target: target.clone(),
+            }
+        }
+        Expr::If {
+            cond,
+            then_e,
+            else_e,
+        } => {
+            let cond = validate_expr(cond, locals, constants, signatures, context, origins)?;
+            if infer(&cond, locals, constants, signatures, context)? != TypeRef::Bool {
+                bail!("typed expression-`if` condition in `{context}` must be bool");
+            }
+            let then_e = validate_expr(then_e, locals, constants, signatures, context, origins)?;
+            let else_e = validate_expr(else_e, locals, constants, signatures, context, origins)?;
+            let then_ty = infer(&then_e, locals, constants, signatures, context)?;
+            let else_ty = infer(&else_e, locals, constants, signatures, context)?;
+            if !type_compatible(&then_ty, &else_ty, &signatures.aliases)
+                && !type_compatible(&else_ty, &then_ty, &signatures.aliases)
+            {
+                bail!(
+                    "typed expression-`if` branches in `{context}` have incompatible types {then_ty:?} and {else_ty:?}"
+                );
+            }
+            Expr::If {
+                cond: Box::new(cond),
+                then_e: Box::new(then_e),
+                else_e: Box::new(else_e),
+            }
         }
     };
     origins.select(&expression_origin);
@@ -767,6 +908,7 @@ fn infer(
     expr: &Expr,
     locals: &HashMap<String, TypeRef>,
     constants: &HashMap<String, RuntimeValue>,
+    signatures: &TypedSignatureIndex,
     context: &str,
 ) -> Result<TypeRef> {
     let mut inference_locals = locals.clone();
@@ -775,14 +917,39 @@ fn infer(
             .iter()
             .map(|(name, ty)| (format!("args.{name}"), ty.clone())),
     );
+    let enums = typed_enum_defs(signatures);
     infer_expr_type(
         expr,
         constants,
         &inference_locals,
-        &HashMap::new(),
-        &HashMap::new(),
+        &signatures.aliases,
+        &enums,
     )
     .with_context(|| format!("cannot infer typed expression in `{context}`"))
+}
+
+/// Build a legacy-shaped `EnumDef` registry from the typed alias table, so
+/// the shared `infer_expr_type` (which predates typed aliases) can resolve
+/// `Expr::EnumConstructor` payload and instantiated-type inference exactly as
+/// the legacy YAML path does.
+fn typed_enum_defs(signatures: &TypedSignatureIndex) -> HashMap<String, EnumDef> {
+    signatures
+        .aliases
+        .iter()
+        .filter_map(|(key, alias)| match &alias.body {
+            TypeRef::Enum(tags) => Some((
+                key.clone(),
+                EnumDef {
+                    alias: alias.alias.clone(),
+                    name: alias.name.clone(),
+                    type_params: alias.type_params.clone(),
+                    type_param_bounds: alias.type_param_bounds.clone(),
+                    tags: tags.clone(),
+                },
+            )),
+            _ => None,
+        })
+        .collect()
 }
 
 fn format_location(location: &SourceLocation) -> String {
@@ -844,7 +1011,7 @@ fn lower_function(
         &mut lexical_bindings,
     )?;
     let mut node_origins = Vec::new();
-    collect_statement_origins(&function.body, &mut node_origins);
+    collect_statement_origins(&function.body, module_alias, signatures, &mut node_origins);
     if bodies
         .functions
         .insert(key.to_string(), FunctionBody::User { statements })
@@ -1032,26 +1199,38 @@ impl<'a> OriginCursor<'a> {
     }
 }
 
-fn collect_statement_origins(expressions: &[AstExpr], origins: &mut Vec<Origin>) {
+fn collect_statement_origins(
+    expressions: &[AstExpr],
+    module_alias: &str,
+    signatures: &TypedSignatureIndex,
+    origins: &mut Vec<Origin>,
+) {
     for expression in expressions {
         if let ExprKind::Do(items) = &expression.value {
-            collect_statement_origins(items, origins);
+            collect_statement_origins(items, module_alias, signatures, origins);
         } else {
-            collect_statement_origin(expression, origins);
+            collect_statement_origin(expression, module_alias, signatures, origins);
         }
     }
 }
 
-fn collect_statement_origin(expression: &AstExpr, origins: &mut Vec<Origin>) {
+fn collect_statement_origin(
+    expression: &AstExpr,
+    module_alias: &str,
+    signatures: &TypedSignatureIndex,
+    origins: &mut Vec<Origin>,
+) {
     origins.push(expression.origin.clone());
     match &expression.value {
         ExprKind::Call { callee, arguments } => {
-            if typed_primitive_head(&callee.value).is_some() {
-                // Primitive calls in statement position lower to
-                // `Statement::Eval`, which validates the wrapped expression
-                // through the generic `validate_expr` path and therefore
-                // consumes one extra origin for the expression node itself,
-                // matching the default arm below.
+            if typed_primitive_head(&callee.value).is_some()
+                || typed_enum_constructor_head(&callee.value, module_alias, signatures).is_some()
+            {
+                // Primitive and enum-constructor calls in statement position
+                // lower to `Statement::Eval`, which validates the wrapped
+                // expression through the generic `validate_expr` path and
+                // therefore consumes one extra origin for the expression
+                // node itself, matching the default arm below.
                 origins.push(expression.origin.clone());
             }
             collect_expr_origins(arguments, origins)
@@ -1070,25 +1249,28 @@ fn collect_statement_origin(expression: &AstExpr, origins: &mut Vec<Origin>) {
             else_body,
         } => {
             collect_expr_origin(condition, origins);
-            collect_statement_origins(then_body, origins);
-            collect_statement_origins(else_body, origins);
+            collect_statement_origins(then_body, module_alias, signatures, origins);
+            collect_statement_origins(else_body, module_alias, signatures, origins);
         }
         ExprKind::While { condition, body } => {
             collect_expr_origin(condition, origins);
-            collect_statement_origins(body, origins);
+            collect_statement_origins(body, module_alias, signatures, origins);
         }
         ExprKind::For { source, body, .. } => {
             collect_expr_origin(source, origins);
-            collect_statement_origins(body, origins);
+            collect_statement_origins(body, module_alias, signatures, origins);
         }
         ExprKind::Match { target, cases } => {
             collect_expr_origin(target, origins);
             for case in cases {
-                collect_statement_origins(&case.body, origins);
+                collect_statement_origins(&case.body, module_alias, signatures, origins);
             }
         }
-        ExprKind::Task { body, .. } => collect_statement_origins(body, origins),
-        ExprKind::Break | ExprKind::Continue | ExprKind::Join { .. } | ExprKind::Spawn { .. } => {}
+        ExprKind::Task { body, .. } => {
+            collect_statement_origins(body, module_alias, signatures, origins)
+        }
+        ExprKind::Spawn { value, .. } => collect_expr_origin(value, origins),
+        ExprKind::Break | ExprKind::Continue | ExprKind::Join { .. } => {}
         _ => {
             // Expression statements lower to an `Eval` statement containing
             // a distinct expression IR node.
@@ -1132,7 +1314,34 @@ fn collect_expr_children(expression: &AstExpr, origins: &mut Vec<Origin>) {
             collect_expr_origin(end, origins);
             collect_expr_origin(step, origins);
         }
+        ExprKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_expr_origin(condition, origins);
+            collect_if_branch_origin(&expression.origin, then_body, origins);
+            collect_if_branch_origin(&expression.origin, else_body, origins);
+        }
         ExprKind::Literal(_) | ExprKind::Reference(_) => {}
+        _ => {}
+    }
+}
+
+/// Origin bookkeeping for an expression-position `if` branch, which lowers
+/// (`lower_if_branch`) to exactly one `Expr` node: the branch's single form
+/// when present, or a synthetic `unit` value when the branch body is empty.
+/// A branch with more than one form is rejected at lowering time, so no
+/// origin is needed for that case (lowering never reaches the point where
+/// `node_origins` is consulted).
+fn collect_if_branch_origin(
+    if_expression_origin: &Origin,
+    body: &[AstExpr],
+    origins: &mut Vec<Origin>,
+) {
+    match body {
+        [] => origins.push(if_expression_origin.clone()),
+        [single] => collect_expr_origin(single, origins),
         _ => {}
     }
 }
@@ -1224,50 +1433,32 @@ fn lower_statement(
         lower_statements(module_alias, values, signatures, declared_aliases, generics)
     };
     Ok(match &expression.value {
-        ExprKind::Call { callee, arguments } => match typed_primitive_head(&callee.value) {
-            Some((op, arity)) => Statement::Eval(lower_primitive_call(
-                module_alias,
-                &callee.value,
-                op,
-                arity,
-                arguments,
-                signatures,
-                declared_aliases,
-                generics,
-            )?),
-            None => Statement::Call(lower_call(
-                module_alias,
-                &callee.value,
-                arguments,
-                signatures,
-                declared_aliases,
-                generics,
-            )?),
+        ExprKind::Call { callee, arguments } => match lower_typed_call(
+            module_alias,
+            &callee.value,
+            arguments,
+            signatures,
+            declared_aliases,
+            generics,
+        )? {
+            TypedCallResolution::Call(call) => Statement::Call(call),
+            TypedCallResolution::Expr(expr) => Statement::Eval(expr),
         },
         ExprKind::Let { name, ty, value } => {
             if let Some(ty) = ty {
                 let _ = lower_type(ty, generics, module_alias, declared_aliases)?;
             }
             let value = match &value.value {
-                ExprKind::Call { callee, arguments } => match typed_primitive_head(&callee.value) {
-                    Some((op, arity)) => LetValue::Expr(lower_primitive_call(
-                        module_alias,
-                        &callee.value,
-                        op,
-                        arity,
-                        arguments,
-                        signatures,
-                        declared_aliases,
-                        generics,
-                    )?),
-                    None => LetValue::Call(lower_call(
-                        module_alias,
-                        &callee.value,
-                        arguments,
-                        signatures,
-                        declared_aliases,
-                        generics,
-                    )?),
+                ExprKind::Call { callee, arguments } => match lower_typed_call(
+                    module_alias,
+                    &callee.value,
+                    arguments,
+                    signatures,
+                    declared_aliases,
+                    generics,
+                )? {
+                    TypedCallResolution::Call(call) => LetValue::Call(call),
+                    TypedCallResolution::Expr(expr) => LetValue::Expr(expr),
                 },
                 _ => LetValue::Expr(expr(value)?),
             };
@@ -1333,9 +1524,18 @@ fn lower_statement(
             captures: captures.iter().map(|name| name.value.clone()).collect(),
             body: body(task_body)?,
         },
-        ExprKind::Spawn { .. } => {
-            bail!("typed spawn lowering is staged until full result-type checking is available")
-        }
+        ExprKind::Spawn {
+            handle,
+            captures,
+            value,
+        } => Statement::Spawn {
+            handle: handle.value.clone(),
+            captures: captures.iter().map(|name| name.value.clone()).collect(),
+            value: expr(value)?,
+            // Placeholder: replaced with the inferred result type by
+            // `validate_statements`, which runs once locals are available.
+            result_type: TypeRef::Void,
+        },
         ExprKind::Join { handle, binding } => Statement::Join {
             handle: handle.value.clone(),
             var: binding.value.clone(),
@@ -1358,26 +1558,16 @@ fn lower_expr(
     Ok(match &expression.value {
         ExprKind::Literal(value) => Expr::Value(lower_literal(value)),
         ExprKind::Reference(name) => Expr::VarRef(name.clone()),
-        ExprKind::Call { callee, arguments } => match typed_primitive_head(&callee.value) {
-            Some((op, arity)) => lower_primitive_call(
-                module_alias,
-                &callee.value,
-                op,
-                arity,
-                arguments,
-                signatures,
-                declared_aliases,
-                generics,
-            )?,
-            None => {
-                let call = lower_call(
-                    module_alias,
-                    &callee.value,
-                    arguments,
-                    signatures,
-                    declared_aliases,
-                    generics,
-                )?;
+        ExprKind::Call { callee, arguments } => match lower_typed_call(
+            module_alias,
+            &callee.value,
+            arguments,
+            signatures,
+            declared_aliases,
+            generics,
+        )? {
+            TypedCallResolution::Expr(expr) => expr,
+            TypedCallResolution::Call(call) => {
                 let return_type = signatures
                     .functions
                     .get(&call.callee_key)
@@ -1419,21 +1609,60 @@ fn lower_expr(
             end: Box::new(lower(end)?),
             step: Box::new(lower(step)?),
         },
-        ExprKind::Cast { value, into } => Expr::Cast {
-            from: Box::new(lower(value)?),
-            target: lower_type(into, generics, module_alias, declared_aliases)?,
-        },
+        ExprKind::Cast { value, into } => {
+            let target = lower_type(into, generics, module_alias, declared_aliases)?;
+            let from = Box::new(lower(value)?);
+            // The typed grammar has one sigil-free `cast` form; the legacy
+            // path split narrowing into a distinct `$policy.narrow` envelope
+            // because a capability/policy target requires subsumption
+            // checking (`policy_type_is_subset`) instead of the newtype-cast
+            // rule (`valid_cast_path`). Dispatch on the resolved target here
+            // so both frontends share one surface spelling.
+            if let Some(capability) = capability_body(&target, &signatures.aliases).cloned() {
+                Expr::PolicyNarrow {
+                    from,
+                    target: TypeRef::Capability(capability),
+                }
+            } else if let Some(policy) = policy_body(&target, &signatures.aliases).cloned() {
+                Expr::PolicyNarrow {
+                    from,
+                    target: TypeRef::Policy(policy),
+                }
+            } else {
+                Expr::Cast { from, target }
+            }
+        }
         ExprKind::Convert { .. } => {
             bail!("typed `convert` lowering requires explicit fallback semantics")
         }
         ExprKind::Embed { .. } | ExprKind::Template { .. } | ExprKind::Wasm { .. } => {
             bail!("typed compile-time expression lowering is not active")
         }
+        ExprKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => Expr::If {
+            cond: Box::new(lower(condition)?),
+            then_e: Box::new(lower_if_branch(
+                module_alias,
+                then_body,
+                signatures,
+                declared_aliases,
+                generics,
+            )?),
+            else_e: Box::new(lower_if_branch(
+                module_alias,
+                else_body,
+                signatures,
+                declared_aliases,
+                generics,
+            )?),
+        },
         ExprKind::Do(_)
         | ExprKind::Let { .. }
         | ExprKind::Set { .. }
         | ExprKind::Return(_)
-        | ExprKind::If { .. }
         | ExprKind::While { .. }
         | ExprKind::For { .. }
         | ExprKind::Match { .. }
@@ -1481,6 +1710,60 @@ fn lower_call(
     })
 }
 
+/// A call-shaped AST node resolves to either an ordinary user-function call,
+/// or a value-producing IR expression (a primitive operator or an enum
+/// constructor). The two are wrapped differently depending on where the call
+/// appears (`Statement::Call`/`Statement::Eval`, `LetValue::Call`/
+/// `LetValue::Expr`, or an inline `Expr::Call`/other `Expr`).
+enum TypedCallResolution {
+    Call(Call),
+    Expr(Expr),
+}
+
+/// Resolve and lower a call-shaped AST node, checking (in order) whether its
+/// head is a primitive operator, an enum constructor, or an ordinary
+/// function call.
+fn lower_typed_call(
+    module_alias: &str,
+    callee: &str,
+    arguments: &[AstExpr],
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+) -> Result<TypedCallResolution> {
+    if let Some((op, arity)) = typed_primitive_head(callee) {
+        return Ok(TypedCallResolution::Expr(lower_primitive_call(
+            module_alias,
+            callee,
+            op,
+            arity,
+            arguments,
+            signatures,
+            declared_aliases,
+            generics,
+        )?));
+    }
+    if let Some((enum_key, tag)) = typed_enum_constructor_head(callee, module_alias, signatures) {
+        return Ok(TypedCallResolution::Expr(lower_enum_constructor_call(
+            module_alias,
+            &enum_key,
+            &tag,
+            arguments,
+            signatures,
+            declared_aliases,
+            generics,
+        )?));
+    }
+    Ok(TypedCallResolution::Call(lower_call(
+        module_alias,
+        callee,
+        arguments,
+        signatures,
+        declared_aliases,
+        generics,
+    )?))
+}
+
 /// Resolution rule: an unqualified call head matching one of the 22 typed
 /// primitive names always resolves to the primitive, never to a user
 /// function of the same name (declaring one is rejected at signature time in
@@ -1491,6 +1774,109 @@ fn typed_primitive_head(callee: &str) -> Option<(PrimitiveOp, usize)> {
         None
     } else {
         typed_primitive_op(callee)
+    }
+}
+
+/// Resolve a call head as an enum constructor reference: the surface grammar
+/// has no dedicated constructor syntax, so `(mytype.tag ...)` is recognized
+/// as one only when the qualified prefix names a registered enum type alias.
+/// Does not check that the tag itself is defined; callers must check that
+/// against the returned enum's tags.
+fn typed_enum_constructor_head(
+    callee: &str,
+    module_alias: &str,
+    signatures: &TypedSignatureIndex,
+) -> Option<(String, String)> {
+    let (enum_name, tag) = callee.rsplit_once('.')?;
+    if enum_name.is_empty() || tag.is_empty() {
+        return None;
+    }
+    let enum_key = if enum_name.contains('.') {
+        enum_name.to_string()
+    } else {
+        qualify(module_alias, enum_name)
+    };
+    match signatures.aliases.get(&enum_key) {
+        Some(alias) if matches!(alias.body, TypeRef::Enum(_)) => Some((enum_key, tag.to_string())),
+        _ => None,
+    }
+}
+
+/// Lower an enum-constructor call. Structural checks (enum/tag existence,
+/// payload arity) happen here, since the typed alias table is already fully
+/// populated by the time bodies are lowered; payload *type* compatibility is
+/// deferred to `validate_expr`, once locals/constants are available for
+/// inference.
+#[allow(clippy::too_many_arguments)]
+fn lower_enum_constructor_call(
+    module_alias: &str,
+    enum_key: &str,
+    tag: &str,
+    arguments: &[AstExpr],
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+) -> Result<Expr> {
+    let alias = signatures
+        .aliases
+        .get(enum_key)
+        .with_context(|| format!("unknown typed enum `{enum_key}`"))?;
+    let TypeRef::Enum(tags) = &alias.body else {
+        bail!("typed constructor target `{enum_key}` is not an enum");
+    };
+    let payload_ty = tags
+        .get(tag)
+        .with_context(|| format!("unknown typed enum tag `{tag}` for enum `{enum_key}`"))?;
+    if *payload_ty == TypeRef::Void {
+        if !arguments.is_empty() {
+            bail!("typed constructor `{enum_key}.{tag}` does not take a payload");
+        }
+        return Ok(Expr::EnumConstructor {
+            enum_key: enum_key.to_string(),
+            tag: tag.to_string(),
+            payload: None,
+        });
+    }
+    if arguments.len() != 1 {
+        bail!(
+            "typed constructor `{enum_key}.{tag}` requires exactly one payload argument, got {}",
+            arguments.len()
+        );
+    }
+    let payload = lower_expr(
+        module_alias,
+        &arguments[0],
+        signatures,
+        declared_aliases,
+        generics,
+    )?;
+    Ok(Expr::EnumConstructor {
+        enum_key: enum_key.to_string(),
+        tag: tag.to_string(),
+        payload: Some(Box::new(payload)),
+    })
+}
+
+/// Lower an expression-position `if` branch. `Expr::If` holds exactly one
+/// value expression per branch (unlike `Statement::If`, which holds full
+/// statement lists), matching the legacy `$if` expression envelope's bare
+/// `then`/`else` exprs. An empty body (`(do)`) is `unit`, matching `do`'s
+/// general semantics; a body with more than one form has no single value to
+/// reduce to and is rejected explicitly rather than guessed at.
+fn lower_if_branch(
+    module_alias: &str,
+    body: &[AstExpr],
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+) -> Result<Expr> {
+    match body {
+        [] => Ok(Expr::Value(RuntimeValue::Void)),
+        [single] => lower_expr(module_alias, single, signatures, declared_aliases, generics),
+        _ => bail!(
+            "typed expression-position `if` branch must reduce to a single value; found {} forms",
+            body.len()
+        ),
     }
 }
 
@@ -2328,5 +2714,443 @@ mod tests {
             unreachable!()
         };
         assert_eq!(op, PrimitiveOp::And);
+    }
+
+    // ---- Expr::EnumConstructor ----
+
+    #[test]
+    fn enum_constructor_lowers_and_validates_nullary_and_payload_tags() {
+        let source = module(
+            r#"(def color (enum (red void) (custom int64)))
+(fn pick-red () int64
+  (do (let chosen (color.red)) (return 1)))
+(fn pick-custom ((value int64)) int64
+  (do (let chosen (color.custom value)) (return value)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+
+        let FunctionBody::User { statements } = &functions["pick-red"].body else {
+            panic!("expected user body");
+        };
+        let Statement::Let {
+            value:
+                LetValue::Expr(Expr::EnumConstructor {
+                    enum_key,
+                    tag,
+                    payload,
+                }),
+            ..
+        } = &statements[0]
+        else {
+            panic!(
+                "expected enum constructor let value, got {:?}",
+                statements[0]
+            );
+        };
+        assert_eq!(enum_key, "color");
+        assert_eq!(tag, "red");
+        assert!(payload.is_none());
+
+        let FunctionBody::User { statements } = &functions["pick-custom"].body else {
+            panic!("expected user body");
+        };
+        let Statement::Let {
+            value:
+                LetValue::Expr(Expr::EnumConstructor {
+                    enum_key,
+                    tag,
+                    payload,
+                }),
+            ..
+        } = &statements[0]
+        else {
+            panic!(
+                "expected enum constructor let value, got {:?}",
+                statements[0]
+            );
+        };
+        assert_eq!(enum_key, "color");
+        assert_eq!(tag, "custom");
+        assert!(payload.is_some());
+    }
+
+    #[test]
+    fn enum_constructor_unknown_alias_falls_back_to_an_ordinary_unknown_callee_error() {
+        // `nonexistent-type` never registers a type alias at all, so this
+        // must not be silently misdiagnosed as an enum-constructor problem;
+        // it falls back to ordinary call resolution and fails there.
+        let source =
+            module("(fn bad () int64 (do (let chosen (nonexistent-type.tag)) (return 1)))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("unknown typed callee"), "{error}");
+        assert!(error.contains("nonexistent-type.tag"), "{error}");
+    }
+
+    #[test]
+    fn enum_constructor_unknown_tag_is_rejected_at_lowering_time() {
+        let source = module(
+            r#"(def color (enum (red void)))
+(fn bad () int64 (do (let chosen (color.mystery)) (return 1)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("unknown typed enum tag"), "{error}");
+        assert!(error.contains("mystery"), "{error}");
+    }
+
+    #[test]
+    fn enum_constructor_payload_arity_mismatches_are_rejected_at_lowering_time() {
+        for source in [
+            // `red` takes no payload.
+            r#"(def color (enum (red void) (custom int64)))
+(fn bad () int64 (do (let chosen (color.red 1)) (return 1)))"#,
+            // `custom` requires exactly one payload.
+            r#"(def color (enum (red void) (custom int64)))
+(fn bad () int64 (do (let chosen (color.custom)) (return 1)))"#,
+        ] {
+            let source = module(source);
+            let inputs = [TypedModuleInput {
+                alias: "",
+                module: &source,
+            }];
+            let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+            let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+            assert!(error.contains("payload"), "{error}");
+        }
+    }
+
+    #[test]
+    fn enum_constructor_payload_type_mismatch_is_rejected_at_validation_time() {
+        let source = module(
+            r#"(def color (enum (custom int64)))
+(fn bad () int64 (do (let chosen (color.custom true)) (return 1)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("payload type mismatch"), "{error}");
+    }
+
+    // ---- Expr::If ----
+
+    #[test]
+    fn expression_if_lowers_and_infers_the_common_branch_type() {
+        let source = module(
+            "(fn choose ((flag bool) (left int64) (right int64)) int64
+               (do (return (if flag (do left) (do right)))))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let FunctionBody::User { statements } = &functions["choose"].body else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::If { .. }) = &statements[0] else {
+            panic!("expected expression-if in return, got {:?}", statements[0]);
+        };
+    }
+
+    #[test]
+    fn expression_if_with_empty_branches_is_unit() {
+        let source = module("(fn noop ((flag bool)) void (do (return (if flag (do) (do)))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        materialize_typed_functions(&signatures, &bodies).unwrap();
+    }
+
+    #[test]
+    fn expression_if_condition_must_be_bool() {
+        let source = module(
+            "(fn bad ((flag int64) (left int64) (right int64)) int64
+               (do (return (if flag (do left) (do right)))))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("must be bool"), "{error}");
+    }
+
+    #[test]
+    fn expression_if_branches_must_have_compatible_types() {
+        let source = module(
+            "(fn bad ((flag bool) (left int64) (right bool)) int64
+               (do (return (if flag (do left) (do right)))))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("incompatible types"), "{error}");
+    }
+
+    #[test]
+    fn expression_if_branch_with_more_than_one_form_is_rejected_at_lowering_time() {
+        let source = module(
+            "(fn bad ((flag bool) (left int64) (right int64)) int64
+               (do (return (if flag (do left left) (do right)))))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("single value"), "{error}");
+    }
+
+    // ---- Expr::PolicyNarrow ----
+    //
+    // A policy-typed value can only ever exist as a function parameter, and
+    // `ensure_safe_type` does not yet admit `TypeRef::Policy` at the function
+    // signature boundary (that remains staged, same as capabilities,
+    // interfaces, and enums as return/arg types). These tests therefore call
+    // the private lowering/validation functions directly with a hand-built
+    // `locals` map, exercising the same code the full pipeline would run
+    // once a policy-typed value can legally reach a typed function body.
+
+    #[test]
+    fn policy_narrow_lowers_via_the_shared_cast_form_and_accepts_a_covering_narrow() {
+        let source =
+            module("(fn narrow () bool (do (return (cast subject (capability fs-read)))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let TopLevel::Function(function) = &source.forms[0] else {
+            panic!("expected function");
+        };
+        let ExprKind::Return(Some(cast_expr)) = &function.body[0].value else {
+            panic!("expected return");
+        };
+        let lowered = lower_expr(
+            "",
+            cast_expr,
+            &signatures,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        let Expr::PolicyNarrow { target, .. } = &lowered else {
+            panic!("expected policy-narrow, got {lowered:?}");
+        };
+        assert!(matches!(target, TypeRef::Capability(_)), "{target:?}");
+
+        let mut locals = HashMap::new();
+        locals.insert(
+            "subject".to_string(),
+            TypeRef::Policy(crate::lower::PolicyType {
+                domains: BTreeMap::from([(crate::lower::CapabilityDomain::FsRead, Vec::new())]),
+            }),
+        );
+        let constants = HashMap::new();
+        let mut node_origins = Vec::new();
+        collect_expr_origin(cast_expr, &mut node_origins);
+        let mut origins = OriginCursor::new(&node_origins);
+        let validated = validate_expr(
+            &lowered,
+            &locals,
+            &constants,
+            &signatures,
+            "narrow",
+            &mut origins,
+        )
+        .unwrap();
+        origins.finish().unwrap();
+        assert!(matches!(validated, Expr::PolicyNarrow { .. }));
+    }
+
+    #[test]
+    fn policy_narrow_rejects_widening_authority() {
+        let source =
+            module("(fn narrow () bool (do (return (cast subject (capability net-connect)))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let TopLevel::Function(function) = &source.forms[0] else {
+            panic!("expected function");
+        };
+        let ExprKind::Return(Some(cast_expr)) = &function.body[0].value else {
+            panic!("expected return");
+        };
+        let lowered = lower_expr(
+            "",
+            cast_expr,
+            &signatures,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+
+        let mut locals = HashMap::new();
+        // `subject` only ever carried `fs-read` authority; narrowing into
+        // `net-connect` must not be allowed.
+        locals.insert(
+            "subject".to_string(),
+            TypeRef::Policy(crate::lower::PolicyType {
+                domains: BTreeMap::from([(crate::lower::CapabilityDomain::FsRead, Vec::new())]),
+            }),
+        );
+        let constants = HashMap::new();
+        let mut node_origins = Vec::new();
+        collect_expr_origin(cast_expr, &mut node_origins);
+        let mut origins = OriginCursor::new(&node_origins);
+        let error = format!(
+            "{:#}",
+            validate_expr(
+                &lowered,
+                &locals,
+                &constants,
+                &signatures,
+                "narrow",
+                &mut origins,
+            )
+            .unwrap_err()
+        );
+        assert!(error.contains("cannot widen authority"), "{error}");
+    }
+
+    // ---- Statement::Spawn / Statement::Join ----
+
+    #[test]
+    fn spawn_and_join_lower_validate_and_execute_in_both_backends() {
+        let source = module(
+            "(fn spawn-and-join ((value int64)) int64
+               (do
+                 (spawn worker (captures value) (add value 1))
+                 (join worker outcome)
+                 (return outcome)))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let FunctionBody::User { statements } = &functions["spawn-and-join"].body else {
+            panic!("expected user body");
+        };
+        let Statement::Spawn {
+            handle,
+            captures,
+            result_type,
+            ..
+        } = &statements[0]
+        else {
+            panic!("expected spawn, got {:?}", statements[0]);
+        };
+        assert_eq!(handle, "worker");
+        assert_eq!(captures, &vec!["args.value".to_string()]);
+        assert_eq!(result_type, &TypeRef::Int64);
+        let Statement::Join { handle, var } = &statements[1] else {
+            panic!("expected join, got {:?}", statements[1]);
+        };
+        assert_eq!(handle, "worker");
+        assert_eq!(var, "outcome");
+
+        let program = LoweredProgram {
+            statements: vec![Statement::Call(Call {
+                callee_key: "spawn-and-join".into(),
+                type_args: Vec::new(),
+                args: vec![Expr::Value(RuntimeValue::Int(41))],
+            })],
+            main_arg_bindings: Vec::new(),
+            constants: HashMap::new(),
+            functions,
+            impls: HashMap::new(),
+            warnings: Vec::new(),
+            foreign_modules: BTreeMap::new(),
+        };
+        crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        crate::wasm_backend::run_lowered(&program, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn spawn_rejects_mutable_captures_and_non_void_result() {
+        for source in [
+            // `cell` is mutable; captures must be immutable snapshots.
+            "(fn bad ((value int64)) int64
+               (do (let cell (mut value)) (spawn worker (captures cell) value) (join worker outcome) (return outcome)))",
+            // A spawned computation must produce a non-void result.
+            "(fn bad () int64
+               (do (spawn worker (captures) unit) (join worker outcome) (return 1)))",
+        ] {
+            let source = module(source);
+            let inputs = [TypedModuleInput {
+                alias: "",
+                module: &source,
+            }];
+            let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+            let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+            assert!(
+                materialize_typed_functions(&signatures, &bodies).is_err(),
+                "unexpectedly materialized {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn join_requires_a_live_unjoined_handle() {
+        let source = module(
+            "(fn bad ((value int64)) int64
+               (do (join worker outcome) (return value)))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("unknown or was already joined"), "{error}");
     }
 }
