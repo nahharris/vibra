@@ -816,26 +816,38 @@ fn validate_index(index: &TypedSignatureIndex) -> Result<()> {
             let actual = index.functions.get(signature_key).with_context(|| {
                 format!("E-IMPL-006: implementation method `{signature_key}` is not registered")
             })?;
+            // The registered method signature may still refer to `Self` in
+            // receiver, argument, or return position (e.g. an inherent
+            // method bound into the impl via a fresh `$function`, or an
+            // alias to one). Substitute it with the implementing type here,
+            // the same way `expected` above was substituted, so conformance
+            // is checked between two fully concrete signatures.
+            let actual_arg_types: Vec<TypeRef> = actual
+                .arg_types
+                .iter()
+                .map(|ty| type_semantics::substitute_self(ty, &self_type))
+                .collect();
+            let actual_return_type =
+                type_semantics::substitute_self(&actual.return_type, &self_type);
             let expected_args = match *args {
                 TypeRef::Tuple(args) => args,
                 other => vec![other],
             };
-            let args_match = actual
-                .arg_types
+            let args_match = actual_arg_types
                 .iter()
                 .zip(&expected_args)
                 .all(|(actual, expected)| equivalent_type(actual, expected, index));
-            if actual.arg_types.len() != expected_args.len()
+            if actual_arg_types.len() != expected_args.len()
                 || !args_match
-                || !equivalent_type(&actual.return_type, &return_type, index)
+                || !equivalent_type(&actual_return_type, &return_type, index)
             {
                 bail!(
                     "E-IMPL-005: signature of `{signature_key}` does not match `{}.{method}`; expected {:?} -> {:?}, got {:?} -> {:?}",
                     key.interface,
                     expected_args,
                     return_type,
-                    actual.arg_types,
-                    actual.return_type
+                    actual_arg_types,
+                    actual_return_type
                 );
             }
         }
@@ -1426,6 +1438,74 @@ mod tests {
                 mutable: true,
             }]
         );
+    }
+
+    #[test]
+    fn substitutes_self_before_checking_impl_conformance() {
+        // Self in receiver position: the impl method's own signature names
+        // its receiver as `self`, while the interface it implements already
+        // names the concrete implementing type. Conformance must substitute
+        // `Self` on the impl side before comparing.
+        let receiver_self = module(
+            r#"(def closeable (interface (close (fn-type (self) str))))
+(def thing (record (value str))
+  impls: ((impl closeable
+    methods: ((method close
+      (fn close-thing ((value self)) str (do (return "closed"))))))))"#,
+            21,
+        );
+        lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &receiver_self,
+        }])
+        .unwrap();
+
+        // Self in receiver position plus an additional, non-Self argument.
+        let receiver_self_plus_arg = module(
+            r#"(def appendable (interface (append-bytes (fn-type (self int64) str))))
+(def thing2 (record (value str))
+  impls: ((impl appendable
+    methods: ((method append-bytes
+      (fn append-thing ((value self) (extra int64)) str (do (return "appended"))))))))"#,
+            22,
+        );
+        lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &receiver_self_plus_arg,
+        }])
+        .unwrap();
+
+        // Self in return position.
+        let return_self = module(
+            r#"(def cloneable (interface (clone (fn-type (self) self))))
+(def thing3 (record (value str))
+  impls: ((impl cloneable
+    methods: ((method clone
+      (fn clone-thing ((value self)) self (do (return value))))))))"#,
+            23,
+        );
+        lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &return_self,
+        }])
+        .unwrap();
+
+        // A genuine signature mismatch (wrong return type) must still be
+        // rejected: substitution must not weaken the conformance check.
+        let genuine_mismatch = module(
+            r#"(def closeable2 (interface (close (fn-type (self) str))))
+(def bad-thing (record (value str))
+  impls: ((impl closeable2
+    methods: ((method close
+      (fn close-bad ((value self)) int64 (do (return 0))))))))"#,
+            24,
+        );
+        let error = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &genuine_mismatch,
+        }])
+        .unwrap_err();
+        assert!(error.to_string().contains("E-IMPL-005"));
     }
 
     #[test]
