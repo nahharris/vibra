@@ -26,6 +26,7 @@ pub mod syntax;
 pub mod test_runner;
 pub mod test_support;
 pub mod tooling;
+pub(crate) mod type_semantics;
 pub mod typed_body;
 pub mod typed_lower;
 pub mod typed_readers;

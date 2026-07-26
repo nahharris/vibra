@@ -12,6 +12,7 @@ use crate::lower::{
     PolicyGroup as LowerPolicyGroup, PolicyRequirement as LowerPolicyRequirement,
     PolicyScope as LowerPolicyScope, PolicyType, TypeAlias, TypeRef,
 };
+use crate::type_semantics;
 use anyhow::{bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -810,7 +811,7 @@ fn validate_index(index: &TypedSignatureIndex) -> Result<()> {
         };
         for (method, expected) in required_methods {
             let TypeRef::FnType { args, return_type } =
-                substitute_type(expected, &substitutions, &self_type)
+                type_semantics::substitute(expected, &substitutions, Some(&self_type))
             else {
                 bail!(
                     "E-IMPL-005: interface method `{}.{method}` is not a function type",
@@ -852,129 +853,11 @@ fn validate_index(index: &TypedSignatureIndex) -> Result<()> {
 }
 
 fn equivalent_type(left: &TypeRef, right: &TypeRef, index: &TypedSignatureIndex) -> bool {
-    normalize_type(left, index, &mut BTreeSet::new())
-        == normalize_type(right, index, &mut BTreeSet::new())
+    normalize_type(left, index) == normalize_type(right, index)
 }
 
-fn normalize_type(
-    ty: &TypeRef,
-    index: &TypedSignatureIndex,
-    visiting: &mut BTreeSet<String>,
-) -> TypeRef {
-    match ty {
-        TypeRef::Named(name) => {
-            let Some(alias) = index.aliases.get(name) else {
-                return ty.clone();
-            };
-            if !alias.type_params.is_empty() || !visiting.insert(name.clone()) {
-                return ty.clone();
-            }
-            let normalized = normalize_type(&alias.body, index, visiting);
-            visiting.remove(name);
-            normalized
-        }
-        TypeRef::Instantiated { base, type_args } => {
-            let Some(alias) = index.aliases.get(base) else {
-                return ty.clone();
-            };
-            if alias.type_params.len() != type_args.len() || !visiting.insert(base.clone()) {
-                return ty.clone();
-            }
-            let substitutions = alias
-                .type_params
-                .iter()
-                .cloned()
-                .zip(type_args.iter().cloned())
-                .collect();
-            let expanded = substitute_type(&alias.body, &substitutions, &TypeRef::SelfType);
-            let normalized = normalize_type(&expanded, index, visiting);
-            visiting.remove(base);
-            normalized
-        }
-        TypeRef::Mutable(inner) => {
-            TypeRef::Mutable(Box::new(normalize_type(inner, index, visiting)))
-        }
-        TypeRef::Reference { inner, mutable } => TypeRef::Reference {
-            inner: Box::new(normalize_type(inner, index, visiting)),
-            mutable: *mutable,
-        },
-        TypeRef::Tuple(items) => TypeRef::Tuple(
-            items
-                .iter()
-                .map(|item| normalize_type(item, index, visiting))
-                .collect(),
-        ),
-        TypeRef::Array(inner) => TypeRef::Array(Box::new(normalize_type(inner, index, visiting))),
-        TypeRef::Map { key, value } => TypeRef::Map {
-            key: Box::new(normalize_type(key, index, visiting)),
-            value: Box::new(normalize_type(value, index, visiting)),
-        },
-        TypeRef::FnType { args, return_type } => TypeRef::FnType {
-            args: Box::new(normalize_type(args, index, visiting)),
-            return_type: Box::new(normalize_type(return_type, index, visiting)),
-        },
-        _ => ty.clone(),
-    }
-}
-
-fn substitute_type(
-    ty: &TypeRef,
-    substitutions: &HashMap<String, TypeRef>,
-    self_type: &TypeRef,
-) -> TypeRef {
-    let substitute = |ty| substitute_type(ty, substitutions, self_type);
-    match ty {
-        TypeRef::Generic(name) => substitutions
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| ty.clone()),
-        TypeRef::SelfType => self_type.clone(),
-        TypeRef::Mutable(inner) => TypeRef::Mutable(Box::new(substitute(inner))),
-        TypeRef::Reference { inner, mutable } => TypeRef::Reference {
-            inner: Box::new(substitute(inner)),
-            mutable: *mutable,
-        },
-        TypeRef::Newtype { name, inner } => TypeRef::Newtype {
-            name: name.clone(),
-            inner: Box::new(substitute(inner)),
-        },
-        TypeRef::JoinHandle(inner) => TypeRef::JoinHandle(Box::new(substitute(inner))),
-        TypeRef::Instantiated { base, type_args } => TypeRef::Instantiated {
-            base: base.clone(),
-            type_args: type_args.iter().map(substitute).collect(),
-        },
-        TypeRef::Record(fields) => TypeRef::Record(
-            fields
-                .iter()
-                .map(|(name, ty)| (name.clone(), substitute(ty)))
-                .collect(),
-        ),
-        TypeRef::Tuple(items) => TypeRef::Tuple(items.iter().map(substitute).collect()),
-        TypeRef::Array(inner) => TypeRef::Array(Box::new(substitute(inner))),
-        TypeRef::Map { key, value } => TypeRef::Map {
-            key: Box::new(substitute(key)),
-            value: Box::new(substitute(value)),
-        },
-        TypeRef::Union(items) => TypeRef::Union(items.iter().map(substitute).collect()),
-        TypeRef::Enum(fields) => TypeRef::Enum(
-            fields
-                .iter()
-                .map(|(name, ty)| (name.clone(), substitute(ty)))
-                .collect(),
-        ),
-        TypeRef::Interface(fields) => TypeRef::Interface(
-            fields
-                .iter()
-                .map(|(name, ty)| (name.clone(), substitute(ty)))
-                .collect(),
-        ),
-        TypeRef::Intersect(items) => TypeRef::Intersect(items.iter().map(substitute).collect()),
-        TypeRef::FnType { args, return_type } => TypeRef::FnType {
-            args: Box::new(substitute(args)),
-            return_type: Box::new(substitute(return_type)),
-        },
-        _ => ty.clone(),
-    }
+fn normalize_type(ty: &TypeRef, index: &TypedSignatureIndex) -> TypeRef {
+    type_semantics::normalize_type_ref(ty, &index.aliases)
 }
 
 fn validate_bounds(
