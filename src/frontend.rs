@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -53,6 +54,7 @@ pub struct SurfaceProgram {
 }
 
 const MAX_TEMPLATE_SOURCE_BYTES: usize = 1_048_576;
+const MAX_EMBED_SOURCE_BYTES: usize = 1_048_576;
 const MAX_TEMPLATE_RENDERED_BYTES: usize = 16_777_216;
 const MAX_TEMPLATE_SECTION_DEPTH: usize = 64;
 
@@ -439,8 +441,13 @@ fn load_typed_embed(
         "E-EMBED-003",
         "embedded",
     )?;
-    let bytes = fs::read(&resolved)
-        .with_context(|| format!("E-EMBED-003: read embedded file {}", resolved.display()))?;
+    let bytes = read_bounded_source(
+        &resolved,
+        MAX_EMBED_SOURCE_BYTES,
+        "E-EMBED-003",
+        "E-EMBED-006",
+        "embedded source",
+    )?;
     embedded.insert(resolved.clone(), format!("{:x}", Sha256::digest(&bytes)));
     let format = infer_embed_format(requested_format, &resolved)?;
     if format == EmbedFormat::Binary {
@@ -527,12 +534,25 @@ fn json_compile_value(value: serde_json::Value) -> Result<CompileValue> {
         serde_json::Value::Null => Ok(CompileValue::Null),
         serde_json::Value::Bool(value) => Ok(CompileValue::Bool(value)),
         serde_json::Value::Number(value) => {
-            if let Some(value) = value.as_i64() {
-                Ok(CompileValue::Int(value))
-            } else if let Some(value) = value.as_f64() {
+            let source = value.to_string();
+            if source
+                .bytes()
+                .any(|byte| matches!(byte, b'.' | b'e' | b'E'))
+            {
+                let value = source
+                    .parse::<f64>()
+                    .context("E-EMBED-005: structured float is outside Vibra numeric range")?;
+                if !value.is_finite() {
+                    bail!("E-EMBED-005: structured float is outside Vibra numeric range");
+                }
                 Ok(CompileValue::Float(value))
+            } else if let Ok(value) = source.parse::<i64>() {
+                Ok(CompileValue::Int(value))
             } else {
-                bail!("E-EMBED-005: structured number is outside Vibra numeric range")
+                // Exercise the full unsigned boundary explicitly rather than
+                // allowing serde_json to expose a large integer as a float.
+                let _unsigned_boundary = source.parse::<u64>();
+                bail!("E-EMBED-005: structured integer is outside signed 64-bit range")
             }
         }
         serde_json::Value::String(value) => Ok(CompileValue::String(value)),
@@ -625,14 +645,17 @@ fn load_typed_template(
         "E-TEMPLATE-003",
         "template",
     )?;
-    let bytes = fs::read(&resolved)
-        .with_context(|| format!("E-TEMPLATE-003: read template {}", resolved.display()))?;
-    if bytes.len() > MAX_TEMPLATE_SOURCE_BYTES {
-        bail!("E-TEMPLATE-006: template source exceeds {MAX_TEMPLATE_SOURCE_BYTES} bytes");
-    }
+    let bytes = read_bounded_source(
+        &resolved,
+        MAX_TEMPLATE_SOURCE_BYTES,
+        "E-TEMPLATE-003",
+        "E-TEMPLATE-006",
+        "template source",
+    )?;
+    let raw_digest = format!("{:x}", Sha256::digest(&bytes));
     let source = String::from_utf8(bytes).context("E-TEMPLATE-003: template is not valid UTF-8")?;
     let source = source.replace("\r\n", "\n");
-    embedded.insert(resolved, format!("{:x}", Sha256::digest(source.as_bytes())));
+    embedded.insert(resolved, raw_digest);
     let root = CompileValue::Record(
         bindings
             .iter()
@@ -716,6 +739,31 @@ fn resolve_package_file(
         );
     }
     Ok(resolved)
+}
+
+fn read_bounded_source(
+    path: &Path,
+    limit: usize,
+    read_code: &str,
+    size_code: &str,
+    kind: &str,
+) -> Result<Vec<u8>> {
+    let file = fs::File::open(path)
+        .with_context(|| format!("{read_code}: read {kind} {}", path.display()))?;
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("{read_code}: inspect {kind} {}", path.display()))?;
+    if metadata.len() > limit as u64 {
+        bail!("{size_code}: {kind} exceeds {limit} bytes");
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("{read_code}: read {kind} {}", path.display()))?;
+    if bytes.len() > limit {
+        bail!("{size_code}: {kind} exceeds {limit} bytes");
+    }
+    Ok(bytes)
 }
 
 fn parse_template(source: &str) -> Result<Vec<TemplateNode>> {
@@ -1573,6 +1621,122 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("E-TEMPLATE-005"), "{error}");
+    }
+
+    #[test]
+    fn typed_json_integers_preserve_signed_boundaries_without_float_coercion() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vibra");
+        let data = temp.path().join("data.json");
+        write(&entry, "(const value dynamic (embed \"data.json\"))\n");
+        write(&data, "[-9223372036854775808,9223372036854775807]");
+        let program = load_surface_program(&entry, &CompilationFlags::default()).unwrap();
+        let TopLevel::Constant(constant) = program.modules[&program.entry].forms().next().unwrap()
+        else {
+            panic!("expected constant");
+        };
+        assert!(matches!(
+            constant.value.value,
+            ExprKind::Array(ref values)
+                if matches!(
+                    values.as_slice(),
+                    [
+                        Spanned {
+                            value: ExprKind::Literal(Literal::Int(i64::MIN)),
+                            ..
+                        },
+                        Spanned {
+                            value: ExprKind::Literal(Literal::Int(i64::MAX)),
+                            ..
+                        }
+                    ]
+                )
+        ));
+
+        for source in [
+            "9223372036854775808",
+            "18446744073709551615",
+            "-9223372036854775809",
+        ] {
+            write(&data, source);
+            let error = load_surface_program(&entry, &CompilationFlags::default())
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("E-EMBED-005: structured integer is outside signed 64-bit range"),
+                "{source}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_compile_time_inputs_are_bounded_before_expansion() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vibra");
+        let oversized = vec![b'x'; MAX_EMBED_SOURCE_BYTES + 1];
+
+        write(&entry, "(const value str (embed \"large.txt\"))\n");
+        fs::write(temp.path().join("large.txt"), &oversized).unwrap();
+        let error = load_surface_program(&entry, &CompilationFlags::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("E-EMBED-006"), "{error}");
+
+        write(
+            &entry,
+            "(const value str (template \"large.mustache\" with: (record)))\n",
+        );
+        fs::write(temp.path().join("large.mustache"), oversized).unwrap();
+        let error = load_surface_program(&entry, &CompilationFlags::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("E-TEMPLATE-006"), "{error}");
+    }
+
+    #[test]
+    fn template_rendering_normalizes_crlf_but_fingerprints_raw_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vibra");
+        let template = temp.path().join("message.mustache");
+        write(
+            &entry,
+            "(const value str\n\
+               (template \"message.mustache\" with: (record (name \"Vibra\"))))\n",
+        );
+        let crlf = b"Hello\r\n{{name}}\r\n";
+        fs::write(&template, crlf).unwrap();
+        let first = load_surface_program(&entry, &CompilationFlags::default()).unwrap();
+        let canonical = fs::canonicalize(&template).unwrap();
+        assert_eq!(
+            first.embedded_files[&canonical],
+            format!("{:x}", Sha256::digest(crlf))
+        );
+        let TopLevel::Constant(first_value) = first.modules[&first.entry].forms().next().unwrap()
+        else {
+            panic!("expected constant");
+        };
+        assert!(matches!(
+            first_value.value.value,
+            ExprKind::Literal(Literal::String(ref value)) if value == "Hello\nVibra\n"
+        ));
+
+        let lf = b"Hello\n{{name}}\n";
+        fs::write(&template, lf).unwrap();
+        let second = load_surface_program(&entry, &CompilationFlags::default()).unwrap();
+        assert_eq!(
+            second.embedded_files[&canonical],
+            format!("{:x}", Sha256::digest(lf))
+        );
+        assert_ne!(
+            first.embedded_files[&canonical],
+            second.embedded_files[&canonical]
+        );
+        let TopLevel::Constant(second_value) =
+            second.modules[&second.entry].forms().next().unwrap()
+        else {
+            panic!("expected constant");
+        };
+        assert_eq!(first_value.value.value, second_value.value.value);
     }
 
     #[test]
