@@ -12,7 +12,7 @@ Its "Implementation and PR plan" defines nine steps; this file tracks them.
 | # | Step | State |
 |---|------|-------|
 | 1 | Reader, CST, spans, formatter | Done — #153, #157, #161, #166 |
-| 2 | Lowering and compiler | **Typed frontend complete** — through #189; corpus body-valid 57/58 |
+| 2 | Lowering and compiler | **Approach changed** — `src/surface_adapter.rs` bridges the typed AST into `src/lower.rs`'s existing `Value` shape instead of continuing to re-derive `src/lower.rs`'s semantics on the typed path; see below |
 | 3 | Macros and origins | Done — #165 |
 | 4 | Language corpus | **Next, and irreversible** — migrator dry-run only, needs an opt-in write mode |
 | 5 | Projects and packages | Done — #158, #160 |
@@ -20,6 +20,30 @@ Its "Implementation and PR plan" defines nine steps; this file tracks them.
 | 7 | Generic editor removal | Partly — #163 removed the public surface; `src/code/` internals remain |
 | 8 | Output and embedding | Done — #154, #171 |
 | 9 | Removal and documentation | Not started (closing PR) |
+
+### Step 2 course correction (#150 surface-adapter)
+
+The typed path (`typed_lower.rs`/`typed_body.rs`/`typed_program.rs`) requires
+re-deriving every semantic rule `src/lower.rs` already implements and proves
+against the live corpus. Measured readiness on that path stalled at
+`materialized-valid 5/57`. `src/lower.rs`'s YAML coupling turned out to be
+shallow -- an unqualified `use serde_yaml::Value` plus roughly 240 accessor
+call sites, not a semantic dependency -- so `src/surface_adapter.rs` instead
+adapts the typed AST into the exact `Value` shape `src/lower.rs` already
+consumes. Chaining `syntax::parse -> ast::lower_document -> module_to_value
+-> lower::lower_program` (with `lower_library`/`lower_tests` substituted for
+files with no `main`, matching how a real build treats a library or test
+suite) lowers 36/58 convertible corpus files completely, against the typed
+path's 5/57. The remaining gap is concentrated in one known, documented
+limitation (`impls:` for an interface declared in a different module than
+its implementation), plus a handful of measurement-harness artifacts
+(self-qualified entry mounting, `expect-error` tests, a missing prebuilt
+`.wasm` fixture, and one project-level `@` import) that do not reflect real
+build behavior. See the amendment in
+`docs/superpowers/specs/2026-07-25-s-expression-language-design.md` for the
+contract exception this relies on. The adapter is internal, private,
+single-direction, not yet wired into `src/load.rs`, and staged for deletion
+once the typed path reaches parity.
 
 ### True dependency order
 
