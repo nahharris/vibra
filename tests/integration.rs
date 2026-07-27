@@ -885,17 +885,11 @@ fn while_body_let_does_not_leak_after_loop() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $while: false
-        do:
-          - $let:
-              x: 42
-      - $io.println: $x
+            r#"(import io "{io}")
+(fn main () void
+  (do
+    (while false (do (let x 42)))
+    (io.println x)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -921,42 +915,23 @@ fn record_tuple_array_and_map_patterns_bind_values() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          value:
-            $record:
-              pair:
-                $tuple: [7, "seven"]
-              tags:
-                $array: ["a", "b"]
-              table:
-                $map:
-                  - key: "lang"
-                    value: "vibra"
-      - $match: $value
-        when:
-            - case:
-                $record:
-                  pair:
-                    $tuple:
-                      - {{ $bind: n }}
-                      - {{ $bind: word }}
-                  tags:
-                    $array:
-                      - "a"
-                      - {{ $wildcard: null }}
-                  table:
-                    $map:
-                      - key: "lang"
-                        value: {{ $bind: language }}
-              do:
-                - $io.println: $word
-                - $io.println: $language
+            r#"(import io "{io}")
+(fn main () void
+  (do
+    (let value
+      (record
+        (pair (tuple 7 "seven"))
+        (tags (array "a" "b"))
+        (table (map ("lang" "vibra")))))
+    (match value
+      (case
+        (record
+          (pair (tuple (bind n) (bind word)))
+          (tags (array "a" _))
+          (table (map ("lang" (bind language)))))
+        (do
+          (io.println word)
+          (io.println language))))))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -1042,31 +1017,23 @@ fn rejects_legacy_variants_union_syntax() {
     let bad = dir.path().join("bad.vibra");
     let entry = dir.path().join("entry.vibra");
 
+    // The legacy `$union: {variants: {...}}` alternative to the canonical
+    // `$union: [...]` list has no S-expression form: `union` is always
+    // `(union type-expr+)` (one head, positional children -- the contract
+    // forbids any form accepting both a compact and expanded spelling).
+    // There is nothing left to reject that the grammar does not already
+    // make unwritable, so this now asserts the canonical form parses.
     std::fs::write(
         &bad,
-        r#"maybe-text:
-  $union:
-    variants:
-      some: $str
-      none: $void
+        r#"(def maybe-text (union str void))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"u:
-  $import: "{u}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+            r#"(import u "{u}")
+(fn main () void (do))
 "#,
             u = bad.display().to_string().replace('\\', "/"),
         ),
@@ -1074,11 +1041,8 @@ main:
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("legacy `variants` union syntax was removed"),
-        "unexpected error: {err}"
-    );
+    vibra::lower::lower_program(&prog)
+        .expect("the single canonical `union` spelling always lowers");
 }
 
 #[test]
@@ -1092,31 +1056,17 @@ fn warns_for_non_kebab_case_symbols() {
 
     std::fs::write(
         &mod_file,
-        r#"BadType:
-  $enum:
-    NotTag: $str
-doThing:
-  $function:
-    BadArg: $str
-  return: $void
-  do:
-      - $let:
-          BadLocal: $args.BadArg
+        r#"(def BadType (enum (NotTag str)))
+(fn doThing ((BadArg str)) void (do (let BadLocal BadArg)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"BadImport:
-  $import: "{m}"
-io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import BadImport "{m}")
+(import io "{io}")
+(fn main () void (do (io.println "ok")))
 "#,
             m = mod_file.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
