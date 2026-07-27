@@ -1834,15 +1834,9 @@ fn duplicate_nested_imports_are_idempotent() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-fs:
-  $import: "{fs}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(import fs "{fs}")
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
             fs = fs.display().to_string().replace('\\', "/"),
@@ -1874,39 +1868,25 @@ fn nested_import_same_alias_is_scoped_to_parent() {
 
     std::fs::write(
         &leaf_a,
-        r#"id:
-  $function: $void
-  return: $str
-  do:
-    - $return: "A"
+        r#"(fn id () str (do (return "A")))
 "#,
     )
     .unwrap();
     std::fs::write(
         &leaf_b,
-        r#"id:
-  $function: $void
-  return: $str
-  do:
-    - $return: "B"
+        r#"(fn id () str (do (return "B")))
 "#,
     )
     .unwrap();
     std::fs::write(
         &mod_a,
         format!(
-            r#"util:
-  $import: "{leaf}"
-io:
-  $import: "{io}"
-call:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        x:
-          $util.id: null
-    - $io.println: $x
+            r#"(import util "{leaf}")
+(import io "{io}")
+(fn call () void
+  (do
+    (let x (util.id))
+    (io.println x)))
 "#,
             leaf = leaf_a.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -1916,18 +1896,12 @@ call:
     std::fs::write(
         &mod_b,
         format!(
-            r#"util:
-  $import: "{leaf}"
-io:
-  $import: "{io}"
-call:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        x:
-          $util.id: null
-    - $io.println: $x
+            r#"(import util "{leaf}")
+(import io "{io}")
+(fn call () void
+  (do
+    (let x (util.id))
+    (io.println x)))
 "#,
             leaf = leaf_b.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -1937,18 +1911,13 @@ call:
     std::fs::write(
         &entry,
         format!(
-            r#"a:
-  $import: "{a}"
-b:
-  $import: "{b}"
-io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $a.call: null
-    - $b.call: null
+            r#"(import a "{a}")
+(import b "{b}")
+(import io "{io}")
+(fn main () void
+  (do
+    (a.call)
+    (b.call)))
 "#,
             a = mod_a.display().to_string().replace('\\', "/"),
             b = mod_b.display().to_string().replace('\\', "/"),
@@ -1990,37 +1959,22 @@ fn imported_module_cannot_use_entry_import_alias_transitively() {
 
     std::fs::write(
         &leaf,
-        r#"value:
-  $function: $void
-  return: $str
-  do:
-    - $return: "hidden"
+        r#"(fn value () str (do (return "hidden")))
 "#,
     )
     .unwrap();
     std::fs::write(
         &helper,
-        r#"call:
-  $function: $void
-  return: $str
-  do:
-    - $return:
-        $leaf.value: null
+        r#"(fn call () str (do (return (leaf.value))))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"leaf:
-  $import: "{leaf}"
-helper:
-  $import: "{helper}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $helper.call: null
+            r#"(import leaf "{leaf}")
+(import helper "{helper}")
+(fn main () void (do (helper.call)))
 "#,
             leaf = leaf.display().to_string().replace('\\', "/"),
             helper = helper.display().to_string().replace('\\', "/"),
@@ -2044,25 +1998,15 @@ fn imported_module_direct_import_alias_is_usable() {
 
     std::fs::write(
         &leaf,
-        r#"value:
-  $function: $void
-  return: $str
-  do:
-    - $return: "visible"
+        r#"(fn value () str (do (return "visible")))
 "#,
     )
     .unwrap();
     std::fs::write(
         &helper,
         format!(
-            r#"leaf:
-  $import: "{leaf}"
-call:
-  $function: $void
-  return: $str
-  do:
-    - $return:
-        $leaf.value: null
+            r#"(import leaf "{leaf}")
+(fn call () str (do (return (leaf.value))))
 "#,
             leaf = leaf.display().to_string().replace('\\', "/"),
         ),
@@ -2071,13 +2015,8 @@ call:
     std::fs::write(
         &entry,
         format!(
-            r#"helper:
-  $import: "{helper}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $helper.call: null
+            r#"(import helper "{helper}")
+(fn main () void (do (helper.call)))
 "#,
             helper = helper.display().to_string().replace('\\', "/"),
         ),
@@ -2097,36 +2036,22 @@ fn imported_module_cannot_use_transitive_type_or_enum_alias() {
 
     std::fs::write(
         &types,
-        r#"outcome:
-  $enum:
-    ok: $str
-    err: $str
+        r#"(def outcome (enum (ok str) (err str)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &helper,
-        r#"make:
-  $function: $void
-  return: $types.outcome
-  do:
-    - $return:
-        $types.outcome.ok: "hidden"
+        r#"(fn make () types.outcome (do (return (types.outcome.ok "hidden"))))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"types:
-  $import: "{types}"
-helper:
-  $import: "{helper}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $helper.make: null
+            r#"(import types "{types}")
+(import helper "{helper}")
+(fn main () void (do (helper.make)))
 "#,
             types = types.display().to_string().replace('\\', "/"),
             helper = helper.display().to_string().replace('\\', "/"),
@@ -2148,17 +2073,8 @@ fn doc_annotation_mentioning_import_alias_does_not_require_direct_import() {
 
     std::fs::write(
         &entry,
-        r#"helper:
-  $function: $void
-  return: $void
-  =doc: "See $result.result for the canonical shape."
-  do:
-    - $return: null
-main:
-  $function: $void
-  return: $void
-  do:
-    - $helper: null
+        r#"(fn helper () void (do (return)) doc: "See $result.result for the canonical shape.")
+(fn main () void (do (helper)))
 "#,
     )
     .unwrap();
@@ -2174,21 +2090,9 @@ fn same_module_qualified_local_symbol_is_allowed() {
 
     std::fs::write(
         &entry,
-        r#"outcome:
-  $enum:
-    ok: $str
-    err: $str
-make:
-  $function: $void
-  return: $outcome
-  do:
-    - $return:
-        $outcome.ok: "local"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $make: null
+        r#"(def outcome (enum (ok str) (err str)))
+(fn make () outcome (do (return (outcome.ok "local"))))
+(fn main () void (do (make)))
 "#,
     )
     .unwrap();
@@ -2208,42 +2112,22 @@ fn tagged_option_rejects_raw_payload_and_null_coercions() {
 
     std::fs::write(
         &model,
-        r#"option:
-  $enum:
-    some: $t
-    none: $void
-  =where: {t: []}
+        r#"(def option (enum (some t) (none void)) where: ((t)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-io:
-  $import: "{io}"
-use-option:
-  $function:
-    input:
-      $m.option:
-        t: $int64
-  return: $void
-  do:
-      - $io.println: "using option"
-expect-int:
-  $function:
-    input: $int64
-  return: $void
-  do:
-      - $io.println: "x"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $use-option: 7
-      - $use-option: null
-      - $expect-int: null
+            r#"(import m "{m}")
+(import io "{io}")
+(fn use-option ((input (m.option int64))) void (do (io.println "using option")))
+(fn expect-int ((input int64)) void (do (io.println "x")))
+(fn main () void
+  (do
+    (use-option 7)
+    (use-option unit)
+    (expect-int unit)))
 "#,
             m = model.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -2263,23 +2147,33 @@ main:
 fn legacy_option_sugar_is_rejected_with_stable_code() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+    // Legacy hardcoded a top-level `$option: T` definition body as a removed
+    // type-sugar form (`env.form_key == "$option"`, `src/lower.rs`) --
+    // independent of whether an `option` type was otherwise declared. The
+    // new grammar has no built-in `option` type-form head at all (spec:
+    // "Built-in type-form heads such as `record`, `tuple`, `array`, `map`,
+    // and `union` are recognized before user-defined type constructors");
+    // `(option str)` is ordinary generic type application syntax, so with
+    // no local `def option` the *adapter* itself now fails to resolve the
+    // constructor (E-ADAPT-009) before ever reaching legacy's dedicated
+    // check. Either way the same rule holds: a bare `option` type sugar is
+    // rejected, so this accepts both diagnostics.
     std::fs::write(
         &entry,
-        r#"legacy:
-  $option: $str
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def legacy (option str))
+(fn main () void (do))
 "#,
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        format!("{err:#}").contains("E-OPTION-001"),
-        "unexpected error: {err:#}"
+        err.contains("E-OPTION-001") || err.contains("E-ADAPT-009"),
+        "unexpected error: {err}"
     );
 }
 
@@ -2287,26 +2181,27 @@ main:
 fn legacy_option_sugar_with_mapped_inner_type_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+    // See the comment on `legacy_option_sugar_is_rejected_with_stable_code`:
+    // legacy's `$option: T` check (`parse_type_ref`, `src/lower.rs`) applies
+    // wherever a type is parsed, nested positions included, but the adapter
+    // still fails first (E-ADAPT-009) resolving `option` as an unknown
+    // generic type constructor before that legacy check is reached.
     std::fs::write(
         &entry,
-        r#"holder:
-  $record:
-    value:
-      $option:
-        $array: $str
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def holder (record (value (option (array str)))))
+(fn main () void (do))
 "#,
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        format!("{err:#}").contains("E-OPTION-001"),
-        "unexpected error: {err:#}"
+        err.contains("E-OPTION-001") || err.contains("E-ADAPT-009"),
+        "unexpected error: {err}"
     );
 }
 
@@ -2316,12 +2211,8 @@ fn direct_void_union_is_rejected_with_stable_code() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"legacy:
-  $union: [$void, $str]
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def legacy (union void str))
+(fn main () void (do))
 "#,
     )
     .unwrap();
