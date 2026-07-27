@@ -600,7 +600,11 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
     assert!(lock_value["packages"][0]["tree-sha256"].is_string());
     assert_eq!(lock_value["packages"][0]["vendor-path"], "dep/math");
     assert!(lock.ends_with('\n'));
-    std::fs::write(project.join("dep/math/math.vibra"), "(const dirty int64 0)\n").unwrap();
+    std::fs::write(
+        project.join("dep/math/math.vibra"),
+        "(const dirty int64 0)\n",
+    )
+    .unwrap();
 
     let dirty_check = vibra_cmd()
         .current_dir(dir.path())

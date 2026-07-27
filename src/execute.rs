@@ -1594,9 +1594,7 @@ mod iteration_tests {
         // Outside a `for`/`while`, `break`/`continue` are semantically
         // rejected by `src/lower.rs` regardless of source syntax.
         for statement in ["(break)", "(continue)"] {
-            let error = lower_error(&format!(
-                "(fn main () void (do {statement}))\n"
-            ));
+            let error = lower_error(&format!("(fn main () void (do {statement}))\n"));
             assert!(
                 error.contains("only valid inside `$for` or `$while`"),
                 "{error}"
@@ -1612,9 +1610,7 @@ mod iteration_tests {
         // by the reader/typed-surface lowering itself, not by a separate
         // "canonical form" semantic check.
         for statement in ["(break false)", "(continue unit)", "(break unit unit)"] {
-            let error = lower_error(&format!(
-                "(fn main () void (do {statement}))\n"
-            ));
+            let error = lower_error(&format!("(fn main () void (do {statement}))\n"));
             assert!(
                 error.contains("E-AST") || error.contains("E-SYN"),
                 "{error}"

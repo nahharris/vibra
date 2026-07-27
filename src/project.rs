@@ -610,9 +610,7 @@ impl ForeignWasmType {
             return None;
         };
         match name.as_str() {
-            "bool" | "int8" | "int16" | "int32" | "uint8" | "uint16" | "uint32" => {
-                Some(Self::I32)
-            }
+            "bool" | "int8" | "int16" | "int32" | "uint8" | "uint16" | "uint32" => Some(Self::I32),
             "int64" | "uint64" => Some(Self::I64),
             "float32" => Some(Self::F32),
             "float64" => Some(Self::F64),
@@ -664,7 +662,8 @@ fn is_uint8_array_type(ty: &crate::ast::TypeExpr) -> bool {
 }
 
 fn is_foreign_buffer_source_type(ty: &crate::ast::TypeExpr) -> bool {
-    matches!(&ty.value, crate::ast::TypeExprKind::Named(name) if name == "str") || is_uint8_array_type(ty)
+    matches!(&ty.value, crate::ast::TypeExprKind::Named(name) if name == "str")
+        || is_uint8_array_type(ty)
 }
 
 fn validate_external_wasm_imports(project: &LoadedProject) -> Result<()> {

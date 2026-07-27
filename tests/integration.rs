@@ -513,16 +513,8 @@ fn private_module_symbol_is_reachable_locally() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"-main-helper:
-  $function: $void
-  return: $void
-  do:
-    - $return: null
-main:
-  $function: $void
-  return: $void
-  do:
-    - $-main-helper: null
+        r#"(private (fn main-helper () void (do (return))))
+(fn main () void (do (main-helper)))
 "#,
     )
     .unwrap();
@@ -537,30 +529,25 @@ main:
 
 #[test]
 fn private_import_alias_is_usable_locally() {
+    // Imports have no private/public distinction anymore ("Imports are
+    // public module-local aliases but are never re-exported" -- spec); the
+    // `private` wrapper only accepts `def`/`const`/`fn`/`macro`. This tests
+    // the surviving half of the original intent: an import alias is usable
+    // locally, regardless of the removed privacy marker.
     let dir = tempfile::tempdir().unwrap();
     let helper = dir.path().join("helper.vibra");
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &helper,
-        r#"noop:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        ok: true
+        r#"(fn noop () void (do (let ok true)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"-h:
-  $import: "{h}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $-h.noop: null
+            r#"(import h "{h}")
+(fn main () void (do (h.noop)))
 "#,
             h = helper.display().to_string().replace('\\', "/"),
         ),
@@ -577,29 +564,16 @@ fn imported_module_private_helper_works_internally() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"-priv:
-  $function: $void
-  return: $void
-  do:
-    - $return: null
-pub-entry:
-  $function: $void
-  return: $void
-  do:
-    - $-priv: null
+        r#"(private (fn priv () void (do (return))))
+(fn pub-entry () void (do (priv)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $m.pub-entry: null
+            r#"(import m "{m}")
+(fn main () void (do (m.pub-entry)))
 "#,
             m = lib.display().to_string().replace('\\', "/"),
         ),
@@ -616,24 +590,15 @@ fn importer_cannot_reference_private_symbol_on_imported_module() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"-priv:
-  $function: $void
-  return: $void
-  do:
-    - $return: null
+        r#"(private (fn priv () void (do (return))))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $m.-priv: null
+            r#"(import m "{m}")
+(fn main () void (do (m.priv)))
 "#,
             m = lib.display().to_string().replace('\\', "/"),
         ),
@@ -642,7 +607,7 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("unknown function") && err.contains("$m.-priv"),
+        err.contains("unknown function") && err.contains("$m.priv"),
         "unexpected error: {err}"
     );
 }
@@ -654,33 +619,17 @@ fn importer_cannot_reference_private_type_on_imported_module() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"-priv-t:
-  $record:
-    x: $int32
-pub-nop:
-  $function: $void
-  return: $void
-  do:
-    - $return: null
+        r#"(private (def priv-t (record (x int32))))
+(fn pub-nop () void (do (return)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-use-ty:
-  $function:
-    subject: $m.-priv-t
-  return: $void
-  do:
-    - $return: null
-main:
-  $function: $void
-  return: $void
-  do:
-    - $m.pub-nop: null
+            r#"(import m "{m}")
+(fn use-ty ((subject m.priv-t)) void (do (return)))
+(fn main () void (do (m.pub-nop)))
 "#,
             m = lib.display().to_string().replace('\\', "/"),
         ),
@@ -689,7 +638,7 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("unknown type") && err.contains("m.-priv-t"),
+        err.contains("unknown type") && err.contains("m.priv-t"),
         "unexpected error: {err}"
     );
 }
@@ -701,24 +650,15 @@ fn importer_cannot_use_private_enum_constructor_on_imported_module() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"-priv-e:
-  $enum:
-    a: $void
+        r#"(private (def priv-e (enum (a void))))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        value:
-          $m.-priv-e.a: null
+            r#"(import m "{m}")
+(fn main () void (do (let value (m.priv-e.a))))
 "#,
             m = lib.display().to_string().replace('\\', "/"),
         ),
@@ -727,7 +667,7 @@ main:
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("unknown enum reference") && err.contains("m.-priv-e"),
+        err.contains("unknown enum reference") && err.contains("m.priv-e"),
         "unexpected error: {err}"
     );
 }

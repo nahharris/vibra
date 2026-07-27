@@ -288,10 +288,7 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
         diagnostic["range"]["start"],
         json!({"line":0,"character":0})
     );
-    assert!(diagnostic["message"]
-        .as_str()
-        .unwrap()
-        .contains("missing"));
+    assert!(diagnostic["message"].as_str().unwrap().contains("missing"));
     assert_eq!(output[3]["params"]["uri"], main_uri);
     assert!(output[3]["params"]["diagnostics"]
         .as_array()

@@ -228,7 +228,10 @@ fn inline_import_roots(entry: &Path, root: &Value) -> Result<Vec<PathBuf>> {
         };
         let resolved = if import.starts_with('@') {
             let project = project.as_ref().with_context(|| {
-                format!("{}: @ import `{import}` requires a project.vibra", entry.display())
+                format!(
+                    "{}: @ import `{import}` requires a project.vibra",
+                    entry.display()
+                )
             })?;
             crate::project_context::resolve_project_import(project, import)?
         } else {
