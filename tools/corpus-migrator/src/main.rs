@@ -865,7 +865,7 @@ fn statement(value: &Value) -> Result<String> {
             "(task (captures{}) {})",
             captures
                 .iter()
-                .map(|capture| Ok(format!(" {}", sym(as_str(capture, "task-capture")?))))
+                .map(|capture| Ok(format!(" {}", reference(as_str(capture, "task-capture")?))))
                 .collect::<Result<String>>()?,
             body_form(get(map, "do").context("task-missing-do")?)?
         ));
@@ -876,7 +876,7 @@ fn statement(value: &Value) -> Result<String> {
             .and_then(Value::as_sequence)
             .context("spawn-captures-not-sequence")?
             .iter()
-            .map(|capture| Ok(sym(as_str(capture, "spawn-capture")?)))
+            .map(|capture| Ok(reference(as_str(capture, "spawn-capture")?)))
             .collect::<Result<Vec<_>>>()?
             .join(" ");
         return Ok(format!(
@@ -923,7 +923,7 @@ fn statement(value: &Value) -> Result<String> {
             let (name, value) = binding.iter().next().unwrap();
             Ok(format!(
                 "(set {} {})",
-                sym(as_str(name, "set-name")?),
+                reference(as_str(name, "set-name")?),
                 expr(value)?
             ))
         }
@@ -1039,7 +1039,7 @@ fn expr(value: &Value) -> Result<String> {
         Value::Null => Ok("unit".into()),
         Value::Bool(value) => Ok(value.to_string()),
         Value::Number(value) => Ok(value.to_string()),
-        Value::String(value) if value.starts_with('$') => Ok(sym(value.trim_start_matches('$'))),
+        Value::String(value) if value.starts_with('$') => Ok(reference(value)),
         Value::String(value) => Ok(quoted(value)),
         Value::Sequence(values) => Ok(format!(
             "(array{})",
@@ -1229,7 +1229,9 @@ fn wasm_expression(payload: &Value) -> Result<String> {
         .context("wasm-args-not-sequence")?
         .iter()
         .map(|value| match value {
-            Value::String(value) if value.starts_with('$') => Ok(format!("(arg {})", sym(value))),
+            Value::String(value) if value.starts_with('$') => {
+                Ok(format!("(arg {})", reference(value)))
+            }
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
                 Ok(format!("(const {})", expr(value)?))
             }
@@ -1649,6 +1651,23 @@ fn sym(value: &str) -> String {
     value.trim().trim_start_matches('$').to_string()
 }
 
+/// A legacy reference to a function's own parameter or a `$set` mutation
+/// target -- `$args.name`, or the bare `args.name` spelling a `$set` target
+/// key uses (YAML keys are never `$`-prefixed). The contract removes the
+/// `$args.` envelope entirely (spec line 110: "`$args.name` is removed";
+/// migration table: `| $args.x | x |`), so every occurrence strips to the
+/// bare declared name, never `args.<name>` -- that spelling is not valid
+/// S-expression surface. Ordinary `$foo`/`foo` references that never had the
+/// `args.` prefix pass through unchanged, so this is safe to apply anywhere
+/// a value or `$set` target reference is converted, not just wasm
+/// forwarding.
+fn reference(value: &str) -> String {
+    let bare = sym(value);
+    bare.strip_prefix("args.")
+        .map(str::to_string)
+        .unwrap_or(bare)
+}
+
 fn quoted(value: &str) -> String {
     format!("{value:?}")
 }
@@ -1688,7 +1707,10 @@ works:
         .unwrap();
         assert!(output.contains("(import test \"../stdlib/src/test.vibra\")"));
         assert!(output.contains("(fn answer ((value int64)) array"));
-        assert!(output.contains("(array args.value)"));
+        // `$args.value` is the removed legacy parameter envelope (spec line
+        // 110; migration table `| $args.x | x |`) -- it converts to the bare
+        // declared name, never `args.value`.
+        assert!(output.contains("(array value)"));
         assert!(output.contains("tags: (fast)"));
         validate(&output).unwrap();
     }
@@ -1719,6 +1741,58 @@ read-handle:
         assert!(
             !output.contains("capability.clock") && !output.contains("handle.read"),
             "fused head leaked into output: {output}"
+        );
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn strips_the_removed_args_envelope_from_parameter_references() {
+        // `$args.name` was the legacy parameter-forwarding envelope; the
+        // contract removes it entirely (spec line 110: "`$args.name` is
+        // removed"; migration table: `| $args.x | x |`). Every position that
+        // can reference a function's own parameter must strip the whole
+        // `args.` token, not just the `$` sigil -- an ordinary expression
+        // reference, a `$wasm` forwarding spec, and a `$set` mutation target
+        // (whose YAML key is bare `args.value`, with no `$` at all).
+        let output = migrate(
+            r#"
+increment:
+  $function:
+    value:
+      $mut: $int64
+  return: $int64
+  do:
+  - $set:
+      args.value: 4
+  - $return: $args.value
+scalar-len:
+  $function:
+    text: $str
+  return: $uint64
+  do:
+  - $wasm:
+      import:
+        module: vibra_v1
+        name: str_scalar_len
+      args: [$args.text]
+"#,
+        )
+        .unwrap();
+        assert!(
+            output.contains("(set value 4)"),
+            "$set target kept the args. envelope: {output}"
+        );
+        assert!(
+            output.contains("(return value)"),
+            "expression reference kept the args. envelope: {output}"
+        );
+        assert!(
+            output.contains("args: ((arg text))"),
+            "wasm forwarding kept the args. envelope: {output}"
+        );
+        assert!(
+            !output.contains("args."),
+            "removed $args. envelope leaked into output: {output}"
         );
         validate(&output).unwrap();
     }
@@ -1881,8 +1955,10 @@ assets:
         .unwrap();
         assert!(output.contains("(record (name \"Vibra\"))"));
         assert!(output.contains("(template \"greeting.txt\" with: (record (name \"Vibra\")))"));
+        // `$args.output` strips to the bare `output`, same as any other
+        // `$args.` reference -- wasm forwarding is not a special case.
         assert!(output.contains(
-            "(wasm import: (import \"vibra_v1\" \"io_write\") args: ((arg args.output) (const 1) (const \"suffix\")))"
+            "(wasm import: (import \"vibra_v1\" \"io_write\") args: ((arg output) (const 1) (const \"suffix\")))"
         ));
         validate(&output).unwrap();
     }

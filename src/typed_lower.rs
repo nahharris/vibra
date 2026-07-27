@@ -1079,7 +1079,10 @@ fn interface_requirements(
     }
 }
 
-fn named_application(ty: &TypeRef) -> Result<(String, Vec<TypeRef>)> {
+/// Widened to `pub(crate)` so `typed_body.rs` can resolve an `impls:`
+/// annotation's interface name the same way signature lowering does, to
+/// derive the exact staged body key `ImplMethodBinding::Fresh` registered.
+pub(crate) fn named_application(ty: &TypeRef) -> Result<(String, Vec<TypeRef>)> {
     match ty {
         TypeRef::Named(name) => Ok((name.clone(), Vec::new())),
         TypeRef::Instantiated { base, type_args } => Ok((base.clone(), type_args.clone())),
@@ -1131,7 +1134,9 @@ pub(crate) fn qualify(module_alias: &str, name: &str) -> String {
     }
 }
 
-fn unqualify<'a>(module_alias: &str, name: &'a str) -> &'a str {
+/// Widened to `pub(crate)` for the same reason as `named_application`: it is
+/// half of the `owner` derivation `typed_body.rs` must reproduce exactly.
+pub(crate) fn unqualify<'a>(module_alias: &str, name: &'a str) -> &'a str {
     name.strip_prefix(module_alias)
         .and_then(|name| name.strip_prefix('.'))
         .unwrap_or(name)
