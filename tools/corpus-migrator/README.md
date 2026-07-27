@@ -55,8 +55,8 @@ value parameters in declaration order; unknown or missing labels are errors.
 
 ## Residual inventory
 
-The repository-wide dry run, measured against `main` after typed primitive
-lowering landed (#177), reports:
+The repository-wide dry run, measured against `main` after wasm host-import
+lowering landed (#184), reports:
 
 ```text
 scanned: 62
@@ -68,52 +68,44 @@ project-manifests-excluded: 4
 surface-valid: 58/58
 surface-invalid: 0
 
-signature-valid: 22/58
-signature-invalid: 36
+signature-valid: 58/58
+signature-invalid: 0
 
-body-valid: 5/22
-body-invalid: 17
+body-valid: 35/58
+body-invalid: 23
 ```
 
-Every non-S-expression source still converts syntactically and every
-converted-or-already-S-expression module source parses into a well-shaped
-typed surface AST (`surface-valid: 58/58`). That is where the good news ends:
-**only 5 of the 58 module files in the corpus (roughly 9%) actually lower all
-the way to an executable typed body.** The gap between "typed-valid" (the old,
-conflated number) and the real depth is the entire point of this staged
-report.
+Every non-S-expression source converts syntactically, every module source
+parses into a well-shaped typed surface AST, and every one of them now lowers
+to typed signatures. 35 of 58 lower all the way to an executable typed body.
 
-### Signature tier: one root cause, cascaded
+Keep the tiers distinct when reading this. The original single-tier report said
+`typed-valid: 58/58` while measuring only surface parsing, which read as
+cutover readiness when body readiness was closer to 9%. The staged report
+exists so that gap cannot hide again.
 
-All 36 `signature-invalid` files fail for the same underlying reason,
-traced to exactly two declarations:
+### Signature tier: complete
 
-- `stdlib/src/option.vibra` declares a function `and` (`option.and`).
-- `stdlib/src/result.vibra` declares a function `and` (`result.and`).
+Two fixes closed it. Declarations named after primitive operators are permitted
+(#180) — `option.and`, `option.or`, `result.and`, and `result.or` are reachable
+through their qualified names, so rejecting them was wrong and it had cascaded
+to every module importing `option` or `result` (22/58 to 43/58). Then `Self` is
+substituted before impl conformance is checked (#182), clearing 15 `E-IMPL-005`
+failures (43/58 to 58/58).
 
-Both collide with the frozen primitive-name-resolution rule
-(`docs/s-expression-migration-status.md`): an unqualified call to a name that
-matches a built-in primitive operator always resolves to the primitive, so a
-declaration named after one is permanently unreachable and is rejected at
-signature-lowering time (`src/typed_lower.rs:266`,
-`crate::lower::typed_primitive_op`). Every file that transitively imports
-`option.vibra` or `result.vibra` inherits the failure when it is validated as
-the entry point of its own program — which is 36 of the corpus's 58 files.
-**Renaming (or re-signature-ing) these two combinators is the single highest-
-leverage remaining item to raise the signature-valid count.**
-
-### Body tier: five distinct causes across the 22 that reach it
-
-Of the 22 files whose signatures validate, 17 fail body lowering, for five
-distinct reasons:
+### Body tier: 23 remaining, four causes
 
 | Cause | Files | Note |
 |---|---|---|
-| Typed compile-time expression lowering (`embed`/`template`/`wasm`) is not active | 13 | Root trigger sites: `stdlib/src/test.vibra`'s `assert` (wasm write, cascades to ~10 test files that import it), `examples/static-wasm-ffi/src/main.vibra`'s `foreign-sum` (direct wasm import), `tests/template.vibra` (compile-time template render) |
-| `@`-prefixed project import unresolved | 1 | `examples/lsp-workspace/main.vibra` imports `@greeting/greet.vibra`; this standalone tool has no `project.vibra` resolution (same limitation it already accepts for named-call signature discovery) — a tool limitation, not a language gap |
-| `Expr::EnumConstructor` not implemented on the typed path | 1 | `tests/lang-enums.vibra` calls an enum constructor (`signal.go`) that isn't registered as a callable function |
-| `ExprKind::Convert` intentionally unimplemented (needs explicit fallback semantics) | 1 | `tests/lang-primitive-operations.vibra` |
-| `Statement::Spawn` not implemented on the typed path | 1 | `tests/lang-tasks.vibra` |
+| `policy.narrow` target is not a capability or policy type | 11 | A migrator conversion bug, not a compiler gap: the legacy shorthand `$capability.<domain>` is emitted as a bare symbol instead of a capability form, so the typed path correctly rejects a malformed target |
+| `unknown typed callee` for interface and inherent method dispatch | 9 | `error.error.kind`, `fs.writable.write-string` — qualified method dispatch is not resolved on the typed path yet |
+| `ExprKind::Convert` intentionally unimplemented | 1 | `tests/lang-primitive-operations.vibra`; legacy maps it to `Expr::Primitive { op: Convert }`, which the typed primitive validators treat as unreachable, and its AST fallback is a bare literal with no origin |
+| Compile-time `template` expansion not run by this tool | 1 | `tests/template.vibra`; the language supports it (#173, `frontend::expand_compile_time_data`), but this tool calls `typed_body::lower_typed_bodies` directly and bypasses `load_surface_program`, so the failure is tool wiring rather than a language gap |
+
+`examples/lsp-workspace/main.vibra` is counted under interface dispatch above
+only incidentally; it fails on `greeting.greet` because this standalone tool has
+no `project.vibra` resolution for `@`-prefixed project imports — a tool
+limitation it already accepts for named-call signature discovery.
 
 Unsupported and per-tier failure entries remain path-qualified and
 deterministic, exactly like the original single-tier report.
