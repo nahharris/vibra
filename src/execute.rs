@@ -1540,43 +1540,35 @@ mod iteration_tests {
         (dir, lowered)
     }
 
+    /// Some malformed inputs now fail at load time (reader/typed-surface
+    /// validation) rather than at `lower_program` time -- e.g. `(break
+    /// false)` is a reader-level arity error (`E-SYN-009`), not a semantic
+    /// one, since the S-expression grammar makes `break`/`continue` take
+    /// zero operands structurally. Return whichever stage actually failed.
     fn lower_error(source: &str) -> String {
         let dir = tempfile::tempdir().unwrap();
         let entry = dir.path().join("entry.vibra");
         std::fs::write(&entry, source).unwrap();
-        let loaded = crate::load::load_program(&entry).unwrap();
-        format!("{:#}", crate::lower::lower_program(&loaded).unwrap_err())
+        match crate::load::load_program(&entry) {
+            Ok(loaded) => format!("{:#}", crate::lower::lower_program(&loaded).unwrap_err()),
+            Err(error) => format!("{error:#}"),
+        }
     }
 
     #[test]
     fn canonical_iteration_runs_in_interpreter_and_wasm() {
         let (_dir, program) = lower(
-            r#"main:
-  $function: $void
-  return: $void
-  do:
-  - $let:
-      sum:
-        $mut: 0
-  - $for: value
-    in:
-      $range:
-        start: 0
-        end: 4
-        step: 1
-    do:
-    - $if:
-        $equal: [$value, 1]
-      then:
-      - $continue: null
-      else: []
-    - $set:
-        sum:
-          $add: [$sum, $value]
-  - $for: scalar
-    in: "é🙂"
-    do:
-    - $break: null
+            r#"(fn main () void
+  (do
+    (let sum (mut 0))
+    (for value (range 0 4 1)
+      (do
+        (if (equal value 1)
+          (do (continue))
+          (do))
+        (set sum (add sum value))))
+    (for scalar "é🙂"
+      (do (break)))))
 "#,
         );
         run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -1586,17 +1578,9 @@ mod iteration_tests {
     #[test]
     fn zero_step_fails_consistently_in_both_runtimes() {
         let (_dir, program) = lower(
-            r#"main:
-  $function: $void
-  return: $void
-  do:
-  - $for: value
-    in:
-      $range:
-        start: 0
-        end: 2
-        step: 0
-    do: []
+            r#"(fn main () void
+  (do
+    (for value (range 0 2 0) (do))))
 "#,
         );
         let interpreted = run_lowered_interpreted(&program, &RunConfig::default()).unwrap_err();
@@ -1607,32 +1591,40 @@ mod iteration_tests {
 
     #[test]
     fn loop_control_requires_a_loop_and_canonical_null_envelopes() {
-        for statement in ["$break: null", "$continue: null"] {
+        // Outside a `for`/`while`, `break`/`continue` are semantically
+        // rejected by `src/lower.rs` regardless of source syntax.
+        for statement in ["(break)", "(continue)"] {
             let error = lower_error(&format!(
-                "main:\n  $function: $void\n  return: $void\n  do:\n  - {statement}\n"
+                "(fn main () void (do {statement}))\n"
             ));
             assert!(
                 error.contains("only valid inside `$for` or `$while`"),
                 "{error}"
             );
         }
-        for statement in [
-            "$break: false",
-            "$continue: {}",
-            "$break: null\n    extra: null",
-        ] {
+        // The legacy YAML surface additionally had to validate that a
+        // `$break`/`$continue` envelope's payload was exactly `null` (its
+        // mapping could otherwise hold any YAML value or extra keys). The
+        // S-expression grammar makes that state structurally unrepresentable
+        // instead: `break` and `continue` take zero operands
+        // (`"(", "break", ")"` / `"(", "continue", ")"` in the reader
+        // grammar), so a malformed form such as `(break false)` is rejected
+        // by the reader/typed-surface lowering itself, not by a separate
+        // "canonical form" semantic check.
+        for statement in ["(break false)", "(continue unit)", "(break unit unit)"] {
             let error = lower_error(&format!(
-                "main:\n  $function: $void\n  return: $void\n  do:\n  - {statement}\n"
+                "(fn main () void (do {statement}))\n"
             ));
-            assert!(error.contains("must use canonical form"), "{error}");
+            assert!(
+                error.contains("E-AST") || error.contains("E-SYN"),
+                "{error}"
+            );
         }
     }
 
     #[test]
     fn while_is_an_existing_loop_control_target() {
-        let (_dir, program) = lower(
-            "main:\n  $function: $void\n  return: $void\n  do:\n  - $while: true\n    do:\n    - $break: null\n",
-        );
+        let (_dir, program) = lower("(fn main () void (do (while true (do (break)))))\n");
         run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
         run_lowered(&program, &RunConfig::default()).unwrap();
     }
@@ -3828,20 +3820,12 @@ mod source_task_tests {
         let entry = dir.path().join("entry.vibra");
         std::fs::write(
             &entry,
-            r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $spawn: first
-      captures: []
-      value: 41
-    - $spawn: second
-      captures: []
-      value: 42
-    - $join: second
-      into: second-result
-    - $join: first
-      into: first-result
+            r#"(fn main () void
+  (do
+    (spawn first (captures) 41)
+    (spawn second (captures) 42)
+    (join second second-result)
+    (join first first-result)))
 "#,
         )
         .unwrap();
@@ -3899,21 +3883,12 @@ mod collection_tests {
         std::fs::write(
             &entry,
             format!(
-                r#"collections:
-  $import: "{collections}"
-test:
-  $import: "{test}"
-main:
-  $function: $void
-  return: $void
-  do:
-  - $let:
-      found:
-        $collections.array-contains:
-          t: $int64
-          values: {{$array: [1, 2, 3]}}
-          value: 2
-  - $test.assert: $found
+                r#"(import collections "{collections}")
+(import test "{test}")
+(fn main () void
+  (do
+    (let found (collections.array-contains int64 (array 1 2 3) 2))
+    (test.assert found)))
 "#
             ),
         )
@@ -3941,7 +3916,7 @@ mod text_conversion_tests {
         std::fs::write(
             &entry,
             format!(
-                "text:\n  $import: \"{}\"\nconvert:\n  $import: \"{}\"\nbytes:\n  $import: \"{}\"\noption:\n  $import: \"{}\"\nresult:\n  $import: \"{}\"\ntest:\n  $import: \"{}\"\nmain:\n  $function: $void\n  return: $void\n  do:\n{}",
+                "(import text \"{}\")\n(import convert \"{}\")\n(import bytes \"{}\")\n(import option \"{}\")\n(import result \"{}\")\n(import test \"{}\")\n(fn main () void\n  (do\n{}))\n",
                 import("text"),
                 import("convert"),
                 import("bytes"),
@@ -3959,29 +3934,16 @@ mod text_conversion_tests {
     #[test]
     fn unicode_parse_and_invalid_utf8_match_in_interpreter_and_wasm() {
         let program = lower(
-            r#"  - $test.assert-eq-int:
-      actual: {$text.scalar-len: aé🙂}
-      expected: 3
-  - $let:
-      parsed: {$convert.parse-int64: '-42'}
-  - $match: $parsed
-    when:
-    - case: {$result.result.ok: -42}
-      do: [{$test.assert: true}]
-    - case: {$wildcard: null}
-      do: [{$test.fail: parse-failed}]
-  - $let:
-      raw:
-        $cast: {$array: [255]}
-        into: $bytes.bytes
-  - $let:
-      decoded: {$bytes.bytes.decode-utf8: $raw}
-  - $match: $decoded
-    when:
-    - case: {$result.result.err: {$bytes.bytes-error.invalid-utf8: null}}
-      do: [{$test.assert: true}]
-    - case: {$wildcard: null}
-      do: [{$test.fail: invalid-utf8-was-accepted}]
+            r#"    (test.assert-eq-int (text.scalar-len "aé🙂") 3)
+    (let parsed (convert.parse-int64 "-42"))
+    (match parsed
+      (case (result.result.ok -42) (do (test.assert true)))
+      (case _ (do (test.fail "parse-failed"))))
+    (let raw (cast (array 255) bytes.bytes))
+    (let decoded (bytes.bytes.decode-utf8 raw))
+    (match decoded
+      (case (result.result.err (bytes.bytes-error.invalid-utf8)) (do (test.assert true)))
+      (case _ (do (test.fail "invalid-utf8-was-accepted"))))
 "#,
         );
         run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -3991,75 +3953,33 @@ mod text_conversion_tests {
     #[test]
     fn text_growth_limit_is_a_typed_result_in_both_backends() {
         let program = lower(
-            r#"  - $let:
-      replaced:
-        $text.replace: a
-        from: a
-        to: xx
-  - $match: $replaced
-    when:
-    - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
-      do: [{$test.assert: true}]
-    - case: {$wildcard: null}
-      do: [{$test.fail: replace-limit-was-not-enforced}]
-  - $let:
-      joined:
-        $text.join: {$array: [a, a]}
-        separator: ''
-  - $match: $joined
-    when:
-    - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
-      do: [{$test.assert: true}]
-    - case: {$wildcard: null}
-      do: [{$test.fail: join-limit-was-not-enforced}]
-  - $let:
-      uppercase: {$text.uppercase: ß}
-  - $match: $uppercase
-    when:
-    - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
-      do: [{$test.assert: true}]
-    - case: {$wildcard: null}
-      do: [{$test.fail: case-limit-was-not-enforced}]
-  - $let:
-      split:
-        $text.split: 'a,'
-        separator: ','
-  - $match: $split
-    when:
-    - case: {$result.result.err: {$text.text-error.limit-exceeded: null}}
-      do: [{$test.assert: true}]
-    - case: {$wildcard: null}
-      do: [{$test.fail: split-element-limit-was-not-enforced}]
-  - $let:
-      left:
-        $cast: {$array: [97]}
-        into: $bytes.bytes
-  - $let:
-      right:
-        $cast: {$array: [98]}
-        into: $bytes.bytes
-  - $let:
-      concatenated:
-        $bytes.bytes.concat: $left
-        other: $right
-  - $match: $concatenated
-    when:
-    - case: {$result.result.err: {$bytes.bytes-error.limit-exceeded: null}}
-      do: [{$test.assert: true}]
-    - case: {$wildcard: null}
-      do: [{$test.fail: bytes-concat-limit-was-not-enforced}]
-  - $let:
-      raw:
-        $cast: {$array: [97, 98]}
-        into: $bytes.bytes
-  - $let:
-      decoded: {$bytes.bytes.decode-utf8: $raw}
-  - $match: $decoded
-    when:
-    - case: {$result.result.err: {$bytes.bytes-error.limit-exceeded: null}}
-      do: [{$test.assert: true}]
-    - case: {$wildcard: null}
-      do: [{$test.fail: bytes-decode-limit-was-not-enforced}]
+            r#"    (let replaced (text.replace "a" "a" "xx"))
+    (match replaced
+      (case (result.result.err (text.text-error.limit-exceeded)) (do (test.assert true)))
+      (case _ (do (test.fail "replace-limit-was-not-enforced"))))
+    (let joined (text.join (array "a" "a") ""))
+    (match joined
+      (case (result.result.err (text.text-error.limit-exceeded)) (do (test.assert true)))
+      (case _ (do (test.fail "join-limit-was-not-enforced"))))
+    (let uppercase (text.uppercase "ß"))
+    (match uppercase
+      (case (result.result.err (text.text-error.limit-exceeded)) (do (test.assert true)))
+      (case _ (do (test.fail "case-limit-was-not-enforced"))))
+    (let split (text.split "a," ","))
+    (match split
+      (case (result.result.err (text.text-error.limit-exceeded)) (do (test.assert true)))
+      (case _ (do (test.fail "split-element-limit-was-not-enforced"))))
+    (let left (cast (array 97) bytes.bytes))
+    (let right (cast (array 98) bytes.bytes))
+    (let concatenated (bytes.bytes.concat left right))
+    (match concatenated
+      (case (result.result.err (bytes.bytes-error.limit-exceeded)) (do (test.assert true)))
+      (case _ (do (test.fail "bytes-concat-limit-was-not-enforced"))))
+    (let raw (cast (array 97 98) bytes.bytes))
+    (let decoded (bytes.bytes.decode-utf8 raw))
+    (match decoded
+      (case (result.result.err (bytes.bytes-error.limit-exceeded)) (do (test.assert true)))
+      (case _ (do (test.fail "bytes-decode-limit-was-not-enforced"))))
 "#,
         );
         let config = RunConfig {

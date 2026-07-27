@@ -53,12 +53,12 @@ fn write_project(root: &Path) {
     .unwrap();
     std::fs::write(
         root.join("src/main.vibra"),
-        "main:\n  $function: $void\n  return: $void\n  do: []\n",
+        "(fn main () void (do))\n",
     )
     .unwrap();
     std::fs::write(
         root.join("tests/basic.vibra"),
-        "works:\n  $test: core\n  do: []\n",
+        "(test works core (do))\n",
     )
     .unwrap();
 }

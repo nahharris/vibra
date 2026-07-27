@@ -1922,29 +1922,12 @@ mod tests {
         std::fs::write(
             &entry,
             format!(
-                r#"fs:
-  $import: "{}"
-main:
-  $function:
-    policy:
-      $policy:
-        fs-read:
-          - requirement: mandatory
-            scopes:
-              - dir: "{}"
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "{}"
-    - $let:
-        capability:
-          $policy.narrow: $args.policy
-          into: $fs.read-capability
-    - $let:
-        text:
-          $fs.read-to-string: $path
-          capability: $capability
+                r#"(import fs "{}")
+(fn main ((policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{}"))))))) void
+  (do
+    (let path (fs.path.new "{}"))
+    (let capability (policy.narrow policy fs.read-capability))
+    (let text (fs.read-to-string path capability))))
 "#,
                 path(&fs),
                 path(temp.path()),
@@ -1983,34 +1966,13 @@ main:
         let entry = temp.path().join("entry.vibra");
         std::fs::write(
             &entry,
-            r#"identity:
-  $function:
-    value: $t
-  =where:
-    t: []
-  return: $t
-  do:
-    - $return: $args.value
-unused-one:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        x: 1
-unused-two:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        y: 2
-main:
-  $function: $void
-  return: $void
-  do:
-    - $identity: true
-      t: $bool
-    - $identity: 7
-      t: $int64
+            r#"(fn identity ((value t)) t (do (return value)) where: ((t)))
+(fn unused-one () void (do (let x 1)))
+(fn unused-two () void (do (let y 2)))
+(fn main () void
+  (do
+    (identity bool true)
+    (identity int64 7)))
 "#,
         )
         .unwrap();

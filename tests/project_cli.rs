@@ -15,31 +15,12 @@ fn docs_resolves_local_and_imported_symbols_in_all_formats() {
     let main = dir.path().join("main.vibra");
     std::fs::write(
         &helper,
-        r#"=doc: Helper module documentation.
-greet:
-  $function: {name: $string}
-  return: $string
-  =doc: |
-    Return a friendly greeting.
-
-    ```vibra
-    $helper.greet: {name: Vibra}
-    ```
-  do:
-    - $return: $args.name
-"#,
+        "(fn greet ((name str)) str\n  (do (return name))\n  doc: \"Return a friendly greeting.\\n\\n```vibra\\n$helper.greet: {name: Vibra}\\n```\\n\")\n",
     )
     .unwrap();
     std::fs::write(
         &main,
-        r#"helper:
-  $import: ./helper.vibra
-main:
-  $function: $void
-  return: $void
-  =doc: Run the example application.
-  do: []
-"#,
+        "(import helper \"./helper.vibra\")\n(fn main () void (do) doc: \"Run the example application.\")\n",
     )
     .unwrap();
 
@@ -114,7 +95,7 @@ fn docs_reads_package_docs_and_requires_a_target_when_ambiguous() {
     for name in ["one", "two"] {
         std::fs::write(
             dir.path().join(format!("src/{name}/lib.vibra")),
-            format!("=doc: The {name} module.\nvalue:\n  $literal: 1\n  =doc: A value.\n"),
+            "(const value int64 1 doc: \"A value.\")\n",
         )
         .unwrap();
     }
@@ -438,7 +419,7 @@ fn project_check_resolves_local_dependency_without_copying_it() {
     std::fs::create_dir_all(&dep).unwrap();
     std::fs::write(
         dep.join("util.vibra"),
-        "io:\n  $import: \"@std/io.vibra\"\nanswer: 42\n",
+        "(import io \"@std/io.vibra\")\n(const answer int64 42)\n",
     )
     .unwrap();
     let stdlib = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src");
@@ -447,7 +428,7 @@ fn project_check_resolves_local_dependency_without_copying_it() {
     std::fs::create_dir_all(project.join("src/app")).unwrap();
     std::fs::write(
         project.join("src/app/main.vibra"),
-        "utils:\n  $import: \"@local-utils/util.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+        "(import utils \"@local-utils/util.vibra\")\n(fn main () void (do))\n",
     )
     .unwrap();
     std::fs::write(
@@ -494,7 +475,7 @@ fn project_check_resolves_dependency_library_source_root() {
     let dir = tempfile::tempdir().unwrap();
     let dep = dir.path().join("packaged-utils");
     std::fs::create_dir_all(dep.join("src")).unwrap();
-    std::fs::write(dep.join("src/util.vibra"), "answer: 42\n").unwrap();
+    std::fs::write(dep.join("src/util.vibra"), "(const answer int64 42)\n").unwrap();
     std::fs::write(
         dep.join("project.vibra"),
         r#"(project
@@ -508,7 +489,7 @@ fn project_check_resolves_dependency_library_source_root() {
     std::fs::create_dir_all(project.join("src/app")).unwrap();
     std::fs::write(
         project.join("src/app/main.vibra"),
-        "utils:\n  $import: \"@packaged-utils/util.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+        "(import utils \"@packaged-utils/util.vibra\")\n(fn main () void (do))\n",
     )
     .unwrap();
     std::fs::write(
@@ -541,7 +522,7 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
     let dir = tempfile::tempdir().unwrap();
     let remote = dir.path().join("remote-math");
     std::fs::create_dir_all(&remote).unwrap();
-    std::fs::write(remote.join("math.vibra"), "pi: 3\n").unwrap();
+    std::fs::write(remote.join("math.vibra"), "(const pi int64 3)\n").unwrap();
     assert!(std::process::Command::new("git")
         .current_dir(&remote)
         .args(["init"])
@@ -583,7 +564,7 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
     std::fs::create_dir_all(project.join("src/app")).unwrap();
     std::fs::write(
         project.join("src/app/main.vibra"),
-        "math:\n  $import: \"@math/math.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+        "(import math \"@math/math.vibra\")\n(fn main () void (do))\n",
     )
     .unwrap();
     std::fs::write(
@@ -619,7 +600,7 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
     assert!(lock_value["packages"][0]["tree-sha256"].is_string());
     assert_eq!(lock_value["packages"][0]["vendor-path"], "dep/math");
     assert!(lock.ends_with('\n'));
-    std::fs::write(project.join("dep/math/math.vibra"), "dirty: 0\n").unwrap();
+    std::fs::write(project.join("dep/math/math.vibra"), "(const dirty int64 0)\n").unwrap();
 
     let dirty_check = vibra_cmd()
         .current_dir(dir.path())
@@ -645,7 +626,7 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
     );
     assert_eq!(
         std::fs::read_to_string(project.join("dep/math/math.vibra")).unwrap(),
-        "pi: 3\n"
+        "(const pi int64 3)\n"
     );
     assert_eq!(
         std::fs::read_to_string(project.join("vibra.lock.json")).unwrap(),
@@ -681,7 +662,7 @@ fn project_sync_vendors_nested_diamond_dependencies_package_locally() {
 
     let project = dir.path().join("diamond-app");
     std::fs::create_dir_all(project.join("src/app")).unwrap();
-    std::fs::write(project.join("src/app/main.vibra"), "main: 1\n").unwrap();
+    std::fs::write(project.join("src/app/main.vibra"), "(const main int64 1)\n").unwrap();
     std::fs::write(
         project.join("project.vibra"),
         format!(
@@ -729,7 +710,7 @@ fn project_sync_vendors_nested_diamond_dependencies_package_locally() {
 
 fn create_git_package(path: &Path, name: &str, dependencies: &str) -> String {
     std::fs::create_dir_all(path.join("src")).unwrap();
-    std::fs::write(path.join("src/lib.vibra"), "answer: 42\n").unwrap();
+    std::fs::write(path.join("src/lib.vibra"), "(const answer int64 42)\n").unwrap();
     std::fs::write(
         path.join("project.vibra"),
         format!(
@@ -830,38 +811,14 @@ fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
-        r#"foreign-sum:
-  $function:
-    left: $int32
-  args:
-    right: $int32
-  return: $int32
-  do:
-    - $wasm:
-        import:
-          module: "@math"
-          name: sum
-        args: [$args.left, $args.right]
-foreign-assert:
-  $function:
-    value: $int32
-  return: $void
-  do:
-    - $wasm:
-        import:
-          module: "@math"
-          name: assert_42
-        args: [$args.value]
-main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        answer:
-          $foreign-sum:
-            left: 20
-            right: 22
-    - $foreign-assert: $answer
+        r#"(fn foreign-sum ((left int32) (right int32)) int32
+  (do (wasm import: (import "@math" "sum") args: ((arg left) (arg right)))))
+(fn foreign-assert ((value int32)) void
+  (do (wasm import: (import "@math" "assert_42") args: ((arg value)))))
+(fn main () void
+  (do
+    (let answer (foreign-sum 20 22))
+    (foreign-assert answer)))
 "#,
     )
     .unwrap();
@@ -995,34 +952,14 @@ fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
-        r#"foreign-status:
-  $function:
-    text: $str
-  return: $int32
-  do:
-    - $wasm:
-        import:
-          module: "@text-ffi"
-          name: utf8_status
-        args: [$args.text]
-foreign-assert:
-  $function:
-    status: $int32
-  return: $void
-  do:
-    - $wasm:
-        import:
-          module: "@text-ffi"
-          name: assert_89
-        args: [$args.status]
-main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        status:
-          $foreign-status: "Vï"
-    - $foreign-assert: $status
+        r#"(fn foreign-status ((text str)) int32
+  (do (wasm import: (import "@text-ffi" "utf8_status") args: ((arg text)))))
+(fn foreign-assert ((status int32)) void
+  (do (wasm import: (import "@text-ffi" "assert_89") args: ((arg status)))))
+(fn main () void
+  (do
+    (let status (foreign-status "Vï"))
+    (foreign-assert status)))
 "#,
     )
     .unwrap();

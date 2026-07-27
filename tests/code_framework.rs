@@ -304,8 +304,8 @@ fn compiler_loading_retains_physical_module_part_origins() {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("math.vibra");
     let part = dir.path().join("math.test.vibra");
-    std::fs::write(&base, "value: 1\n").unwrap();
-    std::fs::write(&part, "other: 2\n").unwrap();
+    std::fs::write(&base, "(const value int64 1)\n").unwrap();
+    std::fs::write(&part, "(const other int64 2)\n").unwrap();
 
     let loaded =
         vibra::load::load_program_with_flags(&base, &vibra::load::CompilationFlags::new(["test"]))
@@ -319,8 +319,18 @@ fn compiler_loading_retains_physical_module_part_origins() {
         loaded.module_parts.get(&canonical_base),
         Some(&expected_parts)
     );
-    assert!(loaded.sources.document(&canonical_base).is_ok());
-    assert!(loaded.sources.document(&canonical_part).is_ok());
+    // `LoadedProgram.sources` is deliberately an empty `SourceDatabase` on
+    // the S-expression loading path: `SourceDatabase::from_sources` runs
+    // `yaml_subset::validate_yaml_subset_or_err` and legacy YAML parsing on
+    // whatever text it is given, which is semantically wrong to apply to
+    // S-expression source (a `#`, `|`, or `>` that is perfectly ordinary
+    // Vibra syntax could misfire as a YAML-subset violation) and is not
+    // load-bearing for compilation -- nothing in the compile/execute/test
+    // path reads it. Physical module-part origins are retained in
+    // `module_parts` (asserted above), which is what this test's name
+    // describes.
+    assert!(loaded.sources.document(&canonical_base).is_err());
+    assert!(loaded.sources.document(&canonical_part).is_err());
 }
 
 #[test]
@@ -328,10 +338,13 @@ fn compiler_loading_filters_conditional_module_parts() {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("math.vibra");
     let test_part = dir.path().join("math.test.vibra");
-    let debug_part = dir.path().join("math.unix.debug.vibra.yaml");
-    std::fs::write(&base, "base: 1\n").unwrap();
-    std::fs::write(&test_part, "test-only: 2\n").unwrap();
-    std::fs::write(&debug_part, "debug-only: 3\n").unwrap();
+    // Conditional module parts are also `.vibra` sources; `.vibra.yaml` is
+    // rejected outright now (verified below) and is not even discovered as a
+    // conditional part candidate.
+    let debug_part = dir.path().join("math.unix.debug.vibra");
+    std::fs::write(&base, "(const base int64 1)\n").unwrap();
+    std::fs::write(&test_part, "(const test-only int64 2)\n").unwrap();
+    std::fs::write(&debug_part, "(const debug-only int64 3)\n").unwrap();
 
     let default = vibra::load::load_program(&base).unwrap();
     let canonical_base = std::fs::canonicalize(&base).unwrap();
@@ -357,17 +370,23 @@ fn compiler_loading_filters_conditional_module_parts() {
     .unwrap();
     assert_eq!(unix_debug.module_parts[&canonical_base].len(), 2);
 
+    // `.vibra.yaml` is rejected outright, not silently discovered as a base
+    // module or a conditional part -- there is no dual-syntax supported
+    // state (contract: "Legacy YAML source must be rejected, not silently
+    // accepted").
     let yaml_base = dir.path().join("config.vibra.yaml");
     let yaml_part = dir.path().join("config.test.vibra.yaml");
     std::fs::write(&yaml_base, "base: 1\n").unwrap();
     std::fs::write(&yaml_part, "test-only: 2\n").unwrap();
-    let from_part = vibra::load::load_program_with_flags(
-        &yaml_part,
-        &vibra::load::CompilationFlags::new(["test"]),
-    )
-    .unwrap();
-    assert_eq!(from_part.entry, std::fs::canonicalize(yaml_base).unwrap());
-    assert_eq!(from_part.module_parts[&from_part.entry].len(), 2);
+    let error = format!(
+        "{:#}",
+        vibra::load::load_program_with_flags(
+            &yaml_part,
+            &vibra::load::CompilationFlags::new(["test"]),
+        )
+        .unwrap_err()
+    );
+    assert!(error.contains("E-SYN-012"), "{error}");
 }
 
 #[test]
@@ -439,19 +458,15 @@ fn semantic_rename_updates_definition_local_and_imported_references() {
         .unwrap()
         .source()
         .contains("$util.assist:"));
-    let validation = tempfile::tempdir().unwrap();
-    std::fs::write(
-        validation.path().join("a.vibra"),
-        renamed.document("a.vibra").unwrap().source(),
-    )
-    .unwrap();
-    std::fs::write(
-        validation.path().join("b.vibra"),
-        renamed.document("b.vibra").unwrap().source(),
-    )
-    .unwrap();
-    let loaded = vibra::load::load_program(&validation.path().join("b.vibra")).unwrap();
-    vibra::lower::lower_program(&loaded).unwrap();
+    // `src/code/`'s structural rename operates on the legacy YAML document
+    // model (staged for removal in issue #150 step 7) and is out of scope
+    // for this cutover; its renamed output is legacy YAML, which the real
+    // compiler's now-S-expression-only loader correctly rejects rather than
+    // silently accepting. Validating the rename itself (above) is the part
+    // of this test that still applies; round-tripping through
+    // `vibra::load::load_program` no longer does, since that would require
+    // either a second source parser or content-based dialect selection --
+    // both of which the S-expression contract forbids.
 }
 
 #[test]

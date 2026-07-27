@@ -11,7 +11,7 @@ fn path_str(path: &Path) -> String {
 fn lower_exec_value(source: &str) -> anyhow::Result<vibra::lower::RuntimeValue> {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
-    std::fs::write(&entry, "placeholder: true\n").unwrap();
+    std::fs::write(&entry, "(const placeholder bool true)\n").unwrap();
     let loaded = vibra::load::load_program(&entry).unwrap();
     let expression: serde_yaml::Value = serde_yaml::from_str(source).unwrap();
     let exec = vibra::lower::lower_exec_expr(&loaded, &expression, &Default::default())?;
@@ -105,21 +105,12 @@ fn collection_operations_execute_through_wasm_backend() {
     std::fs::write(
         &entry,
         format!(
-            r#"collections:
-  $import: "{collections}"
-test:
-  $import: "{test}"
-main:
-  $function: $void
-  return: $void
-  do:
-  - $let:
-      found:
-        $collections.array-contains:
-          t: $int64
-          values: {{$array: [1, 2, 3]}}
-          value: 2
-  - $test.assert: $found
+            r#"(import collections "{collections}")
+(import test "{test}")
+(fn main () void
+  (do
+    (let found (collections.array-contains int64 (array 1 2 3) 2))
+    (test.assert found)))
 "#
         ),
     )
@@ -136,16 +127,7 @@ fn match_arms_use_case_key() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $match: 0
-      when:
-        - case: 0
-          do: []
-        - case: {$wildcard: null}
-          do: []
+        r#"(fn main () void (do (match 0 (case 0 (do)) (case _ (do)))))
 "#,
     )
     .unwrap();
@@ -156,26 +138,31 @@ fn match_arms_use_case_key() {
 
 #[test]
 fn legacy_pattern_match_arm_key_is_rejected() {
+    // The legacy YAML surface distinguished the canonical `case:` match-arm
+    // key from a deprecated `pattern:` spelling with a semantic check
+    // (`E-ONE-008`). The S-expression grammar has no alternate spelling to
+    // reject: `(case pattern (do ...))` is the only match-arm shape the
+    // reader accepts (`"(", "case", pattern, body, ")"`), so a malformed arm
+    // is rejected structurally, by the reader, not by this legacy semantic
+    // check.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $match: 0
-      when:
-        - pattern: 0
-          do: []
+        r#"(fn main () void (do (match 0 (pattern 0 (do)))))
 "#,
     )
     .unwrap();
 
-    let loaded = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
-    assert!(err.contains("E-ONE-008"), "unexpected error: {err}");
-    assert!(err.contains("case"), "expected migration hint: {err}");
+    let loaded = vibra::load::load_program(&entry);
+    let err = match loaded {
+        Ok(loaded) => format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(
+        err.contains("E-SYN") || err.contains("E-AST"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -187,14 +174,8 @@ fn generic_alias_instantiation_prefers_current_module_scope() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        ok: true
+            r#"(import io "{}")
+(fn main () void (do (let ok true)))
 "#,
             io.display().to_string().replace('\\', "/")
         ),
@@ -212,20 +193,13 @@ fn mut_ref_and_set_forms_lower() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        count: {$mut: 0}
-    - $let:
-        reader: {$ref: $count}
-    - $let:
-        writer: {$ref: {$mut: $count}}
-    - $set:
-        count: 1
-    - $set:
-        writer: 2
+        r#"(fn main () void
+  (do
+    (let count (mut 0))
+    (let reader (ref count))
+    (let writer (ref (mut count)))
+    (set count 1)
+    (set writer 2)))
 "#,
     )
     .unwrap();
@@ -253,16 +227,10 @@ fn structured_task_lowers_and_rejects_mutable_reference_captures() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        answer: 42
-    - $task: [answer]
-      do:
-        - $let:
-            snapshot: $answer
+        r#"(fn main () void
+  (do
+    (let answer 42)
+    (task (captures answer) (do (let snapshot answer)))))
 "#,
     )
     .unwrap();
@@ -277,14 +245,10 @@ fn structured_task_lowers_and_rejects_mutable_reference_captures() {
 
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        count: {$mut: 0}
-    - $task: [count]
-      do: []
+        r#"(fn main () void
+  (do
+    (let count (mut 0))
+    (task (captures count) (do))))
 "#,
     )
     .unwrap();
@@ -303,22 +267,13 @@ fn spawned_task_handles_are_typed_affine_and_scheduler_backed() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        base: 40
-    - $spawn: first
-      captures: [base]
-      value: {$add: [$base, 1]}
-    - $spawn: second
-      captures: [base]
-      value: {$add: [$base, 2]}
-    - $join: second
-      into: second-result
-    - $join: first
-      into: first-result
+        r#"(fn main () void
+  (do
+    (let base 40)
+    (spawn first (captures base) (add base 1))
+    (spawn second (captures base) (add base 2))
+    (join second second-result)
+    (join first first-result)))
 "#,
     )
     .unwrap();
@@ -333,13 +288,9 @@ fn spawned_task_handles_are_typed_affine_and_scheduler_backed() {
 
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $spawn: leaked
-      captures: []
-      value: 42
+        r#"(fn main () void
+  (do
+    (spawn leaked (captures) 42)))
 "#,
     )
     .unwrap();
