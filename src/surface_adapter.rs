@@ -764,11 +764,47 @@ impl<'a> Converter<'a> {
         for item in items {
             match item {
                 ImplItem::Types(list) => {
-                    if !list.is_empty() {
+                    if list.is_empty() {
+                        continue;
+                    }
+                    // A parametric interface's own `where:`-declared
+                    // type-param names double as legacy's flat `=impl:
+                    // {$iface: {t: <type>, method: ...}}` keys (the same
+                    // registration path any generic `def`'s `where:` uses,
+                    // `LocalSignatures::types` -- interfaces are not special
+                    // there). `types:` binds them positionally, in that
+                    // declared order, exactly like a generic type
+                    // application's own positional arguments
+                    // (`type_application_value`).
+                    let params = self.sig.types.get(iface_name).cloned().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "E-ADAPT-034: `impls:` on `{owner}` pins `types:` for interface \
+                             `{iface_name}`, which has no known `where:` type-parameter names \
+                             in the adapter's signature index (its `where:` clause must be \
+                             visible to this module -- declared locally or reachable through a \
+                             direct import)"
+                        )
+                    })?;
+                    if params.len() != list.len() {
                         bail!(
-                            "E-ADAPT-034: `impls:` on `{owner}` pins generic `types:` for \
-                             interface `{iface_name}`, which the adapter does not support"
+                            "E-ADAPT-034: `impls:` on `{owner}` supplies {} `types:` \
+                             argument(s) for interface `{iface_name}`, which declares {} \
+                             `where:` type parameter(s)",
+                            list.len(),
+                            params.len()
                         );
+                    }
+                    for (name, ty) in params.iter().zip(list) {
+                        let value = self.type_value(ty)?;
+                        if methods_map
+                            .insert(Value::String(name.clone()), value)
+                            .is_some()
+                        {
+                            bail!(
+                                "E-ADAPT-035: duplicate impl method `{name}` for interface \
+                                 `{iface_name}` on `{owner}`"
+                            );
+                        }
                     }
                 }
                 ImplItem::Method { name, binding, .. } => {

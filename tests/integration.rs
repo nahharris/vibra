@@ -4203,31 +4203,14 @@ fn impl_with_parametric_interface_binds_iface_type_arg() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"from-iface:
-  $interface:
-    from:
-      $fn-type:
-        args:
-          $record:
-            x: $t
-        return: $int64
-  =where: {t: []}
-box:
-  $record:
-    value: $int64
-  =impl:
-    $from-iface:
-      t: $int64
-      from:
-        $function:
-          x: $t
-        return: $int64
-        do:
-            - $return: 0
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def from-iface (interface (from (fn-type (t) int64))) where: ((t)))
+(def box (record (value int64))
+  impls: (
+    (impl from-iface types: (int64) methods: (
+      (method from (fn from ((x int64)) int64 (do (return 0))))
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -4278,30 +4261,14 @@ fn into_interface_registers_target_type_param() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"into-iface:
-  $interface:
-    into:
-      $fn-type:
-        args:
-          $record:
-            self: $self
-        return: $t
-  =where: {t: []}
-box:
-  $record:
-    value: $int64
-  =impl:
-    $into-iface:
-      t: $int64
-      into:
-        $function: $self
-        return: $t
-        do:
-            - $return: 0
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def into-iface (interface (into (fn-type (self) t))) where: ((t)))
+(def box (record (value int64))
+  impls: (
+    (impl into-iface types: (int64) methods: (
+      (method into (fn into ((self self)) int64 (do (return 0))))
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -4325,35 +4292,32 @@ main:
 fn impl_unknown_ref_target_is_rejected_with_e_impl_006() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+    // The adapter itself resolves a `(method name qualified-symbol)`
+    // reference's target signature (`Converter::impl_method_value`,
+    // `MethodBinding::Reference`), so an unknown ref target now fails
+    // during adaptation (E-ADAPT-037) before legacy's own E-IMPL-006 check
+    // is reached -- same rule, earlier enforcement point.
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $record:
-    value: $int64
-  =impl:
-    $display:
-      fmt: $no.such.function
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def box (record (value int64))
+  impls: (
+    (impl display methods: (
+      (method fmt no.such.function)
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err();
-    let msg = format!("{err:#}");
+    let prog = vibra::load::load_program(&entry);
+    let msg = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        msg.contains("E-IMPL-006"),
-        "expected E-IMPL-006 for unknown ref target; got: {msg}"
+        msg.contains("E-IMPL-006") || msg.contains("E-ADAPT-037"),
+        "expected an unknown-ref-target rejection; got: {msg}"
     );
 }
 
@@ -4366,29 +4330,19 @@ fn defs_inherent_op_cannot_shadow_enclosing_type_param() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &model,
-        r#"holder:
-  $record:
-    value: $t
-  =where: {t: []}
-  =defs:
-    bad:
-      $function: $self
-      return: $self
-      do:
-          - $return: $args.self
-      =where: {t: []}
+        r#"(def holder (record (value t))
+  where: ((t))
+  defs: (
+    (fn bad ((self self)) self (do (return self)) where: ((t)))
+  ))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-main:
-  $function: $void
-  return: $void
-  do: []
+            r#"(import m "{m}")
+(fn main () void (do))
 "#,
             m = model.display().to_string().replace('\\', "/"),
         ),
