@@ -3,7 +3,6 @@
 use anyhow::{bail, Context, Result};
 use git2::{build::CheckoutBuilder, Oid, Repository};
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -602,14 +601,21 @@ enum ForeignWasmType {
 }
 
 impl ForeignWasmType {
-    fn from_source(value: &Value) -> Option<Self> {
-        match value.as_str()? {
-            "$bool" | "$int8" | "$int16" | "$int32" | "$uint8" | "$uint16" | "$uint32" => {
+    /// The `str`/`(array uint8)` buffer types are not themselves scalar wasm
+    /// types -- see [`push_foreign_wasm_params_from_type`], which expands
+    /// them to a caller-owned `(ptr, len)` pair of `i32`s instead of calling
+    /// this directly on them.
+    fn from_type_expr(ty: &crate::ast::TypeExpr) -> Option<Self> {
+        let crate::ast::TypeExprKind::Named(name) = &ty.value else {
+            return None;
+        };
+        match name.as_str() {
+            "bool" | "int8" | "int16" | "int32" | "uint8" | "uint16" | "uint32" => {
                 Some(Self::I32)
             }
-            "$int64" | "$uint64" => Some(Self::I64),
-            "$float32" => Some(Self::F32),
-            "$float64" => Some(Self::F64),
+            "int64" | "uint64" => Some(Self::I64),
+            "float32" => Some(Self::F32),
+            "float64" => Some(Self::F64),
             _ => None,
         }
     }
@@ -634,31 +640,31 @@ impl ForeignWasmType {
     }
 }
 
-fn push_foreign_wasm_params(params: &mut Vec<ForeignWasmType>, ty: &Value) -> Option<()> {
-    if ty.as_str() == Some("$str") {
+fn push_foreign_wasm_params_from_type(
+    params: &mut Vec<ForeignWasmType>,
+    ty: &crate::ast::TypeExpr,
+) -> Option<()> {
+    if matches!(&ty.value, crate::ast::TypeExprKind::Named(name) if name == "str") {
         params.extend([ForeignWasmType::I32, ForeignWasmType::I32]);
         return Some(());
     }
-    if ty
-        .as_mapping()
-        .and_then(|mapping| mapping.get(Value::String("$array".into())))
-        .and_then(Value::as_str)
-        == Some("$uint8")
-    {
+    if is_uint8_array_type(ty) {
         params.extend([ForeignWasmType::I32, ForeignWasmType::I32]);
         return Some(());
     }
-    params.push(ForeignWasmType::from_source(ty)?);
+    params.push(ForeignWasmType::from_type_expr(ty)?);
     Some(())
 }
 
-fn is_foreign_buffer_source(ty: &Value) -> bool {
-    ty.as_str() == Some("$str")
-        || ty
-            .as_mapping()
-            .and_then(|mapping| mapping.get(Value::String("$array".into())))
-            .and_then(Value::as_str)
-            == Some("$uint8")
+fn is_uint8_array_type(ty: &crate::ast::TypeExpr) -> bool {
+    let crate::ast::TypeExprKind::Array(inner) = &ty.value else {
+        return false;
+    };
+    matches!(&inner.value, crate::ast::TypeExprKind::Named(name) if name == "uint8")
+}
+
+fn is_foreign_buffer_source_type(ty: &crate::ast::TypeExpr) -> bool {
+    matches!(&ty.value, crate::ast::TypeExprKind::Named(name) if name == "str") || is_uint8_array_type(ty)
 }
 
 fn validate_external_wasm_imports(project: &LoadedProject) -> Result<()> {
@@ -676,6 +682,11 @@ fn validate_external_wasm_imports(project: &LoadedProject) -> Result<()> {
     Ok(())
 }
 
+/// Statically validates external `wasm` FFI wrapper signatures against the
+/// declared dependency's actual `.wasm` export, ahead of and independent of
+/// the real compile pipeline (`crate::load`/`crate::lower`) -- so it reads
+/// `.vibra` S-expression source itself, the same way `crate::frontend` does,
+/// rather than reusing a `LoadedProgram`.
 fn validate_module_external_wasm(
     project: &LoadedProject,
     path: &Path,
@@ -685,24 +696,22 @@ fn validate_module_external_wasm(
     if !seen.insert(path.clone()) {
         return Ok(());
     }
-    let value: Value = serde_yaml::from_str(&fs::read_to_string(&path)?)
-        .with_context(|| format!("parse {}", path.display()))?;
-    let map = value
-        .as_mapping()
-        .with_context(|| format!("{}: module root must be a mapping", path.display()))?;
-    for (symbol, definition) in map {
-        let Some(symbol) = symbol.as_str() else {
-            continue;
-        };
-        let Some(definition) = definition.as_mapping() else {
+    let source = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let document = crate::syntax::parse(&source)
+        .with_context(|| format!("parse S-expression source {}", path.display()))?;
+    let document_id = crate::ast::DocumentId::from_path(&path);
+    let module = crate::ast::lower_document_with_id(&document, document_id)
+        .with_context(|| format!("validate typed source {}", path.display()))?;
+    for form in &module.forms {
+        let crate::ast::TopLevel::Function(function) = form else {
             continue;
         };
         if let Some((alias, import_name, params, results, requires_memory)) =
-            external_wasm_signature(symbol, definition)?
+            external_wasm_signature(function)?
         {
             validate_external_wasm_export(
                 project,
-                symbol,
+                &function.name.value,
                 &alias,
                 &import_name,
                 &params,
@@ -716,17 +725,14 @@ fn validate_module_external_wasm(
     // cannot escape static validation.
     let namespaces = namespace_roots(project)?;
     let parent = path.parent().context("module path has no parent")?;
-    for definition in map.values().filter_map(Value::as_mapping) {
-        let Some(import) = definition
-            .get(Value::String("$import".into()))
-            .and_then(Value::as_str)
-        else {
+    for form in &module.forms {
+        let crate::ast::TopLevel::Import(import) = form else {
             continue;
         };
-        let resolved = if import.starts_with('@') {
-            resolve_at_import(import, &namespaces)?
+        let resolved = if import.path.value.starts_with('@') {
+            resolve_at_import(&import.path.value, &namespaces)?
         } else {
-            parent.join(import)
+            parent.join(&import.path.value)
         };
         validate_module_external_wasm(project, &resolved, seen)?;
     }
@@ -734,8 +740,7 @@ fn validate_module_external_wasm(
 }
 
 fn external_wasm_signature(
-    symbol: &str,
-    definition: &serde_yaml::Mapping,
+    function: &crate::ast::Function,
 ) -> Result<
     Option<(
         String,
@@ -745,78 +750,41 @@ fn external_wasm_signature(
         bool,
     )>,
 > {
-    let Some(body) = definition
-        .get(Value::String("do".into()))
-        .and_then(Value::as_sequence)
-    else {
-        return Ok(None);
-    };
-    if body.len() != 1 {
+    let symbol = &function.name.value;
+    if function.body.len() != 1 {
         return Ok(None);
     }
-    let Some(wasm) = body[0]
-        .as_mapping()
-        .and_then(|step| step.get(Value::String("$wasm".into())))
-        .and_then(Value::as_mapping)
-    else {
+    let crate::ast::ExprKind::Wasm { import, .. } = &function.body[0].value else {
         return Ok(None);
     };
-    let import = wasm
-        .get(Value::String("import".into()))
-        .and_then(Value::as_mapping)
-        .with_context(|| format!("`{symbol}` $wasm.import must be a mapping"))?;
-    let module = import
-        .get(Value::String("module".into()))
-        .and_then(Value::as_str)
-        .with_context(|| format!("`{symbol}` $wasm.import.module must be a string"))?;
-    let Some(alias) = module.strip_prefix('@') else {
+    let Some(alias) = import.module.value.strip_prefix('@') else {
         return Ok(None);
     };
-    let name = import
-        .get(Value::String("name".into()))
-        .and_then(Value::as_str)
-        .with_context(|| format!("`{symbol}` $wasm.import.name must be a string"))?;
-    let function = definition
-        .get(Value::String("$function".into()))
-        .with_context(|| format!("`{symbol}` external $wasm wrapper must declare `$function`"))?;
+    let name = &import.name.value;
     let mut params = Vec::new();
     let mut requires_memory = false;
-    if let Some(arguments) = function.as_mapping() {
-        for (argument, ty) in arguments {
-            let argument = argument.as_str().unwrap_or("<argument>");
-            requires_memory |= is_foreign_buffer_source(ty);
-            push_foreign_wasm_params(&mut params, ty).with_context(|| {
-                format!("E-WASM-007: `{symbol}` argument `{argument}` is not a v1 wasm scalar")
-            })?;
-        }
-    } else if function.as_str() != Some("$void") {
-        bail!("E-WASM-007: `{symbol}` has an invalid `$function` signature");
+    for parameter in &function.parameters {
+        requires_memory |= is_foreign_buffer_source_type(&parameter.ty);
+        push_foreign_wasm_params_from_type(&mut params, &parameter.ty).with_context(|| {
+            format!(
+                "E-WASM-007: `{symbol}` argument `{}` is not a v1 wasm scalar",
+                parameter.name.value
+            )
+        })?;
     }
-    if let Some(arguments) = definition
-        .get(Value::String("args".into()))
-        .and_then(Value::as_mapping)
+    let results = if matches!(&function.return_type.value, crate::ast::TypeExprKind::Named(name) if name == "void")
     {
-        for (argument, ty) in arguments {
-            let argument = argument.as_str().unwrap_or("<argument>");
-            requires_memory |= is_foreign_buffer_source(ty);
-            push_foreign_wasm_params(&mut params, ty).with_context(|| {
-                format!("E-WASM-007: `{symbol}` argument `{argument}` is not a v1 wasm scalar")
-            })?;
-        }
-    }
-    let return_type = definition
-        .get(Value::String("return".into()))
-        .with_context(|| format!("`{symbol}` external $wasm wrapper must declare `return`"))?;
-    let results = if return_type.as_str() == Some("$void") {
         Vec::new()
     } else {
-        vec![ForeignWasmType::from_source(return_type).with_context(|| {
-            format!("E-WASM-007: `{symbol}` return type is not a v1 wasm scalar")
-        })?]
+        vec![
+            ForeignWasmType::from_type_expr(&function.return_type).with_context(|| {
+                format!("E-WASM-007: `{symbol}` return type is not a v1 wasm scalar")
+            })?,
+        ]
     };
     Ok(Some((
         alias.to_string(),
-        name.to_string(),
+        name.clone(),
         params,
         results,
         requires_memory,
@@ -1423,7 +1391,7 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
     fs::create_dir_all(&src)?;
     fs::write(
         src.join("main.vibra"),
-        "io:\n  $import: \"@std/io.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $io.println: \"Hello, World!\"\n",
+        "(import io \"@std/io.vibra\")\n(fn main () void (do (io.println \"Hello, World!\")))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
@@ -1435,7 +1403,7 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
 fn write_lib_template(root: &Path, name: &str) -> Result<()> {
     let src = root.join("src").join(name);
     fs::create_dir_all(&src)?;
-    fs::write(src.join("lib.vibra"), "answer: 42\n")?;
+    fs::write(src.join("lib.vibra"), "(const answer int64 42)\n")?;
     fs::write(
         root.join(MANIFEST_FILE),
         manifest_text(name, &[("lib", name, &format!("src/{name}"), "lib.vibra")]),
@@ -1448,11 +1416,11 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
     fs::create_dir_all(root.join("src").join(name))?;
     fs::write(
         root.join("src/core/lib.vibra"),
-        "message: \"Hello from core\"\n",
+        "(const message str \"Hello from core\")\n",
     )?;
     fs::write(
         root.join("src").join(name).join("main.vibra"),
-        "io:\n  $import: \"@std/io.vibra\"\ncore:\n  $import: \"@core/lib.vibra\"\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $io.println: $core.message\n",
+        "(import io \"@std/io.vibra\")\n(import core \"@core/lib.vibra\")\n(fn main () void (do (io.println core.message)))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
@@ -1763,7 +1731,7 @@ mod tests {
         temp
     }
 
-    const FFI_WRAPPER: &str = "sum:\n  $function:\n    left: $int32\n  args:\n    right: $int32\n  return: $int32\n  do:\n    - $wasm:\n        import:\n          module: '@math'\n          name: sum\n        args: [$args.left, $args.right]\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
+    const FFI_WRAPPER: &str = "(fn sum ((left int32) (right int32)) int32\n  (do (wasm import: (import \"@math\" \"sum\") args: ((arg left) (arg right)))))\n(fn main () void (do))\n";
 
     #[test]
     fn check_accepts_matching_static_wasm_export() {
@@ -1780,7 +1748,7 @@ mod tests {
     #[test]
     fn check_rejects_missing_static_wasm_symbol_before_execution() {
         let project = ffi_project(
-            &FFI_WRAPPER.replace("name: sum", "name: absent"),
+            &FFI_WRAPPER.replace("\"sum\")", "\"absent\")"),
             Some(wasm_fixture(
                 vec![wasm_encoder::ValType::I32; 2],
                 vec![wasm_encoder::ValType::I32],
@@ -1821,7 +1789,7 @@ mod tests {
 
     #[test]
     fn check_rejects_buffer_wrapper_without_ffi_memory_import() {
-        let wrapper = "sum:\n  $function:\n    text: $str\n  return: $int32\n  do:\n    - $wasm:\n        import:\n          module: '@math'\n          name: sum\n        args: [$args.text]\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
+        let wrapper = "(fn sum ((text str)) int32\n  (do (wasm import: (import \"@math\" \"sum\") args: ((arg text)))))\n(fn main () void (do))\n";
         let project = ffi_project(
             wrapper,
             Some(wasm_fixture(
