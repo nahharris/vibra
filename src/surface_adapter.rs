@@ -1855,7 +1855,32 @@ fn bare_type_value(ty: &TypeExpr) -> Result<Value> {
 
 impl<'a> Converter<'a> {
     fn test_value(&mut self, test: &Test) -> Result<(String, Value)> {
-        let body = self.body_to_do(&test.body)?;
+        // A `policy:` test attribute injects an implicit `policy` binding
+        // into the test body, the same mechanism `main`'s own policy
+        // parameter uses on a real function (see
+        // `Converter::function_envelope`, which sets `current_params` for
+        // the duration of body conversion). Legacy stores that binding as
+        // `args.policy`, not bare `policy` (`Converter::local_name_ref`), so
+        // a bare `policy` reference inside the test body must resolve the
+        // same way a real parameter reference would, for exactly as long as
+        // this body is being converted.
+        let has_policy = test
+            .metadata
+            .iter()
+            .any(|meta| matches!(meta, TestMeta::Policy(_)));
+        let previous_params = if has_policy {
+            Some(std::mem::replace(
+                &mut self.current_params,
+                vec!["policy".to_string()],
+            ))
+        } else {
+            None
+        };
+        let body_result = self.body_to_do(&test.body);
+        if let Some(previous_params) = previous_params {
+            self.current_params = previous_params;
+        }
+        let body = body_result?;
         self.test_metadata_value(test, body)
     }
 
