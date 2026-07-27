@@ -4365,16 +4365,9 @@ fn vibra_test_runs_top_level_test_declarations_without_main() {
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
         tests_dir.join("basic.vibra"),
-        r#"test:
-  $import: "@std/test.vibra"
-passes:
-  $test: core
-  do:
-      - $test.assert: true
-also-passes:
-  $test: core
-  do:
-      - $test.assert: true
+        r#"(import test "@std/test.vibra")
+(test passes core (do (test.assert true)))
+(test also-passes core (do (test.assert true)))
 "#,
     )
     .unwrap();
@@ -4412,12 +4405,8 @@ fn vibra_test_reports_assertion_failures() {
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
         tests_dir.join("fails.vibra"),
-        r#"test:
-  $import: "@std/test.vibra"
-fails:
-  $test: core
-  do:
-      - $test.assert: false
+        r#"(import test "@std/test.vibra")
+(test fails core (do (test.assert false)))
 "#,
     )
     .unwrap();
@@ -4454,14 +4443,8 @@ fn vibra_test_typed_equality_helpers_report_expected_and_actual_values() {
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
         tests_dir.join("fails.vibra"),
-        r#"test:
-  $import: "@std/test.vibra"
-fails:
-  $test: core
-  do:
-    - $test.assert-eq-int:
-        actual: 1
-        expected: 2
+        r#"(import test "@std/test.vibra")
+(test fails core (do (test.assert-eq-int 1 2)))
 "#,
     )
     .unwrap();
@@ -4498,12 +4481,8 @@ fn vibra_test_writes_json_report_file() {
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
         tests_dir.join("basic.vibra"),
-        r#"test:
-  $import: "@std/test.vibra"
-passes:
-  $test: core
-  do:
-      - $test.assert: true
+        r#"(import test "@std/test.vibra")
+(test passes core (do (test.assert true)))
 "#,
     )
     .unwrap();
@@ -5705,11 +5684,7 @@ fn vibra_test_caps_command_timeout_with_test_metadata() {
 fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("workspace.vibra");
-    std::fs::write(
-        &entry,
-        "needs-workspace:\n  $test: core\n  workspace: temp\n  do: []\n",
-    )
-    .unwrap();
+    std::fs::write(&entry, "(test needs-workspace core (do) workspace: temp)\n").unwrap();
 
     let skipped = vibra_cmd()
         .args(["test", &path_str(&entry), "--format", "human"])
@@ -5749,14 +5724,13 @@ fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
 fn vibra_test_workspace_metadata_rejects_unknown_values() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("workspace-invalid.vibra");
-    std::fs::write(
-        &entry,
-        "bad:\n  $test: core\n  workspace: persistent\n  do: []\n",
-    )
-    .unwrap();
-    let program = vibra::load::load_program(&entry).unwrap();
-    let error = vibra::lower::discover_test_specs(&program).unwrap_err();
-    assert!(format!("{error:#}").contains("E-TEST-001"));
+    // The reader itself now requires `workspace:`'s value to be exactly the
+    // symbol `temp` (`parse_test_meta`, src/ast/surface.rs), so an unknown
+    // value is an E-SYN-008 rejection, not legacy's lowering-time
+    // E-TEST-001 check -- same rule, earlier enforcement point.
+    std::fs::write(&entry, "(test bad core (do) workspace: persistent)\n").unwrap();
+    let error = vibra::load::load_program(&entry).unwrap_err();
+    assert!(format!("{error:#}").contains("E-SYN-008"));
 }
 
 #[test]
@@ -5764,7 +5738,11 @@ fn vibra_test_deny_warnings_fails_and_emits_warnings_in_json_report() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("warnings.vibra");
     let report = dir.path().join("report.json");
-    std::fs::write(&entry, "BadName: 1\npasses:\n  $test: core\n  do: []\n").unwrap();
+    std::fs::write(
+        &entry,
+        "(const BadName int64 1)\n(test passes core (do))\n",
+    )
+    .unwrap();
 
     let allowed = vibra_cmd()
         .args(["test", &path_str(&entry)])
