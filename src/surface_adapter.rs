@@ -964,9 +964,21 @@ impl<'a> Converter<'a> {
         }
         fn_map.insert(Value::String("return".into()), return_value);
         let call = forwarding_call_value(&target_callee, &target_arg_names, &arg_names);
+        // A void-returning member forwards as a bare statement call: wrapping
+        // it in `$return: <call>` would pass a void-typed call as `$return`'s
+        // value, which legacy's expression parser rejects ("void function
+        // call cannot be used as an expression") -- the same rule
+        // `user_fn_non_void_return_requires_return_statement` exercises for
+        // ordinary functions, just reached through the synthesized shim here.
+        let is_void_return = matches!(&result.value, TypeExprKind::Named(name) if name == "void");
+        let do_body = if is_void_return {
+            Value::Sequence(vec![call])
+        } else {
+            Value::Sequence(vec![single_dollar("return", call)])
+        };
         fn_map.insert(
             Value::String("do".into()),
-            Value::Sequence(vec![single_dollar("return", call)]),
+            do_body,
         );
         Ok(Value::Mapping(fn_map))
     }

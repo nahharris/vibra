@@ -3770,32 +3770,17 @@ fn iface_qualified_call_dispatches_to_impl_method() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $enum:
-    boxed: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $str
-        do:
-            - $return: "boxed"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          b: { $box.boxed: 1 }
-      - $let:
-          s: { $display.fmt: $b }
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def box (enum (boxed int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) str (do (return "boxed"))))
+    ))
+  ))
+(fn main () void
+  (do
+    (let b (box.boxed 1))
+    (let s (display.fmt b))))
 "#,
     )
     .unwrap();
@@ -3821,31 +3806,14 @@ fn iface_qualified_call_without_self_arg_is_rejected_with_e_call_iface_noself() 
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"from-iface:
-  $interface:
-    from:
-      $fn-type:
-        args:
-          $record:
-            x: $int64
-        return: $void
-box:
-  $enum:
-    boxed: $int64
-  =impl:
-    $from-iface:
-      from:
-        $function:
-          x: $int64
-        return: $void
-        do:
-            - $let:
-                unused: $args.x
-main:
-  $function: $void
-  return: $void
-  do:
-      - $from-iface.from: 5
+        r#"(def from-iface (interface (from (fn-type (int64) void))))
+(def box (enum (boxed int64))
+  impls: (
+    (impl from-iface methods: (
+      (method from (fn from ((x int64)) void (do (let unused x))))
+    ))
+  ))
+(fn main () void (do (from-iface.from 5)))
 "#,
     )
     .unwrap();
@@ -3866,20 +3834,8 @@ fn iface_qualified_call_unimplemented_type_is_rejected_with_e_bound_001() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          s: { $display.fmt: 7 }
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(fn main () void (do (let s (display.fmt 7))))
 "#,
     )
     .unwrap();
@@ -3900,28 +3856,13 @@ fn iface_qualified_call_on_generic_value_is_rejected_with_e_dispatch_001() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-fmt-via-bound:
-  $function:
-    x: $t
-  return: $str
-  do:
-      - $let:
-          s: { $display.fmt: $args.x }
-      - $return: $s
-  =where:
-    t: [$display]
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(fn fmt-via-bound ((x t)) str
+  (do
+    (let s (display.fmt x))
+    (return s))
+  where: ((t display)))
+(fn main () void (do))
 "#,
     )
     .unwrap();
