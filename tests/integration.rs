@@ -6376,74 +6376,26 @@ fn closed_file_aliases_return_stable_typed_lifecycle_errors() {
     std::fs::write(
         &entry,
         format!(
-            r#"fs:
-  $import: "{fs}"
-result:
-  $import: "{result}"
-test:
-  $import: "{test}"
-main:
-  $function:
-    policy:
-      $policy:
-        fs-write:
-          - requirement: mandatory
-            scopes:
-              - dir: "{dir}"
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "{target}"
-    - $let:
-        capability:
-          $policy.narrow: $args.policy
-          into: $fs.write-capability
-    - $let:
-        opened:
-          $fs.open-write: $path
-          capability: $capability
-    - $match: $opened
-      when:
-        - case:
-            $result.result.ok:
-              $bind: handle
-          do:
-            - $fs.closeable.close: $handle
-            - $let:
-                duplicate:
-                  $fs.closeable.close: $handle
-            - $match: $duplicate
-              when:
-                - case:
-                    $result.result.err:
-                      $fs.fs-error.resource-closed: null
-                  do:
-                    - $test.assert: true
-                - case:
-                    $wildcard: null
-                  do:
-                    - $test.fail: duplicate close did not return resource-closed
-            - $let:
-                after-close:
-                  $fs.writable.write-string: $handle
-                  s: forbidden
-            - $match: $after-close
-              when:
-                - case:
-                    $result.result.err:
-                      $fs.fs-error.resource-closed: null
-                  do:
-                    - $test.assert: true
-                - case:
-                    $wildcard: null
-                  do:
-                    - $test.fail: use after close did not return resource-closed
-        - case:
-            $result.result.err:
-              $wildcard: null
-          do:
-            - $test.fail: lifecycle fixture could not open file
+            r#"(import fs "{fs}")
+(import result "{result}")
+(import test "{test}")
+(fn main ((policy (policy (fs-write (group requirement: mandatory scopes: ((dir "{dir}"))))))) void
+  (do
+    (let path (fs.path.new "{target}"))
+    (let capability (policy.narrow policy fs.write-capability))
+    (let opened (fs.open-write path capability))
+    (match opened
+      (case (result.result.ok (bind handle)) (do
+        (fs.closeable.close handle)
+        (let duplicate (fs.closeable.close handle))
+        (match duplicate
+          (case (result.result.err (fs.fs-error.resource-closed)) (do (test.assert true)))
+          (case _ (do (test.fail "duplicate close did not return resource-closed"))))
+        (let after-close (fs.writable.write-string handle "forbidden"))
+        (match after-close
+          (case (result.result.err (fs.fs-error.resource-closed)) (do (test.assert true)))
+          (case _ (do (test.fail "use after close did not return resource-closed"))))))
+      (case (result.result.err (bind _oa-err)) (do (test.fail "lifecycle fixture could not open file"))))))
 "#,
             fs = path_str(&fs),
             result = path_str(&result),
@@ -6563,57 +6515,37 @@ fn injected_clock_and_environment_are_deterministic_and_isolated() {
     std::fs::write(
         &entry,
         format!(
-            r#"env:
-  $import: "{env_mod}"
-time:
-  $import: "{time_mod}"
-result:
-  $import: "{result}"
-test:
-  $import: "{test}"
-host-policy:
-  $policy:
-    clock: [{{requirement: mandatory, scopes: any}}]
-    env-read: [{{requirement: mandatory, scopes: [{{exact: VIBRA_INJECTED}}]}}]
-    env-write: [{{requirement: mandatory, scopes: [{{exact: VIBRA_INJECTED}}]}}]
-main:
-  $function:
-    policy: $host-policy
-  return: $void
-  do:
-  - $let: {{clock: {{$policy.narrow: $args.policy, into: $time.capability}}}}
-  - $let: {{read: {{$policy.narrow: $args.policy, into: $env.read-capability}}}}
-  - $let: {{write: {{$policy.narrow: $args.policy, into: $env.write-capability}}}}
-  - $let: {{wall: {{$time.now-unix-millis: {{capability: $clock}}}}}}
-  - $match: $wall
-    when:
-    - case: 1000
-      do: []
-    - case: {{$wildcard: null}}
-      do: [{{$test.fail: injected-wall-clock-was-not-used}}]
-  - $let: {{start: {{$time.monotonic-now: {{capability: $clock}}}}}}
-  - $time.sleep: {{duration: {{$time.milliseconds: 7}}, capability: $clock}}
-  - $let: {{finish: {{$time.now-unix-millis: {{capability: $clock}}}}}}
-  - $match: $finish
-    when:
-    - case: 1007
-      do: []
-    - case: {{$wildcard: null}}
-      do: [{{$test.fail: injected-monotonic-clock-was-not-advanced}}]
-  - $let: {{set: {{$env.set: VIBRA_INJECTED, value: changed, capability: $write}}}}
-  - $match: $set
-    when:
-    - case: {{$result.result.ok: null}}
-      do: []
-    - case: {{$wildcard: null}}
-      do: [{{$test.fail: injected-env-set-failed}}]
-  - $let: {{value: {{$env.get: VIBRA_INJECTED, capability: $read}}}}
-  - $match: $value
-    when:
-    - case: {{$result.result.ok: changed}}
-      do: []
-    - case: {{$wildcard: null}}
-      do: [{{$test.fail: injected-env-read-was-not-isolated}}]
+            r#"(import env "{env_mod}")
+(import time "{time_mod}")
+(import result "{result}")
+(import test "{test}")
+(def host-policy (policy
+  (clock (group requirement: mandatory scopes: ((any))))
+  (env-read (group requirement: mandatory scopes: ((exact "VIBRA_INJECTED"))))
+  (env-write (group requirement: mandatory scopes: ((exact "VIBRA_INJECTED"))))))
+(fn main ((policy host-policy)) void
+  (do
+    (let clock (policy.narrow policy time.capability))
+    (let read (policy.narrow policy env.read-capability))
+    (let write (policy.narrow policy env.write-capability))
+    (let wall (time.now-unix-millis clock))
+    (match wall
+      (case 1000 (do))
+      (case _ (do (test.fail "injected-wall-clock-was-not-used"))))
+    (let start (time.monotonic-now clock))
+    (time.sleep (time.milliseconds 7) clock)
+    (let finish (time.now-unix-millis clock))
+    (match finish
+      (case 1007 (do))
+      (case _ (do (test.fail "injected-monotonic-clock-was-not-advanced"))))
+    (let set (env.set "VIBRA_INJECTED" "changed" write))
+    (match set
+      (case (result.result.ok) (do))
+      (case _ (do (test.fail "injected-env-set-failed"))))
+    (let value (env.get "VIBRA_INJECTED" read))
+    (match value
+      (case (result.result.ok "changed") (do))
+      (case _ (do (test.fail "injected-env-read-was-not-isolated"))))))
 "#,
             env_mod = path_str(&env_mod),
             time_mod = path_str(&time_mod),
