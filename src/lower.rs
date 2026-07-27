@@ -3398,39 +3398,6 @@ fn extract_wasm_body(step: &Value) -> Result<(ImportTarget, Vec<WasmArgSpec>)> {
 /// `pub(crate)` so the typed S-expression body lowerer (`typed_body.rs`) can
 /// reuse this exact validation for `$wasm`-only bodies reached through the
 /// typed frontend, rather than duplicating the E-WASM-*/E-CAP-002 rules.
-/// Resolve a forwarded `$wasm.args` name against `sig`'s parameters,
-/// accepting either the bare legacy YAML form (`parse_wasm_arg_spec` already
-/// strips the whole `$args.` token, so a legacy spec is just the declared
-/// name, e.g. `left`) or the typed S-expression form, which keeps the literal
-/// `args.` runtime-prefix token as written (`(arg args.left)` lowers to
-/// `WasmArgSpec::Arg("args.left")` -- see `typed_body::lower_wasm_argument`),
-/// including forwarding of a *field* of a record-typed parameter
-/// (`args.options.recursive`). Both forms are checked against the same
-/// `seed_arg_type_bindings` flattening legacy already uses for `main`'s own
-/// argument bindings, so record fields resolve identically either way.
-fn wasm_forwarded_arg_type(
-    name: &str,
-    sig: &FunctionSig,
-    aliases: &HashMap<String, TypeAlias>,
-) -> Option<TypeRef> {
-    if let Some(idx) = sig.arg_names.iter().position(|n| n == name) {
-        return Some(sig.arg_types[idx].clone());
-    }
-    let mut flattened = Vec::new();
-    for (arg_name, arg_type) in sig.arg_names.iter().zip(sig.arg_types.iter()) {
-        seed_arg_type_bindings(
-            &format!("args.{arg_name}"),
-            arg_type,
-            aliases,
-            &mut flattened,
-        );
-    }
-    flattened
-        .into_iter()
-        .find(|(candidate, _)| candidate == name)
-        .map(|(_, ty)| ty)
-}
-
 pub(crate) fn validate_wasm_bodies(
     sigs: &HashMap<String, FunctionSig>,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -3449,8 +3416,7 @@ pub(crate) fn validate_wasm_bodies(
             }
             for spec in wasm_args {
                 match spec {
-                    WasmArgSpec::Arg(name)
-                        if wasm_forwarded_arg_type(name, sig, type_aliases).is_some() => {}
+                    WasmArgSpec::Arg(name) if sig.arg_names.contains(name) => {}
                     WasmArgSpec::ConstInt(_) => {}
                     WasmArgSpec::Arg(name) => {
                         bail!("E-WASM-007: `{key}` forwards unknown argument `$args.{name}`")
@@ -3495,17 +3461,22 @@ pub(crate) fn validate_wasm_bodies(
         }
         for (position, (spec, param)) in wasm_args.iter().zip(entry.params.iter()).enumerate() {
             let arg_type = match spec {
-                WasmArgSpec::Arg(name) => wasm_forwarded_arg_type(name, sig, type_aliases)
-                    .with_context(|| {
-                        format!(
-                            "E-WASM-003: `{key}` forwards unknown argument `$args.{name}` to `{}.{}`",
-                            import.module, import.name
-                        )
-                    })?,
-                WasmArgSpec::ConstInt(_) => TypeRef::Int64,
-                WasmArgSpec::ConstStr(_) => TypeRef::Str,
+                WasmArgSpec::Arg(name) => {
+                    sig
+                        .arg_names
+                        .iter()
+                        .position(|n| n == name)
+                        .map(|idx| &sig.arg_types[idx])
+                        .with_context(|| {
+                            format!(
+                                "E-WASM-003: `{key}` forwards unknown argument `$args.{name}` to `{}.{}`",
+                                import.module, import.name
+                            )
+                        })?
+                }
+                WasmArgSpec::ConstInt(_) => &TypeRef::Int64,
+                WasmArgSpec::ConstStr(_) => &TypeRef::Str,
             };
-            let arg_type = &arg_type;
             match param {
                 crate::host_abi::ParamKind::Value(kind) => {
                     if policy_body(arg_type, type_aliases).is_some()
