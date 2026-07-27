@@ -1,0 +1,2227 @@
+//! Internal, single-direction bridge from the typed S-expression surface AST
+//! (`crate::ast::surface`) into the `serde_yaml::Value` shape that
+//! `src/load.rs` and `src/lower.rs` already consume.
+//!
+//! This is a temporary migration mechanism for issue #150. It is private,
+//! single-direction (AST -> `Value`, never `Value` -> AST), and is not a
+//! supported interface. It is slated for deletion once the typed frontend
+//! (`typed_lower`/`typed_body`/`typed_program`) replaces `src/lower.rs`'s
+//! `Value`-based reading layer entirely. See the amendment in
+//! `docs/superpowers/specs/2026-07-25-s-expression-language-design.md` for
+//! the contract exception this file relies on.
+//!
+//! `src/lower.rs`'s call sites key every non-primary argument by the
+//! callee's *declared parameter name* (`merge_call_payload`,
+//! `parse_call_args`), and every generic call requires *explicit* type
+//! arguments in that same named mapping (no type inference). Converting a
+//! positional S-expression call therefore requires knowing the callee's
+//! parameter names ahead of time. [`collect_local_signatures`] gathers those
+//! names for one module; [`resolve_signatures`] combines a module's own
+//! names with its imports' names (mirroring how `tools/corpus-migrator`
+//! resolves qualified calls); [`module_to_value`] then performs the actual
+//! conversion.
+//!
+//! Fails closed: any construct this file cannot map to a precise legacy
+//! shape produces a specific, path-qualified `E-ADAPT-*` error rather than a
+//! best-effort guess. A silently wrong `Value` would be a miscompilation.
+//!
+//! Not yet wired into `load.rs` or any CLI path (that is the next, atomic
+//! PR), so nothing outside this module's own tests calls it yet; allow the
+//! resulting dead-code warnings rather than adding call sites this PR was
+//! explicitly scoped to avoid.
+#![allow(dead_code)]
+
+use crate::ast::{
+    Annotation, AnnotationKind, Constant, Definition, EmbedFormat as AstEmbedFormat, ExpectedError,
+    Expr as AstExpr, ExprField, ExprKind, Function, HandleAccess as AstHandleAccess, ImplItem,
+    Import, Literal, MatchCase, MethodBinding, Module, Pattern as AstPattern, PatternKind,
+    PolicyDomain, PolicyGroup, PolicyRequirement, PolicyScope, PolicyScopeKind, Spanned, Test,
+    TestMeta, TopLevel, TypeExpr, TypeExprKind, TypeMember, Visibility, WasmArgument, WasmImport,
+};
+use anyhow::{bail, Result};
+use serde_yaml::{Mapping, Value};
+use std::collections::BTreeMap;
+
+// ===================== Signature index =====================
+
+/// A callable's positional parameter picture: generic type-parameter names
+/// (in declaration order) and value-argument names (in declaration order).
+/// Legacy call sites key non-primary arguments by these exact names.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CallSignature {
+    pub(crate) type_params: Vec<String>,
+    pub(crate) arg_names: Vec<String>,
+}
+
+/// One module's own (unqualified) call, generic-type, and interface
+/// signatures, as declared in its own source -- no import resolution yet.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LocalSignatures {
+    pub(crate) calls: BTreeMap<String, CallSignature>,
+    pub(crate) types: BTreeMap<String, Vec<String>>,
+    /// Interface name -> its member list, for interfaces declared directly
+    /// in this module. `impl_method_value` needs each member's real
+    /// parameter/result types (not just arity) to type the forwarding shim
+    /// it synthesizes, so unlike `calls`/`types` this stores full type
+    /// information, not just a name/arity picture.
+    pub(crate) interfaces: BTreeMap<String, Vec<TypeMember>>,
+}
+
+/// A module's fully resolved signature view: its own bare names, its own
+/// names again qualified by its file stem (for self-qualified references,
+/// e.g. `option.vibra` calling `option.empty`), and each import's local
+/// names qualified by the alias that module declared for it. Mirrors the
+/// role `SurfaceProgram.imports` (`src/frontend.rs`) plays for the on-disk
+/// typed frontend, built here instead from in-memory ASTs since the
+/// migrated corpus this adapter drives is never written to disk.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ResolvedSignatures {
+    calls: BTreeMap<String, CallSignature>,
+    types: BTreeMap<String, Vec<String>>,
+    interfaces: BTreeMap<String, Vec<TypeMember>>,
+}
+
+pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignatures> {
+    let mut sigs = LocalSignatures::default();
+    for form in &module.forms {
+        match form {
+            TopLevel::Function(function) => {
+                insert_call_signature(&mut sigs.calls, function.name.value.clone(), function);
+            }
+            TopLevel::Definition(definition) => {
+                let params = where_param_names(&definition.annotations);
+                if !params.is_empty() {
+                    sigs.types.insert(definition.name.value.clone(), params);
+                }
+                if let TypeExprKind::Interface(members) = &definition.body.value {
+                    for member in members {
+                        if let TypeExprKind::Function { parameters, .. } = &member.ty.value {
+                            sigs.calls.insert(
+                                format!("{}.{}", definition.name.value, member.name.value),
+                                CallSignature {
+                                    type_params: Vec::new(),
+                                    arg_names: canonical_arg_names(parameters.len()),
+                                },
+                            );
+                        }
+                    }
+                    sigs.interfaces
+                        .insert(definition.name.value.clone(), members.clone());
+                }
+                for annotation in &definition.annotations {
+                    if let AnnotationKind::Definitions(functions) = &annotation.value {
+                        for f in functions {
+                            insert_call_signature(
+                                &mut sigs.calls,
+                                format!("{}.{}", definition.name.value, f.name.value),
+                                f,
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(sigs)
+}
+
+fn insert_call_signature(
+    calls: &mut BTreeMap<String, CallSignature>,
+    name: String,
+    function: &Function,
+) {
+    let type_params = where_param_names(&function.annotations);
+    let arg_names = function
+        .parameters
+        .iter()
+        .map(|p| p.name.value.clone())
+        .collect();
+    calls.insert(
+        name,
+        CallSignature {
+            type_params,
+            arg_names,
+        },
+    );
+}
+
+fn where_param_names(annotations: &[Annotation]) -> Vec<String> {
+    for annotation in annotations {
+        if let AnnotationKind::Where(params) = &annotation.value {
+            return params.iter().map(|p| p.name.value.clone()).collect();
+        }
+    }
+    Vec::new()
+}
+
+/// Combine `own_local` (this module's own declarations) with its imports'
+/// local signatures, qualified the same way real call sites spell them:
+/// bare (own), `{own_stem}.{name}` (self-qualified), and `{alias}.{name}`
+/// per declared import.
+pub(crate) fn resolve_signatures(
+    own_stem: &str,
+    own_local: &LocalSignatures,
+    imports: &[(String, LocalSignatures)],
+) -> ResolvedSignatures {
+    let mut calls = own_local.calls.clone();
+    let mut types = own_local.types.clone();
+    let mut interfaces = own_local.interfaces.clone();
+    for (name, sig) in &own_local.calls {
+        calls
+            .entry(format!("{own_stem}.{name}"))
+            .or_insert_with(|| sig.clone());
+    }
+    for (name, params) in &own_local.types {
+        types
+            .entry(format!("{own_stem}.{name}"))
+            .or_insert_with(|| params.clone());
+    }
+    for (name, members) in &own_local.interfaces {
+        interfaces
+            .entry(format!("{own_stem}.{name}"))
+            .or_insert_with(|| members.clone());
+    }
+    for (alias, local) in imports {
+        for (name, sig) in &local.calls {
+            calls.insert(format!("{alias}.{name}"), sig.clone());
+        }
+        for (name, params) in &local.types {
+            types.insert(format!("{alias}.{name}"), params.clone());
+        }
+        for (name, members) in &local.interfaces {
+            interfaces.insert(format!("{alias}.{name}"), members.clone());
+        }
+    }
+    ResolvedSignatures {
+        calls,
+        types,
+        interfaces,
+    }
+}
+
+/// Canonical positional argument names the adapter assigns to a fn-type
+/// whose parameters carry no names of their own (interface members and bare
+/// `fn-type` forms only ever list parameter *types*). `"self"` for the
+/// first slot is a naming convention only -- legacy's interface dispatch
+/// (`iface_dispatch_arg_name` in `src/lower.rs`) locates the receiver by
+/// *type* (`SelfType`), not by field name, so any unique name set works as
+/// long as it is used consistently between an interface's declared args
+/// record and every impl that binds it (see `impl_method_value`).
+fn canonical_arg_names(arity: usize) -> Vec<String> {
+    (0..arity)
+        .map(|i| {
+            if i == 0 {
+                "self".to_string()
+            } else {
+                format!("arg{i}")
+            }
+        })
+        .collect()
+}
+
+// ===================== Small Value builders =====================
+
+fn single_dollar(head: &str, payload: Value) -> Value {
+    let mut map = Mapping::new();
+    map.insert(Value::String(format!("${head}")), payload);
+    Value::Mapping(map)
+}
+
+fn dollar_name(name: &str) -> Value {
+    Value::String(format!("${name}"))
+}
+
+fn insert_unique(map: &mut Mapping, key: String, value: Value) -> Result<()> {
+    let key_value = Value::String(key.clone());
+    if map.insert(key_value, value).is_some() {
+        bail!("E-ADAPT-044: duplicate top-level key `{key}`");
+    }
+    Ok(())
+}
+
+fn visible_key(name: &str, visibility: Visibility) -> String {
+    match visibility {
+        Visibility::Public => name.to_string(),
+        Visibility::Private => format!("-{name}"),
+    }
+}
+
+fn literal_value(literal: &Literal) -> Value {
+    match literal {
+        Literal::String(s) => string_literal_value(s),
+        Literal::Bool(b) => Value::Bool(*b),
+        Literal::Int(i) => Value::Number((*i).into()),
+        Literal::Float(f) => Value::Number((*f).into()),
+        Literal::Unit => Value::Null,
+    }
+}
+
+/// A string literal that happens to start with `$` is indistinguishable from
+/// a legacy variable reference (`src/lower.rs` `parse_expr`'s bare-string
+/// branch); wrap it in the explicit `$literal` envelope instead.
+fn string_literal_value(s: &str) -> Value {
+    if s.starts_with('$') {
+        single_dollar("literal", Value::String(s.to_string()))
+    } else {
+        Value::String(s.to_string())
+    }
+}
+
+fn handle_access_str(access: AstHandleAccess) -> &'static str {
+    match access {
+        AstHandleAccess::Read => "read",
+        AstHandleAccess::Write => "write",
+        AstHandleAccess::ReadWrite => "read-write",
+        AstHandleAccess::Process => "process",
+    }
+}
+
+fn is_control_form(kind: &ExprKind) -> bool {
+    matches!(
+        kind,
+        ExprKind::Let { .. }
+            | ExprKind::Set { .. }
+            | ExprKind::Return(_)
+            | ExprKind::Break
+            | ExprKind::Continue
+            | ExprKind::While { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Match { .. }
+            | ExprKind::Task { .. }
+            | ExprKind::Spawn { .. }
+            | ExprKind::Join { .. }
+    )
+}
+
+fn expr_kind_name(kind: &ExprKind) -> &'static str {
+    match kind {
+        ExprKind::Let { .. } => "let",
+        ExprKind::Set { .. } => "set",
+        ExprKind::Return(_) => "return",
+        ExprKind::Break => "break",
+        ExprKind::Continue => "continue",
+        ExprKind::While { .. } => "while",
+        ExprKind::For { .. } => "for",
+        ExprKind::Match { .. } => "match",
+        ExprKind::Task { .. } => "task",
+        ExprKind::Spawn { .. } => "spawn",
+        ExprKind::Join { .. } => "join",
+        _ => "expression",
+    }
+}
+
+fn single_body_expr(body: &[AstExpr]) -> Result<&AstExpr> {
+    match body {
+        [single] => Ok(single),
+        other => bail!(
+            "E-ADAPT-022: an `if` used as a nested (non-statement) expression must have exactly \
+             one expression per branch; found {} (legacy has no block sub-expression)",
+            other.len()
+        ),
+    }
+}
+
+// ===================== Converter =====================
+
+/// Per-module conversion state: the resolved signature index (which carries
+/// every reachable interface's member types, needed to type the synthesized
+/// impl forwarding shims -- see `impl_method_value`), any freshly synthesized
+/// private top-level helpers, and a counter for their names.
+struct Converter<'a> {
+    sig: &'a ResolvedSignatures,
+    extra: Vec<(String, Value)>,
+    next_id: u32,
+    /// Parameter names of the function currently being converted. Legacy
+    /// stores a function's own parameters under `locals["args.{name}"]`
+    /// (`src/lower.rs::lower_pending_user_functions`) while every other
+    /// binding -- `let`, `for`, match binds, spawn/join handles -- lives
+    /// under its own bare name. A reference, `$set` target, or capture that
+    /// names a current parameter must therefore be spelled `args.{name}`;
+    /// everything else is spelled bare. See `local_name_ref`.
+    current_params: Vec<String>,
+}
+
+/// Convert one typed module into the legacy top-level mapping `Value` shape
+/// `src/lower.rs::collect_module_defs` and peers consume.
+pub(crate) fn module_to_value(module: &Module, sig: &ResolvedSignatures) -> Result<Value> {
+    let mut converter = Converter {
+        sig,
+        extra: Vec::new(),
+        next_id: 0,
+        current_params: Vec::new(),
+    };
+    let mut map = Mapping::new();
+    for form in &module.forms {
+        match form {
+            TopLevel::Import(import) => {
+                insert_unique(&mut map, import.alias.value.clone(), import_value(import))?;
+            }
+            TopLevel::Definition(definition) => {
+                let (key, value) = converter.definition_value(definition)?;
+                insert_unique(&mut map, key, value)?;
+            }
+            TopLevel::Constant(constant) => {
+                let (key, value) = constant_value(constant)?;
+                insert_unique(&mut map, key, value)?;
+            }
+            TopLevel::Function(function) => {
+                let key = visible_key(&function.name.value, function.visibility);
+                let value = converter.function_envelope(function)?;
+                insert_unique(&mut map, key, value)?;
+            }
+            TopLevel::Test(test) => {
+                let (key, value) = converter.test_value(test)?;
+                insert_unique(&mut map, key, value)?;
+            }
+            TopLevel::Macro(macro_def) => {
+                bail!(
+                    "E-ADAPT-001: top-level `macro {}` has no legacy YAML representation; the \
+                     S-expression macro system (quote/unquote/splice/capture) is not bridged by \
+                     src/surface_adapter.rs",
+                    macro_def.name.value
+                );
+            }
+        }
+    }
+    for (key, value) in std::mem::take(&mut converter.extra) {
+        insert_unique(&mut map, key, value)?;
+    }
+    Ok(Value::Mapping(map))
+}
+
+fn import_value(import: &Import) -> Value {
+    single_dollar("import", Value::String(import.path.value.clone()))
+}
+
+fn constant_value(constant: &Constant) -> Result<(String, Value)> {
+    let key = visible_key(&constant.name.value, constant.visibility);
+    let ExprKind::Literal(literal) = &constant.value.value else {
+        bail!(
+            "E-ADAPT-030: constant `{}` is not a literal; the legacy shape only represents bare \
+             scalar constants (`src/lower.rs::collect_module_defs`), never a general expression",
+            constant.name.value
+        );
+    };
+    let TypeExprKind::Named(type_name) = &constant.ty.value else {
+        bail!(
+            "E-ADAPT-031: constant `{}` type must be a bare primitive name (`bool`, `int64`, \
+             `float64`, or `str`); legacy constants have no explicit type annotation and infer \
+             one of only these four shapes",
+            constant.name.value
+        );
+    };
+    let value = match (type_name.as_str(), literal) {
+        ("bool", Literal::Bool(b)) => Value::Bool(*b),
+        ("int64", Literal::Int(i)) => Value::Number((*i).into()),
+        ("float64", Literal::Float(f)) => Value::Number((*f).into()),
+        ("str", Literal::String(s)) => Value::String(s.clone()),
+        _ => bail!(
+            "E-ADAPT-032: constant `{}` has type `{type_name}` with a mismatched or unsupported \
+             literal; the legacy shape only represents `bool`, `int64`, `float64`, or `str` \
+             constants (no `int8`/`uint32`/etc. width, no non-literal expression)",
+            constant.name.value
+        ),
+    };
+    Ok((key, value))
+}
+
+impl<'a> Converter<'a> {
+    fn fresh_name(&mut self, hint: &str) -> String {
+        self.next_id += 1;
+        format!("-adapt-{}-{}", hint.replace('.', "-"), self.next_id)
+    }
+
+    // ---------------- Definitions and types ----------------
+
+    fn definition_value(&mut self, definition: &Definition) -> Result<(String, Value)> {
+        let key = visible_key(&definition.name.value, definition.visibility);
+        let (form_key, payload) = self.type_head_payload(&definition.body)?;
+        let mut map = Mapping::new();
+        map.insert(Value::String(form_key), payload);
+        self.apply_annotations(&mut map, &definition.annotations, &definition.name.value)?;
+        Ok((key, Value::Mapping(map)))
+    }
+
+    /// Split a type's general `Value` shape into the `($key, payload)` pair
+    /// a top-level `def` envelope needs. Only single-entry-mapping shapes
+    /// (every type constructor) split cleanly; a bare `Named` alias (`(def
+    /// byte uint8)`) has no legacy envelope at all -- `collect_module_defs`
+    /// silently skips any top-level value that is not itself a mapping,
+    /// which would make such a definition vanish rather than fail loudly.
+    fn type_head_payload(&mut self, ty: &TypeExpr) -> Result<(String, Value)> {
+        match self.type_value(ty)? {
+            Value::Mapping(m) if m.len() == 1 => {
+                let (key, value) = m.into_iter().next().expect("checked len == 1");
+                let key = key
+                    .as_str()
+                    .expect("adapter-built type keys are always strings")
+                    .to_string();
+                Ok((key, value))
+            }
+            Value::String(s) => bail!(
+                "E-ADAPT-002: top-level `def` body `{s}` is a bare type alias; \
+                 `src/lower.rs::collect_module_defs` silently ignores non-mapping definition \
+                 bodies, so this cannot be represented without becoming invisible to the legacy \
+                 loader"
+            ),
+            other => bail!("E-ADAPT-003: internal: unexpected type value shape {other:?}"),
+        }
+    }
+
+    fn type_value(&mut self, ty: &TypeExpr) -> Result<Value> {
+        match &ty.value {
+            TypeExprKind::Named(name) => Ok(dollar_name(name)),
+            TypeExprKind::Application {
+                constructor,
+                arguments,
+            } => self.type_application_value(&constructor.value, arguments),
+            TypeExprKind::Record(members) => {
+                let mut m = Mapping::new();
+                for member in members {
+                    let value = self.type_value(&member.ty)?;
+                    if m.insert(Value::String(member.name.value.clone()), value)
+                        .is_some()
+                    {
+                        bail!(
+                            "E-ADAPT-004: duplicate record field `{}`",
+                            member.name.value
+                        );
+                    }
+                }
+                Ok(single_dollar("record", Value::Mapping(m)))
+            }
+            TypeExprKind::Tuple(items) => {
+                let seq = items
+                    .iter()
+                    .map(|t| self.type_value(t))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(single_dollar("tuple", Value::Sequence(seq)))
+            }
+            TypeExprKind::Array(inner) => {
+                let v = self.type_value(inner)?;
+                Ok(single_dollar("array", v))
+            }
+            TypeExprKind::Map(key, value) => {
+                let key_v = self.type_value(key)?;
+                let value_v = self.type_value(value)?;
+                let mut m = Mapping::new();
+                m.insert(Value::String("key".into()), key_v);
+                m.insert(Value::String("value".into()), value_v);
+                Ok(single_dollar("map", Value::Mapping(m)))
+            }
+            TypeExprKind::Union(items) => {
+                let seq = items
+                    .iter()
+                    .map(|t| self.type_value(t))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(single_dollar("union", Value::Sequence(seq)))
+            }
+            TypeExprKind::Enum(members) => {
+                let mut m = Mapping::new();
+                for member in members {
+                    let value = self.type_value(&member.ty)?;
+                    if m.insert(Value::String(member.name.value.clone()), value)
+                        .is_some()
+                    {
+                        bail!("E-ADAPT-005: duplicate enum tag `{}`", member.name.value);
+                    }
+                }
+                Ok(single_dollar("enum", Value::Mapping(m)))
+            }
+            TypeExprKind::Interface(members) => {
+                let mut m = Mapping::new();
+                for member in members {
+                    let TypeExprKind::Function { parameters, result } = &member.ty.value else {
+                        bail!(
+                            "E-ADAPT-006: interface member `{}` must be a `fn-type`",
+                            member.name.value
+                        );
+                    };
+                    let fn_type = self.interface_fn_type_value(parameters, result)?;
+                    if m.insert(Value::String(member.name.value.clone()), fn_type)
+                        .is_some()
+                    {
+                        bail!(
+                            "E-ADAPT-007: duplicate interface member `{}`",
+                            member.name.value
+                        );
+                    }
+                }
+                Ok(single_dollar("interface", Value::Mapping(m)))
+            }
+            TypeExprKind::Function { parameters, result } => self.fn_type_value(parameters, result),
+            TypeExprKind::Newtype(inner) => Ok(single_dollar("newtype", self.type_value(inner)?)),
+            TypeExprKind::Mutable(inner) => Ok(single_dollar("mut", self.type_value(inner)?)),
+            TypeExprKind::Reference(inner) => Ok(single_dollar("ref", self.type_value(inner)?)),
+            TypeExprKind::MutableReference(inner) => {
+                let inner_v = self.type_value(inner)?;
+                Ok(single_dollar("ref", single_dollar("mut", inner_v)))
+            }
+            TypeExprKind::Intersect(items) => {
+                let seq = items
+                    .iter()
+                    .map(|t| self.type_value(t))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(single_dollar("intersect", Value::Sequence(seq)))
+            }
+            TypeExprKind::Policy(domains) => {
+                Ok(single_dollar("policy", policy_domains_value(domains)?))
+            }
+            TypeExprKind::Capability { domain, groups } => {
+                let head = format!("capability.{}", domain.value);
+                Ok(single_dollar(&head, policy_groups_value(groups)?))
+            }
+            TypeExprKind::Handle(access) => {
+                let head = format!("handle.{}", handle_access_str(access.value));
+                Ok(single_dollar(&head, Value::Null))
+            }
+            TypeExprKind::WasmValue(name) => bail!(
+                "E-ADAPT-008: `(wasm {})` host ABI value type has no legacy `Value` shape",
+                name.value
+            ),
+        }
+    }
+
+    fn fn_type_value(&mut self, parameters: &[TypeExpr], result: &TypeExpr) -> Result<Value> {
+        let args = match parameters.len() {
+            0 => Value::String("$void".into()),
+            1 => self.type_value(&parameters[0])?,
+            n => {
+                let names = canonical_arg_names(n);
+                let mut m = Mapping::new();
+                for (name, ty) in names.iter().zip(parameters) {
+                    m.insert(Value::String(name.clone()), self.type_value(ty)?);
+                }
+                single_dollar("record", Value::Mapping(m))
+            }
+        };
+        let ret = self.type_value(result)?;
+        let mut m = Mapping::new();
+        m.insert(Value::String("args".into()), args);
+        m.insert(Value::String("return".into()), ret);
+        Ok(single_dollar("fn-type", Value::Mapping(m)))
+    }
+
+    /// Interface member fn-types are special-cased vs. `fn_type_value`:
+    /// legacy's impl-binding machinery (`iface_impl_primary_field_name`,
+    /// `bind_impl_method`) requires `args` to be a `$record` even for a
+    /// single-parameter method (the sole parameter is conventionally the
+    /// dispatch receiver and must be *named*), where the general
+    /// `(fn-type ...)` shape allows a bare single type with no name.
+    fn interface_fn_type_value(
+        &mut self,
+        parameters: &[TypeExpr],
+        result: &TypeExpr,
+    ) -> Result<Value> {
+        let args = if parameters.is_empty() {
+            Value::String("$void".into())
+        } else {
+            let names = canonical_arg_names(parameters.len());
+            let mut m = Mapping::new();
+            for (name, ty) in names.iter().zip(parameters) {
+                m.insert(Value::String(name.clone()), self.type_value(ty)?);
+            }
+            single_dollar("record", Value::Mapping(m))
+        };
+        let ret = self.type_value(result)?;
+        let mut m = Mapping::new();
+        m.insert(Value::String("args".into()), args);
+        m.insert(Value::String("return".into()), ret);
+        Ok(single_dollar("fn-type", Value::Mapping(m)))
+    }
+
+    fn type_application_value(
+        &mut self,
+        constructor: &str,
+        arguments: &[TypeExpr],
+    ) -> Result<Value> {
+        let params = self.sig.types.get(constructor).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "E-ADAPT-009: generic type application `({constructor} ...)` has no known \
+                 type-parameter names in the adapter's signature index (its `where:` clause \
+                 must be visible to this module -- declared locally or reachable through a \
+                 direct import)"
+            )
+        })?;
+        if params.len() != arguments.len() {
+            bail!(
+                "E-ADAPT-010: generic type `{constructor}` expects {} type argument(s), found {}",
+                params.len(),
+                arguments.len()
+            );
+        }
+        let mut m = Mapping::new();
+        for (name, arg) in params.iter().zip(arguments) {
+            m.insert(Value::String(name.clone()), self.type_value(arg)?);
+        }
+        Ok(single_dollar(constructor, Value::Mapping(m)))
+    }
+
+    // ---------------- Annotations (doc/where/defs/impls) ----------------
+
+    fn apply_annotations(
+        &mut self,
+        map: &mut Mapping,
+        annotations: &[Annotation],
+        owner: &str,
+    ) -> Result<()> {
+        for annotation in annotations {
+            match &annotation.value {
+                AnnotationKind::Doc(text) => {
+                    insert_unique(map, "=doc".into(), Value::String(text.clone()))?;
+                }
+                AnnotationKind::Where(params) => {
+                    let mut m = Mapping::new();
+                    for param in params {
+                        let bounds = param
+                            .bounds
+                            .iter()
+                            .map(|b| self.type_value(b))
+                            .collect::<Result<Vec<_>>>()?;
+                        m.insert(
+                            Value::String(param.name.value.clone()),
+                            Value::Sequence(bounds),
+                        );
+                    }
+                    insert_unique(map, "=where".into(), Value::Mapping(m))?;
+                }
+                AnnotationKind::Definitions(functions) => {
+                    let mut m = Mapping::new();
+                    for f in functions {
+                        let value = self.function_envelope(f)?;
+                        if m.insert(Value::String(f.name.value.clone()), value)
+                            .is_some()
+                        {
+                            bail!(
+                                "E-ADAPT-013: duplicate `defs:` function `{}` on `{owner}`",
+                                f.name.value
+                            );
+                        }
+                    }
+                    insert_unique(map, "=defs".into(), Value::Mapping(m))?;
+                }
+                AnnotationKind::Implementation { interface, items } => {
+                    let (key, value) = self.impl_entry(owner, interface, items)?;
+                    merge_impl_entry(map, key, value)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn impl_entry(
+        &mut self,
+        owner: &str,
+        interface: &TypeExpr,
+        items: &[ImplItem],
+    ) -> Result<(Value, Value)> {
+        let TypeExprKind::Named(iface_name) = &interface.value else {
+            bail!(
+                "E-ADAPT-033: `impls:` on `{owner}` targets a generic or non-named interface \
+                 type; the adapter only supports a bare interface name"
+            );
+        };
+        let mut methods_map = Mapping::new();
+        for item in items {
+            match item {
+                ImplItem::Types(list) => {
+                    if !list.is_empty() {
+                        bail!(
+                            "E-ADAPT-034: `impls:` on `{owner}` pins generic `types:` for \
+                             interface `{iface_name}`, which the adapter does not support"
+                        );
+                    }
+                }
+                ImplItem::Method { name, binding, .. } => {
+                    let value = self.impl_method_value(owner, iface_name, &name.value, binding)?;
+                    if methods_map
+                        .insert(Value::String(name.value.clone()), value)
+                        .is_some()
+                    {
+                        bail!(
+                            "E-ADAPT-035: duplicate impl method `{}` for interface \
+                             `{iface_name}` on `{owner}`",
+                            name.value
+                        );
+                    }
+                }
+            }
+        }
+        Ok((
+            Value::String(format!("${iface_name}")),
+            Value::Mapping(methods_map),
+        ))
+    }
+
+    /// Interface implementations are validated in `src/lower.rs` by
+    /// comparing `TypeRef::Record` field *names* between the interface's
+    /// declared args and the concrete method's own args
+    /// (`bind_impl_method`/`signatures_match`/`unify_types`). Since the
+    /// surface AST's interface member types carry no parameter names at
+    /// all (`(fn-type (Type...) Return)` is positional), the adapter
+    /// assigns a canonical name set (`canonical_arg_names`) to the
+    /// interface once, then always binds each impl method through a
+    /// synthesized forwarding shim using those same canonical names --
+    /// rather than renaming the real implementing function's own
+    /// parameters (and every reference to them in its body), which would
+    /// be considerably riskier. The real function keeps its own names
+    /// untouched; only the thin shim uses the canonical ones.
+    fn impl_method_value(
+        &mut self,
+        owner: &str,
+        iface_name: &str,
+        method: &str,
+        binding: &MethodBinding,
+    ) -> Result<Value> {
+        let sig_key = format!("{iface_name}.{method}");
+        let canonical = self.sig.calls.get(&sig_key).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "E-ADAPT-036: cannot resolve interface `{iface_name}` method `{method}` \
+                 (implemented on `{owner}`) in the adapter's signature index"
+            )
+        })?;
+        let arg_names = canonical.arg_names;
+
+        let (target_callee, target_arg_names): (String, Vec<String>) = match binding {
+            MethodBinding::Reference(name) => {
+                let target_sig = self.sig.calls.get(&name.value).cloned().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "E-ADAPT-037: impl method `{method}` on `{owner}` references unknown \
+                         function `{}`",
+                        name.value
+                    )
+                })?;
+                if !target_sig.type_params.is_empty() {
+                    bail!(
+                        "E-ADAPT-038: impl method `{method}` on `{owner}` references generic \
+                         function `{}`, which the adapter's forwarding shim does not support",
+                        name.value
+                    );
+                }
+                (name.value.clone(), target_sig.arg_names)
+            }
+            MethodBinding::Function(inline) => {
+                if !where_param_names(&inline.annotations).is_empty() {
+                    bail!(
+                        "E-ADAPT-039: impl method `{method}` on `{owner}` is itself generic, \
+                         which the adapter's forwarding shim does not support"
+                    );
+                }
+                let synthetic = self.fresh_name(&format!("impl-{owner}-{iface_name}-{method}"));
+                let value = self.function_envelope(inline)?;
+                self.extra.push((synthetic.clone(), value));
+                let names = inline
+                    .parameters
+                    .iter()
+                    .map(|p| p.name.value.clone())
+                    .collect();
+                (synthetic, names)
+            }
+        };
+        if target_arg_names.len() != arg_names.len() {
+            bail!(
+                "E-ADAPT-040: impl method `{method}` on `{owner}` has arity {}, but interface \
+                 `{iface_name}` declares {}",
+                target_arg_names.len(),
+                arg_names.len()
+            );
+        }
+
+        let (parameters, result) = {
+            let (p, r) = self.interface_member(iface_name, method)?;
+            (p.to_vec(), r.clone())
+        };
+        let param_type_values = parameters
+            .iter()
+            .map(|t| self.type_value(t))
+            .collect::<Result<Vec<_>>>()?;
+        let return_value = self.type_value(&result)?;
+
+        let mut fn_map = Mapping::new();
+        match arg_names.len() {
+            0 => {
+                fn_map.insert(
+                    Value::String("$function".into()),
+                    Value::String("$void".into()),
+                );
+            }
+            _ => {
+                let mut primary = Mapping::new();
+                primary.insert(
+                    Value::String(arg_names[0].clone()),
+                    param_type_values[0].clone(),
+                );
+                fn_map.insert(Value::String("$function".into()), Value::Mapping(primary));
+                if arg_names.len() > 1 {
+                    let mut rest = Mapping::new();
+                    for (name, ty) in arg_names[1..].iter().zip(&param_type_values[1..]) {
+                        rest.insert(Value::String(name.clone()), ty.clone());
+                    }
+                    fn_map.insert(Value::String("args".into()), Value::Mapping(rest));
+                }
+            }
+        }
+        fn_map.insert(Value::String("return".into()), return_value);
+        let call = forwarding_call_value(&target_callee, &target_arg_names, &arg_names);
+        fn_map.insert(
+            Value::String("do".into()),
+            Value::Sequence(vec![single_dollar("return", call)]),
+        );
+        Ok(Value::Mapping(fn_map))
+    }
+
+    /// Look up an interface member's parameter/result types.
+    ///
+    /// Resolvable across the whole program: `ResolvedSignatures::interfaces`
+    /// carries full member types for this module's own interfaces, the same
+    /// under its self-qualified stem, and each import's under the alias the
+    /// module declared. An interface that is genuinely unreachable fails
+    /// closed rather than being given a guessed member shape, since a wrong
+    /// legacy `$record` args shape would be a miscompilation, not a test
+    /// failure.
+    fn interface_member(&self, iface_name: &str, method: &str) -> Result<(&[TypeExpr], &TypeExpr)> {
+        let members = self.sig.interfaces.get(iface_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "E-ADAPT-041: interface `{iface_name}` is not declared in this module or any \
+                 module it imports"
+            )
+        })?;
+        let member = members
+            .iter()
+            .find(|m| m.name.value == method)
+            .ok_or_else(|| {
+                anyhow::anyhow!("E-ADAPT-042: interface `{iface_name}` has no method `{method}`")
+            })?;
+        let TypeExprKind::Function { parameters, result } = &member.ty.value else {
+            bail!("E-ADAPT-006: interface member `{iface_name}.{method}` must be a `fn-type`");
+        };
+        Ok((parameters.as_slice(), result.as_ref()))
+    }
+
+    // ---------------- Functions and bodies ----------------
+
+    fn function_envelope(&mut self, function: &Function) -> Result<Value> {
+        let params = &function.parameters;
+        let mut map = Mapping::new();
+        match params.len() {
+            0 => {
+                map.insert(
+                    Value::String("$function".into()),
+                    Value::String("$void".into()),
+                );
+            }
+            _ => {
+                let mut primary = Mapping::new();
+                primary.insert(
+                    Value::String(params[0].name.value.clone()),
+                    self.type_value(&params[0].ty)?,
+                );
+                map.insert(Value::String("$function".into()), Value::Mapping(primary));
+                if params.len() > 1 {
+                    let mut rest = Mapping::new();
+                    for p in &params[1..] {
+                        let value = self.type_value(&p.ty)?;
+                        if rest
+                            .insert(Value::String(p.name.value.clone()), value)
+                            .is_some()
+                        {
+                            bail!(
+                                "E-ADAPT-014: duplicate parameter `{}` in `fn {}`",
+                                p.name.value,
+                                function.name.value
+                            );
+                        }
+                    }
+                    map.insert(Value::String("args".into()), Value::Mapping(rest));
+                }
+            }
+        }
+        map.insert(
+            Value::String("return".into()),
+            self.type_value(&function.return_type)?,
+        );
+
+        let param_names: Vec<String> = params.iter().map(|p| p.name.value.clone()).collect();
+        let mut bound = Vec::new();
+        collect_binding_names(&function.body, &mut bound);
+        for name in &bound {
+            if param_names.contains(name) {
+                bail!(
+                    "E-ADAPT-048: a local binding named `{name}` in `fn {}` shadows a \
+                     parameter of the same name; the adapter does not support this, because \
+                     legacy stores parameters as `args.{name}` and locals as bare `{name}` in \
+                     separate namespaces, so a same-named local would not actually shadow the \
+                     parameter the way the typed source intends",
+                    function.name.value
+                );
+            }
+        }
+        let previous_params = std::mem::replace(&mut self.current_params, param_names);
+        let body_result = self.body_to_do(&function.body);
+        self.current_params = previous_params;
+        map.insert(Value::String("do".into()), body_result?);
+
+        self.apply_annotations(&mut map, &function.annotations, &function.name.value)?;
+        Ok(Value::Mapping(map))
+    }
+
+    /// Spell a reference to a bare identifier the way legacy's `locals` map
+    /// keys it: `args.{name}` if `name` is one of the current function's own
+    /// parameters, otherwise the bare name. See `Converter::current_params`.
+    fn local_name_ref(&self, name: &str) -> String {
+        if self.current_params.iter().any(|p| p == name) {
+            format!("args.{name}")
+        } else {
+            name.to_string()
+        }
+    }
+
+    fn body_to_do(&mut self, body: &[AstExpr]) -> Result<Value> {
+        if body.len() == 1 {
+            if let ExprKind::Wasm { import, arguments } = &body[0].value {
+                return Ok(Value::Sequence(vec![
+                    self.wasm_statement_value(import, arguments)?
+                ]));
+            }
+        }
+        let mut seq = Vec::new();
+        self.push_statements(body, &mut seq)?;
+        Ok(Value::Sequence(seq))
+    }
+
+    fn push_statements(&mut self, body: &[AstExpr], out: &mut Vec<Value>) -> Result<()> {
+        for expr in body {
+            if let ExprKind::Do(inner) = &expr.value {
+                self.push_statements(inner, out)?;
+                continue;
+            }
+            out.push(self.stmt_value(expr)?);
+        }
+        Ok(())
+    }
+
+    fn wasm_statement_value(
+        &mut self,
+        import: &WasmImport,
+        arguments: &[WasmArgument],
+    ) -> Result<Value> {
+        let mut import_m = Mapping::new();
+        import_m.insert(
+            Value::String("module".into()),
+            Value::String(import.module.value.clone()),
+        );
+        import_m.insert(
+            Value::String("name".into()),
+            Value::String(import.name.value.clone()),
+        );
+        let mut args = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            args.push(match arg {
+                WasmArgument::Parameter(name) => {
+                    // `tools/corpus-migrator`'s `wasm_expression` strips only
+                    // the leading `$` off a legacy `$args.name` wasm-arg
+                    // spec, not the `args.` segment itself (unlike ordinary
+                    // `$args.x` variable references, which it rewrites to
+                    // bare `x`), so migrated source spells this `(arg
+                    // args.name)`. Hand-written S-expression source is
+                    // expected to spell it `(arg name)` per the contract's
+                    // `$args.x` -> `x` migration row. Accept both: only add
+                    // the `args.` segment back when it is not already
+                    // present verbatim.
+                    let spec = if name.value.starts_with("args.") {
+                        name.value.clone()
+                    } else {
+                        format!("args.{}", name.value)
+                    };
+                    Value::String(format!("${spec}"))
+                }
+                WasmArgument::ConstInt(v) => Value::Number(v.value.into()),
+                WasmArgument::ConstString(v) => {
+                    if v.value.starts_with("$args.") || v.value.starts_with("$const.") {
+                        bail!(
+                            "E-ADAPT-015: wasm string constant `{}` collides with the legacy \
+                             `$args.`/`$const.` argument-spec prefix (`src/lower.rs \
+                             parse_wasm_arg_spec`)",
+                            v.value
+                        );
+                    }
+                    Value::String(v.value.clone())
+                }
+            });
+        }
+        let mut wasm_m = Mapping::new();
+        wasm_m.insert(Value::String("import".into()), Value::Mapping(import_m));
+        wasm_m.insert(Value::String("args".into()), Value::Sequence(args));
+        Ok(single_dollar("wasm", Value::Mapping(wasm_m)))
+    }
+
+    // ---------------- Statements ----------------
+
+    fn stmt_value(&mut self, expr: &AstExpr) -> Result<Value> {
+        match &expr.value {
+            ExprKind::Let { name, value, .. } => {
+                let mut inner = Mapping::new();
+                inner.insert(Value::String(name.value.clone()), self.expr_value(value)?);
+                Ok(single_dollar("let", Value::Mapping(inner)))
+            }
+            ExprKind::Set { name, value } => {
+                let mut inner = Mapping::new();
+                let key = self.local_name_ref(&name.value);
+                inner.insert(Value::String(key), self.expr_value(value)?);
+                Ok(single_dollar("set", Value::Mapping(inner)))
+            }
+            ExprKind::Return(value) => {
+                let payload = match value {
+                    Some(v) => self.expr_value(v)?,
+                    None => Value::Null,
+                };
+                Ok(single_dollar("return", payload))
+            }
+            ExprKind::Break => Ok(single_dollar("break", Value::Null)),
+            ExprKind::Continue => Ok(single_dollar("continue", Value::Null)),
+            ExprKind::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                let mut m = Mapping::new();
+                m.insert(Value::String("$if".into()), self.expr_value(condition)?);
+                m.insert(Value::String("then".into()), self.body_to_do(then_body)?);
+                m.insert(Value::String("else".into()), self.body_to_do(else_body)?);
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::While { condition, body } => {
+                let mut m = Mapping::new();
+                m.insert(Value::String("$while".into()), self.expr_value(condition)?);
+                m.insert(Value::String("do".into()), self.body_to_do(body)?);
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::For {
+                binding,
+                source,
+                body,
+            } => {
+                let mut m = Mapping::new();
+                m.insert(
+                    Value::String("$for".into()),
+                    Value::String(binding.value.clone()),
+                );
+                m.insert(Value::String("in".into()), self.expr_value(source)?);
+                m.insert(Value::String("do".into()), self.body_to_do(body)?);
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::Match { target, cases } => {
+                let mut m = Mapping::new();
+                m.insert(Value::String("$match".into()), self.expr_value(target)?);
+                let mut when = Vec::with_capacity(cases.len());
+                for case in cases {
+                    when.push(self.match_case_value(case)?);
+                }
+                m.insert(Value::String("when".into()), Value::Sequence(when));
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::Task { captures, body } => {
+                let mut m = Mapping::new();
+                m.insert(
+                    Value::String("$task".into()),
+                    Value::Sequence(
+                        captures
+                            .iter()
+                            .map(|c| Value::String(self.local_name_ref(&c.value)))
+                            .collect(),
+                    ),
+                );
+                m.insert(Value::String("do".into()), self.body_to_do(body)?);
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::Spawn {
+                handle,
+                captures,
+                value,
+            } => {
+                let mut m = Mapping::new();
+                m.insert(
+                    Value::String("$spawn".into()),
+                    Value::String(handle.value.clone()),
+                );
+                m.insert(
+                    Value::String("captures".into()),
+                    Value::Sequence(
+                        captures
+                            .iter()
+                            .map(|c| Value::String(self.local_name_ref(&c.value)))
+                            .collect(),
+                    ),
+                );
+                m.insert(Value::String("value".into()), self.expr_value(value)?);
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::Join { handle, binding } => {
+                let mut m = Mapping::new();
+                m.insert(
+                    Value::String("$join".into()),
+                    Value::String(handle.value.clone()),
+                );
+                m.insert(
+                    Value::String("into".into()),
+                    Value::String(binding.value.clone()),
+                );
+                Ok(Value::Mapping(m))
+            }
+            _ => self.expr_value(expr),
+        }
+    }
+
+    fn match_case_value(&mut self, case: &MatchCase) -> Result<Value> {
+        let mut m = Mapping::new();
+        m.insert(Value::String("case".into()), pattern_value(&case.pattern)?);
+        m.insert(Value::String("do".into()), self.body_to_do(&case.body)?);
+        Ok(Value::Mapping(m))
+    }
+
+    // ---------------- Expressions ----------------
+
+    fn expr_value(&mut self, expr: &AstExpr) -> Result<Value> {
+        match &expr.value {
+            ExprKind::Literal(literal) => Ok(literal_value(literal)),
+            ExprKind::Reference(name) => {
+                Ok(Value::String(format!("${}", self.local_name_ref(name))))
+            }
+            ExprKind::Call { callee, arguments } => self.call_value(&callee.value, arguments),
+            ExprKind::Do(items) => match items.as_slice() {
+                [single] if !is_control_form(&single.value) => self.expr_value(single),
+                _ => bail!(
+                    "E-ADAPT-018: nested `(do ...)` with more than one statement (or any \
+                     control-flow statement) is not representable as a legacy sub-expression"
+                ),
+            },
+            ExprKind::Record(fields) => {
+                let mut m = Mapping::new();
+                for field in fields {
+                    let value = self.expr_value(&field.value)?;
+                    if m.insert(Value::String(field.name.value.clone()), value)
+                        .is_some()
+                    {
+                        bail!("E-ADAPT-019: duplicate record field `{}`", field.name.value);
+                    }
+                }
+                Ok(single_dollar("record", Value::Mapping(m)))
+            }
+            ExprKind::Tuple(items) => {
+                let seq = items
+                    .iter()
+                    .map(|e| self.expr_value(e))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(single_dollar("tuple", Value::Sequence(seq)))
+            }
+            ExprKind::Array(items) => {
+                let seq = items
+                    .iter()
+                    .map(|e| self.expr_value(e))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(single_dollar("array", Value::Sequence(seq)))
+            }
+            ExprKind::Map(pairs) => {
+                let mut seq = Vec::with_capacity(pairs.len());
+                for (k, v) in pairs {
+                    let mut m = Mapping::new();
+                    m.insert(Value::String("key".into()), self.expr_value(k)?);
+                    m.insert(Value::String("value".into()), self.expr_value(v)?);
+                    seq.push(Value::Mapping(m));
+                }
+                Ok(single_dollar("map", Value::Sequence(seq)))
+            }
+            ExprKind::Mutable(inner) => Ok(single_dollar("mut", self.expr_value(inner)?)),
+            ExprKind::ReferenceOf(inner) => Ok(single_dollar("ref", self.expr_value(inner)?)),
+            ExprKind::Range(start, end, step) => {
+                let mut m = Mapping::new();
+                m.insert(Value::String("start".into()), self.expr_value(start)?);
+                m.insert(Value::String("end".into()), self.expr_value(end)?);
+                m.insert(Value::String("step".into()), self.expr_value(step)?);
+                Ok(single_dollar("range", Value::Mapping(m)))
+            }
+            ExprKind::Convert {
+                value,
+                into,
+                fallback,
+            } => {
+                let mut m = Mapping::new();
+                m.insert(Value::String("$convert".into()), self.expr_value(value)?);
+                m.insert(Value::String("into".into()), self.type_value(into)?);
+                m.insert(Value::String("or".into()), literal_value(&fallback.value));
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::Cast { value, into } => {
+                let mut m = Mapping::new();
+                m.insert(Value::String("$cast".into()), self.expr_value(value)?);
+                m.insert(Value::String("into".into()), self.type_value(into)?);
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::PolicyNarrow { value, into } => {
+                let mut m = Mapping::new();
+                m.insert(
+                    Value::String("$policy.narrow".into()),
+                    self.expr_value(value)?,
+                );
+                m.insert(Value::String("into".into()), self.type_value(into)?);
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                let then_e = single_body_expr(then_body)?;
+                let else_e = single_body_expr(else_body)?;
+                let cond_v = self.expr_value(condition)?;
+                let then_v = self.expr_value(then_e)?;
+                let else_v = self.expr_value(else_e)?;
+                let mut m = Mapping::new();
+                m.insert(Value::String("$if".into()), cond_v);
+                m.insert(Value::String("then".into()), then_v);
+                m.insert(Value::String("else".into()), else_v);
+                Ok(Value::Mapping(m))
+            }
+            ExprKind::Embed { path, format } => Ok(embed_value(path, format.value)),
+            ExprKind::Template { path, bindings } => self.template_value(path, bindings),
+            ExprKind::Wasm { .. } => bail!(
+                "E-ADAPT-020: a `wasm` host-import body is only representable as a function's \
+                 sole statement (`src/lower.rs` `is_wasm_only_body`), not as a nested expression"
+            ),
+            ExprKind::While { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Match { .. }
+            | ExprKind::Task { .. }
+            | ExprKind::Spawn { .. }
+            | ExprKind::Join { .. }
+            | ExprKind::Let { .. }
+            | ExprKind::Set { .. }
+            | ExprKind::Return(_)
+            | ExprKind::Break
+            | ExprKind::Continue => bail!(
+                "E-ADAPT-021: `{}` is a statement-only construct in the legacy shape and cannot \
+                 appear as a nested expression",
+                expr_kind_name(&expr.value)
+            ),
+        }
+    }
+
+    fn template_value(&mut self, path: &Spanned<String>, bindings: &[ExprField]) -> Result<Value> {
+        let mut with_m = Mapping::new();
+        for field in bindings {
+            let value = self.expr_value(&field.value)?;
+            with_m.insert(Value::String(field.name.value.clone()), value);
+        }
+        let mut m = Mapping::new();
+        m.insert(
+            Value::String("path".into()),
+            Value::String(path.value.clone()),
+        );
+        m.insert(Value::String("with".into()), Value::Mapping(with_m));
+        Ok(single_dollar("template", Value::Mapping(m)))
+    }
+
+    // ---------------- Calls ----------------
+
+    fn call_value(&mut self, callee: &str, args: &[AstExpr]) -> Result<Value> {
+        if !callee.contains('.') {
+            if let Some((_, arity)) = crate::lower::typed_primitive_op(callee) {
+                return self.primitive_value(callee, arity, args);
+            }
+        }
+        if let Some(sig) = self.sig.calls.get(callee).cloned() {
+            return self.named_call_value(callee, &sig, args);
+        }
+        match args.len() {
+            0 => Ok(single_dollar(callee, Value::Null)),
+            1 => {
+                let v = self.expr_value(&args[0])?;
+                Ok(single_dollar(callee, v))
+            }
+            n => bail!(
+                "E-ADAPT-023: call to `{callee}` with {n} arguments has no signature in the \
+                 adapter's index; the legacy shape keys every non-primary argument by the \
+                 callee's declared parameter name, which is unknown here (unresolved import, \
+                 forward reference, or genuinely unknown callee)"
+            ),
+        }
+    }
+
+    fn primitive_value(&mut self, name: &str, arity: usize, args: &[AstExpr]) -> Result<Value> {
+        if args.len() != arity {
+            bail!(
+                "E-ADAPT-024: primitive `{name}` expects {arity} operand(s), found {}",
+                args.len()
+            );
+        }
+        let payload = if arity == 1 {
+            self.expr_value(&args[0])?
+        } else {
+            Value::Sequence(
+                args.iter()
+                    .map(|a| self.expr_value(a))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        };
+        Ok(single_dollar(name, payload))
+    }
+
+    fn named_call_value(
+        &mut self,
+        callee: &str,
+        sig: &CallSignature,
+        args: &[AstExpr],
+    ) -> Result<Value> {
+        let type_arity = sig.type_params.len();
+        if args.len() < type_arity {
+            bail!(
+                "E-ADAPT-025: call to `{callee}` supplies {} argument(s), fewer than its {} \
+                 type parameter(s); the adapter requires generic calls to spell type arguments \
+                 explicitly as leading positional arguments (matching the migrated corpus's \
+                 convention) -- it does not perform type inference",
+                args.len(),
+                type_arity
+            );
+        }
+        let (type_args, value_args) = args.split_at(type_arity);
+        if value_args.len() != sig.arg_names.len() {
+            bail!(
+                "E-ADAPT-026: call to `{callee}` supplies {} value argument(s), expected {}",
+                value_args.len(),
+                sig.arg_names.len()
+            );
+        }
+        if type_arity == 0 {
+            return match sig.arg_names.len() {
+                0 => {
+                    if !args.is_empty() {
+                        bail!("E-ADAPT-027: call to `{callee}` takes no arguments");
+                    }
+                    Ok(single_dollar(callee, Value::Null))
+                }
+                1 => {
+                    let v = self.expr_value(&value_args[0])?;
+                    Ok(single_dollar(callee, v))
+                }
+                _ => {
+                    let mut m = Mapping::new();
+                    for (name, expr) in sig.arg_names.iter().zip(value_args) {
+                        let v = self.expr_value(expr)?;
+                        m.insert(Value::String(name.clone()), v);
+                    }
+                    Ok(single_dollar(callee, Value::Mapping(m)))
+                }
+            };
+        }
+        let mut m = Mapping::new();
+        for (name, expr) in sig.type_params.iter().zip(type_args) {
+            let v = self.expr_as_type_value(expr)?;
+            m.insert(Value::String(name.clone()), v);
+        }
+        for (name, expr) in sig.arg_names.iter().zip(value_args) {
+            let key = Value::String(name.clone());
+            if m.contains_key(&key) {
+                bail!(
+                    "E-ADAPT-028: call to `{callee}`: value argument `{name}` collides with a \
+                     type-parameter name of the same name"
+                );
+            }
+            let v = self.expr_value(expr)?;
+            m.insert(key, v);
+        }
+        Ok(single_dollar(callee, Value::Mapping(m)))
+    }
+
+    /// Reinterpret an expression written in a generic call's leading
+    /// (type-argument) position as a type. The migrated corpus always
+    /// spells explicit type arguments as ordinary positional expressions
+    /// (a bare type name parses identically to a variable reference; a
+    /// generic type application parses identically to a call) -- see
+    /// `tools/corpus-migrator`'s `named_call`, which never emits `apply`.
+    fn expr_as_type_value(&mut self, expr: &AstExpr) -> Result<Value> {
+        match &expr.value {
+            ExprKind::Reference(name) => Ok(dollar_name(name)),
+            ExprKind::Call { callee, arguments } => {
+                let params = self.sig.types.get(&callee.value).cloned().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "E-ADAPT-009: generic type application `({} ...)` used as a call's type \
+                         argument has no known type-parameter names in the adapter's signature \
+                         index",
+                        callee.value
+                    )
+                })?;
+                if params.len() != arguments.len() {
+                    bail!(
+                        "E-ADAPT-010: generic type `{}` expects {} type argument(s), found {}",
+                        callee.value,
+                        params.len(),
+                        arguments.len()
+                    );
+                }
+                let mut m = Mapping::new();
+                for (name, arg) in params.iter().zip(arguments) {
+                    let v = self.expr_as_type_value(arg)?;
+                    m.insert(Value::String(name.clone()), v);
+                }
+                Ok(single_dollar(&callee.value, Value::Mapping(m)))
+            }
+            _ => bail!(
+                "E-ADAPT-029: expected a type-argument expression (a bare name or generic type \
+                 application), found a value expression"
+            ),
+        }
+    }
+}
+
+/// Collect every name a function body introduces as a *new* local binding
+/// (`let`, `for`, match binds, spawn/join handles). Used to reject -- fail
+/// closed -- a local binding that reuses one of the enclosing function's own
+/// parameter names, which the adapter's `args.{name}` / bare-`{name}`
+/// namespace split (see `Converter::current_params`) cannot represent as
+/// real shadowing.
+fn collect_binding_names(body: &[AstExpr], names: &mut Vec<String>) {
+    for expr in body {
+        collect_binding_names_expr(expr, names);
+    }
+}
+
+fn collect_binding_names_expr(expr: &AstExpr, names: &mut Vec<String>) {
+    match &expr.value {
+        ExprKind::Let { name, value, .. } => {
+            names.push(name.value.clone());
+            collect_binding_names_expr(value, names);
+        }
+        ExprKind::Set { value, .. } => collect_binding_names_expr(value, names),
+        ExprKind::Return(value) => {
+            if let Some(value) = value {
+                collect_binding_names_expr(value, names);
+            }
+        }
+        ExprKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_binding_names_expr(condition, names);
+            collect_binding_names(then_body, names);
+            collect_binding_names(else_body, names);
+        }
+        ExprKind::While { condition, body } => {
+            collect_binding_names_expr(condition, names);
+            collect_binding_names(body, names);
+        }
+        ExprKind::For {
+            binding,
+            source,
+            body,
+        } => {
+            names.push(binding.value.clone());
+            collect_binding_names_expr(source, names);
+            collect_binding_names(body, names);
+        }
+        ExprKind::Match { target, cases } => {
+            collect_binding_names_expr(target, names);
+            for case in cases {
+                collect_pattern_binding_names(&case.pattern, names);
+                collect_binding_names(&case.body, names);
+            }
+        }
+        ExprKind::Do(items) => collect_binding_names(items, names),
+        ExprKind::Record(fields) => {
+            for field in fields {
+                collect_binding_names_expr(&field.value, names);
+            }
+        }
+        ExprKind::Tuple(items) | ExprKind::Array(items) => {
+            for item in items {
+                collect_binding_names_expr(item, names);
+            }
+        }
+        ExprKind::Map(pairs) => {
+            for (k, v) in pairs {
+                collect_binding_names_expr(k, names);
+                collect_binding_names_expr(v, names);
+            }
+        }
+        ExprKind::Mutable(inner) | ExprKind::ReferenceOf(inner) => {
+            collect_binding_names_expr(inner, names);
+        }
+        ExprKind::Range(start, end, step) => {
+            collect_binding_names_expr(start, names);
+            collect_binding_names_expr(end, names);
+            collect_binding_names_expr(step, names);
+        }
+        ExprKind::Convert { value, .. }
+        | ExprKind::Cast { value, .. }
+        | ExprKind::PolicyNarrow { value, .. } => collect_binding_names_expr(value, names),
+        ExprKind::Call { arguments, .. } => {
+            for arg in arguments {
+                collect_binding_names_expr(arg, names);
+            }
+        }
+        ExprKind::Template { bindings, .. } => {
+            for field in bindings {
+                collect_binding_names_expr(&field.value, names);
+            }
+        }
+        ExprKind::Task { body, .. } => collect_binding_names(body, names),
+        ExprKind::Spawn { handle, value, .. } => {
+            names.push(handle.value.clone());
+            collect_binding_names_expr(value, names);
+        }
+        ExprKind::Join { binding, .. } => names.push(binding.value.clone()),
+        ExprKind::Literal(_)
+        | ExprKind::Reference(_)
+        | ExprKind::Break
+        | ExprKind::Continue
+        | ExprKind::Embed { .. }
+        | ExprKind::Wasm { .. } => {}
+    }
+}
+
+fn collect_pattern_binding_names(pattern: &AstPattern, names: &mut Vec<String>) {
+    match &pattern.value {
+        PatternKind::Bind(name) => names.push(name.value.clone()),
+        PatternKind::Constructor { arguments, .. } => {
+            for p in arguments {
+                collect_pattern_binding_names(p, names);
+            }
+        }
+        PatternKind::Record(fields) => {
+            for field in fields {
+                collect_pattern_binding_names(&field.pattern, names);
+            }
+        }
+        PatternKind::Tuple(items) | PatternKind::Array(items) => {
+            for p in items {
+                collect_pattern_binding_names(p, names);
+            }
+        }
+        PatternKind::Map(pairs) => {
+            for (k, v) in pairs {
+                collect_pattern_binding_names(k, names);
+                collect_pattern_binding_names(v, names);
+            }
+        }
+        PatternKind::Newtype { pattern, .. } => collect_pattern_binding_names(pattern, names),
+        PatternKind::Literal(_) | PatternKind::Wildcard | PatternKind::Interface { .. } => {}
+    }
+}
+
+/// Build the shim's own forwarding call. Every reference here is to one of
+/// the *shim's own* declared parameters (the canonical `self`/`arg1`/...
+/// names), which legacy stores under `args.{name}` just like any other
+/// function's parameters (`lower_pending_user_functions`), so every operand
+/// is spelled `$args.{name}`, never bare `${name}`.
+fn forwarding_call_value(
+    target: &str,
+    target_arg_names: &[String],
+    canonical_arg_names: &[String],
+) -> Value {
+    let refs: Vec<Value> = canonical_arg_names
+        .iter()
+        .map(|n| Value::String(format!("$args.{n}")))
+        .collect();
+    match target_arg_names.len() {
+        0 => single_dollar(target, Value::Null),
+        1 => single_dollar(target, refs.into_iter().next().expect("checked len == 1")),
+        _ => {
+            let mut m = Mapping::new();
+            for (name, value) in target_arg_names.iter().zip(refs) {
+                m.insert(Value::String(name.clone()), value);
+            }
+            single_dollar(target, Value::Mapping(m))
+        }
+    }
+}
+
+fn merge_impl_entry(map: &mut Mapping, key: Value, value: Value) -> Result<()> {
+    let impl_key = Value::String("=impl".into());
+    if let Some(existing) = map.get_mut(&impl_key) {
+        let Value::Mapping(inner) = existing else {
+            bail!("E-ADAPT-045: internal: `=impl` entry is not a mapping");
+        };
+        if inner.insert(key.clone(), value).is_some() {
+            bail!("E-ADAPT-043: duplicate `impls:` interface entry `{key:?}`");
+        }
+    } else {
+        let mut inner = Mapping::new();
+        inner.insert(key, value);
+        map.insert(impl_key, Value::Mapping(inner));
+    }
+    Ok(())
+}
+
+fn embed_value(path: &Spanned<String>, format: AstEmbedFormat) -> Value {
+    let name = match format {
+        AstEmbedFormat::Auto => return single_dollar("embed", Value::String(path.value.clone())),
+        AstEmbedFormat::Text => "text",
+        AstEmbedFormat::Binary => "binary",
+        AstEmbedFormat::Json => "json",
+        AstEmbedFormat::Toml => "toml",
+        AstEmbedFormat::Xml => "xml",
+    };
+    let mut m = Mapping::new();
+    m.insert(
+        Value::String("path".into()),
+        Value::String(path.value.clone()),
+    );
+    m.insert(Value::String("format".into()), Value::String(name.into()));
+    single_dollar("embed", Value::Mapping(m))
+}
+
+// ---------------- Patterns ----------------
+
+fn pattern_value(pattern: &AstPattern) -> Result<Value> {
+    match &pattern.value {
+        PatternKind::Literal(literal) => Ok(literal_value(literal)),
+        PatternKind::Wildcard => Ok(single_dollar("wildcard", Value::Null)),
+        PatternKind::Bind(name) => Ok(single_dollar("bind", Value::String(name.value.clone()))),
+        PatternKind::Constructor {
+            constructor,
+            arguments,
+        } => {
+            let payload = match arguments.len() {
+                0 => Value::Null,
+                1 => pattern_value(&arguments[0])?,
+                _ => Value::Sequence(
+                    arguments
+                        .iter()
+                        .map(pattern_value)
+                        .collect::<Result<Vec<_>>>()?,
+                ),
+            };
+            Ok(single_dollar(&constructor.value, payload))
+        }
+        PatternKind::Record(fields) => {
+            let mut m = Mapping::new();
+            for field in fields {
+                let value = pattern_value(&field.pattern)?;
+                if m.insert(Value::String(field.name.value.clone()), value)
+                    .is_some()
+                {
+                    bail!(
+                        "E-ADAPT-046: duplicate record pattern field `{}`",
+                        field.name.value
+                    );
+                }
+            }
+            Ok(single_dollar("record", Value::Mapping(m)))
+        }
+        PatternKind::Tuple(items) => Ok(single_dollar(
+            "tuple",
+            Value::Sequence(
+                items
+                    .iter()
+                    .map(pattern_value)
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+        )),
+        PatternKind::Array(items) => Ok(single_dollar(
+            "array",
+            Value::Sequence(
+                items
+                    .iter()
+                    .map(pattern_value)
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+        )),
+        PatternKind::Map(pairs) => {
+            let mut seq = Vec::with_capacity(pairs.len());
+            for (k, v) in pairs {
+                let mut m = Mapping::new();
+                m.insert(Value::String("key".into()), pattern_value(k)?);
+                m.insert(Value::String("value".into()), pattern_value(v)?);
+                seq.push(Value::Mapping(m));
+            }
+            Ok(single_dollar("map", Value::Sequence(seq)))
+        }
+        PatternKind::Newtype { ty, pattern } => {
+            let mut m = Mapping::new();
+            m.insert(Value::String("type".into()), bare_type_value(ty)?);
+            m.insert(Value::String("inner".into()), pattern_value(pattern)?);
+            Ok(single_dollar("newtype", Value::Mapping(m)))
+        }
+        PatternKind::Interface { .. } => bail!(
+            "E-ADAPT-017: `(interface Type pattern)` pattern is not supported by the adapter; \
+             `src/lower.rs`'s `Pattern::Interface` carries only a type, with no slot for a \
+             nested sub-pattern, so the AST's inner pattern cannot be represented"
+        ),
+    }
+}
+
+/// Patterns need type conversion but have no `&mut Converter` available
+/// (pattern conversion is free-standing, not tied to the module's generic
+/// signature index at this call depth); newtype/interface pattern payloads
+/// are restricted to non-generic named types, which need no signature
+/// lookups at all.
+fn bare_type_value(ty: &TypeExpr) -> Result<Value> {
+    match &ty.value {
+        TypeExprKind::Named(name) => Ok(dollar_name(name)),
+        _ => bail!(
+            "E-ADAPT-047: pattern type payloads only support a bare named type, not a generic \
+             application or compound type shape"
+        ),
+    }
+}
+
+// ---------------- Tests ----------------
+
+impl<'a> Converter<'a> {
+    fn test_value(&mut self, test: &Test) -> Result<(String, Value)> {
+        let key = test.name.value.clone();
+        let mut m = Mapping::new();
+        m.insert(
+            Value::String("$test".into()),
+            Value::String(test.profile.value.clone()),
+        );
+        m.insert(Value::String("do".into()), self.body_to_do(&test.body)?);
+        for meta in &test.metadata {
+            match meta {
+                TestMeta::Tags(tags) => {
+                    m.insert(
+                        Value::String("tags".into()),
+                        Value::Sequence(
+                            tags.iter()
+                                .map(|n| Value::String(n.value.clone()))
+                                .collect(),
+                        ),
+                    );
+                }
+                TestMeta::TimeoutMillis(v) => {
+                    m.insert(
+                        Value::String("timeout-ms".into()),
+                        Value::Number(v.value.into()),
+                    );
+                }
+                TestMeta::RandomSeed(v) => {
+                    m.insert(
+                        Value::String("random-seed".into()),
+                        Value::Number(v.value.into()),
+                    );
+                }
+                TestMeta::Skip(reason) => {
+                    m.insert(
+                        Value::String("skip".into()),
+                        Value::String(reason.value.clone()),
+                    );
+                }
+                TestMeta::Workspace(name) => {
+                    m.insert(
+                        Value::String("workspace".into()),
+                        Value::String(name.value.clone()),
+                    );
+                }
+                TestMeta::Policy(ty) => {
+                    let v = self.type_value(ty)?;
+                    m.insert(Value::String("policy".into()), v);
+                }
+                TestMeta::ExpectError(err) => {
+                    let mut em = Mapping::new();
+                    match err {
+                        ExpectedError::Load { code, message } => {
+                            em.insert(Value::String("phase".into()), Value::String("load".into()));
+                            em.insert(
+                                Value::String("code".into()),
+                                Value::String(code.value.clone()),
+                            );
+                            if let Some(msg) = message {
+                                em.insert(
+                                    Value::String("message-contains".into()),
+                                    Value::String(msg.value.clone()),
+                                );
+                            }
+                        }
+                        ExpectedError::Compile { code, message } => {
+                            em.insert(
+                                Value::String("phase".into()),
+                                Value::String("compile".into()),
+                            );
+                            em.insert(
+                                Value::String("code".into()),
+                                Value::String(code.value.clone()),
+                            );
+                            if let Some(msg) = message {
+                                em.insert(
+                                    Value::String("message-contains".into()),
+                                    Value::String(msg.value.clone()),
+                                );
+                            }
+                        }
+                        ExpectedError::Runtime { message } => {
+                            em.insert(
+                                Value::String("phase".into()),
+                                Value::String("runtime".into()),
+                            );
+                            em.insert(
+                                Value::String("message-contains".into()),
+                                Value::String(message.value.clone()),
+                            );
+                        }
+                    }
+                    m.insert(Value::String("expect-error".into()), Value::Mapping(em));
+                }
+                TestMeta::Clock {
+                    unix_millis,
+                    monotonic_millis,
+                } => {
+                    let mut cm = Mapping::new();
+                    cm.insert(
+                        Value::String("unix-millis".into()),
+                        Value::Number(unix_millis.value.into()),
+                    );
+                    cm.insert(
+                        Value::String("monotonic-millis".into()),
+                        Value::Number(monotonic_millis.value.into()),
+                    );
+                    m.insert(Value::String("clock".into()), Value::Mapping(cm));
+                }
+            }
+        }
+        Ok((key, Value::Mapping(m)))
+    }
+}
+
+fn policy_domains_value(domains: &[PolicyDomain]) -> Result<Value> {
+    let mut m = Mapping::new();
+    for domain in domains {
+        let groups = policy_groups_value(&domain.groups)?;
+        if m.insert(Value::String(domain.name.value.clone()), groups)
+            .is_some()
+        {
+            bail!(
+                "E-ADAPT-011: duplicate policy domain `{}`",
+                domain.name.value
+            );
+        }
+    }
+    Ok(Value::Mapping(m))
+}
+
+fn policy_groups_value(groups: &[PolicyGroup]) -> Result<Value> {
+    if groups.is_empty() {
+        return Ok(Value::Null);
+    }
+    let mut seq = Vec::with_capacity(groups.len());
+    for group in groups {
+        let requirement = match group.requirement.value {
+            PolicyRequirement::Mandatory => "mandatory",
+            PolicyRequirement::Optional => "optional",
+        };
+        let scopes = policy_scopes_value(&group.scopes)?;
+        let mut m = Mapping::new();
+        m.insert(
+            Value::String("requirement".into()),
+            Value::String(requirement.into()),
+        );
+        m.insert(Value::String("scopes".into()), scopes);
+        seq.push(Value::Mapping(m));
+    }
+    Ok(Value::Sequence(seq))
+}
+
+fn policy_scopes_value(scopes: &[PolicyScope]) -> Result<Value> {
+    if scopes
+        .iter()
+        .any(|s| matches!(s.value, PolicyScopeKind::Any))
+    {
+        if scopes.len() == 1 {
+            return Ok(Value::String("any".into()));
+        }
+        bail!(
+            "E-ADAPT-012: `(any)` cannot be combined with other policy scopes in the legacy \
+             shape (the whole `scopes:` value is either bare `\"any\"` or a plain selector list)"
+        );
+    }
+    let mut seq = Vec::with_capacity(scopes.len());
+    for scope in scopes {
+        let (selector, value) = match &scope.value {
+            PolicyScopeKind::File(v) => ("file", v.value.clone()),
+            PolicyScopeKind::Dir(v) => ("dir", v.value.clone()),
+            PolicyScopeKind::Exact(v) => ("exact", v.value.clone()),
+            PolicyScopeKind::Prefix(v) => ("prefix", v.value.clone()),
+            PolicyScopeKind::Any => unreachable!("filtered above"),
+        };
+        let mut m = Mapping::new();
+        m.insert(Value::String(selector.into()), Value::String(value));
+        seq.push(Value::Mapping(m));
+    }
+    Ok(Value::Sequence(seq))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::code::SourceDatabase;
+    use crate::load::LoadedProgram;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::Path;
+
+    fn module_from_source(source: &str) -> Module {
+        let document = crate::syntax::parse(source).expect("parse S-expression source");
+        crate::ast::lower_document(&document).expect("lower to typed AST")
+    }
+
+    /// Write a placeholder file at `path` and return its canonical form.
+    /// `program.modules` is keyed by canonical path but its file *content*
+    /// is never re-read by `lower::lower_program`/`lower_library`/
+    /// `lower_tests`; only import-path resolution needs the file to exist.
+    fn touch(path: &Path) -> std::path::PathBuf {
+        fs::write(path, "placeholder").expect("write placeholder module file");
+        fs::canonicalize(path).expect("canonicalize placeholder module file")
+    }
+
+    fn single_module_program(dir: &Path, value: Value) -> LoadedProgram {
+        let entry = touch(&dir.join("entry.vibra"));
+        let mut modules = HashMap::new();
+        modules.insert(entry.clone(), value);
+        LoadedProgram {
+            entry,
+            modules,
+            sources: SourceDatabase::from_sources(dir.to_path_buf(), Vec::new())
+                .expect("empty source database"),
+            module_parts: HashMap::new(),
+            embedded_files: Default::default(),
+        }
+    }
+
+    fn assert_lowers(source: &str) -> LoadedProgram {
+        let module = module_from_source(source);
+        let signatures = collect_local_signatures(&module).expect("collect signatures");
+        let resolved = resolve_signatures("entry", &signatures, &[]);
+        let value = module_to_value(&module, &resolved).expect("module_to_value");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = single_module_program(dir.path(), value);
+        if let Err(error) = crate::lower::lower_library(&program) {
+            panic!("expected lower_library to succeed, got: {error:#}");
+        }
+        program
+    }
+
+    // ---- function with args/return/body, plus bare primitives ----
+
+    #[test]
+    fn function_with_args_return_body_and_primitives_lowers() {
+        assert_lowers(
+            r#"
+(fn combine ((left int64) (right int64)) int64
+  (do
+    (let sum (add left right))
+    (if (greater-than sum 0)
+      (do (return sum))
+      (do (return (negate sum))))))
+"#,
+        );
+    }
+
+    #[test]
+    fn primitive_call_uses_dollar_keyed_shape() {
+        let module =
+            module_from_source("(fn f ((a int64) (b int64)) bool (do (return (equal a b))))");
+        let signatures = collect_local_signatures(&module).unwrap();
+        let resolved = resolve_signatures("entry", &signatures, &[]);
+        let value = module_to_value(&module, &resolved).unwrap();
+        let rendered = serde_yaml::to_string(&value).unwrap();
+        assert!(
+            rendered.contains("$equal"),
+            "expected bare `equal` to become `$equal`, got:\n{rendered}"
+        );
+    }
+
+    // ---- generic function with `where:`, called with explicit type args ----
+
+    #[test]
+    fn generic_function_with_where_lowers() {
+        assert_lowers(
+            r#"
+(fn pair-up ((a t) (b t)) (tuple t t)
+  (do (return (tuple a b)))
+  where: ((t)))
+
+(fn use-pair-up () (tuple int64 int64)
+  (do (return (pair-up int64 1 2))))
+"#,
+        );
+    }
+
+    // ---- enum and record definitions ----
+
+    #[test]
+    fn enum_and_record_definitions_lower() {
+        assert_lowers(
+            r#"
+(def color (enum (red void) (green void) (blue void)))
+(def point (record (x int64) (y int64)))
+(fn origin () point (do (return (record (x 0) (y 0)))))
+(fn favorite () color (do (return (color.red))))
+"#,
+        );
+    }
+
+    // ---- impls: with methods ----
+
+    #[test]
+    fn impls_with_methods_lowers() {
+        assert_lowers(
+            r#"
+(def shape (interface (area (fn-type (self) int64))))
+(def square
+  (record (side int64))
+  impls: ((impl shape methods: ((method area (fn area ((self square)) int64 (do (return 1))))))))
+"#,
+        );
+    }
+
+    // ---- imports with aliases (cross-module call) ----
+
+    #[test]
+    fn import_with_alias_lowers_across_modules() {
+        let util_module =
+            module_from_source("(fn double ((x int64)) int64 (do (return (multiply x 2))))");
+        let util_local = collect_local_signatures(&util_module).unwrap();
+        let util_resolved = resolve_signatures("util", &util_local, &[]);
+        let util_value = module_to_value(&util_module, &util_resolved).unwrap();
+
+        let entry_module = module_from_source(
+            r#"
+(import util "./util.vibra")
+(fn compute ((x int64)) int64 (do (return (util.double x))))
+"#,
+        );
+        let entry_local = collect_local_signatures(&entry_module).unwrap();
+        let entry_resolved = resolve_signatures(
+            "entry",
+            &entry_local,
+            &[("util".to_string(), util_local.clone())],
+        );
+        let entry_value = module_to_value(&entry_module, &entry_resolved).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let util_path = touch(&dir.path().join("util.vibra"));
+        let entry_path = touch(&dir.path().join("entry.vibra"));
+        let mut modules = HashMap::new();
+        modules.insert(util_path, util_value);
+        modules.insert(entry_path.clone(), entry_value);
+        let program = LoadedProgram {
+            entry: entry_path,
+            modules,
+            sources: SourceDatabase::from_sources(dir.path().to_path_buf(), Vec::new()).unwrap(),
+            module_parts: HashMap::new(),
+            embedded_files: Default::default(),
+        };
+        if let Err(error) = crate::lower::lower_library(&program) {
+            panic!("expected cross-module lower_library to succeed, got: {error:#}");
+        }
+    }
+
+    #[test]
+    fn import_value_shape_matches_legacy_envelope() {
+        let module = module_from_source(r#"(import io "./io.vibra")"#);
+        let signatures = collect_local_signatures(&module).unwrap();
+        let resolved = resolve_signatures("entry", &signatures, &[]);
+        let value = module_to_value(&module, &resolved).unwrap();
+        let map = value.as_mapping().unwrap();
+        let io_def = map.get(Value::String("io".into())).unwrap();
+        let io_map = io_def.as_mapping().unwrap();
+        assert_eq!(
+            io_map.get(Value::String("$import".into())),
+            Some(&Value::String("./io.vibra".into()))
+        );
+    }
+
+    // ---- test with tags:/policy: ----
+
+    #[test]
+    fn test_declaration_with_tags_and_policy_lowers() {
+        // `test.assert` and peers come from the `test` stdlib module, which
+        // this single-module program does not import; use a self-contained
+        // expression built only from primitives instead.
+        let module = module_from_source(
+            r#"
+(test addition-is-checked core
+  (do (let ok (equal 1 1)))
+  tags: (fast language)
+  policy: (policy (clock)))
+"#,
+        );
+        let signatures = collect_local_signatures(&module).unwrap();
+        let resolved = resolve_signatures("entry", &signatures, &[]);
+        let value = module_to_value(&module, &resolved).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let program = single_module_program(dir.path(), value);
+        let tests = crate::lower::lower_tests(&program).expect("lower_tests");
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].name, "addition-is-checked");
+    }
+
+    // ---- convert / cast ----
+
+    #[test]
+    fn convert_and_cast_lower() {
+        assert_lowers(
+            r#"
+(def meters (newtype int64))
+(fn narrow ((x int64)) int32 (do (return (convert x int32 5))))
+(fn wrap ((x int64)) meters (do (return (cast x meters))))
+"#,
+        );
+    }
+
+    // ---- capability and handle types ----
+
+    #[test]
+    fn capability_and_handle_types_lower() {
+        assert_lowers(
+            r#"
+(def clock-capability (capability clock))
+(def out-handle (handle write))
+"#,
+        );
+    }
+
+    // ---- unmappable construct: a specific, path-qualified error ----
+
+    #[test]
+    fn top_level_macro_fails_closed_with_specific_error() {
+        let module = module_from_source(
+            r#"
+(macro unless
+  ((condition expr-syntax) (body expr-syntax))
+  expr-syntax
+  (do
+    (quote expr-syntax
+      (if (not (unquote condition))
+        (do (unquote body))
+        (do)))))
+"#,
+        );
+        let signatures = collect_local_signatures(&module).unwrap();
+        let resolved = resolve_signatures("entry", &signatures, &[]);
+        let error = module_to_value(&module, &resolved).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("E-ADAPT-001") && message.contains("unless"),
+            "expected a specific macro error naming the construct, got: {message}"
+        );
+    }
+
+    #[test]
+    fn nested_control_flow_expression_fails_closed() {
+        // `while` used as a nested expression (not a statement) has no
+        // legacy shape; this must fail closed rather than emit something
+        // `lower.rs` would silently misinterpret.
+        let module = module_from_source(
+            r#"
+(fn odd () void
+  (do
+    (let x (tuple (while true (do)) 1))))
+"#,
+        );
+        let signatures = collect_local_signatures(&module).unwrap();
+        let resolved = resolve_signatures("entry", &signatures, &[]);
+        let error = module_to_value(&module, &resolved).unwrap_err();
+        assert!(format!("{error:#}").contains("E-ADAPT-021"));
+    }
+}

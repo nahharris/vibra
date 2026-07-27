@@ -781,3 +781,51 @@ part of the supported compiler.
 - The release notes prominently identify the change as non-backward-compatible
   and provide the mechanical migration table, without promising automatic
   compatibility.
+
+## Amendment (2026-07-27): internal typed-AST-to-`Value` migration bridge
+
+This contract's single-direction rule was written against an *external*
+migration utility (`tools/corpus-migrator`, text-to-text, never invoked by
+Vibra). It did not anticipate an *internal* bridge inside the compiler crate
+itself, so this amendment records that exception explicitly rather than
+leaving it implied.
+
+`src/surface_adapter.rs` (issue #150) converts the typed S-expression surface
+AST (`crate::ast`) directly into the `serde_yaml::Value` shape `src/load.rs`
+and `src/lower.rs` already consume, so S-expression source can reach the
+existing, proven lowering semantics without re-deriving them on the typed
+path (`typed_lower`/`typed_body`/`typed_program`), whose measured readiness
+(`materialized-valid`) trails `src/lower.rs`'s coverage by an order of
+magnitude. This is permitted under the following constraints, all enforced
+by the adapter's own structure:
+
+- **Internal and private.** The module is `pub(crate)`, exported to no
+  external crate or CLI surface, and documented in its own header as
+  temporary.
+- **Single direction only.** AST -> `Value`. There is no `Value` -> AST
+  function anywhere in the adapter, not even for tests; the reverse
+  direction remains exclusively `src/ast/surface.rs`'s parser.
+- **Not a dual-syntax state.** The adapter does not parse YAML, does not
+  select a parser from file contents, and does not change what `vibra`
+  accepts as source. Until a follow-up PR repoints `src/load.rs`, the
+  compiler's only source parser remains the legacy YAML one; the adapter is
+  reachable only from its own tests.
+- **Not a supported interface.** It carries no stability guarantee, is not
+  documented as a public API, and is not the intended long-term shape of the
+  compiler: it is a bridge to be deleted, not a permanent third pillar
+  alongside the legacy and typed lowering paths.
+- **Temporary.** It is slated for removal as the typed path's own coverage
+  reaches parity with `src/lower.rs` and the legacy YAML parser is deleted
+  at cutover (step 9 of the plan above) -- at which point the adapter's
+  target shape (`serde_yaml::Value`) disappears along with it, so it cannot
+  outlive the migration it exists to perform.
+- **Fails closed.** Every construct the adapter cannot map to a precise
+  legacy shape produces a specific, path-qualified `E-ADAPT-*` error rather
+  than a best-effort guess, because a silently wrong `Value` would be a
+  miscompilation, not merely an unsupported-feature diagnostic.
+
+This does not relax the reader contract, the removal of the legacy YAML
+*parser* at cutover, or the prohibition on a second source parser: the
+adapter never parses anything. It only widens, for the migration window
+between the typed frontend landing and its coverage reaching parity, what
+"single-direction" is understood to permit inside the compiler.
