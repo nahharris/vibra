@@ -3973,15 +3973,17 @@ fn impl_method_as_ref_to_existing_defs_op_works() {
 fn impl_on_a_function_definition_is_rejected_with_e_impl_001() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+    // A reachable interface is needed for the adapter to resolve `fmt`'s
+    // signature at all (it builds the impl's forwarding shim from the
+    // interface's declared member type); an unresolvable interface would
+    // fail earlier with E-ADAPT-036 instead of reaching legacy's E-IMPL-001,
+    // which is not what this test exercises (that's
+    // `impl_unknown_interface_alias_is_rejected_with_e_impl_002`).
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do: []
-  =impl:
-    $display:
-      fmt: $whatever
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(fn whatever ((self self)) str (do (return "whatever")))
+(fn main () void (do) impls: ((impl display methods: ((method fmt whatever)))))
 "#,
     )
     .unwrap();
@@ -4001,25 +4003,25 @@ fn impl_unknown_interface_alias_is_rejected_with_e_impl_002() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"box:
-  $record:
-    value: $int64
-  =impl:
-    $no-such-iface:
-      fmt: $whatever
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def box (record (value int64))
+  impls: ((impl no-such-iface methods: ((method fmt whatever)))))
+(fn main () void (do))
 "#,
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err();
-    let msg = format!("{err:#}");
+    // The adapter itself needs to resolve the named interface to type the
+    // impl's forwarding shim (`Converter::interface_member`), so an unknown
+    // interface alias now fails during adaptation (E-ADAPT-036) rather than
+    // reaching legacy's own E-IMPL-002 check -- same rule, earlier
+    // enforcement point.
+    let prog = vibra::load::load_program(&entry);
+    let msg = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        msg.contains("E-IMPL-002"),
-        "expected E-IMPL-002 for unknown iface alias; got: {msg}"
+        msg.contains("E-IMPL-002") || msg.contains("E-ADAPT-036"),
+        "expected an unknown-interface rejection; got: {msg}"
     );
 }
 
@@ -4030,34 +4032,14 @@ fn impl_missing_method_is_rejected_with_e_impl_003() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-    debug:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $record:
-    value: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $str
-        do:
-            - $return: "ok"
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str)) (debug (fn-type (self) str))))
+(def box (record (value int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) str (do (return "ok"))))
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -4076,40 +4058,36 @@ main:
 fn impl_extra_key_in_impl_is_rejected_with_e_impl_004() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+    // The legacy `=impl: {$display: {fmt: {...}, bonus-stuff: 1}}` shape put
+    // the interface's method map and any extraneous key at the same mapping
+    // level, letting a stray key like `bonus-stuff:` sit beside a real
+    // method (E-IMPL-004). The new grammar's `impl` form has no equivalent
+    // open mapping: `methods:` is a list of `(method name binding)` entries
+    // (`parse_method`, `src/ast/surface.rs`, requires an `method` head), and
+    // `impl` itself accepts only `types:`/`methods:` labels
+    // (`parse_impl_annotations`, E-SYN-011 for anything else). There is no
+    // position left where a bare extra key like `bonus-stuff: 1` could even
+    // be written, so this now asserts the reader rejects the closest
+    // attempt -- a non-`method`-headed `methods:` entry -- structurally.
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $record:
-    value: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $str
-        do:
-            - $return: "ok"
-      bonus-stuff: 1
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def box (record (value int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) str (do (return "ok"))))
+      (bonus-stuff 1)
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    let err = vibra::load::load_program(&entry).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
-        msg.contains("E-IMPL-004"),
-        "expected E-IMPL-004 for extraneous payload key; got: {msg}"
+        msg.contains("E-SYN"),
+        "expected a reader-level rejection for a non-`method` `methods:` entry; got: {msg}"
     );
 }
 
@@ -4121,28 +4099,14 @@ fn impl_method_signature_mismatch_is_rejected_with_e_impl_005() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $record:
-    value: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $int64
-        do:
-            - $return: 1
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def box (record (value int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) int64 (do (return 1))))
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -4161,29 +4125,14 @@ fn impl_method_return_type_can_be_covariant() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return:
-          $union: [$int64, $str]
-box:
-  $record:
-    value: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $str
-        do:
-            - $return: "boxed"
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) (union int64 str)))))
+(def box (record (value int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) str (do (return "boxed"))))
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -4197,30 +4146,14 @@ fn impl_method_argument_types_remain_invariant() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x:
-              $union: [$int64, $str]
-        return: $str
-box:
-  $record:
-    value: $int64
-  =impl:
-    $display:
-      fmt:
-        $function:
-          x: $str
-        return: $str
-        do:
-            - $return: "boxed"
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type ((union int64 str)) str))))
+(def box (record (value int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((x str)) str (do (return "boxed"))))
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -4239,29 +4172,14 @@ fn impl_method_return_type_cannot_be_wider_than_interface() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $record:
-    value: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return:
-          $union: [$int64, $str]
-        do:
-            - $return: "boxed"
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def box (record (value int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) (union int64 str) (do (return "boxed"))))
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
