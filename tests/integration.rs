@@ -6642,15 +6642,13 @@ fn compile_time_embed_supports_text_binary_and_structured_formats() {
     let entry = dir.path().join("main.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $let: {text: {$embed: message.txt}}
-    - $let: {binary: {$embed: payload.bin}}
-    - $let: {json: {$embed: data.json}}
-    - $let: {toml: {$embed: data.toml}}
-    - $let: {xml: {$embed: data.xml}}
+        r#"(fn main () void
+  (do
+    (let text (embed "message.txt"))
+    (let binary (embed "payload.bin"))
+    (let json (embed "data.json"))
+    (let toml (embed "data.toml"))
+    (let xml (embed "data.xml"))))
 "#,
     )
     .unwrap();
@@ -6668,20 +6666,32 @@ fn compile_time_embed_supports_text_binary_and_structured_formats() {
 
 #[test]
 fn compile_time_embed_rejects_yaml_as_a_data_format() {
+    // NOTE: the spec (`docs/superpowers/specs/2026-07-25-s-expression-
+    // language-design.md`, "Embedded data") states YAML *should* be usable
+    // for `embed` as an external data-interoperability format -- "accepted
+    // by explicit `(embed "path" format: yaml)` and may be inferred from
+    // `.yaml` or `.yml`" -- which step 8 of the migration plan ("isolate
+    // YAML to the external `embed` data decoder") has not landed yet on
+    // this branch: the reader currently hard-rejects *both* the explicit
+    // `format: yaml` spelling and `.yaml`/`.yml` auto-inference outright
+    // (`parse_embed_format`/the auto-format extension check,
+    // `src/ast/surface.rs`), with no working YAML decode path at all. This
+    // is a confirmed, reportable gap against the spec, not a deliberate
+    // design choice this test is meant to lock in. It still demonstrates
+    // today's real, if temporary, behavior: YAML is rejected as an embed
+    // data format, just at the reader (E-SYN-008) instead of legacy's
+    // lowering-time E-EMBED-001.
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("data.yaml"), "name: yaml\n").unwrap();
     let entry = dir.path().join("main.vibra");
     std::fs::write(
         &entry,
-        "main:\n  $function: $void\n  return: $void\n  do:\n    - $let: {value: {$embed: data.yaml}}\n",
+        "(fn main () void (do (let value (embed \"data.yaml\"))))\n",
     )
     .unwrap();
     let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
-    assert!(error.contains("E-EMBED-001"), "{error}");
-    assert!(
-        error.contains("text, binary, json, toml, or xml"),
-        "{error}"
-    );
+    assert!(error.contains("E-SYN-008"), "{error}");
+    assert!(error.contains("YAML embed format was removed"), "{error}");
 }
 
 #[test]
@@ -6693,7 +6703,7 @@ fn compile_time_embed_rejects_escape_and_fingerprints_raw_content() {
     let entry = package.join("main.vibra");
     std::fs::write(
         &entry,
-        "main:\n  $function: $void\n  return: $void\n  do:\n    - $let: {value: {$embed: ../secret.txt}}\n",
+        "(fn main () void (do (let value (embed \"../secret.txt\"))))\n",
     )
     .unwrap();
     let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
@@ -6702,7 +6712,7 @@ fn compile_time_embed_rejects_escape_and_fingerprints_raw_content() {
     std::fs::write(package.join("asset.txt"), "one").unwrap();
     std::fs::write(
         &entry,
-        "main:\n  $function: $void\n  return: $void\n  do:\n    - $let: {value: {$embed: asset.txt}}\n",
+        "(fn main () void (do (let value (embed \"asset.txt\"))))\n",
     )
     .unwrap();
     let first = vibra::load::load_program(&entry).unwrap();
@@ -6726,23 +6736,7 @@ fn compile_time_template_renders_nested_values_and_logicless_sections() {
     let entry = dir.path().join("main.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        rendered:
-          $template:
-            path: message.txt
-            with:
-              title: Team
-              people:
-                - name: Ada
-                  active: true
-                  meta: {role: compiler}
-                - name: Lin
-                  active: false
-                  meta: {role: runtime}
+        r#"(fn main () void (do (let rendered (template "message.txt" with: (record (title "Team") (people (array (record (name "Ada") (active true) (meta (record (role "compiler")))) (record (name "Lin") (active false) (meta (record (role "runtime")))))))))))
 "#,
     )
     .unwrap();
@@ -6750,9 +6744,12 @@ fn compile_time_template_renders_nested_values_and_logicless_sections() {
     let loaded = vibra::load::load_program(&entry).unwrap();
     assert_eq!(loaded.embedded_files.len(), 1);
     let module = loaded.modules.get(&loaded.entry).unwrap();
-    let value = module["main"]["do"][0]["$let"]["rendered"]["$literal"]
-        .as_str()
-        .unwrap();
+    // The typed frontend renders the template and inlines the result as a
+    // bare literal string at load time (see `binary_compile_expr`'s sibling
+    // template-expansion path in `src/frontend.rs`); the adapter's
+    // `string_literal_value` only wraps a `$literal` envelope around a
+    // string that happens to start with `$`, which this render never does.
+    let value = module["main"]["do"][0]["$let"]["rendered"].as_str().unwrap();
     assert_eq!(value, "Team\n- Ada (compiler) active\n- Lin (runtime)\n");
     vibra::lower::lower_program(&loaded).unwrap();
 }
@@ -6764,19 +6761,19 @@ fn compile_time_template_is_strict_sandboxed_and_fingerprinted() {
     std::fs::create_dir(&package).unwrap();
     std::fs::write(outer.path().join("secret.txt"), "{{secret}}").unwrap();
     let entry = package.join("main.vibra");
-    let program = |path: &str, data: &str| {
+    let program = |path: &str, with_body: &str| {
         format!(
-            "main:\n  $function: $void\n  return: $void\n  do:\n    - $let:\n        rendered:\n          $template:\n            path: {path}\n            with: {data}\n"
+            "(fn main () void (do (let rendered (template \"{path}\" with: (record {with_body})))))\n"
         )
     };
 
-    std::fs::write(&entry, program("../secret.txt", "{secret: no}")).unwrap();
+    std::fs::write(&entry, program("../secret.txt", "(secret false)")).unwrap();
     let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
     assert!(error.contains("E-TEMPLATE-002"), "{error}");
 
     let template = package.join("message.txt");
     std::fs::write(&template, "Hello {{name}}").unwrap();
-    std::fs::write(&entry, program("message.txt", "{name: Ada}")).unwrap();
+    std::fs::write(&entry, program("message.txt", "(name \"Ada\")")).unwrap();
     let first = vibra::load::load_program(&entry).unwrap();
     let first_wasm =
         vibra::wasm_backend::emit_program_wasm(&vibra::lower::lower_program(&first).unwrap());
@@ -6803,7 +6800,7 @@ fn compile_time_template_is_strict_sandboxed_and_fingerprinted() {
         ),
     )
     .unwrap();
-    std::fs::write(&entry, program("message.txt", "{enabled: true}")).unwrap();
+    std::fs::write(&entry, program("message.txt", "(enabled true)")).unwrap();
     let error = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
     assert!(error.contains("E-TEMPLATE-006"), "{error}");
 }

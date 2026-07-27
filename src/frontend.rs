@@ -545,12 +545,20 @@ fn load_typed_embed(
 }
 
 fn binary_compile_expr(bytes: Vec<u8>, span: syntax::Span, origin: Origin) -> Expr {
+    // Each byte narrows from the literal's inferred `int64` down to `uint8`.
+    // `$cast` (`ExprKind::Cast`) is scoped to newtype<->inner-type
+    // conversions only (`valid_cast_path`, `src/type_semantics.rs`); a raw
+    // primitive narrowing has no valid cast path and always fails with
+    // E-CAST-001. `$convert` (`ExprKind::Convert`) is the checked,
+    // non-trapping numeric conversion this actually needs -- every value
+    // here is a real `u8`, so it always stays in range and the fallback is
+    // never observed, but the form still requires one syntactically.
     Spanned {
         value: ExprKind::Array(
             bytes
                 .into_iter()
                 .map(|byte| Spanned {
-                    value: ExprKind::Cast {
+                    value: ExprKind::Convert {
                         value: Box::new(Spanned {
                             value: ExprKind::Literal(Literal::Int(i64::from(byte))),
                             span,
@@ -558,6 +566,11 @@ fn binary_compile_expr(bytes: Vec<u8>, span: syntax::Span, origin: Origin) -> Ex
                         }),
                         into: Spanned {
                             value: TypeExprKind::Named("uint8".to_string()),
+                            span,
+                            origin: origin.clone(),
+                        },
+                        fallback: Spanned {
+                            value: Literal::Int(0),
                             span,
                             origin: origin.clone(),
                         },
