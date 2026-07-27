@@ -4,8 +4,8 @@
 //! after every expression in their body has lowered successfully.
 
 use crate::ast::{
-    AnnotationKind, Expr as AstExpr, ExprKind, Function, Literal, Module, Origin,
-    Pattern as AstPattern, PatternKind, SourceLocation, TopLevel, WasmArgument,
+    AnnotationKind, Expr as AstExpr, ExprKind, Function, ImplItem, Literal, MethodBinding, Module,
+    Origin, Pattern as AstPattern, PatternKind, SourceLocation, TopLevel, WasmArgument,
 };
 use crate::body_semantics::{validate_function_body, validate_task_handles};
 use crate::lower::{
@@ -18,7 +18,8 @@ use crate::type_semantics::{
     capability_body, policy_body, policy_type_is_subset, substitute_type, type_compatible,
 };
 use crate::typed_lower::{
-    lower_type, qualify, TypedFunctionSignature, TypedModuleInput, TypedSignatureIndex,
+    lower_type, named_application, qualify, unqualify, TypedFunctionSignature, TypedModuleInput,
+    TypedSignatureIndex,
 };
 use anyhow::{bail, Context, Result};
 use std::collections::{BTreeSet, HashMap};
@@ -70,24 +71,92 @@ pub fn lower_typed_bodies<'a>(
                     &mut bodies,
                 )?,
                 TopLevel::Definition(definition) => {
-                    for annotation in &definition.annotations {
-                        if let AnnotationKind::Definitions(functions) = &annotation.value {
-                            for function in functions {
-                                let key = format!(
-                                    "{}.{}",
-                                    qualify(input.alias, &definition.name.value),
-                                    function.name.value
-                                );
-                                lower_function(
-                                    input.alias,
-                                    input.module,
-                                    function,
-                                    &key,
-                                    signatures,
-                                    &declared_aliases,
-                                    &mut bodies,
-                                )?;
+                    let definition_key = qualify(input.alias, &definition.name.value);
+                    // Only the `where:` parameter *names* are needed here
+                    // (to resolve a generic interface expression like
+                    // `option[t]` in `impls:`), not their bounds -- bound
+                    // checking is `typed_lower`'s job at the signature tier,
+                    // already done by the time bodies are lowered.
+                    let generics: BTreeSet<String> = definition
+                        .annotations
+                        .iter()
+                        .filter_map(|annotation| match &annotation.value {
+                            AnnotationKind::Where(parameters) => {
+                                Some(parameters.iter().map(|p| p.name.value.clone()))
                             }
+                            _ => None,
+                        })
+                        .flatten()
+                        .collect();
+                    for annotation in &definition.annotations {
+                        match &annotation.value {
+                            AnnotationKind::Definitions(functions) => {
+                                for function in functions {
+                                    let key = format!("{definition_key}.{}", function.name.value);
+                                    lower_function(
+                                        input.alias,
+                                        input.module,
+                                        function,
+                                        &key,
+                                        signatures,
+                                        &declared_aliases,
+                                        &mut bodies,
+                                    )?;
+                                }
+                            }
+                            AnnotationKind::Implementation { interface, items } => {
+                                // Mirrors `typed_lower::lower_implementation`'s
+                                // `owner` derivation exactly, so the body key
+                                // built here lands on the same signature key
+                                // `ImplMethodBinding::Fresh` already
+                                // registered. `MethodBinding::Reference`
+                                // (`Alias`) methods point at an existing
+                                // function's body and must not get a second
+                                // one lowered here.
+                                let interface_type = lower_type(
+                                    interface,
+                                    &generics,
+                                    input.alias,
+                                    &declared_aliases,
+                                )
+                                .with_context(|| {
+                                    format!("lowering typed implementation on `{definition_key}`")
+                                })?;
+                                let (interface_name, _) = named_application(&interface_type)
+                                    .with_context(|| {
+                                        format!(
+                                            "lowering typed implementation on `{definition_key}`"
+                                        )
+                                    })?;
+                                let owner = format!(
+                                    "{}.{}",
+                                    unqualify(input.alias, &definition_key),
+                                    unqualify(input.alias, &interface_name)
+                                );
+                                for item in items {
+                                    let ImplItem::Method {
+                                        binding: MethodBinding::Function(function),
+                                        ..
+                                    } = item
+                                    else {
+                                        continue;
+                                    };
+                                    let key = qualify(
+                                        input.alias,
+                                        &format!("{owner}.{}", function.name.value),
+                                    );
+                                    lower_function(
+                                        input.alias,
+                                        input.module,
+                                        function,
+                                        &key,
+                                        signatures,
+                                        &declared_aliases,
+                                        &mut bodies,
+                                    )?;
+                                }
+                            }
+                            AnnotationKind::Doc(_) | AnnotationKind::Where(_) => {}
                         }
                     }
                 }
@@ -2926,6 +2995,63 @@ mod tests {
         assert_eq!(
             bodies.function_origin("copy").unwrap().document,
             DocumentId::from_raw(20)
+        );
+    }
+
+    #[test]
+    fn lowers_fresh_impl_method_bodies_but_not_aliased_ones() {
+        // `box` implements two interfaces: `display.show` is a `Fresh`
+        // inline method (its own `(fn ...)`, no standalone declaration) and
+        // `closeable.close` is an `Alias` to the standalone `close-box`.
+        // Only the `Fresh` method needs (and gets) a body registered under
+        // its own owner-derived key; the `Alias` method's body lives under
+        // `close-box`'s own key, already handled by the `TopLevel::Function`
+        // arm, and must not be duplicated.
+        let source = module(
+            r#"(def display (interface (show (fn-type (self) str))))
+(def closeable (interface (close (fn-type (self) str))))
+(fn close-box ((value self)) str (do (return "closed")))
+(def box (record (value str))
+  impls: ((impl display methods: ((method show (fn show-box ((value self)) str (do (return "box"))))))
+          (impl closeable methods: ((method close close-box)))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+
+        // The staged key is owner + the inline function's *own* name
+        // (`show-box`), not the interface method name (`show`) -- matching
+        // `typed_lower::lower_implementation`'s `ImplMethodBinding::Fresh(
+        // lower_function(..., function, &owner, ...))`, where `function` is
+        // the inline `(fn show-box ...)` node.
+        assert!(
+            signatures.functions.contains_key("box.display.show-box"),
+            "signature tier should have registered the fresh method's key, got {:?}",
+            signatures.functions.keys().collect::<Vec<_>>()
+        );
+        let FunctionBody::User { statements } = &bodies.functions["box.display.show-box"] else {
+            panic!("expected a lowered user body for the fresh impl method");
+        };
+        assert!(matches!(statements[0], Statement::Return(_)));
+
+        assert!(
+            !bodies.functions.contains_key("box.closeable.close-box"),
+            "an aliased method must not get a second body registered under the impl's own key"
+        );
+        assert!(
+            bodies.functions.contains_key("close-box"),
+            "the standalone function the alias points at keeps its own body"
+        );
+
+        let signature_keys: std::collections::BTreeSet<_> =
+            signatures.functions.keys().cloned().collect();
+        let body_keys: std::collections::BTreeSet<_> = bodies.functions.keys().cloned().collect();
+        assert_eq!(
+            signature_keys, body_keys,
+            "materialize_typed_functions's signature/body set check must now pass for this module"
         );
     }
 
