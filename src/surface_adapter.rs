@@ -767,6 +767,9 @@ impl<'a> Converter<'a> {
     /// parameters (and every reference to them in its body), which would
     /// be considerably riskier. The real function keeps its own names
     /// untouched; only the thin shim uses the canonical ones.
+    // (helper functions `close_over_self`/`substitute_self_type`/
+    // `substitute_self_member` are defined below this impl block)
+
     fn impl_method_value(
         &mut self,
         owner: &str,
@@ -809,7 +812,19 @@ impl<'a> Converter<'a> {
                     );
                 }
                 let synthetic = self.fresh_name(&format!("impl-{owner}-{iface_name}-{method}"));
-                let value = self.function_envelope(inline)?;
+                // The synthesized helper is spliced in as a bare top-level
+                // `$function` entry (`self.extra`), not nested inside an
+                // `=impl:`/`=defs:` annotation. Legacy's own semantic check
+                // (`E-SELF-001`) only allows the bare `self` type placeholder
+                // *inside* that structural nesting, so an inline method
+                // written with `self` typed parameters/return (the ordinary,
+                // near-universal way to spell "the receiver" or "returns the
+                // receiver's own type") must have `self` closed over the
+                // concrete `owner` type before conversion -- there is no
+                // structural context left for legacy to infer it from once
+                // flattened.
+                let closed = close_over_self(inline, owner);
+                let value = self.function_envelope(&closed)?;
                 self.extra.push((synthetic.clone(), value));
                 let names = inline
                     .parameters
@@ -828,15 +843,48 @@ impl<'a> Converter<'a> {
             );
         }
 
-        let (parameters, result) = {
-            let (p, r) = self.interface_member(iface_name, method)?;
-            (p.to_vec(), r.clone())
+        // The shim's exposed parameter/result types must come from wherever
+        // they were actually *written*, not from the interface's own member
+        // declaration. An imported interface's member types are captured
+        // verbatim from its declaring module (`collect_local_signatures`
+        // never requalifies them), so a bare name in that declaration (e.g.
+        // `context`, `option`) means a name local to *that* module -- not to
+        // `owner`'s module. Reusing them unmodified here would silently
+        // reinterpret them relative to the wrong import graph: a real bug
+        // this fixed (an `E-IMPL-005` mismatch on `fs.fs-error`'s `context`
+        // method, whose declared return type `(option.option error-lib
+        // .context)` uses `fs.vibra`'s own aliases and was being replaced by
+        // `error.vibra`'s differently-qualified, differently-aliased
+        // declaration of the same member).
+        //
+        // An inline method's own parameters/return type are already
+        // correctly qualified relative to `owner`'s module (they are
+        // literally written there), so use those directly. A referenced
+        // function is rejected above if generic (E-ADAPT-038), so a
+        // non-generic reference's own declared shape is exactly as
+        // trustworthy -- but the adapter does not currently retain full type
+        // information for arbitrary resolved calls (`CallSignature` tracks
+        // only names/arity, not types), so that path still falls back to the
+        // interface's declared shape pending that extension.
+        let (parameters, result): (Vec<TypeExpr>, TypeExpr) = match binding {
+            MethodBinding::Function(inline) => (
+                inline.parameters.iter().map(|p| p.ty.clone()).collect(),
+                inline.return_type.clone(),
+            ),
+            MethodBinding::Reference(_) => {
+                let (p, r) = self.interface_member(iface_name, method)?;
+                (p.to_vec(), r.clone())
+            }
         };
+        // Same flattening problem as the synthesized helper above: this
+        // shim is also a bare top-level `$function` entry, so any bare
+        // `self` in the exposed parameter/result types (from either source)
+        // must be closed over `owner` here too.
         let param_type_values = parameters
             .iter()
-            .map(|t| self.type_value(t))
+            .map(|t| self.type_value(&substitute_self_type(t, owner)))
             .collect::<Result<Vec<_>>>()?;
-        let return_value = self.type_value(&result)?;
+        let return_value = self.type_value(&substitute_self_type(&result, owner))?;
 
         let mut fn_map = Mapping::new();
         match arg_names.len() {
@@ -1324,6 +1372,21 @@ impl<'a> Converter<'a> {
 
     // ---------------- Calls ----------------
 
+    /// Whether `callee` (e.g. `fs.writable.write-string`) names a method of
+    /// a known `$interface` type reachable from this module's resolved
+    /// signature index -- i.e. whether legacy's
+    /// `reject_iface_nested_call_bundle` will apply its sibling-key shape
+    /// requirement to a multi-argument call to it (see
+    /// [`Self::named_call_value`]). Inherent (`=defs:`) methods are not
+    /// interfaces and are unaffected: `self.sig.interfaces` only ever
+    /// contains genuine `$interface` type declarations
+    /// (`collect_local_signatures`).
+    fn is_interface_dispatch_call(&self, callee: &str) -> bool {
+        callee
+            .rsplit_once('.')
+            .is_some_and(|(interface, _method)| self.sig.interfaces.contains_key(interface))
+    }
+
     fn call_value(&mut self, callee: &str, args: &[AstExpr]) -> Result<Value> {
         if !callee.contains('.') {
             if let Some((_, arity)) = crate::lower::typed_primitive_op(callee) {
@@ -1403,6 +1466,28 @@ impl<'a> Converter<'a> {
                 1 => {
                     let v = self.expr_value(&value_args[0])?;
                     Ok(single_dollar(callee, v))
+                }
+                _ if self.is_interface_dispatch_call(callee) => {
+                    // Legacy's `reject_iface_nested_call_bundle`
+                    // (`src/lower.rs`) requires a multi-argument interface
+                    // dispatch call to spell its dispatch value as the
+                    // callee's own payload, with every other argument as a
+                    // *sibling* key at the same mapping level as the callee
+                    // -- never all bundled into one mapping nested under the
+                    // callee. `tools/corpus-migrator`'s `named_call`
+                    // reconstructs exactly this sibling shape back into an
+                    // ordinary positional call, confirming it as the
+                    // canonical legacy spelling for this construct, not the
+                    // generic per-callee-name-bundle shape ordinary
+                    // (non-interface) multi-argument calls use.
+                    let primary = self.expr_value(&value_args[0])?;
+                    let mut m = Mapping::new();
+                    m.insert(Value::String(format!("${callee}")), primary);
+                    for (name, expr) in sig.arg_names[1..].iter().zip(&value_args[1..]) {
+                        let v = self.expr_value(expr)?;
+                        m.insert(Value::String(name.clone()), v);
+                    }
+                    Ok(Value::Mapping(m))
                 }
                 _ => {
                     let mut m = Mapping::new();
@@ -1890,6 +1975,122 @@ impl<'a> Converter<'a> {
             }
         }
         Ok((key, Value::Mapping(m)))
+    }
+}
+
+/// Clone `function` with every bare `self` type reference (in its parameter
+/// and return types) closed over the concrete `owner` type name. Used only
+/// for [`Converter::impl_method_value`]'s synthesized helper function --
+/// see that call site for why closing over `self` is necessary there.
+fn close_over_self(function: &Function, owner: &str) -> Function {
+    let mut function = function.clone();
+    for parameter in &mut function.parameters {
+        parameter.ty = substitute_self_type(&parameter.ty, owner);
+    }
+    function.return_type = substitute_self_type(&function.return_type, owner);
+    function
+}
+
+/// Recursively replace the bare `self` type placeholder with the concrete
+/// `owner` type name. `self` is reserved syntax meaning "the type
+/// implementing this interface/impl", valid in the surface grammar only
+/// inside an `$interface`/`=defs`/`=impl` YAML context (legacy's
+/// `E-SELF-001`). [`Converter::impl_method_value`] flattens both its
+/// synthesized shim and its synthesized helper function into bare
+/// top-level `$function` entries -- structurally outside any
+/// `=impl:`/`=defs:` nesting -- so any `self` they carry must already be a
+/// closed, concrete type by the time they are converted; there is no
+/// structural context left for legacy to resolve it from.
+fn substitute_self_type(ty: &TypeExpr, owner: &str) -> TypeExpr {
+    let value = match &ty.value {
+        TypeExprKind::Named(name) if name == "self" => TypeExprKind::Named(owner.to_string()),
+        TypeExprKind::Named(name) => TypeExprKind::Named(name.clone()),
+        TypeExprKind::Application {
+            constructor,
+            arguments,
+        } => TypeExprKind::Application {
+            constructor: constructor.clone(),
+            arguments: arguments
+                .iter()
+                .map(|argument| substitute_self_type(argument, owner))
+                .collect(),
+        },
+        TypeExprKind::Record(members) => TypeExprKind::Record(
+            members
+                .iter()
+                .map(|member| substitute_self_member(member, owner))
+                .collect(),
+        ),
+        TypeExprKind::Tuple(items) => TypeExprKind::Tuple(
+            items
+                .iter()
+                .map(|item| substitute_self_type(item, owner))
+                .collect(),
+        ),
+        TypeExprKind::Array(inner) => {
+            TypeExprKind::Array(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::Map(key, value) => TypeExprKind::Map(
+            Box::new(substitute_self_type(key, owner)),
+            Box::new(substitute_self_type(value, owner)),
+        ),
+        TypeExprKind::Union(items) => TypeExprKind::Union(
+            items
+                .iter()
+                .map(|item| substitute_self_type(item, owner))
+                .collect(),
+        ),
+        TypeExprKind::Enum(members) => TypeExprKind::Enum(
+            members
+                .iter()
+                .map(|member| substitute_self_member(member, owner))
+                .collect(),
+        ),
+        TypeExprKind::Interface(members) => TypeExprKind::Interface(
+            members
+                .iter()
+                .map(|member| substitute_self_member(member, owner))
+                .collect(),
+        ),
+        TypeExprKind::Function { parameters, result } => TypeExprKind::Function {
+            parameters: parameters
+                .iter()
+                .map(|parameter| substitute_self_type(parameter, owner))
+                .collect(),
+            result: Box::new(substitute_self_type(result, owner)),
+        },
+        TypeExprKind::Newtype(inner) => {
+            TypeExprKind::Newtype(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::Mutable(inner) => {
+            TypeExprKind::Mutable(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::Reference(inner) => {
+            TypeExprKind::Reference(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::MutableReference(inner) => {
+            TypeExprKind::MutableReference(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::Intersect(items) => TypeExprKind::Intersect(
+            items
+                .iter()
+                .map(|item| substitute_self_type(item, owner))
+                .collect(),
+        ),
+        other => other.clone(),
+    };
+    TypeExpr {
+        value,
+        span: ty.span,
+        origin: ty.origin.clone(),
+    }
+}
+
+fn substitute_self_member(member: &TypeMember, owner: &str) -> TypeMember {
+    TypeMember {
+        name: member.name.clone(),
+        ty: substitute_self_type(&member.ty, owner),
+        span: member.span,
     }
 }
 
