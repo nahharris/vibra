@@ -2573,37 +2573,29 @@ fn bool_literal_is_rejected_for_non_bool_arg() {
 fn non_generic_multi_arg_call_rejects_unknown_key() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+    // A multi-arg call's extra unrecognized `typo:` key has no positional
+    // equivalent: positional calls are arity-checked against the callee's
+    // parameter list as a property of the call form itself, so an extra
+    // value operand is an ordinary arity mismatch (E-ADAPT-026), caught
+    // while adapting the call, rather than legacy's dedicated "unexpected
+    // key" lowering check -- same rule (extraneous call input is rejected),
+    // earlier enforcement point.
     std::fs::write(
         &entry,
-        r#"join-ish:
-  $function:
-    left: $str
-  args:
-    right: $str
-  return: $void
-  do:
-    - $wasm:
-        import:
-          module: wasi_snapshot_preview1
-          name: fd_sync
-        args:
-          - $const.1
-main:
-  $function: $void
-  return: $void
-  do:
-      - $join-ish:
-          left: "a"
-          right: "b"
-          typo: "ignored"
+        r#"(fn join-ish ((left str) (right str)) void
+  (do (wasm import: (import "wasi_snapshot_preview1" "fd_sync") args: ((const 1)))))
+(fn main () void (do (join-ish "a" "b" "ignored")))
 "#,
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        err.contains("unexpected key `typo` in call `$join-ish`"),
+        err.contains("E-ADAPT-026") && err.contains("join-ish"),
         "expected unexpected key rejection, got: {err}"
     );
 }
@@ -2612,34 +2604,24 @@ main:
 fn non_generic_single_arg_named_call_rejects_unknown_key() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+    // See the comment on `non_generic_multi_arg_call_rejects_unknown_key`:
+    // an extra call operand is now an ordinary positional arity mismatch.
     std::fs::write(
         &entry,
-        r#"take-text:
-  $function:
-    x: $str
-  return: $void
-  do:
-    - $wasm:
-        import:
-          module: wasi_snapshot_preview1
-          name: fd_sync
-        args:
-          - $const.1
-main:
-  $function: $void
-  return: $void
-  do:
-      - $take-text:
-          x: "ok"
-          typo: "ignored"
+        r#"(fn take-text ((x str)) void
+  (do (wasm import: (import "wasi_snapshot_preview1" "fd_sync") args: ((const 1)))))
+(fn main () void (do (take-text "ok" "ignored")))
 "#,
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        err.contains("unexpected key `typo` in call `$take-text`"),
+        err.contains("E-ADAPT-026") && err.contains("take-text"),
         "expected unexpected key rejection, got: {err}"
     );
 }
@@ -2650,23 +2632,9 @@ fn single_arg_constructor_shorthand_still_lowers() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"maybe:
-  $enum:
-    some: $str
-    none: $void
-take-maybe:
-  $function:
-    x: $maybe
-  return: $void
-  do:
-    - $let:
-        ok: true
-main:
-  $function: $void
-  return: $void
-  do:
-      - $take-maybe:
-          $maybe.some: "value"
+        r#"(def maybe (enum (some str) (none void)))
+(fn take-maybe ((x maybe)) void (do (let ok true)))
+(fn main () void (do (take-maybe (maybe.some "value"))))
 "#,
     )
     .unwrap();
@@ -2689,21 +2657,9 @@ fn generic_call_value_arg_must_unify_with_substituted_type() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-identity:
-  $function:
-    input: $t
-  return: $t
-  do:
-      - $return: $args.input
-  =where: {{t: []}}
-main:
-  $function: $void
-  return: $void
-  do:
-      - $identity: "hi"
-        t: $int64
+            r#"(import io "{io}")
+(fn identity ((input t)) t (do (return input)) where: ((t)))
+(fn main () void (do (identity int64 "hi")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2723,19 +2679,9 @@ fn user_fn_non_void_return_requires_return_statement() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-bad:
-  $function:
-    input: $int64
-  return: $int64
-  do:
-      - $io.println: "nope"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "x"
+            r#"(import io "{io}")
+(fn bad ((input int64)) int64 (do (io.println "nope")))
+(fn main () void (do (io.println "x")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2759,30 +2705,19 @@ fn user_fn_imported_with_user_body_runs() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &helper,
-        r#"echo-int:
-  $function:
-    input: $int64
-  return: $int64
-  do:
-      - $return: $args.input
+        r#"(fn echo-int ((input int64)) int64 (do (return input)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"h:
-  $import: "{h}"
-io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          v:
-            $h.echo-int: 42
-      - $io.println: "z"
+            r#"(import h "{h}")
+(import io "{io}")
+(fn main () void
+  (do
+    (let v (h.echo-int 42))
+    (io.println "z")))
 "#,
             h = helper.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -2801,28 +2736,15 @@ fn generic_stdlib_wasm_wrapper_lowers() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"flush-generic:
-  $function:
-    _: $t
-  return: $void
-  do:
-      - $let:
-          ok: true
-  =where: {t: []}
+        r#"(fn flush-generic ((value t)) void (do (let ok true)) where: ((t)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"lg:
-  $import: "{lg}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $lg.flush-generic: 0
-        t: $int64
+            r#"(import lg "{lg}")
+(fn main () void (do (lg.flush-generic int64 0)))
 "#,
             lg = lib.display().to_string().replace('\\', "/"),
         ),
