@@ -232,6 +232,34 @@ fn expand_compile_time_data(
     Ok(embedded)
 }
 
+/// Expand the compile-time `embed` and `template` forms of a single module,
+/// resolving its package root from `module_path`.
+///
+/// [`load_surface_program`] runs this over a whole program that it read from
+/// disk. Tooling that already holds an in-memory [`Module`] — the corpus
+/// migration validator, for one — needs the same expansion without going back
+/// through the loader, otherwise it reports files as failing on unexpanded
+/// compile-time data that the compiler handles perfectly well.
+pub fn expand_module_compile_time_data(
+    module: &mut Module,
+    module_path: &Path,
+) -> Result<BTreeMap<PathBuf, String>> {
+    let package_root = crate::project::find_project_for_file(module_path)?
+        .map(|project| project.root)
+        .unwrap_or_else(|| module_path.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let package_root = fs::canonicalize(&package_root).with_context(|| {
+        format!(
+            "E-EMBED-002: resolve package root {}",
+            package_root.display()
+        )
+    })?;
+    let mut embedded = BTreeMap::new();
+    for form in &mut module.forms {
+        expand_top_level(form, module_path, &package_root, &mut embedded)?;
+    }
+    Ok(embedded)
+}
+
 fn expand_top_level(
     form: &mut TopLevel,
     module_path: &Path,
