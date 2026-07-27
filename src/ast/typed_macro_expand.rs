@@ -2198,9 +2198,16 @@ fn annotate_generated_expr(
             annotate_generated_expr(end, definition, call, state)?;
             annotate_generated_expr(step, definition, call, state)?;
         }
-        ExprKind::Convert { value, into, .. }
-        | ExprKind::Cast { value, into }
-        | ExprKind::PolicyNarrow { value, into } => {
+        ExprKind::Convert {
+            value,
+            into,
+            fallback,
+        } => {
+            annotate_generated_expr(value, definition, call, state)?;
+            annotate_generated_type(into, definition, call, state)?;
+            annotate_generated_origin(&mut fallback.origin, definition, call, state)?;
+        }
+        ExprKind::Cast { value, into } | ExprKind::PolicyNarrow { value, into } => {
             annotate_generated_expr(value, definition, call, state)?;
             annotate_generated_type(into, definition, call, state)?;
         }

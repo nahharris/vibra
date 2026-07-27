@@ -12,9 +12,9 @@ Its "Implementation and PR plan" defines nine steps; this file tracks them.
 | # | Step | State |
 |---|------|-------|
 | 1 | Reader, CST, spans, formatter | Done — #153, #157, #161, #166 |
-| 2 | Lowering and compiler | **In progress** — #159, #162, #164, #167, #169, #170, #172, #173, #176, #177 merged |
+| 2 | Lowering and compiler | **Typed frontend complete** — through #189; corpus body-valid 57/58 |
 | 3 | Macros and origins | Done — #165 |
-| 4 | Language corpus | **Blocked on step 2** — #174 merged, migrator dry-run only |
+| 4 | Language corpus | **Next, and irreversible** — migrator dry-run only, needs an opt-in write mode |
 | 5 | Projects and packages | Done — #158, #160 |
 | 6 | LSP and rewrites | Index landed (#178); repoint blocked on step 4 |
 | 7 | Generic editor removal | Partly — #163 removed the public surface; `src/code/` internals remain |
@@ -64,15 +64,23 @@ is a repoint rather than a rewrite.
 - Primitives lose the `$` sigil. The spec spells them bare — `(add 1 1)`,
   `equal`, `not` — while the legacy table at `src/lower.rs:7340` still keys on
   `"$add"` and peers.
-- **Primitive name resolution (decided here, needs a spec amendment).** Dropping
-  the sigil makes `add` collidable with a user function, which `$add` never was,
-  and the spec lists primitives under "ordinary call syntax" without giving a
-  precedence rule. Rule adopted: an *unqualified* call head matching a primitive
-  name resolves to the primitive, declaring a function with a primitive name is
-  a diagnostic, and a *qualified* head (`module.add`) is never a primitive.
-  Verified safe against the corpus — no `.vibra` source declares a symbol
-  colliding with any of the 22 primitive names (the apparent `and`/`or` hits are
-  substrings of identifiers and prose in comments).
+- **Primitive name resolution** (spec amended in #177, corrected in #180).
+  Dropping the sigil makes `add` collidable with a user function, which `$add`
+  never was. Rule: an *unqualified* call head matching a primitive name resolves
+  to the primitive, and a *qualified* head (`module.add`) never does.
+  Declaring a function named after a primitive is **permitted**.
+
+  The first version of this rule rejected such declarations, on the stated
+  grounds that they would be "permanently unreachable", and claimed the corpus
+  had been verified free of collisions. Both were wrong. `option.and`,
+  `option.or`, `result.and`, and `result.or` are real declarations reached
+  through their qualified names, and the collision check had dismissed the grep
+  hits as identifier substrings without opening the files. The rejection blocked
+  typed signatures for those two stdlib modules and every module importing them
+  — 36 of 58 corpus files. Fixing it moved `signature-valid` 22/58 to 43/58.
+
+  Lesson worth keeping: a claim of "verified against the corpus" means the
+  tiered validator was run, not that a grep looked clean.
 
 ## Architecture note (important, and easy to get wrong)
 
@@ -92,21 +100,33 @@ semantics, not rewriting the type system.
 
 ### Step 2 — typed body lowering
 
-`Expr::Primitive` is **done** (#177): all 22 `PrimitiveOp` variants lower and
-validate, with the sigil-free name table the contract mandates, alongside the
-untouched legacy `$`-keyed table. That was the blocker — nothing non-trivial
-executed without it.
+Complete for every construct the corpus uses. Landed in order:
 
-Still **zero** coverage in `src/typed_body.rs`:
+| Construct | PR |
+|-----------|----|
+| `Expr::Primitive`, all 22 `PrimitiveOp` variants | #177 |
+| declarations named after primitives permitted | #180 |
+| `Self` substituted before impl conformance | #182 |
+| `Expr::EnumConstructor`, `Expr::If`, `Expr::PolicyNarrow`, `Statement::Spawn` (and `Statement::Join` validation) | #183 |
+| wasm host-import bodies | #184 |
+| interface method dispatch | #187 |
+| `ExprKind::Convert` checked conversion | #189 |
 
-- `Expr::EnumConstructor`
-- `Expr::If` (the expression form; `Statement::If` is covered)
-- `Expr::PolicyNarrow`
-- `Statement::Spawn` (pairs with the already-covered `Statement::Join`)
+Two details worth not relearning:
 
-Also: generic functions are rejected at `src/typed_body.rs:147`, and
-`ExprKind::Convert` still bails pending explicit fallback semantics (legacy has
-`conversion_fallback_fits` and `parse_checked_conversion` in `lower.rs`).
+- `Convert` does not route through generic `PrimitiveOp` dispatch. The
+  sigil-free primitive table intentionally excludes it, since `convert` has its
+  own surface form, so it needs a dedicated `Expr::Primitive { op: Convert }`
+  arm placed before the generic one. Its `fallback` is now `Spanned<Literal>`;
+  it previously discarded the parser's span and so had no origin for
+  `OriginCursor` to consume.
+- Interface and inherent dispatch are the same mechanism. `error.error.kind`
+  and `fs.writable.write-string` both go through `$interface` declarations.
+  Receiver types come from a static pre-pass that uses `substitute_type` and
+  **not** `normalize_type_ref` — normalizing inlines the nominal name away
+  before `ImplKey` can use it.
+
+Generic functions remain rejected at `src/typed_body.rs:147`.
 
 Port from the legacy path rather than reimplementing, and reuse
 `src/type_semantics.rs` for anything type- or policy-relational.
@@ -124,13 +144,16 @@ converted corpus is unreadable to the legacy YAML compiler, so `vibra test`
 breaks the instant it lands unless the typed path fully compiles and runs the
 corpus. This is why the formatter cutover was deliberately kept out of `main`.
 
-**Do not read the migrator's headline count as readiness.** Its `validate()`
-(`tools/corpus-migrator/src/main.rs:1325`) runs only `vibra::syntax::parse` plus
-`vibra::ast::lower_document`. That proves the output parses into a well-shaped
-surface AST; it never runs signature or body lowering. The README wording is
-accurate — the *number* is what misleads. Deepening it into honestly-labeled
-tiers (surface / signatures / bodies), with ranked per-tier failure reasons as
-the remaining work-list, is tracked separately.
+**Readiness is measured in tiers** (#181, #185, #188). The validator reports
+`surface-valid`, `signature-valid`, and `body-valid` as a funnel, each tier run
+only on files passing the one above, with ranked per-tier failure reasons as the
+remaining work-list. It previously reported a single conflated `typed-valid:
+58/58` that measured surface parsing alone, which read as cutover readiness when
+body readiness was 9%.
+
+Read the failure reasons, not just the count. A count can stay flat while real
+progress happens, because files advance to a deeper blocker — that is exactly
+what #183 looked like at first glance.
 
 Verified already correct: the migrator's `sym()` (line 1351) strips the `$`
 sigil, so `$add` emits as bare `(add ...)`, matching the contract and #177.
@@ -157,8 +180,8 @@ Measured against current `main`:
 | Gate | Current | Target |
 |------|---------|--------|
 | `E-YAML-*` diagnostics | 21 references | 0 |
-| `.vibra.yaml` references | 21 | 0 |
-| `serde_yaml` in `src/` | 65 references | 0 (embed decoder only) |
+| `.vibra.yaml` references | 23 | 0 |
+| `serde_yaml` in `src/` | 66 references | 0 (embed decoder only) |
 | `yaml-edit` production dependency | present (`Cargo.toml:33`) | absent |
 | `yaml` crate keyword | present (`Cargo.toml:10`) | removed |
 | `src/yaml_subset.rs` | 240 lines | deleted |

@@ -9,10 +9,10 @@ use crate::ast::{
 };
 use crate::body_semantics::{validate_function_body, validate_task_handles};
 use crate::lower::{
-    infer_expr_type, nominal_type_key_for_module_scope, primitive_integer, primitive_numeric,
-    resolve_iface_key_for_scope, typed_primitive_op, Call, EnumDef, Expr, FunctionBody,
-    FunctionSig, ImplKey, ImplMethodBinding, ImportTarget, LetValue, MatchArm, Pattern,
-    PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef, WasmArgSpec,
+    conversion_fallback_fits, infer_expr_type, nominal_type_key_for_module_scope,
+    primitive_integer, primitive_numeric, resolve_iface_key_for_scope, typed_primitive_op, Call,
+    EnumDef, Expr, FunctionBody, FunctionSig, ImplKey, ImplMethodBinding, ImportTarget, LetValue,
+    MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef, WasmArgSpec,
 };
 use crate::type_semantics::{
     capability_body, policy_body, policy_type_is_subset, substitute_type, type_compatible,
@@ -863,6 +863,45 @@ fn validate_expr(
                 step: Box::new(step),
             }
         }
+        // `convert` has its own envelope, not generic `PrimitiveOp` dispatch
+        // (see `typed_primitive_valid_for`): source and target types need
+        // not match, and the second argument is a fallback literal checked
+        // for exact fit rather than an operand of the same type. Ported from
+        // legacy `parse_checked_conversion`/`conversion_fallback_fits` in
+        // `lower.rs`. `return_type` already holds the explicit `into` type
+        // lowered in `lower_expr`; only `operand_type` is a placeholder here.
+        Expr::Primitive {
+            op: PrimitiveOp::Convert,
+            args,
+            return_type: target,
+            ..
+        } => {
+            let [source, fallback] = args.as_slice() else {
+                bail!(
+                    "typed `convert` requires exactly a source expression and a fallback literal"
+                );
+            };
+            let source = validate_expr(source, locals, constants, signatures, context, origins)?;
+            let operand_type = infer(&source, locals, constants, signatures, context)?;
+            let fallback =
+                validate_expr(fallback, locals, constants, signatures, context, origins)?;
+            if !primitive_numeric(&operand_type) || !primitive_numeric(target) {
+                bail!(
+                    "E-OP-001: typed `convert` source and target must be primitive numeric types, got {operand_type:?} and {target:?}"
+                );
+            }
+            if !conversion_fallback_fits(&fallback, target) {
+                bail!(
+                    "E-OP-001: typed `convert` fallback must be a literal exactly representable by {target:?}"
+                );
+            }
+            Expr::Primitive {
+                op: PrimitiveOp::Convert,
+                args: vec![source, fallback],
+                operand_type,
+                return_type: target.clone(),
+            }
+        }
         Expr::Primitive { op, args, .. } => {
             let args: Vec<Expr> = args
                 .iter()
@@ -1458,6 +1497,16 @@ fn collect_expr_children(expression: &AstExpr, origins: &mut Vec<Origin>) {
         | ExprKind::ReferenceOf(value)
         | ExprKind::Cast { value, .. }
         | ExprKind::PolicyNarrow { value, .. } => collect_expr_origin(value, origins),
+        // `convert` lowers to `Expr::Primitive { args: [source, fallback], .. }`;
+        // `validate_expr`'s dedicated Convert arm recurses into both, so both
+        // need an origin -- the source's full subtree, and the fallback's
+        // own leaf origin (a literal has no children of its own).
+        ExprKind::Convert {
+            value, fallback, ..
+        } => {
+            collect_expr_origin(value, origins);
+            origins.push(fallback.origin.clone());
+        }
         ExprKind::Range(start, end, step) => {
             collect_expr_origin(start, origins);
             collect_expr_origin(end, origins);
@@ -1820,8 +1869,22 @@ fn lower_expr(
                 );
             }
         }
-        ExprKind::Convert { .. } => {
-            bail!("typed `convert` lowering requires explicit fallback semantics")
+        ExprKind::Convert {
+            value,
+            into,
+            fallback,
+        } => {
+            let target = lower_type(into, generics, module_alias, declared_aliases)?;
+            Expr::Primitive {
+                op: PrimitiveOp::Convert,
+                args: vec![lower(value)?, Expr::Value(lower_literal(&fallback.value))],
+                // Placeholder: the operand type is inferred in
+                // `validate_expr`, once locals/constants are available. The
+                // return type is already known from the explicit `into`
+                // annotation.
+                operand_type: TypeRef::Void,
+                return_type: target,
+            }
         }
         ExprKind::Embed { .. } | ExprKind::Template { .. } => {
             bail!("typed compile-time expression lowering is not active")
@@ -3326,6 +3389,148 @@ mod tests {
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
         let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
         assert!(error.contains("totally-unknown-fn"), "{error}");
+    }
+
+    // ---- Expr::Primitive { op: Convert } ----
+    //
+    // `convert` is not part of the sigil-free primitive table
+    // (`typed_primitive_op` does not list it, and `typed_primitive_valid_for`
+    // treats it as unreachable): it has its own surface production, `(convert
+    // value Type fallback)`, ported from legacy `parse_checked_conversion`
+    // and `conversion_fallback_fits` in `lower.rs`.
+
+    #[test]
+    fn convert_lowers_a_valid_narrowing_conversion_with_correct_operand_and_return_types() {
+        let source =
+            module("(fn narrow ((value int64)) int32 (do (return (convert value int32 5))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let Expr::Primitive {
+            op,
+            operand_type,
+            return_type,
+            args,
+        } = primitive_return(&functions, "narrow")
+        else {
+            unreachable!()
+        };
+        assert_eq!(op, PrimitiveOp::Convert);
+        assert_eq!(operand_type, TypeRef::Int64);
+        assert_eq!(return_type, TypeRef::Int32);
+        assert_eq!(args.len(), 2);
+        assert!(
+            matches!(args[1], Expr::Value(RuntimeValue::Int(5))),
+            "{:?}",
+            args[1]
+        );
+    }
+
+    #[test]
+    fn convert_fallback_that_does_not_fit_target_is_rejected() {
+        let source =
+            module("(fn narrow ((value int64)) int8 (do (return (convert value int8 999))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-OP-001"), "{error}");
+        assert!(error.contains("exactly representable"), "{error}");
+    }
+
+    #[test]
+    fn convert_rejects_non_numeric_source_or_target() {
+        for source in [
+            "(fn bad ((value bool)) int32 (do (return (convert value int32 0))))",
+            "(fn bad ((value int64)) bool (do (return (convert value bool 0))))",
+        ] {
+            let source = module(source);
+            let inputs = [TypedModuleInput {
+                alias: "",
+                module: &source,
+            }];
+            let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+            let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+            let error = format!(
+                "{:#}",
+                materialize_typed_functions(&signatures, &bodies).unwrap_err()
+            );
+            assert!(error.contains("E-OP-001"), "{error}");
+            assert!(error.contains("primitive numeric"), "{error}");
+        }
+    }
+
+    #[test]
+    fn convert_f32_narrowing_round_trip_accepts_exact_fallback_and_rejects_lossy_fallback() {
+        // 1.5 is exactly representable in f32, so narrowing and widening it
+        // back reproduces the original f64 bit pattern.
+        let exact = module(
+            "(fn narrow ((value float64)) float32 (do (return (convert value float32 1.5))))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &exact,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        materialize_typed_functions(&signatures, &bodies)
+            .expect("1.5 round-trips exactly through f32");
+
+        // 0.1 does not: narrowing to f32 and back yields a different f64
+        // value (0.10000000149011612), so the fallback must be rejected.
+        let lossy = module(
+            "(fn narrow ((value float64)) float32 (do (return (convert value float32 0.1))))",
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &lossy,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-OP-001"), "{error}");
+        assert!(error.contains("exactly representable"), "{error}");
+    }
+
+    #[test]
+    fn convert_executes_through_interpreter_and_wasm() {
+        let source =
+            module("(fn narrow ((value int64)) int32 (do (return (convert value int32 999))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let program = LoweredProgram {
+            statements: vec![Statement::Call(Call {
+                callee_key: "narrow".into(),
+                type_args: Vec::new(),
+                args: vec![Expr::Value(RuntimeValue::Int(5))],
+            })],
+            main_arg_bindings: Vec::new(),
+            constants: HashMap::new(),
+            functions,
+            impls: HashMap::new(),
+            warnings: Vec::new(),
+            foreign_modules: BTreeMap::new(),
+        };
+        crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        crate::wasm_backend::run_lowered(&program, &RunConfig::default()).unwrap();
     }
 
     #[test]
