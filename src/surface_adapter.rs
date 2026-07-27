@@ -65,6 +65,16 @@ pub(crate) struct LocalSignatures {
     /// it synthesizes, so unlike `calls`/`types` this stores full type
     /// information, not just a name/arity picture.
     pub(crate) interfaces: BTreeMap<String, Vec<TypeMember>>,
+    /// Bare names of every top-level `fn`/`def` declared `private` in this
+    /// module (`Visibility::Private`), independent of `calls`/`types` (which
+    /// track callability/genericity, not visibility, and `types` only ever
+    /// holds *generic* type names). Legacy encodes privacy as a literal `-`
+    /// prefix baked into the declaration's own key (`visible_key`); every
+    /// reference to a private symbol -- bare, self-qualified, or
+    /// alias-qualified -- must reproduce that literal dash to reach (or be
+    /// correctly rejected by) the same legacy entry. See
+    /// `Converter::dashify_private_reference`.
+    pub(crate) private: std::collections::BTreeSet<String>,
 }
 
 /// A module's fully resolved signature view: its own bare names, its own
@@ -79,6 +89,11 @@ pub(crate) struct ResolvedSignatures {
     calls: BTreeMap<String, CallSignature>,
     types: BTreeMap<String, Vec<String>>,
     interfaces: BTreeMap<String, Vec<TypeMember>>,
+    /// Every qualified spelling (bare, self-qualified, alias-qualified) under
+    /// which a private symbol from `LocalSignatures::private` might be
+    /// referenced, *without* its legacy dash. See
+    /// `Converter::dashify_private_reference`.
+    private_names: std::collections::BTreeSet<String>,
 }
 
 pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignatures> {
@@ -87,8 +102,14 @@ pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignature
         match form {
             TopLevel::Function(function) => {
                 insert_call_signature(&mut sigs.calls, function.name.value.clone(), function);
+                if function.visibility == Visibility::Private {
+                    sigs.private.insert(function.name.value.clone());
+                }
             }
             TopLevel::Definition(definition) => {
+                if definition.visibility == Visibility::Private {
+                    sigs.private.insert(definition.name.value.clone());
+                }
                 let params = where_param_names(&definition.annotations);
                 if !params.is_empty() {
                     sigs.types.insert(definition.name.value.clone(), params);
@@ -167,6 +188,15 @@ pub(crate) fn resolve_signatures(
     let mut calls = own_local.calls.clone();
     let mut types = own_local.types.clone();
     let mut interfaces = own_local.interfaces.clone();
+    let mut private_names: std::collections::BTreeSet<String> = own_local.private.clone();
+    for name in &own_local.private {
+        private_names.insert(format!("{own_stem}.{name}"));
+    }
+    for (alias, local) in imports {
+        for name in &local.private {
+            private_names.insert(format!("{alias}.{name}"));
+        }
+    }
     for (name, sig) in &own_local.calls {
         calls
             .entry(format!("{own_stem}.{name}"))
@@ -197,6 +227,7 @@ pub(crate) fn resolve_signatures(
         calls,
         types,
         interfaces,
+        private_names,
     }
 }
 
@@ -471,7 +502,7 @@ impl<'a> Converter<'a> {
 
     fn type_value(&mut self, ty: &TypeExpr) -> Result<Value> {
         match &ty.value {
-            TypeExprKind::Named(name) => Ok(dollar_name(name)),
+            TypeExprKind::Named(name) => Ok(dollar_name(&self.dashify_private_reference(name))),
             TypeExprKind::Application {
                 constructor,
                 arguments,
@@ -841,6 +872,20 @@ impl<'a> Converter<'a> {
                 target_arg_names.len(),
                 arg_names.len()
             );
+        }
+
+        // A qualified-symbol reference (`(method fmt box.show)`) has no
+        // legacy forwarding-shim shape at all: `src/lower.rs`'s impl-method
+        // parser (`impl_method_binding`) branches on the raw legacy `Value`
+        // itself -- a bare string `$alias.symbol` yields
+        // `ImplMethodBinding::Alias` (checked directly against the
+        // referenced function's own real signature), while *any* mapping
+        // (including a shim we might synthesize here) yields `Fresh`. There
+        // is no separate signal to carry "this was written as a reference"
+        // once the shape is a mapping, so preserving `Alias` requires
+        // emitting the bare string here rather than building a shim for it.
+        if matches!(binding, MethodBinding::Reference(_)) {
+            return Ok(dollar_name(&target_callee));
         }
 
         // The shim's exposed parameter/result types must come from wherever
@@ -1387,6 +1432,41 @@ impl<'a> Converter<'a> {
             .is_some_and(|(interface, _method)| self.sig.interfaces.contains_key(interface))
     }
 
+    /// Reproduce legacy's literal `-` privacy encoding for a *reference* to a
+    /// declaration (`LocalSignatures::private`/`ResolvedSignatures::private_names`
+    /// records every declaration's bare/self-qualified/alias-qualified
+    /// spelling *without* the dash `visible_key` bakes into the declaration
+    /// site itself). Two shapes need it:
+    ///
+    /// - a direct reference (function call, bare/qualified type name, or a
+    ///   bare enum type) -- the private segment is the reference's own last
+    ///   segment, e.g. `priv` -> `-priv`, `m.priv-t` -> `m.-priv-t`;
+    /// - an enum-constructor call `Type.tag` (or `alias.Type.tag`) -- the
+    ///   private segment is the *type*, one segment short of the full
+    ///   reference, e.g. `m.priv-e.a` -> `m.-priv-e.a`, not `m.priv-e.-a`.
+    ///
+    /// Public references pass through unchanged. This only rewrites the
+    /// *spelling*; whether the resulting dashed reference then resolves or
+    /// is correctly rejected (e.g. an importer reaching into another
+    /// module's private namespace) remains entirely `src/lower.rs`'s call.
+    fn dashify_private_reference(&self, qualified: &str) -> String {
+        fn dash_last_segment(s: &str) -> String {
+            match s.rsplit_once('.') {
+                Some((prefix, last)) => format!("{prefix}.-{last}"),
+                None => format!("-{s}"),
+            }
+        }
+        if self.sig.private_names.contains(qualified) {
+            return dash_last_segment(qualified);
+        }
+        if let Some((prefix, tag)) = qualified.rsplit_once('.') {
+            if self.sig.private_names.contains(prefix) {
+                return format!("{}.{tag}", dash_last_segment(prefix));
+            }
+        }
+        qualified.to_string()
+    }
+
     fn call_value(&mut self, callee: &str, args: &[AstExpr]) -> Result<Value> {
         if !callee.contains('.') {
             if let Some((_, arity)) = crate::lower::typed_primitive_op(callee) {
@@ -1396,11 +1476,12 @@ impl<'a> Converter<'a> {
         if let Some(sig) = self.sig.calls.get(callee).cloned() {
             return self.named_call_value(callee, &sig, args);
         }
+        let key = self.dashify_private_reference(callee);
         match args.len() {
-            0 => Ok(single_dollar(callee, Value::Null)),
+            0 => Ok(single_dollar(&key, Value::Null)),
             1 => {
                 let v = self.expr_value(&args[0])?;
-                Ok(single_dollar(callee, v))
+                Ok(single_dollar(&key, v))
             }
             n => bail!(
                 "E-ADAPT-023: call to `{callee}` with {n} arguments has no signature in the \
@@ -1455,17 +1536,18 @@ impl<'a> Converter<'a> {
                 sig.arg_names.len()
             );
         }
+        let legacy_head = self.dashify_private_reference(callee);
         if type_arity == 0 {
             return match sig.arg_names.len() {
                 0 => {
                     if !args.is_empty() {
                         bail!("E-ADAPT-027: call to `{callee}` takes no arguments");
                     }
-                    Ok(single_dollar(callee, Value::Null))
+                    Ok(single_dollar(&legacy_head, Value::Null))
                 }
                 1 => {
                     let v = self.expr_value(&value_args[0])?;
-                    Ok(single_dollar(callee, v))
+                    Ok(single_dollar(&legacy_head, v))
                 }
                 _ if self.is_interface_dispatch_call(callee) => {
                     // Legacy's `reject_iface_nested_call_bundle`
@@ -1482,7 +1564,7 @@ impl<'a> Converter<'a> {
                     // (non-interface) multi-argument calls use.
                     let primary = self.expr_value(&value_args[0])?;
                     let mut m = Mapping::new();
-                    m.insert(Value::String(format!("${callee}")), primary);
+                    m.insert(Value::String(format!("${legacy_head}")), primary);
                     for (name, expr) in sig.arg_names[1..].iter().zip(&value_args[1..]) {
                         let v = self.expr_value(expr)?;
                         m.insert(Value::String(name.clone()), v);
@@ -1495,7 +1577,7 @@ impl<'a> Converter<'a> {
                         let v = self.expr_value(expr)?;
                         m.insert(Value::String(name.clone()), v);
                     }
-                    Ok(single_dollar(callee, Value::Mapping(m)))
+                    Ok(single_dollar(&legacy_head, Value::Mapping(m)))
                 }
             };
         }
@@ -1515,7 +1597,7 @@ impl<'a> Converter<'a> {
             let v = self.expr_value(expr)?;
             m.insert(key, v);
         }
-        Ok(single_dollar(callee, Value::Mapping(m)))
+        Ok(single_dollar(&legacy_head, Value::Mapping(m)))
     }
 
     /// Reinterpret an expression written in a generic call's leading

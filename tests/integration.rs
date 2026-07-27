@@ -309,14 +309,10 @@ fn set_rejects_immutable_binding() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        count: 0
-    - $set:
-        count: 1
+        r#"(fn main () void
+  (do
+    (let count 0)
+    (set count 1)))
 "#,
     )
     .unwrap();
@@ -497,8 +493,8 @@ fn import_cycle_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let a = dir.path().join("a.vibra");
     let b = dir.path().join("b.vibra");
-    std::fs::write(&a, "io:\n  $import: ./b.vibra\n").unwrap();
-    std::fs::write(&b, "io:\n  $import: ./a.vibra\n").unwrap();
+    std::fs::write(&a, "(import io \"./b.vibra\")\n").unwrap();
+    std::fs::write(&b, "(import io \"./a.vibra\")\n").unwrap();
     let err = vibra::load::load_program(&a).unwrap_err();
     let s = err.to_string();
     assert!(
@@ -607,7 +603,7 @@ fn importer_cannot_reference_private_symbol_on_imported_module() {
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("unknown function") && err.contains("$m.priv"),
+        err.contains("unknown function") && err.contains("$m.-priv"),
         "unexpected error: {err}"
     );
 }
@@ -638,7 +634,7 @@ fn importer_cannot_reference_private_type_on_imported_module() {
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("unknown type") && err.contains("m.priv-t"),
+        err.contains("unknown type") && err.contains("m.-priv-t"),
         "unexpected error: {err}"
     );
 }
@@ -667,7 +663,7 @@ fn importer_cannot_use_private_enum_constructor_on_imported_module() {
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
-        err.contains("unknown enum reference") && err.contains("m.priv-e"),
+        err.contains("unknown enum reference") && err.contains("m.-priv-e"),
         "unexpected error: {err}"
     );
 }
@@ -1025,7 +1021,7 @@ fn rejects_legacy_variants_union_syntax() {
     // make unwritable, so this now asserts the canonical form parses.
     std::fs::write(
         &bad,
-        r#"(def maybe-text (union str void))
+        r#"(def maybe-text (union str bool))
 "#,
     )
     .unwrap();
@@ -4946,28 +4942,14 @@ fn impl_basic_interface_lowers_and_registers_method() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $record:
-    value: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $str
-        do:
-            - $return: "boxed"
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def box (record (value int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) str (do (return "boxed"))))
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -5012,31 +4994,17 @@ fn impl_method_as_ref_to_existing_defs_op_works() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $record:
-    value: $int64
-  =defs:
-    show:
-      $function:
-        x: $self
-      return: $str
-      do:
-          - $return: "shown"
-  =impl:
-    $display:
-      fmt: $box.show
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def box (record (value int64))
+  defs: (
+    (fn show ((self self)) str (do (return "shown")))
+  )
+  impls: (
+    (impl display methods: (
+      (method fmt box.show)
+    ))
+  ))
+(fn main () void (do))
 "#,
     )
     .unwrap();
