@@ -1539,27 +1539,10 @@ fn policy_narrow_rejects_widening() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"narrow-policy:
-  $policy:
-    fs-read:
-      - requirement: mandatory
-        scopes:
-          - file: ./config/app.yaml
-wide-policy:
-  $policy:
-    fs-read:
-      - requirement: mandatory
-        scopes:
-          - dir: .
-main:
-  $function:
-    policy: $narrow-policy
-  return: $void
-  do:
-    - $let:
-        widened:
-          $policy.narrow: $args.policy
-          into: $wide-policy
+        r#"(def narrow-policy (policy (fs-read (group requirement: mandatory scopes: ((file "./config/app.yaml"))))))
+(def wide-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
+(fn main ((policy narrow-policy)) void
+  (do (let widened (policy.narrow policy wide-policy))))
 "#,
     )
     .unwrap();
@@ -1583,27 +1566,10 @@ fn policy_narrow_rejects_sibling_directory_prefix_escape() {
     std::fs::write(
         &entry,
         format!(
-            r#"root-policy:
-  $policy:
-    fs-read:
-      - requirement: mandatory
-        scopes:
-          - dir: "{root}"
-sibling-policy:
-  $policy:
-    fs-read:
-      - requirement: mandatory
-        scopes:
-          - file: "{sibling}/file.txt"
-main:
-  $function:
-    policy: $root-policy
-  return: $void
-  do:
-    - $let:
-        widened:
-          $policy.narrow: $args.policy
-          into: $sibling-policy
+            r#"(def root-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{root}"))))))
+(def sibling-policy (policy (fs-read (group requirement: mandatory scopes: ((file "{sibling}/file.txt"))))))
+(fn main ((policy root-policy)) void
+  (do (let widened (policy.narrow policy sibling-policy))))
 "#,
             root = root.display().to_string().replace('\\', "/"),
             sibling = sibling.display().to_string().replace('\\', "/"),
@@ -1625,27 +1591,10 @@ fn policy_narrow_named_alias_executes_with_concrete_policy_value() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"root-policy:
-  $policy:
-    fs-read:
-      - requirement: mandatory
-        scopes:
-          - dir: .
-read-policy:
-  $policy:
-    fs-read:
-      - requirement: mandatory
-        scopes:
-          - file: ./config.yaml
-main:
-  $function:
-    policy: $root-policy
-  return: $void
-  do:
-    - $let:
-        narrowed:
-          $policy.narrow: $args.policy
-          into: $read-policy
+        r#"(def root-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
+(def read-policy (policy (fs-read (group requirement: mandatory scopes: ((file "./config.yaml"))))))
+(fn main ((policy root-policy)) void
+  (do (let narrowed (policy.narrow policy read-policy))))
 "#,
     )
     .unwrap();
@@ -1685,29 +1634,12 @@ fn main_injection_uses_declared_policy_not_broader_approval() {
     std::fs::write(
         &entry,
         format!(
-            r#"fs:
-  $import: "{fs}"
-main:
-  $function:
-    policy:
-      $policy:
-        fs-read:
-          - requirement: mandatory
-            scopes:
-              - dir: "{allowed}"
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "{secret}"
-    - $let:
-        capability:
-          $policy.narrow: $args.policy
-          into: $fs.read-capability
-    - $let:
-        text:
-          $fs.exists: $path
-          capability: $capability
+            r#"(import fs "{fs}")
+(fn main ((policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{allowed}"))))))) void
+  (do
+    (let path (fs.path.new "{secret}"))
+    (let capability (policy.narrow policy fs.read-capability))
+    (let text (fs.exists path capability))))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             allowed = allowed.display().to_string().replace('\\', "/"),
@@ -1777,29 +1709,12 @@ fn main_policy_argument_is_injected_and_authorizes_fs_read() {
     std::fs::write(
         &entry,
         format!(
-            r#"fs:
-  $import: "{fs}"
-main:
-  $function:
-    policy:
-      $policy:
-        fs-read:
-          - requirement: mandatory
-            scopes:
-              - dir: "{dir}"
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "{path}"
-    - $let:
-        capability:
-          $policy.narrow: $args.policy
-          into: $fs.read-capability
-    - $let:
-        text:
-          $fs.read-to-string: $path
-          capability: $capability
+            r#"(import fs "{fs}")
+(fn main ((policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{dir}"))))))) void
+  (do
+    (let path (fs.path.new "{path}"))
+    (let capability (policy.narrow policy fs.read-capability))
+    (let text (fs.read-to-string path capability))))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             dir = dir.path().display().to_string().replace('\\', "/"),
@@ -1839,21 +1754,9 @@ fn main_mandatory_policy_requires_full_coverage_before_body_runs() {
     std::fs::write(
         &entry,
         format!(
-            r#"fs:
-  $import: "{fs}"
-main:
-  $function:
-    policy:
-      $policy:
-        fs-read:
-          - requirement: mandatory
-            scopes:
-              - dir: "{dir}"
-  return: $void
-  do:
-    - $let:
-        path:
-          $fs.path.new: "{path}"
+            r#"(import fs "{fs}")
+(fn main ((policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{dir}"))))))) void
+  (do (let path (fs.path.new "{path}"))))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             dir = dir.path().display().to_string().replace('\\', "/"),
@@ -1890,18 +1793,11 @@ fn fs_open_read_requires_policy_argument() {
     std::fs::write(
         &entry,
         format!(
-            r#"fs:
-  $import: "{fs}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          p:
-            $fs.path.new: "{path}"
-      - $let:
-          opened:
-            $fs.open-read: $p
+            r#"(import fs "{fs}")
+(fn main () void
+  (do
+    (let p (fs.path.new "{path}"))
+    (let opened (fs.open-read p))))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             path = data.display().to_string().replace('\\', "/"),
@@ -1909,10 +1805,20 @@ main:
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    // Legacy caught a missing `capability` argument during lowering
+    // ("missing value argument `capability`"). Positional calls are now
+    // "arity checked against the signature" as a property of the call form
+    // itself (spec), so an under-supplied call to `fs.open-read` is rejected
+    // for the same reason -- a missing argument -- just earlier, while
+    // adapting the call into the legacy shape lowering itself still
+    // consumes.
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        err.contains("missing value argument `capability`"),
+        err.contains("E-ADAPT-026") && err.contains("fs.open-read"),
         "expected missing capability argument rejection, got: {err}"
     );
 }
