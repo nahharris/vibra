@@ -2231,20 +2231,9 @@ fn generic_alias_named_option_remains_valid() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"option:
-  $enum:
-    some: $t
-    none: $void
-  =where: {t: []}
-holder:
-  $record:
-    value:
-      $option:
-        t: $str
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def option (enum (some t) (none void)) where: ((t)))
+(def holder (record (value (option str))))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -2264,55 +2253,25 @@ fn result_where_ok_and_err_type_params() {
 
     std::fs::write(
         &model,
-        r#"result:
-  $enum:
-    ok: $t
-    err: $e
-  =where: {t: [], e: []}
+        r#"(def result (enum (ok t) (err e)) where: ((t) (e)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          r-ok:
-            $m.result.ok: 99
-      - $match: $r-ok
-        when:
-            - case:
-                $m.result.ok:
-                  $bind: x
-              do:
-                - $io.println: "ok"
-            - case:
-                $m.result.err:
-                  $bind: y
-              do:
-                - $io.println: $y
-      - $let:
-          r-err:
-            $m.result.err: "fail"
-      - $match: $r-err
-        when:
-            - case:
-                $m.result.ok:
-                  $bind: x2
-              do:
-                - $io.println: "no"
-            - case:
-                $m.result.err:
-                  $bind: y2
-              do:
-                - $io.println: $y2
+            r#"(import m "{m}")
+(import io "{io}")
+(fn main () void
+  (do
+    (let r-ok (m.result.ok 99))
+    (match r-ok
+      (case (m.result.ok (bind x)) (do (io.println "ok")))
+      (case (m.result.err (bind y)) (do (io.println y))))
+    (let r-err (m.result.err "fail"))
+    (match r-err
+      (case (m.result.ok (bind x2)) (do (io.println "no")))
+      (case (m.result.err (bind y2)) (do (io.println y2))))))
 "#,
             m = model.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -2342,20 +2301,13 @@ fn where_only_generic_names_no_unscoped_uppercase_fallback() {
 
     std::fs::write(
         &bad,
-        r#"opt:
-  $enum:
-    some: $T
-    none: $void
+        r#"(def opt (enum (some T) (none void)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &good,
-        r#"opt:
-  $enum:
-    some: $t
-    none: $void
-  =where: {t: []}
+        r#"(def opt (enum (some t) (none void)) where: ((t)))
 "#,
     )
     .unwrap();
@@ -2363,18 +2315,12 @@ fn where_only_generic_names_no_unscoped_uppercase_fallback() {
     std::fs::write(
         &entry_bad,
         format!(
-            r#"m:
-  $import: "{m}"
-io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          v:
-            $m.opt.some: 7
-      - $io.println: "bad"
+            r#"(import m "{m}")
+(import io "{io}")
+(fn main () void
+  (do
+    (let v (m.opt.some 7))
+    (io.println "bad")))
 "#,
             m = bad.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -2384,18 +2330,12 @@ main:
     std::fs::write(
         &entry_good,
         format!(
-            r#"m:
-  $import: "{m}"
-io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          v:
-            $m.opt.some: 7
-      - $io.println: "good"
+            r#"(import m "{m}")
+(import io "{io}")
+(fn main () void
+  (do
+    (let v (m.opt.some 7))
+    (io.println "good")))
 "#,
             m = good.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -2427,13 +2367,8 @@ fn zero_arg_call_accepts_null_payload() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.flush: null
+            r#"(import io "{io}")
+(fn main () void (do (io.flush)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2456,26 +2391,33 @@ fn zero_arg_call_rejects_void_payload_literal() {
             .unwrap();
     let entry = dir.path().join("entry.vibra");
 
+    // Legacy accepted only a literal `null` payload for a zero-arg call and
+    // separately rejected any other literal, including `$void`
+    // ("zero-arg call payload must be `null`"). Positional calls make that
+    // whole spelling axis disappear: a zero-arg call is just `(io.flush)`,
+    // and supplying a value where the callee takes none is an ordinary
+    // arity mismatch, checked (and reported, E-ADAPT-026) while adapting
+    // the call -- the same underlying rule ("nothing may be passed to a
+    // zero-arg call"), enforced earlier and uniformly rather than by a
+    // payload-literal special case.
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.flush: $void
+            r#"(import io "{io}")
+(fn main () void (do (io.flush unit)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        err.contains("zero-arg call payload must be `null`"),
+        err.contains("E-ADAPT-026") && err.contains("io.flush"),
         "unexpected error: {err}"
     );
 }
@@ -2490,24 +2432,12 @@ fn generic_user_fn_identity_returns_value() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-identity:
-  $function:
-    input: $t
-  return: $t
-  do:
-      - $return: $args.input
-  =where: {{t: []}}
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          n:
-            $identity: 7
-            t: $int64
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(fn identity ((input t)) t (do (return input)) where: ((t)))
+(fn main () void
+  (do
+    (let n (identity int64 7))
+    (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2525,32 +2455,35 @@ fn generic_call_requires_explicit_type_args() {
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
             .unwrap();
     let entry = dir.path().join("entry.vibra");
+    // Legacy inferred nothing here: a generic call missing its type-argument
+    // key failed lowering with "missing type argument `t`". The new grammar
+    // requires generic type arguments as explicit leading positional
+    // operands via `apply` (spec: "Generic type arguments are explicit only
+    // through `apply`"); a bare `(identity 7)` supplies exactly as many
+    // total operands as `identity` has parameters (one), so the adapter
+    // reads that single operand as the *type* argument (there is no
+    // separate slot to leave it in), leaving zero value arguments and
+    // failing arity-checking the call (E-ADAPT-026) rather than reaching
+    // legacy's dedicated message -- the same rule, "a type argument must be
+    // supplied", enforced earlier.
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-identity:
-  $function:
-    input: $t
-  return: $t
-  do:
-      - $return: $args.input
-  =where: {{t: []}}
-main:
-  $function: $void
-  return: $void
-  do:
-      - $identity: 7
+            r#"(import io "{io}")
+(fn identity ((input t)) t (do (return input)) where: ((t)))
+(fn main () void (do (identity 7)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err().to_string();
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        err.contains("missing type argument `t`"),
+        err.contains("E-ADAPT-026") && err.contains("identity"),
         "unexpected error: {err}"
     );
 }
@@ -2562,35 +2495,33 @@ fn generic_call_rejects_unknown_keys() {
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
             .unwrap();
     let entry = dir.path().join("entry.vibra");
+    // An extra unrecognized `q:` key alongside a generic call's payload and
+    // type argument has no positional equivalent to even attempt: a generic
+    // call's leading positional arguments are exactly its declared type
+    // parameters followed by exactly its declared value parameters (matching
+    // the migrated corpus's own convention, e.g.
+    // `(collections.array-contains int64 (array 1 2 3) 2)`), so an extra
+    // value operand is an ordinary arity mismatch (E-ADAPT-026) rather than
+    // legacy's "unexpected key" check -- the same rule (unrecognized/extra
+    // call input is rejected), caught earlier.
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-identity:
-  $function:
-    input: $t
-  return: $t
-  do:
-      - $return: $args.input
-  =where: {{t: []}}
-main:
-  $function: $void
-  return: $void
-  do:
-      - $identity: 7
-        t: $int64
-        q: 1
+            r#"(import io "{io}")
+(fn identity ((input t)) t (do (return input)) where: ((t)))
+(fn main () void (do (identity int64 7 1)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err().to_string();
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        err.contains("unexpected key `q`")
-            || err.contains("unexpected argument or type parameter `q`"),
+        err.contains("E-ADAPT-026") && err.contains("identity"),
         "unexpected error: {err}"
     );
 }
@@ -2601,21 +2532,11 @@ fn bool_literals_are_compatible_with_bool_args() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"accepts-bool:
-  $function:
-    x: $bool
-  return: $void
-  do:
-    - $let:
-        ok: true
-main:
-  $function: $void
-  return: $void
-  do:
-      - $accepts-bool:
-          x: true
-      - $accepts-bool:
-          x: false
+        r#"(fn accepts-bool ((x bool)) void (do (let ok true)))
+(fn main () void
+  (do
+    (accepts-bool true)
+    (accepts-bool false)))
 "#,
     )
     .unwrap();
@@ -2634,19 +2555,8 @@ fn bool_literal_is_rejected_for_non_bool_arg() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"accepts-int:
-  $function:
-    x: $int64
-  return: $void
-  do:
-    - $let:
-        ok: true
-main:
-  $function: $void
-  return: $void
-  do:
-      - $accepts-int:
-          x: true
+        r#"(fn accepts-int ((x int64)) void (do (let ok true)))
+(fn main () void (do (accepts-int true)))
 "#,
     )
     .unwrap();
