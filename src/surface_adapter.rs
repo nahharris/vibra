@@ -53,22 +53,32 @@ pub(crate) struct CallSignature {
     pub(crate) arg_names: Vec<String>,
 }
 
-/// One module's own (unqualified) call and generic-type signatures, as
-/// declared in its own source -- no import resolution yet.
+/// One module's own (unqualified) call, generic-type, and interface
+/// signatures, as declared in its own source -- no import resolution yet.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LocalSignatures {
     pub(crate) calls: BTreeMap<String, CallSignature>,
     pub(crate) types: BTreeMap<String, Vec<String>>,
+    /// Interface name -> its member list, for interfaces declared directly
+    /// in this module. `impl_method_value` needs each member's real
+    /// parameter/result types (not just arity) to type the forwarding shim
+    /// it synthesizes, so unlike `calls`/`types` this stores full type
+    /// information, not just a name/arity picture.
+    pub(crate) interfaces: BTreeMap<String, Vec<TypeMember>>,
 }
 
 /// A module's fully resolved signature view: its own bare names, its own
 /// names again qualified by its file stem (for self-qualified references,
 /// e.g. `option.vibra` calling `option.empty`), and each import's local
-/// names qualified by the alias that module declared for it.
+/// names qualified by the alias that module declared for it. Mirrors the
+/// role `SurfaceProgram.imports` (`src/frontend.rs`) plays for the on-disk
+/// typed frontend, built here instead from in-memory ASTs since the
+/// migrated corpus this adapter drives is never written to disk.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ResolvedSignatures {
     calls: BTreeMap<String, CallSignature>,
     types: BTreeMap<String, Vec<String>>,
+    interfaces: BTreeMap<String, Vec<TypeMember>>,
 }
 
 pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignatures> {
@@ -95,6 +105,8 @@ pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignature
                             );
                         }
                     }
+                    sigs.interfaces
+                        .insert(definition.name.value.clone(), members.clone());
                 }
                 for annotation in &definition.annotations {
                     if let AnnotationKind::Definitions(functions) = &annotation.value {
@@ -154,6 +166,7 @@ pub(crate) fn resolve_signatures(
 ) -> ResolvedSignatures {
     let mut calls = own_local.calls.clone();
     let mut types = own_local.types.clone();
+    let mut interfaces = own_local.interfaces.clone();
     for (name, sig) in &own_local.calls {
         calls
             .entry(format!("{own_stem}.{name}"))
@@ -164,6 +177,11 @@ pub(crate) fn resolve_signatures(
             .entry(format!("{own_stem}.{name}"))
             .or_insert_with(|| params.clone());
     }
+    for (name, members) in &own_local.interfaces {
+        interfaces
+            .entry(format!("{own_stem}.{name}"))
+            .or_insert_with(|| members.clone());
+    }
     for (alias, local) in imports {
         for (name, sig) in &local.calls {
             calls.insert(format!("{alias}.{name}"), sig.clone());
@@ -171,8 +189,15 @@ pub(crate) fn resolve_signatures(
         for (name, params) in &local.types {
             types.insert(format!("{alias}.{name}"), params.clone());
         }
+        for (name, members) in &local.interfaces {
+            interfaces.insert(format!("{alias}.{name}"), members.clone());
+        }
     }
-    ResolvedSignatures { calls, types }
+    ResolvedSignatures {
+        calls,
+        types,
+        interfaces,
+    }
 }
 
 /// Canonical positional argument names the adapter assigns to a fn-type
@@ -299,13 +324,12 @@ fn single_body_expr(body: &[AstExpr]) -> Result<&AstExpr> {
 
 // ===================== Converter =====================
 
-/// Per-module conversion state: the resolved signature index, this module's
-/// own interface declarations (needed to type-check synthesized impl
-/// forwarding shims -- see `impl_method_value`), any freshly synthesized
+/// Per-module conversion state: the resolved signature index (which carries
+/// every reachable interface's member types, needed to type the synthesized
+/// impl forwarding shims -- see `impl_method_value`), any freshly synthesized
 /// private top-level helpers, and a counter for their names.
 struct Converter<'a> {
     sig: &'a ResolvedSignatures,
-    own_interfaces: BTreeMap<String, Vec<TypeMember>>,
     extra: Vec<(String, Value)>,
     next_id: u32,
     /// Parameter names of the function currently being converted. Legacy
@@ -321,17 +345,8 @@ struct Converter<'a> {
 /// Convert one typed module into the legacy top-level mapping `Value` shape
 /// `src/lower.rs::collect_module_defs` and peers consume.
 pub(crate) fn module_to_value(module: &Module, sig: &ResolvedSignatures) -> Result<Value> {
-    let mut own_interfaces = BTreeMap::new();
-    for form in &module.forms {
-        if let TopLevel::Definition(definition) = form {
-            if let TypeExprKind::Interface(members) = &definition.body.value {
-                own_interfaces.insert(definition.name.value.clone(), members.clone());
-            }
-        }
-    }
     let mut converter = Converter {
         sig,
-        own_interfaces,
         extra: Vec::new(),
         next_id: 0,
         current_params: Vec::new(),
@@ -856,17 +871,20 @@ impl<'a> Converter<'a> {
         Ok(Value::Mapping(fn_map))
     }
 
-    /// Look up an interface member's parameter/result types. Only
-    /// interfaces declared in *this* module are resolvable: the adapter has
-    /// no access to another module's AST here, only its flattened signature
-    /// (arity only, no types), so a cross-module `impls:` target fails
-    /// closed rather than silently mistyping the shim.
+    /// Look up an interface member's parameter/result types.
+    ///
+    /// Resolvable across the whole program: `ResolvedSignatures::interfaces`
+    /// carries full member types for this module's own interfaces, the same
+    /// under its self-qualified stem, and each import's under the alias the
+    /// module declared. An interface that is genuinely unreachable fails
+    /// closed rather than being given a guessed member shape, since a wrong
+    /// legacy `$record` args shape would be a miscompilation, not a test
+    /// failure.
     fn interface_member(&self, iface_name: &str, method: &str) -> Result<(&[TypeExpr], &TypeExpr)> {
-        let members = self.own_interfaces.get(iface_name).ok_or_else(|| {
+        let members = self.sig.interfaces.get(iface_name).ok_or_else(|| {
             anyhow::anyhow!(
-                "E-ADAPT-041: interface `{iface_name}` is not declared in this module; the \
-                 adapter only supports `impls:` for an interface declared alongside its \
-                 implementations"
+                "E-ADAPT-041: interface `{iface_name}` is not declared in this module or any \
+                 module it imports"
             )
         })?;
         let member = members
