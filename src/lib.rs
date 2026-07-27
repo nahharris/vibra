@@ -30,6 +30,7 @@ pub mod tooling;
 pub(crate) mod type_semantics;
 pub mod typed_body;
 pub mod typed_lower;
+pub mod typed_program;
 pub mod typed_readers;
 pub mod wasm_abi;
 pub mod wasm_backend;

@@ -2927,7 +2927,10 @@ fn instantiated_type_for_constructor(
     })
 }
 
-fn seed_arg_type_bindings(
+/// Widened to `pub(crate)` so `typed_program.rs` can reuse the exact legacy
+/// record-field-flattening rule for `main`'s argument bindings instead of
+/// re-deriving it.
+pub(crate) fn seed_arg_type_bindings(
     name: &str,
     ty: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
@@ -8419,7 +8422,9 @@ fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: 
     resolve_call_target(&call_key, sigs, home_module).is_ok()
 }
 
-fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {
+/// Widened to `pub(crate)` so `typed_program.rs` can reuse the exact legacy
+/// wording for the kebab-case advisory instead of re-deriving it.
+pub(crate) fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {
     if !is_kebab_case(name) {
         warnings.push(format!(
             "non-kebab-case {context}: `{name}` (recommended: kebab-case)"
