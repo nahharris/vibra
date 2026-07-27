@@ -3545,42 +3545,18 @@ fn where_with_interface_bound_is_satisfied_at_call_site() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-box:
-  $enum:
-    boxed: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $str
-        do:
-            - $return: "boxed"
-identity-displayable:
-  $function:
-    x: $t
-  return: $t
-  do:
-      - $return: $args.x
-  =where:
-    t: [$display]
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          b: { $box.boxed: 1 }
-      - $let:
-          c:
-            $identity-displayable: $b
-            t: $box
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def box (enum (boxed int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) str (do (return "boxed"))))
+    ))
+  ))
+(fn identity-displayable ((x t)) t (do (return x)) where: ((t display)))
+(fn main () void
+  (do
+    (let b (box.boxed 1))
+    (let c (identity-displayable box b))))
 "#,
     )
     .unwrap();
@@ -3598,30 +3574,9 @@ fn where_bound_violation_at_call_site_is_rejected_with_e_bound_001() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-identity-displayable:
-  $function:
-    x: $t
-  return: $t
-  do:
-      - $return: $args.x
-  =where:
-    t: [$display]
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          v:
-            $identity-displayable: 7
-            t: $int64
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(fn identity-displayable ((x t)) t (do (return x)) where: ((t display)))
+(fn main () void (do (let v (identity-displayable int64 7))))
 "#,
     )
     .unwrap();
@@ -3636,84 +3591,30 @@ main:
 #[test]
 fn let_expr_nested_generic_bound_violations_are_rejected_with_e_bound_001() {
     fn program_with_let_expr(expr: &str) -> String {
-        let indented_expr = expr
-            .lines()
-            .map(|line| format!("            {line}\n"))
-            .collect::<String>();
-
         format!(
-            r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-needs-display:
-  $function:
-    x: $t
-  return: $t
-  do:
-      - $return: $args.x
-  =where:
-    t: [$display]
-meter:
-  $newtype: $int64
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          result:
-{indented_expr}"#
+            r#"(def display (interface (fmt (fn-type (self) str))))
+(fn needs-display ((x t)) t (do (return x)) where: ((t display)))
+(def meter (newtype int64))
+(fn main () void (do (let result {expr})))
+"#
         )
     }
 
     let cases = [
-        (
-            "record field",
-            r#"$record:
-  y:
-    $needs-display: 1
-    t: $int64"#,
-        ),
-        (
-            "array item",
-            r#"$array:
-  - $needs-display: 1
-    t: $int64"#,
-        ),
+        ("record field", r#"(record (y (needs-display int64 1)))"#),
+        ("array item", r#"(array (needs-display int64 1))"#),
         (
             "map key",
-            r#"$map:
-  - key:
-      $needs-display: 1
-      t: $int64
-    value: bad"#,
+            r#"(map ((needs-display int64 1) "bad"))"#,
         ),
         (
             "map value",
-            r#"$map:
-  - key: bad
-    value:
-      $needs-display: 1
-      t: $int64"#,
+            r#"(map ("bad" (needs-display int64 1)))"#,
         ),
-        (
-            "cast subject",
-            r#"$cast:
-  $needs-display: 1
-  t: $int64
-into: $meter"#,
-        ),
+        ("cast subject", r#"(cast (needs-display int64 1) meter)"#),
         (
             "if branch",
-            r#"$if: true
-then:
-  $needs-display: 1
-  t: $int64
-else: 0"#,
+            r#"(if true (do (needs-display int64 1)) (do 0))"#,
         ),
     ];
 
@@ -3734,75 +3635,24 @@ else: 0"#,
 #[test]
 fn call_argument_nested_generic_bound_violations_are_rejected_with_e_bound_001() {
     fn program_with_main_statement(statement: &str) -> String {
-        let indented_statement = statement
-            .lines()
-            .map(|line| format!("      {line}\n"))
-            .collect::<String>();
-
         format!(
-            r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-needs-display:
-  $function:
-    x: $t
-  return: $t
-  do:
-      - $return: $args.x
-  =where:
-    t: [$display]
-takes-record:
-  $function:
-    rec:
-      $record:
-        y: $int64
-  return: $void
-  do:
-      - $let:
-          ignored: 0
-wrap-record:
-  $function:
-    rec:
-      $record:
-        y: $int64
-  return:
-    $record:
-      y: $int64
-  do:
-      - $return: $args.rec
-main:
-  $function: $void
-  return: $void
-  do:
-{indented_statement}"#
+            r#"(def display (interface (fmt (fn-type (self) str))))
+(fn needs-display ((x t)) t (do (return x)) where: ((t display)))
+(fn takes-record ((rec (record (y int64)))) void (do (let ignored 0)))
+(fn wrap-record ((rec (record (y int64)))) (record (y int64)) (do (return rec)))
+(fn main () void (do {statement}))
+"#
         )
     }
 
     let cases = [
         (
             "statement call argument",
-            r#"  - $takes-record:
-      rec:
-        $record:
-          y:
-            $needs-display: 1
-            t: $int64"#,
+            r#"(takes-record (record (y (needs-display int64 1))))"#,
         ),
         (
             "let call argument",
-            r#"  - $let:
-      result:
-        $wrap-record:
-          rec:
-            $record:
-              y:
-                $needs-display: 1
-                t: $int64"#,
+            r#"(let result (wrap-record (record (y (needs-display int64 1)))))"#,
         ),
     ];
 
@@ -3832,28 +3682,10 @@ fn where_bound_violation_at_type_position_is_rejected_with_e_bound_001() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-bag:
-  $record:
-    item: $t
-  =where:
-    t: [$display]
-holds-bag:
-  $record:
-    inner:
-      $bag:
-        t: $int64
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def bag (record (item t)) where: ((t display)))
+(def holds-bag (record (inner (bag int64))))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -3873,51 +3705,19 @@ fn where_bound_intersect_requires_both_interfaces() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-debug:
-  $interface:
-    show:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-half-impl:
-  $enum:
-    wrap: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $str
-        do:
-            - $return: "half"
-both-iface:
-  $function:
-    x: $t
-  return: $t
-  do:
-      - $return: $args.x
-  =where:
-    t:
-      - $intersect: [$display, $debug]
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          v: { $half-impl.wrap: 1 }
-      - $let:
-          r:
-            $both-iface: $v
-            t: $half-impl
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def debug (interface (show (fn-type (self) str))))
+(def half-impl (enum (wrap int64))
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) str (do (return "half"))))
+    ))
+  ))
+(fn both-iface ((x t)) t (do (return x)) where: ((t (intersect display debug))))
+(fn main () void
+  (do
+    (let v (half-impl.wrap 1))
+    (let r (both-iface half-impl v))))
 "#,
     )
     .unwrap();
@@ -3938,38 +3738,14 @@ fn where_bound_chain_requires_caller_to_declare_bound() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-needs-display:
-  $function:
-    x: $t
-  return: $t
-  do:
-      - $return: $args.x
-  =where:
-    t: [$display]
-forwarder:
-  $function:
-    x: $u
-  return: $u
-  do:
-      - $let:
-          y:
-            $needs-display: $args.x
-            t: $u
-      - $return: $y
-  =where:
-    u: []
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(fn needs-display ((x t)) t (do (return x)) where: ((t display)))
+(fn forwarder ((x u)) u
+  (do
+    (let y (needs-display u x))
+    (return y))
+  where: ((u)))
+(fn main () void (do))
 "#,
     )
     .unwrap();
