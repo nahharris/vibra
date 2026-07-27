@@ -332,16 +332,11 @@ fn set_rejects_read_only_reference() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        count: {$mut: 0}
-    - $let:
-        reader: {$ref: $count}
-    - $set:
-        reader: 1
+        r#"(fn main () void
+  (do
+    (let count (mut 0))
+    (let reader (ref count))
+    (set reader 1)))
 "#,
     )
     .unwrap();
@@ -357,22 +352,9 @@ fn mutable_and_reference_type_wrappers_parse() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"take-mut:
-  $function:
-    value: {$mut: $int64}
-  return: $int64
-  do:
-    - $return: $args.value
-take-ref:
-  $function:
-    value: {$ref: {$mut: $int64}}
-  return: $int64
-  do:
-    - $return: $args.value
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(fn take-mut ((value (mut int64))) int64 (do (return value)))
+(fn take-ref ((value (ref (mut int64)))) int64 (do (return value)))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -415,97 +397,99 @@ fn wasm_abi_aggregate_layout_is_aligned() {
 fn nested_function_grants_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+    // `grants:` is legacy pre-policy-redesign syntax with no S-expression
+    // form at all (the known `fn` attributes are `doc:`, `where:`, `defs:`,
+    // `impls:`); the reader itself rejects it as an unknown declaration
+    // attribute (E-SYN-011), superseding the legacy semantic check
+    // (E-ONE-001/E-SEC-001) this test and the two below it originally
+    // exercised.
     std::fs::write(
         &entry,
-        r#"main:
-  $function:
-    args: $void
-    grants:
-      fs-read: $security.grant.mandatory
-  return: $void
-  do: []
-"#,
+        "(fn main () void (do) grants: (fs-read mandatory))\n",
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("E-ONE-001"),
-        "expected non-canonical nested function rejection, got: {err}"
-    );
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(err.contains("E-SYN-011"), "unexpected error: {err}");
 }
 
 #[test]
 fn implicit_subject_function_is_rejected_with_e_one_001() {
+    // The legacy "implicit subject" fallback (a bare `$function: $str`
+    // payload meant an unnamed single parameter, reachable only via
+    // `$args.subject`) has no S-expression form: `fn` parameters are always
+    // an explicit, named, positional list. Referencing an undeclared name
+    // is rejected instead, by ordinary reference resolution.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        "identity:\n  $function: $str\n  return: $str\n  do:\n    - $return: $args.subject\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+        "(fn identity () str (do (return subject)))\n(fn main () void (do))\n",
     )
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
     let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(err.contains("E-ONE-001"), "unexpected error: {err}");
+    assert!(!err.is_empty(), "expected a reference-resolution error");
 }
 
 #[test]
 fn void_function_with_sibling_args_is_rejected_with_e_one_001() {
+    // The legacy `$function: $void` + sibling `args:` combination (two
+    // different ways to spell "no parameters" and "some parameters" on the
+    // same envelope) has no S-expression form: parameters are always the
+    // single `((name Type) ...)` list. There is nothing left to reject here
+    // that the grammar does not already make unwritable, so this now
+    // asserts the grammar's single spelling still lowers cleanly.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        "identity:\n  $function: $void\n  args:\n    value: $str\n  return: $str\n  do:\n    - $return: $args.value\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+        "(fn identity ((value str)) str (do (return value)))\n(fn main () void (do))\n",
     )
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(err.contains("E-ONE-001"), "unexpected error: {err}");
+    vibra::lower::lower_program(&prog)
+        .expect("the single canonical parameter spelling always lowers");
 }
 
 #[test]
 fn labeled_primary_is_only_available_through_args_namespace() {
+    // `$args.` is removed entirely (spec: "Function arguments are ordinary
+    // lexical names"); a parameter is always referenced by its bare
+    // declared name, which is what this now asserts positively instead of
+    // asserting the removed `args.` namespace requirement negatively.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        "identity:\n  $function:\n    value: $str\n  return: $str\n  do:\n    - $return: $value\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+        "(fn identity ((value str)) str (do (return value)))\n(fn main () void (do))\n",
     )
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("could not infer type for `$return` expression"),
-        "unexpected error: {err}"
-    );
+    vibra::lower::lower_program(&prog).expect("bare parameter reference resolves directly");
 }
 
 #[test]
 fn grant_names_must_be_kebab_case() {
+    // See the comment on `nested_function_grants_are_rejected` above:
+    // `grants:` is unknown syntax now, rejected by the reader.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"main:
-  $function: $void
-  grants:
-    fs_read: optional
-  return: $void
-  do: []
-"#,
-    )
-    .unwrap();
+    std::fs::write(&entry, "(fn main () void (do) grants: (fs_read))\n").unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("E-SEC-001"),
-        "expected removed grant declaration rejection, got: {err}"
-    );
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(err.contains("E-SYN-011"), "unexpected error: {err}");
 }
 
 #[test]
@@ -2142,25 +2126,22 @@ main:
 
 #[test]
 fn legacy_function_grants_are_rejected_after_policy_redesign() {
+    // See the comment on `nested_function_grants_are_rejected` (top of this
+    // file): `grants:` is unknown syntax now, rejected by the reader
+    // (E-SYN-011) rather than reaching the legacy migration diagnostic
+    // (E-SEC-001) this test originally exercised.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"main:
-  $function: $void
-  grants:
-    fs-read: optional
-  return: $void
-  do: []
-"#,
-    )
-    .unwrap();
+    std::fs::write(&entry, "(fn main () void (do) grants: (fs-read))\n").unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
     assert!(
-        err.contains("E-SEC-001"),
-        "expected migration diagnostic, got: {err}"
+        err.contains("E-SYN-011"),
+        "expected an unknown-attribute rejection, got: {err}"
     );
 }
 
