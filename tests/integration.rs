@@ -3117,19 +3117,9 @@ fn record_type_alias_lowers_and_is_usable_in_signature() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-take-vec:
-  $function:
-    input: $io.ciovec
-  return: $void
-  do:
-      - $io.println: "ok"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(fn take-vec ((input io.ciovec)) void (do (io.println "ok")))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3157,25 +3147,10 @@ fn tuple_type_alias_with_where_lowers() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-pair:
-  $tuple: [$a, $b]
-  =where: {{a: [], b: []}}
-take:
-  $function:
-    input:
-      $pair:
-        a: $int64
-        b: $str
-  return: $void
-  do:
-      - $io.println: "ok"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def pair (tuple a b) where: ((a) (b)))
+(fn take ((input (pair int64 str))) void (do (io.println "ok")))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3200,25 +3175,10 @@ fn map_type_alias_with_where_lowers() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-dict:
-  $map: {{key: $k, value: $v}}
-  =where: {{k: [], v: []}}
-take:
-  $function:
-    input:
-      $dict:
-        k: $str
-        v: $int64
-  return: $void
-  do:
-      - $io.println: "ok"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def dict (map k v) where: ((k) (v)))
+(fn take ((input (dict str int64))) void (do (io.println "ok")))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3243,17 +3203,9 @@ fn interface_type_alias_with_where_lowers() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-container:
-  $interface:
-    value: $t
-  =where: {{t: []}}
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def container (interface (value t)) where: ((t)))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3278,22 +3230,10 @@ fn bare_generic_alias_in_signature_is_rejected() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-pair:
-  $tuple: [$a, $b]
-  =where: {{a: [], b: []}}
-take:
-  $function:
-    input: $pair
-  return: $void
-  do:
-      - $io.println: "ok"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def pair (tuple a b) where: ((a) (b)))
+(fn take ((input pair)) void (do (io.println "ok")))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3311,35 +3251,35 @@ fn instantiation_arity_mismatch_is_rejected() {
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
             .unwrap();
     let entry = dir.path().join("entry.vibra");
+    // Legacy caught a partially-instantiated generic alias (one of two type
+    // arguments supplied) during lowering (E-GEN-002). The new grammar's
+    // generic type application has no partial-application spelling at all
+    // (spec: "Partial type application... [is] invalid"); the adapter
+    // itself arity-checks a type application's argument count against the
+    // callee's `where:` param count while building the legacy shape
+    // (E-ADAPT-010, `type_application_value`), so an under-supplied
+    // instantiation is now rejected earlier, for the same reason.
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-pair:
-  $tuple: [$a, $b]
-  =where: {{a: [], b: []}}
-take:
-  $function:
-    input:
-      $pair:
-        a: $int64
-  return: $void
-  do:
-      - $io.println: "ok"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def pair (tuple a b) where: ((a) (b)))
+(fn take ((input (pair int64))) void (do (io.println "ok")))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(err.contains("E-GEN-002"), "unexpected error: {err}");
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(
+        err.contains("E-GEN-002") || err.contains("E-ADAPT-010"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -3354,35 +3294,14 @@ fn instantiated_record_field_type_mismatch_is_caught() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-box:
-  $record:
-    value: $t
-  =where: {{t: []}}
-take-int-box:
-  $function:
-    input:
-      $box:
-        t: $int64
-  return: $void
-  do:
-      - $io.println: "ok"
-make-str-box:
-  $function: $void
-  return:
-    $box:
-      t: $str
-  do:
-      - $return:
-          value: "s"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          sb: {{$make-str-box: null}}
-      - $take-int-box: $sb
+            r#"(import io "{io}")
+(def box (record (value t)) where: ((t)))
+(fn take-int-box ((input (box int64))) void (do (io.println "ok")))
+(fn make-str-box () (box str) (do (return (record (value "s")))))
+(fn main () void
+  (do
+    (let sb (make-str-box))
+    (take-int-box sb)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),

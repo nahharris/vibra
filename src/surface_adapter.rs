@@ -561,16 +561,23 @@ impl<'a> Converter<'a> {
                 Ok(single_dollar("enum", Value::Mapping(m)))
             }
             TypeExprKind::Interface(members) => {
+                // Legacy's own `$interface` parser (`src/lower.rs`) accepts
+                // any type for a member, not only `fn-type` -- the fn-type
+                // requirement below is specific to the *impl-dispatch*
+                // machinery (`Converter::interface_member`, used only when
+                // an `impl` actually implements that member as a method),
+                // not to declaring the interface type itself. A data-shaped
+                // member converts through the ordinary `type_value` path,
+                // exactly as legacy would parse it.
                 let mut m = Mapping::new();
                 for member in members {
-                    let TypeExprKind::Function { parameters, result } = &member.ty.value else {
-                        bail!(
-                            "E-ADAPT-006: interface member `{}` must be a `fn-type`",
-                            member.name.value
-                        );
+                    let value = match &member.ty.value {
+                        TypeExprKind::Function { parameters, result } => {
+                            self.interface_fn_type_value(parameters, result)?
+                        }
+                        _ => self.type_value(&member.ty)?,
                     };
-                    let fn_type = self.interface_fn_type_value(parameters, result)?;
-                    if m.insert(Value::String(member.name.value.clone()), fn_type)
+                    if m.insert(Value::String(member.name.value.clone()), value)
                         .is_some()
                     {
                         bail!(
