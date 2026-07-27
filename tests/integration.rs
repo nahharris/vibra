@@ -6042,12 +6042,12 @@ fn issue50_many_tests_entry(count: usize) -> (tempfile::TempDir, std::path::Path
     let entry = dir.path().join("entry.vibra");
 
     let mut src = format!(
-        "test:\n  $import: \"{lib}\"\nthe-answer:\n  $function: $void\n  return: $int64\n  do:\n    - $return: 42\n",
+        "(import test \"{lib}\")\n(fn the-answer () int64 (do (return 42)))\n",
         lib = test_lib.display().to_string().replace('\\', "/"),
     );
     for i in 0..count {
         src.push_str(&format!(
-            "many-{i}:\n  $test: core\n  do:\n    - $let:\n        v:\n          $the-answer: null\n    - $match: $v\n      when:\n        - case: 42\n          do:\n            - $test.assert: true\n        - case:\n            $wildcard: null\n          do:\n            - $test.fail: not 42\n",
+            "(test many-{i} core (do (let v (the-answer)) (match v (case 42 (do (test.assert true))) (case _ (do (test.fail \"not 42\"))))))\n",
         ));
     }
     std::fs::write(&entry, src).unwrap();
@@ -6115,16 +6115,9 @@ fn issue50_failing_test_still_reported() {
     std::fs::write(
         &entry,
         format!(
-            r#"test:
-  $import: "{lib}"
-passes:
-  $test: core
-  do:
-      - $test.assert: true
-fails:
-  $test: core
-  do:
-      - $test.assert: false
+            r#"(import test "{lib}")
+(test passes core (do (test.assert true)))
+(test fails core (do (test.assert false)))
 "#,
             lib = test_lib.display().to_string().replace('\\', "/"),
         ),
@@ -6186,41 +6179,19 @@ fn guest_stdout_write_failure_yields_matchable_fs_error_io() {
     std::fs::write(
         &entry,
         format!(
-            r#"fs:
-  $import: "{fs}"
-result:
-  $import: "{result}"
-io:
-  $import: "{io}"
-test:
-  $import: "{test}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        r:
-          $io.println: line that cannot be written
-    - $match: $r
-      when:
-        - case:
-            $result.result.ok: null
-          do:
-            - $test.fail: expected write failure but println returned ok
-        - case:
-            $result.result.err:
-              $bind: e
-          do:
-            - $match: $e
-              when:
-                - case:
-                    $fs.fs-error.io:
-                      $bind: _msg
-                  do:
-                    - $test.assert: true
-                - case: {{$wildcard: null}}
-                  do:
-                    - $test.fail: expected fs-error.io variant
+            r#"(import fs "{fs}")
+(import result "{result}")
+(import io "{io}")
+(import test "{test}")
+(fn main () void
+  (do
+    (let r (io.println "line that cannot be written"))
+    (match r
+      (case (result.result.ok) (do (test.fail "expected write failure but println returned ok")))
+      (case (result.result.err (bind e)) (do
+        (match e
+          (case (fs.fs-error.io (bind _msg)) (do (test.assert true)))
+          (case _ (do (test.fail "expected fs-error.io variant")))))))))
 "#,
             fs = path_str(&fs),
             result = path_str(&result),
@@ -6320,101 +6291,36 @@ fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
     std::fs::write(
         &entry,
         format!(
-            r#"fs:
-  $import: "{fs}"
-result:
-  $import: "{result}"
-main:
-  $function:
-    policy:
-      $policy:
-        fs-write:
-          - requirement: mandatory
-            scopes:
-              - dir: "{dir}"
-  return: $void
-  do:
-      - $let:
-          pa:
-            $fs.path.new: "{a}"
-      - $let:
-          pb:
-            $fs.path.new: "{b}"
-      - $let:
-          pc:
-            $fs.path.new: "{c}"
-      - $let:
-          capability:
-            $policy.narrow: $args.policy
-            into: $fs.write-capability
-      - $let:
-          oa:
-            $fs.open-write: $pa
-            capability: $capability
-      - $match: $oa
-        when:
-            - case:
-                $result.result.ok:
-                  $bind: ha
-              do:
-                - $let:
-                    ob:
-                      $fs.open-write: $pb
-                      capability: $capability
-                - $match: $ob
-                  when:
-                      - case:
-                          $result.result.ok:
-                            $bind: hb
-                        do:
-                          - $let:
-                              oc:
-                                $fs.open-write: $pc
-                                capability: $capability
-                          - $match: $oc
-                            when:
-                                - case:
-                                    $result.result.ok:
-                                      $bind: hc-bad
-                                  do: []
-                                - case:
-                                    $result.result.err:
-                                      $bind: oc-err
-                                  do:
-                                    - $match: $oc-err
-                                      when:
-                                          - case:
-                                              $fs.fs-error.too-many-open-files: null
-                                            do:
-                                              - $fs.closeable.close: $ha
-                                              - $let:
-                                                  oc2:
-                                                    $fs.open-write: $pc
-                                                    capability: $capability
-                                              - $match: $oc2
-                                                when:
-                                                    - case:
-                                                        $result.result.ok:
-                                                          $bind: hc2
-                                                      do:
-                                                        - $fs.writable.write-string: $hc2
-                                                          s: "freed-slot"
-                                                        - $fs.closeable.close: $hc2
-                                                    - case:
-                                                        $result.result.err:
-                                                          $bind: oc2-err
-                                                      do: []
-                                          - case:
-                                              $wildcard: null
-                                            do: []
-                      - case:
-                          $result.result.err:
-                            $bind: ob-err
-                        do: []
-            - case:
-                $result.result.err:
-                  $bind: oa-err
-              do: []
+            r#"(import fs "{fs}")
+(import result "{result}")
+(fn main ((policy (policy (fs-write (group requirement: mandatory scopes: ((dir "{dir}"))))))) void
+  (do
+    (let pa (fs.path.new "{a}"))
+    (let pb (fs.path.new "{b}"))
+    (let pc (fs.path.new "{c}"))
+    (let capability (policy.narrow policy fs.write-capability))
+    (let oa (fs.open-write pa capability))
+    (match oa
+      (case (result.result.ok (bind ha)) (do
+        (let ob (fs.open-write pb capability))
+        (match ob
+          (case (result.result.ok (bind hb)) (do
+            (let oc (fs.open-write pc capability))
+            (match oc
+              (case (result.result.ok (bind hc-bad)) (do))
+              (case (result.result.err (bind oc-err)) (do
+                (match oc-err
+                  (case (fs.fs-error.too-many-open-files) (do
+                    (fs.closeable.close ha)
+                    (let oc2 (fs.open-write pc capability))
+                    (match oc2
+                      (case (result.result.ok (bind hc2)) (do
+                        (fs.writable.write-string hc2 "freed-slot")
+                        (fs.closeable.close hc2)))
+                      (case (result.result.err (bind oc2-err)) (do)))))
+                  (case _ (do))))))))
+          (case (result.result.err (bind ob-err)) (do)))))
+      (case (result.result.err (bind oa-err)) (do)))))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             result = result.display().to_string().replace('\\', "/"),
