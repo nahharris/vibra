@@ -3321,27 +3321,17 @@ fn forall_keyword_is_no_longer_recognised() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"id:
-  $forall:
-    types: [t]
-    in:
-      $function:
-        x: $t
-      return: $t
-      do:
-          - $return: $args.x
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def id (forall t))
+(fn main () void (do))
 "#,
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    assert!(
-        vibra::lower::lower_program(&prog).is_err(),
-        "$forall should no longer be a recognised form"
-    );
+    let prog = vibra::load::load_program(&entry);
+    let is_err = match prog {
+        Ok(prog) => vibra::lower::lower_program(&prog).is_err(),
+        Err(_) => true,
+    };
+    assert!(is_err, "$forall should no longer be a recognised form");
 }
 
 #[test]
@@ -3351,37 +3341,30 @@ fn list_and_dict_keywords_are_no_longer_recognised() {
     let entry_dict = dir.path().join("dict.vibra");
     std::fs::write(
         &entry_list,
-        r#"my-list:
-  $list: $int64
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def my-list (list int64))
+(fn main () void (do))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry_dict,
-        r#"my-dict:
-  $dict:
-    a: $int64
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def my-dict (dict a int64))
+(fn main () void (do))
 "#,
     )
     .unwrap();
-    let prog_list = vibra::load::load_program(&entry_list).unwrap();
-    assert!(
-        vibra::lower::lower_program(&prog_list).is_err(),
-        "$list should no longer be a recognised form"
-    );
-    let prog_dict = vibra::load::load_program(&entry_dict).unwrap();
-    assert!(
-        vibra::lower::lower_program(&prog_dict).is_err(),
-        "$dict should no longer be a recognised form"
-    );
+    let prog_list = vibra::load::load_program(&entry_list);
+    let list_is_err = match prog_list {
+        Ok(prog) => vibra::lower::lower_program(&prog).is_err(),
+        Err(_) => true,
+    };
+    assert!(list_is_err, "$list should no longer be a recognised form");
+    let prog_dict = vibra::load::load_program(&entry_dict);
+    let dict_is_err = match prog_dict {
+        Ok(prog) => vibra::lower::lower_program(&prog).is_err(),
+        Err(_) => true,
+    };
+    assert!(dict_is_err, "$dict should no longer be a recognised form");
 }
 
 // ---------------------------------------------------------------------------
@@ -3399,27 +3382,18 @@ fn defs_inherent_op_on_non_generic_type_registers_with_self_substituted() {
 
     std::fs::write(
         &model,
-        r#"box:
-  $record:
-    value: $int64
-  =defs:
-    identity:
-      $function: $self
-      return: $self
-      do:
-          - $return: $args.self
+        r#"(def box (record (value int64))
+  defs: (
+    (fn identity ((self self)) self (do (return self)))
+  ))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-main:
-  $function: $void
-  return: $void
-  do: []
+            r#"(import m "{m}")
+(fn main () void (do))
 "#,
             m = model.display().to_string().replace('\\', "/"),
         ),
@@ -3458,29 +3432,19 @@ fn defs_inherent_op_on_generic_type_substitutes_self_with_instantiation() {
 
     std::fs::write(
         &model,
-        r#"result:
-  $enum:
-    err: $e
-    ok: $t
-  =where: {t: [], e: []}
-  =defs:
-    passthrough:
-      $function: $self
-      return: $self
-      do:
-          - $return: $args.self
+        r#"(def result (enum (err e) (ok t))
+  where: ((t) (e))
+  defs: (
+    (fn passthrough ((self self)) self (do (return self)))
+  ))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"r:
-  $import: "{m}"
-main:
-  $function: $void
-  return: $void
-  do: []
+            r#"(import r "{m}")
+(fn main () void (do))
 "#,
             m = model.display().to_string().replace('\\', "/"),
         ),
@@ -3514,15 +3478,7 @@ fn defs_on_a_function_definition_is_rejected_with_e_defs_001() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do: []
-  =defs:
-    nope:
-      $function: $void
-      return: $void
-      do: []
+        r#"(fn main () void (do) defs: ((fn nope () void (do))))
 "#,
     )
     .unwrap();
@@ -3541,38 +3497,36 @@ fn defs_entry_that_is_not_a_function_is_rejected_with_e_defs_001() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.vibra");
     let entry = dir.path().join("entry.vibra");
+    // Legacy caught a non-`$function` `=defs` entry during lowering
+    // (E-DEFS-001). The new grammar's `defs:` attribute is grammatically
+    // `(function*)` -- each entry's reader parser requires an `fn` head
+    // (`parse_defs_value`, `src/ast/surface.rs`) -- so a non-function entry
+    // is now a reader-level rejection (E-SYN-008), same rule, earlier
+    // enforcement point.
     std::fs::write(
         &model,
-        r#"thing:
-  $record:
-    value: $int64
-  =defs:
-    bad:
-      $record:
-        x: $int64
+        r#"(def thing (record (value int64))
+  defs: (
+    (def bad (record (x int64)))
+  ))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-main:
-  $function: $void
-  return: $void
-  do: []
+            r#"(import m "{m}")
+(fn main () void (do))
 "#,
             m = model.display().to_string().replace('\\', "/"),
         ),
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::lower_program(&prog).unwrap_err();
+    let err = vibra::load::load_program(&entry).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
-        msg.contains("E-DEFS-001"),
-        "expected E-DEFS-001 for non-`$function` entry inside `=defs`, got: {msg}"
+        msg.contains("E-SYN-008"),
+        "expected E-SYN-008 for non-`fn` entry inside `defs:`, got: {msg}"
     );
 }
 
