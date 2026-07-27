@@ -1,94 +1,60 @@
-test:
-  $import: ../stdlib/src/test.vibra
-increment:
-  $function:
-    value:
-      $mut: $int64
-  return: $int64
-  do:
-  - $set:
-      args.value: 4
-  - $return: $args.value
-mutable-set-and-copy:
-  $test: core
-  do:
-    - $let:
-        count:
-          $mut: 0
-    - $let:
-        snapshot: $count
-    - $set:
-        count: 1
-    - $match: $snapshot
-      when:
-      - case: 0
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: mutable read did not copy
-    - $match: $count
-      when:
-      - case: 1
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: set did not update mutable binding
-mutable-ref-writes-through:
-  $test: core
-  do:
-    - $let:
-        count:
-          $mut: 0
-    - $let:
-        writer:
-          $ref:
-            $mut: $count
-    - $set:
-        writer: 2
-    - $match: $count
-      when:
-      - case: 2
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: mutable ref did not update pointee
-mutable-ref-temporary:
-  $test: core
-  do:
-    - $let:
-        writer:
-          $ref:
-            $mut: 0
-    - $set:
-        writer: 3
-    - $match: $writer
-      when:
-      - case: 3
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: mutable temporary ref did not retain storage
-mutable-argument:
-  $test: core
-  do:
-    - $let:
-        result:
-          $increment:
-            $mut: 0
-    - $match: $result
-      when:
-      - case: 4
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: mutable argument was not writable
+(import test "../stdlib/src/test.vibra")
+(fn increment ((value (mut int64))) int64 (do (set value 4) (return value)))
+(test
+  mutable-set-and-copy
+  core
+  (do
+    (let count (mut 0))
+    (let snapshot count)
+    (set count 1)
+    (match
+      snapshot
+      (case 0 (do (test.assert true)))
+      (case _ (do (test.fail "mutable read did not copy")))
+    )
+    (match
+      count
+      (case 1 (do (test.assert true)))
+      (case _ (do (test.fail "set did not update mutable binding")))
+    )
+  )
+)
+(test
+  mutable-ref-writes-through
+  core
+  (do
+    (let count (mut 0))
+    (let writer (ref (mut count)))
+    (set writer 2)
+    (match
+      count
+      (case 2 (do (test.assert true)))
+      (case _ (do (test.fail "mutable ref did not update pointee")))
+    )
+  )
+)
+(test
+  mutable-ref-temporary
+  core
+  (do
+    (let writer (ref (mut 0)))
+    (set writer 3)
+    (match
+      writer
+      (case 3 (do (test.assert true)))
+      (case _ (do (test.fail "mutable temporary ref did not retain storage")))
+    )
+  )
+)
+(test
+  mutable-argument
+  core
+  (do
+    (let result (increment (mut 0)))
+    (match
+      result
+      (case 4 (do (test.assert true)))
+      (case _ (do (test.fail "mutable argument was not writable")))
+    )
+  )
+)

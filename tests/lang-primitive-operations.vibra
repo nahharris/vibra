@@ -1,91 +1,37 @@
-=comment: Canonical, typed primitive operations require no host capability.
-test:
-  $import: ../stdlib/src/test.vibra
-integer-arithmetic:
-  $test: core
-  do:
-  - $test.assert-eq-int:
-      actual:
-        $add:
-        - 20
-        - 22
-      expected: 42
-  - $test.assert-eq-int:
-      actual:
-        $subtract:
-        - 50
-        - 8
-      expected: 42
-  - $test.assert-eq-int:
-      actual:
-        $multiply:
-        - 6
-        - 7
-      expected: 42
-  - $test.assert-eq-int:
-      actual:
-        $divide:
-        - 85
-        - 2
-      expected: 42
-  - $test.assert-eq-int:
-      actual:
-        $remainder:
-        - 85
-        - 43
-      expected: 42
-boolean-and-comparison:
-  $test: core
-  do:
-  - $test.assert:
-      $and:
-      - $less-than:
-        - 1
-        - 2
-      - $equal:
-        - 42
-        - 42
-  - $test.assert:
-      $not:
-        $not-equal:
-        - same
-        - same
-bitwise-and-shift:
-  $test: core
-  do:
-  - $test.assert-eq-int:
-      actual:
-        $bit-or:
-        - 32
-        - 10
-      expected: 42
-  - $test.assert-eq-int:
-      actual:
-        $shift-left:
-        - 21
-        - 1
-      expected: 42
-float-arithmetic:
-  $test: core
-  do:
-  - $test.assert-eq-float:
-      actual:
-        $divide:
-        - 84.0
-        - 2.0
-      expected: 42.0
-checked-numeric-conversion:
-  $test: core
-  do:
-  - $test.assert-eq-int:
-      actual:
-        $convert: 42.0
-        into: $int64
-        or: 0
-      expected: 42
-  - $test.assert-eq-int:
-      actual:
-        $convert: 42.5
-        into: $int64
-        or: 7
-      expected: 7
+(import test "../stdlib/src/test.vibra")
+(test
+  integer-arithmetic
+  core
+  (do
+    (test.assert-eq-int (add 20 22) 42)
+    (test.assert-eq-int (subtract 50 8) 42)
+    (test.assert-eq-int (multiply 6 7) 42)
+    (test.assert-eq-int (divide 85 2) 42)
+    (test.assert-eq-int (remainder 85 43) 42)
+  )
+)
+(test
+  boolean-and-comparison
+  core
+  (do
+    (test.assert (and (less-than 1 2) (equal 42 42)))
+    (test.assert (not (not-equal "same" "same")))
+  )
+)
+(test
+  bitwise-and-shift
+  core
+  (do
+    (test.assert-eq-int (bit-or 32 10) 42)
+    (test.assert-eq-int (shift-left 21 1) 42)
+  )
+)
+(test float-arithmetic core (do (test.assert-eq-float (divide 84.0 2.0) 42.0)))
+(test
+  checked-numeric-conversion
+  core
+  (do
+    (test.assert-eq-int (convert 42.0 int64 0) 42)
+    (test.assert-eq-int (convert 42.5 int64 7) 7)
+  )
+)

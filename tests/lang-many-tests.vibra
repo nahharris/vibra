@@ -1,143 +1,81 @@
-=comment: |
-  Many `$test` declarations in one module that all share the same lowered
-  context (the `truthy` / `echo-int` helpers). Exercises issue #50: shared
-  context across tests and per-child single-test lowering.
-test:
-  $import: ../stdlib/src/test.vibra
-truthy:
-  $function: $void
-  return: $bool
-  do:
-  - $return: true
-echo-int:
-  $function:
-    subject: $int64
-  return: $int64
-  do:
-  - $return: $args.subject
-many-1:
-  $test: core
-  do:
-    - $test.assert: true
-many-2:
-  $test: core
-  do:
-    - $let:
-        flag: true
-    - $test.assert: $flag
-many-3:
-  $test: core
-  do:
-    - $let:
-        v:
-          $truthy: null
-    - $test.assert: $v
-many-4:
-  $test: core
-  do:
-    - $let:
-        n:
-          $echo-int:
-            subject: 4
-    - $match: $n
-      when:
-      - case: 4
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected 4
-many-5:
-  $test: core
-  do:
-    - $let:
-        n:
-          $echo-int:
-            subject: 5
-    - $match: $n
-      when:
-      - case: 5
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected 5
-many-6:
-  $test: core
-  do:
-    - $let:
-        s: shared-context
-    - $match: $s
-      when:
-      - case: shared-context
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected shared-context
-many-7:
-  $test: core
-  do:
-    - $let:
-        x: 2.5
-    - $match: $x
-      when:
-      - case: 2.5
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected 2.5
-many-8:
-  $test: core
-  do:
-    - $let:
-        v:
-          $truthy: null
-    - $test.assert: $v
-many-9:
-  $test: core
-  do:
-    - $test.assert: true
-many-10:
-  $test: core
-  do:
-    - $let:
-        n:
-          $echo-int:
-            subject: 10
-    - $match: $n
-      when:
-      - case: 10
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected 10
-many-11:
-  $test: core
-  do:
-    - $let:
-        flag: true
-    - $test.assert: $flag
-many-12:
-  $test: core
-  do:
-    - $let:
-        n:
-          $echo-int:
-            subject: 12
-    - $match: $n
-      when:
-      - case: 12
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected 12
+(import test "../stdlib/src/test.vibra")
+(fn truthy () bool (do (return true)))
+(fn echo-int ((subject int64)) int64 (do (return subject)))
+(test many-1 core (do (test.assert true)))
+(test many-2 core (do (let flag true) (test.assert flag)))
+(test many-3 core (do (let v (truthy)) (test.assert v)))
+(test
+  many-4
+  core
+  (do
+    (let n (echo-int 4))
+    (match
+      n
+      (case 4 (do (test.assert true)))
+      (case _ (do (test.fail "expected 4")))
+    )
+  )
+)
+(test
+  many-5
+  core
+  (do
+    (let n (echo-int 5))
+    (match
+      n
+      (case 5 (do (test.assert true)))
+      (case _ (do (test.fail "expected 5")))
+    )
+  )
+)
+(test
+  many-6
+  core
+  (do
+    (let s "shared-context")
+    (match
+      s
+      (case "shared-context" (do (test.assert true)))
+      (case _ (do (test.fail "expected shared-context")))
+    )
+  )
+)
+(test
+  many-7
+  core
+  (do
+    (let x 2.5)
+    (match
+      x
+      (case 2.5 (do (test.assert true)))
+      (case _ (do (test.fail "expected 2.5")))
+    )
+  )
+)
+(test many-8 core (do (let v (truthy)) (test.assert v)))
+(test many-9 core (do (test.assert true)))
+(test
+  many-10
+  core
+  (do
+    (let n (echo-int 10))
+    (match
+      n
+      (case 10 (do (test.assert true)))
+      (case _ (do (test.fail "expected 10")))
+    )
+  )
+)
+(test many-11 core (do (let flag true) (test.assert flag)))
+(test
+  many-12
+  core
+  (do
+    (let n (echo-int 12))
+    (match
+      n
+      (case 12 (do (test.assert true)))
+      (case _ (do (test.fail "expected 12")))
+    )
+  )
+)

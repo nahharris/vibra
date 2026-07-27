@@ -1,73 +1,29 @@
-test:
-  $import: ../stdlib/src/test.vibra
-time:
-  $import: ../stdlib/src/time.vibra
-result:
-  $import: ../stdlib/src/result.vibra
-accepts-unix-millis:
-  $function:
-    value: $uint64
-  return: $bool
-  do:
-  - $return: true
-accepts-duration:
-  $function:
-    value: $time.duration
-  return: $bool
-  do:
-  - $return: true
-now-unix-millis-uses-the-granted-clock:
-  $test: system
-  tags:
-  - stdlib
-  - capability
-  policy:
-    $policy:
-      clock:
-      - requirement: mandatory
-        scopes: any
-  do:
-  - $let:
-      capability:
-        $policy.narrow: $args.policy
-        into: $time.capability
-  - $let:
-      now:
-        $time.now-unix-millis:
-          capability: $capability
-  - $let:
-      is-millis:
-        $accepts-unix-millis: $now
-  - $test.assert: $is-millis
-  - $let:
-      start:
-        $time.monotonic-now:
-          capability: $capability
-  - $time.sleep:
-      duration:
-        $time.milliseconds: 0
-      capability: $capability
-  - $let:
-      finish:
-        $time.monotonic-now:
-          capability: $capability
-  - $let:
-      elapsed:
-        $time.duration-between:
-          earlier: $start
-          later: $finish
-  - $match: $elapsed
-    when:
-    - case:
-        $result.result.ok:
-          $bind: duration
-      do:
-      - $let:
-          is-duration:
-            $accepts-duration: $duration
-      - $test.assert: $is-duration
-    - case:
-        $result.result.err:
-          $wildcard: null
-      do:
-      - $test.fail: monotonic clock moved backwards
+(import test "../stdlib/src/test.vibra")
+(import time "../stdlib/src/time.vibra")
+(import result "../stdlib/src/result.vibra")
+(fn accepts-unix-millis ((value uint64)) bool (do (return true)))
+(fn accepts-duration ((value time.duration)) bool (do (return true)))
+(test
+  now-unix-millis-uses-the-granted-clock
+  system
+  (do
+    (let capability (policy.narrow policy time.capability))
+    (let now (time.now-unix-millis capability))
+    (let is-millis (accepts-unix-millis now))
+    (test.assert is-millis)
+    (let start (time.monotonic-now capability))
+    (time.sleep (time.milliseconds 0) capability)
+    (let finish (time.monotonic-now capability))
+    (let elapsed (time.duration-between start finish))
+    (match
+      elapsed
+      (case
+        (result.result.ok (bind duration))
+        (do (let is-duration (accepts-duration duration)) (test.assert is-duration))
+      )
+      (case (result.result.err _) (do (test.fail "monotonic clock moved backwards")))
+    )
+  )
+  tags: (stdlib capability)
+  policy: (policy (clock (group requirement: mandatory scopes: ((any)))))
+)

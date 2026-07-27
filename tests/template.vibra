@@ -1,23 +1,22 @@
-test:
-  $import: ../stdlib/src/test.vibra
-compile-time-template-renders-sections:
-  $test: core
-  do:
-  - $let:
-      rendered:
-        $template:
-          path: template-assets/greeting.txt
-          with:
-            greeting: Hello
-            people:
-            - name: Ada
-            - name: Lin
-  - $match: $rendered
-    when:
-    - case: "Hello: Ada, Lin, \n"
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: compile-time template rendered unexpected text
+(import test "../stdlib/src/test.vibra")
+(test
+  compile-time-template-renders-sections
+  core
+  (do
+    (let
+      rendered
+      (template
+        "template-assets/greeting.txt"
+        with: (record
+          (greeting "Hello")
+          (people (array (record (name "Ada")) (record (name "Lin"))))
+        )
+      )
+    )
+    (match
+      rendered
+      (case "Hello: Ada, Lin, \n" (do (test.assert true)))
+      (case _ (do (test.fail "compile-time template rendered unexpected text")))
+    )
+  )
+)

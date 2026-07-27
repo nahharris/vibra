@@ -1,86 +1,55 @@
-test:
-  $import: ../stdlib/src/test.vibra
-net:
-  $import: ../stdlib/src/net.vibra
-result:
-  $import: ../stdlib/src/result.vibra
-address-parsing-is-typed:
-  $test: core
-  tags:
-  - stdlib
-  - network
-  do:
-  - $let:
-      valid:
-        $net.parse-address: 127.0.0.1:8080
-  - $match: $valid
-    when:
-    - case:
-        $result.result.ok:
-          $wildcard: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: valid socket address was rejected
-  - $let:
-      invalid:
-        $net.parse-address: not-an-address
-  - $match: $invalid
-    when:
-    - case:
-        $result.result.err:
-          $net.net-error.invalid-address:
-            $wildcard: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: invalid socket address was accepted
-connect-requires-the-exact-target-grant:
-  $test: net
-  tags:
-  - stdlib
-  - capability
-  - network
-  policy:
-    $policy:
-      net-connect:
-      - requirement: mandatory
-        scopes:
-        - exact: 127.0.0.1:9
-  do:
-  - $let:
-      capability:
-        $policy.narrow: $args.policy
-        into: $net.connect-capability
-  - $let:
-      parsed:
-        $net.parse-address: 127.0.0.1:10
-  - $match: $parsed
-    when:
-    - case:
-        $result.result.ok:
-          $bind: address
-      do:
-      - $let:
-          outcome:
-            $net.connect: $address
-            capability: $capability
-      - $match: $outcome
-        when:
-        - case:
-            $result.result.err:
-              $net.net-error.permission-denied: null
-          do:
-          - $test.assert: true
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: out-of-scope network target was attempted
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: test socket address did not parse
+(import test "../stdlib/src/test.vibra")
+(import net "../stdlib/src/net.vibra")
+(import result "../stdlib/src/result.vibra")
+(test
+  address-parsing-is-typed
+  core
+  (do
+    (let valid (net.parse-address "127.0.0.1:8080"))
+    (match
+      valid
+      (case (result.result.ok _) (do (test.assert true)))
+      (case _ (do (test.fail "valid socket address was rejected")))
+    )
+    (let invalid (net.parse-address "not-an-address"))
+    (match
+      invalid
+      (case
+        (result.result.err (net.net-error.invalid-address _))
+        (do (test.assert true))
+      )
+      (case _ (do (test.fail "invalid socket address was accepted")))
+    )
+  )
+  tags: (stdlib network)
+)
+(test
+  connect-requires-the-exact-target-grant
+  net
+  (do
+    (let capability (policy.narrow policy net.connect-capability))
+    (let parsed (net.parse-address "127.0.0.1:10"))
+    (match
+      parsed
+      (case
+        (result.result.ok (bind address))
+        (do
+          (let outcome (net.connect address capability))
+          (match
+            outcome
+            (case
+              (result.result.err (net.net-error.permission-denied))
+              (do (test.assert true))
+            )
+            (case _ (do (test.fail "out-of-scope network target was attempted")))
+          )
+        )
+      )
+      (case _ (do (test.fail "test socket address did not parse")))
+    )
+  )
+  tags: (stdlib capability network)
+  policy: (policy
+    (net-connect (group requirement: mandatory scopes: ((exact "127.0.0.1:9"))))
+  )
+)

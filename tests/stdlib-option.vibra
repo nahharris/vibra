@@ -1,129 +1,82 @@
-test:
-  $import: ../stdlib/src/test.vibra
-option:
-  $import: ../stdlib/src/option.vibra
-some-carries-payload:
-  $test: core
-  do:
-  - $let:
-      o:
-        $option.option.some: 7
-  - $match: $o
-    when:
-    - case:
-        $option.option.some:
-          $bind: v
-      do:
-      - $match: $v
-        when:
-        - case: 7
-          do:
-          - $test.assert: true
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: wrong some payload
-    - case:
-        $option.option.none: null
-      do:
-      - $test.fail: expected some
-none-variant:
-  $test: core
-  do:
-  - $let:
-      present:
-        $option.option.some: 1
-  - $match: $present
-    when:
-    - case:
-        $option.option.some:
-          $bind: _v
-      do:
-      - $let:
-          absent: $option.option.none
-      - $match: $absent
-        when:
-        - case:
-            $option.option.some:
-              $bind: _x
-          do:
-          - $test.fail: expected none
-        - case:
-            $option.option.none: null
-          do:
-          - $test.assert: true
-    - case:
-        $option.option.none: null
-      do:
-      - $test.fail: expected some
-queries-and-defaulting:
-  $test: core
-  do:
-  - $let:
-      present:
-        $option.option.some: 7
-  - $test.assert:
-      $option.is-some:
-        t: $int64
-        input: $present
-  - $let:
-      present-value:
-        $option.unwrap-or:
-          t: $int64
-          input: $present
-          default: 11
-  - $match: $present-value
-    when:
-    - case: 7
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: some did not preserve its value
-and-or-combinators:
-  $test: core
-  do:
-  - $let:
-      present:
-        $option.from-value:
-          t: $int64
-          input: 1
-  - $let:
-      absent:
-        $option.empty:
-          t: $int64
-          ignored: false
-  - $let:
-      next:
-        $option.from-value:
-          t: $str
-          input: next
-  - $match:
-      $option.and:
-        t: $int64
-        u: $str
-        input: $present
-        next: $next
-    when:
-    - case:
-        $option.option.some: next
-      do:
-      - $match:
-          $option.or:
-            t: $int64
-            input: $absent
-            fallback: $present
-        when:
-        - case:
-            $option.option.some: 1
-          do:
-          - $test.assert: true
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: option or did not select fallback
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: option and did not select next
+(import test "../stdlib/src/test.vibra")
+(import option "../stdlib/src/option.vibra")
+(test
+  some-carries-payload
+  core
+  (do
+    (let o (option.option.some 7))
+    (match
+      o
+      (case
+        (option.option.some (bind v))
+        (do
+          (match
+            v
+            (case 7 (do (test.assert true)))
+            (case _ (do (test.fail "wrong some payload")))
+          )
+        )
+      )
+      (case (option.option.none) (do (test.fail "expected some")))
+    )
+  )
+)
+(test
+  none-variant
+  core
+  (do
+    (let present (option.option.some 1))
+    (match
+      present
+      (case
+        (option.option.some (bind _v))
+        (do
+          (let absent option.option.none)
+          (match
+            absent
+            (case (option.option.some (bind _x)) (do (test.fail "expected none")))
+            (case (option.option.none) (do (test.assert true)))
+          )
+        )
+      )
+      (case (option.option.none) (do (test.fail "expected some")))
+    )
+  )
+)
+(test
+  queries-and-defaulting
+  core
+  (do
+    (let present (option.option.some 7))
+    (test.assert (option.is-some int64 present))
+    (let present-value (option.unwrap-or int64 present 11))
+    (match
+      present-value
+      (case 7 (do (test.assert true)))
+      (case _ (do (test.fail "some did not preserve its value")))
+    )
+  )
+)
+(test
+  and-or-combinators
+  core
+  (do
+    (let present (option.from-value int64 1))
+    (let absent (option.empty int64 false))
+    (let next (option.from-value str "next"))
+    (match
+      (option.and int64 str present next)
+      (case
+        (option.option.some "next")
+        (do
+          (match
+            (option.or int64 absent present)
+            (case (option.option.some 1) (do (test.assert true)))
+            (case _ (do (test.fail "option or did not select fallback")))
+          )
+        )
+      )
+      (case _ (do (test.fail "option and did not select next")))
+    )
+  )
+)

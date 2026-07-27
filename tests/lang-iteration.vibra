@@ -1,205 +1,100 @@
-=comment: Canonical copy-based traversal over ranges, arrays, maps, and Unicode scalars.
-test:
-  $import: ../stdlib/src/test.vibra
-range-reduction-and-loop-control:
-  $test: core
-  do:
-  - $let:
-      sum:
-        $mut: 0
-  - $for: number
-    in:
-      $range:
-        start: 0
-        end: 10
-        step: 1
-    do:
-    - $if:
-        $equal:
-        - $number
-        - 2
-      then:
-      - $continue: null
-      else: []
-    - $if:
-        $equal:
-        - $number
-        - 5
-      then:
-      - $break: null
-      else: []
-    - $set:
-        sum:
-          $add:
-          - $sum
-          - $number
-  - $match: $sum
-    when:
-    - case: 8
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: range reduction or loop control failed
-descending-range-and-empty-sources:
-  $test: core
-  do:
-  - $let:
-      count:
-        $mut: 0
-  - $for: number
-    in:
-      $range:
-        start: 3
-        end: -1
-        step: -1
-    do:
-    - $set:
-        count:
-          $add:
-          - $count
-          - 1
-  - $for: number
-    in:
-      $range:
-        start: 0
-        end: 0
-        step: 1
-    do:
-    - $test.fail: empty range traversed
-  - $for: scalar
-    in: ''
-    do:
-    - $test.fail: empty string traversed
-  - $match: $count
-    when:
-    - case: 4
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: descending range failed
-map-order-and-string-scalars:
-  $test: core
-  do:
-  - $let:
-      position:
-        $mut: 0
-  - $for: entry
-    in:
-      $map:
-      - key: first
-        value: 10
-      - key: second
-        value: 20
-    do:
-    - $match: $entry
-      when:
-      - case:
-          $tuple:
-          - first
-          - 10
-        do:
-        - $match: $position
-          when:
-          - case: 0
-            do:
-            - $test.assert: true
-          - case:
-              $wildcard: null
-            do:
-            - $test.fail: map insertion order changed
-      - case:
-          $wildcard: null
-        do: []
-    - $set:
-        position:
-          $add:
-          - $position
-          - 1
-  - $let:
-      scalars:
-        $mut: 0
-  - $for: scalar
-    in: aé🙂
-    do:
-    - $set:
-        scalars:
-          $add:
-          - $scalars
-          - 1
-  - $match: $scalars
-    when:
-    - case: 3
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: strings must traverse Unicode scalar values
-nested-traversal-and-copy-source:
-  $test: core
-  do:
-  - $let:
-      source:
-        $array:
-        - 1
-        - 2
-  - $let:
-      visits:
-        $mut: 0
-  - $for: outer
-    in: $source
-    do:
-    - $for: inner
-      in: $source
-      do:
-      - $set:
-          visits:
-            $add:
-            - $visits
-            - 1
-  - $match: $visits
-    when:
-    - case: 4
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: nested traversal failed
-source-is-snapshotted-before-traversal:
-  $test: core
-  do:
-  - $let:
-      source:
-        $mut:
-          $array:
-          - 1
-          - 2
-  - $let:
-      visits:
-        $mut: 0
-  - $for: item
-    in: $source
-    do:
-    - $set:
-        source:
-          $array:
-          - 9
-    - $set:
-        visits:
-          $add:
-          - $visits
-          - 1
-  - $match: $visits
-    when:
-    - case: 2
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: mutation changed traversal snapshot
+(import test "../stdlib/src/test.vibra")
+(test
+  range-reduction-and-loop-control
+  core
+  (do
+    (let sum (mut 0))
+    (for
+      number
+      (range 0 10 1)
+      (do
+        (if (equal number 2) (do (continue)) (do))
+        (if (equal number 5) (do (break)) (do))
+        (set sum (add sum number))
+      )
+    )
+    (match
+      sum
+      (case 8 (do (test.assert true)))
+      (case _ (do (test.fail "range reduction or loop control failed")))
+    )
+  )
+)
+(test
+  descending-range-and-empty-sources
+  core
+  (do
+    (let count (mut 0))
+    (for number (range 3 -1 -1) (do (set count (add count 1))))
+    (for number (range 0 0 1) (do (test.fail "empty range traversed")))
+    (for scalar "" (do (test.fail "empty string traversed")))
+    (match
+      count
+      (case 4 (do (test.assert true)))
+      (case _ (do (test.fail "descending range failed")))
+    )
+  )
+)
+(test
+  map-order-and-string-scalars
+  core
+  (do
+    (let position (mut 0))
+    (for
+      entry
+      (map ("first" 10) ("second" 20))
+      (do
+        (match
+          entry
+          (case
+            (tuple "first" 10)
+            (do
+              (match
+                position
+                (case 0 (do (test.assert true)))
+                (case _ (do (test.fail "map insertion order changed")))
+              )
+            )
+          )
+          (case _ (do))
+        )
+        (set position (add position 1))
+      )
+    )
+    (let scalars (mut 0))
+    (for scalar "aé🙂" (do (set scalars (add scalars 1))))
+    (match
+      scalars
+      (case 3 (do (test.assert true)))
+      (case _ (do (test.fail "strings must traverse Unicode scalar values")))
+    )
+  )
+)
+(test
+  nested-traversal-and-copy-source
+  core
+  (do
+    (let source (array 1 2))
+    (let visits (mut 0))
+    (for outer source (do (for inner source (do (set visits (add visits 1))))))
+    (match
+      visits
+      (case 4 (do (test.assert true)))
+      (case _ (do (test.fail "nested traversal failed")))
+    )
+  )
+)
+(test
+  source-is-snapshotted-before-traversal
+  core
+  (do
+    (let source (mut (array 1 2)))
+    (let visits (mut 0))
+    (for item source (do (set source (array 9)) (set visits (add visits 1))))
+    (match
+      visits
+      (case 2 (do (test.assert true)))
+      (case _ (do (test.fail "mutation changed traversal snapshot")))
+    )
+  )
+)

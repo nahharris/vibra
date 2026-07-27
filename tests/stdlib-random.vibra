@@ -1,46 +1,18 @@
-test:
-  $import: ../stdlib/src/test.vibra
-random:
-  $import: ../stdlib/src/random.vibra
-bytes-uses-the-granted-random-source:
-  $test: random
-  tags:
-  - stdlib
-  - capability
-  policy:
-    $policy:
-      random:
-      - requirement: mandatory
-        scopes: any
-  do:
-  - $let:
-      capability:
-        $policy.narrow: $args.policy
-        into: $random.capability
-  - $let:
-      value:
-        $random.bytes: 8
-        capability: $capability
-  - $let:
-      raw:
-        $cast: $value
-        into:
-          $array: $uint8
-  - $match: $raw
-    when:
-    - case:
-        $array:
-        - $wildcard: null
-        - $wildcard: null
-        - $wildcard: null
-        - $wildcard: null
-        - $wildcard: null
-        - $wildcard: null
-        - $wildcard: null
-        - $wildcard: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: random bytes returned the wrong length
+(import test "../stdlib/src/test.vibra")
+(import random "../stdlib/src/random.vibra")
+(test
+  bytes-uses-the-granted-random-source
+  random
+  (do
+    (let capability (policy.narrow policy random.capability))
+    (let value (random.bytes 8 capability))
+    (let raw (cast value (array uint8)))
+    (match
+      raw
+      (case (array _ _ _ _ _ _ _ _) (do (test.assert true)))
+      (case _ (do (test.fail "random bytes returned the wrong length")))
+    )
+  )
+  tags: (stdlib capability)
+  policy: (policy (random (group requirement: mandatory scopes: ((any)))))
+)

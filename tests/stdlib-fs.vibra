@@ -1,68 +1,37 @@
-test:
-  $import: ../stdlib/src/test.vibra
-fs:
-  $import: ../stdlib/src/fs.vibra
-option:
-  $import: ../stdlib/src/option.vibra
-result:
-  $import: ../stdlib/src/result.vibra
-path-new-wraps-a-string:
-  $test: core
-  tags:
-  - stdlib
-  - filesystem
-  do:
-  - $let:
-      path:
-        $fs.path.new: contract.txt
-  - $let:
-      raw:
-        $cast: $path
-        into: $str
-  - $match: $raw
-    when:
-    - case: contract.txt
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: path constructor changed the source string
-path-name-and-components-are-structural:
-  $test: core
-  tags:
-  - stdlib
-  - filesystem
-  do:
-  - $let:
-      base:
-        $fs.path.new: alpha
-  - $let:
-      path:
-        $fs.path.join: $base
-        segment: beta.txt
-  - $match:
-      $fs.path.file-name: $path
-    when:
-    - case:
-        $option.option.some: beta.txt
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: file name was not the final component
-  - $match:
-      $fs.path.components: $path
-    when:
-    - case:
-        $result.result.ok:
-          $array:
-          - alpha
-          - beta.txt
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: path components were not platform-neutral
+(import test "../stdlib/src/test.vibra")
+(import fs "../stdlib/src/fs.vibra")
+(import option "../stdlib/src/option.vibra")
+(import result "../stdlib/src/result.vibra")
+(test
+  path-new-wraps-a-string
+  core
+  (do
+    (let path (fs.path.new "contract.txt"))
+    (let raw (cast path str))
+    (match
+      raw
+      (case "contract.txt" (do (test.assert true)))
+      (case _ (do (test.fail "path constructor changed the source string")))
+    )
+  )
+  tags: (stdlib filesystem)
+)
+(test
+  path-name-and-components-are-structural
+  core
+  (do
+    (let base (fs.path.new "alpha"))
+    (let path (fs.path.join base "beta.txt"))
+    (match
+      (fs.path.file-name path)
+      (case (option.option.some "beta.txt") (do (test.assert true)))
+      (case _ (do (test.fail "file name was not the final component")))
+    )
+    (match
+      (fs.path.components path)
+      (case (result.result.ok (array "alpha" "beta.txt")) (do (test.assert true)))
+      (case _ (do (test.fail "path components were not platform-neutral")))
+    )
+  )
+  tags: (stdlib filesystem)
+)

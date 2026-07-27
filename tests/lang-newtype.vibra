@@ -1,62 +1,45 @@
-test:
-  $import: ../stdlib/src/test.vibra
-meters:
-  $newtype: $int64
-label:
-  $newtype: $str
-cast-into-newtype:
-  $test: core
-  do:
-    - $let:
-        d:
-          $cast: 10
-          into: $meters
-    - $match: $d
-      when:
-      - case:
-          $newtype:
-            type: $meters
-            inner:
-              $bind: raw
-        do:
-        - $match: $raw
-          when:
-          - case: 10
-            do:
-            - $test.assert: true
-          - case:
-              $wildcard: null
-            do:
-            - $test.fail: wrong inner value
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected meters newtype
-cast-string-newtype:
-  $test: core
-  do:
-    - $let:
-        l:
-          $cast: north
-          into: $label
-    - $match: $l
-      when:
-      - case:
-          $newtype:
-            type: $label
-            inner:
-              $bind: raw
-        do:
-        - $match: $raw
-          when:
-          - case: north
-            do:
-            - $test.assert: true
-          - case:
-              $wildcard: null
-            do:
-            - $test.fail: wrong inner string
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected label newtype
+(import test "../stdlib/src/test.vibra")
+(def meters (newtype int64))
+(def label (newtype str))
+(test
+  cast-into-newtype
+  core
+  (do
+    (let d (cast 10 meters))
+    (match
+      d
+      (case
+        (newtype meters (bind raw))
+        (do
+          (match
+            raw
+            (case 10 (do (test.assert true)))
+            (case _ (do (test.fail "wrong inner value")))
+          )
+        )
+      )
+      (case _ (do (test.fail "expected meters newtype")))
+    )
+  )
+)
+(test
+  cast-string-newtype
+  core
+  (do
+    (let l (cast "north" label))
+    (match
+      l
+      (case
+        (newtype label (bind raw))
+        (do
+          (match
+            raw
+            (case "north" (do (test.assert true)))
+            (case _ (do (test.fail "wrong inner string")))
+          )
+        )
+      )
+      (case _ (do (test.fail "expected label newtype")))
+    )
+  )
+)

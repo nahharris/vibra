@@ -1,111 +1,58 @@
-test:
-  $import: ../stdlib/src/test.vibra
-env:
-  $import: ../stdlib/src/env.vibra
-result:
-  $import: ../stdlib/src/result.vibra
-accepts-names:
-  $function:
-    value:
-      $array: $str
-  return: $bool
-  do:
-  - $return: true
-get-reads-an-explicitly-granted-variable:
-  $test: env
-  tags:
-  - stdlib
-  - capability
-  policy:
-    $policy:
-      env-read:
-      - requirement: mandatory
-        scopes:
-        - exact: PATH
-  do:
-  - $let:
-      capability:
-        $policy.narrow: $args.policy
-        into: $env.read-capability
-  - $let:
-      value:
-        $env.get: PATH
-        capability: $capability
-  - $match: $value
-    when:
-    - case:
-        $result.result.ok:
-          $wildcard: null
-      do:
-      - $test.assert: true
-    - case:
-        $result.result.err:
-          $wildcard: null
-      do:
-      - $test.fail: granted environment variable was not readable
-  - $let:
-      names:
-        $env.list:
-          capability: $capability
-  - $let:
-      names-have-the-declared-type:
-        $accepts-names: $names
-  - $test.assert: $names-have-the-declared-type
-set-and-remove-use-the-exact-write-grant:
-  $test: env
-  tags:
-  - stdlib
-  - capability
-  policy:
-    $policy:
-      env-read:
-      - requirement: mandatory
-        scopes:
-        - exact: VIBRA_STDLIB_ENV_REMOVE_TEST
-      env-write:
-      - requirement: mandatory
-        scopes:
-        - exact: VIBRA_STDLIB_ENV_REMOVE_TEST
-  do:
-  - $let:
-      read-capability:
-        $policy.narrow: $args.policy
-        into: $env.read-capability
-  - $let:
-      write-capability:
-        $policy.narrow: $args.policy
-        into: $env.write-capability
-  - $let:
-      set-result:
-        $env.set: VIBRA_STDLIB_ENV_REMOVE_TEST
-        value: present
-        capability: $write-capability
-  - $let:
-      remove-result:
-        $env.remove: VIBRA_STDLIB_ENV_REMOVE_TEST
-        capability: $write-capability
-  - $match: $remove-result
-    when:
-    - case:
-        $result.result.ok: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: environment removal returned an error
-  - $let:
-      after-remove:
-        $env.get: VIBRA_STDLIB_ENV_REMOVE_TEST
-        capability: $read-capability
-  - $match: $after-remove
-    when:
-    - case:
-        $result.result.err:
-          $wildcard: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: removed environment variable remained visible
+(import test "../stdlib/src/test.vibra")
+(import env "../stdlib/src/env.vibra")
+(import result "../stdlib/src/result.vibra")
+(fn accepts-names ((value (array str))) bool (do (return true)))
+(test
+  get-reads-an-explicitly-granted-variable
+  env
+  (do
+    (let capability (policy.narrow policy env.read-capability))
+    (let value (env.get "PATH" capability))
+    (match
+      value
+      (case (result.result.ok _) (do (test.assert true)))
+      (case
+        (result.result.err _)
+        (do (test.fail "granted environment variable was not readable"))
+      )
+    )
+    (let names (env.list capability))
+    (let names-have-the-declared-type (accepts-names names))
+    (test.assert names-have-the-declared-type)
+  )
+  tags: (stdlib capability)
+  policy: (policy (env-read (group requirement: mandatory scopes: ((exact "PATH")))))
+)
+(test
+  set-and-remove-use-the-exact-write-grant
+  env
+  (do
+    (let read-capability (policy.narrow policy env.read-capability))
+    (let write-capability (policy.narrow policy env.write-capability))
+    (let
+      set-result
+      (env.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present" write-capability)
+    )
+    (let remove-result (env.remove "VIBRA_STDLIB_ENV_REMOVE_TEST" write-capability))
+    (match
+      remove-result
+      (case (result.result.ok) (do (test.assert true)))
+      (case _ (do (test.fail "environment removal returned an error")))
+    )
+    (let after-remove (env.get "VIBRA_STDLIB_ENV_REMOVE_TEST" read-capability))
+    (match
+      after-remove
+      (case (result.result.err _) (do (test.assert true)))
+      (case _ (do (test.fail "removed environment variable remained visible")))
+    )
+  )
+  tags: (stdlib capability)
+  policy: (policy
+    (env-read
+      (group requirement: mandatory scopes: ((exact "VIBRA_STDLIB_ENV_REMOVE_TEST")))
+    )
+    (env-write
+      (group requirement: mandatory scopes: ((exact "VIBRA_STDLIB_ENV_REMOVE_TEST")))
+    )
+  )
+)

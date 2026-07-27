@@ -1,93 +1,74 @@
-test:
-  $import: ../stdlib/src/test.vibra
-literal-int-arm:
-  $test: core
-  do:
-    - $let:
-        n: 3
-    - $match: $n
-      when:
-      - case: 1
-        do:
-        - $test.fail: matched 1
-      - case: 3
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: fell through to wildcard
-literal-string-arm:
-  $test: core
-  do:
-    - $let:
-        s: b
-    - $match: $s
-      when:
-      - case: a
-        do:
-        - $test.fail: matched a
-      - case: b
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: fell through
-bool-arm:
-  $test: core
-  do:
-    - $let:
-        flag: false
-    - $match: $flag
-      when:
-      - case: true
-        do:
-        - $test.fail: matched true
-      - case: false
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: fell through bool match
-wildcard-catch-all:
-  $test: core
-  do:
-    - $let:
-        n: 99
-    - $match: $n
-      when:
-      - case: 0
-        do:
-        - $test.fail: matched 0
-      - case:
-          $wildcard: null
-        do:
-        - $test.assert: true
-bind-captures-value:
-  $test: core
-  do:
-    - $let:
-        n: 8
-    - $match: $n
-      when:
-      - case: 7
-        do:
-        - $test.fail: matched 7
-      - case:
-          $bind: captured
-        do:
-        - $match: $captured
-          when:
-          - case: 8
-            do:
-            - $test.assert: true
-          - case:
-              $wildcard: null
-            do:
-            - $test.fail: wrong captured value
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: fell through to wildcard
+(import test "../stdlib/src/test.vibra")
+(test
+  literal-int-arm
+  core
+  (do
+    (let n 3)
+    (match
+      n
+      (case 1 (do (test.fail "matched 1")))
+      (case 3 (do (test.assert true)))
+      (case _ (do (test.fail "fell through to wildcard")))
+    )
+  )
+)
+(test
+  literal-string-arm
+  core
+  (do
+    (let s "b")
+    (match
+      s
+      (case "a" (do (test.fail "matched a")))
+      (case "b" (do (test.assert true)))
+      (case _ (do (test.fail "fell through")))
+    )
+  )
+)
+(test
+  bool-arm
+  core
+  (do
+    (let flag false)
+    (match
+      flag
+      (case true (do (test.fail "matched true")))
+      (case false (do (test.assert true)))
+      (case _ (do (test.fail "fell through bool match")))
+    )
+  )
+)
+(test
+  wildcard-catch-all
+  core
+  (do
+    (let n 99)
+    (match
+      n
+      (case 0 (do (test.fail "matched 0")))
+      (case _ (do (test.assert true)))
+    )
+  )
+)
+(test
+  bind-captures-value
+  core
+  (do
+    (let n 8)
+    (match
+      n
+      (case 7 (do (test.fail "matched 7")))
+      (case
+        (bind captured)
+        (do
+          (match
+            captured
+            (case 8 (do (test.assert true)))
+            (case _ (do (test.fail "wrong captured value")))
+          )
+        )
+      )
+      (case _ (do (test.fail "fell through to wildcard")))
+    )
+  )
+)
