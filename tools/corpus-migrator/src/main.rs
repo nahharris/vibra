@@ -115,8 +115,25 @@ fn main() -> Result<()> {
         }
         let display = displays.get(canonical).cloned().unwrap_or_default();
         match surface_module(source, canonical) {
-            Ok(module) => {
+            Ok(mut module) => {
                 report.surface_valid += 1;
+                // A real build expands compile-time `embed` and `template`
+                // forms in `load_surface_program` before any body lowering.
+                // This tool drives `lower_typed_bodies` directly, so without
+                // running expansion here it reports files as failing on
+                // compile-time data the compiler handles correctly.
+                if let Err(error) =
+                    vibra::frontend::expand_module_compile_time_data(&mut module, canonical)
+                {
+                    record_issue(
+                        &mut report.body_failures,
+                        format!(
+                            "{display}: compile-time expansion: {}",
+                            first_line(&format!("{error:#}"))
+                        ),
+                    );
+                    continue;
+                }
                 modules.insert(canonical.clone(), module);
             }
             Err(error) => record_issue(
