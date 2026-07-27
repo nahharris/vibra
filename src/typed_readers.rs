@@ -60,6 +60,9 @@ pub struct StagedTypedTest {
     pub name: String,
     pub profile: String,
     pub tags: Vec<String>,
+    pub timeout_ms: Option<u64>,
+    pub skip: Option<String>,
+    pub random_seed: Option<u64>,
     pub expect_error: Option<StagedExpectedError>,
     pub clock: Option<StagedTestClock>,
     pub workspace: Option<String>,
@@ -72,6 +75,9 @@ pub struct StagedTypedTest {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StagedTestMetadata {
     Tags(Vec<StagedMetadataValue<String>>),
+    TimeoutMillis(StagedMetadataValue<i64>),
+    RandomSeed(StagedMetadataValue<i64>),
+    Skip(StagedMetadataValue<String>),
     LoadError {
         code: StagedMetadataValue<String>,
         message: Option<StagedMetadataValue<String>>,
@@ -131,6 +137,9 @@ pub fn staged_discover_typed_tests(program: &SurfaceProgram) -> Result<Vec<Stage
                 name: test.name.value.clone(),
                 profile: test.profile.value.clone(),
                 tags: Vec::new(),
+                timeout_ms: None,
+                skip: None,
+                random_seed: None,
                 expect_error: None,
                 clock: None,
                 workspace: None,
@@ -211,10 +220,31 @@ pub fn staged_discover_typed_tests(program: &SurfaceProgram) -> Result<Vec<Stage
                                 name,
                             )));
                     }
-                    TestMeta::TimeoutMillis(_)
-                    | TestMeta::RandomSeed(_)
-                    | TestMeta::Skip(_)
-                    | TestMeta::Policy(_) => {}
+                    TestMeta::TimeoutMillis(value) => {
+                        discovered.timeout_ms = Some(value.value as u64);
+                        discovered.metadata.push(StagedTestMetadata::TimeoutMillis(
+                            metadata_value(part.module.document_id, value),
+                        ));
+                    }
+                    TestMeta::RandomSeed(value) => {
+                        discovered.random_seed = Some(value.value as u64);
+                        discovered
+                            .metadata
+                            .push(StagedTestMetadata::RandomSeed(metadata_value(
+                                part.module.document_id,
+                                value,
+                            )));
+                    }
+                    TestMeta::Skip(value) => {
+                        discovered.skip = Some(value.value.clone());
+                        discovered
+                            .metadata
+                            .push(StagedTestMetadata::Skip(metadata_value(
+                                part.module.document_id,
+                                value,
+                            )));
+                    }
+                    TestMeta::Policy(_) => {}
                 }
             }
             tests.push(discovered);
@@ -599,6 +629,9 @@ mod tests {
         assert!(measured.metadata.iter().all(|metadata| {
             let source = match metadata {
                 StagedTestMetadata::Tags(values) => values[0].source,
+                StagedTestMetadata::TimeoutMillis(value) => value.source,
+                StagedTestMetadata::RandomSeed(value) => value.source,
+                StagedTestMetadata::Skip(value) => value.source,
                 StagedTestMetadata::LoadError { code, .. }
                 | StagedTestMetadata::CompileError { code, .. } => code.source,
                 StagedTestMetadata::RuntimeError { message } => message.source,

@@ -254,6 +254,104 @@ pub fn materialize_typed_functions(
         .collect()
 }
 
+/// Fully validate a single `$test` declaration's body, independent of
+/// `lower_typed_bodies`'s staged `TypedBodyIndex.tests` (which stores the
+/// raw, unvalidated `Statement`s `lower_statements` produces and is used only
+/// for corpus equivalence-checking today -- it never runs the origin-tracked
+/// type-check pass a function body gets).
+///
+/// Mirrors `lower_function` followed by the `FunctionBody::User` arm of
+/// `materialize_typed_functions`, but for a `$test`, which has no signature
+/// of its own: its only possible parameter is the single `args.policy` local
+/// a `policy:` label seeds, matching legacy `lower_single_test_body`
+/// (`src/lower.rs`). Does not touch `lower_typed_bodies` or
+/// `materialize_typed_functions`, so it cannot regress the corpus tiers they
+/// are measured against.
+pub(crate) fn materialize_typed_test(
+    module_alias: &str,
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    constants: &HashMap<String, RuntimeValue>,
+    test: &crate::ast::Test,
+) -> Result<(Vec<Statement>, Vec<(String, TypeRef)>)> {
+    let mut static_types: HashMap<String, TypeRef> = HashMap::new();
+    let mut arg_bindings: Vec<(String, TypeRef)> = Vec::new();
+    for meta in &test.metadata {
+        if let crate::ast::TestMeta::Policy(policy_expr) = meta {
+            let ty = lower_type(
+                policy_expr,
+                &BTreeSet::new(),
+                module_alias,
+                declared_aliases,
+            )
+            .with_context(|| format!("lowering typed test `{}` policy", test.name.value))?;
+            static_types.insert("args.policy".to_string(), ty.clone());
+            arg_bindings.push(("args.policy".to_string(), ty));
+        }
+    }
+    extend_static_local_types(
+        &test.body,
+        module_alias,
+        signatures,
+        declared_aliases,
+        &BTreeSet::new(),
+        &mut static_types,
+    );
+    let statements = lower_statements(
+        module_alias,
+        &test.body,
+        signatures,
+        declared_aliases,
+        &BTreeSet::new(),
+        &static_types,
+    )
+    .with_context(|| format!("lowering typed test `{}`", test.name.value))?;
+    let mut let_types = HashMap::new();
+    let mut lexical_bindings = BTreeSet::new();
+    collect_body_metadata(
+        &test.body,
+        module_alias,
+        declared_aliases,
+        &BTreeSet::new(),
+        &mut let_types,
+        &mut lexical_bindings,
+    )?;
+    let mut node_origins = Vec::new();
+    collect_statement_origins(&test.body, module_alias, signatures, &mut node_origins);
+    let mut origins = OriginCursor::new(&node_origins);
+    // Unlike a function, whose starting `locals` are exactly its declared
+    // parameters, a test's starting locals are exactly its `arg_bindings`
+    // (policy only, if any) -- `static_types` above is a superset used only
+    // for the static interface-dispatch pre-pass and must not leak into the
+    // real type-check.
+    let mut locals: HashMap<String, TypeRef> = arg_bindings.iter().cloned().collect();
+    let context = format!("test `{}`", test.name.value);
+    let checked = validate_statements(
+        &statements,
+        &mut locals,
+        constants,
+        signatures,
+        &let_types,
+        &TypeRef::Void,
+        0,
+        false,
+        &context,
+        &mut origins,
+    )
+    .map_err(|error| origins.annotate(error))
+    .with_context(|| format!("validating typed test `{}`", test.name.value))?;
+    origins.finish()?;
+    validate_function_body(&checked, &TypeRef::Void)
+        .with_context(|| format!("validating returns in typed test `{}`", test.name.value))?;
+    validate_task_handles(&checked).with_context(|| {
+        format!(
+            "validating task handles in typed test `{}`",
+            test.name.value
+        )
+    })?;
+    Ok((checked, arg_bindings))
+}
+
 /// Validate a `$wasm`-only typed body against the versioned host ABI
 /// registry. Delegates to `crate::lower::validate_wasm_bodies`, the exact
 /// legacy YAML-path check (`E-WASM-002`/`E-WASM-003`/`E-WASM-004`/
@@ -284,7 +382,13 @@ fn validate_wasm_import_body(
         .with_context(|| format!("validating typed wasm import `{key}` {location}"))
 }
 
-fn materialize_constants(
+/// Widened to `pub(crate)` so `typed_program.rs` can materialize
+/// `LoweredProgram::constants` without a second constant evaluator: this is
+/// the same literal-only rule the legacy YAML path applies (see
+/// `collect_module_defs` in `src/lower.rs`, which only ever accepts a bare
+/// bool/int/float/string scalar for a constant), reusing
+/// `crate::lower::infer_expr_type` to check the declared type still matches.
+pub(crate) fn materialize_constants(
     signatures: &TypedSignatureIndex,
     bodies: &TypedBodyIndex,
 ) -> Result<HashMap<String, RuntimeValue>> {

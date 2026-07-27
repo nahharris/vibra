@@ -73,6 +73,9 @@ signature-invalid: 0
 
 body-valid: 57/58
 body-invalid: 1
+
+materialized-valid: 5/57
+materialized-invalid: 52
 ```
 
 Every non-S-expression source converts syntactically, every module source
@@ -92,6 +95,24 @@ through their qualified names, so rejecting them was wrong and it had cascaded
 to every module importing `option` or `result` (22/58 to 43/58). Then `Self` is
 substituted before impl conformance is checked (#182), clearing 15 `E-IMPL-005`
 failures (43/58 to 58/58).
+
+### Materialize tier: the real readiness number
+
+Body lowering alone does not prove a program compiles. `lower_typed_bodies`
+produces *staged* statements; only `materialize_typed_functions` turns them into
+executable `FunctionSig`s, which is what the real compiler consumes. Reporting
+`body-valid` as readiness overstated it by an order of magnitude — 57/58 against
+an actual 5/57.
+
+52 failures, three causes:
+
+| Cause | Occurrences | Note |
+|---|---|---|
+| wasm import forwards an unrecognized argument | 21 + 20 `E-WASM-003`, 1 `E-WASM-007` | `validate_wasm_import_body` matches forwarded names exactly against `sig.arg_names`, so forwarding a *field* of a record-typed parameter (`$args.actual`) is rejected. Hits most of `stdlib/src/test.vibra`'s `assert*` imports and everything calling them |
+| typed signature/body set mismatch | 15 | `lower_typed_bodies`'s `TopLevel::Definition` arm lowers bodies only for `defs:`-declared functions (`AnnotationKind::Definitions`). Methods defined inline in an `impls:` block (`AnnotationKind::Implementation`, `Fresh` binding) get a registered signature and no body |
+| generic functions unsupported | 12 | `src/typed_body.rs:147` rejects them outright, and `ensure_safe_type` rejects instantiated types, `SelfType`, and capability-typed values at the signature boundary. The standard library is built on generics |
+
+This is the work remaining before the corpus can be converted.
 
 ### Body tier: 1 remaining
 

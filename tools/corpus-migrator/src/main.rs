@@ -60,7 +60,9 @@ struct Report {
     /// expected to fail widely until `Expr::Primitive` lands on the typed
     /// path (tracked on a separate branch).
     body_valid: usize,
+    materialized_valid: usize,
     body_failures: BTreeMap<String, usize>,
+    materialize_failures: BTreeMap<String, usize>,
 }
 
 fn main() -> Result<()> {
@@ -181,7 +183,25 @@ fn main() -> Result<()> {
             Ok(signature_index) => {
                 report.signature_valid += 1;
                 match typed_body::lower_typed_bodies(inputs.iter().copied(), &signature_index) {
-                    Ok(_) => report.body_valid += 1,
+                    Ok(bodies) => {
+                        report.body_valid += 1;
+                        // Tier 4 (materialized-valid): body lowering alone does
+                        // not prove a program compiles. It produces staged
+                        // statements; only materialization turns them into
+                        // executable `FunctionSig`s, which is what the real
+                        // compiler needs. Reporting body-valid as readiness
+                        // overstated it by an order of magnitude.
+                        match vibra::typed_body::materialize_typed_functions(
+                            &signature_index,
+                            &bodies,
+                        ) {
+                            Ok(_) => report.materialized_valid += 1,
+                            Err(error) => record_issue(
+                                &mut report.materialize_failures,
+                                format!("{display}: {}", first_line(&format!("{error:#}"))),
+                            ),
+                        }
+                    }
                     Err(error) => record_issue(
                         &mut report.body_failures,
                         format!("{display}: {}", first_line(&format!("{error:#}"))),
@@ -241,6 +261,18 @@ fn main() -> Result<()> {
         report.body_failures.values().sum::<usize>()
     );
     for (reason, count) in &report.body_failures {
+        println!("  {count:>3}  {reason}");
+    }
+    println!();
+    println!(
+        "materialized-valid: {}/{}",
+        report.materialized_valid, report.body_valid
+    );
+    println!(
+        "materialized-invalid: {}",
+        report.materialize_failures.values().sum::<usize>()
+    );
+    for (reason, count) in &report.materialize_failures {
         println!("  {count:>3}  {reason}");
     }
     Ok(())
