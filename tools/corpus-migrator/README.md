@@ -55,8 +55,8 @@ value parameters in declaration order; unknown or missing labels are errors.
 
 ## Residual inventory
 
-The repository-wide dry run, measured against `main` after interface method
-dispatch landed (#187) and compile-time expansion was wired in, reports:
+The repository-wide dry run, measured against `main` after checked numeric
+conversion landed on the typed path (#150), reports:
 
 ```text
 scanned: 62
@@ -71,13 +71,13 @@ surface-invalid: 0
 signature-valid: 58/58
 signature-invalid: 0
 
-body-valid: 56/58
-body-invalid: 2
+body-valid: 57/58
+body-invalid: 1
 ```
 
 Every non-S-expression source converts syntactically, every module source
 parses into a well-shaped typed surface AST, and every one of them now lowers
-to typed signatures. 56 of 58 lower all the way to an executable typed body.
+to typed signatures. 57 of 58 lower all the way to an executable typed body.
 
 Keep the tiers distinct when reading this. The original single-tier report said
 `typed-valid: 58/58` while measuring only surface parsing, which read as
@@ -93,15 +93,21 @@ to every module importing `option` or `result` (22/58 to 43/58). Then `Self` is
 substituted before impl conformance is checked (#182), clearing 15 `E-IMPL-005`
 failures (43/58 to 58/58).
 
-### Body tier: 2 remaining
+### Body tier: 1 remaining
 
 | Cause | Files | Note |
 |---|---|---|
 | `@`-prefixed project import unresolved | 1 | `examples/lsp-workspace/main.vibra` imports `@greeting/greet.vibra`; this standalone tool has no `project.vibra` resolution — a tool limitation, not a language gap |
-| `ExprKind::Convert` intentionally unimplemented | 1 | `tests/lang-primitive-operations.vibra`; legacy maps it to `Expr::Primitive { op: Convert }`, which the typed primitive validators treat as unreachable, and its AST fallback is a bare literal with no origin, so it would break the `OriginCursor` one-to-one invariant |
 
-`ExprKind::Convert` is the only genuine language gap left in this tier. The
-other file is a limitation of this standalone tool, not of the compiler.
+`ExprKind::Convert` (checked numeric conversion) closed this tier's last
+genuine language gap. `fallback` is now `Spanned<Literal>` (`src/ast/surface.rs`)
+so it carries a real origin, satisfying the `OriginCursor` one-to-one
+invariant; `convert` lowers to its own `Expr::Primitive { op: Convert }`
+envelope in `validate_expr`, ported from legacy `parse_checked_conversion`/
+`conversion_fallback_fits` in `lower.rs` rather than the generic `PrimitiveOp`
+dispatch (`typed_primitive_valid_for` still treats `Convert` as unreachable
+there, by design). The one remaining failure is this standalone tool's lack
+of `project.vibra` resolution, not a compiler gap.
 
 ### What the earlier failures actually were
 

@@ -513,7 +513,7 @@ pub enum ExprKind {
     Convert {
         value: Box<Expr>,
         into: TypeExpr,
-        fallback: Literal,
+        fallback: Spanned<Literal>,
     },
     Cast {
         value: Box<Expr>,
@@ -2008,11 +2008,11 @@ fn trailing_attributes<'a>(
     Ok(attributes)
 }
 
-fn literal_node(node: &Node) -> Result<Literal, AstError> {
+fn literal_node(node: &Node) -> Result<Spanned<Literal>, AstError> {
     match &node.kind {
-        NodeKind::Atom(atom) => {
-            literal(atom).ok_or_else(|| AstError::new("E-SYN-010", "expected a literal", node.span))
-        }
+        NodeKind::Atom(atom) => literal(atom)
+            .map(|value| Spanned::source(value, node.span))
+            .ok_or_else(|| AstError::new("E-SYN-010", "expected a literal", node.span)),
         _ => Err(AstError::new("E-SYN-010", "expected a literal", node.span)),
     }
 }
@@ -2257,6 +2257,27 @@ mod tests {
                 .code,
             "E-SYN-008"
         );
+    }
+
+    #[test]
+    fn convert_preserves_the_fallback_literals_own_span() {
+        let source = "(fn narrow ((value int64)) int32 (do (return (convert value int32 5))))";
+        let parsed = module(source).unwrap();
+        let TopLevel::Function(function) = &parsed.forms[0] else {
+            panic!("expected function");
+        };
+        let ExprKind::Return(Some(convert_expr)) = &function.body[0].value else {
+            panic!("expected return");
+        };
+        let ExprKind::Convert { fallback, .. } = &convert_expr.value else {
+            panic!("expected convert, got {:?}", convert_expr.value);
+        };
+        assert_eq!(fallback.value, Literal::Int(5));
+        // Exact half-open span of the `5` token, not the enclosing `convert`
+        // form: this is the origin problem the fallback field exists to fix.
+        let start = source.rfind('5').expect("fallback literal present");
+        assert_eq!(fallback.span, Span::new(start, start + 1));
+        assert_eq!(fallback.span, fallback.origin.primary_span());
     }
 
     #[test]

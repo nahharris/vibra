@@ -6789,7 +6789,7 @@ pub(crate) fn typed_primitive_op(name: &str) -> Option<(PrimitiveOp, usize)> {
     })
 }
 
-fn conversion_fallback_fits(expr: &Expr, target: &TypeRef) -> bool {
+pub(crate) fn conversion_fallback_fits(expr: &Expr, target: &TypeRef) -> bool {
     let Expr::Value(value) = expr else {
         return false;
     };
