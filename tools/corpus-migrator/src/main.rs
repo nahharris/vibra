@@ -65,11 +65,39 @@ struct Report {
     materialize_failures: BTreeMap<String, usize>,
 }
 
+/// `--write` is the explicit opt-in for the migrator to touch disk at all. Dry
+/// run (report only, no `fs::write`) stays the default so a plain invocation
+/// can never mutate the corpus by accident; only this flag switches the tool
+/// into its write mode. Positional argument order does not matter.
+struct Args {
+    root: PathBuf,
+    write: bool,
+}
+
+fn parse_args() -> Result<Args> {
+    let mut root = None;
+    let mut write = false;
+    for arg in env::args().skip(1) {
+        if arg == "--write" {
+            write = true;
+        } else if root.is_none() {
+            root = Some(PathBuf::from(arg));
+        } else {
+            bail!("unexpected extra argument `{arg}`");
+        }
+    }
+    Ok(Args {
+        root: match root {
+            Some(root) => root,
+            None => env::current_dir()?,
+        },
+        write,
+    })
+}
+
 fn main() -> Result<()> {
-    let root = env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or(env::current_dir()?);
+    let args = parse_args()?;
+    let root = args.root;
     let mut files = Vec::new();
     collect(&root, &mut files)?;
     files.sort();
@@ -78,6 +106,11 @@ fn main() -> Result<()> {
     let mut report = Report::default();
     let mut displays: BTreeMap<PathBuf, String> = BTreeMap::new();
     let mut sexpr_sources: BTreeMap<PathBuf, String> = BTreeMap::new();
+    // Canonical path -> real on-disk path, and the set of canonical paths
+    // that were freshly converted this run (as opposed to files that were
+    // already S-expression and therefore have nothing to write back).
+    let mut originals: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
+    let mut freshly_converted: BTreeSet<PathBuf> = BTreeSet::new();
 
     for path in &files {
         report.scanned += 1;
@@ -88,6 +121,7 @@ fn main() -> Result<()> {
             .to_string();
         let canonical = fs::canonicalize(path)?;
         displays.insert(canonical.clone(), display.clone());
+        originals.insert(canonical.clone(), path.clone());
         let source = fs::read_to_string(path)?;
         if source.trim_start().starts_with('(') {
             report.already_sexpr += 1;
@@ -97,7 +131,8 @@ fn main() -> Result<()> {
         match migrate_for_path(&source, path, &signature_index) {
             Ok(output) => {
                 report.converted += 1;
-                sexpr_sources.insert(canonical, output);
+                sexpr_sources.insert(canonical.clone(), output);
+                freshly_converted.insert(canonical);
             }
             Err(error) => record_issue(
                 &mut report.conversion_failures,
@@ -142,6 +177,55 @@ fn main() -> Result<()> {
                 &mut report.surface_failures,
                 format!("{display}: {}", first_line(&format!("{error:#}"))),
             ),
+        }
+    }
+
+    // `--write` mode: rewrite a source file in place only if it was both
+    // converted (the YAML-to-S-expression rewrite succeeded) and validated
+    // (tier 1: the emitted S-expression parses and lowers into a well-shaped
+    // typed surface AST). A file that fails either check is left untouched on
+    // disk -- never a partially-converted file. Files that were already
+    // S-expression are never rewritten here; there is nothing to migrate.
+    //
+    // Each write is immediately re-canonicalized through the staged
+    // S-expression printer (`sexpr_tooling::staged_format_sexpr`), the same
+    // parse-validate-print path `vibra fmt` will use once it is repointed at
+    // S-expression source. Formatting is best-effort: if it fails for any
+    // reason the already-valid, already-written (merely non-canonically
+    // spaced) source is left in place rather than aborting the run, since the
+    // write already passed its own tier-1 validation.
+    let mut written = 0usize;
+    let mut formatted = 0usize;
+    if args.write {
+        for canonical in &freshly_converted {
+            if !modules.contains_key(canonical) {
+                continue;
+            }
+            let Some(original) = originals.get(canonical) else {
+                continue;
+            };
+            let Some(source) = sexpr_sources.get(canonical) else {
+                continue;
+            };
+            fs::write(original, source)
+                .with_context(|| format!("write converted source {}", original.display()))?;
+            written += 1;
+            match vibra::sexpr_tooling::staged_format_sexpr(original, source) {
+                Ok(canonical_source) if &canonical_source != source => {
+                    fs::write(original, &canonical_source).with_context(|| {
+                        format!("write canonically formatted source {}", original.display())
+                    })?;
+                    formatted += 1;
+                }
+                Ok(_) => {}
+                Err(diagnostic) => {
+                    eprintln!(
+                        "warning: {} did not reformat cleanly ({:?}); kept unformatted-but-valid output",
+                        original.display(),
+                        diagnostic
+                    );
+                }
+            }
         }
     }
 
@@ -219,6 +303,16 @@ fn main() -> Result<()> {
     println!("scanned: {}", report.scanned);
     println!("already-sexpr: {}", report.already_sexpr);
     println!("converted: {}", report.converted);
+    println!(
+        "written: {} ({}); canonically reformatted: {}",
+        written,
+        if args.write {
+            "--write requested"
+        } else {
+            "dry run; pass --write to rewrite in place"
+        },
+        formatted
+    );
     println!(
         "unsupported: {}",
         report.conversion_failures.values().sum::<usize>()

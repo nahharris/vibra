@@ -1770,13 +1770,23 @@ fn bare_type_value(ty: &TypeExpr) -> Result<Value> {
 
 impl<'a> Converter<'a> {
     fn test_value(&mut self, test: &Test) -> Result<(String, Value)> {
+        let body = self.body_to_do(&test.body)?;
+        self.test_metadata_value(test, body)
+    }
+
+    /// Shared by [`Self::test_value`] (real compilation, real body) and
+    /// [`test_discovery_value`] (test-name/tag/metadata discovery only, which
+    /// deliberately never resolves imports or converts bodies -- see that
+    /// function's doc comment). `body` is the already-converted `do` value, or
+    /// a placeholder the caller promises nothing will read.
+    fn test_metadata_value(&mut self, test: &Test, body: Value) -> Result<(String, Value)> {
         let key = test.name.value.clone();
         let mut m = Mapping::new();
         m.insert(
             Value::String("$test".into()),
             Value::String(test.profile.value.clone()),
         );
-        m.insert(Value::String("do".into()), self.body_to_do(&test.body)?);
+        m.insert(Value::String("do".into()), body);
         for meta in &test.metadata {
             match meta {
                 TestMeta::Tags(tags) => {
@@ -1881,6 +1891,28 @@ impl<'a> Converter<'a> {
         }
         Ok((key, Value::Mapping(m)))
     }
+}
+
+/// Convert one typed `Test` into the legacy `(name, envelope)` shape for name
+/// and metadata discovery only -- never for compilation.
+///
+/// [`crate::load::load_entry_module_for_test_discovery`] deliberately skips
+/// import resolution (a test that expects a load failure must still be
+/// selectable), and `src/lower.rs::discover_test_specs_in_entry` only reads a
+/// test's `$test` profile and its metadata attributes (`tags`, `timeout-ms`,
+/// `expect-error`, `clock`, ...); it never reads `do`. So this never resolves
+/// call signatures (there is no cross-module signature index available yet at
+/// discovery time) and never converts the test body -- it stubs `do` with an
+/// empty sequence that the discovery reader is guaranteed not to inspect.
+pub(crate) fn test_discovery_value(test: &Test) -> Result<(String, Value)> {
+    let sig = ResolvedSignatures::default();
+    let mut converter = Converter {
+        sig: &sig,
+        extra: Vec::new(),
+        next_id: 0,
+        current_params: Vec::new(),
+    };
+    converter.test_metadata_value(test, Value::Sequence(Vec::new()))
 }
 
 fn policy_domains_value(domains: &[PolicyDomain]) -> Result<Value> {
