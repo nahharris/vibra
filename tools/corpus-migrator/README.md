@@ -55,8 +55,8 @@ value parameters in declaration order; unknown or missing labels are errors.
 
 ## Residual inventory
 
-The repository-wide dry run, measured against `main` after wasm host-import
-lowering landed (#184), reports:
+The repository-wide dry run, measured against `main` after the capability and
+handle shorthand conversions were fixed, reports:
 
 ```text
 scanned: 62
@@ -71,13 +71,13 @@ surface-invalid: 0
 signature-valid: 58/58
 signature-invalid: 0
 
-body-valid: 35/58
-body-invalid: 23
+body-valid: 40/58
+body-invalid: 18
 ```
 
 Every non-S-expression source converts syntactically, every module source
 parses into a well-shaped typed surface AST, and every one of them now lowers
-to typed signatures. 35 of 58 lower all the way to an executable typed body.
+to typed signatures. 40 of 58 lower all the way to an executable typed body.
 
 Keep the tiers distinct when reading this. The original single-tier report said
 `typed-valid: 58/58` while measuring only surface parsing, which read as
@@ -93,19 +93,21 @@ to every module importing `option` or `result` (22/58 to 43/58). Then `Self` is
 substituted before impl conformance is checked (#182), clearing 15 `E-IMPL-005`
 failures (43/58 to 58/58).
 
-### Body tier: 23 remaining, four causes
+### Body tier: 18 remaining, three causes
 
 | Cause | Files | Note |
 |---|---|---|
-| `policy.narrow` target is not a capability or policy type | 11 | A migrator conversion bug, not a compiler gap: the legacy shorthand `$capability.<domain>` is emitted as a bare symbol instead of a capability form, so the typed path correctly rejects a malformed target |
-| `unknown typed callee` for interface and inherent method dispatch | 9 | `error.error.kind`, `fs.writable.write-string` — qualified method dispatch is not resolved on the typed path yet |
+| `unknown typed callee` for interface and inherent method dispatch | 15 | `error.error.kind` (10), `fs.writable.write-string` (5) — qualified method dispatch is not resolved on the typed path yet. This is now the whole remaining tier for practical purposes |
+| `@`-prefixed project import unresolved | 1 | `examples/lsp-workspace/main.vibra` imports `@greeting/greet.vibra`; this standalone tool has no `project.vibra` resolution — a tool limitation, not a language gap |
 | `ExprKind::Convert` intentionally unimplemented | 1 | `tests/lang-primitive-operations.vibra`; legacy maps it to `Expr::Primitive { op: Convert }`, which the typed primitive validators treat as unreachable, and its AST fallback is a bare literal with no origin |
 | Compile-time `template` expansion not run by this tool | 1 | `tests/template.vibra`; the language supports it (#173, `frontend::expand_compile_time_data`), but this tool calls `typed_body::lower_typed_bodies` directly and bypasses `load_surface_program`, so the failure is tool wiring rather than a language gap |
 
-`examples/lsp-workspace/main.vibra` is counted under interface dispatch above
-only incidentally; it fails on `greeting.greet` because this standalone tool has
-no `project.vibra` resolution for `@`-prefixed project imports — a tool
-limitation it already accepts for named-call signature discovery.
+The capability-target failures that previously dominated this tier are gone.
+They were a converter bug rather than a compiler gap: the corpus fuses the
+domain into the head (`$capability.env-read`, `$handle.read`) and only the
+expanded `$capability` spelling was handled, so the head was emitted verbatim
+as a bare symbol and the typed path correctly rejected a malformed capability
+target. The corpus never uses the expanded spelling at all.
 
 Unsupported and per-tier failure entries remain path-qualified and
 deterministic, exactly like the original single-tier report.

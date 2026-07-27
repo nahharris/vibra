@@ -1309,6 +1309,31 @@ fn type_form(head: &str, payload: &Value) -> Result<String> {
             policy_groups(groups)?
         ));
     }
+    // The corpus spells capability and handle types with the domain or access
+    // fused into the head: `$capability.clock: null`, `$handle.read: null`.
+    // Legacy strips the prefix and parses the remainder as the domain/access
+    // (`src/lower.rs`, `strip_prefix("$capability.")` and `"$handle."`). Both
+    // must become one head with positional children, since the contract allows
+    // no form to accept both a compact and an expanded spelling.
+    if let Some(domain) = head.strip_prefix("capability.") {
+        if domain.is_empty() {
+            bail!("capability-domain-missing")
+        }
+        return Ok(format!(
+            "(capability {}{})",
+            sym(domain),
+            policy_groups(payload)?
+        ));
+    }
+    if let Some(access) = head.strip_prefix("handle.") {
+        if access.is_empty() {
+            bail!("handle-access-missing")
+        }
+        if !payload.is_null() {
+            bail!("handle-body-not-null")
+        }
+        return Ok(format!("(handle {})", sym(access)));
+    }
     match payload {
         Value::Null => Ok(head),
         Value::String(value) if value == "$void" => Ok(format!("({head})")),
@@ -1616,6 +1641,59 @@ works:
         assert!(output.contains("(fn answer ((value int64)) array"));
         assert!(output.contains("(array args.value)"));
         assert!(output.contains("tags: (fast)"));
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn migrates_capability_and_handle_shorthand_heads() {
+        // The corpus never spells these expanded: it fuses the domain or access
+        // into the head, as `$capability.clock` and `$handle.read`. Emitting the
+        // head verbatim produced a bare symbol reference, which the typed path
+        // then correctly rejected as a malformed capability target.
+        let output = migrate(
+            r#"
+clock-capability:
+  $capability.clock: null
+read-handle:
+  $handle.read: null
+"#,
+        )
+        .unwrap();
+        assert!(
+            output.contains("(capability clock)"),
+            "capability shorthand not converted: {output}"
+        );
+        assert!(
+            output.contains("(handle read)"),
+            "handle shorthand not converted: {output}"
+        );
+        assert!(
+            !output.contains("capability.clock") && !output.contains("handle.read"),
+            "fused head leaked into output: {output}"
+        );
+        validate(&output).unwrap();
+    }
+
+    #[test]
+    fn capability_shorthand_keeps_explicit_policy_groups() {
+        let output = migrate(
+            r#"
+scoped-reader:
+  $capability.fs-read:
+  - requirement: mandatory
+    scopes:
+    - exact: /tmp
+"#,
+        )
+        .unwrap();
+        assert!(
+            output.contains("(capability fs-read (group"),
+            "capability groups lost: {output}"
+        );
+        assert!(
+            output.contains("requirement: mandatory"),
+            "group requirement lost: {output}"
+        );
         validate(&output).unwrap();
     }
 

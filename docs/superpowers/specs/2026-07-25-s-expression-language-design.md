@@ -197,7 +197,17 @@ type-expr = symbol
 field-type       = "(", symbol, type-expr, ")" ;
 enum-tag         = "(", symbol, type-expr, ")" ;
 interface-member = "(", symbol, type-expr, ")" ;
+
+capability-type  = "(", "capability", symbol, policy-group*, ")" ;
+handle-type      = "(", "handle", symbol, ")" ;
+policy-type      = "(", "policy", policy-domain*, ")" ;
 ```
+
+The capability domain and handle access are positional operands, not part of
+the head. The legacy surface fused them in — `$capability.env-read`,
+`$handle.read` — which is exactly the head-varies-by-payload shape this
+grammar removes. A capability carries zero or more policy groups; a handle
+takes its access mode and nothing else.
 
 Generic type application uses the same direct, call-like list shape as other
 Vibra forms: `(constructor type...)`. There is no generic `inst` head. Type
@@ -683,6 +693,9 @@ filesystem changes remains an explicit CLI or LSP workspace action.
 | `$join`/into sibling | `(join handle result)` |
 | `$convert`/into/or siblings | `(convert value Type fallback)` |
 | `$cast`/into sibling | `(cast value Type)` |
+| `{$capability.<domain>: null}` | `(capability <domain>)` |
+| `{$capability.<domain>: [groups]}` | `(capability <domain> (group ...) ...)` |
+| `{$handle.<access>: null}` | `(handle <access>)` |
 | `$policy.narrow`/into sibling | `(policy.narrow value Type)` |
 | leading `-private-name` | `(private (fn private-name ...))` |
 | `=doc`, `=where`, `=defs`, `=impl` | trailing `doc:`, `where:`, `defs:`, `impls:` attributes |
