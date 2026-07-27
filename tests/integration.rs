@@ -5412,23 +5412,32 @@ fn test_discovery_trims_skip_reason_and_closes_profile_diagnostic() {
 
 #[test]
 fn test_discovery_rejects_malformed_expected_error_metadata() {
+    // Legacy's `expect-error:` was a mapping of named `phase:`/`code:`/
+    // `message-contains:` keys, so "wrong shape" included things like a
+    // bare scalar payload or a duplicated key. The new grammar's
+    // `expect-error:` is fully positional -- `(load|compile, code,
+    // [message])` or `(runtime, message)` (`parse_test_meta`,
+    // `src/ast/surface.rs`) -- with no named fields at all, so there is no
+    // "duplicate key" to write anymore; every malformed shape below is a
+    // reader-level rejection instead of legacy's E-TEST-001.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     for source in [
-        "bad:\n  $test: core\n  expect-error: compile\n  do: []\n",
-        "bad:\n  $test: core\n  expect-error:\n    phase: compile\n  do: []\n",
-        "bad:\n  $test: core\n  expect-error:\n    phase: runtime\n    code: E-RUNTIME-001\n  do: []\n",
-        "bad:\n  $test: core\n  expect-error:\n    phase: unknown\n    message-contains: nope\n  do: []\n",
-        "bad:\n  $test: core\n  expect-error:\n    phase: compile\n    phase: runtime\n    code: E-OPTION-001\n  do: []\n",
-        "bad:\n  $test: core\n  expect-error:\n    phase: compile\n    code: E-OPTION-001\n    code: E-CALL-001\n  do: []\n",
-        "bad:\n  $test: core\n  expect-error:\n    phase: runtime\n    message-contains: one\n    message-contains: two\n  do: []\n",
+        "(test bad core (do) expect-error: compile)\n",
+        "(test bad core (do) expect-error: (compile))\n",
+        "(test bad core (do) expect-error: (runtime E-RUNTIME-001))\n",
+        "(test bad core (do) expect-error: (unknown \"nope\"))\n",
+        "(test bad core (do) expect-error: (compile E-OPTION-001 \"a\" \"b\"))\n",
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
-            Ok(program) => vibra::lower::discover_test_specs(&program).unwrap_err(),
-            Err(error) => error,
+            Ok(program) => format!(
+                "{:#}",
+                vibra::lower::discover_test_specs(&program).unwrap_err()
+            ),
+            Err(error) => format!("{error:#}"),
         };
-        assert!(format!("{err:#}").contains("E-TEST-001"), "{err:#}");
+        assert!(err.contains("E-SYN"), "{source:?}: {err}");
     }
 }
 
@@ -5440,20 +5449,17 @@ fn vibra_test_matches_structured_expected_errors() {
     let test_lib =
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/test.vibra"))
             .unwrap();
+    // `$option: T` sugar has no S-expression form at all (see the comment
+    // on `legacy_option_sugar_is_rejected_with_stable_code`) and reaching
+    // it would only hit the adapter's own E-ADAPT-009 anyway; a direct
+    // `$void` union member is the S-expression construct that still
+    // reaches legacy's real E-OPTION-001 lowering check.
     std::fs::write(
         &compile_entry,
         format!(
-            r#"test:
-  $import: "{test_lib}"
-legacy:
-  $option: $str
-compile-error:
-  $test: core
-  expect-error:
-    phase: compile
-    code: E-OPTION-001
-    message-contains: $option
-  do: []
+            r#"(import test "{test_lib}")
+(def legacy (union void str))
+(test compile-error core (do) expect-error: (compile E-OPTION-001 "removed"))
 "#,
             test_lib = path_str(&test_lib),
         ),
@@ -5479,15 +5485,8 @@ compile-error:
     std::fs::write(
         &runtime_entry,
         format!(
-            r#"test:
-  $import: "{test_lib}"
-runtime-error:
-  $test: core
-  expect-error:
-    phase: runtime
-    message-contains: assertion failed
-  do:
-    - $test.assert: false
+            r#"(import test "{test_lib}")
+(test runtime-error core (do (test.assert false)) expect-error: (runtime "assertion failed"))
 "#,
             test_lib = path_str(&test_lib),
         ),
@@ -5512,10 +5511,10 @@ fn vibra_test_matches_load_error_before_imports_are_recursively_loaded() {
     let imported = dir.path().join("cycle.vibra");
     std::fs::write(
         &entry,
-        "cycle:\n  $import: cycle.vibra\nload-error:\n  $test: core\n  expect-error:\n    phase: load\n    code: E-MOD-003\n  do: []\n",
+        "(import cycle \"cycle.vibra\")\n(test load-error core (do) expect-error: (load E-MOD-003))\n",
     )
     .unwrap();
-    std::fs::write(&imported, "entry:\n  $import: load-error.vibra\n").unwrap();
+    std::fs::write(&imported, "(import entry \"load-error.vibra\")\n").unwrap();
 
     let output = vibra_cmd()
         .args(["test", &path_str(&entry), "--format", "human"])
@@ -5540,7 +5539,7 @@ fn vibra_test_reports_expected_error_mismatches_from_the_parent() {
     let entry = dir.path().join("expected-error-mismatch.vibra");
     std::fs::write(
         &entry,
-        "passes:\n  $test: core\n  expect-error:\n    phase: compile\n    code: E-OPTION-001\n  do: []\n",
+        "(test passes core (do) expect-error: (compile E-OPTION-001))\n",
     )
     .unwrap();
 
@@ -5563,20 +5562,20 @@ fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
         (
             "wrong-phase.vibra",
             format!(
-                "test:\n  $import: \"{}\"\nbad:\n  $test: core\n  expect-error:\n    phase: compile\n    code: E-OPTION-001\n  do:\n    - $test.assert: false\n",
+                "(import test \"{}\")\n(test bad core (do (test.assert false)) expect-error: (compile E-OPTION-001))\n",
                 path_str(&test_lib)
             ),
             "expected compile error, but test failed during runtime",
         ),
         (
             "wrong-code.vibra",
-            "legacy:\n  $option: $str\nbad:\n  $test: core\n  expect-error:\n    phase: compile\n    code: E-CALL-001\n  do: []\n".to_string(),
+            "(def legacy (union void str))\n(test bad core (do) expect-error: (compile E-CALL-001))\n".to_string(),
             "expected compile error code `E-CALL-001`, got `E-OPTION-001`",
         ),
         (
             "wrong-message.vibra",
             format!(
-                "test:\n  $import: \"{}\"\nbad:\n  $test: core\n  expect-error:\n    phase: runtime\n    message-contains: expected different runtime error\n  do:\n    - $test.assert: false\n",
+                "(import test \"{}\")\n(test bad core (do (test.assert false)) expect-error: (runtime \"expected different runtime error\"))\n",
                 path_str(&test_lib)
             ),
             "expected runtime error message to contain `expected different runtime error`",
@@ -5602,7 +5601,10 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
     let report = dir.path().join("report.json");
     std::fs::write(
         &entry,
-        "core-language:\n  $test: core\n  tags: [language, fast]\n  do: []\nfs-language:\n  $test: fs\n  tags: [language, filesystem]\n  do: []\nskipped-core:\n  $test: core\n  tags: [language]\n  skip: external fixture unavailable\n  do: []\n",
+        r#"(test core-language core (do) tags: (language fast))
+(test fs-language fs (do) tags: (language filesystem))
+(test skipped-core core (do) tags: (language) skip: "external fixture unavailable")
+"#,
     )
     .unwrap();
     let output = vibra_cmd()
@@ -5659,11 +5661,7 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
 fn vibra_test_deny_skips_fails_after_reporting_selected_skip() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("skip.vibra");
-    std::fs::write(
-        &entry,
-        "skipped:\n  $test: core\n  skip: pending\n  do: []\n",
-    )
-    .unwrap();
+    std::fs::write(&entry, "(test skipped core (do) skip: \"pending\")\n").unwrap();
     let output = vibra_cmd()
         .args([
             "test",
@@ -5684,7 +5682,7 @@ fn vibra_test_caps_command_timeout_with_test_metadata() {
     let entry = dir.path().join("timeout.vibra");
     std::fs::write(
         &entry,
-        "slow:\n  $test: core\n  timeout-ms: 1\n  do:\n    - $while: true\n      do: []\n",
+        "(test slow core (do (while true (do))) timeout-ms: 1)\n",
     )
     .unwrap();
     let output = vibra_cmd()
