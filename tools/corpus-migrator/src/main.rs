@@ -127,12 +127,20 @@ fn main() -> Result<()> {
     }
 
     // Tier 2 (signature-valid) and tier 3 (body-valid): only attempted for
-    // files whose surface AST is valid. Each file is validated as if it were
-    // the entry point of its own program, pulling in its transitive relative
-    // imports so cross-module type and call references resolve the same way
-    // a real build would see them. Tier 3 is expected to fail widely: the
-    // typed path does not implement `Expr::Primitive` yet (tracked on a
-    // separate branch), and almost every non-trivial body uses a primitive.
+    // files whose surface AST is valid. Each file is validated as the entry
+    // point of its own program, pulling in its transitive relative imports so
+    // cross-module type and call references resolve the same way a real build
+    // would see them.
+    //
+    // The entry module is mounted under an alias derived from its file stem
+    // rather than under the empty alias. A module refers to its own exports
+    // through its module name — `option.vibra` calls `option.empty` — and with
+    // an empty alias `qualify("", name)` is a no-op, so those self-qualified
+    // references resolve against neither the qualified nor the bare key. The
+    // legacy path has the same requirement: its self-export resolution is
+    // guarded by a non-empty home module, because stdlib modules are always
+    // mounted rather than compiled bare. Mounting here matches a real build
+    // instead of testing a configuration that never occurs.
     for canonical in modules.keys() {
         let display = displays.get(canonical).cloned().unwrap_or_default();
         let graph = match build_typed_graph(canonical, &modules) {
@@ -254,7 +262,12 @@ fn build_typed_graph(
     let mut order = Vec::new();
     let mut visited = BTreeSet::new();
     let mut queue = VecDeque::new();
-    queue.push_back((String::new(), entry.to_path_buf()));
+    let entry_alias = entry
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default()
+        .to_string();
+    queue.push_back((entry_alias, entry.to_path_buf()));
     while let Some((alias, path)) = queue.pop_front() {
         if !visited.insert((alias.clone(), path.clone())) {
             continue;
