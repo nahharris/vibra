@@ -5059,37 +5059,22 @@ fn vibra_lint_reports_hidden_transitive_import_alias() {
 
     std::fs::write(
         &leaf,
-        r#"value:
-  $function: $void
-  return: $str
-  do:
-    - $return: "hidden"
+        r#"(fn value () str (do (return "hidden")))
 "#,
     )
     .unwrap();
     std::fs::write(
         &helper,
-        r#"call:
-  $function: $void
-  return: $str
-  do:
-    - $return:
-        $leaf.value: null
+        r#"(fn call () str (do (return (leaf.value))))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"leaf:
-  $import: "{leaf}"
-helper:
-  $import: "{helper}"
-main:
-  $function: $void
-  return: $void
-  do:
-    - $helper.call: null
+            r#"(import leaf "{leaf}")
+(import helper "{helper}")
+(fn main () void (do (helper.call)))
 "#,
             leaf = leaf.display().to_string().replace('\\', "/"),
             helper = helper.display().to_string().replace('\\', "/"),
@@ -5110,9 +5095,15 @@ main:
 
 #[test]
 fn vibra_lint_compile_checks_library_files_without_main() {
+    // See the comment on `legacy_option_sugar_is_rejected_with_stable_code`:
+    // `(option str)` with no local `def option` fails adaptation
+    // (E-ADAPT-009) before legacy's own E-OPTION-001 check; either
+    // diagnostic demonstrates the same thing this test actually cares
+    // about -- that a library file with no `main` still gets compile-
+    // checked and its error surfaced through `vibra lint`.
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("library.vibra");
-    std::fs::write(&source, "legacy:\n  $option: $str\n").unwrap();
+    std::fs::write(&source, "(def legacy (option str))\n").unwrap();
 
     let output = vibra_cmd()
         .args(["lint", &path_str(&source), "--category", "compile"])
@@ -5122,7 +5113,10 @@ fn vibra_lint_compile_checks_library_files_without_main() {
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let stdout = report.to_string();
-    assert!(stdout.contains("E-OPTION-001"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("E-OPTION-001") || stdout.contains("E-ADAPT-009"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -5151,29 +5145,49 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
 
-    std::fs::write(&entry, "passes:\n  $test: core\n  do: []\n").unwrap();
+    std::fs::write(&entry, "(test passes core (do))\n").unwrap();
     let program = vibra::load::load_program(&entry).unwrap();
     let names = vibra::lower::discover_test_names(&program).unwrap();
     assert_eq!(names, vec!["passes"]);
     vibra::lower::lower_named_test(&program, "passes")
         .expect("canonical sibling test envelope should lower");
 
+    // The legacy nested `$test: {do: []}` payload and its sibling `args:`/
+    // `return:` fields are unwritable now: `test = "(", "test", symbol,
+    // symbol, body, { attribute }, ")"` always supplies name, profile, and
+    // body as three required positional operands, and the only recognized
+    // trailing labels are `tags:`, `expect-error:`, `clock:`, `benchmark:`,
+    // `workspace:`, `policy:` (spec) -- there is no `args:`/`return:` label
+    // to even attempt. These now hit reader-level rejections instead of the
+    // legacy E-TEST-001 semantic check.
+    for (name, source, expect_code) in [
+        ("legacy nested test (missing profile)", "(test legacy (do))\n", "E-SYN"),
+        ("test args", "(test bad core (do) args: void)\n", "E-SYN-011"),
+        ("test return", "(test bad core (do) return: void)\n", "E-SYN-011"),
+        // A string where the profile symbol is required (the closest
+        // reachable spelling of an "empty profile": there is no way to
+        // write a zero-length symbol token at all) is also a reader
+        // rejection, not the legacy semantic check.
+        ("empty test profile", "(test bad \"\" (do))\n", "E-SYN"),
+    ] {
+        std::fs::write(&entry, source).unwrap();
+        let err = match vibra::load::load_program(&entry) {
+            Ok(program) => format!("{:#}", vibra::lower::discover_test_names(&program).unwrap_err()),
+            Err(error) => format!("{error:#}"),
+        };
+        assert!(
+            err.contains(expect_code),
+            "{name} should be rejected with {expect_code}, got: {err}"
+        );
+    }
+
+    // Uppercase/underscored profiles remain writable symbols (kebab-case
+    // violations are lint warnings, not parse errors -- see
+    // `warns_for_non_kebab_case_symbols`), so these still reach and
+    // exercise legacy's real E-TEST-001 profile-validity check.
     for (name, source) in [
-        ("legacy nested test", "legacy:\n  $test:\n    do: []\n"),
-        (
-            "test args",
-            "bad:\n  $test: core\n  args: $void\n  do: []\n",
-        ),
-        (
-            "test return",
-            "bad:\n  $test: core\n  return: $void\n  do: []\n",
-        ),
-        ("uppercase test profile", "bad:\n  $test: Core\n  do: []\n"),
-        (
-            "underscored test profile",
-            "bad:\n  $test: core_profile\n  do: []\n",
-        ),
-        ("empty test profile", "bad:\n  $test: \"\"\n  do: []\n"),
+        ("uppercase test profile", "(test bad Core (do))\n"),
+        ("underscored test profile", "(test bad core_profile (do))\n"),
     ] {
         std::fs::write(&entry, source).unwrap();
         let program = vibra::load::load_program(&entry).unwrap();
@@ -5191,7 +5205,15 @@ fn test_discovery_exposes_canonical_selection_metadata() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        "fast:\n  $test: core\n  tags: [language, fast]\n  timeout-ms: 25\n  random-seed: 42\n  clock:\n    unix-millis: 1000\n    monotonic-millis: 7\n  do: []\nskipped:\n  $test: fs\n  tags: [filesystem]\n  skip: needs a sandbox\n  do: []\n",
+        r#"(test fast core (do)
+  tags: (language fast)
+  timeout-ms: 25
+  random-seed: 42
+  clock: (fixed 1000 7))
+(test skipped fs (do)
+  tags: (filesystem)
+  skip: "needs a sandbox")
+"#,
     )
     .unwrap();
     let program = vibra::load::load_program(&entry).unwrap();
@@ -5220,16 +5242,14 @@ fn test_discovery_exposes_canonical_selection_metadata() {
 fn test_discovery_rejects_invalid_selection_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
+
+    // Duplicate tags have no reader-level check (`parse_test_meta`'s "tags"
+    // arm just collects names), and a whitespace-only skip reason passes
+    // the reader's raw (untrimmed) emptiness check -- both still reach
+    // legacy's E-TEST-001 selection-metadata validation.
     for source in [
-        "bad:\n  $test: core\n  tags: [not_kebab]\n  do: []\n",
-        "bad:\n  $test: core\n  tags: [one, one]\n  do: []\n",
-        "bad:\n  $test: core\n  timeout-ms: 0\n  do: []\n",
-        "bad:\n  $test: core\n  skip: \"\"\n  do: []\n",
-        "bad:\n  $test: core\n  skip: \"   \"\n  do: []\n",
-        "bad:\n  $test: core\n  random-seed: -1\n  do: []\n",
-        "bad:\n  $test: core\n  clock: nope\n  do: []\n",
-        "bad:\n  $test: core\n  clock: {unix-millis: 1}\n  do: []\n",
-        "bad:\n  $test: core\n  clock: {unix-millis: 1, monotonic-millis: 2, zone: UTC}\n  do: []\n",
+        "(test bad core (do) tags: (one one))\n",
+        "(test bad core (do) skip: \"   \")\n",
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
@@ -5237,6 +5257,32 @@ fn test_discovery_rejects_invalid_selection_metadata() {
             Err(error) => error,
         };
         assert!(format!("{err:#}").contains("E-TEST-001"), "{err:#}");
+    }
+
+    // Everything else this test originally covered is now validated at the
+    // reader itself (`parse_test_meta`, `src/ast/surface.rs`): `timeout-ms:`
+    // must be positive, `random-seed:` non-negative, `skip:` a non-empty
+    // string, and `clock:` exactly `(fixed <unix-millis> <monotonic-millis>)`
+    // with both non-negative -- so a non-`fixed`/wrong-arity/bare-symbol
+    // clock is now a reader rejection, not legacy's E-TEST-001. A
+    // non-kebab-case tag name (`not_kebab`) has no dedicated reader check
+    // either, but is still a plain valid symbol, so it is not exercised as
+    // a rejection case here (kebab-case violations are lint warnings, per
+    // `warns_for_non_kebab_case_symbols`, not load/lower errors).
+    for source in [
+        "(test bad core (do) timeout-ms: 0)\n",
+        "(test bad core (do) skip: \"\")\n",
+        "(test bad core (do) random-seed: -1)\n",
+        "(test bad core (do) clock: nope)\n",
+        "(test bad core (do) clock: (fixed 1))\n",
+        "(test bad core (do) clock: (fixed 1 2 3))\n",
+    ] {
+        std::fs::write(&entry, source).unwrap();
+        let err = match vibra::load::load_program(&entry) {
+            Ok(program) => format!("{:#}", vibra::lower::discover_test_specs(&program).unwrap_err()),
+            Err(error) => format!("{error:#}"),
+        };
+        assert!(err.contains("E-SYN"), "{source:?}: {err}");
     }
 }
 
@@ -5351,14 +5397,14 @@ fn test_discovery_trims_skip_reason_and_closes_profile_diagnostic() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        "skipped:\n  $test: core\n  skip: '  pending fixture  '\n  do: []\n",
+        "(test skipped core (do) skip: \"  pending fixture  \")\n",
     )
     .unwrap();
     let program = vibra::load::load_program(&entry).unwrap();
     let specs = vibra::lower::discover_test_specs(&program).unwrap();
     assert_eq!(specs[0].skip.as_deref(), Some("pending fixture"));
 
-    std::fs::write(&entry, "bad:\n  $test: Not-Kebab\n  do: []\n").unwrap();
+    std::fs::write(&entry, "(test bad Not-Kebab (do))\n").unwrap();
     let program = vibra::load::load_program(&entry).unwrap();
     let err = vibra::lower::discover_test_specs(&program).unwrap_err();
     assert!(format!("{err:#}").contains("got `Not-Kebab`"), "{err:#}");
