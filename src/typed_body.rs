@@ -9,11 +9,14 @@ use crate::ast::{
 };
 use crate::body_semantics::{validate_function_body, validate_task_handles};
 use crate::lower::{
-    infer_expr_type, primitive_integer, primitive_numeric, typed_primitive_op, Call, EnumDef, Expr,
-    FunctionBody, FunctionSig, ImportTarget, LetValue, MatchArm, Pattern, PrimitiveOp,
-    RuntimeValue, Statement, TypeAlias, TypeRef, WasmArgSpec,
+    infer_expr_type, nominal_type_key_for_module_scope, primitive_integer, primitive_numeric,
+    resolve_iface_key_for_scope, typed_primitive_op, Call, EnumDef, Expr, FunctionBody,
+    FunctionSig, ImplKey, ImplMethodBinding, ImportTarget, LetValue, MatchArm, Pattern,
+    PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef, WasmArgSpec,
 };
-use crate::type_semantics::{capability_body, policy_body, policy_type_is_subset, type_compatible};
+use crate::type_semantics::{
+    capability_body, policy_body, policy_type_is_subset, substitute_type, type_compatible,
+};
 use crate::typed_lower::{
     lower_type, qualify, TypedFunctionSignature, TypedModuleInput, TypedSignatureIndex,
 };
@@ -96,6 +99,7 @@ pub fn lower_typed_bodies<'a>(
                         signatures,
                         &declared_aliases,
                         &BTreeSet::new(),
+                        &HashMap::new(),
                     )
                     .with_context(|| format!("lowering typed constant `{key}`"))?;
                     if bodies.constants.insert(key.clone(), value).is_some() {
@@ -104,12 +108,22 @@ pub fn lower_typed_bodies<'a>(
                 }
                 TopLevel::Test(test) => {
                     let key = qualify(input.alias, &test.name.value);
+                    let mut test_local_types = HashMap::new();
+                    extend_static_local_types(
+                        &test.body,
+                        input.alias,
+                        signatures,
+                        &declared_aliases,
+                        &BTreeSet::new(),
+                        &mut test_local_types,
+                    );
                     let statements = lower_statements(
                         input.alias,
                         &test.body,
                         signatures,
                         &declared_aliases,
                         &BTreeSet::new(),
+                        &test_local_types,
                     )
                     .with_context(|| format!("lowering typed test `{key}`"))?;
                     if bodies.tests.insert(key.clone(), statements).is_some() {
@@ -1085,20 +1099,38 @@ fn lower_function(
         bodies.node_origins.insert(key.to_string(), Vec::new());
         return Ok(());
     }
-    let generic_names = signatures
+    let own_signature = signatures
         .functions
         .get(key)
-        .with_context(|| format!("typed function `{key}` has no signature"))?
-        .type_params
+        .with_context(|| format!("typed function `{key}` has no signature"))?;
+    let generic_names = own_signature.type_params.iter().cloned().collect();
+    // A best-effort, purely static type environment for the sole purpose of
+    // resolving interface method dispatch (`lower_call`'s fallback): it needs
+    // to know a dispatch subject's *declared* type before locals/inference
+    // are available (those only exist in the later `validate_*` pass). Seed
+    // it with the function's own parameters, then extend with anything the
+    // body's own `$let`/match-bind shapes statically reveal.
+    let mut local_types: HashMap<String, TypeRef> = own_signature
+        .arg_names
         .iter()
         .cloned()
+        .zip(own_signature.arg_types.iter().cloned())
         .collect();
+    extend_static_local_types(
+        &function.body,
+        module_alias,
+        signatures,
+        declared_aliases,
+        &generic_names,
+        &mut local_types,
+    );
     let statements = lower_statements(
         module_alias,
         &function.body,
         signatures,
         declared_aliases,
         &generic_names,
+        &local_types,
     )
     .with_context(|| format!("lowering typed function `{key}`"))?;
     let mut let_types = HashMap::new();
@@ -1519,6 +1551,7 @@ fn lower_statements(
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
 ) -> Result<Vec<Statement>> {
     expressions
         .iter()
@@ -1533,6 +1566,7 @@ fn lower_statements(
                 signatures,
                 declared_aliases,
                 generics,
+                local_types,
             )
         })
         .collect()
@@ -1544,10 +1578,27 @@ fn lower_statement(
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
 ) -> Result<Statement> {
-    let expr = |value| lower_expr(module_alias, value, signatures, declared_aliases, generics);
+    let expr = |value| {
+        lower_expr(
+            module_alias,
+            value,
+            signatures,
+            declared_aliases,
+            generics,
+            local_types,
+        )
+    };
     let body = |values: &[AstExpr]| {
-        lower_statements(module_alias, values, signatures, declared_aliases, generics)
+        lower_statements(
+            module_alias,
+            values,
+            signatures,
+            declared_aliases,
+            generics,
+            local_types,
+        )
     };
     Ok(match &expression.value {
         ExprKind::Call { callee, arguments } => match lower_typed_call(
@@ -1557,6 +1608,7 @@ fn lower_statement(
             signatures,
             declared_aliases,
             generics,
+            local_types,
         )? {
             TypedCallResolution::Call(call) => Statement::Call(call),
             TypedCallResolution::Expr(expr) => Statement::Eval(expr),
@@ -1573,6 +1625,7 @@ fn lower_statement(
                     signatures,
                     declared_aliases,
                     generics,
+                    local_types,
                 )? {
                     TypedCallResolution::Call(call) => LetValue::Call(call),
                     TypedCallResolution::Expr(expr) => LetValue::Expr(expr),
@@ -1670,8 +1723,18 @@ fn lower_expr(
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
 ) -> Result<Expr> {
-    let lower = |value| lower_expr(module_alias, value, signatures, declared_aliases, generics);
+    let lower = |value| {
+        lower_expr(
+            module_alias,
+            value,
+            signatures,
+            declared_aliases,
+            generics,
+            local_types,
+        )
+    };
     Ok(match &expression.value {
         ExprKind::Literal(value) => Expr::Value(lower_literal(value)),
         ExprKind::Reference(name) => Expr::VarRef(name.clone()),
@@ -1682,6 +1745,7 @@ fn lower_expr(
             signatures,
             declared_aliases,
             generics,
+            local_types,
         )? {
             TypedCallResolution::Expr(expr) => expr,
             TypedCallResolution::Call(call) => {
@@ -1784,6 +1848,7 @@ fn lower_expr(
                 signatures,
                 declared_aliases,
                 generics,
+                local_types,
             )?),
             else_e: Box::new(lower_if_branch(
                 module_alias,
@@ -1791,6 +1856,7 @@ fn lower_expr(
                 signatures,
                 declared_aliases,
                 generics,
+                local_types,
             )?),
         },
         ExprKind::Do(_)
@@ -1810,6 +1876,12 @@ fn lower_expr(
     })
 }
 
+/// Resolve a call-shaped head to a concrete, callable signature key,
+/// checking (in order) ordinary function resolution and, on failure,
+/// interface method dispatch. Mirrors the legacy `resolve_call_target` /
+/// `try_resolve_iface_call` split at `src/lower.rs:6046`/`:5920`: ordinary
+/// resolution is tried first (and always wins if it matches), interface
+/// dispatch is only a fallback.
 fn lower_call(
     module_alias: &str,
     callee: &str,
@@ -1817,15 +1889,23 @@ fn lower_call(
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
 ) -> Result<Call> {
-    let local = qualify(module_alias, callee);
-    let callee_key = if signatures.functions.contains_key(&local) {
-        local
-    } else if signatures.functions.contains_key(callee) {
-        callee.to_string()
-    } else {
-        bail!("unknown typed callee `{callee}`");
-    };
+    let callee_key =
+        if let Some(key) = resolve_ordinary_call_target(module_alias, callee, signatures) {
+            key
+        } else {
+            resolve_interface_call_target(
+                module_alias,
+                callee,
+                arguments,
+                signatures,
+                declared_aliases,
+                generics,
+                local_types,
+            )
+            .with_context(|| format!("unknown typed callee `{callee}`"))?
+        };
     Ok(Call {
         callee_key,
         type_args: Vec::new(),
@@ -1838,10 +1918,415 @@ fn lower_call(
                     signatures,
                     declared_aliases,
                     generics,
+                    local_types,
                 )
             })
             .collect::<Result<_>>()?,
     })
+}
+
+/// Ordinary (non-interface) call resolution, mirroring legacy
+/// `resolve_call_target` (`src/lower.rs:6046`): a qualified head first tries
+/// the module-scoped key, then the "self-export" convention (a module
+/// referring to its own exports through its own alias, e.g. `io.foo` while
+/// mounted at `a.io` resolves to `a.io.foo`, not `a.io.io.foo`), then the
+/// bare `alias.symbol` key. An unqualified head only ever matches a bare
+/// (alias-less) function key.
+///
+/// A partial match at one rung must never foreclose a later rung or the
+/// interface-dispatch fallback -- this is the same "fall through on partial
+/// matches" discipline #183 had to restore for enum-constructor resolution.
+fn resolve_ordinary_call_target(
+    module_alias: &str,
+    callee: &str,
+    signatures: &TypedSignatureIndex,
+) -> Option<String> {
+    // Legacy-parity rung: `{module_alias}.{callee}` is tried unconditionally
+    // first, exactly like the pre-existing typed lowering did. For a dotted
+    // callee (`alias.symbol`) this is the "module-scoped" rung
+    // (`{home_module}.{alias}.{symbol}`); for a bare callee it additionally
+    // covers same-module sibling calls, which the typed path's flat, always
+    // module-alias-qualified function keys require but legacy's
+    // alias-less-bare-namespace convention did not.
+    let scoped = qualify(module_alias, callee);
+    if signatures.functions.contains_key(&scoped) {
+        return Some(scoped);
+    }
+    if let Some((alias, symbol)) = callee.split_once('.') {
+        if !alias.is_empty() && !symbol.is_empty() && !module_alias.is_empty() {
+            let leaf = module_alias.rsplit('.').next().unwrap_or(module_alias);
+            if alias == leaf {
+                let self_export = format!("{module_alias}.{symbol}");
+                if signatures.functions.contains_key(&self_export) {
+                    return Some(self_export);
+                }
+            }
+        }
+    }
+    if signatures.functions.contains_key(callee) {
+        return Some(callee.to_string());
+    }
+    None
+}
+
+/// Resolve a call head as interface-qualified method dispatch: `alias.iface.method`
+/// (or, module-relative, `iface.method`) where `iface` names a registered
+/// `$interface` alias and `method` one of its declared methods. Mirrors
+/// legacy `try_resolve_iface_call` (`src/lower.rs:5920`), reusing the shared
+/// `signatures.impls` index (`ImplKey { implementing_type, interface }`)
+/// rather than a second scheme.
+///
+/// Unlike legacy, which dispatches on a named `$self` argument found in a
+/// mapping payload, the typed surface's calls are positional, so the
+/// dispatch subject is the call's first positional argument -- matching
+/// every dispatch call in the corpus, where the subject is always written
+/// first (`$fs.writable.write-string: $out` with `$out` as the call's
+/// primary/first value).
+fn resolve_interface_call_target(
+    module_alias: &str,
+    callee: &str,
+    arguments: &[AstExpr],
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
+) -> Result<String> {
+    let (iface_path, method) = callee.rsplit_once('.').with_context(|| {
+        format!("`{callee}` is not an interface-qualified call (no `.method` suffix)")
+    })?;
+    let iface_qualified =
+        resolve_iface_key_for_scope(iface_path, module_alias, &signatures.aliases)?;
+    let iface_def = signatures
+        .aliases
+        .get(&iface_qualified)
+        .with_context(|| format!("interface alias `{iface_qualified}` is not registered"))?;
+    let TypeRef::Interface(iface_methods) = &iface_def.body else {
+        bail!(
+            "`{iface_qualified}` is not an interface (its body is `{:?}`)",
+            iface_def.body
+        );
+    };
+    let expected = iface_methods
+        .get(method)
+        .with_context(|| format!("interface `{iface_qualified}` has no method `{method}`"))?;
+    let TypeRef::FnType { args, .. } = expected else {
+        bail!(
+            "interface `{iface_qualified}` method `{method}` is not a `$fn-type`; got `{expected:?}`"
+        );
+    };
+    // The typed surface's function types are positional (`TypeRef::Tuple`,
+    // not legacy's named `TypeRef::Record`): `typed_lower::lower_type`
+    // lowers an interface method's `TypeExprKind::Function { parameters,
+    // .. }` straight into `FnType { args: Tuple(parameter types), .. }`, and
+    // `typed_lower`'s own impl-conformance check (`#182`) zips that same
+    // `Tuple` positionally against the concrete implementation's
+    // `arg_types`. The self-typed parameter's *index* in that tuple is
+    // therefore exactly the index of the dispatch subject among the call's
+    // positional arguments.
+    let expected_args = match args.as_ref() {
+        TypeRef::Tuple(args) => args.as_slice(),
+        other => std::slice::from_ref(other),
+    };
+    let Some(self_index) = expected_args
+        .iter()
+        .position(|ty| matches!(ty, TypeRef::SelfType))
+    else {
+        bail!(
+            "E-CALL-IFACE-NOSELF: interface method `{iface_qualified}.{method}` has no `$self` \
+             argument; call it via the type-qualified form \
+             `<implementing-type>.{iface_short}.{method}` instead",
+            iface_short = iface_qualified
+                .rsplit('.')
+                .next()
+                .unwrap_or(&iface_qualified)
+        );
+    };
+    let Some(dispatch_arg) = arguments.get(self_index) else {
+        bail!(
+            "interface-qualified call `{callee}` expects at least {} argument(s) to locate its \
+             receiver, got {}",
+            self_index + 1,
+            arguments.len()
+        );
+    };
+    let dispatch_ty = static_expr_type(
+        dispatch_arg,
+        module_alias,
+        signatures,
+        declared_aliases,
+        generics,
+        local_types,
+    )
+    .with_context(|| {
+        format!("could not statically determine the type of the dispatch argument of `{callee}`")
+    })?;
+    let implementing = match &dispatch_ty {
+        TypeRef::Named(n) | TypeRef::Instantiated { base: n, .. } => n.clone(),
+        TypeRef::Generic(_) => bail!(
+            "E-DISPATCH-001: interface-qualified dispatch on a generic-typed value is not yet \
+             implemented (monomorphisation pending). Call site: `{callee}` with dispatch arg of \
+             type `{dispatch_ty:?}`."
+        ),
+        _ => bail!(
+            "interface-qualified call `{callee}` cannot dispatch on dispatch-arg type \
+             `{dispatch_ty:?}` (no nominal `=impl` block can exist for primitives, tuples, \
+             records, or unions)"
+        ),
+    };
+    let implementing = nominal_type_key_for_module_scope(
+        implementing,
+        module_alias,
+        &signatures.aliases,
+        &typed_enum_defs(signatures),
+    );
+    let impl_key = ImplKey {
+        implementing_type: implementing.clone(),
+        interface: iface_qualified.clone(),
+    };
+    let impl_body = signatures.impls.get(&impl_key).with_context(|| {
+        format!(
+            "E-BOUND-001: type `{implementing}` does not implement interface `{iface_qualified}` \
+             (no `=impl` block found); cannot dispatch `{callee}`"
+        )
+    })?;
+    let binding = impl_body.methods.get(method).with_context(|| {
+        format!("internal: impl `{implementing} : {iface_qualified}` is missing method `{method}`")
+    })?;
+    let sig_key = match binding {
+        ImplMethodBinding::Fresh(sk) | ImplMethodBinding::Alias(sk) => sk.clone(),
+    };
+    if !signatures.functions.contains_key(&sig_key) {
+        bail!(
+            "impl method `{implementing}.{method}` resolved to unregistered typed signature `{sig_key}`"
+        );
+    }
+    Ok(sig_key)
+}
+
+/// Best-effort *static* type environment for a function/test body, computed
+/// before body lowering: interface method dispatch (`resolve_interface_call_target`)
+/// needs to know a dispatch subject's declared type while `lower_call` is
+/// still constructing the IR, which is earlier than `locals`/inference exist
+/// (those belong to the later `validate_*` pass, run once the whole body has
+/// lowered). This is deliberately conservative: it records a local's type
+/// only when purely syntactic information determines it -- an explicit
+/// `$let` annotation, a directly-called function's declared return type, or
+/// an enum-tag match binding against an already-known target type -- and
+/// otherwise leaves the local out, so unresolvable dispatch still fails
+/// explicitly instead of guessing.
+fn extend_static_local_types(
+    expressions: &[AstExpr],
+    module_alias: &str,
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+    types: &mut HashMap<String, TypeRef>,
+) {
+    for expression in expressions {
+        match &expression.value {
+            ExprKind::Let { name, ty, value } => {
+                let resolved = match ty {
+                    Some(ty) => lower_type(ty, generics, module_alias, declared_aliases).ok(),
+                    None => static_expr_type(
+                        value,
+                        module_alias,
+                        signatures,
+                        declared_aliases,
+                        generics,
+                        types,
+                    ),
+                };
+                if let Some(resolved) = resolved {
+                    types.insert(name.value.clone(), resolved);
+                }
+            }
+            ExprKind::Match { target, cases } => {
+                let target_ty = static_expr_type(
+                    target,
+                    module_alias,
+                    signatures,
+                    declared_aliases,
+                    generics,
+                    types,
+                );
+                for case in cases {
+                    if let Some(target_ty) = &target_ty {
+                        bind_pattern_types(&case.pattern, target_ty, signatures, types);
+                    }
+                    extend_static_local_types(
+                        &case.body,
+                        module_alias,
+                        signatures,
+                        declared_aliases,
+                        generics,
+                        types,
+                    );
+                }
+            }
+            ExprKind::Do(body) | ExprKind::While { body, .. } | ExprKind::Task { body, .. } => {
+                extend_static_local_types(
+                    body,
+                    module_alias,
+                    signatures,
+                    declared_aliases,
+                    generics,
+                    types,
+                );
+            }
+            ExprKind::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                extend_static_local_types(
+                    then_body,
+                    module_alias,
+                    signatures,
+                    declared_aliases,
+                    generics,
+                    types,
+                );
+                extend_static_local_types(
+                    else_body,
+                    module_alias,
+                    signatures,
+                    declared_aliases,
+                    generics,
+                    types,
+                );
+            }
+            ExprKind::For { body, .. } => {
+                extend_static_local_types(
+                    body,
+                    module_alias,
+                    signatures,
+                    declared_aliases,
+                    generics,
+                    types,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The statically-known type of `expression`, if any -- see
+/// `extend_static_local_types` for what "statically-known" covers here.
+fn static_expr_type(
+    expression: &AstExpr,
+    module_alias: &str,
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+    types: &HashMap<String, TypeRef>,
+) -> Option<TypeRef> {
+    match &expression.value {
+        // A migrated legacy body spells its own function parameters
+        // `args.name` (the literal legacy `$args.` envelope, preserved
+        // verbatim by the corpus migrator's `sym()`), while `types` is
+        // seeded from `TypedFunctionSignature::arg_names`, which holds the
+        // bare declared name. Bridge the same way `infer`'s
+        // `inference_locals` bridges it for the shared `infer_expr_type`
+        // path: try the name as written first, then its `args.`-stripped
+        // form.
+        ExprKind::Reference(name) => types
+            .get(name)
+            .or_else(|| name.strip_prefix("args.").and_then(|bare| types.get(bare)))
+            .cloned(),
+        ExprKind::Call { callee, .. } => {
+            let key = resolve_ordinary_call_target(module_alias, &callee.value, signatures)?;
+            signatures
+                .functions
+                .get(&key)
+                .map(|sig| sig.return_type.clone())
+        }
+        ExprKind::Cast { into, .. } | ExprKind::PolicyNarrow { into, .. } => {
+            lower_type(into, generics, module_alias, declared_aliases).ok()
+        }
+        _ => None,
+    }
+}
+
+/// Resolve `ty` to its enum tag map, substituting a generic enum's own type
+/// parameters from an `Instantiated` type's arguments where needed.
+///
+/// Deliberately *not* `type_semantics::normalize_type_ref`: that helper also
+/// recursively inlines every non-generic, non-newtype nominal alias it finds
+/// *inside* the substituted type arguments, which would erase exactly the
+/// nominal name (e.g. `fs.write-file`) that interface dispatch needs for its
+/// `ImplKey` lookup -- collapsing it down to a structural body like
+/// `HostHandle(Write)` instead. `substitute_type` only replaces `Generic`
+/// placeholders, leaving nominal type arguments untouched.
+fn enum_body_of(
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> Option<std::collections::BTreeMap<String, TypeRef>> {
+    match ty {
+        TypeRef::Enum(tags) => Some(tags.clone()),
+        TypeRef::Named(name) => match &aliases.get(name)?.body {
+            TypeRef::Enum(tags) => Some(tags.clone()),
+            _ => None,
+        },
+        TypeRef::Instantiated { base, type_args } => {
+            let alias = aliases.get(base)?;
+            let TypeRef::Enum(tags) = &alias.body else {
+                return None;
+            };
+            if alias.type_params.len() != type_args.len() {
+                return None;
+            }
+            let substitutions: HashMap<String, TypeRef> = alias
+                .type_params
+                .iter()
+                .cloned()
+                .zip(type_args.iter().cloned())
+                .collect();
+            Some(
+                tags.iter()
+                    .map(|(tag, payload)| (tag.clone(), substitute_type(payload, &substitutions)))
+                    .collect(),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// Record the static type(s) a match pattern binds, given the already-known
+/// (possibly generic-instantiated) type of the value it matches against.
+/// Only `(bind name)` directly, or nested one level inside an enum
+/// constructor pattern, are covered -- matching every match-bind dispatch
+/// subject seen in the corpus (`case (result.result.ok (bind out)) ...`).
+fn bind_pattern_types(
+    pattern: &AstPattern,
+    ty: &TypeRef,
+    signatures: &TypedSignatureIndex,
+    types: &mut HashMap<String, TypeRef>,
+) {
+    match &pattern.value {
+        PatternKind::Bind(name) => {
+            types.insert(name.value.clone(), ty.clone());
+        }
+        PatternKind::Constructor {
+            constructor,
+            arguments,
+        } => {
+            let Some(tags) = enum_body_of(ty, &signatures.aliases) else {
+                return;
+            };
+            let tag = constructor
+                .value
+                .rsplit_once('.')
+                .map(|(_, tag)| tag)
+                .unwrap_or(constructor.value.as_str());
+            let Some(payload_ty) = tags.get(tag) else {
+                return;
+            };
+            if let [inner] = arguments.as_slice() {
+                bind_pattern_types(inner, payload_ty, signatures, types);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A call-shaped AST node resolves to either an ordinary user-function call,
@@ -1864,6 +2349,7 @@ fn lower_typed_call(
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
 ) -> Result<TypedCallResolution> {
     if let Some((op, arity)) = typed_primitive_head(callee) {
         return Ok(TypedCallResolution::Expr(lower_primitive_call(
@@ -1875,6 +2361,7 @@ fn lower_typed_call(
             signatures,
             declared_aliases,
             generics,
+            local_types,
         )?));
     }
     if let Some((enum_key, tag)) = typed_enum_constructor_head(callee, module_alias, signatures) {
@@ -1886,6 +2373,7 @@ fn lower_typed_call(
             signatures,
             declared_aliases,
             generics,
+            local_types,
         )?));
     }
     Ok(TypedCallResolution::Call(lower_call(
@@ -1895,6 +2383,7 @@ fn lower_typed_call(
         signatures,
         declared_aliases,
         generics,
+        local_types,
     )?))
 }
 
@@ -1964,6 +2453,7 @@ fn lower_enum_constructor_call(
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
 ) -> Result<Expr> {
     let alias = signatures
         .aliases
@@ -1997,6 +2487,7 @@ fn lower_enum_constructor_call(
         signatures,
         declared_aliases,
         generics,
+        local_types,
     )?;
     Ok(Expr::EnumConstructor {
         enum_key: enum_key.to_string(),
@@ -2017,10 +2508,18 @@ fn lower_if_branch(
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
 ) -> Result<Expr> {
     match body {
         [] => Ok(Expr::Value(RuntimeValue::Void)),
-        [single] => lower_expr(module_alias, single, signatures, declared_aliases, generics),
+        [single] => lower_expr(
+            module_alias,
+            single,
+            signatures,
+            declared_aliases,
+            generics,
+            local_types,
+        ),
         _ => bail!(
             "typed expression-position `if` branch must reduce to a single value; found {} forms",
             body.len()
@@ -2041,6 +2540,7 @@ fn lower_primitive_call(
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
+    local_types: &HashMap<String, TypeRef>,
 ) -> Result<Expr> {
     if arguments.len() != arity {
         bail!(
@@ -2058,6 +2558,7 @@ fn lower_primitive_call(
                 signatures,
                 declared_aliases,
                 generics,
+                local_types,
             )
         })
         .collect::<Result<_>>()?;
@@ -3159,6 +3660,7 @@ mod tests {
             &signatures,
             &BTreeSet::new(),
             &BTreeSet::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let Expr::PolicyNarrow { target, .. } = &lowered else {
@@ -3212,6 +3714,7 @@ mod tests {
             &signatures,
             &BTreeSet::new(),
             &BTreeSet::new(),
+            &HashMap::new(),
         )
         .unwrap();
 
@@ -3497,5 +4000,264 @@ mod tests {
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
         let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
         assert!(error.contains("entire body"), "{error}");
+    }
+
+    // ---- Interface and inherent method dispatch (issue #150) ----
+
+    #[test]
+    fn inherent_method_dispatch_resolves_with_correct_signature() {
+        // `registry.get` looks exactly like interface-qualified method
+        // dispatch (`type.method`), but `registry` is a plain record with an
+        // inherent `=defs` method, not an interface: ordinary call
+        // resolution (rung 1, `qualify(module_alias, callee)`) must claim it
+        // outright, the same as any other qualified function call, without
+        // ever considering interface dispatch.
+        let source = module(
+            r#"(def registry (record (count int64))
+  defs: ((fn get ((self registry)) int64 (do (return 5)))))
+(fn caller ((r registry)) int64 (do (return (registry.get r))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["caller"] else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::Call { call, .. }) = &statements[0] else {
+            panic!(
+                "expected a call in return position, got {:?}",
+                statements[0]
+            );
+        };
+        assert_eq!(call.callee_key, "registry.get");
+    }
+
+    #[test]
+    fn self_export_convention_resolves_a_modules_own_export_and_executes() {
+        // Mirrors the legacy `resolve_call_target` self-export rung
+        // (`src/lower.rs:6063`-ish comment): a module mounted under alias
+        // `io` refers to its own sibling function through its own alias
+        // (`io.helper`), which must resolve to `io.helper` -- not be
+        // mis-qualified to `io.io.helper` by rung 1, and not require any
+        // interface at all. Uses only `int64` so it can also execute through
+        // both the interpreter and the Wasm backend, proving the ladder
+        // change is not just structurally accepted but semantically correct
+        // end to end.
+        let source = module(
+            r#"(fn helper () int64 (do (return 3)))
+(fn caller () int64 (do (return (io.helper))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "io",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["io.caller"] else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::Call { call, .. }) = &statements[0] else {
+            panic!(
+                "expected a call in return position, got {:?}",
+                statements[0]
+            );
+        };
+        assert_eq!(call.callee_key, "io.helper");
+
+        let functions = materialize_typed_identity_functions(&signatures, &bodies).unwrap();
+        let program = LoweredProgram {
+            statements: vec![Statement::Call(Call {
+                callee_key: "io.caller".into(),
+                type_args: Vec::new(),
+                args: Vec::new(),
+            })],
+            main_arg_bindings: Vec::new(),
+            constants: HashMap::new(),
+            functions,
+            impls: HashMap::new(),
+            warnings: Vec::new(),
+            foreign_modules: BTreeMap::new(),
+        };
+        crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        crate::wasm_backend::run_lowered(&program, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn qualified_call_resembling_interface_dispatch_resolves_as_an_ordinary_function() {
+        // Same shape as the real stdlib gap (`fs.writable.write-string`:
+        // alias, then a dotted path that *looks* like `iface.method`), but
+        // `pipe` is a record with an inherent method, not an interface. The
+        // self-export rung must resolve it as the ordinary function it is;
+        // interface dispatch must never even be attempted, matching the
+        // "fall through on partial matches" discipline #183 needed for
+        // enum-constructor resolution.
+        let source = module(
+            r#"(def pipe (record (id int64))
+  defs: ((fn write-string ((self pipe) (s str)) int64 (do (return 1)))))
+(fn send ((p pipe)) int64 (do (return (fs.pipe.write-string p "hi"))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "fs",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["fs.send"] else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::Call { call, .. }) = &statements[0] else {
+            panic!(
+                "expected a call in return position, got {:?}",
+                statements[0]
+            );
+        };
+        assert_eq!(call.callee_key, "fs.pipe.write-string");
+    }
+
+    /// Shared fixture for the interface-dispatch tests below: an interface
+    /// `shape` with a single `self` method `area`, and two implementing
+    /// record types (`square`, `circle`) bound to distinct functions -- so a
+    /// resolution bug that always picks "the" impl (there being more than
+    /// one registered `ImplKey` for the same interface, exactly like the
+    /// real `writable` interface's three implementors in `stdlib/src/fs.vibra`)
+    /// would be caught by asserting *which* one was chosen.
+    const SHAPE_FIXTURE: &str = r#"(def shape (interface (area (fn-type (self) int64))))
+(fn square-area ((value square)) int64 (do (return 4)))
+(def square (record (side int64))
+  impls: ((impl shape methods: ((method area square-area)))))
+(fn circle-area ((value circle)) int64 (do (return 9)))
+(def circle (record (radius int64))
+  impls: ((impl shape methods: ((method area circle-area)))))"#;
+
+    #[test]
+    fn interface_method_dispatch_resolves_via_function_parameter() {
+        // Mirrors `stdlib/src/env.vibra:88` (`$error.error.kind: $args.input`):
+        // the dispatch subject is a direct reference to the enclosing
+        // function's own parameter, so its type is known from the function's
+        // signature alone, no `$let`/match tracking required.
+        let source = module(&format!(
+            "{SHAPE_FIXTURE}\n(fn direct-dispatch ((value square)) int64 (do (return (shape.area value))))"
+        ));
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["direct-dispatch"] else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::Call { call, .. }) = &statements[0] else {
+            panic!(
+                "expected a call in return position, got {:?}",
+                statements[0]
+            );
+        };
+        assert_eq!(call.callee_key, "square-area");
+    }
+
+    #[test]
+    fn interface_method_dispatch_resolves_via_let_bound_call_result() {
+        // Mirrors `stdlib/src/io.vibra` (`print`/`eprint`: `$out`/`$err` are
+        // `$let`-bound to a direct call, `io.stdout`/`io.stderr`, with no
+        // explicit type annotation): the dispatch subject's type comes from
+        // the declared return type of the function it was let-bound from.
+        let source = module(&format!(
+            "{SHAPE_FIXTURE}\n(fn make-square () square (do (return unit)))
+(fn dispatch-via-let () int64 (do (let value (make-square)) (return (shape.area value))))"
+        ));
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["dispatch-via-let"] else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::Call { call, .. }) = &statements[1] else {
+            panic!(
+                "expected a call in return position, got {:?}",
+                statements[1]
+            );
+        };
+        assert_eq!(call.callee_key, "square-area");
+    }
+
+    #[test]
+    fn interface_method_dispatch_resolves_via_match_bind_on_generic_enum() {
+        // Mirrors `examples/fs-roundtrip.vibra` (the hardest of the corpus
+        // shapes): the dispatch subject is bound by a match arm over a
+        // *generic* enum instantiated with the implementing type
+        // (`(box t e)` instantiated as `(box square int64)`), so resolving
+        // its type requires substituting the enum's own type parameters
+        // from the match target's inferred instantiation -- not just
+        // reading a declared annotation.
+        let source = module(&format!(
+            "{SHAPE_FIXTURE}\n(def box (enum (ok t) (err e)) where: ((t) (e)))
+(fn make-boxed-square () (box square int64) (do (return unit)))
+(fn dispatch-via-match () int64
+  (do (match (make-boxed-square)
+        (case (box.ok (bind out)) (do (return (shape.area out))))
+        (case (box.err (bind reason)) (do (return reason))))))"
+        ));
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["dispatch-via-match"] else {
+            panic!("expected user body");
+        };
+        let Statement::Match { arms, .. } = &statements[0] else {
+            panic!("expected a match statement, got {:?}", statements[0]);
+        };
+        let Statement::Return(Expr::Call { call, .. }) = &arms[0].body[0] else {
+            panic!("expected a call in the `ok` arm, got {:?}", arms[0].body[0]);
+        };
+        assert_eq!(call.callee_key, "square-area");
+    }
+
+    #[test]
+    fn interface_dispatch_on_a_non_implementing_type_raises_the_legacy_diagnostic() {
+        // `triangle` implements no interface at all; dispatching `shape.area`
+        // on it must fail with the same `E-BOUND-001` diagnostic the legacy
+        // YAML path raises for the identical situation (`src/lower.rs:6032`),
+        // not some new or silent behavior.
+        let source = module(&format!(
+            "{SHAPE_FIXTURE}\n(def triangle (record (base int64)))
+(fn bad ((value triangle)) int64 (do (return (shape.area value))))"
+        ));
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("E-BOUND-001"), "{error}");
+        assert!(error.contains("triangle"), "{error}");
+    }
+
+    #[test]
+    fn unresolvable_interface_qualified_callee_produces_a_clear_diagnostic() {
+        // Neither an ordinary function nor a registered interface named
+        // `nonexistent` exists at all; this must fail with the same clear
+        // `unknown typed callee` diagnostic every other unresolvable call
+        // gets, not a confusing interface-specific error about a path that
+        // was never real to begin with.
+        let source =
+            module("(fn bad ((value int64)) int64 (do (return (nonexistent.thing.method value))))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("unknown typed callee"), "{error}");
+        assert!(error.contains("nonexistent.thing.method"), "{error}");
     }
 }

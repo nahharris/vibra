@@ -5837,7 +5837,11 @@ fn lower_statement(
 
 /// Resolve a dotted interface path from source (`fs.writable`) using the
 /// current module scope (`io` → `io.fs.writable`), then fall back to the bare path.
-fn resolve_iface_key_for_scope(
+///
+/// `pub(crate)` so the typed S-expression body lowerer
+/// (`typed_body::lower_call`) can reuse the exact same scope-resolution rule
+/// for interface-qualified method dispatch, rather than duplicating it.
+pub(crate) fn resolve_iface_key_for_scope(
     iface_path: &str,
     module_scope: &str,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -5865,7 +5869,10 @@ fn resolve_iface_key_for_scope(
 
 /// When `module_scope` is `a.io` but a value is still typed as a peer key like `io.fs.*`,
 /// rewrite to `a.io.fs.*` if that nominal type exists.
-fn nominal_type_key_for_module_scope(
+///
+/// `pub(crate)` so `typed_body::lower_call` can reuse the same bridging rule
+/// when resolving the implementing type of a typed interface dispatch.
+pub(crate) fn nominal_type_key_for_module_scope(
     key: String,
     module_scope: &str,
     type_aliases: &HashMap<String, TypeAlias>,
