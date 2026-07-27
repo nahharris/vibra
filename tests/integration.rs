@@ -1093,37 +1093,21 @@ fn supports_void_enum_constructor_without_payload() {
 
     std::fs::write(
         &model,
-        r#"option:
-  $enum:
-    none: $void
-    some: $str
+        r#"(def option (enum (none void) (some str)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"m:
-  $import: "{m}"
-io:
-  $import: "{io}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          value-none: $m.option.none
-      - $match: $value-none
-        when:
-            - case:
-                $m.option.none: null
-              do:
-                - $io.println: "none"
-            - case:
-                $m.option.some:
-                  $bind: text
-              do:
-                - $io.println: $text
+            r#"(import m "{m}")
+(import io "{io}")
+(fn main () void
+  (do
+    (let value-none (m.option.none))
+    (match value-none
+      (case (m.option.none) (do (io.println "none")))
+      (case (m.option.some (bind text)) (do (io.println text))))))
 "#,
             m = model.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -1148,35 +1132,17 @@ fn rejects_removed_int_float_aliases() {
 
     std::fs::write(
         &bad,
-        r#"takes-old-int:
-  $function:
-    input: $int
-  return: $void
-  do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+        r#"(fn takes-old-int ((input int)) void
+  (do (wasm import: (import "wasi_snapshot_preview1" "fd_sync") args: ((const 1)))))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"u:
-  $import: "{u}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
+            r#"(import u "{u}")
+(fn main () void
+  (do (wasm import: (import "wasi_snapshot_preview1" "fd_sync") args: ((const 1)))))
 "#,
             u = bad.display().to_string().replace('\\', "/"),
         ),
@@ -1200,34 +1166,19 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
 
     std::fs::write(
         &mod_file,
-        r#"accepts-int32:
-  $function:
-    input: $int32
-  return: $void
-  do:
-      - $let:
-          ok: true
-accepts-float32:
-  $function:
-    input: $float32
-  return: $void
-  do:
-      - $let:
-          ok: true
+        r#"(fn accepts-int32 ((input int32)) void (do (let ok true)))
+(fn accepts-float32 ((input float32)) void (do (let ok true)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         format!(
-            r#"n:
-  $import: "{n}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $n.accepts-int32: 7
-      - $n.accepts-float32: 3.14
+            r#"(import n "{n}")
+(fn main () void
+  (do
+    (n.accepts-int32 7)
+    (n.accepts-float32 3.14)))
 "#,
             n = mod_file.display().to_string().replace('\\', "/"),
         ),
@@ -1248,24 +1199,12 @@ fn newtype_decl_lowers_and_requires_explicit_cast() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"meter:
-  $newtype: $int64
-take-meter:
-  $function:
-    input: $meter
-  return: $void
-  do:
-      - $let:
-          ok: true
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          v:
-            $cast: 7
-            into: $meter
-      - $take-meter: $v
+        r#"(def meter (newtype int64))
+(fn take-meter ((input meter)) void (do (let ok true)))
+(fn main () void
+  (do
+    (let v (cast 7 meter))
+    (take-meter v)))
 "#,
     )
     .unwrap();
@@ -1285,31 +1224,29 @@ main:
 
 #[test]
 fn cast_rejects_legacy_nested_payload_shape() {
+    // The legacy `$cast: {from: ..., to: ...}` nested-payload alternative to
+    // the canonical `$cast: <expr>` + sibling `into: <type>` shape (the
+    // E-CAST-002 check this test originally exercised) has no S-expression
+    // form: `cast` is always `(cast expr type-expr)`, exactly two positional
+    // operands, arity-checked by the reader itself (`exact_arity("cast",
+    // ..., 2, ...)` in `src/ast/surface.rs`). A malformed arity is therefore
+    // now a reader-level `E-SYN` error, not the legacy semantic check.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"meter:
-  $newtype: $int64
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          v:
-            $cast:
-              from: 7
-              to: $meter
+        r#"(def meter (newtype int64))
+(fn main () void (do (let v (cast 7 meter (record (from 7) (to meter))))))
 "#,
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("E-CAST-002"),
-        "expected nested `$cast` payload to be rejected, got: {err}"
-    );
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(err.contains("E-SYN"), "unexpected error: {err}");
 }
 
 #[test]
@@ -1318,14 +1255,7 @@ fn cast_rejects_identity_conversion() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          v:
-            $cast: 7
-            into: $int64
+        r#"(fn main () void (do (let v (cast 7 int64))))
 "#,
     )
     .unwrap();
@@ -1344,24 +1274,10 @@ fn newtype_does_not_accept_inner_type_implicitly() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"meter:
-  $newtype: $int64
-take-meter:
-  $function:
-    input: $meter
-  return: $void
-  do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
-main:
-  $function: $void
-  return: $void
-  do:
-      - $take-meter: 7
+        r#"(def meter (newtype int64))
+(fn take-meter ((input meter)) void
+  (do (wasm import: (import "wasi_snapshot_preview1" "fd_sync") args: ((const 1)))))
+(fn main () void (do (take-meter 7)))
 "#,
     )
     .unwrap();
@@ -1380,34 +1296,15 @@ fn cast_rejects_cross_newtype_conversion() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"meter:
-  $newtype: $int64
-second:
-  $newtype: $int64
-take-second:
-  $function:
-    input: $second
-  return: $void
-  do:
-      - $wasm:
-          import:
-            module: wasi_snapshot_preview1
-            name: fd_sync
-          args:
-            - $const.1
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          m:
-            $cast: 7
-            into: $meter
-      - $let:
-          s:
-            $cast: $m
-            into: $second
-      - $take-second: $s
+        r#"(def meter (newtype int64))
+(def second (newtype int64))
+(fn take-second ((input second)) void
+  (do (wasm import: (import "wasi_snapshot_preview1" "fd_sync") args: ((const 1)))))
+(fn main () void
+  (do
+    (let m (cast 7 meter))
+    (let s (cast m second))
+    (take-second s)))
 "#,
     )
     .unwrap();
@@ -1429,18 +1326,11 @@ fn fs_writable_interface_rejects_read_file() {
     std::fs::write(
         &entry,
         format!(
-            r#"fs:
-  $import: "{fs}"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          f:
-            $cast: 0
-            into: $fs.read-file
-      - $fs.writable.write-string: $f
-        s: "nope"
+            r#"(import fs "{fs}")
+(fn main () void
+  (do
+    (let f (cast 0 fs.read-file))
+    (fs.writable.write-string f "nope")))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
         ),
@@ -1457,26 +1347,33 @@ main:
 
 #[test]
 fn capability_type_constructor_is_removed() {
+    // The legacy generic/untyped `$capability: <domain-string>` type (no
+    // domain in the head, a bare scalar payload) predates this S-expression
+    // cutover's own removal, in favor of the domain-qualified
+    // `$capability.<domain>` shape (see `domain_capability_type_lowers_with
+    // _a_typed_domain`). The new grammar has no separate spelling for it at
+    // all: `capability-type = "(", "capability", symbol, policy-group*, ")"`
+    // always requires the domain as its first positional operand
+    // (`min_arity("capability", &args, 1, ...)` in `src/ast/surface.rs`), so
+    // there is no way to even reach a domain-qualified form without
+    // supplying one. A domain-less attempt is therefore now a reader-level
+    // arity error, not the legacy semantic check.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"secret:
-  $capability: fs-read
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def secret (capability))
+(fn main () void (do))
 "#,
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("unknown form `$capability`"),
-        "expected removed capability diagnostic, got: {err}"
-    );
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(err.contains("E-SYN"), "unexpected error: {err}");
 }
 
 #[test]
@@ -1485,25 +1382,9 @@ fn policy_type_alias_lowers_and_can_be_used_in_signature() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"read-policy:
-  $policy:
-    fs-read:
-      - requirement: mandatory
-        scopes:
-          - dir: .
-uses-policy:
-  $function:
-    policy: $read-policy
-  return: $void
-  do:
-    - $let:
-        ok: true
-main:
-  $function:
-    policy: $read-policy
-  return: $void
-  do:
-    - $uses-policy: $args.policy
+        r#"(def read-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
+(fn uses-policy ((policy read-policy)) void (do (let ok true)))
+(fn main ((policy read-policy)) void (do (uses-policy policy)))
 "#,
     )
     .unwrap();
@@ -1518,22 +1399,9 @@ fn domain_capability_type_lowers_with_a_typed_domain() {
     let path = dir.path().join("main.vibra");
     std::fs::write(
         &path,
-        r#"read-data:
-  $capability.fs-read:
-    - requirement: mandatory
-      scopes:
-        - dir: ./data
-read-file:
-  $function:
-    capability: $read-data
-  return: $void
-  do:
-    - $let:
-        ok: true
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def read-data (capability fs-read (group requirement: mandatory scopes: ((dir "./data")))))
+(fn read-file ((capability read-data)) void (do (let ok true)))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -1551,35 +1419,13 @@ fn policy_narrow_returns_a_domain_capability() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"root-policy:
-  $policy:
-    fs-read:
-      - requirement: mandatory
-        scopes:
-          - dir: .
-read-data:
-  $capability.fs-read:
-    - requirement: mandatory
-      scopes:
-        - dir: ./data
-use-read:
-  $function:
-    capability: $read-data
-  return: $void
-  do:
-    - $let:
-        ok: true
-main:
-  $function:
-    policy: $root-policy
-  return: $void
-  do:
-    - $let:
-        read:
-          $policy.narrow: $args.policy
-          into: $read-data
-    - $use-read:
-        capability: $read
+        r#"(def root-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
+(def read-data (capability fs-read (group requirement: mandatory scopes: ((dir "./data")))))
+(fn use-read ((capability read-data)) void (do (let ok true)))
+(fn main ((policy root-policy)) void
+  (do
+    (let read (policy.narrow policy read-data))
+    (use-read read)))
 "#,
     )
     .unwrap();
@@ -1593,21 +1439,9 @@ fn wasm_abi_rejects_wrong_value_parameter_type() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"bad-assert:
-  $function:
-    value: $str
-  return: $void
-  do:
-    - $wasm:
-        import:
-          module: vibra_test
-          name: assert
-        args:
-          - $args.value
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(fn bad-assert ((value str)) void
+  (do (wasm import: (import "vibra_test" "assert") args: ((arg value)))))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -1625,21 +1459,9 @@ fn wasm_abi_rejects_wrong_return_type() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"bad-assert:
-  $function:
-    value: $bool
-  return: $bool
-  do:
-    - $wasm:
-        import:
-          module: vibra_test
-          name: assert
-        args:
-          - $args.value
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(fn bad-assert ((value bool)) bool
+  (do (wasm import: (import "vibra_test" "assert") args: ((arg value)))))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -1657,27 +1479,11 @@ fn wasm_abi_accepts_explicit_domain_capability() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"stdin-capability:
-  $capability.stdin-read:
-    - requirement: mandatory
-      scopes: any
-read-file:
-  $handle.read: null
-stdin-open:
-  $function:
-    capability: $stdin-capability
-  return: $read-file
-  do:
-    - $wasm:
-        import:
-          module: vibra_v1
-          name: stdin_open
-        args:
-          - $args.capability
-main:
-  $function: $void
-  return: $void
-  do: []
+        r#"(def stdin-capability (capability stdin-read (group requirement: mandatory scopes: ((any)))))
+(def read-file (handle read))
+(fn stdin-open ((capability stdin-capability)) read-file
+  (do (wasm import: (import "vibra_v1" "stdin_open") args: ((arg capability)))))
+(fn main () void (do))
 "#,
     )
     .unwrap();
@@ -1691,16 +1497,8 @@ fn opaque_host_handle_cannot_be_cast_from_integer() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"read-file:
-  $handle.read: null
-main:
-  $function: $void
-  return: $void
-  do:
-    - $let:
-        forged:
-          $cast: 0
-          into: $read-file
+        r#"(def read-file (handle read))
+(fn main () void (do (let forged (cast 0 read-file))))
 "#,
     )
     .unwrap();
