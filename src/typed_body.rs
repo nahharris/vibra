@@ -4267,6 +4267,79 @@ mod tests {
     }
 
     #[test]
+    fn wasm_import_forwards_the_corpus_migrator_args_prefixed_name() {
+        // The corpus migrator's `sym()` only strips the `$` sigil, so a
+        // legacy `$args.value` forwarding spec becomes the literal typed
+        // symbol `args.value`, not the bare declared parameter name `value`
+        // -- unlike hand-written S-expression bodies, which spell it `(arg
+        // value)` directly (see `wasm_import_body_lowers_with_correct_signature_and_executes_in_both_backends`
+        // above). Both forms must resolve to the same parameter.
+        let source = module(
+            r#"(fn scalar-len ((value str)) uint64
+  (do (wasm import: (import "vibra_v1" "str_scalar_len") args: ((arg args.value)))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        assert!(matches!(
+            &functions["scalar-len"].body,
+            FunctionBody::Wasm { import, .. }
+                if import.module == "vibra_v1" && import.name == "str_scalar_len"
+        ));
+    }
+
+    #[test]
+    fn wasm_import_forwarding_a_genuinely_unknown_argument_is_still_rejected() {
+        // The `args.`-prefixed forwarding bridge must not become a loophole:
+        // a name that resolves to neither the bare declared parameter nor
+        // any `args.`-prefixed flattening of it is still `E-WASM-003`.
+        let source = module(
+            r#"(fn scalar-len ((value str)) uint64
+  (do (wasm import: (import "vibra_v1" "str_scalar_len") args: ((arg args.nope)))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("E-WASM-003"), "{error}");
+        assert!(error.contains("args.nope"), "{error}");
+    }
+
+    #[test]
+    fn scalar_wasm_import_forwards_the_corpus_migrator_args_prefixed_name() {
+        // Same `args.`-prefixed bridge, but through the `@`-prefixed static
+        // (scalar-only) wasm ABI's own arity/name check (`E-WASM-007`), not
+        // the versioned host-import registry (`E-WASM-003`) --
+        // `examples/static-wasm-ffi` is exactly this shape.
+        let source = module(
+            r#"(fn foreign-sum ((left int32) (right int32)) int32
+  (do (wasm import: (import "@math" "sum") args: ((arg args.left) (arg args.right)))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        assert!(matches!(
+            &functions["foreign-sum"].body,
+            FunctionBody::Wasm { import, .. }
+                if import.module == "@math" && import.name == "sum"
+        ));
+    }
+
+    #[test]
     fn wasm_import_targeting_an_unknown_host_module_is_rejected() {
         // A malformed import declaration -- one that names no registered
         // host module -- must fail strictly (`E-WASM-002`) rather than be
