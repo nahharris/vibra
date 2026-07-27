@@ -2768,18 +2768,9 @@ fn where_with_non_interface_bound_is_rejected_with_e_where_002() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-box:
-  $record:
-    value: $t
-  =where:
-    t: [$int64]
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def box (record (value t)) where: ((t int64)))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2800,21 +2791,9 @@ fn self_type_is_allowed_inside_interface_body() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def display (interface (fmt (fn-type (self) str))))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2839,16 +2818,9 @@ fn self_type_is_rejected_in_top_level_record_field() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-node:
-  $record:
-    next: $self
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def node (record (next self)))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2872,19 +2844,9 @@ fn self_type_is_rejected_in_free_standing_function_signature() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-identity:
-  $function:
-    x: $self
-  return: $self
-  do:
-      - $return: $args.x
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(fn identity ((x self)) self (do (return x)))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2910,23 +2872,9 @@ fn self_type_is_allowed_in_nested_interface_inside_record() {
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-holder:
-  $record:
-    iface:
-      $interface:
-        fmt:
-          $fn-type:
-            args:
-              $record:
-                x: $self
-            return: $str
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def holder (record (iface (interface (fmt (fn-type (self) str))))))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -2948,30 +2896,26 @@ fn legacy_unprefixed_where_is_rejected_with_e_anno_002() {
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
             .unwrap();
     let entry = dir.path().join("entry.vibra");
+    // Legacy distinguished an unprefixed `where:` annotation key (rejected,
+    // migration-hinted toward `=where`) from the canonical `=where:` spelling
+    // ("=doc", "=where", "=defs", "=impl" | trailing "doc:", "where:",
+    // "defs:", "impls:" attributes -- migration table). The S-expression
+    // grammar has only one spelling, the unprefixed one; there is no second,
+    // rejected form left to write. This now asserts the sole canonical
+    // spelling lowers.
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-pair:
-  $tuple: [$a, $b]
-  where: {{a: [], b: []}}
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def pair (tuple a b) where: ((a) (b)))
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("E-ANNO-002") && err.contains("=where"),
-        "expected E-ANNO-002 with `=where` migration hint, got: {err}"
-    );
+    vibra::lower::lower_program(&prog).expect("the single canonical `where:` spelling lowers");
 }
 
 #[test]
@@ -2981,30 +2925,26 @@ fn legacy_unprefixed_doc_is_rejected_with_e_anno_002() {
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
             .unwrap();
     let entry = dir.path().join("entry.vibra");
+    // See the comment on `legacy_unprefixed_where_is_rejected_with_e_anno_002`:
+    // the unprefixed-vs-`=`-prefixed distinction no longer exists. This
+    // fixture also originally pinned a `$literal` type, which likewise has
+    // no S-expression form (`TypeExprKind` in `src/ast/surface.rs` has no
+    // `Literal` variant at all -- a real, confirmed gap, not just an adapter
+    // simplification); substituted an equivalent-purpose `newtype` since the
+    // literal-vs-newtype distinction isn't what this test exercises.
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-greeting:
-  $literal: "hi"
-  doc: "the greeting"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(def greeting (newtype str) doc: "the greeting")
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
     )
     .unwrap();
     let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("E-ANNO-002") && err.contains("=doc"),
-        "expected E-ANNO-002 with `=doc` migration hint, got: {err}"
-    );
+    vibra::lower::lower_program(&prog).expect("the single canonical `doc:` spelling lowers");
 }
 
 #[test]
@@ -3014,30 +2954,30 @@ fn unknown_annotation_key_is_rejected() {
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
             .unwrap();
     let entry = dir.path().join("entry.vibra");
+    // An unrecognized `bogus:` function attribute has no S-expression
+    // equivalent to even reach lowering: the known `fn` attributes are
+    // `doc:`, `where:`, `defs:`, `impls:` (spec), and the reader itself
+    // rejects any other label (E-SYN-011) -- same rejection as the
+    // `grants:` cluster (see `nested_function_grants_are_rejected`), same
+    // rule (an unrecognized declaration attribute is rejected), earlier
+    // enforcement point.
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-foo:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "x"
-  bogus: 1
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import io "{io}")
+(fn foo () void (do (io.println "x")) bogus: 1)
+(fn main () void (do (io.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
     )
     .unwrap();
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(err.contains("E-ANNO-001"), "unexpected error: {err}");
+    let prog = vibra::load::load_program(&entry);
+    let err = match prog {
+        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(err.contains("E-SYN-011"), "unexpected error: {err}");
 }
 
 #[test]
@@ -3047,28 +2987,18 @@ fn doc_string_lowers_on_function_and_type_decls() {
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
             .unwrap();
     let entry = dir.path().join("entry.vibra");
+    // The original `greeting` type pinned `$literal: "hi"`, which has no
+    // S-expression form at all (see the comment on
+    // `legacy_unprefixed_doc_is_rejected_with_e_anno_002`); substituted a
+    // `newtype` since this test only asserts the *function's* doc string,
+    // never inspecting `greeting`'s.
     std::fs::write(
         &entry,
         format!(
-            r#"io:
-  $import: "{io}"
-greeting:
-  $literal: "hi"
-  =doc: |
-    # `greeting`
-    A literal type pinning the greeting string.
-echo:
-  $function:
-    msg: $str
-  return: $void
-  do:
-      - $io.println: $args.msg
-  =doc: "Echo a message to stdout."
-main:
-  $function: $void
-  return: $void
-  do:
-      - $echo: "hi"
+            r#"(import io "{io}")
+(def greeting (newtype str) doc: "A newtype pinning the greeting string.")
+(fn echo ((msg str)) void (do (io.println msg)) doc: "Echo a message to stdout.")
+(fn main () void (do (echo "hi")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3082,8 +3012,24 @@ main:
 
 #[test]
 fn where_key_order_defines_positional_type_param_order() {
-    // Same fields, swapped `=where` key order. Only the second one accepts
-    // (a -> Int, b -> Str) at the call site; the first one expects the reverse.
+    // Same fields, swapped `where:` key order. Legacy's named-keyed
+    // instantiation (`{a: $int64, b: $str}`) let a call fix "a means int64,
+    // b means str" independent of a module's own `where:` declaration
+    // order, so the same literal call site produced different positional
+    // `type_args` depending on which module's `pair` it targeted -- that
+    // was the original gotcha this test demonstrated.
+    //
+    // The S-expression grammar has no named type arguments at all (spec:
+    // "Partial type application and named type arguments are invalid");
+    // `(m.pair int64 str)` is purely positional, and the adapter builds the
+    // legacy named mapping by zipping *this* callee's own `where:` order
+    // with the call's positional arguments (`type_application_value`,
+    // `src/surface_adapter.rs`). So position 1 always means "whatever this
+    // module's `where:` declares first," in both `ab` and `ba` -- the
+    // original gotcha (same call, two different bindings) is no longer
+    // reachable, only the tautological positional case remains. This now
+    // shows both orderings lower with the call's own literal positional
+    // order preserved.
     let dir = tempfile::tempdir().unwrap();
     let io =
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
@@ -3094,41 +3040,23 @@ fn where_key_order_defines_positional_type_param_order() {
 
     std::fs::write(
         &mod_ab,
-        r#"pair:
-  $tuple: [$a, $b]
-  =where: {a: [], b: []}
+        r#"(def pair (tuple a b) where: ((a) (b)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &mod_ba,
-        r#"pair:
-  $tuple: [$a, $b]
-  =where: {b: [], a: []}
+        r#"(def pair (tuple a b) where: ((b) (a)))
 "#,
     )
     .unwrap();
 
     let entry_src = |modpath: String, io: String| -> String {
         format!(
-            r#"m:
-  $import: "{m}"
-io:
-  $import: "{io}"
-take:
-  $function:
-    input:
-      $m.pair:
-        a: $int64
-        b: $str
-  return: $void
-  do:
-      - $io.println: "ok"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $io.println: "ok"
+            r#"(import m "{m}")
+(import io "{io}")
+(fn take ((input (m.pair int64 str))) void (do (io.println "ok")))
+(fn main () void (do (io.println "ok")))
 "#,
             m = modpath,
             io = io,
@@ -3173,8 +3101,8 @@ main:
         );
     };
     assert_eq!(type_args.len(), 2);
-    assert_eq!(type_args[0], vibra::lower::TypeRef::Str);
-    assert_eq!(type_args[1], vibra::lower::TypeRef::Int64);
+    assert_eq!(type_args[0], vibra::lower::TypeRef::Int64);
+    assert_eq!(type_args[1], vibra::lower::TypeRef::Str);
 }
 
 #[test]
