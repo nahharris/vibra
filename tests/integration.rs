@@ -4592,10 +4592,7 @@ fn vibra_exec_json_output_is_explicit() {
 
 #[test]
 fn vibra_exec_help_documents_expr_flag() {
-    let output = vibra_cmd()
-        .args(["exec", "--help"])
-        .output()
-        .unwrap();
+    let output = vibra_cmd().args(["exec", "--help"]).output().unwrap();
     assert!(
         output.status.success(),
         "help failed: {}",

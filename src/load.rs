@@ -187,13 +187,10 @@ pub fn parse_inline_exec_expression(source: &str) -> Result<Value> {
     let [node] = nodes.as_slice() else {
         bail!("exec expression must contain exactly one S-expression");
     };
-    let expression = crate::ast::lower_expression_node_with_id(
-        node,
-        crate::ast::DocumentId::ANONYMOUS,
-    )
-    .context("validate exec expression")?;
-    crate::surface_adapter::inline_expression_to_value(&expression)
-        .context("adapt exec expression")
+    let expression =
+        crate::ast::lower_expression_node_with_id(node, crate::ast::DocumentId::ANONYMOUS)
+            .context("validate exec expression")?;
+    crate::surface_adapter::inline_expression_to_value(&expression).context("adapt exec expression")
 }
 
 /// `vibra exec`'s inline program seam. `root` is a synthetic in-memory module
