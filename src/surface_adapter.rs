@@ -1012,10 +1012,7 @@ impl<'a> Converter<'a> {
         } else {
             Value::Sequence(vec![single_dollar("return", call)])
         };
-        fn_map.insert(
-            Value::String("do".into()),
-            do_body,
-        );
+        fn_map.insert(Value::String("do".into()), do_body);
         Ok(Value::Mapping(fn_map))
     }
 

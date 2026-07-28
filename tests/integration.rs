@@ -945,58 +945,37 @@ fn newtype_and_nominal_interface_patterns_match_runtime_type_tags() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
 
+    // KNOWN BLOCKED (see the S-expression cutover handoff notes): the
+    // `(interface Type pattern)` pattern this test's first `$match` needs is
+    // structurally accepted by the reader (`PatternKind::Interface`,
+    // src/ast/surface.rs) but the adapter rejects every use with
+    // E-ADAPT-017, because legacy's own `Pattern::Interface(TypeRef)`
+    // (src/lower.rs) carries only a type, with no slot for a nested
+    // sub-pattern at all -- there is no legacy shape this can adapt to,
+    // not even for a `_` wildcard sub-pattern. This is a genuine legacy-IR
+    // limitation, not an adapter oversight: fixing it would mean extending
+    // `Pattern::Interface` itself (and its match-evaluation code) rather
+    // than bridging to an existing shape, which is out of scope for the
+    // migration-bridge adapter. Left failing deliberately; do not weaken
+    // this test to route around the gap.
     std::fs::write(
         &entry,
-        r#"display:
-  $interface:
-    fmt:
-      $fn-type:
-        args:
-          $record:
-            x: $self
-        return: $str
-meter:
-  $newtype: $int64
-  =impl:
-    $display:
-      fmt:
-        $function: $self
-        return: $str
-        do:
-            - $return: "meter"
-main:
-  $function: $void
-  return: $void
-  do:
-      - $let:
-          distance:
-            $cast: 7
-            into: $meter
-      - $match: $distance
-        when:
-            - case:
-                $interface: $display
-              do:
-                - $let:
-                    matched: "display"
-            - case:
-                $wildcard: null
-              do:
-                - $let:
-                    matched: "other"
-      - $match: $distance
-        when:
-            - case:
-                $newtype:
-                  type: $meter
-                  inner:
-                    $bind: raw
-              do:
-                - $let:
-                    seen: $raw
-            - case:
-                $wildcard: null
-              do: []
+        r#"(def display (interface (fmt (fn-type (self) str))))
+(def meter (newtype int64)
+  impls: (
+    (impl display methods: (
+      (method fmt (fn fmt ((self self)) str (do (return "meter"))))
+    ))
+  ))
+(fn main () void
+  (do
+    (let distance (cast 7 meter))
+    (match distance
+      (case (interface display _) (do (let matched "display")))
+      (case _ (do (let matched "other"))))
+    (match distance
+      (case (newtype meter (bind raw)) (do (let seen raw)))
+      (case _ (do)))))
 "#,
     )
     .unwrap();
@@ -3603,14 +3582,8 @@ fn let_expr_nested_generic_bound_violations_are_rejected_with_e_bound_001() {
     let cases = [
         ("record field", r#"(record (y (needs-display int64 1)))"#),
         ("array item", r#"(array (needs-display int64 1))"#),
-        (
-            "map key",
-            r#"(map ((needs-display int64 1) "bad"))"#,
-        ),
-        (
-            "map value",
-            r#"(map ("bad" (needs-display int64 1)))"#,
-        ),
+        ("map key", r#"(map ((needs-display int64 1) "bad"))"#),
+        ("map value", r#"(map ("bad" (needs-display int64 1)))"#),
         ("cast subject", r#"(cast (needs-display int64 1) meter)"#),
         (
             "if branch",
@@ -5140,9 +5113,21 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
     // to even attempt. These now hit reader-level rejections instead of the
     // legacy E-TEST-001 semantic check.
     for (name, source, expect_code) in [
-        ("legacy nested test (missing profile)", "(test legacy (do))\n", "E-SYN"),
-        ("test args", "(test bad core (do) args: void)\n", "E-SYN-011"),
-        ("test return", "(test bad core (do) return: void)\n", "E-SYN-011"),
+        (
+            "legacy nested test (missing profile)",
+            "(test legacy (do))\n",
+            "E-SYN",
+        ),
+        (
+            "test args",
+            "(test bad core (do) args: void)\n",
+            "E-SYN-011",
+        ),
+        (
+            "test return",
+            "(test bad core (do) return: void)\n",
+            "E-SYN-011",
+        ),
         // A string where the profile symbol is required (the closest
         // reachable spelling of an "empty profile": there is no way to
         // write a zero-length symbol token at all) is also a reader
@@ -5151,7 +5136,10 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
-            Ok(program) => format!("{:#}", vibra::lower::discover_test_names(&program).unwrap_err()),
+            Ok(program) => format!(
+                "{:#}",
+                vibra::lower::discover_test_names(&program).unwrap_err()
+            ),
             Err(error) => format!("{error:#}"),
         };
         assert!(
@@ -5258,7 +5246,10 @@ fn test_discovery_rejects_invalid_selection_metadata() {
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
-            Ok(program) => format!("{:#}", vibra::lower::discover_test_specs(&program).unwrap_err()),
+            Ok(program) => format!(
+                "{:#}",
+                vibra::lower::discover_test_specs(&program).unwrap_err()
+            ),
             Err(error) => format!("{error:#}"),
         };
         assert!(err.contains("E-SYN"), "{source:?}: {err}");
@@ -5738,11 +5729,7 @@ fn vibra_test_deny_warnings_fails_and_emits_warnings_in_json_report() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("warnings.vibra");
     let report = dir.path().join("report.json");
-    std::fs::write(
-        &entry,
-        "(const BadName int64 1)\n(test passes core (do))\n",
-    )
-    .unwrap();
+    std::fs::write(&entry, "(const BadName int64 1)\n(test passes core (do))\n").unwrap();
 
     let allowed = vibra_cmd()
         .args(["test", &path_str(&entry)])
@@ -5792,127 +5779,50 @@ fn vibra_test_temp_workspace_modes_limit_real_filesystem_operations() {
     std::fs::write(
         &entry,
         format!(
-            r#"test:
-  $import: "{test_lib}"
-fs:
-  $import: "{fs_lib}"
-result:
-  $import: "{result_lib}"
-workspace-read-only:
-  $test: core
+            r#"(import test "{test_lib}")
+(import fs "{fs_lib}")
+(import result "{result_lib}")
+(test workspace-read-only core
+  (do
+    (let capability (policy.narrow policy fs.read-capability))
+    (let path (fs.path.new "."))
+    (let readable (fs.exists path capability))
+    (test.assert readable))
   workspace: temp
-  policy:
-    $policy:
-      fs-read:
-      - requirement: mandatory
-        scopes: [{{dir: .}}]
-  do:
-    - $let:
-        capability:
-          $policy.narrow: $args.policy
-          into: $fs.read-capability
-    - $let:
-        path:
-          $fs.path.new: .
-    - $let:
-        readable:
-          $fs.exists: $path
-          capability: $capability
-    - $test.assert: $readable
-workspace-write-only:
-  $test: core
+  policy: (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
+(test workspace-write-only core
+  (do
+    (let capability (policy.narrow policy fs.write-capability))
+    (let path (fs.path.new "workspace-created"))
+    (let created (fs.create-dir-all path capability))
+    (match created
+      (case (result.result.ok) (do (test.assert true)))
+      (case (result.result.err (bind ignored)) (do (test.fail "workspace write grant was denied")))))
   workspace: temp
-  policy:
-    $policy:
-      fs-write:
-      - requirement: mandatory
-        scopes: [{{dir: .}}]
-  do:
-    - $let:
-        capability:
-          $policy.narrow: $args.policy
-          into: $fs.write-capability
-    - $let:
-        path:
-          $fs.path.new: workspace-created
-    - $let:
-        created:
-          $fs.create-dir-all: $path
-          capability: $capability
-    - $match: $created
-      when:
-      - case:
-          $result.result.ok: null
-        do:
-        - $test.assert: true
-      - case:
-          $result.result.err:
-            $bind: ignored
-        do:
-        - $test.fail: workspace write grant was denied
-workspace-read-write:
-  $test: core
+  policy: (policy (fs-write (group requirement: mandatory scopes: ((dir "."))))))
+(test workspace-read-write core
+  (do
+    (let read-capability (policy.narrow policy fs.read-capability))
+    (let write-capability (policy.narrow policy fs.write-capability))
+    (let path (fs.path.new "workspace-created"))
+    (let created (fs.create-dir-all path write-capability))
+    (match created
+      (case (result.result.ok) (do))
+      (case (result.result.err (bind ignored)) (do (test.fail "workspace write grant was denied"))))
+    (let readable (fs.exists path read-capability))
+    (test.assert readable))
   workspace: temp
-  policy:
-    $policy:
-      fs-read:
-      - requirement: mandatory
-        scopes: [{{dir: .}}]
-      fs-write:
-      - requirement: mandatory
-        scopes: [{{dir: .}}]
-  do:
-    - $let:
-        read-capability:
-          $policy.narrow: $args.policy
-          into: $fs.read-capability
-    - $let:
-        write-capability:
-          $policy.narrow: $args.policy
-          into: $fs.write-capability
-    - $let:
-        path:
-          $fs.path.new: workspace-created
-    - $let:
-        created:
-          $fs.create-dir-all: $path
-          capability: $write-capability
-    - $match: $created
-      when:
-      - case:
-          $result.result.ok: null
-        do: []
-      - case:
-          $result.result.err:
-            $bind: ignored
-        do:
-        - $test.fail: workspace write grant was denied
-    - $let:
-        readable:
-          $fs.exists: $path
-          capability: $read-capability
-    - $test.assert: $readable
-host-grants-are-isolated:
-  $test: core
+  policy: (policy
+    (fs-read (group requirement: mandatory scopes: ((dir "."))))
+    (fs-write (group requirement: mandatory scopes: ((dir "."))))))
+(test host-grants-are-isolated core
+  (do
+    (let capability (policy.narrow policy fs.read-capability))
+    (let host-path (fs.path.new "{host_path}"))
+    (fs.exists host-path capability))
   workspace: temp
-  expect-error:
-    phase: runtime
-    message-contains: mandatory policy coverage is missing
-  policy:
-    $policy:
-      fs-read:
-      - requirement: mandatory
-        scopes: [{{dir: "{host_path}"}}]
-  do:
-    - $let:
-        capability:
-          $policy.narrow: $args.policy
-          into: $fs.read-capability
-    - $let:
-        host-path:
-          $fs.path.new: {host_path}
-    - $fs.exists: $host-path
-      capability: $capability
+  expect-error: (runtime "mandatory policy coverage is missing")
+  policy: (policy (fs-read (group requirement: mandatory scopes: ((dir "{host_path}"))))))
 "#,
             result_lib =
                 path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap()),
@@ -6005,7 +5915,7 @@ fn vibra_test_drains_large_child_output_without_timing_out() {
     std::fs::write(
         &entry,
         format!(
-            "io:\n  $import: \"{io_lib}\"\nemits-large-output:\n  $test: core\n  do:\n    - $io.println: {payload}\n"
+            "(import io \"{io_lib}\")\n(test emits-large-output core (do (io.println \"{payload}\")))\n"
         ),
     )
     .unwrap();
@@ -6749,7 +6659,9 @@ fn compile_time_template_renders_nested_values_and_logicless_sections() {
     // template-expansion path in `src/frontend.rs`); the adapter's
     // `string_literal_value` only wraps a `$literal` envelope around a
     // string that happens to start with `$`, which this render never does.
-    let value = module["main"]["do"][0]["$let"]["rendered"].as_str().unwrap();
+    let value = module["main"]["do"][0]["$let"]["rendered"]
+        .as_str()
+        .unwrap();
     assert_eq!(value, "Team\n- Ada (compiler) active\n- Lin (runtime)\n");
     vibra::lower::lower_program(&loaded).unwrap();
 }

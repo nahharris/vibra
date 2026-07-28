@@ -1636,16 +1636,23 @@ mod tests {
         ));
         assert!(matches!(values[2].value, ExprKind::Record(_)));
         assert!(matches!(values[3].value, ExprKind::Record(_)));
+        // Each embedded byte narrows `int64` -> `uint8` with `Convert`, the
+        // checked numeric conversion. It was `Cast` until a binary embed was
+        // actually compiled: `Cast` is scoped to newtype<->inner-type
+        // conversions, so a raw primitive narrowing has no valid cast path and
+        // always failed `E-CAST-001`.
         assert!(matches!(
             values[4].value,
             ExprKind::Array(ref values)
                 if matches!(
                     values[2].value,
-                    ExprKind::Cast {
+                    ExprKind::Convert {
                         ref value,
                         ref into,
+                        ref fallback,
                     } if matches!(value.value, ExprKind::Literal(Literal::Int(255)))
                         && matches!(into.value, TypeExprKind::Named(ref name) if name == "uint8")
+                        && matches!(fallback.value, Literal::Int(0))
                 )
         ));
         assert!(
