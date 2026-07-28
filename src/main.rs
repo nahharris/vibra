@@ -152,45 +152,9 @@ enum Command {
     Run {
         /// Entry module path (e.g. examples/hello.vibra).
         path: PathBuf,
-        /// Preopen a host directory for WASI mapping; does not approve host ABI access.
+        /// Preopen a host directory for WASI mapping.
         #[arg(long = "preopen")]
         preopen: Vec<PathBuf>,
-        /// Allow filesystem reads under this host path (repeatable).
-        #[arg(long = "allow-read")]
-        allow_read: Vec<PathBuf>,
-        /// Allow filesystem writes under this host path (repeatable).
-        #[arg(long = "allow-write")]
-        allow_write: Vec<PathBuf>,
-        /// Allow reading from stdin.
-        #[arg(long = "allow-stdin")]
-        allow_stdin: bool,
-        /// Allow reading the named environment variable (repeatable).
-        #[arg(long = "allow-env")]
-        allow_env: Vec<String>,
-        /// Allow writing the named environment variable (repeatable).
-        #[arg(long = "allow-env-write")]
-        allow_env_write: Vec<String>,
-        /// Allow outbound network access to HOST[:PORT] (repeatable).
-        #[arg(long = "allow-net")]
-        allow_net: Vec<String>,
-        /// Allow listening on HOST[:PORT] (repeatable).
-        #[arg(long = "allow-net-listen")]
-        allow_net_listen: Vec<String>,
-        /// Allow running the named command (repeatable).
-        #[arg(long = "allow-run")]
-        allow_run: Vec<String>,
-        /// Allow clock/time access.
-        #[arg(long = "allow-clock")]
-        allow_clock: bool,
-        /// Allow randomness access.
-        #[arg(long = "allow-random")]
-        allow_random: bool,
-        /// Allow system information access.
-        #[arg(long = "allow-sys-info")]
-        allow_system_info: bool,
-        /// Allow every modeled non-filesystem permission and filesystem access under the current directory.
-        #[arg(long = "allow-all")]
-        allow_all: bool,
         /// Maximum number of concurrently open file handles (0 = unlimited).
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
@@ -198,7 +162,7 @@ enum Command {
         #[arg(long = "flag", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
-    /// Print the statically referenced, typed host effect surface as JSON.
+    /// Print the statically referenced host effect surface as JSON.
     Effects {
         /// Entry module path.
         path: PathBuf,
@@ -237,45 +201,9 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = ExecFormatArg::Json)]
         format: ExecFormatArg,
-        /// Preopen a host directory for WASI mapping; does not approve host ABI access.
+        /// Preopen a host directory for WASI mapping.
         #[arg(long = "preopen")]
         preopen: Vec<PathBuf>,
-        /// Allow filesystem reads under this host path (repeatable).
-        #[arg(long = "allow-read")]
-        allow_read: Vec<PathBuf>,
-        /// Allow filesystem writes under this host path (repeatable).
-        #[arg(long = "allow-write")]
-        allow_write: Vec<PathBuf>,
-        /// Allow reading from stdin.
-        #[arg(long = "allow-stdin")]
-        allow_stdin: bool,
-        /// Allow reading the named environment variable (repeatable).
-        #[arg(long = "allow-env")]
-        allow_env: Vec<String>,
-        /// Allow writing the named environment variable (repeatable).
-        #[arg(long = "allow-env-write")]
-        allow_env_write: Vec<String>,
-        /// Allow outbound network access to HOST[:PORT] (repeatable).
-        #[arg(long = "allow-net")]
-        allow_net: Vec<String>,
-        /// Allow listening on HOST[:PORT] (repeatable).
-        #[arg(long = "allow-net-listen")]
-        allow_net_listen: Vec<String>,
-        /// Allow running the named command (repeatable).
-        #[arg(long = "allow-run")]
-        allow_run: Vec<String>,
-        /// Allow clock/time access.
-        #[arg(long = "allow-clock")]
-        allow_clock: bool,
-        /// Allow randomness access.
-        #[arg(long = "allow-random")]
-        allow_random: bool,
-        /// Allow system information access.
-        #[arg(long = "allow-sys-info")]
-        allow_system_info: bool,
-        /// Allow every modeled non-filesystem permission and filesystem access under the current directory.
-        #[arg(long = "allow-all")]
-        allow_all: bool,
         /// Maximum number of concurrently open file handles (0 = unlimited).
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
@@ -299,9 +227,9 @@ enum Command {
         /// Fail tests that produce compiler warnings.
         #[arg(long = "deny-warnings")]
         deny_warnings: bool,
-        /// Allow an isolated `workspace: temp` test to access its temporary cwd.
-        #[arg(long = "allow-test-workspace", value_enum)]
-        allow_test_workspace: Option<TestWorkspaceAccessArg>,
+        /// Allow an isolated `workspace: temp` test to run in its temporary cwd.
+        #[arg(long = "allow-test-workspace")]
+        allow_test_workspace: bool,
         /// Number of test worker processes.
         #[arg(long)]
         jobs: Option<usize>,
@@ -326,45 +254,9 @@ enum Command {
         /// Write structured report to this path.
         #[arg(long = "report-file")]
         report_file: Option<PathBuf>,
-        /// Preopen a host directory for WASI mapping; does not approve host ABI access.
+        /// Preopen a host directory for WASI mapping.
         #[arg(long = "preopen")]
         preopen: Vec<PathBuf>,
-        /// Allow filesystem reads under this host path (repeatable).
-        #[arg(long = "allow-read")]
-        allow_read: Vec<PathBuf>,
-        /// Allow filesystem writes under this host path (repeatable).
-        #[arg(long = "allow-write")]
-        allow_write: Vec<PathBuf>,
-        /// Allow reading from stdin.
-        #[arg(long = "allow-stdin")]
-        allow_stdin: bool,
-        /// Allow reading the named environment variable (repeatable).
-        #[arg(long = "allow-env")]
-        allow_env: Vec<String>,
-        /// Allow writing the named environment variable (repeatable).
-        #[arg(long = "allow-env-write")]
-        allow_env_write: Vec<String>,
-        /// Allow outbound network access to HOST[:PORT] (repeatable).
-        #[arg(long = "allow-net")]
-        allow_net: Vec<String>,
-        /// Allow listening on HOST[:PORT] (repeatable).
-        #[arg(long = "allow-net-listen")]
-        allow_net_listen: Vec<String>,
-        /// Allow running the named command (repeatable).
-        #[arg(long = "allow-run")]
-        allow_run: Vec<String>,
-        /// Allow clock/time access.
-        #[arg(long = "allow-clock")]
-        allow_clock: bool,
-        /// Allow randomness access.
-        #[arg(long = "allow-random")]
-        allow_random: bool,
-        /// Allow system information access.
-        #[arg(long = "allow-sys-info")]
-        allow_system_info: bool,
-        /// Allow every modeled non-filesystem permission and filesystem access under the current directory.
-        #[arg(long = "allow-all")]
-        allow_all: bool,
         /// Maximum number of concurrently open file handles (0 = unlimited).
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
@@ -378,28 +270,6 @@ enum Command {
         result_file: PathBuf,
         #[arg(long = "preopen")]
         preopen: Vec<PathBuf>,
-        #[arg(long = "allow-read")]
-        allow_read: Vec<PathBuf>,
-        #[arg(long = "allow-write")]
-        allow_write: Vec<PathBuf>,
-        #[arg(long = "allow-stdin")]
-        allow_stdin: bool,
-        #[arg(long = "allow-env")]
-        allow_env: Vec<String>,
-        #[arg(long = "allow-env-write")]
-        allow_env_write: Vec<String>,
-        #[arg(long = "allow-net")]
-        allow_net: Vec<String>,
-        #[arg(long = "allow-net-listen")]
-        allow_net_listen: Vec<String>,
-        #[arg(long = "allow-run")]
-        allow_run: Vec<String>,
-        #[arg(long = "allow-clock")]
-        allow_clock: bool,
-        #[arg(long = "allow-random")]
-        allow_random: bool,
-        #[arg(long = "allow-sys-info")]
-        allow_system_info: bool,
         /// Private deterministic test-worker random state.
         #[arg(long = "injected-random-state", hide = true)]
         injected_random_state: Option<u64>,
@@ -409,8 +279,6 @@ enum Command {
         /// Private deterministic test-worker monotonic clock.
         #[arg(long = "injected-clock-monotonic-millis", hide = true)]
         injected_clock_monotonic_millis: Option<u64>,
-        #[arg(long = "allow-all")]
-        allow_all: bool,
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
     },
@@ -457,13 +325,6 @@ enum StatusFormatArg {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-enum TestWorkspaceAccessArg {
-    Read,
-    Write,
-    ReadWrite,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
 enum ToolOutputArg {
     Json,
 }
@@ -507,16 +368,6 @@ impl From<ReportArg> for test_runner::ReportFormat {
         match value {
             ReportArg::Human => test_runner::ReportFormat::Human,
             ReportArg::Json => test_runner::ReportFormat::Json,
-        }
-    }
-}
-
-impl From<TestWorkspaceAccessArg> for test_runner::TestWorkspaceAccess {
-    fn from(value: TestWorkspaceAccessArg) -> Self {
-        match value {
-            TestWorkspaceAccessArg::Read => test_runner::TestWorkspaceAccess::Read,
-            TestWorkspaceAccessArg::Write => test_runner::TestWorkspaceAccess::Write,
-            TestWorkspaceAccessArg::ReadWrite => test_runner::TestWorkspaceAccess::ReadWrite,
         }
     }
 }
@@ -704,37 +555,10 @@ fn run_cli() -> Result<()> {
         Command::Run {
             path,
             preopen,
-            allow_read,
-            allow_write,
-            allow_stdin,
-            allow_env,
-            allow_env_write,
-            allow_net,
-            allow_net_listen,
-            allow_run,
-            allow_clock,
-            allow_random,
-            allow_system_info,
-            allow_all,
             max_open_files,
             flag,
         } => {
-            let config = run_config(
-                preopen,
-                allow_read,
-                allow_write,
-                allow_stdin,
-                allow_env,
-                allow_env_write,
-                allow_net,
-                allow_net_listen,
-                allow_run,
-                allow_clock,
-                allow_random,
-                allow_system_info,
-                allow_all,
-                max_open_files,
-            );
+            let config = run_config(preopen, max_open_files);
             if path.extension().and_then(|value| value.to_str()) == Some("vapp") {
                 if !flag.is_empty() {
                     bail!(
@@ -769,18 +593,6 @@ fn run_cli() -> Result<()> {
             import,
             format,
             preopen,
-            allow_read,
-            allow_write,
-            allow_stdin,
-            allow_env,
-            allow_env_write,
-            allow_net,
-            allow_net_listen,
-            allow_run,
-            allow_clock,
-            allow_random,
-            allow_system_info,
-            allow_all,
             max_open_files,
         } => {
             let (bindings, local_types) = exec_bindings(arg, arg_file)?;
@@ -792,22 +604,7 @@ fn run_cli() -> Result<()> {
             for warning in &lowered.program.warnings {
                 eprintln!("warning: {warning}");
             }
-            let config = run_config(
-                preopen,
-                allow_read,
-                allow_write,
-                allow_stdin,
-                allow_env,
-                allow_env_write,
-                allow_net,
-                allow_net_listen,
-                allow_run,
-                allow_clock,
-                allow_random,
-                allow_system_info,
-                allow_all,
-                max_open_files,
-            );
+            let config = run_config(preopen, max_open_files);
             let value = execute::eval_lowered_exec(&lowered, &bindings, &config)?;
             print_exec_value(value, format)?;
         }
@@ -828,36 +625,9 @@ fn run_cli() -> Result<()> {
             format,
             report_file,
             preopen,
-            allow_read,
-            allow_write,
-            allow_stdin,
-            allow_env,
-            allow_env_write,
-            allow_net,
-            allow_net_listen,
-            allow_run,
-            allow_clock,
-            allow_random,
-            allow_system_info,
-            allow_all,
             max_open_files,
         } => {
-            let config = run_config(
-                preopen,
-                allow_read,
-                allow_write,
-                allow_stdin,
-                allow_env,
-                allow_env_write,
-                allow_net,
-                allow_net_listen,
-                allow_run,
-                allow_clock,
-                allow_random,
-                allow_system_info,
-                allow_all,
-                max_open_files,
-            );
+            let config = run_config(preopen, max_open_files);
             let ok = test_runner::run_tests(test_runner::TestOptions {
                 path: path.unwrap_or_else(|| PathBuf::from(".")),
                 filter,
@@ -865,7 +635,7 @@ fn run_cli() -> Result<()> {
                 tags,
                 deny_skips,
                 deny_warnings,
-                allow_test_workspace: allow_test_workspace.map(Into::into),
+                allow_test_workspace,
                 jobs: jobs
                     .or_else(|| std::thread::available_parallelism().ok().map(usize::from))
                     .unwrap_or(1),
@@ -887,39 +657,12 @@ fn run_cli() -> Result<()> {
             name,
             result_file,
             preopen,
-            allow_read,
-            allow_write,
-            allow_stdin,
-            allow_env,
-            allow_env_write,
-            allow_net,
-            allow_net_listen,
-            allow_run,
-            allow_clock,
-            allow_random,
-            allow_system_info,
             injected_random_state,
             injected_clock_unix_millis,
             injected_clock_monotonic_millis,
-            allow_all,
             max_open_files,
         } => {
-            let mut config = run_config(
-                preopen,
-                allow_read,
-                allow_write,
-                allow_stdin,
-                allow_env,
-                allow_env_write,
-                allow_net,
-                allow_net_listen,
-                allow_run,
-                allow_clock,
-                allow_random,
-                allow_system_info,
-                allow_all,
-                max_open_files,
-            );
+            let mut config = run_config(preopen, max_open_files);
             if let Some(state) = injected_random_state {
                 config.injected_random = Some(std::sync::Arc::new(std::sync::Mutex::new(
                     runtime::InjectedRandom::new(state),
@@ -1138,8 +881,6 @@ fn raw_exec_string(value: RuntimeValue) -> Result<String> {
 #[derive(serde::Serialize)]
 struct EffectsReport {
     effects: Vec<EffectEntry>,
-    #[serde(rename = "root-policy")]
-    root_policy: std::collections::BTreeMap<String, vibra::lower::PolicyType>,
 }
 
 #[derive(serde::Serialize)]
@@ -1150,17 +891,12 @@ struct EffectEntry {
     params: Vec<EffectParam>,
     #[serde(rename = "return")]
     result: String,
-    #[serde(rename = "required-domains")]
-    required_domains: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
 struct EffectParam {
-    kind: String,
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    value_type: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    domains: Vec<String>,
+    #[serde(rename = "type")]
+    value_type: String,
 }
 
 fn print_effects(
@@ -1187,20 +923,8 @@ fn print_effects(
         let params = entry
             .params
             .iter()
-            .map(|param| match param {
-                vibra::host_abi::ParamKind::Value(kind) => EffectParam {
-                    kind: "value".into(),
-                    value_type: Some(kind.as_str().into()),
-                    domains: Vec::new(),
-                },
-                vibra::host_abi::ParamKind::Capability(domains) => EffectParam {
-                    kind: "capability".into(),
-                    value_type: None,
-                    domains: domains
-                        .iter()
-                        .map(|domain| domain.as_str().into())
-                        .collect(),
-                },
+            .map(|kind| EffectParam {
+                value_type: kind.as_str().into(),
             })
             .collect();
         effects.push(EffectEntry {
@@ -1209,28 +933,9 @@ fn print_effects(
             name: import.name.clone(),
             params,
             result: entry.result.as_str().into(),
-            required_domains: entry
-                .required_domains()
-                .iter()
-                .map(|domain| domain.as_str().into())
-                .collect(),
         });
     }
-    let root_policy = lowered
-        .main_arg_bindings
-        .iter()
-        .filter_map(|(name, ty)| match ty {
-            TypeRef::Policy(policy) => Some((name.clone(), policy.clone())),
-            _ => None,
-        })
-        .collect();
-    print_structured(
-        &EffectsReport {
-            effects,
-            root_policy,
-        },
-        format,
-    )
+    print_structured(&EffectsReport { effects }, format)
 }
 
 fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTreeSet<String> {
@@ -1238,9 +943,7 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
         use lower::Expr;
         match expr {
             Expr::Call { call, .. } => visit_call(call, pending),
-            Expr::Mutable(value)
-            | Expr::Cast { from: value, .. }
-            | Expr::PolicyNarrow { from: value, .. } => visit_expr(value, pending),
+            Expr::Mutable(value) | Expr::Cast { from: value, .. } => visit_expr(value, pending),
             Expr::Reference { target, .. } => visit_expr(target, pending),
             Expr::EnumConstructor { payload, .. } => {
                 if let Some(payload) = payload {
@@ -1383,10 +1086,6 @@ fn runtime_value_to_json(value: RuntimeValue) -> Result<serde_json::Value> {
             "type": format!("{type_ref:?}"),
             "value": runtime_value_to_json(*value)?,
         }),
-        RuntimeValue::Policy(policy) => serde_json::Value::String(format!("{:?}", policy.policy)),
-        RuntimeValue::Capability(capability) => {
-            serde_json::Value::String(format!("{:?}", capability.capability))
-        }
         RuntimeValue::HostHandle(_) => {
             bail!("opaque host handles cannot be rendered as source values")
         }
@@ -1417,63 +1116,9 @@ fn path_str(path: &std::path::Path) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_config(
-    preopen: Vec<PathBuf>,
-    allow_read: Vec<PathBuf>,
-    allow_write: Vec<PathBuf>,
-    allow_stdin: bool,
-    allow_env: Vec<String>,
-    allow_env_write: Vec<String>,
-    allow_net: Vec<String>,
-    allow_net_listen: Vec<String>,
-    allow_run: Vec<String>,
-    allow_clock: bool,
-    allow_random: bool,
-    allow_system_info: bool,
-    allow_all: bool,
-    max_open_files: usize,
-) -> runtime::RunConfig {
+fn run_config(preopen: Vec<PathBuf>, max_open_files: usize) -> runtime::RunConfig {
     runtime::RunConfig {
         preopen_host_dirs: preopen,
-        allow_read: if allow_all {
-            vec![PathBuf::from(".")]
-        } else {
-            allow_read
-        },
-        allow_write: if allow_all {
-            vec![PathBuf::from(".")]
-        } else {
-            allow_write
-        },
-        allow_stdin: allow_all || allow_stdin,
-        allow_env: if allow_all {
-            vec!["*".to_string()]
-        } else {
-            allow_env
-        },
-        allow_env_write: if allow_all {
-            vec!["*".to_string()]
-        } else {
-            allow_env_write
-        },
-        allow_net: if allow_all {
-            vec!["*".to_string()]
-        } else {
-            allow_net
-        },
-        allow_net_listen: if allow_all {
-            vec!["*".to_string()]
-        } else {
-            allow_net_listen
-        },
-        allow_run: if allow_all {
-            vec!["*".to_string()]
-        } else {
-            allow_run
-        },
-        allow_clock: allow_all || allow_clock,
-        allow_random: allow_all || allow_random,
-        allow_system_info: allow_all || allow_system_info,
         max_open_files,
         ..runtime::RunConfig::default()
     }

@@ -48,7 +48,7 @@ flowchart TD
 | 5 | #12, #13, #16 | tooling/adoption | LSP semantics and structured CLI/tool schemas precede MCP and comprehensive agent guidance. |
 | 6 | #18, #17 | distribution | Platform support and CI matrix precede claims and artifacts for official multi-platform images. |
 
-Within a wave, work is ordered by: blocking edges, security/capability impact,
+Within a wave, work is ordered by: blocking edges, security impact,
 typed-contract stability, deterministic local testability, then adoption value.
 
 Issue #129 is a high-coreness source-graph concern. It is independent of the

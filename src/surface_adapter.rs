@@ -34,9 +34,9 @@
 use crate::ast::{
     Annotation, AnnotationKind, Constant, Definition, EmbedFormat as AstEmbedFormat, ExpectedError,
     Expr as AstExpr, ExprField, ExprKind, Function, HandleAccess as AstHandleAccess, ImplItem,
-    Import, Literal, MatchCase, MethodBinding, Module, Pattern as AstPattern, PatternKind,
-    PolicyDomain, PolicyGroup, PolicyRequirement, PolicyScope, PolicyScopeKind, Spanned, Test,
-    TestMeta, TopLevel, TypeExpr, TypeExprKind, TypeMember, Visibility, WasmArgument, WasmImport,
+    Import, Literal, MatchCase, MethodBinding, Module, Pattern as AstPattern, PatternKind, Spanned,
+    Test, TestMeta, TopLevel, TypeExpr, TypeExprKind, TypeMember, Visibility, WasmArgument,
+    WasmImport,
 };
 use anyhow::{bail, Result};
 use serde_yaml::{Mapping, Value};
@@ -614,13 +614,6 @@ impl<'a> Converter<'a> {
                     .map(|t| self.type_value(t))
                     .collect::<Result<Vec<_>>>()?;
                 Ok(single_dollar("intersect", Value::Sequence(seq)))
-            }
-            TypeExprKind::Policy(domains) => {
-                Ok(single_dollar("policy", policy_domains_value(domains)?))
-            }
-            TypeExprKind::Capability { domain, groups } => {
-                let head = format!("capability.{}", domain.value);
-                Ok(single_dollar(&head, policy_groups_value(groups)?))
             }
             TypeExprKind::Handle(access) => {
                 let head = format!("handle.{}", handle_access_str(access.value));
@@ -1415,15 +1408,6 @@ impl<'a> Converter<'a> {
                 m.insert(Value::String("into".into()), self.type_value(into)?);
                 Ok(Value::Mapping(m))
             }
-            ExprKind::PolicyNarrow { value, into } => {
-                let mut m = Mapping::new();
-                m.insert(
-                    Value::String("$policy.narrow".into()),
-                    self.expr_value(value)?,
-                );
-                m.insert(Value::String("into".into()), self.type_value(into)?);
-                Ok(Value::Mapping(m))
-            }
             ExprKind::If {
                 condition,
                 then_body,
@@ -1783,9 +1767,9 @@ fn collect_binding_names_expr(expr: &AstExpr, names: &mut Vec<String>) {
             collect_binding_names_expr(end, names);
             collect_binding_names_expr(step, names);
         }
-        ExprKind::Convert { value, .. }
-        | ExprKind::Cast { value, .. }
-        | ExprKind::PolicyNarrow { value, .. } => collect_binding_names_expr(value, names),
+        ExprKind::Convert { value, .. } | ExprKind::Cast { value, .. } => {
+            collect_binding_names_expr(value, names)
+        }
         ExprKind::Call { arguments, .. } => {
             for arg in arguments {
                 collect_binding_names_expr(arg, names);
@@ -2020,32 +2004,7 @@ fn bare_type_value(ty: &TypeExpr) -> Result<Value> {
 
 impl<'a> Converter<'a> {
     fn test_value(&mut self, test: &Test) -> Result<(String, Value)> {
-        // A `policy:` test attribute injects an implicit `policy` binding
-        // into the test body, the same mechanism `main`'s own policy
-        // parameter uses on a real function (see
-        // `Converter::function_envelope`, which sets `current_params` for
-        // the duration of body conversion). Legacy stores that binding as
-        // `args.policy`, not bare `policy` (`Converter::local_name_ref`), so
-        // a bare `policy` reference inside the test body must resolve the
-        // same way a real parameter reference would, for exactly as long as
-        // this body is being converted.
-        let has_policy = test
-            .metadata
-            .iter()
-            .any(|meta| matches!(meta, TestMeta::Policy(_)));
-        let previous_params = if has_policy {
-            Some(std::mem::replace(
-                &mut self.current_params,
-                vec!["policy".to_string()],
-            ))
-        } else {
-            None
-        };
-        let body_result = self.body_to_do(&test.body);
-        if let Some(previous_params) = previous_params {
-            self.current_params = previous_params;
-        }
-        let body = body_result?;
+        let body = self.body_to_do(&test.body)?;
         self.test_metadata_value(test, body)
     }
 
@@ -2097,10 +2056,6 @@ impl<'a> Converter<'a> {
                         Value::String("workspace".into()),
                         Value::String(name.value.clone()),
                     );
-                }
-                TestMeta::Policy(ty) => {
-                    let v = self.type_value(ty)?;
-                    m.insert(Value::String("policy".into()), v);
                 }
                 TestMeta::ExpectError(err) => {
                     let mut em = Mapping::new();
@@ -2306,73 +2261,6 @@ pub(crate) fn test_discovery_value(test: &Test) -> Result<(String, Value)> {
     converter.test_metadata_value(test, Value::Sequence(Vec::new()))
 }
 
-fn policy_domains_value(domains: &[PolicyDomain]) -> Result<Value> {
-    let mut m = Mapping::new();
-    for domain in domains {
-        let groups = policy_groups_value(&domain.groups)?;
-        if m.insert(Value::String(domain.name.value.clone()), groups)
-            .is_some()
-        {
-            bail!(
-                "E-ADAPT-011: duplicate policy domain `{}`",
-                domain.name.value
-            );
-        }
-    }
-    Ok(Value::Mapping(m))
-}
-
-fn policy_groups_value(groups: &[PolicyGroup]) -> Result<Value> {
-    if groups.is_empty() {
-        return Ok(Value::Null);
-    }
-    let mut seq = Vec::with_capacity(groups.len());
-    for group in groups {
-        let requirement = match group.requirement.value {
-            PolicyRequirement::Mandatory => "mandatory",
-            PolicyRequirement::Optional => "optional",
-        };
-        let scopes = policy_scopes_value(&group.scopes)?;
-        let mut m = Mapping::new();
-        m.insert(
-            Value::String("requirement".into()),
-            Value::String(requirement.into()),
-        );
-        m.insert(Value::String("scopes".into()), scopes);
-        seq.push(Value::Mapping(m));
-    }
-    Ok(Value::Sequence(seq))
-}
-
-fn policy_scopes_value(scopes: &[PolicyScope]) -> Result<Value> {
-    if scopes
-        .iter()
-        .any(|s| matches!(s.value, PolicyScopeKind::Any))
-    {
-        if scopes.len() == 1 {
-            return Ok(Value::String("any".into()));
-        }
-        bail!(
-            "E-ADAPT-012: `(any)` cannot be combined with other policy scopes in the legacy \
-             shape (the whole `scopes:` value is either bare `\"any\"` or a plain selector list)"
-        );
-    }
-    let mut seq = Vec::with_capacity(scopes.len());
-    for scope in scopes {
-        let (selector, value) = match &scope.value {
-            PolicyScopeKind::File(v) => ("file", v.value.clone()),
-            PolicyScopeKind::Dir(v) => ("dir", v.value.clone()),
-            PolicyScopeKind::Exact(v) => ("exact", v.value.clone()),
-            PolicyScopeKind::Prefix(v) => ("prefix", v.value.clone()),
-            PolicyScopeKind::Any => unreachable!("filtered above"),
-        };
-        let mut m = Mapping::new();
-        m.insert(Value::String(selector.into()), Value::String(value));
-        seq.push(Value::Mapping(m));
-    }
-    Ok(Value::Sequence(seq))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2554,10 +2442,10 @@ mod tests {
         );
     }
 
-    // ---- test with tags:/policy: ----
+    // ---- test with tags: ----
 
     #[test]
-    fn test_declaration_with_tags_and_policy_lowers() {
+    fn test_declaration_with_tags_lowers() {
         // `test.assert` and peers come from the `test` stdlib module, which
         // this single-module program does not import; use a self-contained
         // expression built only from primitives instead.
@@ -2565,8 +2453,7 @@ mod tests {
             r#"
 (test addition-is-checked core
   (do (let ok (equal 1 1)))
-  tags: (fast language)
-  policy: (policy (clock)))
+  tags: (fast language))
 "#,
         );
         let signatures = collect_local_signatures(&module).unwrap();
@@ -2592,13 +2479,12 @@ mod tests {
         );
     }
 
-    // ---- capability and handle types ----
+    // ---- handle types ----
 
     #[test]
-    fn capability_and_handle_types_lower() {
+    fn handle_types_lower() {
         assert_lowers(
             r#"
-(def clock-capability (capability clock))
 (def out-handle (handle write))
 "#,
         );

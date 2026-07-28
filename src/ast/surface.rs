@@ -350,7 +350,6 @@ pub enum TestMeta {
         monotonic_millis: Spanned<i64>,
     },
     Workspace(Name),
-    Policy(TypeExpr),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -398,46 +397,8 @@ pub enum TypeExprKind {
     Reference(Box<TypeExpr>),
     MutableReference(Box<TypeExpr>),
     Intersect(Vec<TypeExpr>),
-    Policy(Vec<PolicyDomain>),
-    Capability {
-        domain: Name,
-        groups: Vec<PolicyGroup>,
-    },
     Handle(Spanned<HandleAccess>),
     WasmValue(Name),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PolicyDomain {
-    pub name: Name,
-    pub groups: Vec<PolicyGroup>,
-    pub span: Span,
-    pub origin: Origin,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PolicyGroup {
-    pub requirement: Spanned<PolicyRequirement>,
-    pub scopes: Vec<PolicyScope>,
-    pub span: Span,
-    pub origin: Origin,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PolicyRequirement {
-    Mandatory,
-    Optional,
-}
-
-pub type PolicyScope = Spanned<PolicyScopeKind>;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PolicyScopeKind {
-    Any,
-    File(Spanned<String>),
-    Dir(Spanned<String>),
-    Exact(Spanned<String>),
-    Prefix(Spanned<String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -516,10 +477,6 @@ pub enum ExprKind {
         fallback: Spanned<Literal>,
     },
     Cast {
-        value: Box<Expr>,
-        into: TypeExpr,
-    },
-    PolicyNarrow {
         value: Box<Expr>,
         into: TypeExpr,
     },
@@ -1072,17 +1029,6 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
             min_arity("intersect", &args, 1, node.span)?;
             TypeExprKind::Intersect(parse_types(args)?)
         }
-        "policy" => TypeExprKind::Policy(parse_policy_domains(&args)?),
-        "capability" => {
-            min_arity("capability", &args, 1, node.span)?;
-            TypeExprKind::Capability {
-                domain: name(args[0])?,
-                groups: args[1..]
-                    .iter()
-                    .map(|node| parse_policy_group(node))
-                    .collect::<Result<_, _>>()?,
-            }
-        }
         "handle" => {
             exact_arity("handle", &args, 1, node.span)?;
             TypeExprKind::Handle(parse_handle_access(args[0])?)
@@ -1104,111 +1050,6 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
                 constructor: head,
                 arguments: parse_types(args)?,
             }
-        }
-    };
-    Ok(Spanned::source(value, node.span))
-}
-
-fn parse_policy_domains(args: &[&Node]) -> Result<Vec<PolicyDomain>, AstError> {
-    args.iter()
-        .map(|node| {
-            let values = semantic_nodes(list(node)?).collect::<Vec<_>>();
-            min_arity("policy domain", &values, 1, node.span)?;
-            Ok(PolicyDomain {
-                name: name(values[0])?,
-                groups: values[1..]
-                    .iter()
-                    .map(|node| parse_policy_group(node))
-                    .collect::<Result<_, _>>()?,
-                span: node.span,
-                origin: source_origin(node.span),
-            })
-        })
-        .collect()
-}
-
-fn parse_policy_group(node: &Node) -> Result<PolicyGroup, AstError> {
-    let (head, args) = headed(node)?;
-    if head.value != "group" {
-        return Err(expected_head("group", &head));
-    }
-    let attributes = trailing_attributes("group", &args, 0, node.span)?;
-    let mut requirement = None;
-    let mut scopes = None;
-    for attribute in attributes {
-        let label = label(attribute.label)?;
-        match label.value.as_str() {
-            "requirement" => {
-                requirement = Some(Spanned::source(
-                    match symbol(attribute.value) {
-                        Some("mandatory") => PolicyRequirement::Mandatory,
-                        Some("optional") => PolicyRequirement::Optional,
-                        _ => {
-                            return Err(AstError::new(
-                                "E-SYN-008",
-                                "policy requirement must be `mandatory` or `optional`",
-                                attribute.value.span,
-                            ));
-                        }
-                    },
-                    attribute.value.span,
-                ));
-            }
-            "scopes" => {
-                scopes = Some(
-                    semantic_nodes(list(attribute.value)?)
-                        .map(parse_policy_scope)
-                        .collect::<Result<_, _>>()?,
-                );
-            }
-            _ => {
-                return Err(AstError::new(
-                    "E-SYN-011",
-                    format!("unknown policy group attribute `{}:`", label.value),
-                    label.span,
-                ));
-            }
-        }
-    }
-    Ok(PolicyGroup {
-        requirement: requirement.ok_or_else(|| {
-            AstError::new(
-                "E-SYN-011",
-                "policy group is missing `requirement:`",
-                node.span,
-            )
-        })?,
-        scopes: scopes.ok_or_else(|| {
-            AstError::new("E-SYN-011", "policy group is missing `scopes:`", node.span)
-        })?,
-        span: node.span,
-        origin: source_origin(node.span),
-    })
-}
-
-fn parse_policy_scope(node: &Node) -> Result<PolicyScope, AstError> {
-    let (head, args) = headed(node)?;
-    let value = match head.value.as_str() {
-        "any" => {
-            exact_arity("any scope", &args, 0, node.span)?;
-            PolicyScopeKind::Any
-        }
-        "file" | "dir" | "exact" | "prefix" => {
-            exact_arity("policy scope", &args, 1, node.span)?;
-            let value = string(args[0])?;
-            match head.value.as_str() {
-                "file" => PolicyScopeKind::File(value),
-                "dir" => PolicyScopeKind::Dir(value),
-                "exact" => PolicyScopeKind::Exact(value),
-                _ => PolicyScopeKind::Prefix(value),
-            }
-        }
-        _ => {
-            return Err(AstError::new(
-                "E-SYN-008",
-                format!("unknown policy scope selector `{}`", head.value),
-                head.span,
-            ));
         }
     };
     Ok(Spanned::source(value, node.span))
@@ -1377,13 +1218,6 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
         "cast" => {
             exact_arity("cast", &args, 2, node.span)?;
             ExprKind::Cast {
-                value: Box::new(parse_expr(args[0])?),
-                into: parse_type(args[1])?,
-            }
-        }
-        "policy.narrow" => {
-            exact_arity("policy.narrow", &args, 2, node.span)?;
-            ExprKind::PolicyNarrow {
                 value: Box::new(parse_expr(args[0])?),
                 into: parse_type(args[1])?,
             }
@@ -1932,17 +1766,6 @@ fn parse_test_meta(attribute: &AttributeRef<'_>) -> Result<TestMeta, AstError> {
             }
             Ok(TestMeta::Workspace(workspace))
         }
-        "policy" => {
-            let policy = parse_type(attribute.value)?;
-            if !matches!(policy.value, TypeExprKind::Policy(_)) {
-                return Err(AstError::new(
-                    "E-SYN-010",
-                    "`policy:` requires a `(policy ...)` type",
-                    attribute.value.span,
-                ));
-            }
-            Ok(TestMeta::Policy(policy))
-        }
         _ => Err(AstError::new(
             "E-SYN-011",
             format!("unknown test attribute `{}:`", label.value),
@@ -2282,43 +2105,9 @@ mod tests {
 
     #[test]
     fn lowers_explicit_security_types_and_validates_their_closed_shapes() {
-        let parsed = module(
-            r#"
-(def root-policy
-  (policy
-    (fs-read
-      (group requirement: mandatory scopes: ((dir "src") (dir "tests"))))
-    (clock
-      (group requirement: optional scopes: ((any))))))
-(def read-capability
-  (capability fs-read
-    (group requirement: mandatory scopes: ((dir "src")))))
-(def input-handle (handle read))
-"#,
-        )
-        .unwrap();
+        let parsed = module(r#"(def input-handle (handle read))"#).unwrap();
         assert!(matches!(
             parsed.forms[0],
-            TopLevel::Definition(Definition {
-                body: Spanned {
-                    value: TypeExprKind::Policy(ref domains),
-                    ..
-                },
-                ..
-            }) if domains.len() == 2
-        ));
-        assert!(matches!(
-            parsed.forms[1],
-            TopLevel::Definition(Definition {
-                body: Spanned {
-                    value: TypeExprKind::Capability { ref groups, .. },
-                    ..
-                },
-                ..
-            }) if groups.len() == 1
-        ));
-        assert!(matches!(
-            parsed.forms[2],
             TopLevel::Definition(Definition {
                 body: Spanned {
                     value: TypeExprKind::Handle(Spanned {
@@ -2329,33 +2118,6 @@ mod tests {
                 },
                 ..
             })
-        ));
-
-        let error = module(
-            "(def invalid (policy (fs-read (group scopes: ((dir \"src\")) requirement: required))))",
-        )
-        .unwrap_err();
-        assert_eq!(error.code, "E-SYN-008");
-
-        let scopes = module(
-            r#"(def all-scopes
-              (policy (fs-read (group requirement: optional
-                scopes: ((any) (file "a") (dir "b") (exact "c") (prefix "d"))))))"#,
-        )
-        .unwrap();
-        let TopLevel::Definition(definition) = &scopes.forms[0] else {
-            panic!("expected definition");
-        };
-        let TypeExprKind::Policy(domains) = &definition.body.value else {
-            panic!("expected policy");
-        };
-        assert!(matches!(
-            domains[0].groups[0].scopes[0].value,
-            PolicyScopeKind::Any
-        ));
-        assert!(matches!(
-            domains[0].groups[0].scopes[4].value,
-            PolicyScopeKind::Prefix(ref value) if value.value == "d"
         ));
     }
 
@@ -2370,19 +2132,17 @@ mod tests {
   skip: "sandbox unavailable"
   expect-error: (compile E-FS-001 "denied")
   clock: (fixed 1000 7)
-  workspace: temp
-  policy: (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
+  workspace: temp)
 "#,
         )
         .unwrap();
         let TopLevel::Test(test) = &parsed.forms[0] else {
             panic!("expected test");
         };
-        assert_eq!(test.metadata.len(), 8);
+        assert_eq!(test.metadata.len(), 7);
         assert!(matches!(test.metadata[1], TestMeta::TimeoutMillis(_)));
         assert!(matches!(test.metadata[2], TestMeta::RandomSeed(_)));
         assert!(matches!(test.metadata[3], TestMeta::Skip(_)));
-        assert!(matches!(test.metadata[7], TestMeta::Policy(_)));
 
         assert_eq!(
             module("(test bad core (do) timeout-ms: 0)")

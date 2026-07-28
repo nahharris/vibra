@@ -11,9 +11,8 @@
 use crate::load::{map_get_str, LoadedProgram};
 use crate::project;
 use crate::type_semantics::{
-    capability_body, crosses_newtype_boundary, newtype_inner, normalize_type_ref, policy_body,
-    policy_type_is_subset, resolve_alias_type, substitute_self, substitute_type, type_compatible,
-    unify_types, valid_cast_path,
+    crosses_newtype_boundary, newtype_inner, normalize_type_ref, resolve_alias_type,
+    substitute_self, substitute_type, type_compatible, unify_types, valid_cast_path,
 };
 use anyhow::{bail, Context, Result};
 use serde_yaml::Value;
@@ -90,8 +89,6 @@ pub enum RuntimeValue {
         type_ref: TypeRef,
         value: Box<RuntimeValue>,
     },
-    Policy(PolicyValue),
-    Capability(CapabilityValue),
     HostHandle(HostHandle),
     /// Interpreter-only identity for an affine source-level task handle.
     /// Wasm represents the same handle in a compiler-owned local.
@@ -107,17 +104,6 @@ pub enum RuntimeValue {
         mutable: bool,
     },
     Void,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PolicyValue {
-    pub policy: PolicyType,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CapabilityValue {
-    pub capability: CapabilityType,
-    pub policy: PolicyType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -154,10 +140,6 @@ pub enum Expr {
         return_type: TypeRef,
     },
     Cast {
-        from: Box<Expr>,
-        target: TypeRef,
-    },
-    PolicyNarrow {
         from: Box<Expr>,
         target: TypeRef,
     },
@@ -260,11 +242,6 @@ pub enum TypeRef {
         name: String,
         inner: Box<TypeRef>,
     },
-    Policy(PolicyType),
-    /// An explicitly narrowed, domain-specific authority value. Unlike a
-    /// root `$policy`, this is the only authority type accepted by privileged
-    /// helpers and host imports.
-    Capability(CapabilityType),
     /// An opaque runtime-minted host resource handle. No source expression,
     /// literal, or cast can construct a value of this type.
     HostHandle(HandleAccess),
@@ -352,110 +329,6 @@ pub struct Call {
     pub callee_key: String,
     pub type_args: Vec<TypeRef>,
     pub args: Vec<Expr>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum PolicyRequirement {
-    Mandatory,
-    Optional,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PolicyType {
-    pub domains: BTreeMap<CapabilityDomain, Vec<PolicyGroup>>,
-}
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "kebab-case")]
-pub enum CapabilityDomain {
-    FsRead,
-    FsWrite,
-    StdinRead,
-    EnvRead,
-    EnvWrite,
-    NetConnect,
-    NetListen,
-    ProcessRun,
-    Clock,
-    Random,
-    SystemInfo,
-}
-
-impl CapabilityDomain {
-    pub const ALL: [Self; 11] = [
-        Self::FsRead,
-        Self::FsWrite,
-        Self::StdinRead,
-        Self::EnvRead,
-        Self::EnvWrite,
-        Self::NetConnect,
-        Self::NetListen,
-        Self::ProcessRun,
-        Self::Clock,
-        Self::Random,
-        Self::SystemInfo,
-    ];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::FsRead => "fs-read",
-            Self::FsWrite => "fs-write",
-            Self::StdinRead => "stdin-read",
-            Self::EnvRead => "env-read",
-            Self::EnvWrite => "env-write",
-            Self::NetConnect => "net-connect",
-            Self::NetListen => "net-listen",
-            Self::ProcessRun => "process-run",
-            Self::Clock => "clock",
-            Self::Random => "random",
-            Self::SystemInfo => "system-info",
-        }
-    }
-}
-
-impl std::str::FromStr for CapabilityDomain {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> Result<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|domain| domain.as_str() == value)
-            .with_context(|| {
-                format!(
-                    "unknown capability domain `{value}`; known domains are: {}",
-                    Self::ALL.map(Self::as_str).join(", ")
-                )
-            })
-    }
-}
-
-impl std::fmt::Display for CapabilityDomain {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct CapabilityType {
-    pub domain: CapabilityDomain,
-    pub groups: Vec<PolicyGroup>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PolicyGroup {
-    pub requirement: PolicyRequirement,
-    pub scopes: Vec<PolicyScope>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum PolicyScope {
-    Any,
-    File(String),
-    Dir(String),
-    Exact(String),
-    Prefix(String),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -686,9 +559,6 @@ struct DefEnvelope<'a> {
     function_args: Option<&'a Value>,
     function_return: Option<&'a Value>,
     function_do: Option<&'a Value>,
-    /// `$test`-only sibling: a `$policy` type describing the authority the
-    /// test body receives as `$args.policy`.
-    test_policy: Option<&'a Value>,
     test_tags: Option<&'a Value>,
     test_timeout_ms: Option<&'a Value>,
     test_skip: Option<&'a Value>,
@@ -721,7 +591,6 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut function_args: Option<&'a Value> = None;
     let mut function_return: Option<&'a Value> = None;
     let mut function_do: Option<&'a Value> = None;
-    let mut test_policy: Option<&'a Value> = None;
     let mut test_tags: Option<&'a Value> = None;
     let mut test_timeout_ms: Option<&'a Value> = None;
     let mut test_skip: Option<&'a Value> = None;
@@ -789,15 +658,6 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 bail!("duplicate `args` key on definition");
             }
             function_args = Some(val);
-        } else if ks == "grants" {
-            bail!(
-                "E-SEC-001: the `grants` system was removed; declare a `$policy`-typed argument and pass the capability value explicitly"
-            );
-        } else if ks == "policy" {
-            if test_policy.is_some() {
-                bail!("E-TEST-001: duplicate `policy` key on definition");
-            }
-            test_policy = Some(val);
         } else if ks == "return" {
             if function_return.is_some() {
                 bail!("duplicate `return` key on definition");
@@ -870,8 +730,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 form_key
             );
         }
-        if test_policy.is_some()
-            || test_tags.is_some()
+        if test_tags.is_some()
             || test_timeout_ms.is_some()
             || test_skip.is_some()
             || test_expect_error.is_some()
@@ -895,8 +754,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
             let _ = function_return.context("missing `return` on `$function`")?;
             let _ = function_do.context("missing `do` on `$function`")?;
         }
-        if test_policy.is_some()
-            || test_tags.is_some()
+        if test_tags.is_some()
             || test_timeout_ms.is_some()
             || test_skip.is_some()
             || test_expect_error.is_some()
@@ -964,7 +822,6 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         function_args,
         function_return,
         function_do,
-        test_policy,
         test_tags,
         test_timeout_ms,
         test_skip,
@@ -1238,14 +1095,10 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$literal",
     "$union",
     "$enum",
-    "$policy",
-    "$grant-token",
 ];
 
 fn is_builtin_type_form(form: &str) -> bool {
-    BUILTIN_TYPE_FORMS.contains(&form)
-        || form.starts_with("$capability.")
-        || form.starts_with("$handle.")
+    BUILTIN_TYPE_FORMS.contains(&form) || form.starts_with("$handle.")
 }
 
 fn collect_alias_skeletons(
@@ -1403,18 +1256,10 @@ fn parse_type_ref(
             );
         }
         if m.len() == 1 {
-            let (key, body) = m.iter().next().expect("one entry");
+            let (key, _body) = m.iter().next().expect("one entry");
             let key = key
                 .as_str()
                 .context("type expression key must be a string")?;
-            if let Some(domain) = key.strip_prefix("$capability.") {
-                return Ok(TypeRef::Capability(CapabilityType {
-                    domain: domain
-                        .parse()
-                        .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?,
-                    groups: parse_policy_groups(domain, body)?,
-                }));
-            }
             if let Some(access) = key.strip_prefix("$handle.") {
                 return Ok(TypeRef::HostHandle(parse_handle_access(access)?));
             }
@@ -1486,9 +1331,6 @@ fn parse_type_ref(
         "float32" => TypeRef::Float32,
         "float64" => TypeRef::Float64,
         "void" => TypeRef::Void,
-        "grant-token" => {
-            bail!("E-SEC-001: `$grant-token` was removed; use a `$policy`-typed argument")
-        }
         "self" => {
             if !self_allowed {
                 bail!(
@@ -1540,14 +1382,6 @@ fn parse_type_constructor(
     warnings: &mut Vec<String>,
     self_allowed: bool,
 ) -> Result<TypeRef> {
-    if let Some(domain) = form.strip_prefix("$capability.") {
-        return Ok(TypeRef::Capability(CapabilityType {
-            domain: domain
-                .parse()
-                .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?,
-            groups: parse_policy_groups(domain, v)?,
-        }));
-    }
     if let Some(access) = form.strip_prefix("$handle.") {
         if !v.is_null() {
             bail!("E-CAP-004: opaque handle type `{form}` must have a null body");
@@ -1588,7 +1422,6 @@ fn parse_type_constructor(
                 inner: Box::new(inner),
             })
         }
-        "$policy" => Ok(TypeRef::Policy(parse_policy_type(v)?)),
         "$record" => {
             let m = v
                 .as_mapping()
@@ -1762,104 +1595,6 @@ fn parse_handle_access(access: &str) -> Result<HandleAccess> {
         "process" => Ok(HandleAccess::Process),
         _ => bail!("E-CAP-004: unknown opaque handle type `$handle.{access}`"),
     }
-}
-
-/// Parse a `{ $policy: <domains> }` envelope (used by `$test` `policy:`
-/// siblings, where the policy type appears as a value rather than in a type
-/// position).
-fn parse_policy_type_expr(v: &Value) -> Result<PolicyType> {
-    let m = v
-        .as_mapping()
-        .context("policy must be a `$policy` type mapping")?;
-    let (only_key, only_value) = match m.iter().collect::<Vec<_>>().as_slice() {
-        [(k, v)] => (k.as_str(), *v),
-        _ => bail!("policy must contain exactly the `$policy` key"),
-    };
-    if only_key != Some("$policy") {
-        bail!("policy must contain exactly the `$policy` key");
-    }
-    parse_policy_type(only_value)
-}
-
-fn parse_policy_type(v: &Value) -> Result<PolicyType> {
-    let domains = v
-        .as_mapping()
-        .context("`$policy` must be a mapping of domain -> groups")?;
-    let mut out = BTreeMap::new();
-    for (domain, groups_v) in domains {
-        let domain_name = domain
-            .as_str()
-            .context("`$policy` domain names must be strings")?;
-        let domain: CapabilityDomain = domain_name
-            .parse()
-            .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?;
-        let parsed_groups = parse_policy_groups(domain_name, groups_v)?;
-        out.insert(domain, parsed_groups);
-    }
-    Ok(PolicyType { domains: out })
-}
-
-fn parse_policy_groups(domain: &str, value: &Value) -> Result<Vec<PolicyGroup>> {
-    if value.is_null() {
-        return Ok(Vec::new());
-    }
-    let groups = value
-        .as_sequence()
-        .with_context(|| format!("capability `{domain}` must be a sequence"))?;
-    let mut parsed_groups = Vec::with_capacity(groups.len());
-    for group_v in groups {
-        let group = group_v
-            .as_mapping()
-            .with_context(|| format!("`$policy.{domain}` entries must be mappings"))?;
-        let requirement = match map_get_str(group, "requirement").and_then(Value::as_str) {
-            Some("mandatory") => PolicyRequirement::Mandatory,
-            Some("optional") => PolicyRequirement::Optional,
-            _ => bail!("`$policy.{domain}` requirement must be `mandatory` or `optional`"),
-        };
-        let scopes_v = map_get_str(group, "scopes")
-            .with_context(|| format!("`$policy.{domain}` entry missing `scopes`"))?;
-        let scopes = parse_policy_scopes(&domain, scopes_v)?;
-        parsed_groups.push(PolicyGroup {
-            requirement,
-            scopes,
-        });
-    }
-    Ok(parsed_groups)
-}
-
-fn parse_policy_scopes(domain: &str, v: &Value) -> Result<Vec<PolicyScope>> {
-    if v.as_str() == Some("any") {
-        return Ok(vec![PolicyScope::Any]);
-    }
-    let scopes = v
-        .as_sequence()
-        .with_context(|| format!("`$policy.{domain}.scopes` must be `any` or a sequence"))?;
-    let mut out = Vec::with_capacity(scopes.len());
-    for scope_v in scopes {
-        let scope = scope_v
-            .as_mapping()
-            .with_context(|| format!("`$policy.{domain}` scope must be a mapping"))?;
-        if scope.len() != 1 {
-            bail!("`$policy.{domain}` scope must contain exactly one selector");
-        }
-        let (k, v) = scope.iter().next().expect("checked one entry");
-        let key = k
-            .as_str()
-            .with_context(|| format!("`$policy.{domain}` scope key must be a string"))?;
-        let value = v
-            .as_str()
-            .with_context(|| format!("`$policy.{domain}.{key}` must be a string"))?
-            .to_string();
-        let parsed = match key {
-            "file" => PolicyScope::File(value),
-            "dir" => PolicyScope::Dir(value),
-            "exact" => PolicyScope::Exact(value),
-            "prefix" => PolicyScope::Prefix(value),
-            _ => bail!("unsupported `$policy.{domain}` scope selector `{key}`"),
-        };
-        out.push(parsed);
-    }
-    Ok(out)
 }
 
 /// Parse a `{ tparam: $T, ... }` mapping at a type-position alias use site,
@@ -2220,10 +1955,6 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
                 .context("invalid `main` args")?;
         for (name, ty) in arg_names.into_iter().zip(arg_types.into_iter()) {
             let ty = qualify_named_type("", ty, &type_aliases);
-            let ty = policy_body(&ty, &type_aliases)
-                .cloned()
-                .map(TypeRef::Policy)
-                .unwrap_or(ty);
             seed_arg_type_bindings(
                 &format!("args.{name}"),
                 &ty,
@@ -2397,14 +2128,7 @@ fn lower_single_test_body(
         .as_sequence()
         .context("E-TEST-001: `$test` sibling `do` must be sequence")?;
     let mut locals = HashMap::new();
-    let mut arg_bindings = Vec::new();
-    if let Some(policy_value) = env.test_policy {
-        let policy = parse_policy_type_expr(policy_value)
-            .with_context(|| format!("E-TEST-001: invalid `policy` on `$test` `{name}`"))?;
-        let binding = ("args.policy".to_string(), TypeRef::Policy(policy));
-        locals.insert(binding.0.clone(), binding.1.clone());
-        arg_bindings.push(binding);
-    }
+    let arg_bindings = Vec::new();
     let mut statements = Vec::new();
     for step in steps {
         statements.push(lower_statement(
@@ -3387,17 +3111,11 @@ fn extract_wasm_body(step: &Value) -> Result<(ImportTarget, Vec<WasmArgSpec>)> {
 ///
 /// - `E-WASM-002`: unknown host module or import name.
 /// - `E-WASM-003`: `$wasm.args` arity/shape does not match the registry
-///   entry (wrong count, constant or non-policy value in a capability
-///   position, policy value in a data position).
-/// - `E-CAP-002`: a capability position is fed by a `$policy` argument whose
-///   declared domains do not cover the import's required domains.
-///
-/// Together with the unforgeability of `$policy` values this bounds a
-/// program's authority by the policy types declared on its roots.
+///   entry (wrong count or value in the wrong position).
 ///
 /// `pub(crate)` so the typed S-expression body lowerer (`typed_body.rs`) can
 /// reuse this exact validation for `$wasm`-only bodies reached through the
-/// typed frontend, rather than duplicating the E-WASM-*/E-CAP-002 rules.
+/// typed frontend, rather than duplicating the E-WASM-* rules.
 pub(crate) fn validate_wasm_bodies(
     sigs: &HashMap<String, FunctionSig>,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -3477,47 +3195,14 @@ pub(crate) fn validate_wasm_bodies(
                 WasmArgSpec::ConstInt(_) => &TypeRef::Int64,
                 WasmArgSpec::ConstStr(_) => &TypeRef::Str,
             };
-            match param {
-                crate::host_abi::ParamKind::Value(kind) => {
-                    if policy_body(arg_type, type_aliases).is_some()
-                        || capability_body(arg_type, type_aliases).is_some()
-                    {
-                        bail!(
-                            "E-WASM-003: `{key}` passes an authority value in data position {position} of `{}.{}`",
-                            import.module,
-                            import.name
-                        );
-                    }
-                    if !abi_value_type_matches(*kind, arg_type, type_aliases) {
-                        bail!(
-                            "E-WASM-003: `{key}` passes {:?} in position {position} of `{}.{}`, which requires `{}`",
-                            arg_type,
-                            import.module,
-                            import.name,
-                            kind.as_str()
-                        );
-                    }
-                }
-                crate::host_abi::ParamKind::Capability(required_domains) => {
-                    let Some(capability) = capability_body(arg_type, type_aliases) else {
-                        bail!(
-                            "E-CAP-002: host import `{}.{}` requires an explicit domain capability covering {} in position {position}; `{key}` must declare and forward a `$capability.<domain>` argument",
-                            import.module,
-                            import.name,
-                            required_domains.iter().map(|domain| domain.as_str()).collect::<Vec<_>>().join(" + ")
-                        );
-                    };
-                    for domain in *required_domains {
-                        if capability.domain != *domain {
-                            bail!(
-                                "E-CAP-002: `{key}` forwards `{}` capability where `{domain}` is required by `{}.{}`",
-                                capability.domain,
-                                import.module,
-                                import.name
-                            );
-                        }
-                    }
-                }
+            if !abi_value_type_matches(*param, arg_type, type_aliases) {
+                bail!(
+                    "E-WASM-003: `{key}` passes {:?} in position {position} of `{}.{}`, which requires `{}`",
+                    arg_type,
+                    import.module,
+                    import.name,
+                    param.as_str()
+                );
             }
         }
     }
@@ -4735,16 +4420,6 @@ fn check_expr_call_bounds(
             }
         }
         Expr::Cast { from, .. } => check_expr_call_bounds(
-            from,
-            sigs,
-            type_aliases,
-            impls,
-            enclosing_params,
-            enclosing_bounds,
-            referrer_owner,
-            context,
-        )?,
-        Expr::PolicyNarrow { from, .. } => check_expr_call_bounds(
             from,
             sigs,
             type_aliases,
@@ -6258,11 +5933,6 @@ fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<CallEnvelope> {
             }
             callee = Some((ks.to_string(), v.clone()));
         } else if ks.starts_with('=') {
-            if ks == "=grants" {
-                bail!(
-                    "E-SEC-001: `=grants` forwarding was removed; pass the `$policy` capability value as an ordinary argument"
-                );
-            }
             bail!("unexpected `=` key `{ks}` in call site");
         } else {
             siblings.push((ks.to_string(), v.clone()));
@@ -7156,14 +6826,11 @@ fn parse_expr(
             let target = parse_type_ref(into_v, &[], &empty_skeletons, warnings, false)
                 .context("E-CAST-002: invalid `$cast.into` type")?;
             let target = qualify_named_type(home_module, target, type_aliases);
-            if policy_body(&target, type_aliases).is_some()
-                || capability_body(&target, type_aliases).is_some()
-                || matches!(
-                    resolve_alias_type(&target, type_aliases),
-                    TypeRef::HostHandle(_)
-                )
-            {
-                bail!("E-CAP-001: capability values are runtime-minted and cannot be created with `$cast`");
+            if matches!(
+                resolve_alias_type(&target, type_aliases),
+                TypeRef::HostHandle(_)
+            ) {
+                bail!("E-CAP-001: opaque host handles are runtime-minted and cannot be created with `$cast`");
             }
             if !valid_cast_path(&source, &target, type_aliases) {
                 bail!(
@@ -7173,46 +6840,6 @@ fn parse_expr(
                 );
             }
             return Ok(Expr::Cast {
-                from: Box::new(from),
-                target,
-            });
-        }
-        if mapping_keys_exactly(m, &["$policy.narrow", "into"]) {
-            let from = parse_expr(
-                map_get_str(m, "$policy.narrow").context("`$policy.narrow` missing subject")?,
-                sigs,
-                constants,
-                type_aliases,
-                enums,
-                impls,
-                locals,
-                home_module,
-                warnings,
-            )?;
-            let source = infer_expr_type(&from, constants, locals, type_aliases, enums)
-                .context("could not infer `$policy.narrow` subject type")?;
-            let empty_skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
-            let target = parse_type_ref(
-                map_get_str(m, "into").context("`$policy.narrow` missing `into` type")?,
-                &[],
-                &empty_skeletons,
-                warnings,
-                false,
-            )?;
-            let target = qualify_named_type(home_module, target, type_aliases);
-            if !policy_type_is_subset(&source, &target, type_aliases) {
-                bail!("policy narrowing cannot widen authority");
-            }
-            let target = capability_body(&target, type_aliases)
-                .cloned()
-                .map(TypeRef::Capability)
-                .or_else(|| {
-                    policy_body(&target, type_aliases)
-                        .cloned()
-                        .map(TypeRef::Policy)
-                })
-                .unwrap_or(target);
-            return Ok(Expr::PolicyNarrow {
                 from: Box::new(from),
                 target,
             });
@@ -7475,11 +7102,6 @@ fn parse_expr(
     if let Some(s) = v.as_str() {
         if let Some(var) = s.strip_prefix('$') {
             maybe_warn_kebab_qualified(var, "symbol reference", warnings);
-            if var.strip_prefix("grants.").is_some() {
-                bail!(
-                    "E-SEC-001: `$grants.*` references were removed; pass a `$policy` capability value as an ordinary argument"
-                );
-            }
             if let Ok((enum_key, tag)) = resolve_enum_tag_ref(s, home_module, enums) {
                 if let Some(enum_def) = enums.get(&enum_key) {
                     let payload_ty = enum_def.tags.get(tag.as_str()).with_context(|| {
@@ -7674,10 +7296,6 @@ pub(crate) fn infer_expr_type(
         }
         Expr::Value(RuntimeValue::Range { .. }) => Some(TypeRef::Range),
         Expr::Value(RuntimeValue::Typed { type_ref, .. }) => Some(type_ref.clone()),
-        Expr::Value(RuntimeValue::Policy(value)) => Some(TypeRef::Policy(value.policy.clone())),
-        Expr::Value(RuntimeValue::Capability(value)) => {
-            Some(TypeRef::Capability(value.capability.clone()))
-        }
         Expr::Value(RuntimeValue::HostHandle(value)) => Some(TypeRef::HostHandle(value.access)),
         Expr::Value(RuntimeValue::JoinHandle(_)) => None,
         Expr::Value(RuntimeValue::Void) => Some(TypeRef::Void),
@@ -7716,7 +7334,6 @@ pub(crate) fn infer_expr_type(
         Expr::Call { return_type, .. } => Some(return_type.clone()),
         Expr::Primitive { return_type, .. } => Some(return_type.clone()),
         Expr::Cast { target, .. } => Some(target.clone()),
-        Expr::PolicyNarrow { target, .. } => Some(target.clone()),
         Expr::Record(fields) => fields
             .iter()
             .map(|(k, v)| {

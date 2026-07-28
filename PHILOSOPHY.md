@@ -53,23 +53,23 @@ Language and tooling should favor:
 Compatibility should not preserve ambiguity indefinitely. Migration tools are
 better than permanent alternate syntaxes.
 
-## Secure By Nature
+## Correct By Nature
 
-LLMs make mistakes, so safety cannot depend on agents remembering every rule.
-The safe path should be the default path.
+LLMs make mistakes, so correctness cannot depend on agents remembering every
+rule. The safe path should be the default path.
 
 Vibra should prefer:
 
-- Default-deny access to privileged host capabilities.
-- Runtime-minted, domain-typed capability values for authority.
-- Narrowable permissions that can only reduce authority, not widen it.
 - Nominal wrappers and interfaces that make invalid states unrepresentable.
 - Typed `result` and `option` flows instead of unchecked failure paths.
 - Clear diagnostics when code crosses a trust boundary.
 
 Host interaction must be visible and mechanically auditable. `$wasm` binds only
 to the closed, versioned host ABI and is checked against its complete typed
-signature; declaring a wrapper never creates authority.
+signature. Vibra does not run untrusted host-privileged code: every host
+operation (filesystem, network, process, clock, random, environment, stdin)
+is unconditionally available to any program at runtime, so embedders must not
+run untrusted Vibra source without their own sandboxing.
 
 ## Explicit Intent
 
@@ -83,8 +83,6 @@ Prefer:
 - Explicit generic type arguments at call sites and type positions.
 - Explicit `$cast` for nominal wrapper boundaries.
 - Explicit `$match` arms with local bindings.
-- Explicit aggregate `$policy` declarations at roots and narrowed
-  `$capability.<domain>` arguments at privileged calls.
 - Explicit implementation blocks for nominal interface satisfaction.
 
 Inference is useful only when it narrows a local expression without hiding a

@@ -28,8 +28,8 @@ and must be rebuilt.
 The runtime verifies the complete inventory before extracting sources. It then
 loads the declared entry, emits its Wasm again, checks that it matches
 `program.wasm`, and executes that self-contained module through the `vibra-v1`
-boundary with the policy approvals supplied to `vibra run`. Execution reconstructs host
-descriptors from `vibra.plan.v1`; it does not retain the freshly lowered IR.
+boundary. Execution reconstructs host descriptors from `vibra.plan.v1`; it
+does not retain the freshly lowered IR.
 Validated static wasm dependency bytes are embedded in that plan and their
 original files remain covered by the `source/` inventory. Their digests affect
 both the program fingerprint and deterministic archive bytes.

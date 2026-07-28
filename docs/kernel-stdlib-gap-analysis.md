@@ -2,6 +2,14 @@
 
 Status: exploration report, 2026-07-19
 
+> **Note:** this report predates the removal of Vibra's capability/policy
+> authority system (fully decommissioned; every host operation is now
+> unconditionally available at runtime). References below to "capability
+> gating," "capability review," "capability attenuation," and similar design
+> constraints describe a system that no longer exists; read them as
+> historical context, not current design guidance. Generic uses of
+> "capability" meaning general feature/ability are unaffected.
+
 ## Purpose and scope
 
 This report compares Vibra's current language kernel and standard library with

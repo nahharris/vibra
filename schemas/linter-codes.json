@@ -325,7 +325,7 @@
     {
       "code": "E-CAP-001",
       "severity": "error",
-      "summary": "Capability types are runtime-minted authority values and cannot be created with `$cast` or literals"
+      "summary": "Opaque host handles are runtime-minted and cannot be created with `$cast` or literals"
     },
     {
       "code": "E-SELF-001",
@@ -393,24 +393,9 @@
       "summary": "`=comment` and `=lint` must share a mapping with the syntax they describe"
     },
     {
-      "code": "E-SEC-001",
-      "severity": "error",
-      "summary": "Legacy grant syntax was removed; use root policies and explicit domain capabilities"
-    },
-    {
       "code": "E-CAP-001",
       "severity": "error",
-      "summary": "Policies, domain capabilities, and host handles cannot be constructed or cast"
-    },
-    {
-      "code": "E-CAP-002",
-      "severity": "error",
-      "summary": "Host import capability argument is missing or has the wrong domain"
-    },
-    {
-      "code": "E-CAP-003",
-      "severity": "error",
-      "summary": "Unknown capability domain"
+      "summary": "Opaque host handles cannot be constructed or cast"
     },
     {
       "code": "E-CAP-004",

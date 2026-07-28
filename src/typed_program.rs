@@ -27,7 +27,6 @@ use crate::lower::{
     self, ExpectedTestError, FunctionBody, FunctionSig, ImplBody, ImplKey, LoweredProgram,
     LoweredTestCase, RuntimeValue, TestClock, TestErrorPhase, TestSpec, TestWorkspace, TypeRef,
 };
-use crate::type_semantics::policy_body;
 use crate::typed_body;
 use crate::typed_lower::{self, TypedModuleInput, TypedSignatureIndex};
 use crate::typed_readers::{self, StagedExpectedError, StagedTypedTest};
@@ -43,8 +42,7 @@ use crate::typed_readers::{self, StagedExpectedError, StagedTypedTest};
 ///   entry point) rather than re-deriving constant typing.
 /// - `statements`/`main_arg_bindings` come from the entry module's `main`
 ///   function, using the exact legacy record-flattening rule
-///   (`crate::lower::seed_arg_type_bindings`) and the exact legacy policy
-///   substitution (`crate::type_semantics::policy_body`) for its arguments.
+///   (`crate::lower::seed_arg_type_bindings`) for its arguments.
 /// - `foreign_modules` reuses `crate::project::static_wasm_artifacts_for_entry`
 ///   unchanged: it takes only the entry path, has no YAML dependency, and is
 ///   the same validated-bytes path the legacy compiler uses, so there is no
@@ -79,17 +77,9 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
 
     let mut main_arg_bindings: Vec<(String, TypeRef)> = Vec::new();
     for (name, ty) in main_sig.arg_names.iter().zip(main_sig.arg_types.iter()) {
-        // Same substitution legacy applies before flattening: a `main`
-        // argument typed as a named alias whose body is a `policy` must bind
-        // as `TypeRef::Policy` directly, since capability narrowing expects
-        // that variant literally rather than resolving through the alias.
-        let effective = policy_body(ty, &signatures.aliases)
-            .cloned()
-            .map(TypeRef::Policy)
-            .unwrap_or_else(|| ty.clone());
         lower::seed_arg_type_bindings(
             &format!("args.{name}"),
-            &effective,
+            ty,
             &signatures.aliases,
             &mut main_arg_bindings,
         );

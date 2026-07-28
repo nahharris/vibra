@@ -1,11 +1,10 @@
 (import test "../stdlib/src/test.vibra")
 (import random "../stdlib/src/random.vibra")
 (test
-  bytes-uses-the-granted-random-source
+  bytes-uses-the-random-source
   random
   (do
-    (let capability (policy.narrow policy random.capability))
-    (let value (random.bytes 8 capability))
+    (let value (random.bytes 8))
     (let raw (cast value (array uint8)))
     (match
       raw
@@ -13,6 +12,5 @@
       (case _ (do (test.fail "random bytes returned the wrong length")))
     )
   )
-  tags: (stdlib capability)
-  policy: (policy (random (group requirement: mandatory scopes: ((any)))))
+  tags: (stdlib)
 )

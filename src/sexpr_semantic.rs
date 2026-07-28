@@ -375,9 +375,7 @@ fn visit_expr(expr: &Expr, context: &DocContext<'_>, facts: &mut Vec<SemanticFac
             visit_expr(end, context, facts);
             visit_expr(step, context, facts);
         }
-        ExprKind::Convert { value, into, .. }
-        | ExprKind::Cast { value, into }
-        | ExprKind::PolicyNarrow { value, into } => {
+        ExprKind::Convert { value, into, .. } | ExprKind::Cast { value, into } => {
             visit_expr(value, context, facts);
             visit_type(into, context, facts);
         }
@@ -496,26 +494,6 @@ fn visit_type(ty: &TypeExpr, context: &DocContext<'_>, facts: &mut Vec<SemanticF
             }
             visit_type(result, context, facts);
         }
-        TypeExprKind::Policy(domains) => {
-            for domain in domains {
-                push(
-                    facts,
-                    context,
-                    domain.name.span,
-                    SemanticKind::Reference,
-                    domain.name.value.clone(),
-                    resolve_reference_target(&domain.name.value, context),
-                );
-            }
-        }
-        TypeExprKind::Capability { domain, .. } => push(
-            facts,
-            context,
-            domain.span,
-            SemanticKind::Reference,
-            domain.value.clone(),
-            resolve_reference_target(&domain.value, context),
-        ),
         TypeExprKind::WasmValue(name) => push(
             facts,
             context,

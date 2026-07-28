@@ -26,7 +26,7 @@ pub struct TestOptions {
     pub tags: Vec<String>,
     pub deny_skips: bool,
     pub deny_warnings: bool,
-    pub allow_test_workspace: Option<TestWorkspaceAccess>,
+    pub allow_test_workspace: bool,
     pub jobs: usize,
     pub timeout: Duration,
     pub fail_fast: bool,
@@ -36,14 +36,6 @@ pub struct TestOptions {
     pub report: ReportFormat,
     pub report_file: Option<PathBuf>,
     pub run_config: runtime::RunConfig,
-}
-
-/// The filesystem policy approved for an isolated `workspace: temp` test.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TestWorkspaceAccess {
-    Read,
-    Write,
-    ReadWrite,
 }
 
 #[derive(Debug, Clone)]
@@ -188,8 +180,8 @@ pub fn run_tests(options: TestOptions) -> Result<bool> {
     let mut skipped_results = Vec::new();
     items.retain(|item| {
         let reason = item.skip_reason.as_deref().or_else(|| {
-            (item.workspace.is_some() && options.allow_test_workspace.is_none())
-                .then_some("requires --allow-test-workspace read, write, or read-write")
+            (item.workspace.is_some() && !options.allow_test_workspace)
+                .then_some("requires --allow-test-workspace")
         });
         if let Some(reason) = reason {
             skipped_results.push(skipped_result(item, reason));
@@ -297,13 +289,12 @@ fn run_benchmarks(options: TestOptions) -> Result<bool> {
     }
     let mut tests = Vec::with_capacity(items.len());
     for item in &items {
-        if item.skip_reason.is_some()
-            || (item.workspace.is_some() && options.allow_test_workspace.is_none())
+        if item.skip_reason.is_some() || (item.workspace.is_some() && !options.allow_test_workspace)
         {
             let reason = item
                 .skip_reason
                 .as_deref()
-                .unwrap_or("requires --allow-test-workspace read, write, or read-write");
+                .unwrap_or("requires --allow-test-workspace");
             tests.push(skipped_result(item, reason));
             continue;
         }
@@ -633,7 +624,7 @@ fn run_one_child(
     item: &TestPlanItem,
     timeout: Duration,
     config: &runtime::RunConfig,
-    allow_test_workspace: Option<TestWorkspaceAccess>,
+    allow_test_workspace: bool,
     deny_warnings: bool,
 ) -> Result<TestResult> {
     let started = Instant::now();
@@ -654,19 +645,15 @@ fn run_one_child(
         .then(tempfile::tempdir)
         .transpose()?;
     let mut child_config = match (temp_workspace.as_ref(), allow_test_workspace) {
-        (Some(workspace), Some(access)) => {
-            isolated_workspace_config(config, workspace.path(), access)
-        }
-        (Some(_), None) => bail!("workspace test was scheduled without workspace access"),
+        (Some(_), true) => isolated_workspace_config(config),
+        (Some(_), false) => bail!("workspace test was scheduled without workspace access"),
         (None, _) => config.clone(),
     };
     if let Some(seed) = item.random_seed {
-        child_config.allow_random = true;
         child_config.injected_random =
             Some(Arc::new(Mutex::new(runtime::InjectedRandom::new(seed))));
     }
     if let Some(clock) = item.clock {
-        child_config.allow_clock = true;
         child_config.injected_clock = Some(Arc::new(Mutex::new(runtime::InjectedClock {
             unix_millis: clock.unix_millis,
             monotonic_millis: clock.monotonic_millis,
@@ -791,23 +778,9 @@ fn join_output_reader(
         .with_context(|| format!("read test child {stream}"))
 }
 
-fn isolated_workspace_config(
-    base: &runtime::RunConfig,
-    workspace: &Path,
-    access: TestWorkspaceAccess,
-) -> runtime::RunConfig {
+fn isolated_workspace_config(base: &runtime::RunConfig) -> runtime::RunConfig {
     let mut config = base.clone();
     config.preopen_host_dirs.clear();
-    config.allow_read.clear();
-    config.allow_write.clear();
-    match access {
-        TestWorkspaceAccess::Read => config.allow_read.push(workspace.to_path_buf()),
-        TestWorkspaceAccess::Write => config.allow_write.push(workspace.to_path_buf()),
-        TestWorkspaceAccess::ReadWrite => {
-            config.allow_read.push(workspace.to_path_buf());
-            config.allow_write.push(workspace.to_path_buf());
-        }
-    }
     config
 }
 
@@ -902,39 +875,6 @@ fn child_result_file() -> Result<tempfile::TempPath> {
 fn append_run_config_args(cmd: &mut Command, config: &runtime::RunConfig) {
     for path in &config.preopen_host_dirs {
         cmd.arg("--preopen").arg(path);
-    }
-    for path in &config.allow_read {
-        cmd.arg("--allow-read").arg(path);
-    }
-    for path in &config.allow_write {
-        cmd.arg("--allow-write").arg(path);
-    }
-    if config.allow_stdin {
-        cmd.arg("--allow-stdin");
-    }
-    for name in &config.allow_env {
-        cmd.arg("--allow-env").arg(name);
-    }
-    for name in &config.allow_env_write {
-        cmd.arg("--allow-env-write").arg(name);
-    }
-    for host in &config.allow_net {
-        cmd.arg("--allow-net").arg(host);
-    }
-    for host in &config.allow_net_listen {
-        cmd.arg("--allow-net-listen").arg(host);
-    }
-    for program in &config.allow_run {
-        cmd.arg("--allow-run").arg(program);
-    }
-    if config.allow_clock {
-        cmd.arg("--allow-clock");
-    }
-    if config.allow_random {
-        cmd.arg("--allow-random");
-    }
-    if config.allow_system_info {
-        cmd.arg("--allow-sys-info");
     }
     if let Some(random) = &config.injected_random {
         let random = random.lock().expect("injected random source poisoned");

@@ -21,7 +21,7 @@ load, compile, or runtime outcome to the parent, so expected failures are matche
 reliably rather than inferred from an exit code.
 
 `$test` is a non-empty kebab-case profile scalar and its body is the sibling `do`
-sequence. Use `core` for the capability-free suite.
+sequence. Use `core` for the default suite.
 
 ```yaml
 test:
@@ -33,10 +33,9 @@ truth:
     - $test.assert: true
 ```
 
-When a test needs authority, declare a sibling `policy:` containing a `$policy`
-type. Narrow `$args.policy` to the required `$capability.<domain>` type and pass
-that value to the privileged call. Profiles select tests only; they never
-confer authority.
+Every host operation (filesystem, network, process, clock, random, environment,
+stdin) is unconditionally available — there is no runtime authorization model.
+Profiles select which tests run; they carry no other meaning.
 
 ## Expected errors
 
@@ -65,39 +64,33 @@ fails in another phase, or its code/message does not match.
 - **Naming.** `lang-*.vibra` cover core language features; `stdlib-*.vibra` cover the
   standard library modules. Test (and symbol) names are kebab-case to avoid lint
   warnings.
-- **Capability-free by default.** Every test here passes under a bare `vibra test` with no
-  permission flags. Tests use only pure/stdout operations (`io`, `code`) and never
-  require `--allow-read`/`--allow-write`/etc. Add capability-gated tests in their own
-  file and document the flags they need.
+- **`core` runs by default.** A bare `vibra test` selects only the `core`
+  profile. Tests that touch real, non-hermetic state (network, processes, real
+  environment variables) belong in their own file under a non-`core` profile,
+  selected explicitly with `--profile`.
 - **Self-contained.** Each file declares the helper functions, enums, and newtypes it
   needs alongside its `$test` declarations (the runner shares module-level definitions
   with the tests in that file).
 
-## Capability-profile contracts
+## Non-core profiles
 
-The bare command selects the `core` profile only, so it never grants host
-permissions and remains the required default suite:
+The bare command selects the `core` profile only:
 
 ```sh
 vibra test
 ```
 
-Non-core profiles select contract tests; a profile does not grant anything by
-itself. Run each capability contract with the permission it declares:
+Non-`core` profiles (`env`, `net`, `process`, `random`, `system`) group tests
+that touch real, non-hermetic host state. Select them explicitly:
 
 ```sh
-vibra test --profile env --filter get-reads-an-explicitly-granted-variable --allow-env PATH
-vibra test --profile net --filter connect-requires-the-exact-target-grant --allow-net 127.0.0.1:9
-vibra test --profile process --filter run-reports-the-current-unsupported-runtime --allow-run echo
-vibra test --profile random --filter bytes-uses-the-granted-random-source --allow-random
-vibra test --profile system --filter now-unix-millis-uses-the-granted-clock --allow-clock
-vibra test --profile system --filter info-uses-the-granted-system-capability --allow-sys-info
-vibra test --profile system --filter privileged-stdlib-operations-return-their-declared-shapes --allow-clock --allow-random --allow-sys-info
+vibra test --profile env --filter get-reads-an-explicitly-granted-variable
+vibra test --profile process --filter run-rejects-stream-stdio-without-spawning
+vibra test --profile random --filter bytes-uses-the-random-source
+vibra test --profile system --filter now-unix-millis-reads-the-clock
+vibra test --profile system --filter info-returns-system-information
+vibra test --profile system --filter privileged-stdlib-operations-return-their-declared-shapes
 ```
-
-Keep these invocations narrow. Selecting several profiles (or all `system`
-tests) requires the union of their explicit policies; the runner never infers or
-widens permissions from profile names.
 
 ## Asserting equality
 
@@ -154,20 +147,18 @@ vibra test --profile fs --profile env   # profiles are repeatable (OR); bare tes
 vibra test --tag language --tag fast    # tags are repeatable (AND)
 vibra test --deny-skips                 # fail if a selected test is skipped
 vibra test --deny-warnings              # fail tests that produce compiler warnings
-vibra test --allow-test-workspace read-write # enable an isolated temp cwd and fs policy
+vibra test --allow-test-workspace       # enable an isolated temp cwd for `workspace: temp` tests
 vibra test --jobs 4                      # parallel workers
 vibra test --fail-fast                   # stop after first failure
 vibra test --timeout-ms 30000            # per-test timeout
 vibra test --format json --report-file report.json
 ```
 
-`workspace: temp` is test metadata, not a profile capability. It creates an
-empty temporary working directory for that one child test only when explicitly
-enabled with `--allow-test-workspace read`, `write`, or `read-write`. Without
-the flag, the selected test is reported as skipped (and `--deny-skips` turns
-that into a failing command). The test runner clears ordinary host filesystem
-policy for workspace tests, then approves only the selected access mode on that
-temporary directory.
+`workspace: temp` is test metadata, not a profile. It creates an empty
+temporary working directory and runs that one child test with it as the
+current directory, only when explicitly enabled with `--allow-test-workspace`.
+Without the flag, the selected test is reported as skipped (and
+`--deny-skips` turns that into a failing command).
 
 `--deny-warnings` turns a child test's compiler warnings into a failure. The
 warnings remain available in the JSON report for diagnosis.
@@ -175,8 +166,7 @@ warnings remain available in the JSON report for diagnosis.
 ## Deterministic clock and random fixtures
 
 A test may declare `random-seed` and/or `clock` sibling metadata. The runner
-creates a fresh source for that child, grants the corresponding domain only
-through the test's declared `policy`, and never reads the OS random source or
+creates a fresh source for that child and never reads the OS random source or
 wall clock. The same seed always produces the same byte stream. Fake-clock
 sleep advances both values instead of blocking:
 
@@ -187,16 +177,11 @@ reproducible:
   clock:
     unix-millis: 1000
     monotonic-millis: 0
-  policy:
-    $policy:
-      clock: [{requirement: mandatory, scopes: any}]
-      random: [{requirement: mandatory, scopes: any}]
   do: [...]
 ```
 
-These fixtures do not weaken ordinary execution: without the metadata,
-clock/random operations still require explicit host approval and use their
-production sources. The seeded generator is for tests, not cryptography.
+Without the metadata, clock/random operations use their production sources.
+The seeded generator is for tests, not cryptography.
 
 ## Table/property helpers and benchmarks
 
@@ -213,8 +198,8 @@ vibra test --filter parse-table --benchmark \
   --benchmark-warmup 2 --benchmark-iterations 20 --format json
 ```
 
-Benchmark mode uses the same discovery, profiles, tags, capability policy,
-fixtures, timeout, and isolated worker as normal tests. Warm-ups are unmeasured;
+Benchmark mode uses the same discovery, profiles, tags, fixtures, timeout, and
+isolated worker as normal tests. Warm-ups are unmeasured;
 the stable report contract records sorted nanosecond samples plus minimum,
 median, maximum, and integer mean. `--benchmark-iterations 0` fails with
 `E-BENCH-001`. Without `--benchmark`, each test still runs exactly once and

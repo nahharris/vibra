@@ -4,16 +4,15 @@
 (fn accepts-unix-millis ((value uint64)) bool (do (return true)))
 (fn accepts-duration ((value time.duration)) bool (do (return true)))
 (test
-  now-unix-millis-uses-the-granted-clock
+  now-unix-millis-reads-the-clock
   system
   (do
-    (let capability (policy.narrow policy time.capability))
-    (let now (time.now-unix-millis capability))
+    (let now (time.now-unix-millis))
     (let is-millis (accepts-unix-millis now))
     (test.assert is-millis)
-    (let start (time.monotonic-now capability))
-    (time.sleep (time.milliseconds 0) capability)
-    (let finish (time.monotonic-now capability))
+    (let start (time.monotonic-now))
+    (time.sleep (time.milliseconds 0))
+    (let finish (time.monotonic-now))
     (let elapsed (time.duration-between start finish))
     (match
       elapsed
@@ -24,6 +23,5 @@
       (case (result.result.err _) (do (test.fail "monotonic clock moved backwards")))
     )
   )
-  tags: (stdlib capability)
-  policy: (policy (clock (group requirement: mandatory scopes: ((any)))))
+  tags: (stdlib)
 )

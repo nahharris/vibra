@@ -23,33 +23,3 @@
   )
   tags: (stdlib network)
 )
-(test
-  connect-requires-the-exact-target-grant
-  net
-  (do
-    (let capability (policy.narrow policy net.connect-capability))
-    (let parsed (net.parse-address "127.0.0.1:10"))
-    (match
-      parsed
-      (case
-        (result.result.ok (bind address))
-        (do
-          (let outcome (net.connect address capability))
-          (match
-            outcome
-            (case
-              (result.result.err (net.net-error.permission-denied))
-              (do (test.assert true))
-            )
-            (case _ (do (test.fail "out-of-scope network target was attempted")))
-          )
-        )
-      )
-      (case _ (do (test.fail "test socket address did not parse")))
-    )
-  )
-  tags: (stdlib capability network)
-  policy: (policy
-    (net-connect (group requirement: mandatory scopes: ((exact "127.0.0.1:9"))))
-  )
-)

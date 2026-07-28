@@ -244,7 +244,6 @@ pub fn staged_discover_typed_tests(program: &SurfaceProgram) -> Result<Vec<Stage
                                 value,
                             )));
                     }
-                    TestMeta::Policy(_) => {}
                 }
             }
             tests.push(discovered);

@@ -2,7 +2,6 @@
 
 mod wasi_env;
 
-pub mod fs;
 pub mod io;
 
 pub use wasi_env::{build_wasi_builder, InjectedClock, InjectedRandom, RunConfig};

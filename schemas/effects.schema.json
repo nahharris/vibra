@@ -3,29 +3,31 @@
   "$id": "https://vibra.dev/schemas/effects.schema.json",
   "title": "Vibra static effect surface",
   "type": "object",
-  "required": ["effects", "root-policy"],
+  "required": ["effects"],
   "properties": {
     "effects": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["source", "module", "name", "params", "return", "required-domains"],
+        "required": ["source", "module", "name", "params", "return"],
         "properties": {
           "source": { "type": "string" },
           "module": { "enum": ["vibra_v1", "vibra_test"] },
           "name": { "type": "string" },
-          "params": { "type": "array" },
-          "return": { "type": "string" },
-          "required-domains": {
+          "params": {
             "type": "array",
-            "items": { "type": "string" },
-            "uniqueItems": true
-          }
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": { "type": { "type": "string" } },
+              "additionalProperties": false
+            }
+          },
+          "return": { "type": "string" }
         },
         "additionalProperties": false
       }
-    },
-    "root-policy": { "type": "object" }
+    }
   },
   "additionalProperties": false
 }

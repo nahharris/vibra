@@ -7,11 +7,7 @@ use crate::ast::{
     Annotation, AnnotationKind, Definition, DocumentId, Function, ImplItem, MethodBinding, Module,
     TestMeta, TopLevel, TypeExpr, TypeExprKind, Visibility,
 };
-use crate::lower::{
-    CapabilityDomain, CapabilityType, HandleAccess, ImplBody, ImplKey, ImplMethodBinding,
-    PolicyGroup as LowerPolicyGroup, PolicyRequirement as LowerPolicyRequirement,
-    PolicyScope as LowerPolicyScope, PolicyType, TypeAlias, TypeRef,
-};
+use crate::lower::{HandleAccess, ImplBody, ImplKey, ImplMethodBinding, TypeAlias, TypeRef};
 use crate::type_semantics;
 use anyhow::{bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -557,30 +553,6 @@ pub(crate) fn lower_type(
         TypeExprKind::Intersect(items) => {
             TypeRef::Intersect(items.iter().map(lower).collect::<Result<_>>()?)
         }
-        TypeExprKind::Policy(policy_domains) => {
-            let mut domains = BTreeMap::new();
-            for domain in policy_domains {
-                let name = domain
-                    .name
-                    .value
-                    .parse::<CapabilityDomain>()
-                    .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?;
-                if domains
-                    .insert(name, lower_policy_groups(&domain.groups))
-                    .is_some()
-                {
-                    bail!("typed `policy` repeats domain `{name}`");
-                }
-            }
-            TypeRef::Policy(PolicyType { domains })
-        }
-        TypeExprKind::Capability { domain, groups } => TypeRef::Capability(CapabilityType {
-            domain: domain
-                .value
-                .parse::<CapabilityDomain>()
-                .map_err(|error| anyhow::anyhow!("E-CAP-003: {error}"))?,
-            groups: lower_policy_groups(groups),
-        }),
         TypeExprKind::Handle(access) => TypeRef::HostHandle(match access.value {
             crate::ast::HandleAccess::Read => HandleAccess::Read,
             crate::ast::HandleAccess::Write => HandleAccess::Write,
@@ -595,37 +567,6 @@ pub(crate) fn lower_type(
             other => bail!("typed `wasm` type must name an ABI scalar, got `{other}`"),
         },
     })
-}
-
-fn lower_policy_groups(groups: &[crate::ast::PolicyGroup]) -> Vec<LowerPolicyGroup> {
-    groups
-        .iter()
-        .map(|group| LowerPolicyGroup {
-            requirement: match group.requirement.value {
-                crate::ast::PolicyRequirement::Mandatory => LowerPolicyRequirement::Mandatory,
-                crate::ast::PolicyRequirement::Optional => LowerPolicyRequirement::Optional,
-            },
-            scopes: group
-                .scopes
-                .iter()
-                .map(|scope| match &scope.value {
-                    crate::ast::PolicyScopeKind::Any => LowerPolicyScope::Any,
-                    crate::ast::PolicyScopeKind::File(value) => {
-                        LowerPolicyScope::File(value.value.clone())
-                    }
-                    crate::ast::PolicyScopeKind::Dir(value) => {
-                        LowerPolicyScope::Dir(value.value.clone())
-                    }
-                    crate::ast::PolicyScopeKind::Exact(value) => {
-                        LowerPolicyScope::Exact(value.value.clone())
-                    }
-                    crate::ast::PolicyScopeKind::Prefix(value) => {
-                        LowerPolicyScope::Prefix(value.value.clone())
-                    }
-                })
-                .collect(),
-        })
-        .collect()
 }
 
 fn resolve_impl_method_references(index: &mut TypedSignatureIndex) -> Result<()> {
@@ -1273,13 +1214,12 @@ mod tests {
     fn lowers_domain_reference_and_wasm_types_without_yaml_adapters() {
         let source = module(
             r#"(fn host-types
-  ((cap (capability fs-read))
-   (input (handle read))
+  ((input (handle read))
    (shared (ref str))
    (exclusive (mut-ref int64))
    (raw (wasm i32)))
-  (policy (clock) (random))
-  (do (return unit)))"#,
+  int32
+  (do (return raw)))"#,
             6,
         );
         let index = lower_typed_signatures([TypedModuleInput {
@@ -1290,31 +1230,24 @@ mod tests {
         let signature = &index.functions["host-types"];
         assert_eq!(
             signature.arg_types[0],
-            TypeRef::Capability(CapabilityType {
-                domain: CapabilityDomain::FsRead,
-                groups: Vec::new(),
-            })
-        );
-        assert_eq!(
-            signature.arg_types[1],
             TypeRef::HostHandle(HandleAccess::Read)
         );
         assert_eq!(
-            signature.arg_types[2],
+            signature.arg_types[1],
             TypeRef::Reference {
                 inner: Box::new(TypeRef::Str),
                 mutable: false,
             }
         );
         assert_eq!(
-            signature.arg_types[3],
+            signature.arg_types[2],
             TypeRef::Reference {
                 inner: Box::new(TypeRef::Int64),
                 mutable: true,
             }
         );
-        assert_eq!(signature.arg_types[4], TypeRef::Int32);
-        assert!(matches!(signature.return_type, TypeRef::Policy(_)));
+        assert_eq!(signature.arg_types[3], TypeRef::Int32);
+        assert_eq!(signature.return_type, TypeRef::Int32);
     }
 
     #[test]

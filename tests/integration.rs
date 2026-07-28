@@ -1322,94 +1322,6 @@ fn fs_writable_interface_rejects_read_file() {
 }
 
 #[test]
-fn capability_type_constructor_is_removed() {
-    // The legacy generic/untyped `$capability: <domain-string>` type (no
-    // domain in the head, a bare scalar payload) predates this S-expression
-    // cutover's own removal, in favor of the domain-qualified
-    // `$capability.<domain>` shape (see `domain_capability_type_lowers_with
-    // _a_typed_domain`). The new grammar has no separate spelling for it at
-    // all: `capability-type = "(", "capability", symbol, policy-group*, ")"`
-    // always requires the domain as its first positional operand
-    // (`min_arity("capability", &args, 1, ...)` in `src/ast/surface.rs`), so
-    // there is no way to even reach a domain-qualified form without
-    // supplying one. A domain-less attempt is therefore now a reader-level
-    // arity error, not the legacy semantic check.
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"(def secret (capability))
-(fn main () void (do))
-"#,
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry);
-    let err = match prog {
-        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
-        Err(error) => format!("{error:#}"),
-    };
-    assert!(err.contains("E-SYN"), "unexpected error: {err}");
-}
-
-#[test]
-fn policy_type_alias_lowers_and_can_be_used_in_signature() {
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"(def read-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
-(fn uses-policy ((policy read-policy)) void (do (let ok true)))
-(fn main ((policy read-policy)) void (do (uses-policy policy)))
-"#,
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    vibra::lower::lower_program(&prog).expect("policy type alias should lower");
-}
-
-#[test]
-fn domain_capability_type_lowers_with_a_typed_domain() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("main.vibra");
-    std::fs::write(
-        &path,
-        r#"(def read-data (capability fs-read (group requirement: mandatory scopes: ((dir "./data")))))
-(fn read-file ((capability read-data)) void (do (let ok true)))
-(fn main () void (do))
-"#,
-    )
-    .unwrap();
-    let loaded = vibra::load::load_program(&path).unwrap();
-    vibra::lower::lower_program(&loaded).expect("typed fs-read capability should lower");
-    assert_eq!(
-        "fs-read".parse::<vibra::lower::CapabilityDomain>().unwrap(),
-        vibra::lower::CapabilityDomain::FsRead
-    );
-}
-
-#[test]
-fn policy_narrow_returns_a_domain_capability() {
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"(def root-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
-(def read-data (capability fs-read (group requirement: mandatory scopes: ((dir "./data")))))
-(fn use-read ((capability read-data)) void (do (let ok true)))
-(fn main ((policy root-policy)) void
-  (do
-    (let read (policy.narrow policy read-data))
-    (use-read read)))
-"#,
-    )
-    .unwrap();
-    let loaded = vibra::load::load_program(&entry).unwrap();
-    vibra::lower::lower_program(&loaded).expect("policy should narrow into a domain capability");
-}
-
-#[test]
 fn wasm_abi_rejects_wrong_value_parameter_type() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
@@ -1447,24 +1359,6 @@ fn wasm_abi_rejects_wrong_return_type() {
         error.contains("E-WASM-004") && error.contains("void"),
         "{error}"
     );
-}
-
-#[test]
-fn wasm_abi_accepts_explicit_domain_capability() {
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"(def stdin-capability (capability stdin-read (group requirement: mandatory scopes: ((any)))))
-(def read-file (handle read))
-(fn stdin-open ((capability stdin-capability)) read-file
-  (do (wasm import: (import "vibra_v1" "stdin_open") args: ((arg capability)))))
-(fn main () void (do))
-"#,
-    )
-    .unwrap();
-    let loaded = vibra::load::load_program(&entry).unwrap();
-    vibra::lower::lower_program(&loaded).expect("typed stdin capability should satisfy ABI");
 }
 
 #[test]
@@ -1506,151 +1400,6 @@ fn effects_command_reports_typed_host_surface_deterministically() {
     assert!(json.contains("vibra_v1"), "{json}");
     assert!(json.contains("stdout_open"), "{json}");
     assert!(json.contains("write-handle"), "{json}");
-    assert!(report.get("root-policy").is_some(), "{report}");
-}
-
-#[test]
-fn policy_narrow_rejects_widening() {
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"(def narrow-policy (policy (fs-read (group requirement: mandatory scopes: ((file "./config/app.yaml"))))))
-(def wide-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
-(fn main ((policy narrow-policy)) void
-  (do (let widened (policy.narrow policy wide-policy))))
-"#,
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("policy narrowing cannot widen authority"),
-        "expected widening rejection, got: {err}"
-    );
-}
-
-#[test]
-fn policy_narrow_rejects_sibling_directory_prefix_escape() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("root");
-    let sibling = dir.path().join("root2");
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::create_dir_all(&sibling).unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"(def root-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{root}"))))))
-(def sibling-policy (policy (fs-read (group requirement: mandatory scopes: ((file "{sibling}/file.txt"))))))
-(fn main ((policy root-policy)) void
-  (do (let widened (policy.narrow policy sibling-policy))))
-"#,
-            root = root.display().to_string().replace('\\', "/"),
-            sibling = sibling.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        err.contains("policy narrowing cannot widen authority"),
-        "expected sibling escape rejection, got: {err}"
-    );
-}
-
-#[test]
-fn policy_narrow_named_alias_executes_with_concrete_policy_value() {
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        r#"(def root-policy (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
-(def read-policy (policy (fs-read (group requirement: mandatory scopes: ((file "./config.yaml"))))))
-(fn main ((policy root-policy)) void
-  (do (let narrowed (policy.narrow policy read-policy))))
-"#,
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            approved_policy: Some(vibra::lower::PolicyType {
-                domains: std::collections::BTreeMap::from([(
-                    vibra::lower::CapabilityDomain::FsRead,
-                    vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::PolicyRequirement::Mandatory,
-                        scopes: vec![vibra::lower::PolicyScope::Dir(".".to_string())],
-                    }],
-                )]),
-            }),
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("named policy aliases should narrow at runtime");
-}
-
-#[test]
-fn main_injection_uses_declared_policy_not_broader_approval() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let allowed = dir.path().join("allowed");
-    let outside = dir.path().join("outside");
-    std::fs::create_dir_all(&allowed).unwrap();
-    std::fs::create_dir_all(&outside).unwrap();
-    let secret = outside.join("secret.txt");
-    std::fs::write(&secret, "secret").unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"(import fs "{fs}")
-(fn main ((policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{allowed}"))))))) void
-  (do
-    (let path (fs.path.new "{secret}"))
-    (let capability (policy.narrow policy fs.read-capability))
-    (let text (fs.exists path capability))))
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            allowed = allowed.display().to_string().replace('\\', "/"),
-            secret = secret.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::execute::run_lowered(
-            &lowered,
-            &vibra::runtime::RunConfig {
-                approved_policy: Some(vibra::lower::PolicyType {
-                    domains: std::collections::BTreeMap::from([(
-                        vibra::lower::CapabilityDomain::FsRead,
-                        vec![vibra::lower::PolicyGroup {
-                            requirement: vibra::lower::PolicyRequirement::Mandatory,
-                            scopes: vec![vibra::lower::PolicyScope::Dir(
-                                dir.path().display().to_string().replace('\\', "/"),
-                            )],
-                        }],
-                    )]),
-                }),
-                ..vibra::runtime::RunConfig::default()
-            },
-        )
-        .unwrap_err()
-    );
-    assert!(
-        err.contains("outside approved policy"),
-        "expected injected policy to be narrowed to main declaration, got: {err}"
-    );
 }
 
 #[test]
@@ -1675,7 +1424,7 @@ fn legacy_function_grants_are_rejected_after_policy_redesign() {
 }
 
 #[test]
-fn main_policy_argument_is_injected_and_authorizes_fs_read() {
+fn fs_open_read_reads_a_file_without_any_authority_argument() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -1686,94 +1435,10 @@ fn main_policy_argument_is_injected_and_authorizes_fs_read() {
         &entry,
         format!(
             r#"(import fs "{fs}")
-(fn main ((policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{dir}"))))))) void
-  (do
-    (let path (fs.path.new "{path}"))
-    (let capability (policy.narrow policy fs.read-capability))
-    (let text (fs.read-to-string path capability))))
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            dir = dir.path().display().to_string().replace('\\', "/"),
-            path = data.display().to_string().replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            approved_policy: Some(vibra::lower::PolicyType {
-                domains: std::collections::BTreeMap::from([(
-                    vibra::lower::CapabilityDomain::FsRead,
-                    vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::PolicyRequirement::Mandatory,
-                        scopes: vec![vibra::lower::PolicyScope::Dir(
-                            dir.path().display().to_string().replace('\\', "/"),
-                        )],
-                    }],
-                )]),
-            }),
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("approved policy should authorize fs read");
-}
-
-#[test]
-fn main_mandatory_policy_requires_full_coverage_before_body_runs() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"(import fs "{fs}")
-(fn main ((policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{dir}"))))))) void
-  (do (let path (fs.path.new "{path}"))))
-"#,
-            fs = fs.display().to_string().replace('\\', "/"),
-            dir = dir.path().display().to_string().replace('\\', "/"),
-            path = dir
-                .path()
-                .join("data.txt")
-                .display()
-                .to_string()
-                .replace('\\', "/"),
-        ),
-    )
-    .unwrap();
-
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    let err = format!(
-        "{:#}",
-        vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default()).unwrap_err()
-    );
-    assert!(
-        err.contains("mandatory policy coverage is missing"),
-        "expected mandatory policy preflight failure, got: {err}"
-    );
-}
-
-#[test]
-fn fs_open_read_requires_policy_argument() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let data = dir.path().join("data.txt");
-    std::fs::write(&data, "hello").unwrap();
-    std::fs::write(
-        &entry,
-        format!(
-            r#"(import fs "{fs}")
 (fn main () void
   (do
-    (let p (fs.path.new "{path}"))
-    (let opened (fs.open-read p))))
+    (let path (fs.path.new "{path}"))
+    (let text (fs.read-to-string path))))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             path = data.display().to_string().replace('\\', "/"),
@@ -1781,22 +1446,10 @@ fn fs_open_read_requires_policy_argument() {
     )
     .unwrap();
 
-    // Legacy caught a missing `capability` argument during lowering
-    // ("missing value argument `capability`"). Positional calls are now
-    // "arity checked against the signature" as a property of the call form
-    // itself (spec), so an under-supplied call to `fs.open-read` is rejected
-    // for the same reason -- a missing argument -- just earlier, while
-    // adapting the call into the legacy shape lowering itself still
-    // consumes.
-    let prog = vibra::load::load_program(&entry);
-    let err = match prog {
-        Ok(prog) => format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err()),
-        Err(error) => format!("{error:#}"),
-    };
-    assert!(
-        err.contains("E-ADAPT-026") && err.contains("fs.open-read"),
-        "expected missing capability argument rejection, got: {err}"
-    );
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+        .expect("fs reads require no capability argument anymore");
 }
 
 #[test]
@@ -5778,7 +5431,6 @@ fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
             "test",
             &path_str(&entry),
             "--allow-test-workspace",
-            "read-write",
             "--format",
             "human",
         ])
@@ -5849,13 +5501,11 @@ fn vibra_test_deny_warnings_fails_and_emits_warnings_in_json_report() {
 }
 
 #[test]
-fn vibra_test_temp_workspace_modes_limit_real_filesystem_operations() {
+fn vibra_test_temp_workspace_runs_fs_operations_relative_to_the_temp_cwd() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap());
     let test_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap());
     let dir = tempfile::tempdir().unwrap();
-    let host_dir = tempfile::tempdir().unwrap();
-    let host_path = path_str(host_dir.path());
     let entry = dir.path().join("workspace-modes.vibra");
     std::fs::write(
         &entry,
@@ -5863,88 +5513,22 @@ fn vibra_test_temp_workspace_modes_limit_real_filesystem_operations() {
             r#"(import test "{test_lib}")
 (import fs "{fs_lib}")
 (import result "{result_lib}")
-(test workspace-read-only core
-  (do
-    (let capability (policy.narrow policy fs.read-capability))
-    (let path (fs.path.new "."))
-    (let readable (fs.exists path capability))
-    (test.assert readable))
-  workspace: temp
-  policy: (policy (fs-read (group requirement: mandatory scopes: ((dir "."))))))
-(test workspace-write-only core
-  (do
-    (let capability (policy.narrow policy fs.write-capability))
-    (let path (fs.path.new "workspace-created"))
-    (let created (fs.create-dir-all path capability))
-    (match created
-      (case (result.result.ok) (do (test.assert true)))
-      (case (result.result.err (bind ignored)) (do (test.fail "workspace write grant was denied")))))
-  workspace: temp
-  policy: (policy (fs-write (group requirement: mandatory scopes: ((dir "."))))))
 (test workspace-read-write core
   (do
-    (let read-capability (policy.narrow policy fs.read-capability))
-    (let write-capability (policy.narrow policy fs.write-capability))
     (let path (fs.path.new "workspace-created"))
-    (let created (fs.create-dir-all path write-capability))
+    (let created (fs.create-dir-all path))
     (match created
       (case (result.result.ok) (do))
-      (case (result.result.err (bind ignored)) (do (test.fail "workspace write grant was denied"))))
-    (let readable (fs.exists path read-capability))
+      (case (result.result.err (bind ignored)) (do (test.fail "workspace write failed"))))
+    (let readable (fs.exists path))
     (test.assert readable))
-  workspace: temp
-  policy: (policy
-    (fs-read (group requirement: mandatory scopes: ((dir "."))))
-    (fs-write (group requirement: mandatory scopes: ((dir "."))))))
-(test host-grants-are-isolated core
-  (do
-    (let capability (policy.narrow policy fs.read-capability))
-    (let host-path (fs.path.new "{host_path}"))
-    (fs.exists host-path capability))
-  workspace: temp
-  expect-error: (runtime "mandatory policy coverage is missing")
-  policy: (policy (fs-read (group requirement: mandatory scopes: ((dir "{host_path}"))))))
+  workspace: temp)
 "#,
             result_lib =
                 path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap()),
         ),
     )
     .unwrap();
-
-    let read = vibra_cmd()
-        .args([
-            "test",
-            &path_str(&entry),
-            "--filter",
-            "workspace-read-only",
-            "--allow-test-workspace",
-            "read",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        read.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&read.stdout),
-        String::from_utf8_lossy(&read.stderr)
-    );
-
-    let write = vibra_cmd()
-        .args([
-            "test",
-            &path_str(&entry),
-            "--filter",
-            "workspace-write-only",
-            "--allow-test-workspace",
-            "write",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        write.status.success(),
-        "{}",
-        String::from_utf8_lossy(&write.stderr)
-    );
 
     let read_write = vibra_cmd()
         .args([
@@ -5953,35 +5537,14 @@ fn vibra_test_temp_workspace_modes_limit_real_filesystem_operations() {
             "--filter",
             "workspace-read-write",
             "--allow-test-workspace",
-            "read-write",
         ])
         .output()
         .unwrap();
     assert!(
         read_write.status.success(),
-        "{}",
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&read_write.stdout),
         String::from_utf8_lossy(&read_write.stderr)
-    );
-
-    let no_host_leak = vibra_cmd()
-        .args([
-            "test",
-            &path_str(&entry),
-            "--filter",
-            "host-grants-are-isolated",
-            "--allow-test-workspace",
-            "read-write",
-            "--allow-read",
-            &host_path,
-            "--allow-write",
-            &host_path,
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        no_host_leak.status.success(),
-        "{}",
-        String::from_utf8_lossy(&no_host_leak.stderr)
     );
 }
 
@@ -6284,26 +5847,25 @@ fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
         format!(
             r#"(import fs "{fs}")
 (import result "{result}")
-(fn main ((policy (policy (fs-write (group requirement: mandatory scopes: ((dir "{dir}"))))))) void
+(fn main () void
   (do
     (let pa (fs.path.new "{a}"))
     (let pb (fs.path.new "{b}"))
     (let pc (fs.path.new "{c}"))
-    (let capability (policy.narrow policy fs.write-capability))
-    (let oa (fs.open-write pa capability))
+    (let oa (fs.open-write pa))
     (match oa
       (case (result.result.ok (bind ha)) (do
-        (let ob (fs.open-write pb capability))
+        (let ob (fs.open-write pb))
         (match ob
           (case (result.result.ok (bind hb)) (do
-            (let oc (fs.open-write pc capability))
+            (let oc (fs.open-write pc))
             (match oc
               (case (result.result.ok (bind hc-bad)) (do))
               (case (result.result.err (bind oc-err)) (do
                 (match oc-err
                   (case (fs.fs-error.too-many-open-files) (do
                     (fs.closeable.close ha)
-                    (let oc2 (fs.open-write pc capability))
+                    (let oc2 (fs.open-write pc))
                     (match oc2
                       (case (result.result.ok (bind hc2)) (do
                         (fs.writable.write-string hc2 "freed-slot")
@@ -6315,7 +5877,6 @@ fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             result = result.display().to_string().replace('\\', "/"),
-            dir = dir.path().display().to_string().replace('\\', "/"),
             a = a.display().to_string().replace('\\', "/"),
             b = b.display().to_string().replace('\\', "/"),
             c = c.display().to_string().replace('\\', "/"),
@@ -6331,17 +5892,6 @@ fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
         &vibra::runtime::RunConfig {
             program_name: "vibra-test".to_string(),
             argv: Vec::new(),
-            approved_policy: Some(vibra::lower::PolicyType {
-                domains: std::collections::BTreeMap::from([(
-                    vibra::lower::CapabilityDomain::FsWrite,
-                    vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::PolicyRequirement::Mandatory,
-                        scopes: vec![vibra::lower::PolicyScope::Dir(
-                            dir.path().display().to_string().replace('\\', "/"),
-                        )],
-                    }],
-                )]),
-            }),
             max_open_files: 2,
             ..vibra::runtime::RunConfig::default()
         },
@@ -6370,11 +5920,10 @@ fn closed_file_aliases_return_stable_typed_lifecycle_errors() {
             r#"(import fs "{fs}")
 (import result "{result}")
 (import test "{test}")
-(fn main ((policy (policy (fs-write (group requirement: mandatory scopes: ((dir "{dir}"))))))) void
+(fn main () void
   (do
     (let path (fs.path.new "{target}"))
-    (let capability (policy.narrow policy fs.write-capability))
-    (let opened (fs.open-write path capability))
+    (let opened (fs.open-write path))
     (match opened
       (case (result.result.ok (bind handle)) (do
         (fs.closeable.close handle)
@@ -6391,7 +5940,6 @@ fn closed_file_aliases_return_stable_typed_lifecycle_errors() {
             fs = path_str(&fs),
             result = path_str(&result),
             test = path_str(&test),
-            dir = path_str(dir.path()),
             target = path_str(&target),
         ),
     )
@@ -6399,73 +5947,8 @@ fn closed_file_aliases_return_stable_typed_lifecycle_errors() {
 
     let program = vibra::load::load_program(&entry).unwrap();
     let lowered = vibra::lower::lower_program(&program).expect("lifecycle program should lower");
-    vibra::execute::run_lowered(
-        &lowered,
-        &vibra::runtime::RunConfig {
-            approved_policy: Some(vibra::lower::PolicyType {
-                domains: std::collections::BTreeMap::from([(
-                    vibra::lower::CapabilityDomain::FsWrite,
-                    vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::PolicyRequirement::Mandatory,
-                        scopes: vec![vibra::lower::PolicyScope::Dir(path_str(dir.path()))],
-                    }],
-                )]),
-            }),
-            ..vibra::runtime::RunConfig::default()
-        },
-    )
-    .expect("guest should observe lifecycle violations as typed errors");
-}
-
-// --- Issue #53: environment capability scopes are case-sensitive on Unix ---
-
-#[test]
-fn env_read_capability_is_case_sensitive_on_unix() {
-    if cfg!(windows) {
-        return;
-    }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let env_mod = std::fs::canonicalize(root.join("stdlib/src/env.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
-    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    std::fs::write(
-        &entry,
-        format!(
-            r#"(import env "{env_mod}")
-(import result "{result}")
-(import test "{test}")
-(def env-policy (policy
-  (env-read (group requirement: mandatory scopes: ((exact "VIBRA_ISSUE53_TOKEN"))))))
-(fn main ((policy env-policy)) void
-  (do
-    (let capability (policy.narrow policy env.read-capability))
-    (let value (env.get "vibra_issue53_token" capability))
-    (match value
-      (case (result.result.ok _) (do (test.fail "lowercase environment name matched uppercase capability scope")))
-      (case (result.result.err _) (do)))))
-"#,
-            env_mod = path_str(&env_mod),
-            result = path_str(&result),
-            test = path_str(&test),
-        ),
-    )
-    .unwrap();
-    std::env::set_var("VIBRA_ISSUE53_TOKEN", "public");
-    std::env::set_var("vibra_issue53_token", "secret");
-    let output = vibra_cmd()
-        .args(["run", &path_str(&entry), "--allow-env=VIBRA_ISSUE53_TOKEN"])
-        .output()
-        .unwrap();
-    std::env::remove_var("VIBRA_ISSUE53_TOKEN");
-    std::env::remove_var("vibra_issue53_token");
-    assert!(
-        output.status.success(),
-        "lowercase env name must not match uppercase capability scope:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
+        .expect("guest should observe lifecycle violations as typed errors");
 }
 
 #[test]
@@ -6486,30 +5969,23 @@ fn injected_clock_and_environment_are_deterministic_and_isolated() {
 (import time "{time_mod}")
 (import result "{result}")
 (import test "{test}")
-(def host-policy (policy
-  (clock (group requirement: mandatory scopes: ((any))))
-  (env-read (group requirement: mandatory scopes: ((exact "VIBRA_INJECTED"))))
-  (env-write (group requirement: mandatory scopes: ((exact "VIBRA_INJECTED"))))))
-(fn main ((policy host-policy)) void
+(fn main () void
   (do
-    (let clock (policy.narrow policy time.capability))
-    (let read (policy.narrow policy env.read-capability))
-    (let write (policy.narrow policy env.write-capability))
-    (let wall (time.now-unix-millis clock))
+    (let wall (time.now-unix-millis))
     (match wall
       (case 1000 (do))
       (case _ (do (test.fail "injected-wall-clock-was-not-used"))))
-    (let start (time.monotonic-now clock))
-    (time.sleep (time.milliseconds 7) clock)
-    (let finish (time.now-unix-millis clock))
+    (let start (time.monotonic-now))
+    (time.sleep (time.milliseconds 7))
+    (let finish (time.now-unix-millis))
     (match finish
       (case 1007 (do))
       (case _ (do (test.fail "injected-monotonic-clock-was-not-advanced"))))
-    (let set (env.set "VIBRA_INJECTED" "changed" write))
+    (let set (env.set "VIBRA_INJECTED" "changed"))
     (match set
       (case (result.result.ok) (do))
       (case _ (do (test.fail "injected-env-set-failed"))))
-    (let value (env.get "VIBRA_INJECTED" read))
+    (let value (env.get "VIBRA_INJECTED"))
     (match value
       (case (result.result.ok "changed") (do))
       (case _ (do (test.fail "injected-env-read-was-not-isolated"))))))
@@ -6532,31 +6008,6 @@ fn injected_clock_and_environment_are_deterministic_and_isolated() {
             unix_millis: 1000,
             monotonic_millis: 10,
         }))),
-        approved_policy: Some(vibra::lower::PolicyType {
-            domains: std::collections::BTreeMap::from([
-                (
-                    vibra::lower::CapabilityDomain::Clock,
-                    vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::PolicyRequirement::Mandatory,
-                        scopes: vec![vibra::lower::PolicyScope::Any],
-                    }],
-                ),
-                (
-                    vibra::lower::CapabilityDomain::EnvRead,
-                    vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::PolicyRequirement::Mandatory,
-                        scopes: vec![vibra::lower::PolicyScope::Exact("VIBRA_INJECTED".into())],
-                    }],
-                ),
-                (
-                    vibra::lower::CapabilityDomain::EnvWrite,
-                    vec![vibra::lower::PolicyGroup {
-                        requirement: vibra::lower::PolicyRequirement::Mandatory,
-                        scopes: vec![vibra::lower::PolicyScope::Exact("VIBRA_INJECTED".into())],
-                    }],
-                ),
-            ]),
-        }),
         ..vibra::runtime::RunConfig::default()
     };
     vibra::execute::run_lowered(&lowered, &make_config()).unwrap();

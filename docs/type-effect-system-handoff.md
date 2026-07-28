@@ -1,5 +1,13 @@
 # Vibra type/effect-system planning handoff
 
+> **Stale planning document.** This handoff assumes both the pre-cutover YAML
+> source surface (superseded by the S-expression surface, see
+> `docs/s-expression-migration-status.md`) and the capability/policy
+> authority system (fully decommissioned; every host operation is now
+> unconditionally available at runtime). Any future type/effect-system design
+> building on capabilities/domains as described below needs to be redesigned
+> from scratch around an authority-free host ABI, or dropped.
+
 ## Repository and implementation
 
 - Repository: `nahharris/vibra`

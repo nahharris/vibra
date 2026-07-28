@@ -490,10 +490,6 @@ fn expand_expr(
             value: Box::new(expand_expr(*value, macros, state, depth)?),
             into: expand_type(into, macros, state, depth)?,
         },
-        ExprKind::PolicyNarrow { value, into } => ExprKind::PolicyNarrow {
-            value: Box::new(expand_expr(*value, macros, state, depth)?),
-            into: expand_type(into, macros, state, depth)?,
-        },
         ExprKind::Template { path, bindings } => ExprKind::Template {
             path,
             bindings: bindings
@@ -645,8 +641,6 @@ fn map_type_children(
         TypeExprKind::Intersect(values) => {
             TypeExprKind::Intersect(values.into_iter().map(&mut map).collect::<Result<_, _>>()?)
         }
-        TypeExprKind::Policy(domains) => TypeExprKind::Policy(domains),
-        TypeExprKind::Capability { domain, groups } => TypeExprKind::Capability { domain, groups },
         TypeExprKind::Handle(access) => TypeExprKind::Handle(access),
         TypeExprKind::WasmValue(name) => TypeExprKind::WasmValue(name),
         other => other,
@@ -1200,10 +1194,6 @@ fn substitute_expr_kind(
             value: Box::new(one(*value)?),
             into: substitute_type(into, environment)?,
         },
-        ExprKind::PolicyNarrow { value, into } => ExprKind::PolicyNarrow {
-            value: Box::new(one(*value)?),
-            into: substitute_type(into, environment)?,
-        },
         ExprKind::Template { path, bindings } => ExprKind::Template {
             path,
             bindings: bindings
@@ -1705,9 +1695,7 @@ fn hygienize_expr(
                 );
             }
         }
-        ExprKind::Convert { value, into, .. }
-        | ExprKind::Cast { value, into }
-        | ExprKind::PolicyNarrow { value, into } => {
+        ExprKind::Convert { value, into, .. } | ExprKind::Cast { value, into } => {
             hygienize_expr(
                 value,
                 definition_document,
@@ -1997,11 +1985,7 @@ fn qualify_generated_type_names(
                 definition_symbols,
             );
         }
-        TypeExprKind::Policy(_)
-        | TypeExprKind::Capability { .. }
-        | TypeExprKind::WasmValue(_)
-        | TypeExprKind::Handle(_)
-        | TypeExprKind::Named(_) => {}
+        TypeExprKind::WasmValue(_) | TypeExprKind::Handle(_) | TypeExprKind::Named(_) => {}
     }
 }
 
@@ -2207,7 +2191,7 @@ fn annotate_generated_expr(
             annotate_generated_type(into, definition, call, state)?;
             annotate_generated_origin(&mut fallback.origin, definition, call, state)?;
         }
-        ExprKind::Cast { value, into } | ExprKind::PolicyNarrow { value, into } => {
+        ExprKind::Cast { value, into } => {
             annotate_generated_expr(value, definition, call, state)?;
             annotate_generated_type(into, definition, call, state)?;
         }
@@ -2319,52 +2303,6 @@ fn annotate_generated_type(
                 annotate_generated_type(parameter, definition, call, state)?;
             }
             annotate_generated_type(result, definition, call, state)?;
-        }
-        TypeExprKind::Policy(domains) => {
-            for domain in domains {
-                annotate_generated_origin(&mut domain.origin, definition, call, state)?;
-                annotate_generated_name(&mut domain.name, definition, call, state)?;
-                for group in &mut domain.groups {
-                    annotate_generated_origin(&mut group.origin, definition, call, state)?;
-                    annotate_generated_origin(
-                        &mut group.requirement.origin,
-                        definition,
-                        call,
-                        state,
-                    )?;
-                    for scope in &mut group.scopes {
-                        annotate_generated_origin(&mut scope.origin, definition, call, state)?;
-                        match &mut scope.value {
-                            super::PolicyScopeKind::Any => {}
-                            super::PolicyScopeKind::File(value)
-                            | super::PolicyScopeKind::Dir(value)
-                            | super::PolicyScopeKind::Exact(value)
-                            | super::PolicyScopeKind::Prefix(value) => {
-                                annotate_generated_name(value, definition, call, state)?;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        TypeExprKind::Capability { domain, groups } => {
-            annotate_generated_name(domain, definition, call, state)?;
-            for group in groups {
-                annotate_generated_origin(&mut group.origin, definition, call, state)?;
-                annotate_generated_origin(&mut group.requirement.origin, definition, call, state)?;
-                for scope in &mut group.scopes {
-                    annotate_generated_origin(&mut scope.origin, definition, call, state)?;
-                    match &mut scope.value {
-                        super::PolicyScopeKind::Any => {}
-                        super::PolicyScopeKind::File(value)
-                        | super::PolicyScopeKind::Dir(value)
-                        | super::PolicyScopeKind::Exact(value)
-                        | super::PolicyScopeKind::Prefix(value) => {
-                            annotate_generated_name(value, definition, call, state)?;
-                        }
-                    }
-                }
-            }
         }
         TypeExprKind::WasmValue(name) => {
             annotate_generated_name(name, definition, call, state)?;
@@ -2668,59 +2606,17 @@ mod tests {
     }
 
     #[test]
-    fn expands_detailed_security_types_with_nested_origins() {
-        let source = r#"
-(macro secure ((ignored type-syntax)) type-syntax
-  (do (quote type-syntax
-    (policy
-      (fs-read
-        (group requirement: mandatory scopes: ((dir "src"))))))))
-(def root-policy (secure int64))
-"#;
-        let expanded = expand_typed_macros(module(source, 31)).unwrap();
-        let TopLevel::Definition(definition) = &expanded.forms[0] else {
-            panic!("expected definition");
-        };
-        let TypeExprKind::Policy(domains) = &definition.body.value else {
-            panic!("expected expanded policy");
-        };
-        assert_eq!(domains[0].name.value, "fs-read");
-        assert!(matches!(
-            domains[0].groups[0].scopes[0].value,
-            super::super::PolicyScopeKind::Dir(ref value) if value.value == "src"
-        ));
-        assert!(matches!(
-            domains[0].name.origin,
-            Origin::DocumentExpansion { .. }
-        ));
-        assert!(matches!(
-            domains[0].groups[0].scopes[0].origin,
-            Origin::DocumentExpansion { .. }
-        ));
-        assert!(matches!(
-            domains[0].groups[0].origin,
-            Origin::DocumentExpansion { .. }
-        ));
-        assert!(matches!(
-            domains[0].groups[0].requirement.origin,
-            Origin::DocumentExpansion { .. }
-        ));
-    }
-
-    #[test]
     fn imported_macros_never_qualify_closed_semantic_type_tokens() {
         let helper_path = PathBuf::from("helper.vibra");
         let caller_path = PathBuf::from("main.vibra");
         let helper = module(
             r#"
-(def fs-read int64)
 (def i32 int64)
 (macro host-types ((ignored type-syntax)) type-syntax
   (do (quote type-syntax
     (tuple
-      (policy (fs-read (group requirement: mandatory scopes: ((any)))))
-      (capability fs-read)
-      (wasm i32)))))
+      (wasm i32)
+      (handle read)))))
 "#,
             41,
         );
@@ -2747,17 +2643,16 @@ mod tests {
         let TypeExprKind::Tuple(types) = &definition.body.value else {
             panic!("expected tuple");
         };
-        let TypeExprKind::Policy(domains) = &types[0].value else {
-            panic!("expected policy");
-        };
-        assert_eq!(domains[0].name.value, "fs-read");
         assert!(matches!(
-            types[1].value,
-            TypeExprKind::Capability { ref domain, .. } if domain.value == "fs-read"
+            types[0].value,
+            TypeExprKind::WasmValue(ref name) if name.value == "i32"
         ));
         assert!(matches!(
-            types[2].value,
-            TypeExprKind::WasmValue(ref name) if name.value == "i32"
+            types[1].value,
+            TypeExprKind::Handle(Spanned {
+                value: super::super::HandleAccess::Read,
+                ..
+            })
         ));
     }
 

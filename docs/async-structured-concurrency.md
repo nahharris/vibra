@@ -4,6 +4,12 @@ Status: design contract for issue #105. This document defines observable
 semantics; it does not select an executor, native threads, Wasm threads, or a
 shared-memory synchronization model.
 
+> **Note:** the "capability"/"capability grant" vocabulary below is this
+> module's own structured-concurrency resource-attenuation model
+> (`src/async_runtime.rs::CapabilityGrant`), independent of Vibra's former
+> `$policy`/`$capability.<domain>` host-authority system, which has been
+> fully decommissioned. Do not conflate the two.
+
 The machine-readable trace format is
 [`async-task-trace.schema.json`](../schemas/async-task-trace.schema.json). The
 typed host-adapter boundary is

@@ -332,7 +332,7 @@ fn rule_summary(code: &str) -> &'static str {
         "E-NEWTYPE-002" => "Malformed `$newtype` definition body",
         "E-CAST-001" => "`$cast` has no valid v1 cast path",
         "E-CAST-002" => "Malformed `$cast` payload",
-        "E-CAP-001" => "Capability values cannot be created from source",
+        "E-CAP-001" => "Opaque host handles cannot be created from source",
         "E-SELF-001" => "Reserved `$self` type used outside allowed positions",
         "E-DEFS-001" => "Invalid `=defs` annotation",
         "E-IMPL-001" => "Invalid `=impl` annotation",

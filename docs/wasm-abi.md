@@ -16,18 +16,18 @@ space.
 
 The `vibra.plan.v1` custom section contains the deterministic value-expression,
 pattern, seed, and privileged-call descriptors needed by the v1 host. It also
-contains only reachable host-function signatures, policy argument declarations,
-and interface identities. This makes `program.wasm` executable after all
-compiler IR and source state has been dropped. `vibra.program.v1` separately
-contains the SHA-256 fingerprint of the complete lowered input.
+contains only reachable host-function signatures and interface identities.
+This makes `program.wasm` executable after all compiler IR and source state
+has been dropped. `vibra.program.v1` separately contains the SHA-256
+fingerprint of the complete lowered input.
 
 ## Values and memory
 
 Guest locals and parameters are direct `i32` arena addresses. Address zero is
 invalid; the host owns the arena and returns nonzero opaque handles. This is the
-v1 representation for dynamic values, mutable cells, references, policies, and
-capabilities. The guest cannot forge a valid policy or widen one by integer
-arithmetic because every handle is checked before use.
+v1 representation for dynamic values, mutable cells, and references. The guest
+cannot forge a valid handle or widen it by integer arithmetic because every
+handle is checked before use.
 
 Within values, the stable layouts in [`src/wasm_abi.rs`](../src/wasm_abi.rs)
 remain normative: scalars are direct, strings/buffers use 32-bit
@@ -51,14 +51,13 @@ The removed `vibra_v1.run_program` envelope is rejected. Imports must be in the
 exact v1 registry; arbitrary Preview 1 imports and unknown Vibra symbols are
 rejected before instantiation.
 
-## Policies and capabilities
+## Host authority
 
-The host creates the aggregate root policy from `RunConfig` before `main`.
-Guest-side narrowing produces domain-typed capability values for statically
-validated subsets. Capability and resource handles remain opaque, and every
-privileged host call rechecks the approved scopes.
-Filesystem handles and allocation limits remain host-owned. Instantiation does
-not grant authority by itself.
+Every host operation (filesystem, network, process, clock, random,
+environment, stdin) is unconditionally available to guest code -- there is no
+capability, policy, or `--allow-*` authorization layer. Resource handles
+remain opaque and host-owned; filesystem handles and allocation limits remain
+host-owned regardless.
 
 ## Resource lifecycle and limits
 

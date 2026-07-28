@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/type-expr.schema.json",
   "title": "VibraTypeExpr",
-  "description": "JSON encoding of a Vibra type after YAML parse. `$policy` is the runtime-injected root authority envelope; qualified `$capability.<domain>` types are explicitly narrowed domain authority; qualified `$handle.<access>` types are opaque runtime-minted host resources.",
+  "description": "JSON encoding of a Vibra type after YAML parse. Qualified `$handle.<access>` types are opaque runtime-minted host resources.",
   "oneOf": [
     {
       "type": "string",
@@ -46,19 +46,6 @@
       "required": ["$ref"],
       "additionalProperties": false,
       "properties": { "$ref": { "$ref": "#" } }
-    },
-    {
-      "type": "object",
-      "required": ["$policy"],
-      "additionalProperties": false,
-      "properties": { "$policy": { "type": "object" } }
-    },
-    {
-      "type": "object",
-      "minProperties": 1,
-      "maxProperties": 1,
-      "propertyNames": { "pattern": "^\\$capability\\.(fs-read|fs-write|stdin-read|env-read|env-write|net-connect|net-listen|process-run|clock|random|system-info)$" },
-      "additionalProperties": { "type": ["array", "null"] }
     },
     {
       "type": "object",
