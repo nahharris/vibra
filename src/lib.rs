@@ -35,4 +35,4 @@ pub mod typed_program;
 pub mod typed_readers;
 pub mod wasm_abi;
 pub mod wasm_backend;
-pub mod yaml_subset;
+pub(crate) mod yaml_subset;

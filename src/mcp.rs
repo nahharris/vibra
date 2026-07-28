@@ -4,7 +4,7 @@
 //! accepts a command name, environment mutation, or arbitrary argument vector
 //! from a client.
 
-use crate::{project, test_runner};
+use crate::{ast::TopLevel, frontend, project, project_context, test_runner};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -501,19 +501,14 @@ impl Server {
             if path.file_name().and_then(|name| name.to_str()) == Some(project::MANIFEST_FILE) {
                 self.validate_manifest_paths(&path)?;
             }
-            if !matches!(
-                path.extension().and_then(|extension| extension.to_str()),
-                Some("vibra" | "yaml")
-            ) {
+            if path.file_name().and_then(|name| name.to_str()) == Some(project::MANIFEST_FILE)
+                || path.extension().and_then(|extension| extension.to_str()) != Some("vibra")
+            {
                 continue;
             }
-            let Ok(source) = fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&source) else {
-                continue;
-            };
-            self.validate_import_values(&path, &value)?;
+            let (_, module) =
+                frontend::load_surface_entry_for_test_discovery(&path).map_err(operation_error)?;
+            self.validate_module_imports(&module)?;
         }
         Ok(())
     }
@@ -537,34 +532,31 @@ impl Server {
         Ok(())
     }
 
-    fn validate_import_values(
+    fn validate_module_imports(
         &self,
-        module: &Path,
-        value: &serde_yaml::Value,
+        module: &frontend::SourceModule,
     ) -> std::result::Result<(), ToolFailure> {
-        match value {
-            serde_yaml::Value::Mapping(map) => {
-                for (key, value) in map {
-                    if key.as_str() == Some("$import") {
-                        if let Some(import) = value.as_str() {
-                            if !import.starts_with('@') {
-                                self.confine_declared_path(
-                                    module.parent().unwrap_or(&self.root),
-                                    Path::new(import),
-                                    "source import",
-                                )?;
-                            }
-                        }
-                    }
-                    self.validate_import_values(module, value)?;
-                }
-            }
-            serde_yaml::Value::Sequence(values) => {
-                for value in values {
-                    self.validate_import_values(module, value)?;
-                }
-            }
-            _ => {}
+        let parent = module.path.parent().unwrap_or(&self.root);
+        let project = project_context::discover_project_import_context(&module.path)
+            .map_err(operation_error)?;
+        for form in module.forms() {
+            let TopLevel::Import(import) = form else {
+                continue;
+            };
+            let path = if import.path.value.starts_with('@') {
+                let project = project.as_ref().ok_or_else(|| {
+                    operation_error(anyhow::anyhow!(
+                        "{}: @ import `{}` requires project.vibra",
+                        module.path.display(),
+                        import.path.value
+                    ))
+                })?;
+                project_context::resolve_project_import(project, &import.path.value)
+                    .map_err(operation_error)?
+            } else {
+                parent.join(&import.path.value)
+            };
+            self.confine_declared_path(&self.root, &path, "source import")?;
         }
         Ok(())
     }

@@ -186,7 +186,8 @@ enum Command {
     },
     /// Evaluate one inline Vibra expression for tooling workflows.
     Exec {
-        /// Inline Vibra expression encoded as YAML.
+        /// Inline Vibra expression encoded as an S-expression.
+        #[arg(long)]
         expr: String,
         /// Bind a string local as `name=value` (repeatable).
         #[arg(long = "arg")]
@@ -595,10 +596,10 @@ fn run_cli() -> Result<()> {
             max_open_files,
         } => {
             let (bindings, local_types) = exec_bindings(arg, arg_file)?;
-            let expr_value: Value = serde_yaml::from_str(&expr).context("parse exec expression")?;
             let root = exec_root(import)?;
             let cwd = std::env::current_dir().context("resolve current directory")?;
             let program = load::load_legacy_yaml_inline_program(&cwd, Value::Mapping(root))?;
+            let expr_value = load::parse_inline_exec_expression(&expr)?;
             let lowered = lower::lower_exec_expr(&program, &expr_value, &local_types)?;
             for warning in &lowered.program.warnings {
                 eprintln!("warning: {warning}");

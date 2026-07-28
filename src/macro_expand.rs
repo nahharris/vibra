@@ -622,10 +622,7 @@ fn canonical_module_path(path: PathBuf) -> PathBuf {
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return path;
     };
-    let without_extension = file_name
-        .strip_suffix(".vibra.yaml")
-        .or_else(|| file_name.strip_suffix(".vibra"))
-        .unwrap_or(file_name);
+    let without_extension = file_name.strip_suffix(".vibra").unwrap_or(file_name);
     let Some((base, _)) = without_extension.split_once('.') else {
         return path;
     };

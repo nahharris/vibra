@@ -14,7 +14,7 @@ Its "Implementation and PR plan" defines nine steps; this file tracks them.
 | 1 | Reader, CST, spans, formatter | Done — #153, #157, #161, #166 |
 | 2 | Lowering and compiler | **Approach changed** — `src/surface_adapter.rs` bridges the typed AST into `src/lower.rs`'s existing `Value` shape instead of continuing to re-derive `src/lower.rs`'s semantics on the typed path; see below |
 | 3 | Macros and origins | Done — #165 |
-| 4 | Language corpus | **Next, and irreversible** — migrator dry-run only, needs an opt-in write mode |
+| 4 | Language corpus | Done — #193 converted all modules; migrator has explicit `--write` opt-in |
 | 5 | Projects and packages | Done — #158, #160 |
 | 6 | LSP and rewrites | Index landed (#178); repoint blocked on step 4 |
 | 7 | Generic editor removal | Partly — #163 removed the public surface; `src/code/` internals remain |
@@ -157,11 +157,11 @@ Port from the legacy path rather than reimplementing, and reuse
 
 ### Step 4 — corpus
 
-62 `.vibra` files exist; 4 are already S-expression, 58 need conversion. The
-migrator in `tools/corpus-migrator` is deliberately **dry-run only** (verified:
-no `fs::write` outside its `#[cfg(test)]` module) and must stay that way, so
-applying the conversion needs an opt-in write mode. `stdlib` is a submodule, so
-the corpus lands as a stdlib PR plus a parent pointer bump.
+All 62 `.vibra` corpus files are S-expressions. The migrator in
+`tools/corpus-migrator` remains dry-run by default and supports an explicit
+`--write` opt-in; it rewrites only successfully converted and
+surface-validated files. `stdlib` is a submodule, so the completed corpus
+conversion landed as a stdlib change plus a parent pointer bump.
 
 **Converting the corpus IS the atomic cutover, not a preparatory step.** A
 converted corpus is unreadable to the legacy YAML compiler, so `vibra test`

@@ -421,6 +421,18 @@ pub(crate) fn module_to_value(module: &Module, sig: &ResolvedSignatures) -> Resu
     Ok(Value::Mapping(map))
 }
 
+/// Adapt one standalone typed S-expression for inline tooling.
+pub(crate) fn inline_expression_to_value(expression: &AstExpr) -> Result<Value> {
+    let signatures = ResolvedSignatures::default();
+    let mut converter = Converter {
+        sig: &signatures,
+        extra: Vec::new(),
+        next_id: 0,
+        current_params: Vec::new(),
+    };
+    converter.expr_value(expression)
+}
+
 fn import_value(import: &Import) -> Value {
     single_dollar("import", Value::String(import.path.value.clone()))
 }
