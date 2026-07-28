@@ -7,7 +7,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 
-use crate::code::{SemanticIndex, SemanticKind, SourceDatabase};
+use crate::sexpr_semantic::{SemanticIndex, SemanticKind};
 
 struct Server {
     root: Option<PathBuf>,
@@ -93,6 +93,7 @@ impl Server {
                         "hoverProvider":true,
                         "definitionProvider":true,
                         "referencesProvider":true,
+                        "documentSymbolProvider":true,
                         "completionProvider":{"triggerCharacters":["$", "."]}
                     }
                 }))
@@ -164,6 +165,7 @@ impl Server {
             "textDocument/hover" => self.hover(params),
             "textDocument/definition" => self.definition(params),
             "textDocument/references" => self.references(params),
+            "textDocument/documentSymbol" => self.document_symbols(params),
             _ => {
                 if params.is_null() {
                     Ok(Value::Null)
@@ -267,13 +269,10 @@ impl Server {
         };
         let workspace = self.workspace()?;
         let document = uri_path(&uri).context("hover requires a file URI")?;
-        let Some((target, name)) = workspace.resolve(&document, &word) else {
+        let Some((_target, name)) = workspace.resolve(&document, &word) else {
             return Ok(Value::Null);
         };
-        let doc = workspace
-            .definition(&target, &name)
-            .map(|d| d.2)
-            .unwrap_or_default();
+        let doc = String::new();
         Ok(
             json!({"contents":{"kind":"markdown","value":if doc.is_empty(){format!("`{name}` — Vibra symbol")}else{doc}}}),
         )
@@ -291,7 +290,15 @@ impl Server {
             return Ok(Value::Null);
         };
         match workspace.definition(&target, &name) {
-            Some((_, line, _)) => Ok(location(&path_uri(&target), line, 0, name.len())),
+            Some(definition) => Ok(location_span(
+                &path_uri(&workspace.original_path(&definition.document)),
+                workspace
+                    .sources
+                    .get(&workspace.original_path(&definition.document))
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+                definition.span,
+            )),
             None => Ok(Value::Null),
         }
     }
@@ -307,41 +314,49 @@ impl Server {
         let Some((target, name)) = workspace.resolve(&document, &word) else {
             return Ok(json!([]));
         };
-        let mut result = Vec::new();
-        if let Some(text) = workspace.sources.get(&target) {
-            let needle = format!("${name}");
-            for (line, row) in text.lines().enumerate() {
-                if let Some(column) = row.find(&needle) {
-                    result.push(location(&path_uri(&target), line, column, needle.len()));
-                }
-            }
-        }
-        for (path, text) in &workspace.sources {
-            for (line, row) in text.lines().enumerate() {
-                let bytes = row.as_bytes();
-                let mut column = 0;
-                while column < bytes.len() {
-                    if bytes[column] != b'$' {
-                        column += 1;
-                        continue;
-                    }
-                    let mut end = column + 1;
-                    while end < bytes.len() && is_word(bytes[end]) {
-                        end += 1;
-                    }
-                    let token = &row[column..end];
-                    if workspace.resolve(path, token).as_ref()
-                        == Some(&(target.clone(), name.clone()))
-                    {
-                        result.push(location(&path_uri(path), line, column, token.len()));
-                    }
-                    column = end;
-                }
-            }
-        }
+        let mut result = workspace
+            .index
+            .facts()
+            .iter()
+            .filter(|fact| matches!(fact.kind, SemanticKind::Reference | SemanticKind::Call))
+            .filter(|fact| {
+                fact.target_document.as_ref().unwrap_or(&fact.document) == &target
+                    && fact.symbol.rsplit('.').next() == Some(name.as_str())
+            })
+            .filter_map(|fact| {
+                workspace
+                    .sources
+                    .get(&workspace.original_path(&fact.document))
+                    .map(|source| {
+                        location_span(
+                            &path_uri(&workspace.original_path(&fact.document)),
+                            source,
+                            fact.span,
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
         result.sort_by_key(|item| item.to_string());
         result.dedup();
         Ok(Value::Array(result))
+    }
+
+    fn document_symbols(&self, params: &Value) -> Result<Value> {
+        let (uri, source) = self.source(params)?;
+        let document = uri_path(&uri).context("document symbols require a file URI")?;
+        let workspace = self.workspace()?;
+        Ok(Value::Array(
+            workspace
+                .index
+                .query(Some(SemanticKind::Definition), None)
+                .into_iter()
+                .filter(|fact| fact.document == document)
+                .map(|fact| {
+                    let range = location_span(&uri, &source, fact.span)["range"].clone();
+                    json!({"name":fact.symbol,"kind":12,"range":range,"selectionRange":range})
+                })
+                .collect(),
+        ))
     }
 
     fn workspace(&self) -> Result<Workspace> {
@@ -368,32 +383,66 @@ impl Server {
 }
 
 struct Workspace {
-    root: PathBuf,
     index: SemanticIndex,
     sources: BTreeMap<PathBuf, String>,
+    originals: BTreeMap<PathBuf, PathBuf>,
+    mirrors: BTreeMap<PathBuf, PathBuf>,
 }
 
 impl Workspace {
     fn build(root: PathBuf, sources: BTreeMap<PathBuf, String>) -> Result<Self> {
-        let database = SourceDatabase::from_sources(root.clone(), sources.clone())
-            .map_err(anyhow::Error::msg)?;
-        let index = SemanticIndex::build(&database).map_err(anyhow::Error::msg)?;
+        let root = fs::canonicalize(root)?;
+        let sources = sources
+            .into_iter()
+            .map(|(path, source)| Ok((fs::canonicalize(path)?, source)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let mirror = tempfile::tempdir().context("create LSP semantic workspace")?;
+        mirror_workspace(&root, mirror.path())?;
+        let mut originals = BTreeMap::new();
+        let mut mirrors = BTreeMap::new();
+        for (path, source) in &sources {
+            let relative = path.strip_prefix(&root).with_context(|| {
+                format!("open document {} is outside workspace", path.display())
+            })?;
+            let target = mirror.path().join(relative);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&target, source)?;
+            let target = fs::canonicalize(target)?;
+            originals.insert(target.clone(), path.clone());
+            mirrors.insert(path.clone(), target);
+        }
+        let roots = mirrors.values().cloned().collect::<Vec<_>>();
+        let program = crate::frontend::load_surface_program_multi_root(
+            &roots,
+            &crate::load::CompilationFlags::default(),
+        )?;
+        let index = SemanticIndex::from_surface_program(&program);
         Ok(Self {
-            root,
             index,
             sources,
+            originals,
+            mirrors,
         })
+    }
+    fn original_path(&self, path: &std::path::Path) -> PathBuf {
+        self.originals
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| path.to_path_buf())
     }
     fn resolve(&self, document: &PathBuf, word: &str) -> Option<(PathBuf, String)> {
         let symbol = word.trim_start_matches('$');
-        let document = normalize(document.clone());
+        let document = fs::canonicalize(document).unwrap_or_else(|_| normalize(document.clone()));
+        let document = self.mirrors.get(&document).cloned().unwrap_or(document);
         if let Some((alias, name)) = symbol.split_once('.') {
             let import = self
                 .index
                 .query(Some(SemanticKind::Import), Some(alias))
                 .into_iter()
                 .find(|fact| fact.document == document)?;
-            let target = self.resolve_import_target(import.target_document.as_ref()?)?;
+            let target = import.target_document.clone()?;
             if name.contains('.') {
                 return self.resolve(&target, &format!("${name}"));
             }
@@ -404,40 +453,40 @@ impl Workspace {
         let name = symbol.to_string();
         self.definition(&document, &name).map(|_| (document, name))
     }
-    fn definition(&self, document: &PathBuf, name: &str) -> Option<(String, usize, String)> {
-        definitions(self.sources.get(&normalize(document.clone()))?)
+    fn definition(
+        &self,
+        document: &PathBuf,
+        name: &str,
+    ) -> Option<&crate::sexpr_semantic::SemanticFact> {
+        self.index
+            .query(Some(SemanticKind::Definition), Some(name))
             .into_iter()
-            .find(|d| d.0 == name)
+            .find(|fact| fact.document == *document)
     }
     fn visible_symbols(&self, document: &PathBuf) -> Vec<String> {
-        let document = normalize(document.clone());
-        let mut result = definitions(
-            self.sources
-                .get(&document)
-                .map(String::as_str)
-                .unwrap_or(""),
-        )
-        .into_iter()
-        .map(|d| d.0)
-        .collect::<Vec<_>>();
+        let document = fs::canonicalize(document).unwrap_or_else(|_| normalize(document.clone()));
+        let document = self.mirrors.get(&document).cloned().unwrap_or(document);
+        let mut result = self
+            .index
+            .query(Some(SemanticKind::Definition), None)
+            .into_iter()
+            .filter(|fact| fact.document == document)
+            .map(|fact| fact.symbol.clone())
+            .collect::<Vec<_>>();
         for import in self
             .index
             .query(Some(SemanticKind::Import), None)
             .into_iter()
             .filter(|f| f.document == document)
         {
-            if let Some(target) = import
-                .target_document
-                .as_ref()
-                .and_then(|path| self.resolve_import_target(path))
-            {
-                if let Some(source) = self.sources.get(&target) {
-                    result.extend(
-                        definitions(source)
-                            .into_iter()
-                            .map(|d| format!("{}.{}", import.symbol, d.0)),
-                    );
-                }
+            if let Some(target) = import.target_document.clone() {
+                result.extend(
+                    self.index
+                        .query(Some(SemanticKind::Definition), None)
+                        .into_iter()
+                        .filter(|fact| fact.document == target)
+                        .map(|fact| format!("{}.{}", import.symbol, fact.symbol)),
+                );
                 result.extend(self.visible_imports(&target, &import.symbol, 0));
             }
         }
@@ -454,58 +503,21 @@ impl Workspace {
             .into_iter()
             .filter(|fact| fact.document == *document)
         {
-            let Some(target) = import
-                .target_document
-                .as_ref()
-                .and_then(|path| self.resolve_import_target(path))
-            else {
+            let Some(target) = import.target_document.clone() else {
                 continue;
             };
             let qualified = format!("{prefix}.{}", import.symbol);
-            if let Some(source) = self.sources.get(&target) {
-                result.extend(
-                    definitions(source)
-                        .into_iter()
-                        .map(|d| format!("{qualified}.{}", d.0)),
-                );
-            }
+            result.extend(
+                self.index
+                    .query(Some(SemanticKind::Definition), None)
+                    .into_iter()
+                    .filter(|fact| fact.document == target)
+                    .map(|fact| format!("{qualified}.{}", fact.symbol)),
+            );
             result.extend(self.visible_imports(&target, &qualified, depth + 1));
         }
         result
     }
-    fn resolve_import_target(&self, target: &std::path::Path) -> Option<PathBuf> {
-        if !target.to_string_lossy().starts_with('@') {
-            return Some(target.to_path_buf());
-        }
-        let project = crate::project::load_project(&self.root).ok()?;
-        crate::project::resolve_project_import(&project, target.to_str()?)
-            .ok()
-            .map(normalize)
-    }
-}
-
-fn definitions(source: &str) -> Vec<(String, usize, String)> {
-    let mut result = Vec::new();
-    let lines = source.lines().collect::<Vec<_>>();
-    for (line, text) in lines.iter().enumerate() {
-        if text.starts_with(|c: char| !c.is_whitespace()) {
-            if let Some((key, _)) = text.split_once(':') {
-                if !key.starts_with(['=', '$']) && !key.is_empty() {
-                    let doc = lines[line + 1..]
-                        .iter()
-                        .take_while(|next| next.starts_with(|c: char| c.is_whitespace()))
-                        .find_map(|next| {
-                            next.trim()
-                                .strip_prefix("=doc:")
-                                .map(|value| value.trim().trim_matches('"').to_string())
-                        })
-                        .unwrap_or_default();
-                    result.push((key.to_string(), line, doc));
-                }
-            }
-        }
-    }
-    result
 }
 fn position(params: &Value) -> Result<(usize, usize)> {
     Ok((
@@ -533,8 +545,11 @@ fn word_at(source: &str, line: usize, column: usize) -> Option<String> {
 fn is_word(c: u8) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, b'$' | b'-' | b'_' | b'.')
 }
-fn location(uri: &str, line: usize, column: usize, len: usize) -> Value {
-    json!({"uri":uri,"range":{"start":{"line":line,"character":column},"end":{"line":line,"character":column+len}}})
+fn location_span(uri: &str, source: &str, span: crate::syntax::Span) -> Value {
+    let index = crate::syntax::LineIndex::new(source);
+    let start = index.position(source, span.start);
+    let end = index.position(source, span.end);
+    json!({"uri":uri,"range":{"start":{"line":start.line-1,"character":start.offset},"end":{"line":end.line-1,"character":end.offset}}})
 }
 fn end_position(source: &str) -> Value {
     let line = source.lines().count().saturating_sub(1);
@@ -575,6 +590,7 @@ fn uri_path(uri: &str) -> Option<PathBuf> {
 fn path_uri(path: &std::path::Path) -> String {
     let value = path
         .to_string_lossy()
+        .trim_start_matches(r"\\?\")
         .replace('\\', "/")
         .replace(' ', "%20");
     if value.starts_with('/') {
