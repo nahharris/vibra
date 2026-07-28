@@ -4550,7 +4550,7 @@ fn copy_stdlib(dest: &Path) {
 #[test]
 fn vibra_exec_prints_raw_string_expression() {
     let output = vibra_cmd()
-        .args(["exec", "\"hello\"", "--format", "raw"])
+        .args(["exec", "--expr", "\"hello\"", "--format", "raw"])
         .output()
         .unwrap();
     assert!(
@@ -4564,7 +4564,7 @@ fn vibra_exec_prints_raw_string_expression() {
 #[test]
 fn vibra_exec_rejects_non_string_raw_output() {
     let non_string = vibra_cmd()
-        .args(["exec", "42", "--format", "raw"])
+        .args(["exec", "--expr", "42", "--format", "raw"])
         .output()
         .unwrap();
     assert!(!non_string.status.success());
@@ -4578,7 +4578,7 @@ fn vibra_exec_rejects_non_string_raw_output() {
 #[test]
 fn vibra_exec_json_output_is_explicit() {
     let output = vibra_cmd()
-        .args(["exec", "42", "--format", "json"])
+        .args(["exec", "--expr", "42", "--format", "json"])
         .output()
         .unwrap();
     assert!(
@@ -4588,6 +4588,37 @@ fn vibra_exec_json_output_is_explicit() {
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value, 42);
+}
+
+#[test]
+fn vibra_exec_help_documents_expr_flag() {
+    let output = vibra_cmd()
+        .args(["exec", "--help"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "help failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--expr <EXPR>"));
+}
+
+#[test]
+fn vibra_exec_parses_and_lowers_sexpression() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(&entry, "(const placeholder bool true)\n").unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let expression = vibra::load::parse_inline_exec_expression("(add 20 22)").unwrap();
+    let exec = vibra::lower::lower_exec_expr(&loaded, &expression, &Default::default()).unwrap();
+    let value = vibra::execute::eval_lowered_exec(
+        &exec,
+        &Default::default(),
+        &vibra::runtime::RunConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(value, vibra::lower::RuntimeValue::Int(42));
 }
 
 #[test]

@@ -34,11 +34,11 @@ and dedicated load authority; see [the runtime plugin design](docs/runtime-plugi
 `vibra exec` remains available for evaluating a single Vibra expression:
 
 ```sh
-vibra exec '"hello"' --format raw
+vibra exec --expr '"hello"' --format raw
 ```
 
-Use `--arg name=value`, `--arg-file name=path`, and `--import alias=path` to
-provide its explicit inputs.
+Use `--expr` with one S-expression, then `--arg name=value`, `--arg-file
+name=path`, and `--import alias=path` to provide explicit inputs.
 
 ## Schemas and tooling contracts
 
