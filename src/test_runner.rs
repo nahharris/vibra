@@ -473,6 +473,17 @@ fn discover_tests(
     let mut items = Vec::new();
     let mut seen_modules = HashSet::new();
     for file in files {
+        if is_conditional_module_part(&file)? {
+            // `name.flag.vibra` is a conditional part of `name.vibra`, not a
+            // standalone module: `load::load_entry_module_for_test_discovery`
+            // would load it as its own base module (never merged with
+            // `name.vibra`'s definitions), duplicating whatever tests the
+            // base module's own scan already discovers with correctly merged
+            // signatures, and -- worse -- recording this part file itself as
+            // the `TestPlanItem` entry, which later makes `run_single_test`
+            // compile the part alone and lose the base module's symbols.
+            continue;
+        }
         let display_path = normalize_path(file.strip_prefix(&base).unwrap_or(&file));
         let (entry, entry_module) = load::load_entry_module_for_test_discovery(&file)?;
         if !seen_modules.insert(entry.clone()) {
@@ -581,6 +592,29 @@ fn collect_vibra_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 fn is_vibra_file(path: &Path) -> bool {
     let s = path.to_string_lossy();
     s.ends_with(".vibra") || s.ends_with(".vibra.yaml")
+}
+
+/// Mirrors `frontend::module_part_paths`'s naming convention: `name.flag.vibra`
+/// is a conditional part of `name.vibra` whenever that base file exists
+/// alongside it. Test discovery must never treat such a part file as its own
+/// standalone module -- see the call site in `discover_tests`.
+fn is_conditional_module_part(path: &Path) -> Result<bool> {
+    let Some(parent) = path.parent() else {
+        return Ok(false);
+    };
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Ok(false);
+    };
+    let Some(stem) = file_name.strip_suffix(".vibra") else {
+        return Ok(false);
+    };
+    let Some(base) = stem.split('.').next() else {
+        return Ok(false);
+    };
+    if base == stem {
+        return Ok(false);
+    }
+    Ok(parent.join(format!("{base}.vibra")).is_file())
 }
 
 fn run_one_child(
