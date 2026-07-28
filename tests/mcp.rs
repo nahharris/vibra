@@ -115,7 +115,7 @@ fn transitive_imports_cannot_read_outside_the_workspace() {
     .unwrap();
     std::fs::write(
         workspace.join("src/main.vibra"),
-        "secret:\n  $import: ../../secret.vibra\nmain:\n  $function: $void\n  return: $void\n  do: []\n",
+        "(import secret \"../../secret.vibra\")\n(fn main () void (do))\n",
     )
     .unwrap();
     let responses = run_mcp(
@@ -128,6 +128,49 @@ fn transitive_imports_cannot_read_outside_the_workspace() {
         responses[0]["result"]["structuredContent"]["code"],
         "path-outside-workspace"
     );
+}
+
+#[test]
+fn s_expression_imports_reject_absolute_paths_and_allow_project_imports() {
+    let parent = tempfile::tempdir().unwrap();
+    let workspace = parent.path().join("project");
+    std::fs::create_dir_all(&workspace).unwrap();
+    write_project(&workspace);
+    let secret = parent.path().join("secret.vibra");
+    std::fs::write(&secret, "(const secret str \"hidden\")\n").unwrap();
+    let absolute = secret.to_string_lossy().replace('\\', "\\\\");
+    std::fs::write(
+        workspace.join("src/main.vibra"),
+        format!("(import secret \"{absolute}\")\n(fn main () void (do))\n"),
+    )
+    .unwrap();
+    let responses = run_mcp(
+        &workspace,
+        &[],
+        &[call(1, "vibra.lint", json!({"paths": ["src/main.vibra"]}))],
+    );
+    assert_eq!(responses[0]["result"]["isError"], true);
+    assert_eq!(
+        responses[0]["result"]["structuredContent"]["code"],
+        "path-outside-workspace"
+    );
+
+    std::fs::write(workspace.join("src/main.vibra"), "(fn main () void (do))\n").unwrap();
+    std::fs::write(
+        workspace.join("src/feature.vibra"),
+        "(import app \"@app/main.vibra\")\n(fn feature () void (do))\n",
+    )
+    .unwrap();
+    let responses = run_mcp(
+        &workspace,
+        &[],
+        &[call(
+            2,
+            "vibra.lint",
+            json!({"paths": ["src/feature.vibra"]}),
+        )],
+    );
+    assert_eq!(responses[0]["result"]["isError"], false);
 }
 
 #[test]
