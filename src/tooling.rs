@@ -11,8 +11,6 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use yaml_edit::Document;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolOutputFormat {
@@ -86,8 +84,8 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
     for path in files {
         let original =
             fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        let formatted =
-            format_source(&original).with_context(|| format!("format {}", path.display()))?;
+        let formatted = format_source(&path, &original)
+            .with_context(|| format!("format {}", path.display()))?;
         let is_changed = formatted != original;
         let status = if is_changed && options.write {
             fs::write(&path, formatted).with_context(|| format!("write {}", path.display()))?;
@@ -119,12 +117,12 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
     Ok(options.write || report.summary.changed == 0)
 }
 
-pub fn format_source(source: &str) -> Result<String> {
-    crate::yaml_subset::validate_yaml_subset_or_err(source, Path::new("<format>"))?;
-    let _ = Document::from_str(source).context("parse Vibra code document")?;
-    let value: serde_yaml::Value = serde_yaml::from_str(source).context("parse Vibra YAML")?;
-    crate::annotations::validate(&value)?;
-    serde_yaml::to_string(&value).context("emit canonical Vibra YAML")
+/// Source is always S-expression (see `src/load.rs` module docs): this
+/// delegates to `sexpr_tooling::staged_format_sexpr`, the reader-typed,
+/// serde-free canonical printer, rather than the legacy YAML-subset path.
+pub fn format_source(path: &Path, source: &str) -> Result<String> {
+    crate::sexpr_tooling::staged_format_sexpr(path, source)
+        .map_err(|diagnostic| anyhow::anyhow!("{}: {}", diagnostic.code, diagnostic.message))
 }
 
 /// Produce syntax and style diagnostics for an in-memory editor document.
@@ -165,35 +163,20 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let suppressions = Suppressions::parse(&source);
         let mut file_diagnostics = Vec::new();
-        let mut yaml_subset_ok = true;
+
+        // Source is always S-expression (see `src/load.rs` module docs): reader
+        // and typed-surface diagnostics come from `sexpr_tooling`, not the
+        // legacy YAML-subset/`serde_yaml` path. Style and compile passes both
+        // require a structurally valid document, so this check always runs
+        // and gates them even when the Syntax category itself is not selected.
+        let syntax_diagnostics = crate::sexpr_tooling::staged_sexpr_diagnostics(path, &source);
+        let syntax_ok = syntax_diagnostics.is_empty();
         if active_categories.contains(&Category::Syntax) {
-            for violation in crate::yaml_subset::validate_yaml_subset(&source) {
-                yaml_subset_ok = false;
-                file_diagnostics.push(yaml_subset_diagnostic(path, &violation));
-            }
+            file_diagnostics.extend(syntax_diagnostics);
         }
-        let syntax_ok = if active_categories.contains(&Category::Syntax) && yaml_subset_ok {
-            match serde_yaml::from_str::<serde_yaml::Value>(&source) {
-                Ok(value) => match crate::annotations::validate(&value) {
-                    Ok(()) => true,
-                    Err(error) => {
-                        file_diagnostics.push(annotation_diagnostic(path, &source, &error));
-                        false
-                    }
-                },
-                Err(err) => {
-                    file_diagnostics.push(yaml_diagnostic(path, &err));
-                    false
-                }
-            }
-        } else if yaml_subset_ok {
-            serde_yaml::from_str::<serde_yaml::Value>(&source).is_ok()
-        } else {
-            false
-        };
 
         if syntax_ok && active_categories.contains(&Category::Style) {
-            file_diagnostics.extend(style_diagnostics(path, &source));
+            file_diagnostics.extend(crate::sexpr_tooling::staged_lint_sexpr(path, &source));
         }
 
         if syntax_ok && active_categories.contains(&Category::Compile) {

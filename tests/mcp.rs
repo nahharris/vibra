@@ -51,16 +51,8 @@ fn write_project(root: &Path) {
         "(project\n  (package \"mcp-fixture\" \"0.1.0\")\n  (target app kind: bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
-    std::fs::write(
-        root.join("src/main.vibra"),
-        "main:\n  $function: $void\n  return: $void\n  do: []\n",
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("tests/basic.vibra"),
-        "works:\n  $test: core\n  do: []\n",
-    )
-    .unwrap();
+    std::fs::write(root.join("src/main.vibra"), "(fn main () void (do))\n").unwrap();
+    std::fs::write(root.join("tests/basic.vibra"), "(test works core (do))\n").unwrap();
 }
 
 #[test]

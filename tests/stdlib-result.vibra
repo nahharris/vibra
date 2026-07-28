@@ -1,181 +1,104 @@
-test:
-  $import: ../stdlib/src/test.vibra
-result:
-  $import: ../stdlib/src/result.vibra
-option:
-  $import: ../stdlib/src/option.vibra
-ok-carries-payload:
-  $test: core
-  do:
-  - $let:
-      r:
-        $result.result.ok: 99
-  - $match: $r
-    when:
-    - case:
-        $result.result.ok:
-          $bind: v
-      do:
-      - $match: $v
-        when:
-        - case: 99
-          do:
-          - $test.assert: true
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: wrong ok payload
-    - case:
-        $result.result.err:
-          $bind: _e
-      do:
-      - $test.fail: expected ok
-err-carries-payload:
-  $test: core
-  do:
-  - $let:
-      r:
-        $result.result.err: boom
-  - $match: $r
-    when:
-    - case:
-        $result.result.ok:
-          $bind: _v
-      do:
-      - $test.fail: expected err
-    - case:
-        $result.result.err:
-          $bind: e
-      do:
-      - $match: $e
-        when:
-        - case: boom
-          do:
-          - $test.assert: true
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: wrong err payload
-queries-defaulting-and-option-conversion:
-  $test: core
-  do:
-  - $let:
-      success:
-        $result.from-ok:
-          t: $int64
-          e: $str
-          input: 5
-  - $let:
-      failure:
-        $result.from-err:
-          t: $int64
-          e: $str
-          input: boom
-  - $test.assert:
-      $result.is-ok:
-        t: $int64
-        e: $str
-        input: $success
-  - $test.assert:
-      $result.is-err:
-        t: $int64
-        e: $str
-        input: $failure
-  - $let:
-      fallback:
-        $result.unwrap-or:
-          t: $int64
-          e: $str
-          input: $failure
-          default: 9
-  - $let:
-      value-option:
-        $result.into-ok-option:
-          t: $int64
-          e: $str
-          input: $success
-  - $let:
-      error-option:
-        $result.into-err-option:
-          t: $int64
-          e: $str
-          input: $failure
-  - $match: $value-option
-    when:
-    - case:
-        $option.option.some: 5
-      do:
-      - $match: $error-option
-        when:
-        - case:
-            $option.option.some: boom
-          do:
-          - $match: $fallback
-            when:
-            - case: 9
-              do:
-              - $test.assert: true
-            - case:
-                $wildcard: null
-              do:
-              - $test.fail: err did not use default
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: err conversion lost error
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: ok conversion lost value
-and-or-preserve-error-types:
-  $test: core
-  do:
-  - $let:
-      failure:
-        $result.from-err:
-          t: $int64
-          e: $str
-          input: original
-  - $let:
-      next:
-        $result.from-ok:
-          t: $bool
-          e: $str
-          input: true
-  - $let:
-      chained:
-        $result.and:
-          t: $int64
-          u: $bool
-          e: $str
-          input: $failure
-          next: $next
-  - $match: $chained
-    when:
-    - case:
-        $result.result.err: original
-      do:
-      - $match:
-          $result.or:
-            t: $int64
-            e: $str
-            f: $bool
-            input: $failure
-            fallback:
-              $result.from-ok:
-                t: $int64
-                e: $bool
-                input: 9
-        when:
-        - case:
-            $result.result.ok: 9
-          do:
-          - $test.assert: true
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: result or did not select fallback
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: result and did not preserve the original error
+(import test "../stdlib/src/test.vibra")
+(import result "../stdlib/src/result.vibra")
+(import option "../stdlib/src/option.vibra")
+(test
+  ok-carries-payload
+  core
+  (do
+    (let r (result.result.ok 99))
+    (match
+      r
+      (case
+        (result.result.ok (bind v))
+        (do
+          (match
+            v
+            (case 99 (do (test.assert true)))
+            (case _ (do (test.fail "wrong ok payload")))
+          )
+        )
+      )
+      (case (result.result.err _) (do (test.fail "expected ok")))
+    )
+  )
+)
+(test
+  err-carries-payload
+  core
+  (do
+    (let r (result.result.err "boom"))
+    (match
+      r
+      (case (result.result.ok _) (do (test.fail "expected err")))
+      (case
+        (result.result.err (bind e))
+        (do
+          (match
+            e
+            (case "boom" (do (test.assert true)))
+            (case _ (do (test.fail "wrong err payload")))
+          )
+        )
+      )
+    )
+  )
+)
+(test
+  queries-defaulting-and-option-conversion
+  core
+  (do
+    (let success (result.from-ok int64 str 5))
+    (let failure (result.from-err int64 str "boom"))
+    (test.assert (result.is-ok int64 str success))
+    (test.assert (result.is-err int64 str failure))
+    (let fallback (result.unwrap-or int64 str failure 9))
+    (let value-option (result.into-ok-option int64 str success))
+    (let error-option (result.into-err-option int64 str failure))
+    (match
+      value-option
+      (case
+        (option.option.some 5)
+        (do
+          (match
+            error-option
+            (case
+              (option.option.some "boom")
+              (do
+                (match
+                  fallback
+                  (case 9 (do (test.assert true)))
+                  (case _ (do (test.fail "err did not use default")))
+                )
+              )
+            )
+            (case _ (do (test.fail "err conversion lost error")))
+          )
+        )
+      )
+      (case _ (do (test.fail "ok conversion lost value")))
+    )
+  )
+)
+(test
+  and-or-preserve-error-types
+  core
+  (do
+    (let failure (result.from-err int64 str "original"))
+    (let next (result.from-ok bool str true))
+    (let chained (result.and int64 bool str failure next))
+    (match
+      chained
+      (case
+        (result.result.err "original")
+        (do
+          (match
+            (result.or int64 str bool failure (result.from-ok int64 bool 9))
+            (case (result.result.ok 9) (do (test.assert true)))
+            (case _ (do (test.fail "result or did not select fallback")))
+          )
+        )
+      )
+      (case _ (do (test.fail "result and did not preserve the original error")))
+    )
+  )
+)

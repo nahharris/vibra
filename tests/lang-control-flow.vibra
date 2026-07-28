@@ -1,48 +1,48 @@
-=comment: '`$if` / `$while` control flow.'
-test:
-  $import: ../stdlib/src/test.vibra
-if-true-takes-then:
-  $test: core
-  do:
-    - $if: true
-      then:
-      - $test.assert: true
-      else:
-      - $test.fail: then branch was skipped
-if-false-takes-else:
-  $test: core
-  do:
-    - $if: false
-      then:
-      - $test.fail: then branch ran on false
-      else:
-      - $test.assert: true
-if-on-bound-condition:
-  $test: core
-  do:
-    - $let:
-        flag: true
-    - $if: $flag
-      then:
-      - $test.assert: true
-      else:
-      - $test.fail: bound true condition took else
-nested-if:
-  $test: core
-  do:
-    - $if: true
-      then:
-      - $if: false
-        then:
-        - $test.fail: inner false took then
-        else:
-        - $test.assert: true
-      else:
-      - $test.fail: outer true took else
-while-false-never-runs:
-  $test: core
-  do:
-    - $while: false
-      do:
-      - $test.fail: while body ran on false condition
-    - $test.assert: true
+(import test "../stdlib/src/test.vibra")
+(test
+  if-true-takes-then
+  core
+  (do
+    (if true (do (test.assert true)) (do (test.fail "then branch was skipped")))
+  )
+)
+(test
+  if-false-takes-else
+  core
+  (do
+    (if false (do (test.fail "then branch ran on false")) (do (test.assert true)))
+  )
+)
+(test
+  if-on-bound-condition
+  core
+  (do
+    (let flag true)
+    (if
+      flag
+      (do (test.assert true))
+      (do (test.fail "bound true condition took else"))
+    )
+  )
+)
+(test
+  nested-if
+  core
+  (do
+    (if
+      true
+      (do
+        (if false (do (test.fail "inner false took then")) (do (test.assert true)))
+      )
+      (do (test.fail "outer true took else"))
+    )
+  )
+)
+(test
+  while-false-never-runs
+  core
+  (do
+    (while false (do (test.fail "while body ran on false condition")))
+    (test.assert true)
+  )
+)

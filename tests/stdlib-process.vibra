@@ -1,94 +1,71 @@
-test:
-  $import: ../stdlib/src/test.vibra
-process:
-  $import: ../stdlib/src/process.vibra
-result:
-  $import: ../stdlib/src/result.vibra
-executable-scope-is-attenuated:
-  $test: process
-  tags:
-  - stdlib
-  - capability
-  - process
-  policy:
-    $policy:
-      process-run:
-      - requirement: mandatory
-        scopes:
-        - exact: vibra-process-test
-  do:
-  - $let:
-      capability:
-        $policy.narrow: $args.policy
-        into: $process.run-capability
-  - $let:
-      outcome:
-        $process.run:
-          $record:
-            executable: outside-grant
-            arguments:
-              $array:
-              - unused
-            environment:
-              $map:
-              - key: VIBRA_PROCESS_TEST
-                value: '1'
-            cwd: ''
-            stdio:
-              $process.stdio-policy.capture: null
-        capability: $capability
-  - $match: $outcome
-    when:
-    - case:
-        $result.result.err:
-          $process.process-error.permission-denied: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: executable outside process grant was not rejected
-run-rejects-stream-stdio-without-spawning:
-  $test: process
-  tags:
-  - stdlib
-  - process
-  policy:
-    $policy:
-      process-run:
-      - requirement: mandatory
-        scopes:
-        - exact: vibra-process-test
-  do:
-  - $let:
-      capability:
-        $policy.narrow: $args.policy
-        into: $process.run-capability
-  - $let:
-      outcome:
-        $process.run:
-          $record:
-            executable: vibra-process-test
-            arguments:
-              $array:
-              - unused
-            environment:
-              $map:
-              - key: VIBRA_PROCESS_TEST
-                value: '1'
-            cwd: ''
-            stdio:
-              $process.stdio-policy.stream: null
-        capability: $capability
-  - $match: $outcome
-    when:
-    - case:
-        $result.result.err:
-          $process.process-error.unsupported:
-            $wildcard: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: run stream mode was not rejected as unsupported
+(import test "../stdlib/src/test.vibra")
+(import process "../stdlib/src/process.vibra")
+(import result "../stdlib/src/result.vibra")
+(test
+  executable-scope-is-attenuated
+  process
+  (do
+    (let capability (policy.narrow policy process.run-capability))
+    (let
+      outcome
+      (process.run
+        (record
+          (executable "outside-grant")
+          (arguments (array "unused"))
+          (environment (map ("VIBRA_PROCESS_TEST" "1")))
+          (cwd "")
+          (stdio (process.stdio-policy.capture))
+        )
+        capability
+      )
+    )
+    (match
+      outcome
+      (case
+        (result.result.err (process.process-error.permission-denied))
+        (do (test.assert true))
+      )
+      (case _ (do (test.fail "executable outside process grant was not rejected")))
+    )
+  )
+  tags: (stdlib capability process)
+  policy: (policy
+    (process-run
+      (group requirement: mandatory scopes: ((exact "vibra-process-test")))
+    )
+  )
+)
+(test
+  run-rejects-stream-stdio-without-spawning
+  process
+  (do
+    (let capability (policy.narrow policy process.run-capability))
+    (let
+      outcome
+      (process.run
+        (record
+          (executable "vibra-process-test")
+          (arguments (array "unused"))
+          (environment (map ("VIBRA_PROCESS_TEST" "1")))
+          (cwd "")
+          (stdio (process.stdio-policy.stream))
+        )
+        capability
+      )
+    )
+    (match
+      outcome
+      (case
+        (result.result.err (process.process-error.unsupported _))
+        (do (test.assert true))
+      )
+      (case _ (do (test.fail "run stream mode was not rejected as unsupported")))
+    )
+  )
+  tags: (stdlib process)
+  policy: (policy
+    (process-run
+      (group requirement: mandatory scopes: ((exact "vibra-process-test")))
+    )
+  )
+)

@@ -1,15 +1,8 @@
-test:
-  $import: ../stdlib/src/test.vibra
-
-identity-cast-is-a-compile-error:
-  $test: core
-  tags: [language, diagnostics]
-  expect-error:
-    phase: compile
-    code: E-CAST-001
-    message-contains: no valid cast path
-  do:
-    - $let:
-        value:
-          $cast: 7
-          into: $int64
+(import test "../stdlib/src/test.vibra")
+(test
+  identity-cast-is-a-compile-error
+  core
+  (do (let value (cast 7 int64)))
+  tags: (language diagnostics)
+  expect-error: (compile E-CAST-001 "no valid cast path")
+)

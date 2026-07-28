@@ -1,7 +1,2 @@
-io:
-  $import: ../stdlib/src/io.vibra
-main:
-  $function: $void
-  return: $void
-  do:
-    - $io.println: "Hello, World!"
+(import io "../stdlib/src/io.vibra")
+(fn main () void (do (io.println "Hello, World!")))

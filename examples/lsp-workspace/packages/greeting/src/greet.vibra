@@ -1,8 +1,1 @@
-greet:
-  $function: $void
-  =doc: Greets from a local package.
-  return: $void
-  do:
-    - $let:
-        value: 1
-
+(fn greet () void (do (let value 1)) doc: "Greets from a local package.")

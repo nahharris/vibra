@@ -65,6 +65,16 @@ pub(crate) struct LocalSignatures {
     /// it synthesizes, so unlike `calls`/`types` this stores full type
     /// information, not just a name/arity picture.
     pub(crate) interfaces: BTreeMap<String, Vec<TypeMember>>,
+    /// Bare names of every top-level `fn`/`def` declared `private` in this
+    /// module (`Visibility::Private`), independent of `calls`/`types` (which
+    /// track callability/genericity, not visibility, and `types` only ever
+    /// holds *generic* type names). Legacy encodes privacy as a literal `-`
+    /// prefix baked into the declaration's own key (`visible_key`); every
+    /// reference to a private symbol -- bare, self-qualified, or
+    /// alias-qualified -- must reproduce that literal dash to reach (or be
+    /// correctly rejected by) the same legacy entry. See
+    /// `Converter::dashify_private_reference`.
+    pub(crate) private: std::collections::BTreeSet<String>,
 }
 
 /// A module's fully resolved signature view: its own bare names, its own
@@ -79,6 +89,11 @@ pub(crate) struct ResolvedSignatures {
     calls: BTreeMap<String, CallSignature>,
     types: BTreeMap<String, Vec<String>>,
     interfaces: BTreeMap<String, Vec<TypeMember>>,
+    /// Every qualified spelling (bare, self-qualified, alias-qualified) under
+    /// which a private symbol from `LocalSignatures::private` might be
+    /// referenced, *without* its legacy dash. See
+    /// `Converter::dashify_private_reference`.
+    private_names: std::collections::BTreeSet<String>,
 }
 
 pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignatures> {
@@ -87,8 +102,14 @@ pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignature
         match form {
             TopLevel::Function(function) => {
                 insert_call_signature(&mut sigs.calls, function.name.value.clone(), function);
+                if function.visibility == Visibility::Private {
+                    sigs.private.insert(function.name.value.clone());
+                }
             }
             TopLevel::Definition(definition) => {
+                if definition.visibility == Visibility::Private {
+                    sigs.private.insert(definition.name.value.clone());
+                }
                 let params = where_param_names(&definition.annotations);
                 if !params.is_empty() {
                     sigs.types.insert(definition.name.value.clone(), params);
@@ -167,6 +188,15 @@ pub(crate) fn resolve_signatures(
     let mut calls = own_local.calls.clone();
     let mut types = own_local.types.clone();
     let mut interfaces = own_local.interfaces.clone();
+    let mut private_names: std::collections::BTreeSet<String> = own_local.private.clone();
+    for name in &own_local.private {
+        private_names.insert(format!("{own_stem}.{name}"));
+    }
+    for (alias, local) in imports {
+        for name in &local.private {
+            private_names.insert(format!("{alias}.{name}"));
+        }
+    }
     for (name, sig) in &own_local.calls {
         calls
             .entry(format!("{own_stem}.{name}"))
@@ -197,6 +227,7 @@ pub(crate) fn resolve_signatures(
         calls,
         types,
         interfaces,
+        private_names,
     }
 }
 
@@ -471,7 +502,7 @@ impl<'a> Converter<'a> {
 
     fn type_value(&mut self, ty: &TypeExpr) -> Result<Value> {
         match &ty.value {
-            TypeExprKind::Named(name) => Ok(dollar_name(name)),
+            TypeExprKind::Named(name) => Ok(dollar_name(&self.dashify_private_reference(name))),
             TypeExprKind::Application {
                 constructor,
                 arguments,
@@ -530,16 +561,23 @@ impl<'a> Converter<'a> {
                 Ok(single_dollar("enum", Value::Mapping(m)))
             }
             TypeExprKind::Interface(members) => {
+                // Legacy's own `$interface` parser (`src/lower.rs`) accepts
+                // any type for a member, not only `fn-type` -- the fn-type
+                // requirement below is specific to the *impl-dispatch*
+                // machinery (`Converter::interface_member`, used only when
+                // an `impl` actually implements that member as a method),
+                // not to declaring the interface type itself. A data-shaped
+                // member converts through the ordinary `type_value` path,
+                // exactly as legacy would parse it.
                 let mut m = Mapping::new();
                 for member in members {
-                    let TypeExprKind::Function { parameters, result } = &member.ty.value else {
-                        bail!(
-                            "E-ADAPT-006: interface member `{}` must be a `fn-type`",
-                            member.name.value
-                        );
+                    let value = match &member.ty.value {
+                        TypeExprKind::Function { parameters, result } => {
+                            self.interface_fn_type_value(parameters, result)?
+                        }
+                        _ => self.type_value(&member.ty)?,
                     };
-                    let fn_type = self.interface_fn_type_value(parameters, result)?;
-                    if m.insert(Value::String(member.name.value.clone()), fn_type)
+                    if m.insert(Value::String(member.name.value.clone()), value)
                         .is_some()
                     {
                         bail!(
@@ -726,11 +764,47 @@ impl<'a> Converter<'a> {
         for item in items {
             match item {
                 ImplItem::Types(list) => {
-                    if !list.is_empty() {
+                    if list.is_empty() {
+                        continue;
+                    }
+                    // A parametric interface's own `where:`-declared
+                    // type-param names double as legacy's flat `=impl:
+                    // {$iface: {t: <type>, method: ...}}` keys (the same
+                    // registration path any generic `def`'s `where:` uses,
+                    // `LocalSignatures::types` -- interfaces are not special
+                    // there). `types:` binds them positionally, in that
+                    // declared order, exactly like a generic type
+                    // application's own positional arguments
+                    // (`type_application_value`).
+                    let params = self.sig.types.get(iface_name).cloned().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "E-ADAPT-034: `impls:` on `{owner}` pins `types:` for interface \
+                             `{iface_name}`, which has no known `where:` type-parameter names \
+                             in the adapter's signature index (its `where:` clause must be \
+                             visible to this module -- declared locally or reachable through a \
+                             direct import)"
+                        )
+                    })?;
+                    if params.len() != list.len() {
                         bail!(
-                            "E-ADAPT-034: `impls:` on `{owner}` pins generic `types:` for \
-                             interface `{iface_name}`, which the adapter does not support"
+                            "E-ADAPT-034: `impls:` on `{owner}` supplies {} `types:` \
+                             argument(s) for interface `{iface_name}`, which declares {} \
+                             `where:` type parameter(s)",
+                            list.len(),
+                            params.len()
                         );
+                    }
+                    for (name, ty) in params.iter().zip(list) {
+                        let value = self.type_value(ty)?;
+                        if methods_map
+                            .insert(Value::String(name.clone()), value)
+                            .is_some()
+                        {
+                            bail!(
+                                "E-ADAPT-035: duplicate impl method `{name}` for interface \
+                                 `{iface_name}` on `{owner}`"
+                            );
+                        }
                     }
                 }
                 ImplItem::Method { name, binding, .. } => {
@@ -767,6 +841,9 @@ impl<'a> Converter<'a> {
     /// parameters (and every reference to them in its body), which would
     /// be considerably riskier. The real function keeps its own names
     /// untouched; only the thin shim uses the canonical ones.
+    // (helper functions `close_over_self`/`substitute_self_type`/
+    // `substitute_self_member` are defined below this impl block)
+
     fn impl_method_value(
         &mut self,
         owner: &str,
@@ -809,7 +886,19 @@ impl<'a> Converter<'a> {
                     );
                 }
                 let synthetic = self.fresh_name(&format!("impl-{owner}-{iface_name}-{method}"));
-                let value = self.function_envelope(inline)?;
+                // The synthesized helper is spliced in as a bare top-level
+                // `$function` entry (`self.extra`), not nested inside an
+                // `=impl:`/`=defs:` annotation. Legacy's own semantic check
+                // (`E-SELF-001`) only allows the bare `self` type placeholder
+                // *inside* that structural nesting, so an inline method
+                // written with `self` typed parameters/return (the ordinary,
+                // near-universal way to spell "the receiver" or "returns the
+                // receiver's own type") must have `self` closed over the
+                // concrete `owner` type before conversion -- there is no
+                // structural context left for legacy to infer it from once
+                // flattened.
+                let closed = close_over_self(inline, owner);
+                let value = self.function_envelope(&closed)?;
                 self.extra.push((synthetic.clone(), value));
                 let names = inline
                     .parameters
@@ -828,15 +917,62 @@ impl<'a> Converter<'a> {
             );
         }
 
-        let (parameters, result) = {
-            let (p, r) = self.interface_member(iface_name, method)?;
-            (p.to_vec(), r.clone())
+        // A qualified-symbol reference (`(method fmt box.show)`) has no
+        // legacy forwarding-shim shape at all: `src/lower.rs`'s impl-method
+        // parser (`impl_method_binding`) branches on the raw legacy `Value`
+        // itself -- a bare string `$alias.symbol` yields
+        // `ImplMethodBinding::Alias` (checked directly against the
+        // referenced function's own real signature), while *any* mapping
+        // (including a shim we might synthesize here) yields `Fresh`. There
+        // is no separate signal to carry "this was written as a reference"
+        // once the shape is a mapping, so preserving `Alias` requires
+        // emitting the bare string here rather than building a shim for it.
+        if matches!(binding, MethodBinding::Reference(_)) {
+            return Ok(dollar_name(&target_callee));
+        }
+
+        // The shim's exposed parameter/result types must come from wherever
+        // they were actually *written*, not from the interface's own member
+        // declaration. An imported interface's member types are captured
+        // verbatim from its declaring module (`collect_local_signatures`
+        // never requalifies them), so a bare name in that declaration (e.g.
+        // `context`, `option`) means a name local to *that* module -- not to
+        // `owner`'s module. Reusing them unmodified here would silently
+        // reinterpret them relative to the wrong import graph: a real bug
+        // this fixed (an `E-IMPL-005` mismatch on `fs.fs-error`'s `context`
+        // method, whose declared return type `(option.option error-lib
+        // .context)` uses `fs.vibra`'s own aliases and was being replaced by
+        // `error.vibra`'s differently-qualified, differently-aliased
+        // declaration of the same member).
+        //
+        // An inline method's own parameters/return type are already
+        // correctly qualified relative to `owner`'s module (they are
+        // literally written there), so use those directly. A referenced
+        // function is rejected above if generic (E-ADAPT-038), so a
+        // non-generic reference's own declared shape is exactly as
+        // trustworthy -- but the adapter does not currently retain full type
+        // information for arbitrary resolved calls (`CallSignature` tracks
+        // only names/arity, not types), so that path still falls back to the
+        // interface's declared shape pending that extension.
+        let (parameters, result): (Vec<TypeExpr>, TypeExpr) = match binding {
+            MethodBinding::Function(inline) => (
+                inline.parameters.iter().map(|p| p.ty.clone()).collect(),
+                inline.return_type.clone(),
+            ),
+            MethodBinding::Reference(_) => {
+                let (p, r) = self.interface_member(iface_name, method)?;
+                (p.to_vec(), r.clone())
+            }
         };
+        // Same flattening problem as the synthesized helper above: this
+        // shim is also a bare top-level `$function` entry, so any bare
+        // `self` in the exposed parameter/result types (from either source)
+        // must be closed over `owner` here too.
         let param_type_values = parameters
             .iter()
-            .map(|t| self.type_value(t))
+            .map(|t| self.type_value(&substitute_self_type(t, owner)))
             .collect::<Result<Vec<_>>>()?;
-        let return_value = self.type_value(&result)?;
+        let return_value = self.type_value(&substitute_self_type(&result, owner))?;
 
         let mut fn_map = Mapping::new();
         match arg_names.len() {
@@ -864,10 +1000,19 @@ impl<'a> Converter<'a> {
         }
         fn_map.insert(Value::String("return".into()), return_value);
         let call = forwarding_call_value(&target_callee, &target_arg_names, &arg_names);
-        fn_map.insert(
-            Value::String("do".into()),
-            Value::Sequence(vec![single_dollar("return", call)]),
-        );
+        // A void-returning member forwards as a bare statement call: wrapping
+        // it in `$return: <call>` would pass a void-typed call as `$return`'s
+        // value, which legacy's expression parser rejects ("void function
+        // call cannot be used as an expression") -- the same rule
+        // `user_fn_non_void_return_requires_return_statement` exercises for
+        // ordinary functions, just reached through the synthesized shim here.
+        let is_void_return = matches!(&result.value, TypeExprKind::Named(name) if name == "void");
+        let do_body = if is_void_return {
+            Value::Sequence(vec![call])
+        } else {
+            Value::Sequence(vec![single_dollar("return", call)])
+        };
+        fn_map.insert(Value::String("do".into()), do_body);
         Ok(Value::Mapping(fn_map))
     }
 
@@ -1324,6 +1469,56 @@ impl<'a> Converter<'a> {
 
     // ---------------- Calls ----------------
 
+    /// Whether `callee` (e.g. `fs.writable.write-string`) names a method of
+    /// a known `$interface` type reachable from this module's resolved
+    /// signature index -- i.e. whether legacy's
+    /// `reject_iface_nested_call_bundle` will apply its sibling-key shape
+    /// requirement to a multi-argument call to it (see
+    /// [`Self::named_call_value`]). Inherent (`=defs:`) methods are not
+    /// interfaces and are unaffected: `self.sig.interfaces` only ever
+    /// contains genuine `$interface` type declarations
+    /// (`collect_local_signatures`).
+    fn is_interface_dispatch_call(&self, callee: &str) -> bool {
+        callee
+            .rsplit_once('.')
+            .is_some_and(|(interface, _method)| self.sig.interfaces.contains_key(interface))
+    }
+
+    /// Reproduce legacy's literal `-` privacy encoding for a *reference* to a
+    /// declaration (`LocalSignatures::private`/`ResolvedSignatures::private_names`
+    /// records every declaration's bare/self-qualified/alias-qualified
+    /// spelling *without* the dash `visible_key` bakes into the declaration
+    /// site itself). Two shapes need it:
+    ///
+    /// - a direct reference (function call, bare/qualified type name, or a
+    ///   bare enum type) -- the private segment is the reference's own last
+    ///   segment, e.g. `priv` -> `-priv`, `m.priv-t` -> `m.-priv-t`;
+    /// - an enum-constructor call `Type.tag` (or `alias.Type.tag`) -- the
+    ///   private segment is the *type*, one segment short of the full
+    ///   reference, e.g. `m.priv-e.a` -> `m.-priv-e.a`, not `m.priv-e.-a`.
+    ///
+    /// Public references pass through unchanged. This only rewrites the
+    /// *spelling*; whether the resulting dashed reference then resolves or
+    /// is correctly rejected (e.g. an importer reaching into another
+    /// module's private namespace) remains entirely `src/lower.rs`'s call.
+    fn dashify_private_reference(&self, qualified: &str) -> String {
+        fn dash_last_segment(s: &str) -> String {
+            match s.rsplit_once('.') {
+                Some((prefix, last)) => format!("{prefix}.-{last}"),
+                None => format!("-{s}"),
+            }
+        }
+        if self.sig.private_names.contains(qualified) {
+            return dash_last_segment(qualified);
+        }
+        if let Some((prefix, tag)) = qualified.rsplit_once('.') {
+            if self.sig.private_names.contains(prefix) {
+                return format!("{}.{tag}", dash_last_segment(prefix));
+            }
+        }
+        qualified.to_string()
+    }
+
     fn call_value(&mut self, callee: &str, args: &[AstExpr]) -> Result<Value> {
         if !callee.contains('.') {
             if let Some((_, arity)) = crate::lower::typed_primitive_op(callee) {
@@ -1333,11 +1528,12 @@ impl<'a> Converter<'a> {
         if let Some(sig) = self.sig.calls.get(callee).cloned() {
             return self.named_call_value(callee, &sig, args);
         }
+        let key = self.dashify_private_reference(callee);
         match args.len() {
-            0 => Ok(single_dollar(callee, Value::Null)),
+            0 => Ok(single_dollar(&key, Value::Null)),
             1 => {
                 let v = self.expr_value(&args[0])?;
-                Ok(single_dollar(callee, v))
+                Ok(single_dollar(&key, v))
             }
             n => bail!(
                 "E-ADAPT-023: call to `{callee}` with {n} arguments has no signature in the \
@@ -1392,17 +1588,40 @@ impl<'a> Converter<'a> {
                 sig.arg_names.len()
             );
         }
+        let legacy_head = self.dashify_private_reference(callee);
         if type_arity == 0 {
             return match sig.arg_names.len() {
                 0 => {
                     if !args.is_empty() {
                         bail!("E-ADAPT-027: call to `{callee}` takes no arguments");
                     }
-                    Ok(single_dollar(callee, Value::Null))
+                    Ok(single_dollar(&legacy_head, Value::Null))
                 }
                 1 => {
                     let v = self.expr_value(&value_args[0])?;
-                    Ok(single_dollar(callee, v))
+                    Ok(single_dollar(&legacy_head, v))
+                }
+                _ if self.is_interface_dispatch_call(callee) => {
+                    // Legacy's `reject_iface_nested_call_bundle`
+                    // (`src/lower.rs`) requires a multi-argument interface
+                    // dispatch call to spell its dispatch value as the
+                    // callee's own payload, with every other argument as a
+                    // *sibling* key at the same mapping level as the callee
+                    // -- never all bundled into one mapping nested under the
+                    // callee. `tools/corpus-migrator`'s `named_call`
+                    // reconstructs exactly this sibling shape back into an
+                    // ordinary positional call, confirming it as the
+                    // canonical legacy spelling for this construct, not the
+                    // generic per-callee-name-bundle shape ordinary
+                    // (non-interface) multi-argument calls use.
+                    let primary = self.expr_value(&value_args[0])?;
+                    let mut m = Mapping::new();
+                    m.insert(Value::String(format!("${legacy_head}")), primary);
+                    for (name, expr) in sig.arg_names[1..].iter().zip(&value_args[1..]) {
+                        let v = self.expr_value(expr)?;
+                        m.insert(Value::String(name.clone()), v);
+                    }
+                    Ok(Value::Mapping(m))
                 }
                 _ => {
                     let mut m = Mapping::new();
@@ -1410,7 +1629,7 @@ impl<'a> Converter<'a> {
                         let v = self.expr_value(expr)?;
                         m.insert(Value::String(name.clone()), v);
                     }
-                    Ok(single_dollar(callee, Value::Mapping(m)))
+                    Ok(single_dollar(&legacy_head, Value::Mapping(m)))
                 }
             };
         }
@@ -1430,7 +1649,7 @@ impl<'a> Converter<'a> {
             let v = self.expr_value(expr)?;
             m.insert(key, v);
         }
-        Ok(single_dollar(callee, Value::Mapping(m)))
+        Ok(single_dollar(&legacy_head, Value::Mapping(m)))
     }
 
     /// Reinterpret an expression written in a generic call's leading
@@ -1743,11 +1962,30 @@ fn pattern_value(pattern: &AstPattern) -> Result<Value> {
             m.insert(Value::String("inner".into()), pattern_value(pattern)?);
             Ok(single_dollar("newtype", Value::Mapping(m)))
         }
-        PatternKind::Interface { .. } => bail!(
-            "E-ADAPT-017: `(interface Type pattern)` pattern is not supported by the adapter; \
-             `src/lower.rs`'s `Pattern::Interface` carries only a type, with no slot for a \
-             nested sub-pattern, so the AST's inner pattern cannot be represented"
-        ),
+        // `src/lower.rs`'s `Pattern::Interface(TypeRef)` carries only a type,
+        // with no slot for a nested sub-pattern at all -- not even to record
+        // that one was written. Legacy's own YAML surface spelled this same
+        // construct `$interface: <type-expr>` with no inner pattern (see
+        // `parse_pattern`'s `"$interface"` arm in `src/lower.rs`), and
+        // legacy's match evaluation for it (`Pattern::Interface` in
+        // `validate_pattern`) only ever checks the interface bound and binds
+        // nothing. A `_` wildcard sub-pattern is the one case that is
+        // faithfully representable: it binds nothing either, so dropping it
+        // loses no information legacy would have captured. Any other
+        // sub-pattern (a bind, a nested destructure) would need a real slot
+        // legacy does not have, so it still must fail loudly rather than be
+        // silently dropped.
+        PatternKind::Interface { ty, pattern } => {
+            if !matches!(pattern.value, PatternKind::Wildcard) {
+                bail!(
+                    "E-ADAPT-017: `(interface Type pattern)` pattern is not supported by the \
+                     adapter unless `pattern` is `_`; `src/lower.rs`'s `Pattern::Interface` \
+                     carries only a type, with no slot for a nested sub-pattern, so a non- \
+                     wildcard inner pattern cannot be represented"
+                );
+            }
+            Ok(single_dollar("interface", bare_type_value(ty)?))
+        }
     }
 }
 
@@ -1770,13 +2008,48 @@ fn bare_type_value(ty: &TypeExpr) -> Result<Value> {
 
 impl<'a> Converter<'a> {
     fn test_value(&mut self, test: &Test) -> Result<(String, Value)> {
+        // A `policy:` test attribute injects an implicit `policy` binding
+        // into the test body, the same mechanism `main`'s own policy
+        // parameter uses on a real function (see
+        // `Converter::function_envelope`, which sets `current_params` for
+        // the duration of body conversion). Legacy stores that binding as
+        // `args.policy`, not bare `policy` (`Converter::local_name_ref`), so
+        // a bare `policy` reference inside the test body must resolve the
+        // same way a real parameter reference would, for exactly as long as
+        // this body is being converted.
+        let has_policy = test
+            .metadata
+            .iter()
+            .any(|meta| matches!(meta, TestMeta::Policy(_)));
+        let previous_params = if has_policy {
+            Some(std::mem::replace(
+                &mut self.current_params,
+                vec!["policy".to_string()],
+            ))
+        } else {
+            None
+        };
+        let body_result = self.body_to_do(&test.body);
+        if let Some(previous_params) = previous_params {
+            self.current_params = previous_params;
+        }
+        let body = body_result?;
+        self.test_metadata_value(test, body)
+    }
+
+    /// Shared by [`Self::test_value`] (real compilation, real body) and
+    /// [`test_discovery_value`] (test-name/tag/metadata discovery only, which
+    /// deliberately never resolves imports or converts bodies -- see that
+    /// function's doc comment). `body` is the already-converted `do` value, or
+    /// a placeholder the caller promises nothing will read.
+    fn test_metadata_value(&mut self, test: &Test, body: Value) -> Result<(String, Value)> {
         let key = test.name.value.clone();
         let mut m = Mapping::new();
         m.insert(
             Value::String("$test".into()),
             Value::String(test.profile.value.clone()),
         );
-        m.insert(Value::String("do".into()), self.body_to_do(&test.body)?);
+        m.insert(Value::String("do".into()), body);
         for meta in &test.metadata {
             match meta {
                 TestMeta::Tags(tags) => {
@@ -1881,6 +2154,144 @@ impl<'a> Converter<'a> {
         }
         Ok((key, Value::Mapping(m)))
     }
+}
+
+/// Clone `function` with every bare `self` type reference (in its parameter
+/// and return types) closed over the concrete `owner` type name. Used only
+/// for [`Converter::impl_method_value`]'s synthesized helper function --
+/// see that call site for why closing over `self` is necessary there.
+fn close_over_self(function: &Function, owner: &str) -> Function {
+    let mut function = function.clone();
+    for parameter in &mut function.parameters {
+        parameter.ty = substitute_self_type(&parameter.ty, owner);
+    }
+    function.return_type = substitute_self_type(&function.return_type, owner);
+    function
+}
+
+/// Recursively replace the bare `self` type placeholder with the concrete
+/// `owner` type name. `self` is reserved syntax meaning "the type
+/// implementing this interface/impl", valid in the surface grammar only
+/// inside an `$interface`/`=defs`/`=impl` YAML context (legacy's
+/// `E-SELF-001`). [`Converter::impl_method_value`] flattens both its
+/// synthesized shim and its synthesized helper function into bare
+/// top-level `$function` entries -- structurally outside any
+/// `=impl:`/`=defs:` nesting -- so any `self` they carry must already be a
+/// closed, concrete type by the time they are converted; there is no
+/// structural context left for legacy to resolve it from.
+fn substitute_self_type(ty: &TypeExpr, owner: &str) -> TypeExpr {
+    let value = match &ty.value {
+        TypeExprKind::Named(name) if name == "self" => TypeExprKind::Named(owner.to_string()),
+        TypeExprKind::Named(name) => TypeExprKind::Named(name.clone()),
+        TypeExprKind::Application {
+            constructor,
+            arguments,
+        } => TypeExprKind::Application {
+            constructor: constructor.clone(),
+            arguments: arguments
+                .iter()
+                .map(|argument| substitute_self_type(argument, owner))
+                .collect(),
+        },
+        TypeExprKind::Record(members) => TypeExprKind::Record(
+            members
+                .iter()
+                .map(|member| substitute_self_member(member, owner))
+                .collect(),
+        ),
+        TypeExprKind::Tuple(items) => TypeExprKind::Tuple(
+            items
+                .iter()
+                .map(|item| substitute_self_type(item, owner))
+                .collect(),
+        ),
+        TypeExprKind::Array(inner) => {
+            TypeExprKind::Array(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::Map(key, value) => TypeExprKind::Map(
+            Box::new(substitute_self_type(key, owner)),
+            Box::new(substitute_self_type(value, owner)),
+        ),
+        TypeExprKind::Union(items) => TypeExprKind::Union(
+            items
+                .iter()
+                .map(|item| substitute_self_type(item, owner))
+                .collect(),
+        ),
+        TypeExprKind::Enum(members) => TypeExprKind::Enum(
+            members
+                .iter()
+                .map(|member| substitute_self_member(member, owner))
+                .collect(),
+        ),
+        TypeExprKind::Interface(members) => TypeExprKind::Interface(
+            members
+                .iter()
+                .map(|member| substitute_self_member(member, owner))
+                .collect(),
+        ),
+        TypeExprKind::Function { parameters, result } => TypeExprKind::Function {
+            parameters: parameters
+                .iter()
+                .map(|parameter| substitute_self_type(parameter, owner))
+                .collect(),
+            result: Box::new(substitute_self_type(result, owner)),
+        },
+        TypeExprKind::Newtype(inner) => {
+            TypeExprKind::Newtype(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::Mutable(inner) => {
+            TypeExprKind::Mutable(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::Reference(inner) => {
+            TypeExprKind::Reference(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::MutableReference(inner) => {
+            TypeExprKind::MutableReference(Box::new(substitute_self_type(inner, owner)))
+        }
+        TypeExprKind::Intersect(items) => TypeExprKind::Intersect(
+            items
+                .iter()
+                .map(|item| substitute_self_type(item, owner))
+                .collect(),
+        ),
+        other => other.clone(),
+    };
+    TypeExpr {
+        value,
+        span: ty.span,
+        origin: ty.origin.clone(),
+    }
+}
+
+fn substitute_self_member(member: &TypeMember, owner: &str) -> TypeMember {
+    TypeMember {
+        name: member.name.clone(),
+        ty: substitute_self_type(&member.ty, owner),
+        span: member.span,
+    }
+}
+
+/// Convert one typed `Test` into the legacy `(name, envelope)` shape for name
+/// and metadata discovery only -- never for compilation.
+///
+/// [`crate::load::load_entry_module_for_test_discovery`] deliberately skips
+/// import resolution (a test that expects a load failure must still be
+/// selectable), and `src/lower.rs::discover_test_specs_in_entry` only reads a
+/// test's `$test` profile and its metadata attributes (`tags`, `timeout-ms`,
+/// `expect-error`, `clock`, ...); it never reads `do`. So this never resolves
+/// call signatures (there is no cross-module signature index available yet at
+/// discovery time) and never converts the test body -- it stubs `do` with an
+/// empty sequence that the discovery reader is guaranteed not to inspect.
+pub(crate) fn test_discovery_value(test: &Test) -> Result<(String, Value)> {
+    let sig = ResolvedSignatures::default();
+    let mut converter = Converter {
+        sig: &sig,
+        extra: Vec::new(),
+        next_id: 0,
+        current_params: Vec::new(),
+    };
+    converter.test_metadata_value(test, Value::Sequence(Vec::new()))
 }
 
 fn policy_domains_value(domains: &[PolicyDomain]) -> Result<Value> {

@@ -1,80 +1,55 @@
-io:
-  $import: ../stdlib/src/io.vibra
-fs:
-  $import: ../stdlib/src/fs.vibra
-result:
-  $import: ../stdlib/src/result.vibra
-main:
-  $function:
-    policy:
-      $policy:
-        fs-write:
-        - requirement: mandatory
-          scopes:
-          - dir: ./tmp
-        fs-read:
-        - requirement: mandatory
-          scopes:
-          - dir: ./tmp
-  return: $void
-  do:
-  - $let:
-      path:
-        $fs.path.new: tmp/hello.txt
-  - $let:
-      write-capability:
-        $policy.narrow: $args.policy
-        into: $fs.write-capability
-  - $let:
-      read-capability:
-        $policy.narrow: $args.policy
-        into: $fs.read-capability
-  - $let:
-      opened-write:
-        $fs.open-write: $path
-        capability: $write-capability
-  - $match: $opened-write
-    when:
-    - case:
-        $result.result.ok:
-          $bind: out
-      do:
-      - $fs.writable.write-string: $out
-        s: from vibra fs
-      - $fs.closeable.close: $out
-    - case:
-        $result.result.err:
-          $bind: write-err
-      do:
-      - $io.eprintln: failed to open file for writing
-  - $let:
-      opened-read:
-        $fs.open-read: $path
-        capability: $read-capability
-  - $match: $opened-read
-    when:
-    - case:
-        $result.result.ok:
-          $bind: input
-      do:
-      - $let:
-          text-result:
-            $fs.readable.read-string: $input
-      - $match: $text-result
-        when:
-        - case:
-            $result.result.ok:
-              $bind: text
-          do:
-          - $io.println: $text
-        - case:
-            $result.result.err:
-              $bind: read-err
-          do:
-          - $io.eprintln: failed to read file
-      - $fs.closeable.close: $input
-    - case:
-        $result.result.err:
-          $bind: open-err
-      do:
-      - $io.eprintln: failed to open file for reading
+(import io "../stdlib/src/io.vibra")
+(import fs "../stdlib/src/fs.vibra")
+(import result "../stdlib/src/result.vibra")
+(fn
+  main
+  (
+    (policy
+      (policy
+        (fs-write (group requirement: mandatory scopes: ((dir "./tmp"))))
+        (fs-read (group requirement: mandatory scopes: ((dir "./tmp"))))
+      )
+    )
+  )
+  void
+  (do
+    (let path (fs.path.new "tmp/hello.txt"))
+    (let write-capability (policy.narrow policy fs.write-capability))
+    (let read-capability (policy.narrow policy fs.read-capability))
+    (let opened-write (fs.open-write path write-capability))
+    (match
+      opened-write
+      (case
+        (result.result.ok (bind out))
+        (do (fs.writable.write-string out "from vibra fs") (fs.closeable.close out))
+      )
+      (case
+        (result.result.err (bind write-err))
+        (do (io.eprintln "failed to open file for writing"))
+      )
+    )
+    (let opened-read (fs.open-read path read-capability))
+    (match
+      opened-read
+      (case
+        (result.result.ok (bind input))
+        (do
+          (let text-result (fs.readable.read-string input))
+          (match
+            text-result
+            (case (result.result.ok (bind text)) (do (io.println text)))
+            (case
+              (result.result.err (bind read-err))
+              (do (io.eprintln "failed to read file"))
+            )
+          )
+          (fs.closeable.close input)
+        )
+      )
+      (case
+        (result.result.err (bind open-err))
+        (do (io.eprintln "failed to open file for reading"))
+      )
+    )
+  )
+)

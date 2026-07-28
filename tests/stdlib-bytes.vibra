@@ -1,103 +1,58 @@
-=comment: Bytes never decode lossily and all indexing/search offsets are bytes.
-test:
-  $import: ../stdlib/src/test.vibra
-bytes:
-  $import: ../stdlib/src/bytes.vibra
-option:
-  $import: ../stdlib/src/option.vibra
-result:
-  $import: ../stdlib/src/result.vibra
-utf8-round-trip-and-byte-lookup:
-  $test: core
-  do:
-  - $let:
-      encoded:
-        $bytes.bytes.from-str: aé
-  - $test.assert-eq-int:
-      actual:
-        $bytes.bytes.len: $encoded
-      expected: 3
-  - $let:
-      byte:
-        $bytes.bytes.get: $encoded
-        index: 1
-  - $match: $byte
-    when:
-    - case:
-        $option.option.some: 195
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: byte lookup failed
-  - $let:
-      decoded:
-        $bytes.bytes.decode-utf8: $encoded
-  - $match: $decoded
-    when:
-    - case:
-        $result.result.ok: aé
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: UTF-8 round trip failed
-concat-search-and-invalid-utf8:
-  $test: core
-  do:
-  - $let:
-      left:
-        $bytes.bytes.from-str: abc
-  - $let:
-      right:
-        $bytes.bytes.from-str: dé
-  - $let:
-      joined:
-        $bytes.bytes.concat: $left
-        other: $right
-  - $match: $joined
-    when:
-    - case:
-        $result.result.ok:
-          $bind: combined
-      do:
-      - $let:
-          found:
-            $bytes.bytes.find: $combined
-            needle: $right
-      - $match: $found
-        when:
-        - case:
-            $option.option.some: 3
-          do:
-          - $test.assert: true
-        - case:
-            $wildcard: null
-          do:
-          - $test.fail: byte search failed
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: byte concat failed
-  - $let:
-      raw:
-        $cast:
-          $array:
-          - 255
-        into: $bytes.bytes
-  - $let:
-      invalid:
-        $bytes.bytes.decode-utf8: $raw
-  - $match: $invalid
-    when:
-    - case:
-        $result.result.err:
-          $bytes.bytes-error.invalid-utf8: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: malformed UTF-8 was not rejected
+(import test "../stdlib/src/test.vibra")
+(import bytes "../stdlib/src/bytes.vibra")
+(import option "../stdlib/src/option.vibra")
+(import result "../stdlib/src/result.vibra")
+(test
+  utf8-round-trip-and-byte-lookup
+  core
+  (do
+    (let encoded (bytes.bytes.from-str "aé"))
+    (test.assert-eq-int (bytes.bytes.len encoded) 3)
+    (let byte (bytes.bytes.get encoded 1))
+    (match
+      byte
+      (case (option.option.some 195) (do (test.assert true)))
+      (case _ (do (test.fail "byte lookup failed")))
+    )
+    (let decoded (bytes.bytes.decode-utf8 encoded))
+    (match
+      decoded
+      (case (result.result.ok "aé") (do (test.assert true)))
+      (case _ (do (test.fail "UTF-8 round trip failed")))
+    )
+  )
+)
+(test
+  concat-search-and-invalid-utf8
+  core
+  (do
+    (let left (bytes.bytes.from-str "abc"))
+    (let right (bytes.bytes.from-str "dé"))
+    (let joined (bytes.bytes.concat left right))
+    (match
+      joined
+      (case
+        (result.result.ok (bind combined))
+        (do
+          (let found (bytes.bytes.find combined right))
+          (match
+            found
+            (case (option.option.some 3) (do (test.assert true)))
+            (case _ (do (test.fail "byte search failed")))
+          )
+        )
+      )
+      (case _ (do (test.fail "byte concat failed")))
+    )
+    (let raw (cast (array 255) bytes.bytes))
+    (let invalid (bytes.bytes.decode-utf8 raw))
+    (match
+      invalid
+      (case
+        (result.result.err (bytes.bytes-error.invalid-utf8))
+        (do (test.assert true))
+      )
+      (case _ (do (test.fail "malformed UTF-8 was not rejected")))
+    )
+  )
+)

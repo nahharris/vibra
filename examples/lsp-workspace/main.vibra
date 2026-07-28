@@ -1,9 +1,2 @@
-greeting:
-  $import: '@greeting/greet.vibra'
-
-main:
-  $function: $void
-  return: $void
-  do:
-    - $greeting.greet: null
-
+(import greeting "@greeting/greet.vibra")
+(fn main () void (do (greeting.greet)))

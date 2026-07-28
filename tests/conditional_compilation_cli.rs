@@ -17,14 +17,10 @@ fn write_project(root: &Path) -> PathBuf {
     )
     .unwrap();
     let entry = root.join("src/main.vibra");
-    std::fs::write(
-        &entry,
-        "main:\n  $function: $void\n  return: $void\n  do:\n    - $let:\n        value: 1\n",
-    )
-    .unwrap();
+    std::fs::write(&entry, "(fn main () void (do (let value 1)))\n").unwrap();
     std::fs::write(
         root.join("src/main.release.vibra"),
-        "enabled:\n  $function: $void\n  =doc: Enabled only in release mode\n  return: $void\n  do:\n    - $let:\n        value: 1\n",
+        "(fn enabled () void (do (let value 1)) doc: \"Enabled only in release mode\")\n",
     )
     .unwrap();
     entry
@@ -78,14 +74,10 @@ fn check_and_effects_compile_only_the_selected_parts() {
         "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
-    std::fs::write(
-        &entry,
-        "main:\n  $function: $void\n  return: $void\n  do:\n    - $let:\n        value: 1\n",
-    )
-    .unwrap();
+    std::fs::write(&entry, "(fn main () void (do (let value 1)))\n").unwrap();
     std::fs::write(
         root.path().join("src/main.broken.vibra"),
-        "missing:\n  $import: absent.vibra\n",
+        "(import missing \"absent.vibra\")\n",
     )
     .unwrap();
 

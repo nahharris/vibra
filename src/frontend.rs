@@ -63,11 +63,39 @@ const MAX_TEMPLATE_RENDERED_BYTES: usize = 16_777_216;
 const MAX_TEMPLATE_SECTION_DEPTH: usize = 64;
 
 pub fn load_surface_program(entry: &Path, flags: &CompilationFlags) -> Result<SurfaceProgram> {
-    let entry = canonical_module_path(entry)?;
-    let project = project_context::discover_project_import_context(&entry)?;
+    load_surface_program_multi_root(std::slice::from_ref(&entry.to_path_buf()), flags)
+}
+
+/// Like [`load_surface_program`] but seeds the transitive import graph from
+/// zero or more roots at once instead of a single canonical entry file.
+///
+/// `vibra exec`'s inline program is the motivating caller: its "entry" is a
+/// synthetic in-memory root assembled from `--import` flags, not a real
+/// `.vibra` file, so there is no single file to canonicalize as
+/// [`SurfaceProgram::entry`] -- the caller fills that field in separately.
+/// `entry` on the returned program is arbitrarily the first root (or the
+/// current directory if `roots` is empty) and carries no meaning for that
+/// caller; every other field (`modules`, `module_parts`, `embedded_files`,
+/// `imports`) is complete over the full union of the roots' transitive
+/// import graphs, exactly as [`load_surface_program`] would compute it for a
+/// single real entry.
+pub(crate) fn load_surface_program_multi_root(
+    roots: &[PathBuf],
+    flags: &CompilationFlags,
+) -> Result<SurfaceProgram> {
+    let mut canonical_roots = Vec::with_capacity(roots.len());
+    for root in roots {
+        canonical_roots.push(canonical_module_path(root)?);
+    }
+    let project = match canonical_roots.first() {
+        Some(root) => project_context::discover_project_import_context(root)?,
+        None => None,
+    };
     let mut modules = BTreeMap::new();
     let mut visiting = Vec::new();
-    load_recursive(&entry, project.as_ref(), flags, &mut modules, &mut visiting)?;
+    for root in &canonical_roots {
+        load_recursive(root, project.as_ref(), flags, &mut modules, &mut visiting)?;
+    }
     let imports = modules
         .iter()
         .map(|(path, module)| {
@@ -113,7 +141,10 @@ pub fn load_surface_program(entry: &Path, flags: &CompilationFlags) -> Result<Su
         })
         .collect();
     Ok(SurfaceProgram {
-        entry,
+        entry: canonical_roots
+            .first()
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from(".")),
         modules,
         module_parts,
         embedded_files,
@@ -514,12 +545,20 @@ fn load_typed_embed(
 }
 
 fn binary_compile_expr(bytes: Vec<u8>, span: syntax::Span, origin: Origin) -> Expr {
+    // Each byte narrows from the literal's inferred `int64` down to `uint8`.
+    // `$cast` (`ExprKind::Cast`) is scoped to newtype<->inner-type
+    // conversions only (`valid_cast_path`, `src/type_semantics.rs`); a raw
+    // primitive narrowing has no valid cast path and always fails with
+    // E-CAST-001. `$convert` (`ExprKind::Convert`) is the checked,
+    // non-trapping numeric conversion this actually needs -- every value
+    // here is a real `u8`, so it always stays in range and the fallback is
+    // never observed, but the form still requires one syntactically.
     Spanned {
         value: ExprKind::Array(
             bytes
                 .into_iter()
                 .map(|byte| Spanned {
-                    value: ExprKind::Cast {
+                    value: ExprKind::Convert {
                         value: Box::new(Spanned {
                             value: ExprKind::Literal(Literal::Int(i64::from(byte))),
                             span,
@@ -527,6 +566,11 @@ fn binary_compile_expr(bytes: Vec<u8>, span: syntax::Span, origin: Origin) -> Ex
                         }),
                         into: Spanned {
                             value: TypeExprKind::Named("uint8".to_string()),
+                            span,
+                            origin: origin.clone(),
+                        },
+                        fallback: Spanned {
+                            value: Literal::Int(0),
                             span,
                             origin: origin.clone(),
                         },
@@ -1377,7 +1421,12 @@ fn validate_reference_alias(
     )
 }
 
-fn module_self_alias(path: &Path) -> Option<String> {
+/// A module's own bare name for self-qualified references (e.g.
+/// `option.vibra` calling `option.empty`). Shared with
+/// `crate::load::convert_surface_program`, which needs the exact same
+/// derivation when it resolves a module's own signatures under its self
+/// alias for `crate::surface_adapter::resolve_signatures`.
+pub(crate) fn module_self_alias(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_str()?;
     Some(
         file_name
@@ -1587,16 +1636,23 @@ mod tests {
         ));
         assert!(matches!(values[2].value, ExprKind::Record(_)));
         assert!(matches!(values[3].value, ExprKind::Record(_)));
+        // Each embedded byte narrows `int64` -> `uint8` with `Convert`, the
+        // checked numeric conversion. It was `Cast` until a binary embed was
+        // actually compiled: `Cast` is scoped to newtype<->inner-type
+        // conversions, so a raw primitive narrowing has no valid cast path and
+        // always failed `E-CAST-001`.
         assert!(matches!(
             values[4].value,
             ExprKind::Array(ref values)
                 if matches!(
                     values[2].value,
-                    ExprKind::Cast {
+                    ExprKind::Convert {
                         ref value,
                         ref into,
+                        ref fallback,
                     } if matches!(value.value, ExprKind::Literal(Literal::Int(255)))
                         && matches!(into.value, TypeExprKind::Named(ref name) if name == "uint8")
+                        && matches!(fallback.value, Literal::Int(0))
                 )
         ));
         assert!(

@@ -1,92 +1,69 @@
-test:
-  $import: ../stdlib/src/test.vibra
-signal:
-  $enum:
-    stop: $void
-    go: $int64
-opt:
-  $enum:
-    none: $void
-    some: $str
-construct-and-match-payload:
-  $test: core
-  do:
-    - $let:
-        s:
-          $signal.go: 3
-    - $match: $s
-      when:
-      - case:
-          $signal.go:
-            $bind: speed
-        do:
-        - $match: $speed
-          when:
-          - case: 3
-            do:
-            - $test.assert: true
-          - case:
-              $wildcard: null
-            do:
-            - $test.fail: wrong payload
-      - case:
-          $signal.stop: null
-        do:
-        - $test.fail: expected go
-void-variant-constructor:
-  $test: core
-  do:
-    - $let:
-        s: $signal.stop
-    - $match: $s
-      when:
-      - case:
-          $signal.stop: null
-        do:
-        - $test.assert: true
-      - case:
-          $signal.go:
-            $bind: _speed
-        do:
-        - $test.fail: expected stop
-option-like-some:
-  $test: core
-  do:
-    - $let:
-        v:
-          $opt.some: hi
-    - $match: $v
-      when:
-      - case:
-          $opt.some:
-            $bind: text
-        do:
-        - $match: $text
-          when:
-          - case: hi
-            do:
-            - $test.assert: true
-          - case:
-              $wildcard: null
-            do:
-            - $test.fail: wrong text
-      - case:
-          $opt.none: null
-        do:
-        - $test.fail: expected some
-option-like-none:
-  $test: core
-  do:
-    - $let:
-        v: $opt.none
-    - $match: $v
-      when:
-      - case:
-          $opt.some:
-            $bind: _text
-        do:
-        - $test.fail: expected none
-      - case:
-          $opt.none: null
-        do:
-        - $test.assert: true
+(import test "../stdlib/src/test.vibra")
+(def signal (enum (stop void) (go int64)))
+(def opt (enum (none void) (some str)))
+(test
+  construct-and-match-payload
+  core
+  (do
+    (let s (signal.go 3))
+    (match
+      s
+      (case
+        (signal.go (bind speed))
+        (do
+          (match
+            speed
+            (case 3 (do (test.assert true)))
+            (case _ (do (test.fail "wrong payload")))
+          )
+        )
+      )
+      (case (signal.stop) (do (test.fail "expected go")))
+    )
+  )
+)
+(test
+  void-variant-constructor
+  core
+  (do
+    (let s signal.stop)
+    (match
+      s
+      (case (signal.stop) (do (test.assert true)))
+      (case (signal.go _) (do (test.fail "expected stop")))
+    )
+  )
+)
+(test
+  option-like-some
+  core
+  (do
+    (let v (opt.some "hi"))
+    (match
+      v
+      (case
+        (opt.some (bind text))
+        (do
+          (match
+            text
+            (case "hi" (do (test.assert true)))
+            (case _ (do (test.fail "wrong text")))
+          )
+        )
+      )
+      (case (opt.none) (do (test.fail "expected some")))
+    )
+  )
+)
+(test
+  option-like-none
+  core
+  (do
+    (let v opt.none)
+    (match
+      v
+      (case (opt.some _) (do (test.fail "expected none")))
+      (case (opt.none) (do (test.assert true)))
+    )
+  )
+)

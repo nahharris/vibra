@@ -138,8 +138,9 @@ impl Server {
                 )
             }
             "textDocument/formatting" => {
-                let (_uri, source) = self.source(params)?;
-                let formatted = crate::tooling::format_source(&source)?;
+                let (uri, source) = self.source(params)?;
+                let path = uri_path(&uri).unwrap_or_else(|| PathBuf::from("document.vibra"));
+                let formatted = crate::tooling::format_source(&path, &source)?;
                 if formatted == source {
                     return Ok(json!([]));
                 }

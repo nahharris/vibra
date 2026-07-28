@@ -1,85 +1,34 @@
-test:
-  $import: ../stdlib/src/test.vibra
-time:
-  $import: ../stdlib/src/time.vibra
-random:
-  $import: ../stdlib/src/random.vibra
-sys:
-  $import: ../stdlib/src/sys.vibra
-accepts-unix-millis:
-  $function:
-    value: $uint64
-  return: $bool
-  do:
-  - $return: true
-accepts-system-info:
-  $function:
-    value: $str
-  return: $bool
-  do:
-  - $return: true
-privileged-stdlib-operations-return-their-declared-shapes:
-  $test: system
-  tags:
-  - stdlib
-  - capability
-  policy:
-    $policy:
-      clock:
-      - requirement: mandatory
-        scopes: any
-      random:
-      - requirement: mandatory
-        scopes: any
-      system-info:
-      - requirement: mandatory
-        scopes: any
-  do:
-  - $let:
-      clock-capability:
-        $policy.narrow: $args.policy
-        into: $time.capability
-  - $let:
-      random-capability:
-        $policy.narrow: $args.policy
-        into: $random.capability
-  - $let:
-      system-capability:
-        $policy.narrow: $args.policy
-        into: $sys.capability
-  - $let:
-      now:
-        $time.now-unix-millis:
-          capability: $clock-capability
-  - $let:
-      is-millis:
-        $accepts-unix-millis: $now
-  - $test.assert: $is-millis
-  - $let:
-      bytes:
-        $random.bytes: 1
-        capability: $random-capability
-  - $let:
-      raw-bytes:
-        $cast: $bytes
-        into:
-          $array: $uint8
-  - $match: $raw-bytes
-    when:
-    - case:
-        $array:
-        - $wildcard: null
-      do:
-      - $test.assert: true
-    - case:
-        $wildcard: null
-      do:
-      - $test.fail: random bytes returned the wrong length
-  - $let:
-      info:
-        $sys.info:
-          capability: $system-capability
-  - $let:
-      is-info:
-        $accepts-system-info: $info
-  - $test.assert: $is-info
+(import test "../stdlib/src/test.vibra")
+(import time "../stdlib/src/time.vibra")
+(import random "../stdlib/src/random.vibra")
+(import sys "../stdlib/src/sys.vibra")
+(fn accepts-unix-millis ((value uint64)) bool (do (return true)))
+(fn accepts-system-info ((value str)) bool (do (return true)))
+(test
+  privileged-stdlib-operations-return-their-declared-shapes
+  system
+  (do
+    (let clock-capability (policy.narrow policy time.capability))
+    (let random-capability (policy.narrow policy random.capability))
+    (let system-capability (policy.narrow policy sys.capability))
+    (let now (time.now-unix-millis clock-capability))
+    (let is-millis (accepts-unix-millis now))
+    (test.assert is-millis)
+    (let bytes (random.bytes 1 random-capability))
+    (let raw-bytes (cast bytes (array uint8)))
+    (match
+      raw-bytes
+      (case (array _) (do (test.assert true)))
+      (case _ (do (test.fail "random bytes returned the wrong length")))
+    )
+    (let info (sys.info system-capability))
+    (let is-info (accepts-system-info info))
+    (test.assert is-info)
+  )
+  tags: (stdlib capability)
+  policy: (policy
+    (clock (group requirement: mandatory scopes: ((any))))
+    (random (group requirement: mandatory scopes: ((any))))
+    (system-info (group requirement: mandatory scopes: ((any))))
+  )
+)

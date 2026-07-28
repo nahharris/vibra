@@ -1,71 +1,49 @@
-test:
-  $import: ../stdlib/src/test.vibra
-bool-literal:
-  $test: core
-  do:
-    - $test.assert: true
-bound-bool:
-  $test: core
-  do:
-    - $let:
-        flag: true
-    - $test.assert: $flag
-int-literal:
-  $test: core
-  do:
-    - $let:
-        n: 7
-    - $match: $n
-      when:
-      - case: 7
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected 7
-float-literal:
-  $test: core
-  do:
-    - $let:
-        x: 1.5
-    - $match: $x
-      when:
-      - case: 1.5
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected 1.5
-string-literal:
-  $test: core
-  do:
-    - $let:
-        s: hello
-    - $match: $s
-      when:
-      - case: hello
-        do:
-        - $test.assert: true
-      - case:
-          $wildcard: null
-        do:
-        - $test.fail: expected hello
-match-arm-binding-does-not-leak:
-  $test: core
-  do:
-    - $let:
-        outer: true
-    - $let:
-        subject: 1
-    - $match: $subject
-      when:
-      - case: 1
-        do:
-        - $let:
-            outer: false
-      - case:
-          $wildcard: null
-        do: []
-    - $test.assert: $outer
+(import test "../stdlib/src/test.vibra")
+(test bool-literal core (do (test.assert true)))
+(test bound-bool core (do (let flag true) (test.assert flag)))
+(test
+  int-literal
+  core
+  (do
+    (let n 7)
+    (match
+      n
+      (case 7 (do (test.assert true)))
+      (case _ (do (test.fail "expected 7")))
+    )
+  )
+)
+(test
+  float-literal
+  core
+  (do
+    (let x 1.5)
+    (match
+      x
+      (case 1.5 (do (test.assert true)))
+      (case _ (do (test.fail "expected 1.5")))
+    )
+  )
+)
+(test
+  string-literal
+  core
+  (do
+    (let s "hello")
+    (match
+      s
+      (case "hello" (do (test.assert true)))
+      (case _ (do (test.fail "expected hello")))
+    )
+  )
+)
+(test
+  match-arm-binding-does-not-leak
+  core
+  (do
+    (let outer true)
+    (let subject 1)
+    (match subject (case 1 (do (let outer false))) (case _ (do)))
+    (test.assert outer)
+  )
+)
