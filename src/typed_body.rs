@@ -14,9 +14,7 @@ use crate::lower::{
     EnumDef, Expr, FunctionBody, FunctionSig, ImplKey, ImplMethodBinding, ImportTarget, LetValue,
     MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef, WasmArgSpec,
 };
-use crate::type_semantics::{
-    capability_body, policy_body, policy_type_is_subset, substitute_type, type_compatible,
-};
+use crate::type_semantics::{substitute_type, type_compatible};
 use crate::typed_lower::{
     lower_type, named_application, qualify, unqualify, TypedFunctionSignature, TypedModuleInput,
     TypedSignatureIndex,
@@ -331,9 +329,7 @@ pub fn materialize_typed_functions(
 ///
 /// Mirrors `lower_function` followed by the `FunctionBody::User` arm of
 /// `materialize_typed_functions`, but for a `$test`, which has no signature
-/// of its own: its only possible parameter is the single `args.policy` local
-/// a `policy:` label seeds, matching legacy `lower_single_test_body`
-/// (`src/lower.rs`). Does not touch `lower_typed_bodies` or
+/// of its own and no parameters. Does not touch `lower_typed_bodies` or
 /// `materialize_typed_functions`, so it cannot regress the corpus tiers they
 /// are measured against.
 pub(crate) fn materialize_typed_test(
@@ -344,20 +340,7 @@ pub(crate) fn materialize_typed_test(
     test: &crate::ast::Test,
 ) -> Result<(Vec<Statement>, Vec<(String, TypeRef)>)> {
     let mut static_types: HashMap<String, TypeRef> = HashMap::new();
-    let mut arg_bindings: Vec<(String, TypeRef)> = Vec::new();
-    for meta in &test.metadata {
-        if let crate::ast::TestMeta::Policy(policy_expr) = meta {
-            let ty = lower_type(
-                policy_expr,
-                &BTreeSet::new(),
-                module_alias,
-                declared_aliases,
-            )
-            .with_context(|| format!("lowering typed test `{}` policy", test.name.value))?;
-            static_types.insert("args.policy".to_string(), ty.clone());
-            arg_bindings.push(("args.policy".to_string(), ty));
-        }
-    }
+    let arg_bindings: Vec<(String, TypeRef)> = Vec::new();
     extend_static_local_types(
         &test.body,
         module_alias,
@@ -390,7 +373,7 @@ pub(crate) fn materialize_typed_test(
     let mut origins = OriginCursor::new(&node_origins);
     // Unlike a function, whose starting `locals` are exactly its declared
     // parameters, a test's starting locals are exactly its `arg_bindings`
-    // (policy only, if any) -- `static_types` above is a superset used only
+    // (always empty today) -- `static_types` above is a superset used only
     // for the static interface-dispatch pre-pass and must not leak into the
     // real type-check.
     let mut locals: HashMap<String, TypeRef> = arg_bindings.iter().cloned().collect();
@@ -424,7 +407,7 @@ pub(crate) fn materialize_typed_test(
 /// Validate a `$wasm`-only typed body against the versioned host ABI
 /// registry. Delegates to `crate::lower::validate_wasm_bodies`, the exact
 /// legacy YAML-path check (`E-WASM-002`/`E-WASM-003`/`E-WASM-004`/
-/// `E-WASM-007`/`E-CAP-002`), against a single-entry signature map built for
+/// `E-WASM-007`), against a single-entry signature map built for
 /// this function alone -- this is a trust boundary (host imports call out to
 /// the runtime), so it must reuse the strict legacy rule rather than a
 /// best-effort typed re-derivation.
@@ -1148,17 +1131,6 @@ fn validate_expr(
             }
         }
         Expr::Cast { .. } => bail!("typed cast forms remain staged"),
-        Expr::PolicyNarrow { from, target } => {
-            let from = validate_expr(from, locals, constants, signatures, context, origins)?;
-            let source = infer(&from, locals, constants, signatures, context)?;
-            if !policy_type_is_subset(&source, target, &signatures.aliases) {
-                bail!("policy narrowing cannot widen authority");
-            }
-            Expr::PolicyNarrow {
-                from: Box::new(from),
-                target: target.clone(),
-            }
-        }
         Expr::If {
             cond,
             then_e,
@@ -1473,7 +1445,6 @@ fn collect_body_metadata(
             | ExprKind::Mutable(value)
             | ExprKind::ReferenceOf(value)
             | ExprKind::Cast { value, .. }
-            | ExprKind::PolicyNarrow { value, .. }
             | ExprKind::Convert { value, .. } => collect_body_metadata(
                 std::slice::from_ref(value.as_ref()),
                 module_alias,
@@ -1666,10 +1637,9 @@ fn collect_expr_children(expression: &AstExpr, origins: &mut Vec<Origin>) {
                 collect_expr_origin(value, origins);
             }
         }
-        ExprKind::Mutable(value)
-        | ExprKind::ReferenceOf(value)
-        | ExprKind::Cast { value, .. }
-        | ExprKind::PolicyNarrow { value, .. } => collect_expr_origin(value, origins),
+        ExprKind::Mutable(value) | ExprKind::ReferenceOf(value) | ExprKind::Cast { value, .. } => {
+            collect_expr_origin(value, origins)
+        }
         // `convert` lowers to `Expr::Primitive { args: [source, fallback], .. }`;
         // `validate_expr`'s dedicated Convert arm recurses into both, so both
         // need an origin -- the source's full subtree, and the fallback's
@@ -2016,32 +1986,6 @@ fn lower_expr(
             from: Box::new(lower(value)?),
             target: lower_type(into, generics, module_alias, declared_aliases)?,
         },
-        ExprKind::PolicyNarrow { value, into } => {
-            let target = lower_type(into, generics, module_alias, declared_aliases)?;
-            let from = Box::new(lower(value)?);
-            // `policy.narrow` is its own head, distinct from `cast`: a
-            // capability/policy target needs subsumption checking
-            // (`policy_type_is_subset`) instead of the newtype-cast rule
-            // (`valid_cast_path`), so it must not be silently inferred from
-            // the target type of an otherwise-ordinary `cast`. Normalize a
-            // named alias down to the concrete `Capability`/`Policy` variant
-            // here, matching the legacy `$policy.narrow` envelope.
-            if let Some(capability) = capability_body(&target, &signatures.aliases).cloned() {
-                Expr::PolicyNarrow {
-                    from,
-                    target: TypeRef::Capability(capability),
-                }
-            } else if let Some(policy) = policy_body(&target, &signatures.aliases).cloned() {
-                Expr::PolicyNarrow {
-                    from,
-                    target: TypeRef::Policy(policy),
-                }
-            } else {
-                bail!(
-                    "typed `policy.narrow` target must be a capability or policy type, got {target:?}"
-                );
-            }
-        }
         ExprKind::Convert {
             value,
             into,
@@ -2476,9 +2420,7 @@ fn static_expr_type(
                 .get(&key)
                 .map(|sig| sig.return_type.clone())
         }
-        ExprKind::Cast { into, .. } | ExprKind::PolicyNarrow { into, .. } => {
-            lower_type(into, generics, module_alias, declared_aliases).ok()
-        }
+        ExprKind::Cast { into, .. } => lower_type(into, generics, module_alias, declared_aliases).ok(),
         _ => None,
     }
 }
@@ -4061,165 +4003,6 @@ mod tests {
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
         let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
         assert!(error.contains("single value"), "{error}");
-    }
-
-    // ---- Expr::PolicyNarrow ----
-    //
-    // A policy-typed value can only ever exist as a function parameter, and
-    // `ensure_safe_type` does not yet admit `TypeRef::Policy` at the function
-    // signature boundary (that remains staged, same as capabilities,
-    // interfaces, and enums as return/arg types). These tests therefore call
-    // the private lowering/validation functions directly with a hand-built
-    // `locals` map, exercising the same code the full pipeline would run
-    // once a policy-typed value can legally reach a typed function body.
-
-    #[test]
-    fn policy_narrow_lowers_as_its_own_head_and_accepts_a_covering_narrow() {
-        let source = module(
-            "(fn narrow () bool (do (return (policy.narrow subject (capability fs-read)))))",
-        );
-        let inputs = [TypedModuleInput {
-            alias: "",
-            module: &source,
-        }];
-        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
-        let TopLevel::Function(function) = &source.forms[0] else {
-            panic!("expected function");
-        };
-        let ExprKind::Return(Some(narrow_expr)) = &function.body[0].value else {
-            panic!("expected return");
-        };
-        let lowered = lower_expr(
-            "",
-            narrow_expr,
-            &signatures,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            &HashMap::new(),
-        )
-        .unwrap();
-        let Expr::PolicyNarrow { target, .. } = &lowered else {
-            panic!("expected policy-narrow, got {lowered:?}");
-        };
-        assert!(matches!(target, TypeRef::Capability(_)), "{target:?}");
-
-        let mut locals = HashMap::new();
-        locals.insert(
-            "subject".to_string(),
-            TypeRef::Policy(crate::lower::PolicyType {
-                domains: BTreeMap::from([(crate::lower::CapabilityDomain::FsRead, Vec::new())]),
-            }),
-        );
-        let constants = HashMap::new();
-        let mut node_origins = Vec::new();
-        collect_expr_origin(narrow_expr, &mut node_origins);
-        let mut origins = OriginCursor::new(&node_origins);
-        let validated = validate_expr(
-            &lowered,
-            &locals,
-            &constants,
-            &signatures,
-            "narrow",
-            &mut origins,
-        )
-        .unwrap();
-        origins.finish().unwrap();
-        assert!(matches!(validated, Expr::PolicyNarrow { .. }));
-    }
-
-    #[test]
-    fn policy_narrow_rejects_widening_authority() {
-        let source = module(
-            "(fn narrow () bool (do (return (policy.narrow subject (capability net-connect)))))",
-        );
-        let inputs = [TypedModuleInput {
-            alias: "",
-            module: &source,
-        }];
-        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
-        let TopLevel::Function(function) = &source.forms[0] else {
-            panic!("expected function");
-        };
-        let ExprKind::Return(Some(narrow_expr)) = &function.body[0].value else {
-            panic!("expected return");
-        };
-        let lowered = lower_expr(
-            "",
-            narrow_expr,
-            &signatures,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            &HashMap::new(),
-        )
-        .unwrap();
-
-        let mut locals = HashMap::new();
-        // `subject` only ever carried `fs-read` authority; narrowing into
-        // `net-connect` must not be allowed.
-        locals.insert(
-            "subject".to_string(),
-            TypeRef::Policy(crate::lower::PolicyType {
-                domains: BTreeMap::from([(crate::lower::CapabilityDomain::FsRead, Vec::new())]),
-            }),
-        );
-        let constants = HashMap::new();
-        let mut node_origins = Vec::new();
-        collect_expr_origin(narrow_expr, &mut node_origins);
-        let mut origins = OriginCursor::new(&node_origins);
-        let error = format!(
-            "{:#}",
-            validate_expr(
-                &lowered,
-                &locals,
-                &constants,
-                &signatures,
-                "narrow",
-                &mut origins,
-            )
-            .unwrap_err()
-        );
-        assert!(error.contains("cannot widen authority"), "{error}");
-    }
-
-    #[test]
-    fn policy_narrow_on_a_non_policy_target_is_a_distinct_diagnostic() {
-        // `policy.narrow` is a distinct head from `cast` precisely so a
-        // narrow into a non-policy type stays honest: it must not silently
-        // succeed as an ordinary cast, nor be misreported as a widening
-        // failure -- it is a shape error on the target type itself.
-        let source = module("(fn bad () int64 (do (return (policy.narrow subject int64))))");
-        let inputs = [TypedModuleInput {
-            alias: "",
-            module: &source,
-        }];
-        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
-        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
-        assert!(
-            error.contains("must be a capability or policy type"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn cast_to_a_capability_type_is_not_silently_reinterpreted_as_policy_narrow() {
-        // Regression guard: `cast` must stay a plain cast even when its
-        // target happens to be a capability/policy type. Only the explicit
-        // `policy.narrow` head performs subsumption checking. `cast`
-        // remains staged, so this must fail as a (still-staged) cast, not
-        // succeed as an implicit narrow.
-        let source = module("(fn bad () bool (do (return (cast subject (capability fs-read)))))");
-        let inputs = [TypedModuleInput {
-            alias: "",
-            module: &source,
-        }];
-        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
-        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
-        let FunctionBody::User { statements } = &bodies.functions["bad"] else {
-            panic!("expected user body");
-        };
-        let Statement::Return(Expr::Cast { .. }) = &statements[0] else {
-            panic!("expected a plain cast, got {:?}", statements[0]);
-        };
     }
 
     // ---- Statement::Spawn / Statement::Join ----

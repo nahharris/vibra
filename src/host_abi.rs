@@ -1,29 +1,12 @@
 //! The versioned host ABI registry: the single source of truth for every host
 //! import a `$wasm` body may target.
 //!
-//! Each entry declares the import's parameter shape — including which
-//! positions are *capability parameters* and which policy domains those
-//! capabilities must cover — plus the capability domains the import requires
-//! overall. Lowering validates every `$wasm` body against this registry
-//! (`E-WASM-002`, `E-WASM-003`, `E-CAP-002`) and the runtime dispatches
-//! strictly on `(module, name)`, so declaring a `$wasm` wrapper confers no
-//! authority by itself: privileged imports are only callable with a genuine
-//! `$policy` value covering their domains.
+//! Each entry declares the import's parameter shape. Lowering validates every
+//! `$wasm` body against this registry (`E-WASM-002`, `E-WASM-003`) and the
+//! runtime dispatches strictly on `(module, name)`.
 //!
 //! The registry is exported as a machine-readable document in
 //! `schemas/host-abi.json`; a test asserts the two stay in sync.
-
-use crate::lower::CapabilityDomain;
-
-/// Shape of one host-import parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParamKind {
-    /// An ordinary data value (string, integer, handle, structural form, ...).
-    Value(ValueKind),
-    /// A capability position: must be fed by a `$policy`-typed wrapper
-    /// argument whose declared domains cover every listed domain.
-    Capability(&'static [CapabilityDomain]),
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueKind {
@@ -68,26 +51,8 @@ pub enum ValueKind {
 pub struct HostImport {
     pub module: &'static str,
     pub name: &'static str,
-    pub params: &'static [ParamKind],
+    pub params: &'static [ValueKind],
     pub result: ValueKind,
-}
-
-impl HostImport {
-    /// The capability domains this import requires (union over capability
-    /// parameters). Empty for pure/baseline imports.
-    pub fn required_domains(&self) -> Vec<CapabilityDomain> {
-        let mut out = Vec::new();
-        for param in self.params {
-            if let ParamKind::Capability(domains) = param {
-                for domain in *domains {
-                    if !out.contains(domain) {
-                        out.push(*domain);
-                    }
-                }
-            }
-        }
-        out
-    }
 }
 
 impl ValueKind {
@@ -131,41 +96,28 @@ impl ValueKind {
     }
 }
 
-const BOOL: ParamKind = ParamKind::Value(ValueKind::Bool);
-const I64: ParamKind = ParamKind::Value(ValueKind::Int64);
-const U64: ParamKind = ParamKind::Value(ValueKind::UInt64);
-const DURATION: ParamKind = ParamKind::Value(ValueKind::Duration);
-const INSTANT: ParamKind = ParamKind::Value(ValueKind::Instant);
-const NET_ADDRESS: ParamKind = ParamKind::Value(ValueKind::NetAddress);
-const TCP_STREAM: ParamKind = ParamKind::Value(ValueKind::TcpStream);
-const TCP_LISTENER: ParamKind = ParamKind::Value(ValueKind::TcpListener);
-const UDP_SOCKET: ParamKind = ParamKind::Value(ValueKind::UdpSocket);
-const F64: ParamKind = ParamKind::Value(ValueKind::Float64);
-const STR: ParamKind = ParamKind::Value(ValueKind::Str);
-const BYTES: ParamKind = ParamKind::Value(ValueKind::Bytes);
-const PATH: ParamKind = ParamKind::Value(ValueKind::Path);
-const READ_HANDLE: ParamKind = ParamKind::Value(ValueKind::ReadHandle);
-const WRITE_HANDLE: ParamKind = ParamKind::Value(ValueKind::WriteHandle);
-const PROCESS_HANDLE: ParamKind = ParamKind::Value(ValueKind::ProcessHandle);
-const ANY_HANDLE: ParamKind = ParamKind::Value(ValueKind::AnyHandle);
-
-macro_rules! cap {
-    ($($domain:ident),+) => {
-        ParamKind::Capability(&[$(CapabilityDomain::$domain),+])
-    };
-}
+const BOOL: ValueKind = ValueKind::Bool;
+const I64: ValueKind = ValueKind::Int64;
+const U64: ValueKind = ValueKind::UInt64;
+const DURATION: ValueKind = ValueKind::Duration;
+const INSTANT: ValueKind = ValueKind::Instant;
+const NET_ADDRESS: ValueKind = ValueKind::NetAddress;
+const TCP_STREAM: ValueKind = ValueKind::TcpStream;
+const TCP_LISTENER: ValueKind = ValueKind::TcpListener;
+const UDP_SOCKET: ValueKind = ValueKind::UdpSocket;
+const F64: ValueKind = ValueKind::Float64;
+const STR: ValueKind = ValueKind::Str;
+const BYTES: ValueKind = ValueKind::Bytes;
+const PATH: ValueKind = ValueKind::Path;
+const READ_HANDLE: ValueKind = ValueKind::ReadHandle;
+const WRITE_HANDLE: ValueKind = ValueKind::WriteHandle;
+const PROCESS_HANDLE: ValueKind = ValueKind::ProcessHandle;
+const ANY_HANDLE: ValueKind = ValueKind::AnyHandle;
 
 /// The complete host ABI: every import a `$wasm` body may bind.
 pub const HOST_ABI: &[HostImport] = &[
-    // vibra_v1: standard streams and handle IO. Handle-consuming imports need
-    // no capability parameter: the handle itself is the authority, minted by
-    // a capability-checked open.
-    entry(
-        "vibra_v1",
-        "stdin_open",
-        &[cap!(StdinRead)],
-        ValueKind::ReadHandle,
-    ),
+    // vibra_v1: standard streams and handle IO.
+    entry("vibra_v1", "stdin_open", &[], ValueKind::ReadHandle),
     entry("vibra_v1", "stdout_open", &[], ValueKind::WriteHandle),
     entry("vibra_v1", "stderr_open", &[], ValueKind::WriteHandle),
     entry("vibra_v1", "fd_read", &[READ_HANDLE], ValueKind::ResultStr),
@@ -244,7 +196,7 @@ pub const HOST_ABI: &[HostImport] = &[
     entry(
         "vibra_v1",
         "bytes_from_array",
-        &[ParamKind::Value(ValueKind::Array)],
+        &[ValueKind::Array],
         ValueKind::ResultAny,
     ),
     entry(
@@ -279,7 +231,7 @@ pub const HOST_ABI: &[HostImport] = &[
     entry(
         "vibra_v1",
         "str_join",
-        &[ParamKind::Value(ValueKind::Array), STR],
+        &[ValueKind::Array, STR],
         ValueKind::ResultAny,
     ),
     entry("vibra_v1", "str_lowercase", &[STR], ValueKind::ResultAny),
@@ -298,250 +250,187 @@ pub const HOST_ABI: &[HostImport] = &[
     entry(
         "vibra_v1",
         "array_len",
-        &[ParamKind::Value(ValueKind::Array)],
+        &[ValueKind::Array],
         ValueKind::UInt64,
     ),
     entry(
         "vibra_v1",
         "array_get",
-        &[ParamKind::Value(ValueKind::Array), U64],
+        &[ValueKind::Array, U64],
         ValueKind::OptionAny,
     ),
     entry(
         "vibra_v1",
         "array_set",
-        &[
-            ParamKind::Value(ValueKind::Array),
-            U64,
-            ParamKind::Value(ValueKind::Any),
-        ],
+        &[ValueKind::Array, U64, ValueKind::Any],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "array_slice",
-        &[ParamKind::Value(ValueKind::Array), U64, U64],
+        &[ValueKind::Array, U64, U64],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "array_append",
-        &[
-            ParamKind::Value(ValueKind::Array),
-            ParamKind::Value(ValueKind::Any),
-        ],
+        &[ValueKind::Array, ValueKind::Any],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "array_insert",
-        &[
-            ParamKind::Value(ValueKind::Array),
-            U64,
-            ParamKind::Value(ValueKind::Any),
-        ],
+        &[ValueKind::Array, U64, ValueKind::Any],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "array_remove",
-        &[ParamKind::Value(ValueKind::Array), U64],
+        &[ValueKind::Array, U64],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "array_contains",
-        &[
-            ParamKind::Value(ValueKind::Array),
-            ParamKind::Value(ValueKind::Any),
-        ],
+        &[ValueKind::Array, ValueKind::Any],
         ValueKind::Bool,
     ),
     entry(
         "vibra_v1",
         "map_len",
-        &[ParamKind::Value(ValueKind::StringMap)],
+        &[ValueKind::StringMap],
         ValueKind::UInt64,
     ),
     entry(
         "vibra_v1",
         "map_get",
-        &[ParamKind::Value(ValueKind::StringMap), STR],
+        &[ValueKind::StringMap, STR],
         ValueKind::OptionAny,
     ),
     entry(
         "vibra_v1",
         "map_insert",
-        &[
-            ParamKind::Value(ValueKind::StringMap),
-            STR,
-            ParamKind::Value(ValueKind::Any),
-        ],
+        &[ValueKind::StringMap, STR, ValueKind::Any],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "map_remove",
-        &[ParamKind::Value(ValueKind::StringMap), STR],
+        &[ValueKind::StringMap, STR],
         ValueKind::OptionAny,
     ),
     entry(
         "vibra_v1",
         "map_contains_key",
-        &[ParamKind::Value(ValueKind::StringMap), STR],
+        &[ValueKind::StringMap, STR],
         ValueKind::Bool,
     ),
     // vibra_v1: filesystem.
     entry(
         "vibra_v1",
         "fs_open_read",
-        &[PATH, cap!(FsRead)],
+        &[PATH],
         ValueKind::ResultReadHandle,
     ),
     entry(
         "vibra_v1",
         "fs_open_write",
-        &[PATH, cap!(FsWrite)],
+        &[PATH],
         ValueKind::ResultWriteHandle,
     ),
     entry(
         "vibra_v1",
         "fs_open_write_options",
-        &[PATH, BOOL, BOOL, BOOL, cap!(FsWrite)],
+        &[PATH, BOOL, BOOL, BOOL],
         ValueKind::ResultWriteHandle,
     ),
     entry(
         "vibra_v1",
         "fs_open_append",
-        &[PATH, cap!(FsWrite)],
+        &[PATH],
         ValueKind::ResultWriteHandle,
     ),
     entry(
         "vibra_v1",
         "fs_open_read_write",
-        &[PATH, cap!(FsRead), cap!(FsWrite)],
+        &[PATH],
         ValueKind::ResultReadHandle,
     ),
     entry(
         "vibra_v1",
         "fs_read_to_string",
-        &[PATH, cap!(FsRead)],
+        &[PATH],
         ValueKind::ResultStr,
     ),
     entry(
         "vibra_v1",
         "fs_write_string_all",
-        &[PATH, STR, cap!(FsWrite)],
+        &[PATH, STR],
         ValueKind::ResultVoid,
     ),
     entry(
         "vibra_v1",
         "fs_append_string",
-        &[PATH, STR, cap!(FsWrite)],
+        &[PATH, STR],
         ValueKind::ResultVoid,
     ),
-    entry(
-        "vibra_v1",
-        "fs_exists",
-        &[PATH, cap!(FsRead)],
-        ValueKind::Bool,
-    ),
+    entry("vibra_v1", "fs_exists", &[PATH], ValueKind::Bool),
     entry(
         "vibra_v1",
         "fs_create_dir_all",
-        &[PATH, cap!(FsWrite)],
+        &[PATH],
         ValueKind::ResultVoid,
     ),
     entry(
         "vibra_v1",
         "fs_remove_file",
-        &[PATH, cap!(FsWrite)],
+        &[PATH],
         ValueKind::ResultVoid,
     ),
-    entry(
-        "vibra_v1",
-        "fs_remove_dir",
-        &[PATH, cap!(FsWrite)],
-        ValueKind::ResultVoid,
-    ),
-    entry(
-        "vibra_v1",
-        "fs_read_dir",
-        &[PATH, cap!(FsRead)],
-        ValueKind::ResultPaths,
-    ),
+    entry("vibra_v1", "fs_remove_dir", &[PATH], ValueKind::ResultVoid),
+    entry("vibra_v1", "fs_read_dir", &[PATH], ValueKind::ResultPaths),
     entry(
         "vibra_v1",
         "fs_read_dir_entries",
-        &[PATH, cap!(FsRead)],
+        &[PATH],
         ValueKind::ResultAny,
     ),
-    entry(
-        "vibra_v1",
-        "fs_metadata",
-        &[PATH, cap!(FsRead)],
-        ValueKind::ResultStr,
-    ),
+    entry("vibra_v1", "fs_metadata", &[PATH], ValueKind::ResultStr),
     entry(
         "vibra_v1",
         "fs_canonicalize",
-        &[PATH, cap!(FsRead)],
+        &[PATH],
         ValueKind::ResultPath,
     ),
     entry(
         "vibra_v1",
         "fs_rename",
-        &[PATH, PATH, cap!(FsWrite)],
+        &[PATH, PATH],
         ValueKind::ResultVoid,
     ),
-    entry(
-        "vibra_v1",
-        "fs_copy",
-        &[PATH, PATH, cap!(FsRead), cap!(FsWrite)],
-        ValueKind::ResultVoid,
-    ),
+    entry("vibra_v1", "fs_copy", &[PATH, PATH], ValueKind::ResultVoid),
     // vibra_v1: environment, network, process, clock, randomness, system.
-    entry(
-        "vibra_v1",
-        "env_get",
-        &[STR, cap!(EnvRead)],
-        ValueKind::ResultStr,
-    ),
-    entry(
-        "vibra_v1",
-        "env_set",
-        &[STR, STR, cap!(EnvWrite)],
-        ValueKind::ResultVoid,
-    ),
-    entry(
-        "vibra_v1",
-        "env_remove",
-        &[STR, cap!(EnvWrite)],
-        ValueKind::ResultVoid,
-    ),
-    entry("vibra_v1", "env_list", &[cap!(EnvRead)], ValueKind::Array),
+    entry("vibra_v1", "env_get", &[STR], ValueKind::ResultStr),
+    entry("vibra_v1", "env_set", &[STR, STR], ValueKind::ResultVoid),
+    entry("vibra_v1", "env_remove", &[STR], ValueKind::ResultVoid),
+    entry("vibra_v1", "env_list", &[], ValueKind::Array),
     entry(
         "vibra_v1",
         "net_address_parse",
         &[STR],
         ValueKind::ResultAny,
     ),
-    entry(
-        "vibra_v1",
-        "net_resolve",
-        &[STR, cap!(NetConnect)],
-        ValueKind::ResultAny,
-    ),
+    entry("vibra_v1", "net_resolve", &[STR], ValueKind::ResultAny),
     entry(
         "vibra_v1",
         "net_connect",
-        &[NET_ADDRESS, cap!(NetConnect)],
+        &[NET_ADDRESS],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "net_listen",
-        &[NET_ADDRESS, cap!(NetListen)],
+        &[NET_ADDRESS],
         ValueKind::ResultAny,
     ),
     entry(
@@ -571,19 +460,19 @@ pub const HOST_ABI: &[HostImport] = &[
     entry(
         "vibra_v1",
         "net_udp_bind",
-        &[NET_ADDRESS, cap!(NetListen)],
+        &[NET_ADDRESS],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "net_udp_connect",
-        &[UDP_SOCKET, NET_ADDRESS, cap!(NetConnect)],
+        &[UDP_SOCKET, NET_ADDRESS],
         ValueKind::ResultVoid,
     ),
     entry(
         "vibra_v1",
         "net_udp_send_to",
-        &[UDP_SOCKET, BYTES, NET_ADDRESS, cap!(NetConnect)],
+        &[UDP_SOCKET, BYTES, NET_ADDRESS],
         ValueKind::ResultAny,
     ),
     entry(
@@ -595,13 +484,13 @@ pub const HOST_ABI: &[HostImport] = &[
     entry(
         "vibra_v1",
         "process_run",
-        &[ParamKind::Value(ValueKind::Record), cap!(ProcessRun)],
+        &[ValueKind::Record],
         ValueKind::ResultAny,
     ),
     entry(
         "vibra_v1",
         "process_spawn",
-        &[ParamKind::Value(ValueKind::Record), cap!(ProcessRun)],
+        &[ValueKind::Record],
         ValueKind::ResultProcessHandle,
     ),
     entry(
@@ -637,13 +526,13 @@ pub const HOST_ABI: &[HostImport] = &[
     entry(
         "vibra_v1",
         "clock_now_unix_millis",
-        &[cap!(Clock)],
+        &[],
         ValueKind::UInt64,
     ),
     entry(
         "vibra_v1",
         "clock_monotonic_millis",
-        &[cap!(Clock)],
+        &[],
         ValueKind::Instant,
     ),
     entry(
@@ -664,49 +553,19 @@ pub const HOST_ABI: &[HostImport] = &[
         &[INSTANT, INSTANT],
         ValueKind::ResultAny,
     ),
-    entry(
-        "vibra_v1",
-        "clock_sleep_millis",
-        &[DURATION, cap!(Clock)],
-        ValueKind::Void,
-    ),
-    entry(
-        "vibra_v1",
-        "random_bytes",
-        &[U64, cap!(Random)],
-        ValueKind::Bytes,
-    ),
-    entry(
-        "vibra_v1",
-        "system_info",
-        &[cap!(SystemInfo)],
-        ValueKind::Record,
-    ),
-    entry(
-        "vibra_v1",
-        "system_args",
-        &[cap!(SystemInfo)],
-        ValueKind::Array,
-    ),
+    entry("vibra_v1", "clock_sleep_millis", &[DURATION], ValueKind::Void),
+    entry("vibra_v1", "random_bytes", &[U64], ValueKind::Bytes),
+    entry("vibra_v1", "system_info", &[], ValueKind::Record),
+    entry("vibra_v1", "system_args", &[], ValueKind::Array),
     entry(
         "vibra_v1",
         "system_current_dir",
-        &[cap!(SystemInfo)],
+        &[],
         ValueKind::ResultStr,
     ),
-    entry(
-        "vibra_v1",
-        "system_executable",
-        &[cap!(SystemInfo)],
-        ValueKind::ResultStr,
-    ),
-    entry(
-        "vibra_v1",
-        "system_temp_dir",
-        &[cap!(SystemInfo)],
-        ValueKind::Str,
-    ),
-    // vibra_test: in-memory assertions; capability-free.
+    entry("vibra_v1", "system_executable", &[], ValueKind::ResultStr),
+    entry("vibra_v1", "system_temp_dir", &[], ValueKind::Str),
+    // vibra_test: in-memory assertions.
     entry("vibra_test", "assert", &[BOOL], ValueKind::Void),
     entry("vibra_test", "fail", &[STR], ValueKind::Void),
     entry(
@@ -728,7 +587,7 @@ pub const HOST_ABI: &[HostImport] = &[
 const fn entry(
     module: &'static str,
     name: &'static str,
-    params: &'static [ParamKind],
+    params: &'static [ValueKind],
     result: ValueKind,
 ) -> HostImport {
     HostImport {
@@ -759,15 +618,11 @@ pub fn schema_document() -> serde_json::Value {
             let params: Vec<serde_json::Value> = import
                 .params
                 .iter()
-                .map(|param| match param {
-                    ParamKind::Value(kind) => serde_json::json!({
+                .map(|kind| {
+                    serde_json::json!({
                         "kind": "value",
                         "type": kind.as_str(),
-                    }),
-                    ParamKind::Capability(domains) => serde_json::json!({
-                        "kind": "capability",
-                        "domains": domains.iter().map(|domain| domain.as_str()).collect::<Vec<_>>(),
-                    }),
+                    })
                 })
                 .collect();
             serde_json::json!({
@@ -775,14 +630,12 @@ pub fn schema_document() -> serde_json::Value {
                 "name": import.name,
                 "params": params,
                 "return": import.result.as_str(),
-                "required-domains": import.required_domains().iter().map(|domain| domain.as_str()).collect::<Vec<_>>(),
             })
         })
         .collect();
     serde_json::json!({
         "$id": "https://vibra-lang.org/schemas/host-abi.json",
-        "description": "Versioned Vibra host ABI registry: every host import a `$wasm` body may bind, with capability requirements",
-        "domains": CapabilityDomain::ALL.map(CapabilityDomain::as_str),
+        "description": "Versioned Vibra host ABI registry: every host import a `$wasm` body may bind",
         "imports": imports,
     })
 }
@@ -806,30 +659,16 @@ mod tests {
     }
 
     #[test]
-    fn every_capability_domain_is_known() {
-        for import in HOST_ABI {
-            for domain in import.required_domains() {
-                assert!(
-                    CapabilityDomain::ALL.contains(&domain),
-                    "{}.{} requires unknown domain `{domain}`",
-                    import.module,
-                    import.name
-                );
-            }
-        }
-    }
-
-    #[test]
     fn registry_exposes_exact_value_and_return_shapes() {
         assert!(lookup("vibra_code", "parse").is_none());
         assert!(!is_host_module("vibra_code"));
 
         let import = lookup("vibra_v1", "random_bytes").unwrap();
-        assert_eq!(import.params[0], ParamKind::Value(ValueKind::UInt64));
+        assert_eq!(import.params[0], ValueKind::UInt64);
         assert_eq!(import.result, ValueKind::Bytes);
 
         let open = lookup("vibra_v1", "fs_open_read").unwrap();
-        assert_eq!(open.params[0], ParamKind::Value(ValueKind::Path));
+        assert_eq!(open.params[0], ValueKind::Path);
         assert_eq!(open.result, ValueKind::ResultReadHandle);
 
         let bounded = lookup("vibra_v1", "fd_read_bytes_up_to").unwrap();
@@ -837,38 +676,28 @@ mod tests {
         assert_eq!(bounded.result, ValueKind::ResultBytes);
 
         let rename = lookup("vibra_v1", "fs_rename").unwrap();
-        assert_eq!(rename.required_domains(), vec![CapabilityDomain::FsWrite]);
+        assert_eq!(rename.params, &[PATH, PATH]);
 
         let copy = lookup("vibra_v1", "fs_copy").unwrap();
-        assert_eq!(
-            copy.required_domains(),
-            vec![CapabilityDomain::FsRead, CapabilityDomain::FsWrite]
-        );
+        assert_eq!(copy.params, &[PATH, PATH]);
 
         let monotonic = lookup("vibra_v1", "clock_monotonic_millis").unwrap();
         assert_eq!(monotonic.result, ValueKind::Instant);
-        assert_eq!(monotonic.required_domains(), vec![CapabilityDomain::Clock]);
 
         let list = lookup("vibra_v1", "env_list").unwrap();
         assert_eq!(list.result, ValueKind::Array);
-        assert_eq!(list.required_domains(), vec![CapabilityDomain::EnvRead]);
 
         let info = lookup("vibra_v1", "system_info").unwrap();
         assert_eq!(info.result, ValueKind::Record);
-        assert_eq!(info.required_domains(), vec![CapabilityDomain::SystemInfo]);
 
         let connect = lookup("vibra_v1", "net_connect").unwrap();
         assert_eq!(connect.params[0], NET_ADDRESS);
-        assert_eq!(
-            connect.required_domains(),
-            vec![CapabilityDomain::NetConnect]
-        );
 
         let bind = lookup("vibra_v1", "net_udp_bind").unwrap();
-        assert_eq!(bind.required_domains(), vec![CapabilityDomain::NetListen]);
+        assert_eq!(bind.params, &[NET_ADDRESS]);
 
         let accept = lookup("vibra_v1", "net_accept").unwrap();
-        assert!(accept.required_domains().is_empty());
+        assert_eq!(accept.params, &[TCP_LISTENER]);
     }
 
     #[test]

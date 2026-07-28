@@ -111,7 +111,7 @@ is a repoint rather than a rewrite.
 `src/lower.rs` is 9127 lines against `src/typed_lower.rs`'s 1619, which invites
 the wrong conclusion that the typed path must reimplement it. It must not.
 `typed_lower.rs` imports its *output* types from `crate::lower` (`TypeRef`,
-`TypeAlias`, `ImplBody`, `ImplKey`, `PolicyType`, `CapabilityType`), so the
+`TypeAlias`, `ImplBody`, `ImplKey`), so the
 typed modules are new **readers** producing the existing semantic IR. Legacy
 lowering mentions `Yaml`/`Mapping` on only 27 of its lines; the YAML coupling is
 the unqualified `use serde_yaml::Value` at `src/lower.rs:14` plus roughly 240
@@ -153,7 +153,7 @@ Two details worth not relearning:
 Generic functions remain rejected at `src/typed_body.rs:147`.
 
 Port from the legacy path rather than reimplementing, and reuse
-`src/type_semantics.rs` for anything type- or policy-relational.
+`src/type_semantics.rs` for anything type-relational.
 
 ### Step 4 — corpus
 

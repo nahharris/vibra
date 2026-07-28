@@ -4,6 +4,12 @@ Date: 2026-07-25
 Status: accepted implementation contract for issue #150  
 Compatibility: intentionally breaking; there is no YAML compatibility mode
 
+> **Note:** the `capability`/`policy`/`policy.narrow` grammar and the
+> capability model referenced below were later fully decommissioned (every
+> host operation is now unconditionally available at runtime, with no
+> authority type or narrowing expression). Passages describing them are
+> historical; they do not describe current syntax or semantics.
+
 ## Decision
 
 Vibra source becomes a small, regular S-expression language. YAML is removed
@@ -390,8 +396,8 @@ The canonical test form is:
 Each metadata label consumes one value with its own positional schema. Known
 labels are `tags:`, `expect-error:`, `clock:`, `benchmark:`, and `workspace:`.
 Profiles and tags still
-select tests and never grant capabilities. Workspace and capability policy
-remain explicit runner options. Metadata is unordered and must follow the body.
+select tests only. Workspace access remains an explicit runner option.
+Metadata is unordered and must follow the body.
 
 ## Source files, manifests, locks, and packages
 

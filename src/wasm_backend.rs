@@ -304,8 +304,7 @@ impl HostExecution {
             warnings: vec![],
             foreign_modules: plan.foreign_modules.clone(),
         };
-        let mut seed_env = HashMap::new();
-        crate::execute::seed_main_args(&program, &config, &mut seed_env)?;
+        let seed_env = HashMap::new();
         let files = match io {
             Some((stdout, stderr)) => {
                 crate::execute::FileTable::with_io(config.max_open_files, stdout, stderr)
@@ -413,20 +412,6 @@ impl HostExecution {
                 type_ref: target,
                 value: Box::new(values[0].clone()),
             },
-            Expr::PolicyNarrow { target, .. } => {
-                let RuntimeValue::Policy(source) = &values[0] else {
-                    bail!("`$policy.narrow` expects a policy value")
-                };
-                match target {
-                    TypeRef::Capability(requested) => RuntimeValue::Capability(
-                        crate::execute::narrow_capability_value(&requested, &source.policy)?,
-                    ),
-                    TypeRef::Policy(requested) => RuntimeValue::Policy(
-                        crate::execute::narrow_policy_value(&requested, &source.policy)?,
-                    ),
-                    _ => bail!("`$policy.narrow.into` must be a capability type"),
-                }
-            }
             Expr::Primitive {
                 op,
                 operand_type,
@@ -1545,7 +1530,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
 
 fn expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {
-        Expr::Mutable(v) | Expr::Cast { from: v, .. } | Expr::PolicyNarrow { from: v, .. } => {
+        Expr::Mutable(v) | Expr::Cast { from: v, .. } => {
             vec![v]
         }
         Expr::Reference { target, .. } => vec![target],
@@ -1908,56 +1893,6 @@ mod tests {
         assert!(high_level_imports
             .iter()
             .all(|import| import.module == ABI_MODULE));
-    }
-
-    #[test]
-    fn interpreter_and_wasm_match_privileged_policy_program() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-        let temp = tempfile::tempdir().unwrap();
-        let data = temp.path().join("data.txt");
-        std::fs::write(&data, "secret").unwrap();
-        let entry = temp.path().join("entry.vibra");
-        let path = |value: &std::path::Path| value.display().to_string().replace('\\', "/");
-        std::fs::write(
-            &entry,
-            format!(
-                r#"(import fs "{}")
-(fn main ((policy (policy (fs-read (group requirement: mandatory scopes: ((dir "{}"))))))) void
-  (do
-    (let path (fs.path.new "{}"))
-    (let capability (policy.narrow policy fs.read-capability))
-    (let text (fs.read-to-string path capability))))
-"#,
-                path(&fs),
-                path(temp.path()),
-                path(&data)
-            ),
-        )
-        .unwrap();
-        let loaded = crate::load::load_program(&entry).unwrap();
-        let program = crate::lower::lower_program(&loaded).unwrap();
-        let config = RunConfig {
-            approved_policy: Some(crate::lower::PolicyType {
-                domains: BTreeMap::from([(
-                    crate::lower::CapabilityDomain::FsRead,
-                    vec![crate::lower::PolicyGroup {
-                        requirement: crate::lower::PolicyRequirement::Mandatory,
-                        scopes: vec![crate::lower::PolicyScope::Dir(path(temp.path()))],
-                    }],
-                )]),
-            }),
-            ..RunConfig::default()
-        };
-        crate::execute::run_lowered_interpreted(&program, &config).unwrap();
-        run_lowered(&program, &config).unwrap();
-        let interpreted = crate::execute::run_lowered_interpreted(&program, &RunConfig::default())
-            .unwrap_err()
-            .to_string();
-        let guest = run_lowered(&program, &RunConfig::default())
-            .unwrap_err()
-            .to_string();
-        assert_eq!(interpreted, guest);
     }
 
     #[test]

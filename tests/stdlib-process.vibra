@@ -2,44 +2,9 @@
 (import process "../stdlib/src/process.vibra")
 (import result "../stdlib/src/result.vibra")
 (test
-  executable-scope-is-attenuated
-  process
-  (do
-    (let capability (policy.narrow policy process.run-capability))
-    (let
-      outcome
-      (process.run
-        (record
-          (executable "outside-grant")
-          (arguments (array "unused"))
-          (environment (map ("VIBRA_PROCESS_TEST" "1")))
-          (cwd "")
-          (stdio (process.stdio-policy.capture))
-        )
-        capability
-      )
-    )
-    (match
-      outcome
-      (case
-        (result.result.err (process.process-error.permission-denied))
-        (do (test.assert true))
-      )
-      (case _ (do (test.fail "executable outside process grant was not rejected")))
-    )
-  )
-  tags: (stdlib capability process)
-  policy: (policy
-    (process-run
-      (group requirement: mandatory scopes: ((exact "vibra-process-test")))
-    )
-  )
-)
-(test
   run-rejects-stream-stdio-without-spawning
   process
   (do
-    (let capability (policy.narrow policy process.run-capability))
     (let
       outcome
       (process.run
@@ -50,7 +15,6 @@
           (cwd "")
           (stdio (process.stdio-policy.stream))
         )
-        capability
       )
     )
     (match
@@ -63,9 +27,4 @@
     )
   )
   tags: (stdlib process)
-  policy: (policy
-    (process-run
-      (group requirement: mandatory scopes: ((exact "vibra-process-test")))
-    )
-  )
 )

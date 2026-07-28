@@ -22,7 +22,7 @@ vibra run examples/hello.vibra
 
 This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
 
-Source execution emits and enters a deterministic WebAssembly module through the versioned `vibra_v1` host boundary. See [the ABI design](docs/wasm-abi.md) for the entrypoint, capability, value-layout, import-validation, and compatibility contract.
+Source execution emits and enters a deterministic WebAssembly module through the versioned `vibra_v1` host boundary. See [the ABI design](docs/wasm-abi.md) for the entrypoint, value-layout, import-validation, and compatibility contract.
 
 Project dependencies may also declare statically resolved WebAssembly
 libraries behind explicit typed `$wasm` wrappers. The supported scalar and
@@ -287,8 +287,8 @@ Run `vibra mcp --workspace .` to expose project inspection, test discovery,
 check, docs, formatting, and lint tools over MCP stdio. The server is read-only
 and does not execute project tests by default. `--allow-write` narrowly enables
 formatter writes and builds inside the workspace; `--allow-test` enables
-capability-free test execution. Paths are canonicalized and confined to the
-workspace, and clients cannot submit arbitrary commands or capability flags.
+test execution. Paths are canonicalized and confined to the
+workspace, and clients cannot submit arbitrary commands.
 
 See [the MCP guide](docs/mcp.md) for tool mappings, schemas, agent
 configuration, security boundaries, and the stable error model.
@@ -317,21 +317,16 @@ The compiler repository pins that same stdlib revision as the `stdlib` Git submo
 
 Functions use canonical labeled declarations: `$function: $void` for zero arguments, `$function: $self` for a method receiver, or a singleton labeled mapping for the primary argument. Additional arguments use sibling `args:`, and function bodies reference every argument through `$args.<name>`.
 
-**Policies:** authority roots declare aggregate `$policy` arguments. The runtime
-intersects those declarations with `--allow-*` approvals, then code explicitly
-narrows the live value with `$policy.narrow` into a typed
-`$capability.<domain>` argument for privileged helpers.
-
 ```sh
-vibra run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
+vibra run examples/fs-roundtrip.vibra
 ```
 
-Filesystem policy checks use canonical ancestry: a `dir` scope for `path/root` does not authorize a sibling such as `path/root2`.
-
-**Host ABI:** `$wasm` is a checked binding to the closed `vibra_v1` registry,
-not an authority escape hatch. The compiler validates the module/import pair,
-every argument and capability domain, and the exact return type. Run
-`vibra effects <path>` to inspect the reachable host surface without executing it.
+**Host ABI:** `$wasm` is a checked binding to the closed `vibra_v1` registry.
+The compiler validates the module/import pair, every argument, and the exact
+return type. Run `vibra effects <path>` to inspect the reachable host surface
+without executing it. Every host operation (filesystem, network, process,
+clock, random, environment, stdin) is unconditionally available at runtime --
+there is no capability or policy authorization layer.
 
 **Current subset:** entry module defines `main` with `args: $void`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns and ordered `$match` sequence arms with explicit `case:` entries). Canonical `$for` traversal covers half-open signed integer `$range` values, arrays, insertion-ordered string-key maps, and Unicode scalar values from strings; `$break: null` and `$continue: null` target the nearest loop. Entry and imported modules may also define **user functions** (`do:` with `$let` / `$match` / `$return`) and **generic functions** (`$function` with the `=where` annotation declaring type parameters and bounds); generic calls pass explicit type arguments in the same mapping as value arguments (see [DRAFT.md](DRAFT.md)). `io` and `fs` functions declared in [stdlib/src/io.vibra](stdlib/src/io.vibra) and [stdlib/src/fs.vibra](stdlib/src/fs.vibra) are executable via the runtime execution backend.
 
@@ -345,25 +340,21 @@ primitives are fallible typed operations; formatting is deterministic and
 locale-free (`nan`, `inf`, and `-inf` are the canonical float spellings).
 Potentially growing text/byte operations honor the runtime allocation limit.
 
-Time, environment, and system helpers remain explicitly capability-gated.
 `time` distinguishes unit-safe `duration` values from monotonic `instant`
 values, provides checked addition/elapsed arithmetic, and never uses wall time
-for elapsed measurement. `env.list` filters its deterministic name list through
-the supplied `env-read` scopes, while get/set/remove check the requested name.
-`sys` exposes configured program arguments, current/executable/temp locations,
-and structured operating-system, architecture, and family fields under the
-existing `system-info` grant.
+for elapsed measurement. `sys` exposes configured program arguments,
+current/executable/temp locations, and structured operating-system,
+architecture, and family fields.
 
 Networking uses typed `net.address`, `tcp-stream`, `tcp-listener`, and
-`udp-socket` resources. Address parsing is pure; hostname resolution and every
-outbound TCP/UDP target require an explicit matching `net-connect` scope, while
-bind operations require `net-listen`. TCP supports connect/listen/accept,
-bounded byte I/O, deadlines, shutdown, and deterministic close; UDP supports
-bind/connect/send-to/receive-from. All socket resources share the instance host
-resource limit and are reclaimed at instance teardown. Until cross-module
-interface method forwarding is supported, `net.stream-read`, `stream-write`,
-and `close-*` expose the common fd behavior directly rather than claiming an
-unusable `$fs.readable`/`writable`/`closeable` implementation.
+`udp-socket` resources. Address parsing is pure. TCP supports
+connect/listen/accept, bounded byte I/O, deadlines, shutdown, and deterministic
+close; UDP supports bind/connect/send-to/receive-from. All socket resources
+share the instance host resource limit and are reclaimed at instance teardown.
+Until cross-module interface method forwarding is supported,
+`net.stream-read`, `stream-write`, and `close-*` expose the common fd behavior
+directly rather than claiming an unusable
+`$fs.readable`/`writable`/`closeable` implementation.
 
 ## Type System Snapshot
 
@@ -409,9 +400,9 @@ visible. There is currently no implicit `?`-style control-flow form.
 - `io`/`fs` APIs use nominal paths and file-mode handles with reusable
   `readable`/`writable`/`closeable` stream interfaces. Bounded reads use an
   empty successful chunk for EOF, partial writes report progress, and file
-  rename/copy/open options and typed directory entries remain capability gated
+  rename/copy/open options and typed directory entries are fully supported
 - `process` uses a typed command record containing an explicit executable,
-  argument array, environment, cwd, and stdio policy without shell parsing;
+  argument array, environment, cwd, and stdio mode without shell parsing;
   capture/inherit/null execution returns typed status and output, and
   exposes instance-owned child handles with typed wait/kill outcomes; stream
   mode provides child pipes through the shared file reader/writer interfaces.
@@ -425,8 +416,8 @@ visible. There is currently no implicit `?`-style control-flow form.
 # Interactive stdin path
 cargo run -- run examples/ask-name.vibra
 
-# Filesystem roundtrip (requires explicit approval)
-cargo run -- run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
+# Filesystem roundtrip
+cargo run -- run examples/fs-roundtrip.vibra
 ```
 
 ## Tests
@@ -434,7 +425,7 @@ cargo run -- run examples/fs-roundtrip.vibra --allow-read=. --allow-write=.
 `vibra test` discovers `.vibra` files under `tests/` and runs each top-level
 `$test` declaration as an isolated test case. Test modules do not need `main`.
 The `$test` value is a non-empty kebab-case profile; a bare `vibra test` runs
-the capability-free `core` profile.
+the `core` profile.
 
 ```yaml
 test:
@@ -455,29 +446,21 @@ vibra test --jobs 4 --timeout-ms 30000 --fail-fast
 vibra test --format json --report-file report.json
 ```
 
-Profiles and tags only select tests; they never confer host permissions.
-Capability tests declare sibling `policy` and must be run with the matching
-explicit `--allow-*` flag. `workspace: temp` tests additionally need
-`--allow-test-workspace read`, `write`, or `read-write`; without it, they are
-reported as skipped. See [`tests/README.md`](tests/README.md) for expected
-errors, typed assertion helpers, profile contracts, and the complete flag
-reference.
+Profiles and tags only select tests. `workspace: temp` tests additionally need
+`--allow-test-workspace`; without it, they are reported as skipped. See
+[`tests/README.md`](tests/README.md) for expected errors, typed assertion
+helpers, and the complete flag reference.
 
 Tests can replace ambient clock and random inputs with isolated fixtures.
 `random-seed` selects a reproducible non-cryptographic byte stream, while
 `clock` supplies wall and monotonic millisecond values; test sleeps advance
-both fake values without waiting. These fixtures grant only their declared
-test policy and require no `--allow-clock` or `--allow-random` flags:
+both fake values without waiting:
 
 ```yaml
 deterministic:
   $test: core
   random-seed: 42
   clock: {unix-millis: 1000, monotonic-millis: 0}
-  policy:
-    $policy:
-      clock: [{requirement: mandatory, scopes: any}]
-      random: [{requirement: mandatory, scopes: any}]
   do: [...]
 ```
 

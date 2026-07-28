@@ -2,10 +2,8 @@
 
 use crate::async_runtime::{JoinHandle as RuntimeJoinHandle, Scheduler, TaskOutcome};
 use crate::lower::{
-    Call, CapabilityDomain, CapabilityType, CapabilityValue, Expr, FunctionBody, HandleAccess,
-    HostHandle, LetValue, LoweredExec, LoweredProgram, Pattern, PolicyGroup, PolicyRequirement,
-    PolicyScope, PolicyType, PolicyValue, PrimitiveOp, RuntimeValue, Statement, TypeRef,
-    WasmArgSpec,
+    Call, Expr, FunctionBody, HandleAccess, HostHandle, LetValue, LoweredExec, LoweredProgram,
+    Pattern, PrimitiveOp, RuntimeValue, Statement, TypeRef, WasmArgSpec,
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
@@ -13,7 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -27,7 +25,6 @@ pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
 pub(crate) fn run_lowered_interpreted(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
     reset_source_tasks();
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
-    seed_main_args(program, config, &mut env)?;
     let mut files = FileTable::new(config.max_open_files);
     for stmt in &program.statements {
         if !matches!(
@@ -63,7 +60,6 @@ pub(crate) fn run_lowered_interpreted_with_io(
     stderr: Box<dyn Write>,
 ) -> Result<()> {
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
-    seed_main_args(program, config, &mut env)?;
     let mut files = FileTable::new(config.max_open_files);
     files.stdout_sink = Some(stdout);
     files.stderr_sink = Some(stderr);
@@ -86,198 +82,6 @@ pub fn eval_lowered_exec(
     let env = bindings.clone();
     let mut files = FileTable::new(config.max_open_files);
     eval_expr(&exec.expr, &env, &exec.program, &mut files, config)
-}
-
-/// Seed every `$policy`-typed root argument (of `main` or a `$test`) with an
-/// **attenuated** capability value: the intersection of the requested policy
-/// type and the run's approved policy. Mandatory domain groups must intersect
-/// to a non-empty scope set; optional groups may end up empty and fail closed
-/// at the point of use.
-pub(crate) fn seed_main_args(
-    program: &LoweredProgram,
-    config: &RunConfig,
-    env: &mut HashMap<String, RuntimeValue>,
-) -> Result<()> {
-    let mut approved: Option<PolicyType> = None;
-    for (name, ty) in &program.main_arg_bindings {
-        let TypeRef::Policy(requested) = ty else {
-            continue;
-        };
-        let approved = approved.get_or_insert_with(|| config.effective_approved_policy());
-        let effective = intersect_requested_policy(requested, approved).map_err(|domain| {
-            anyhow::anyhow!(
-                "mandatory policy coverage is missing: `{domain}` is not approved for this run (approve it with the matching `--allow-*` flag)"
-            )
-        })?;
-        env.insert(
-            name.clone(),
-            RuntimeValue::Policy(PolicyValue { policy: effective }),
-        );
-    }
-    Ok(())
-}
-
-/// Runtime half of `$policy.narrow`: the statically checked target type is
-/// additionally intersected with the **live source value's** scopes, so a
-/// narrowed capability can never exceed the value it came from.
-pub(crate) fn narrow_policy_value(
-    requested: &PolicyType,
-    source: &PolicyType,
-) -> Result<PolicyValue> {
-    let policy = intersect_requested_policy(requested, source).map_err(|domain| {
-        anyhow::anyhow!(
-            "`$policy.narrow` requires mandatory `{domain}` scopes the source value does not carry"
-        )
-    })?;
-    Ok(PolicyValue { policy })
-}
-
-pub(crate) fn narrow_capability_value(
-    requested: &CapabilityType,
-    source: &PolicyType,
-) -> Result<CapabilityValue> {
-    if requested.groups.is_empty() {
-        let groups = source
-            .domains
-            .get(&requested.domain)
-            .cloned()
-            .unwrap_or_default();
-        let policy = PolicyType {
-            domains: std::collections::BTreeMap::from([(requested.domain, groups.clone())]),
-        };
-        return Ok(CapabilityValue {
-            capability: CapabilityType {
-                domain: requested.domain,
-                groups,
-            },
-            policy,
-        });
-    }
-    let policy = PolicyType {
-        domains: std::collections::BTreeMap::from([(requested.domain, requested.groups.clone())]),
-    };
-    let narrowed = intersect_requested_policy(&policy, source).map_err(|domain| {
-        anyhow::anyhow!(
-            "`$policy.narrow` requires mandatory `{domain}` scopes the source value does not carry"
-        )
-    })?;
-    Ok(CapabilityValue {
-        capability: CapabilityType {
-            domain: requested.domain,
-            groups: narrowed
-                .domains
-                .get(&requested.domain)
-                .cloned()
-                .unwrap_or_default(),
-        },
-        policy: narrowed,
-    })
-}
-
-/// Intersect a requested policy type with an approved policy. Every
-/// `mandatory` group must retain at least one scope (otherwise the offending
-/// domain is returned as the error); `optional` groups may intersect to empty
-/// and fail closed at the point of use.
-fn intersect_requested_policy(
-    requested: &PolicyType,
-    approved: &PolicyType,
-) -> std::result::Result<PolicyType, CapabilityDomain> {
-    let mut domains = std::collections::BTreeMap::new();
-    for (domain, groups) in &requested.domains {
-        let approved_scopes: Vec<PolicyScope> = approved
-            .domains
-            .get(domain)
-            .map(|groups| {
-                groups
-                    .iter()
-                    .flat_map(|group| group.scopes.iter().cloned())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut effective_groups = Vec::with_capacity(groups.len());
-        for group in groups {
-            let effective_scopes = intersect_scope_sets(&group.scopes, &approved_scopes);
-            if effective_scopes.is_empty() && group.requirement == PolicyRequirement::Mandatory {
-                return Err(domain.clone());
-            }
-            effective_groups.push(PolicyGroup {
-                requirement: group.requirement.clone(),
-                scopes: effective_scopes,
-            });
-        }
-        domains.insert(domain.clone(), effective_groups);
-    }
-    Ok(PolicyType { domains })
-}
-
-/// Scope-set intersection: the portion of `requested` that `approved` covers.
-/// Requesting `any` yields exactly the approved scopes (never more).
-fn intersect_scope_sets(requested: &[PolicyScope], approved: &[PolicyScope]) -> Vec<PolicyScope> {
-    let mut out: Vec<PolicyScope> = Vec::new();
-    for req in requested {
-        for app in approved {
-            if let Some(scope) = intersect_scopes(req, app) {
-                if !out.contains(&scope) {
-                    out.push(scope);
-                }
-            }
-        }
-    }
-    out
-}
-
-/// The intersection of two scopes, or `None` when they are disjoint. The
-/// result never exceeds either input.
-fn intersect_scopes(a: &PolicyScope, b: &PolicyScope) -> Option<PolicyScope> {
-    match (a, b) {
-        (PolicyScope::Any, other) | (other, PolicyScope::Any) => Some(other.clone()),
-        (PolicyScope::Dir(x), PolicyScope::Dir(y)) => {
-            let nx = normalize_absolute_path(Path::new(x)).ok()?;
-            let ny = normalize_absolute_path(Path::new(y)).ok()?;
-            if nx.starts_with(&ny) {
-                Some(PolicyScope::Dir(x.clone()))
-            } else if ny.starts_with(&nx) {
-                Some(PolicyScope::Dir(y.clone()))
-            } else {
-                None
-            }
-        }
-        (PolicyScope::File(f), PolicyScope::Dir(d))
-        | (PolicyScope::Dir(d), PolicyScope::File(f)) => {
-            let nf = normalize_absolute_path(Path::new(f)).ok()?;
-            let nd = normalize_absolute_path(Path::new(d)).ok()?;
-            nf.starts_with(&nd).then(|| PolicyScope::File(f.clone()))
-        }
-        (PolicyScope::File(x), PolicyScope::File(y)) => {
-            let nx = normalize_absolute_path(Path::new(x)).ok()?;
-            let ny = normalize_absolute_path(Path::new(y)).ok()?;
-            (nx == ny).then(|| PolicyScope::File(x.clone()))
-        }
-        (PolicyScope::Exact(x), PolicyScope::Exact(y)) => {
-            (x == y).then(|| PolicyScope::Exact(x.clone()))
-        }
-        (PolicyScope::Exact(e), PolicyScope::Prefix(p))
-        | (PolicyScope::Prefix(p), PolicyScope::Exact(e)) => {
-            e.starts_with(p).then(|| PolicyScope::Exact(e.clone()))
-        }
-        (PolicyScope::Prefix(x), PolicyScope::Prefix(y)) => {
-            if x.starts_with(y) {
-                Some(PolicyScope::Prefix(x.clone()))
-            } else if y.starts_with(x) {
-                Some(PolicyScope::Prefix(y.clone()))
-            } else {
-                None
-            }
-        }
-        (
-            PolicyScope::Dir(_) | PolicyScope::File(_),
-            PolicyScope::Exact(_) | PolicyScope::Prefix(_),
-        )
-        | (
-            PolicyScope::Exact(_) | PolicyScope::Prefix(_),
-            PolicyScope::Dir(_) | PolicyScope::File(_),
-        ) => None,
-    }
 }
 
 enum FileHandle {
@@ -347,10 +151,9 @@ pub(crate) struct FileTable {
 impl FileTable {
     pub(crate) fn new(limit: usize) -> Self {
         let mut handles = HashMap::new();
-        // Stdout/stderr are baseline authority and always present. Stdin is
-        // *not* preinserted: a stdin handle only exists after a
-        // capability-checked `stdin_open`, so a forged integer handle cannot
-        // read stdin in a program that never presented a `stdin-read` policy.
+        // Stdout/stderr are always present. Stdin is *not* preinserted: a
+        // stdin handle only exists after calling `stdin_open`, so a forged
+        // integer handle cannot read stdin before that call.
         handles.insert(1, FileHandle::Stdout);
         handles.insert(2, FileHandle::Stderr);
         Self {
@@ -450,8 +253,8 @@ impl FileTable {
         id
     }
 
-    /// Mint a stdin handle. Only reachable through the capability-checked
-    /// `stdin_open` host import.
+    /// Mint a stdin handle. Only reachable through the `stdin_open` host
+    /// import.
     fn insert_stdin(&mut self) -> u64 {
         if let Some(id) = self
             .handles
@@ -754,22 +557,6 @@ fn eval_expr(
             type_ref: target.clone(),
             value: Box::new(eval_expr(from, env, program, files, config)?),
         }),
-        Expr::PolicyNarrow { from, target } => {
-            let value = eval_expr(from, env, program, files, config)?;
-            let RuntimeValue::Policy(source) = value else {
-                bail!("`$policy.narrow` expects a policy value");
-            };
-            match target {
-                TypeRef::Capability(requested) => Ok(RuntimeValue::Capability(
-                    narrow_capability_value(requested, &source.policy)?,
-                )),
-                TypeRef::Policy(requested) => Ok(RuntimeValue::Policy(narrow_policy_value(
-                    requested,
-                    &source.policy,
-                )?)),
-                _ => bail!("`$policy.narrow.into` must be a capability type"),
-            }
-        }
         Expr::EnumConstructor {
             enum_key,
             tag,
@@ -1708,17 +1495,6 @@ fn value_bool(value: &RuntimeValue) -> Result<bool> {
     }
 }
 
-/// Require a genuine runtime-minted `$policy` capability value.
-fn value_policy(value: &RuntimeValue) -> Result<&PolicyType> {
-    match value {
-        RuntimeValue::Capability(capability) => Ok(&capability.policy),
-        RuntimeValue::Policy(_) => bail!(
-            "expected an explicitly narrowed `$capability.<domain>` value, got root `$policy`"
-        ),
-        other => bail!("expected a domain capability value, got {other:?}"),
-    }
-}
-
 fn result_enum_key(sig: &crate::lower::FunctionSig) -> String {
     match &sig.return_type {
         TypeRef::Instantiated { base, .. } => base.clone(),
@@ -1887,118 +1663,6 @@ pub fn checked_alloc_len(
     Ok(len)
 }
 
-fn resolve_policy_path(
-    path: &str,
-    policy: &PolicyType,
-    domain: CapabilityDomain,
-) -> Result<PathBuf> {
-    let abs = normalize_absolute_path(Path::new(path))?;
-    let auth_path = nearest_existing_path(&abs)?;
-    let canon_auth = auth_path.canonicalize().unwrap_or(auth_path);
-    let Some(groups) = policy.domains.get(&domain) else {
-        bail!("policy does not authorize `{domain}`");
-    };
-    for group in groups {
-        for scope in &group.scopes {
-            match scope {
-                crate::lower::PolicyScope::Any => return Ok(abs),
-                crate::lower::PolicyScope::Dir(root) => {
-                    let root_path = PathBuf::from(root);
-                    let canon_root = root_path.canonicalize().unwrap_or(root_path);
-                    if canon_auth.starts_with(canon_root) {
-                        return Ok(abs);
-                    }
-                }
-                crate::lower::PolicyScope::File(file) => {
-                    let file_path = PathBuf::from(file);
-                    let canon_file = file_path.canonicalize().unwrap_or(file_path);
-                    if abs == canon_file {
-                        return Ok(abs);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    bail!("path `{}` is outside approved policy", path)
-}
-
-fn normalize_absolute_path(path: &Path) -> Result<PathBuf> {
-    let mut normalized = if path.is_absolute() {
-        PathBuf::new()
-    } else {
-        std::env::current_dir().context("current dir")?
-    };
-
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(component.as_os_str()),
-            Component::Normal(part) => normalized.push(part),
-        }
-    }
-
-    Ok(normalized)
-}
-
-fn nearest_existing_path(path: &Path) -> Result<PathBuf> {
-    let mut current = path.to_path_buf();
-    loop {
-        if current.exists() {
-            return Ok(current);
-        }
-        if !current.pop() {
-            bail!("path `{}` has no existing ancestor", path.display());
-        }
-    }
-}
-
-/// Check that `policy` authorizes `requested` under `domain` using
-/// non-filesystem scope selectors: `any` matches everything, `exact` requires
-/// equality, `prefix` requires a leading match. Filesystem domains use
-/// [`resolve_policy_path`] instead.
-fn ensure_policy_scope(
-    policy: &PolicyType,
-    domain: CapabilityDomain,
-    requested: &str,
-) -> Result<()> {
-    let Some(groups) = policy.domains.get(&domain) else {
-        bail!("policy does not authorize `{domain}`");
-    };
-    for group in groups {
-        for scope in &group.scopes {
-            let matched = match scope {
-                PolicyScope::Any => true,
-                PolicyScope::Exact(value) => scope_value_eq(domain, value, requested),
-                PolicyScope::Prefix(prefix) => requested.starts_with(prefix.as_str()),
-                PolicyScope::Dir(_) | PolicyScope::File(_) => false,
-            };
-            if matched {
-                return Ok(());
-            }
-        }
-    }
-    bail!("`{requested}` is outside the `{domain}` scopes of the provided policy")
-}
-
-fn scope_value_eq(domain: CapabilityDomain, scope: &str, requested: &str) -> bool {
-    // Environment variable names are case-insensitive on Windows.
-    if cfg!(windows)
-        && matches!(
-            domain,
-            CapabilityDomain::EnvRead | CapabilityDomain::EnvWrite
-        )
-    {
-        scope.eq_ignore_ascii_case(requested)
-    } else {
-        scope == requested
-    }
-}
-
 fn env_get(name: &str) -> std::io::Result<String> {
     std::env::var(name).map_err(|err| {
         let kind = match err {
@@ -2086,20 +1750,6 @@ pub(crate) fn exec_call(
                     WasmArgSpec::ConstStr(value) => RuntimeValue::Str(value.clone()),
                 });
             }
-            // Defense in depth behind the static `E-CAP-002` check: every
-            // capability position must hold a genuine runtime-minted policy
-            // value. `$policy` values cannot be forged, so presence here
-            // proves the authority was threaded from a root signature.
-            for (position, param) in entry.params.iter().enumerate() {
-                if matches!(param, crate::host_abi::ParamKind::Capability(_)) {
-                    value_policy(&host_args[position]).with_context(|| {
-                        format!(
-                            "host import `{}.{}` requires a `$policy` capability in position {position}",
-                            entry.module, entry.name
-                        )
-                    })?;
-                }
-            }
             match entry.module {
                 "vibra_v1" => exec_vibra_v1(entry.name, sig, &host_args, files, config),
                 "vibra_test" => exec_vibra_test(entry.name, &host_args),
@@ -2107,19 +1757,6 @@ pub(crate) fn exec_call(
             }
         }
     }
-}
-
-/// Resolve `path` against the `domain` scopes of `policy`, mapping a denial
-/// into the wrapper's typed `permission-denied` error (payload-free, matching
-/// the error enum's `$void` payload) instead of a hard runtime failure.
-fn policy_path_or_denied(
-    sig: &crate::lower::FunctionSig,
-    path: &str,
-    policy: &PolicyType,
-    domain: CapabilityDomain,
-) -> std::result::Result<PathBuf, Box<RuntimeValue>> {
-    resolve_policy_path(path, policy, domain)
-        .map_err(|_| Box::new(result_err(sig, "permission-denied", None)))
 }
 
 fn exec_vibra_v1(
@@ -2288,8 +1925,6 @@ fn exec_vibra_v1(
             })))
         }
         "stdin_open" => {
-            let policy = value_policy(&args[0])?;
-            ensure_policy_scope(policy, CapabilityDomain::StdinRead, "*")?;
             Ok(RuntimeValue::HostHandle(HostHandle {
                 id: files.insert_stdin(),
                 access: HandleAccess::Read,
@@ -2847,27 +2482,7 @@ fn exec_vibra_v1(
         | "fs_open_append"
         | "fs_open_read_write" => {
             let path = value_string(&args[0])?;
-            let mut resolved: Option<PathBuf> = None;
-            let checks: Vec<(&PolicyType, CapabilityDomain)> = match name {
-                "fs_open_read" => vec![(value_policy(&args[1])?, CapabilityDomain::FsRead)],
-                "fs_open_write" | "fs_open_append" => {
-                    vec![(value_policy(&args[1])?, CapabilityDomain::FsWrite)]
-                }
-                "fs_open_write_options" => {
-                    vec![(value_policy(&args[4])?, CapabilityDomain::FsWrite)]
-                }
-                _ => vec![
-                    (value_policy(&args[1])?, CapabilityDomain::FsRead),
-                    (value_policy(&args[2])?, CapabilityDomain::FsWrite),
-                ],
-            };
-            for (policy, domain) in checks {
-                match policy_path_or_denied(sig, &path, policy, domain) {
-                    Ok(p) => resolved = Some(p),
-                    Err(denied) => return Ok(*denied),
-                }
-            }
-            let p = resolved.expect("open import checks at least one domain");
+            let p = PathBuf::from(&path);
             if files.at_capacity() {
                 return Ok(result_err(sig, "too-many-open-files", None));
             }
@@ -2900,21 +2515,13 @@ fn exec_vibra_v1(
         }
         "fs_read_to_string" => {
             let path = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(sig, || fs::read_to_string(p), RuntimeValue::Str))
         }
         "fs_write_string_all" => {
             let path = value_string(&args[0])?;
             let contents = value_string(&args[1])?;
-            let policy = value_policy(&args[2])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(
                 sig,
                 || fs::write(p, contents),
@@ -2924,11 +2531,7 @@ fn exec_vibra_v1(
         "fs_append_string" => {
             let path = value_string(&args[0])?;
             let contents = value_string(&args[1])?;
-            let policy = value_policy(&args[2])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(
                 sig,
                 || {
@@ -2940,17 +2543,11 @@ fn exec_vibra_v1(
         }
         "fs_exists" => {
             let path = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            let p = resolve_policy_path(&path, policy, CapabilityDomain::FsRead)?;
-            Ok(RuntimeValue::Bool(p.exists()))
+            Ok(RuntimeValue::Bool(PathBuf::from(&path).exists()))
         }
         "fs_create_dir_all" => {
             let path = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(
                 sig,
                 || fs::create_dir_all(p),
@@ -2959,11 +2556,7 @@ fn exec_vibra_v1(
         }
         "fs_remove_file" => {
             let path = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(
                 sig,
                 || fs::remove_file(p),
@@ -2972,11 +2565,7 @@ fn exec_vibra_v1(
         }
         "fs_remove_dir" => {
             let path = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsWrite) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(
                 sig,
                 || fs::remove_dir_all(p),
@@ -2985,11 +2574,7 @@ fn exec_vibra_v1(
         }
         "fs_read_dir" => {
             let path = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(
                 sig,
                 || {
@@ -3010,11 +2595,7 @@ fn exec_vibra_v1(
         "fs_read_dir_entries" => {
             let path = value_string(&args[0])?;
             let logical_path = PathBuf::from(&path);
-            let policy = value_policy(&args[1])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = logical_path.clone();
             Ok(fs_result(
                 sig,
                 || {
@@ -3046,11 +2627,7 @@ fn exec_vibra_v1(
         }
         "fs_metadata" => {
             let path = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(
                 sig,
                 || fs::metadata(p),
@@ -3059,11 +2636,7 @@ fn exec_vibra_v1(
         }
         "fs_canonicalize" => {
             let path = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            let p = match policy_path_or_denied(sig, &path, policy, CapabilityDomain::FsRead) {
-                Ok(p) => p,
-                Err(denied) => return Ok(*denied),
-            };
+            let p = PathBuf::from(&path);
             Ok(fs_result(
                 sig,
                 || p.canonicalize(),
@@ -3071,17 +2644,8 @@ fn exec_vibra_v1(
             ))
         }
         "fs_rename" => {
-            let from = value_string(&args[0])?;
-            let to = value_string(&args[1])?;
-            let policy = value_policy(&args[2])?;
-            let from = match policy_path_or_denied(sig, &from, policy, CapabilityDomain::FsWrite) {
-                Ok(path) => path,
-                Err(denied) => return Ok(*denied),
-            };
-            let to = match policy_path_or_denied(sig, &to, policy, CapabilityDomain::FsWrite) {
-                Ok(path) => path,
-                Err(denied) => return Ok(*denied),
-            };
+            let from = PathBuf::from(value_string(&args[0])?);
+            let to = PathBuf::from(value_string(&args[1])?);
             Ok(fs_result(
                 sig,
                 || fs::rename(from, to),
@@ -3089,20 +2653,8 @@ fn exec_vibra_v1(
             ))
         }
         "fs_copy" => {
-            let from = value_string(&args[0])?;
-            let to = value_string(&args[1])?;
-            let read_policy = value_policy(&args[2])?;
-            let write_policy = value_policy(&args[3])?;
-            let from =
-                match policy_path_or_denied(sig, &from, read_policy, CapabilityDomain::FsRead) {
-                    Ok(path) => path,
-                    Err(denied) => return Ok(*denied),
-                };
-            let to = match policy_path_or_denied(sig, &to, write_policy, CapabilityDomain::FsWrite)
-            {
-                Ok(path) => path,
-                Err(denied) => return Ok(*denied),
-            };
+            let from = PathBuf::from(value_string(&args[0])?);
+            let to = PathBuf::from(value_string(&args[1])?);
             Ok(fs_result(
                 sig,
                 || fs::copy(from, to),
@@ -3111,10 +2663,6 @@ fn exec_vibra_v1(
         }
         "env_get" => {
             let var = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            if ensure_policy_scope(policy, CapabilityDomain::EnvRead, &var).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             if let Some(environment) = &config.injected_environment {
                 let environment = environment.lock().expect("injected environment poisoned");
                 return Ok(match environment.get(&var) {
@@ -3127,10 +2675,6 @@ fn exec_vibra_v1(
         "env_set" => {
             let var = value_string(&args[0])?;
             let value = value_string(&args[1])?;
-            let policy = value_policy(&args[2])?;
-            if ensure_policy_scope(policy, CapabilityDomain::EnvWrite, &var).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             if !is_valid_env_name(&var) {
                 return Ok(result_err(sig, "invalid-name", None));
             }
@@ -3146,10 +2690,6 @@ fn exec_vibra_v1(
         }
         "env_remove" => {
             let var = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            if ensure_policy_scope(policy, CapabilityDomain::EnvWrite, &var).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             if !is_valid_env_name(&var) {
                 return Ok(result_err(sig, "invalid-name", None));
             }
@@ -3164,23 +2704,16 @@ fn exec_vibra_v1(
             Ok(result_ok(sig, RuntimeValue::Void))
         }
         "env_list" => {
-            let policy = value_policy(&args[0])?;
             let mut names = if let Some(environment) = &config.injected_environment {
                 environment
                     .lock()
                     .expect("injected environment poisoned")
                     .keys()
-                    .filter(|name| {
-                        ensure_policy_scope(policy, CapabilityDomain::EnvRead, name).is_ok()
-                    })
                     .cloned()
                     .collect::<Vec<_>>()
             } else {
                 std::env::vars_os()
                     .filter_map(|(name, _)| name.into_string().ok())
-                    .filter(|name| {
-                        ensure_policy_scope(policy, CapabilityDomain::EnvRead, name).is_ok()
-                    })
                     .collect::<Vec<_>>()
             };
             names.sort();
@@ -3194,10 +2727,6 @@ fn exec_vibra_v1(
         },
         "net_resolve" => {
             let target = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            if ensure_policy_scope(policy, CapabilityDomain::NetConnect, &target).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             match target.to_socket_addrs() {
                 Ok(addresses) => Ok(result_ok(
                     sig,
@@ -3212,10 +2741,6 @@ fn exec_vibra_v1(
         }
         "net_connect" => {
             let target = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            if ensure_policy_scope(policy, CapabilityDomain::NetConnect, &target).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             if files.at_capacity() {
                 return Ok(result_err(
                     sig,
@@ -3239,10 +2764,6 @@ fn exec_vibra_v1(
         }
         "net_listen" => {
             let target = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            if ensure_policy_scope(policy, CapabilityDomain::NetListen, &target).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             if files.at_capacity() {
                 return Ok(result_err(
                     sig,
@@ -3351,10 +2872,6 @@ fn exec_vibra_v1(
         }
         "net_udp_bind" => {
             let target = value_string(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            if ensure_policy_scope(policy, CapabilityDomain::NetListen, &target).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             if files.at_capacity() {
                 return Ok(result_err(
                     sig,
@@ -3379,10 +2896,6 @@ fn exec_vibra_v1(
         "net_udp_connect" => {
             let id = value_handle(&args[0])?;
             let target = value_string(&args[1])?;
-            let policy = value_policy(&args[2])?;
-            if ensure_policy_scope(policy, CapabilityDomain::NetConnect, &target).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             let result = match files.get_mut(id)? {
                 FileHandle::UdpSocket(v) => v.connect(&target),
                 _ => return Ok(result_err(sig, "invalid-handle", None)),
@@ -3396,10 +2909,6 @@ fn exec_vibra_v1(
             let id = value_handle(&args[0])?;
             let bytes = value_bytes(&args[1])?;
             let target = value_string(&args[2])?;
-            let policy = value_policy(&args[3])?;
-            if ensure_policy_scope(policy, CapabilityDomain::NetConnect, &target).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             let result = match files.get_mut(id)? {
                 FileHandle::UdpSocket(v) => v.send_to(&bytes, &target),
                 _ => return Ok(result_err(sig, "invalid-handle", None)),
@@ -3447,10 +2956,6 @@ fn exec_vibra_v1(
                     .with_context(|| format!("process command is missing `{name}`"))
             };
             let executable = value_string(field("executable")?)?;
-            let policy = value_policy(&args[1])?;
-            if ensure_policy_scope(policy, CapabilityDomain::ProcessRun, &executable).is_err() {
-                return Ok(result_err(sig, "permission-denied", None));
-            }
             let RuntimeValue::Array(argv) = untyped(field("arguments")?) else {
                 bail!("process arguments must be an array")
             };
@@ -3603,8 +3108,6 @@ fn exec_vibra_v1(
             }
         }
         "clock_now_unix_millis" => {
-            let policy = value_policy(&args[0])?;
-            ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
             if let Some(clock) = &config.injected_clock {
                 let millis = clock.lock().expect("injected clock poisoned").unix_millis;
                 return Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)));
@@ -3616,8 +3119,6 @@ fn exec_vibra_v1(
             Ok(RuntimeValue::Int(i64::try_from(millis).unwrap_or(i64::MAX)))
         }
         "clock_monotonic_millis" => {
-            let policy = value_policy(&args[0])?;
-            ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
             if let Some(clock) = &config.injected_clock {
                 let millis = clock
                     .lock()
@@ -3648,8 +3149,6 @@ fn exec_vibra_v1(
         }
         "clock_sleep_millis" => {
             let millis = value_i64(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            ensure_policy_scope(policy, CapabilityDomain::Clock, "*")?;
             let millis = u64::try_from(millis).context("sleep duration must be non-negative")?;
             if let Some(clock) = &config.injected_clock {
                 let mut clock = clock.lock().expect("injected clock poisoned");
@@ -3662,8 +3161,6 @@ fn exec_vibra_v1(
         }
         "random_bytes" => {
             let len = value_i64(&args[0])?;
-            let policy = value_policy(&args[1])?;
-            ensure_policy_scope(policy, CapabilityDomain::Random, "*")?;
             let len = checked_alloc_len(len, config)
                 .map_err(|(tag, msg)| anyhow::anyhow!("random_bytes {tag}: {msg}"))?;
             let mut buf = vec![0u8; len];
@@ -3683,8 +3180,6 @@ fn exec_vibra_v1(
             ))
         }
         "system_info" => {
-            let policy = value_policy(&args[0])?;
-            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
             Ok(RuntimeValue::Record(BTreeMap::from([
                 (
                     "architecture".to_string(),
@@ -3701,8 +3196,6 @@ fn exec_vibra_v1(
             ])))
         }
         "system_args" => {
-            let policy = value_policy(&args[0])?;
-            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
             Ok(RuntimeValue::Array(
                 std::iter::once(config.program_name.clone())
                     .chain(config.argv.iter().cloned())
@@ -3711,22 +3204,16 @@ fn exec_vibra_v1(
             ))
         }
         "system_current_dir" => {
-            let policy = value_policy(&args[0])?;
-            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
             Ok(fs_result(sig, std::env::current_dir, |path| {
                 RuntimeValue::Str(path.display().to_string())
             }))
         }
         "system_executable" => {
-            let policy = value_policy(&args[0])?;
-            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
             Ok(fs_result(sig, std::env::current_exe, |path| {
                 RuntimeValue::Str(path.display().to_string())
             }))
         }
         "system_temp_dir" => {
-            let policy = value_policy(&args[0])?;
-            ensure_policy_scope(policy, CapabilityDomain::SystemInfo, "*")?;
             Ok(RuntimeValue::Str(
                 std::env::temp_dir().display().to_string(),
             ))

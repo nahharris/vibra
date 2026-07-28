@@ -353,7 +353,7 @@ $cast: $args.raw
 into: $path
 ```
 
-In v1, casts are allowed only for the two directions between a `$newtype` and its declared inner type. Transparent aliases already coerce implicitly, and other semantic conversions must be expressed through explicit conversion interfaces such as `$from.from` or `$into.into`. All other casts are invalid (`E-CAST-001`). `$cast` attaches runtime type metadata so `$newtype` and nominal `$interface` patterns can test the value later; primitive host operations still consume the inner representation. `$cast` cannot target `$capability` types or aliases whose body is `$capability` (`E-CAP-001`).
+In v1, casts are allowed only for the two directions between a `$newtype` and its declared inner type. Transparent aliases already coerce implicitly, and other semantic conversions must be expressed through explicit conversion interfaces such as `$from.from` or `$into.into`. All other casts are invalid (`E-CAST-001`). `$cast` attaches runtime type metadata so `$newtype` and nominal `$interface` patterns can test the value later; primitive host operations still consume the inner representation. `$cast` cannot target opaque host handle types (`E-CAP-001`).
 
 ### `$do`
 
@@ -387,7 +387,6 @@ Anywhere else (record fields, free-standing function signatures, generic instant
 |------|---------|
 | `$literal` | Literal type: `{ $literal: "ok" }` |
 | `$newtype` | Nominal wrapper: `{ $newtype: T }`. Unlike transparent aliases, a `$newtype` is distinct from `T` and crosses to/from `T` only through `$cast`. |
-| `$policy` | Opaque runtime-injected authority type. User code cannot mint policy values and may only attenuate them through explicit narrowing. |
 | `$record` | Concrete product: `{ $record: { f: T, ... } }` |
 | `$map` | Homogeneous map: `{ $map: { key: K, value: V } }` |
 | `$tuple` | Tuple of types: `{ $tuple: [$t1, $t2] }` — **type positions only** |
@@ -479,8 +478,8 @@ Structural satisfaction is **not enough** to clear a `=where` bound or be a disp
 - `$quote`, `$unquote`, and `$splice` compose structural syntax values.
   Introduced bindings are hygienic; `$capture` is the explicit caller-scope
   escape hatch.
-- Compile-time execution has no `$wasm`, policy, filesystem, environment,
-  network, clock, or randomness authority.
+- Compile-time execution has no `$wasm`, filesystem, environment, network,
+  clock, or randomness access.
 - Expansion limits are 64 nested invocations, 1,000,000 evaluation steps, and
   100,000 generated nodes. Typed/post-typecheck macros are not part of v1.
 
@@ -553,15 +552,10 @@ instance exits.
 
 The embedded runner uses **wasmer-wasix** (requires a Tokio 1.x runtime). **Preopened directories** map host paths into the guest; stdio does not require preopens.
 
-**Security policies:** Authority roots receive aggregate, unforgeable `$policy`
-values. `$policy.narrow` produces a domain-specific `$capability.<domain>` value;
-privileged helpers accept only those narrowed values. The runtime checks dynamic
-targets against the live capability at use. Policy groups may mix mandatory and
-optional scopes, and filesystem scopes use canonical ancestry.
-
 **Typed host boundary:** `$wasm` declarations bind only to the closed,
-versioned host registry. Complete parameter, capability-domain, and return types
-are checked statically; wrapper declarations confer no authority.
+versioned host registry. Complete parameter and return types are checked
+statically. There is no capability or policy authorization layer -- every
+host operation is unconditionally available at runtime.
 
 **`$wasm` encoding (pick one per build):**
 
@@ -604,7 +598,7 @@ The other mode is **disabled** in v1 builds (`E-WASM-001` if wrong form).
 | `E-NEWTYPE-002` | error | Malformed `$newtype` definition body. |
 | `E-CAST-001` | error | `$cast` has no valid v1 cast path between source and target types. |
 | `E-CAST-002` | error | Malformed `$cast` payload; expected `$cast: <expr>` with sibling `into: <type>`. |
-| `E-CAP-001` | error | Capability values are runtime-minted and cannot be created with `$cast` or literals. |
+| `E-CAP-001` | error | Opaque host handles are runtime-minted and cannot be created with `$cast` or literals. |
 | `E-SELF-001` | error | Reserved `$self` type used outside an `$interface` body or a type's `=defs` / `=impl` annotation. |
 | `E-DEFS-001` | error | Invalid `=defs` annotation (placed on a non-type definition, entry is not a `$function`, or duplicate name). |
 | `E-IMPL-001` | error | Invalid `=impl` annotation (non-type definition, malformed payload, or method binding that is neither a `$function` envelope nor a qualified function alias). |
@@ -781,22 +775,20 @@ Both call shapes are valid in **statement** position (the body of a `do:` step o
   retry the unwritten suffix. `read-line` removes one trailing CRLF or LF.
   Writes can select create/create-new/truncate behavior explicitly. Path
   join/parent/file-name/components are pure platform path operations; rename,
-  copy, directory enumeration, and canonicalization remain capability checked.
+  copy, directory enumeration, and canonicalization are fully supported.
   `stdlib/src/io.vibra` exposes stdin/stdout/stderr through the same handles.
 - **Typed processes:** `process.run` and `process.spawn` take an executable and
   argument array directly, so no shell parses a command string. Callers choose
   the complete child environment, working directory (empty means inherit), and
-  capture/inherit/null stdio policy. Captured output includes raw stdout/stderr
+  capture/inherit/null stdio mode. Captured output includes raw stdout/stderr
   bytes and an exit code. Spawned children are opaque instance-owned resources
-  consumed by `wait` and terminable with `kill`. Capability scope is checked
-  against the executable. Stream mode exposes child stdin/stdout/stderr through
-  `process.stdin`, `process.stdout`, and `process.stderr`; those returned file
-  handles implement the same byte stream and close interfaces as filesystem
-  handles, and taking the same pipe twice returns `unavailable`.
-- **Security policies:** privileged host modules consume narrowed domain
-  capabilities; roots alone receive aggregate `$policy` values.
+  consumed by `wait` and terminable with `kill`. Stream mode exposes child
+  stdin/stdout/stderr through `process.stdin`, `process.stdout`, and
+  `process.stderr`; those returned file handles implement the same byte
+  stream and close interfaces as filesystem handles, and taking the same pipe
+  twice returns `unavailable`.
 - **Rust-inspired unions:** `stdlib/src/option.vibra` (`Option`) is the tagged `$enum: { some: $t, none: $void }` with `=where: {t: []}`; `stdlib/src/result.vibra` (`Result`) is `$enum: { err: $e, ok: $t }` with `=where: {t: [], e: []}`. Both use qualified constructors and `$match`.
-- **Naming policy:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
+- **Naming convention:** kebab-case is recommended for every symbol category; non-kebab symbols produce warnings.
 
 ---
 

@@ -6,8 +6,7 @@
   get-reads-an-explicitly-granted-variable
   env
   (do
-    (let capability (policy.narrow policy env.read-capability))
-    (let value (env.get "PATH" capability))
+    (let value (env.get "PATH"))
     (match
       value
       (case (result.result.ok _) (do (test.assert true)))
@@ -16,43 +15,32 @@
         (do (test.fail "granted environment variable was not readable"))
       )
     )
-    (let names (env.list capability))
+    (let names (env.list))
     (let names-have-the-declared-type (accepts-names names))
     (test.assert names-have-the-declared-type)
   )
-  tags: (stdlib capability)
-  policy: (policy (env-read (group requirement: mandatory scopes: ((exact "PATH")))))
+  tags: (stdlib)
 )
 (test
   set-and-remove-use-the-exact-write-grant
   env
   (do
-    (let read-capability (policy.narrow policy env.read-capability))
-    (let write-capability (policy.narrow policy env.write-capability))
     (let
       set-result
-      (env.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present" write-capability)
+      (env.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present")
     )
-    (let remove-result (env.remove "VIBRA_STDLIB_ENV_REMOVE_TEST" write-capability))
+    (let remove-result (env.remove "VIBRA_STDLIB_ENV_REMOVE_TEST"))
     (match
       remove-result
       (case (result.result.ok) (do (test.assert true)))
       (case _ (do (test.fail "environment removal returned an error")))
     )
-    (let after-remove (env.get "VIBRA_STDLIB_ENV_REMOVE_TEST" read-capability))
+    (let after-remove (env.get "VIBRA_STDLIB_ENV_REMOVE_TEST"))
     (match
       after-remove
       (case (result.result.err _) (do (test.assert true)))
       (case _ (do (test.fail "removed environment variable remained visible")))
     )
   )
-  tags: (stdlib capability)
-  policy: (policy
-    (env-read
-      (group requirement: mandatory scopes: ((exact "VIBRA_STDLIB_ENV_REMOVE_TEST")))
-    )
-    (env-write
-      (group requirement: mandatory scopes: ((exact "VIBRA_STDLIB_ENV_REMOVE_TEST")))
-    )
-  )
+  tags: (stdlib)
 )

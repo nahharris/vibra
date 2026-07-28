@@ -4,11 +4,8 @@
 //! (including the legacy YAML reader) must lower into [`TypeRef`] before using
 //! these relations.
 
-use crate::lower::{
-    CapabilityType, LiteralType, PolicyGroup, PolicyScope, PolicyType, TypeAlias, TypeRef,
-};
+use crate::lower::{LiteralType, TypeAlias, TypeRef};
 use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
 
 pub(crate) fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
     substitute(ty, &HashMap::new(), Some(self_ty))
@@ -252,9 +249,6 @@ pub(crate) fn unify_types(
         return true;
     }
     match (&expected, &actual) {
-        (TypeRef::Policy(_), TypeRef::Policy(_)) => {
-            policy_type_is_subset(&actual, &expected, aliases)
-        }
         (TypeRef::Literal(left), TypeRef::Literal(right)) => left == right,
         (expected, TypeRef::Literal(actual)) => literal_fits_primitive(actual, expected),
         (TypeRef::Literal(_), _) => false,
@@ -385,9 +379,6 @@ pub(crate) fn type_compatible(
         }
         _ => {}
     }
-    if policy_body(expected, aliases).is_some() && policy_body(actual, aliases).is_some() {
-        return policy_type_is_subset(expected, actual, aliases);
-    }
     unify_types(expected, actual, aliases, &mut HashMap::new())
 }
 
@@ -430,10 +421,7 @@ pub(crate) fn valid_cast_path(
     target: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
-    if policy_body(target, aliases).is_some()
-        || capability_body(target, aliases).is_some()
-        || matches!(resolve_alias_type(target, aliases), TypeRef::HostHandle(_))
-    {
+    if matches!(resolve_alias_type(target, aliases), TypeRef::HostHandle(_)) {
         return false;
     }
     newtype_inner(target, aliases).is_some_and(|inner| type_compatible(inner, source, aliases))
@@ -451,105 +439,6 @@ pub(crate) fn resolve_alias_type<'a>(
     }
 }
 
-pub(crate) fn policy_body<'a>(
-    ty: &'a TypeRef,
-    aliases: &'a HashMap<String, TypeAlias>,
-) -> Option<&'a PolicyType> {
-    match resolve_alias_type(ty, aliases) {
-        TypeRef::Policy(policy) => Some(policy),
-        _ => None,
-    }
-}
-
-pub(crate) fn capability_body<'a>(
-    ty: &'a TypeRef,
-    aliases: &'a HashMap<String, TypeAlias>,
-) -> Option<&'a CapabilityType> {
-    match resolve_alias_type(ty, aliases) {
-        TypeRef::Capability(capability) => Some(capability),
-        _ => None,
-    }
-}
-
-pub(crate) fn policy_type_is_subset(
-    source: &TypeRef,
-    target: &TypeRef,
-    aliases: &HashMap<String, TypeAlias>,
-) -> bool {
-    let Some(source) = policy_body(source, aliases) else {
-        return false;
-    };
-    if let Some(target) = capability_body(target, aliases) {
-        let Some(source_groups) = source.domains.get(&target.domain) else {
-            return false;
-        };
-        return target.groups.is_empty()
-            || target.groups.iter().all(|target_group| {
-                source_groups
-                    .iter()
-                    .any(|source_group| policy_group_covers(source_group, target_group))
-            });
-    }
-    let Some(target) = policy_body(target, aliases) else {
-        return false;
-    };
-    target.domains.iter().all(|(domain, target_groups)| {
-        source.domains.get(domain).is_some_and(|source_groups| {
-            target_groups.iter().all(|target_group| {
-                source_groups
-                    .iter()
-                    .any(|source_group| policy_group_covers(source_group, target_group))
-            })
-        })
-    })
-}
-
-fn policy_group_covers(source: &PolicyGroup, target: &PolicyGroup) -> bool {
-    source
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, PolicyScope::Any))
-        || target.scopes.iter().all(|target_scope| {
-            source
-                .scopes
-                .iter()
-                .any(|source_scope| policy_scope_covers(source_scope, target_scope))
-        })
-}
-
-fn policy_scope_covers(source: &PolicyScope, target: &PolicyScope) -> bool {
-    match (source, target) {
-        (PolicyScope::Any, _) => true,
-        (PolicyScope::Dir(source), PolicyScope::Dir(target))
-        | (PolicyScope::Dir(source), PolicyScope::File(target)) => {
-            path_scope_covers(source, target)
-        }
-        (PolicyScope::File(source), PolicyScope::File(target))
-        | (PolicyScope::Exact(source), PolicyScope::Exact(target)) => source == target,
-        (PolicyScope::Prefix(source), PolicyScope::Exact(target))
-        | (PolicyScope::Prefix(source), PolicyScope::Prefix(target)) => target.starts_with(source),
-        _ => false,
-    }
-}
-
-fn path_scope_covers(source: &str, target: &str) -> bool {
-    normalize_policy_path(target).starts_with(normalize_policy_path(source))
-}
-
-fn normalize_policy_path(path: &str) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in Path::new(path).components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    normalized
-}
-
 fn bare_name(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
@@ -557,8 +446,6 @@ fn bare_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lower::{CapabilityDomain, PolicyRequirement};
-    use std::collections::BTreeMap;
 
     fn alias(name: &str, body: TypeRef) -> TypeAlias {
         TypeAlias {
@@ -615,37 +502,6 @@ mod tests {
         assert!(valid_cast_path(
             &TypeRef::Int64,
             &TypeRef::Named("user-id".into()),
-            &aliases
-        ));
-    }
-
-    #[test]
-    fn policy_subset_handles_aliases_and_normalized_paths() {
-        let group = |scope| PolicyGroup {
-            requirement: PolicyRequirement::Mandatory,
-            scopes: vec![scope],
-        };
-        let source = TypeRef::Policy(PolicyType {
-            domains: BTreeMap::from([(
-                CapabilityDomain::FsRead,
-                vec![group(PolicyScope::Dir("workspace/./src".into()))],
-            )]),
-        });
-        let target = TypeRef::Policy(PolicyType {
-            domains: BTreeMap::from([(
-                CapabilityDomain::FsRead,
-                vec![group(PolicyScope::File("workspace/src/lib.vibra".into()))],
-            )]),
-        });
-        let aliases = HashMap::from([("read-policy".into(), alias("read-policy", source))]);
-        assert!(policy_type_is_subset(
-            &TypeRef::Named("read-policy".into()),
-            &target,
-            &aliases
-        ));
-        assert!(!policy_type_is_subset(
-            &target,
-            &TypeRef::Named("read-policy".into()),
             &aliases
         ));
     }

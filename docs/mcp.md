@@ -68,8 +68,7 @@ which avoids both escape paths and directory cycles.
 
 The server starts only its own resolved `vibra` executable with a fixed command
 and validated arguments. Clients cannot provide an executable, arbitrary CLI
-subcommand, environment entry, shell fragment, capability flag, or report
-path.
+subcommand, environment entry, shell fragment, or report path.
 
 ## Error model
 

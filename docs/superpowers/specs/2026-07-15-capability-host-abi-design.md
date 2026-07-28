@@ -1,7 +1,10 @@
 # Capability-typed host ABI and unified security model
 
 Date: 2026-07-15
-Status: approved for implementation
+Status: **reverted** — the capability/policy system this spec designed was
+fully decommissioned; every host operation is now unconditionally available
+at runtime. Kept as a historical record of the original design; do not use it
+as a description of current behavior.
 Related issues: #19 (static wasm FFI groundwork), README/DRAFT/PHILOSOPHY "known
 escape hatch" notes.
 

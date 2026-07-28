@@ -196,8 +196,7 @@ fn lint_module_names(
                         TestMeta::Clock { .. }
                         | TestMeta::TimeoutMillis(_)
                         | TestMeta::RandomSeed(_)
-                        | TestMeta::Skip(_)
-                        | TestMeta::Policy(_) => {}
+                        | TestMeta::Skip(_) => {}
                     }
                 }
                 for expression in &value.body {
@@ -319,14 +318,6 @@ fn lint_type(path: &Path, source: &str, ty: &TypeExpr, diagnostics: &mut Vec<Dia
             }
             lint_type(path, source, result, diagnostics);
         }
-        TypeExprKind::Policy(domains) => {
-            for domain in domains {
-                lint_name(path, source, &domain.name, "policy domain", diagnostics);
-            }
-        }
-        TypeExprKind::Capability { domain, .. } => {
-            lint_name(path, source, domain, "capability domain", diagnostics)
-        }
         TypeExprKind::WasmValue(name) => {
             lint_name(path, source, name, "wasm value type", diagnostics)
         }
@@ -412,9 +403,7 @@ fn lint_expr(path: &Path, source: &str, expr: &Expr, diagnostics: &mut Vec<Diagn
             lint_expr(path, source, end, diagnostics);
             lint_expr(path, source, step, diagnostics);
         }
-        ExprKind::Convert { value, into, .. }
-        | ExprKind::Cast { value, into }
-        | ExprKind::PolicyNarrow { value, into } => {
+        ExprKind::Convert { value, into, .. } | ExprKind::Cast { value, into } => {
             lint_expr(path, source, value, diagnostics);
             lint_type(path, source, into, diagnostics);
         }
