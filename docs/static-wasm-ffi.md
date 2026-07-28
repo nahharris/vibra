@@ -12,22 +12,15 @@ Git dependencies use the same `wasm:` label alongside `git:` and exact `rev:`;
 the artifact is resolved inside the synced `dep/<alias>` tree. Absolute paths
 and traversal are rejected. The dependency alias is the stable module name:
 
-```yaml
-sum:
-  $function:
-    left: $int32
-  args:
-    right: $int32
-  return: $int32
-  do:
-    - $wasm:
-        import:
-          module: "@math"
-          name: sum
-        args: [$args.left, $args.right]
+```vibra
+(fn foreign-sum ((left int32) (right int32)) int32
+  (do
+    (wasm
+      import: (import "@math" "sum")
+      args: ((arg left) (arg right)))))
 ```
 
-The visible `$wasm` node is the explicit unsafe boundary. It must be the
+The visible `wasm` form is the explicit unsafe boundary. It must be the
 wrapper's only body statement. The wrapper owns conversion of integer status
 codes into typed Vibra `result` values; v1 performs no automatic foreign error
 translation.
@@ -45,7 +38,7 @@ The scalar mapping is exact:
 | `void` return | no result |
 
 Only zero or one result is supported. Records, arrays other than a direct
-`$array: $uint8` input, nominal wrappers, references, handles, and host
+`(array uint8)` input, nominal wrappers, references, handles, and host
 capabilities never cross this boundary.
 
 Bytes and UTF-8 strings use caller-owned linear-memory buffers and an explicit
@@ -63,8 +56,8 @@ caller-owned pointers. Linking supplies the current instance's memory. It must
 not export or require an allocator. Callee-owned pointers, allocator
 negotiation, and foreign-owned heap values are outside v1.
 
-`$str` wrapper arguments are automatically lowered to one `(pointer, length)`
-pair containing their validated UTF-8 bytes. A direct `$array: $uint8` argument
+`str` wrapper arguments are automatically lowered to one `(pointer, length)`
+pair containing their validated UTF-8 bytes. A direct `(array uint8)` argument
 uses the same pair without UTF-8 interpretation. Non-empty allocations are
 8-byte aligned; an empty buffer is exactly `(0, 0)`. The host checks every
 length, addition, alignment, wasm32 conversion, memory growth, and write before

@@ -131,33 +131,24 @@ is rendered from this data and must not be parsed by tools.
 
 Example conflict:
 
-```yaml
-resolution-version: 1
-outcome: conflict
-code: E-RESOLVE-CONFLICT
-package: https://github.com/example/common#/
-requirements:
-  - chain:
-      - from: root
-        alias: left
-        to: https://github.com/example/left#/
-        requirement: ^1.0.0
-      - from: https://github.com/example/left#/
-        from-version: 1.0.0
-        alias: common
-        to: https://github.com/example/common#/
-        requirement: ^1.0.0
-  - chain:
-      - from: root
-        alias: right
-        to: https://github.com/example/right#/
-        requirement: ^1.0.0
-      - from: https://github.com/example/right#/
-        from-version: 1.0.0
-        alias: common
-        to: https://github.com/example/common#/
-        requirement: ^2.0.0
-available: [1.9.0, 2.1.0]
+```json
+{
+  "resolution-version": 1,
+  "outcome": "conflict",
+  "code": "E-RESOLVE-CONFLICT",
+  "package": "https://github.com/example/common#/",
+  "requirements": [
+    {"chain": [
+      {"from": "root", "alias": "left", "to": "https://github.com/example/left#/", "requirement": "^1.0.0"},
+      {"from": "https://github.com/example/left#/", "from-version": "1.0.0", "alias": "common", "to": "https://github.com/example/common#/", "requirement": "^1.0.0"}
+    ]},
+    {"chain": [
+      {"from": "root", "alias": "right", "to": "https://github.com/example/right#/", "requirement": "^1.0.0"},
+      {"from": "https://github.com/example/right#/", "from-version": "1.0.0", "alias": "common", "to": "https://github.com/example/common#/", "requirement": "^2.0.0"}
+    ]}
+  ],
+  "available": ["1.9.0", "2.1.0"]
+}
 ```
 
 ## Conformance vectors

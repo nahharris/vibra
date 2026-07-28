@@ -41,21 +41,18 @@ hello/
 ## Tests
 
 Project tests live under `tests/` by convention. `vibra test` recursively
-discovers `.vibra` files there and runs each top-level `$test` declaration.
+discovers `.vibra` files there and runs each top-level `test` declaration.
 Test files may contain several tests and do not need a `main` function.
 
-```yaml
-test:
-  $import: "@std/test.vibra"
+```vibra
+(import test "@std/test.vibra")
 
-opens-file:
-  $test: core
-  do:
-    - $test.assert: true
+(test opens-file core
+  (do (test.assert true)))
 ```
 
 Use `--filter`, `--jobs`, `--timeout-ms`, `--fail-fast`, and
-`--report yaml --report-file <path>` to control runner behavior. Permission
+`--report json --report-file <path>` to control runner behavior. Permission
 flags are the same as `vibra run` and apply to each test case.
 
 Files named `foo.<flag>.vibra` are conditional module parts for `foo.vibra`
@@ -69,18 +66,15 @@ tooling semantics.
 
 Relative imports keep file-relative behavior:
 
-```yaml
-model:
-  $import: ./model.vibra
+```vibra
+(import model "./model.vibra")
 ```
 
 Imports beginning with `@` resolve through project namespaces:
 
-```yaml
-io:
-  $import: "@std/io.vibra"
-core:
-  $import: "@core/lib.vibra"
+```vibra
+(import io "@std/io.vibra")
+(import core "@core/lib.vibra")
 ```
 
 `@name/path` resolves `name` as either a target name or dependency name. Target imports resolve under the target `root`. Dependencies with a `project.vibra` resolve under their matching (or only) library target root; unmanifested path dependencies retain root-relative behavior. Git dependencies live under `dep/<name>` after `vibra sync`.
@@ -103,7 +97,7 @@ Git dependencies:
 
 A path or Git dependency may expose a static WebAssembly library with a
 package-relative `wasm: path/to/library.wasm` field. Typed wrappers bind its
-exports through `$wasm.import.module: "@dependency-name"`; see
+exports through `(wasm import: (import "@dependency-name" "function") ...)`; see
 [static-wasm-ffi.md](static-wasm-ffi.md) for the ABI and safety contract.
 
 Git dependencies must pin a full 40-hex `rev`. `vibra sync` recursively exports clean source trees into package-local `dep/<name>` directories; nested repositories use their own `dep/` directories, so diamond edges may select different revisions without a global namespace collision. Exported trees contain no `.git` metadata. Local dependencies are not copied and published Git dependencies may not declare path dependencies.

@@ -1,490 +1,95 @@
 # Vibra
 
-A vibe-coding-first programming language: **YAML** surface (strict subset), **static typing**, functional core, compiles to **WebAssembly**.
+Vibra is a vibe-coding-first, statically typed functional language with an
+S-expression surface that compiles to WebAssembly.
 
-- **Specification:** [DRAFT.md](DRAFT.md)
-- **Philosophy:** [PHILOSOPHY.md](PHILOSOPHY.md)
-- **Schemas and tooling contracts:** [below](#schemas-and-tooling-contracts)
+- **Language contract:** [S-expression language design](docs/superpowers/specs/2026-07-25-s-expression-language-design.md)
+- **Historical record:** [DRAFT.md](DRAFT.md) documents the retired YAML surface.
+- **Project layout:** [docs/project-layout.md](docs/project-layout.md)
+- **Schemas and tooling contracts:** [schemas/](schemas/)
 - **Examples:** [examples/](examples/)
-- **[Container images](docs/containers.md)**
-- **[Native toolchain archives](docs/distribution.md)**
-- **[Agent skills](docs/agent-skills.md)**
+- [Container images](docs/containers.md)
 
-## Run (MVP)
-
-From the repo root (or any directory, using paths as you like—there is no required project layout):
+## Quick start
 
 ```sh
 cargo run -- run examples/hello.vibra
-# After `cargo install --path .`:
-vibra run examples/hello.vibra
+cargo run -- check examples/hello.vibra
+cargo run -- fmt
+cargo run -- lint --deny-warnings
+cargo run -- test
 ```
 
-This parses the entry `.vibra` file, resolves `$import` **relative to that file’s directory** (Python-style), lowers stdlib-qualified calls from `$wasm` declarations, and executes them through the current runtime path. Argument forwarding is explicit: call-site args are validated against stdlib signatures and forwarded into the declared `$wasm.args` contract.
+Vibra source uses UTF-8 S-expressions. A module contains imports and
+definitions; calls are positional and labels configure enclosing forms.
 
-Source execution emits and enters a deterministic WebAssembly module through the versioned `vibra_v1` host boundary. See [the ABI design](docs/wasm-abi.md) for the entrypoint, value-layout, import-validation, and compatibility contract.
+```vibra
+(import io "../stdlib/src/io.vibra")
 
-Project dependencies may also declare statically resolved WebAssembly
-libraries behind explicit typed `$wasm` wrappers. The supported scalar and
-caller-owned-buffer ABI is specified in [the static wasm FFI design](docs/static-wasm-ffi.md).
-
-Runtime-selected local wasm plugins use separately declared typed interfaces
-and dedicated load authority; see [the runtime plugin design](docs/runtime-plugins.md).
-
-`vibra exec` remains available for evaluating a single Vibra expression:
-
-```sh
-vibra exec --expr '"hello"' --format raw
+(fn main () void
+  (do (io.println "Hello, World!")))
 ```
 
-Use `--expr` with one S-expression, then `--arg name=value`, `--arg-file
-name=path`, and `--import alias=path` to provide explicit inputs.
+Use `;` for reader comments. Persisted documentation belongs in a trailing
+`doc:` attribute, not in comments.
 
-## Schemas and tooling contracts
-
-The JSON Schema files in [`schemas/`](schemas/) describe the machine-readable
-Vibra surface used by editors, LSP clients, and automation. They complement
-the language rules in [DRAFT.md](DRAFT.md); they
-are not a complete specification of compiler behavior.
-
-- **Source surface:** [`module-surface.schema.json`](schemas/module-surface.schema.json),
-  [`function.schema.json`](schemas/function.schema.json),
-  [`macro.schema.json`](schemas/macro.schema.json),
-  [`type-expr.schema.json`](schemas/type-expr.schema.json),
-  [`expression.schema.json`](schemas/expression.schema.json), and
-  [`source-annotations.schema.json`](schemas/source-annotations.schema.json).
-- **Projects, packages, and diagnostics:** [`project-manifest.schema.json`](schemas/project-manifest.schema.json),
-  [`project-lock.schema.json`](schemas/project-lock.schema.json),
-  [`dependency-resolution.schema.json`](schemas/dependency-resolution.schema.json),
-  [`package-manifest.schema.json`](schemas/package-manifest.schema.json),
-  [`release-metadata.schema.json`](schemas/release-metadata.schema.json),
-  [`distribution-targets.schema.json`](schemas/distribution-targets.schema.json),
-  [`diagnostic.schema.json`](schemas/diagnostic.schema.json),
-  [`test-report.schema.json`](schemas/test-report.schema.json), and the stable
-  code registry in [`linter-codes.json`](schemas/linter-codes.json).
-- **Editor and documentation queries:** [`query-response.schema.json`](schemas/query-response.schema.json)
-  specifies the `vibra/contextAt` (and `vibra query`) response shape,
-  [`lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json) and
-  [`lsp-compilation-options.schema.json`](schemas/lsp-compilation-options.schema.json)
-  define the editor protocol shapes, and
-  [`docs-response.schema.json`](schemas/docs-response.schema.json) specifies
-  `vibra docs --format json`.
-- **Agent protocol:** [`mcp-tool-result.schema.json`](schemas/mcp-tool-result.schema.json)
-  specifies the shared `vibra mcp` tool result and structured error envelope.
-- **Async conformance:** [`async-task-trace.schema.json`](schemas/async-task-trace.schema.json)
-  defines deterministic structured-task traces and
-  [`async-host-operation.schema.json`](schemas/async-host-operation.schema.json)
-  defines generation-safe host adapter messages. The semantics, implementation
-  milestones, and normative vectors are documented in
-  [`docs/async-structured-concurrency.md`](docs/async-structured-concurrency.md).
-
-Each schema has a canonical `$id` under `https://vibra.dev/schemas/`. Tooling
-should use the schema that matches its boundary and treat the expression and
-module-surface schemas as deliberately permissive where contextual compiler
-validation is required.
-
-## Macros
-
-Function-shaped `$macro` declarations expand after import resolution and before
-normal lowering/typechecking. `$quote`, `$unquote`, and sequence `$splice`
-construct syntax; generated bindings are hygienic, while `$capture` explicitly
-requests caller-scoped syntax.
-
-```yaml
-identity:
-  $macro:
-    input: $code.expr-syntax
-  return: $code.expr-syntax
-  do:
-    - $return:
-        $quote:
-          $unquote: $args.input
+```vibra
+(fn greet ((name str)) void
+  (do (io.println name))
+  doc: "Write a name followed by a newline.")
 ```
-
-Macro execution is deterministic and limited to 64 nested expansions,
-1,000,000 evaluation steps, and 100,000 generated nodes per module load.
-`vibra expand path/to/module.vibra` prints the canonical expanded module.
-
-## Format and lint
-
-Vibra's CLI uses JSON by default for structured machine-readable output. Commands
-with presentation-oriented output also support formats such as `human`, `raw`,
-`markdown`, or `sarif`. Program-owned stdout from `vibra run` is passed through
-unchanged.
-
-`vibra fmt` and `vibra lint` follow the same convention. Lint also supports
-SARIF for external automation.
-
-```sh
-vibra fmt                 # check every .vibra/.vibra.yaml file under .
-vibra fmt src --write     # rewrite changed files in place
-vibra fmt src --format json
-
-vibra lint
-vibra lint src --category style
-vibra lint src --format json
-vibra lint src --format sarif
-vibra lint src --deny-warnings
-```
-
-`vibra fmt` is check-only by default. It exits `0` when all files are canonical, exits `1` when check mode finds formatting drift, and only mutates files with `--write`.
-
-`vibra lint` emits diagnostics with stable codes, severity, and spans matching [schemas/diagnostic.schema.json](schemas/diagnostic.schema.json). Warning-only lint runs exit `0` unless `--deny-warnings` is set. Errors always fail. YAML `#` comments are forbidden; use structural annotations:
-
-```yaml
-BadName:
-  =comment: This external name is intentionally preserved.
-  =lint:
-    disable: [W-STYLE-001]
-  $literal: 1
-```
-
-`=comment` is ignored by compilation. `=lint` applies to its mapping and
-descendants and cannot suppress syntax or compiler errors.
 
 ## Projects
 
-`project.vibra` is the canonical project manifest. New projects can be scaffolded with:
+`project.vibra` is an S-expression manifest and source files use the `.vibra`
+extension. Lockfiles and compiler-owned package metadata are canonical JSON.
 
-```sh
-vibra init hello
-vibra init hello --template lib
-vibra init hello --template workspace
-```
-
-`vibra init` creates `project.vibra`, target source files under `src/`, and an offline stdlib seed under `dep/std`. The manifest records `std` as an exact-revision Git dependency on [nahharris/vibra-stdlib](https://github.com/nahharris/vibra-stdlib); `vibra sync` can reproduce that same tree. Imports remain relative by default; imports beginning with `@` resolve through project targets or dependencies and honor a dependency's declared library source root:
-
-```yaml
-io:
-  $import: "@std/io.vibra"
-core:
-  $import: "@core/lib.vibra"
-```
-
-Use `vibra sync` to export exact Git revisions recursively into package-local `dep/<name>` trees and write the committed `vibra.lock.json`. Exported trees contain no Git metadata. The canonical JSON lock records identities, exact revisions, SHA-256 tree hashes, vendor paths, and alias edges. `vibra check` validates the lock, rejects modified vendor trees, and then validates targets, dependencies, and `@` imports:
-
-```sh
-vibra sync hello
-vibra check hello
-```
-
-See [docs/project-layout.md](docs/project-layout.md) and [schemas/project-manifest.schema.json](schemas/project-manifest.schema.json).
-The proposed post-v1 deterministic source version solver is specified in
-[docs/version-solving.md](docs/version-solving.md); it does not change today's
-exact-revision workflow.
-
-### Compile-time file embedding
-
-`$embed` turns a package-owned file into a Vibra expression while loading the
-module. A string value uses the file extension to select `txt`, `bin`, `json`,
-`toml`, or `xml`; YAML is intentionally not an embedded data format.
-Use the mapping form when the extension is ambiguous:
-
-```yaml
-message: {$embed: assets/message.txt}
-logo: {$embed: {path: assets/logo.dat, format: binary}}
-settings: {$embed: {path: assets/settings.conf, format: toml}}
-```
-
-Text produces `$str`, binary produces `$array<$uint8>`, and structured formats
-produce statically typed records and arrays. Paths are relative to the module,
-must be normalized, and cannot leave the nearest package root (including via a
-symlink). Embedded raw bytes and their package-relative paths participate in
-the deterministic compiler fingerprint; no runtime filesystem grant is needed.
-Malformed content uses `E-EMBED-004`, invalid structured shapes use
-`E-EMBED-005`, and path/sandbox failures use `E-EMBED-002`/`E-EMBED-003`.
-
-### Compile-time text templates
-
-`$template` renders a package-owned UTF-8 text file while loading the module
-and produces a `$str`. It uses the same normalized-path and package sandbox as
-`$embed`, and template bytes participate in the compiler fingerprint:
-
-```yaml
-page:
-  $template:
-    path: templates/team.txt
-    with:
-      title: Compiler team
-      people:
-        - {name: Ada, active: true}
-        - {name: Lin, active: false}
-```
-
-Templates are deterministic and logicless. `{{name}}` performs strict scalar
-lookup, dotted names such as `{{user.name}}` traverse mappings, and `{{.}}`
-refers to the current section item. `{{#items}}...{{/items}}` iterates
-sequences or conditionally renders truthy values; `{{^items}}...{{/items}}`
-renders when the value is false, null, or an empty sequence. `{{! comment }}`
-is ignored. The `with` mapping is static JSON-shaped YAML data, not runtime
-expressions. Interpolation (including the accepted `{{{name}}}` / `{{&name}}`
-aliases) is verbatim and context-neutral; templates that emit HTML, shell, SQL,
-or another escaped language must pass already escaped data. Missing values,
-compound-value interpolation, malformed tags, invalid UTF-8, and package
-escapes are compile errors (`E-TEMPLATE-001` through `E-TEMPLATE-005`). Source,
-output, and section-nesting bounds report `E-TEMPLATE-006`. Rendering never
-needs a runtime filesystem grant.
-
-### Symbol documentation
-
-Use `vibra docs` to read compile-time `=doc` annotations without running a
-program. Pass a source module or a project directory, followed by an optional
-qualified symbol. Plain output is the default; Markdown preserves examples and
-other formatting from the annotation, while JSON is intended for tooling.
-
-```sh
-vibra docs src/app/main.vibra main
-vibra docs src/app/main.vibra io.println --format markdown
-vibra docs src/app/main.vibra --format json
-vibra docs . --target app --format json
-```
-
-With no symbol, the command lists every documented package, module, function,
-type, interface, constant, macro, and inherent definition visible from the
-selected entry module. Prefixing a lookup with `$` is optional. Package docs use
-`package.=doc` in `project.vibra`; module docs use a top-level `=doc`. Imported
-symbols are addressed through their import alias, such as `io.println`.
-
-The command reports source documentation and does not execute macros beyond the
-compiler's normal load-time expansion. Generated implementation methods that
-have no source `=doc` are not listed. The structured documentation records are
-also exposed to editor tooling.
-
-### Language server
-
-Run `vibra lsp` and configure an editor to communicate with the process over
-standard input/output. The server implements LSP lifecycle requests,
-full-document synchronization, syntax/style diagnostics for unsaved buffers,
-canonical formatting, and local-document hover, definition, reference, and
-completion requests. Hover uses `=doc` text.
-
-Navigation, references, hover, and completion discover `.vibra` files under
-the initialized workspace and resolve directly imported top-level symbols.
-Open buffers replace their saved versions in this semantic snapshot, including
-files in nested local packages. Direct and transitive aliases are followed,
-including project `@name/path` imports when the dependency is present in the
-workspace. Completion is not yet expression-type-aware.
-
-Syntax, style, and compile diagnostics use all open editor overlays. Compile
-checking runs in a temporary mirror of the project (excluding `.git` and
-`target`) and never rewrites the user's workspace. Each edit republishes
-diagnostics for every open document so cleared errors do not remain stale.
-When a compiler message names a source symbol, its range is anchored to that
-definition or `$reference`; otherwise the compiler's fallback point is kept.
-The advertised capability shape is documented by
-[`schemas/lsp-capabilities.schema.json`](schemas/lsp-capabilities.schema.json).
-Conditional compilation uses `initializationOptions.compilationFlags`; clients
-may replace the active set through `workspace/didChangeConfiguration` at
-`settings.vibra.compilationFlags`. Both fields use the shape documented by
-[`schemas/lsp-compilation-options.schema.json`](schemas/lsp-compilation-options.schema.json).
-Ready-to-copy Visual Studio Code and Neovim setup, multi-package workspace
-guidance, and the measured medium-project performance contract are in
-[`docs/editor-support.md`](docs/editor-support.md).
-
-### Model Context Protocol server
-
-Run `vibra mcp --workspace .` to expose project inspection, test discovery,
-check, docs, formatting, and lint tools over MCP stdio. The server is read-only
-and does not execute project tests by default. `--allow-write` narrowly enables
-formatter writes and builds inside the workspace; `--allow-test` enables
-test execution. Paths are canonicalized and confined to the
-workspace, and clients cannot submit arbitrary commands.
-
-See [the MCP guide](docs/mcp.md) for tool mappings, schemas, agent
-configuration, security boundaries, and the stable error model.
-
-### Executable application packages
-
-`vibra build` produces a deterministic `.vapp` ZIP containing the selected bin's
-`program.wasm`, its complete project and vendored dependency source graph, and a
-SHA-256 inventory in canonical `package.json`. Timestamps, permissions,
-compression, and entry ordering are fixed, so identical inputs produce
-identical bytes:
-
-```sh
-vibra build hello --output hello.vapp
-vibra package inspect hello.vapp
-vibra package verify hello.vapp
-vibra run hello.vapp
-```
-
-Use `--bin <name>` when a project declares multiple bin targets. Verification
-rejects missing, modified, duplicate, undeclared, or path-unsafe entries before
-execution. The metadata contract is documented by
-[`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
-
-The compiler repository pins that same stdlib revision as the `stdlib` Git submodule. Clone contributors' checkouts with `git clone --recurse-submodules`, or initialize an existing checkout with `git submodule update --init --recursive`.
-
-Functions use canonical labeled declarations: `$function: $void` for zero arguments, `$function: $self` for a method receiver, or a singleton labeled mapping for the primary argument. Additional arguments use sibling `args:`, and function bodies reference every argument through `$args.<name>`.
-
-```sh
-vibra run examples/fs-roundtrip.vibra
-```
-
-**Host ABI:** `$wasm` is a checked binding to the closed `vibra_v1` registry.
-The compiler validates the module/import pair, every argument, and the exact
-return type. Run `vibra effects <path>` to inspect the reachable host surface
-without executing it. Every host operation (filesystem, network, process,
-clock, random, environment, stdin) is unconditionally available at runtime --
-there is no capability or policy authorization layer.
-
-**Current subset:** entry module defines `main` with `args: $void`, `return: $void`, and a `do:` sequence of stdlib-qualified calls (including `$let` bindings of non-void returns and ordered `$match` sequence arms with explicit `case:` entries). Canonical `$for` traversal covers half-open signed integer `$range` values, arrays, insertion-ordered string-key maps, and Unicode scalar values from strings; `$break: null` and `$continue: null` target the nearest loop. Entry and imported modules may also define **user functions** (`do:` with `$let` / `$match` / `$return`) and **generic functions** (`$function` with the `=where` annotation declaring type parameters and bounds); generic calls pass explicit type arguments in the same mapping as value arguments (see [DRAFT.md](DRAFT.md)). `io` and `fs` functions declared in [stdlib/src/io.vibra](stdlib/src/io.vibra) and [stdlib/src/fs.vibra](stdlib/src/fs.vibra) are executable via the runtime execution backend.
-
-Pure collection operations live in [stdlib/src/collections.vibra](stdlib/src/collections.vibra): generic arrays support safe lookup and copy-on-return updates, while deterministic string-key maps preserve insertion order and use explicit `option`/`result` outcomes.
-
-Text and conversion foundations live in `stdlib/src/text.vibra`,
-`stdlib/src/bytes.vibra`, and `stdlib/src/convert.vibra`. `$str` is valid UTF-8:
-string traversal and text offsets count Unicode scalar values, while explicitly
-named byte operations count UTF-8 bytes. Decoding arbitrary bytes and parsing
-primitives are fallible typed operations; formatting is deterministic and
-locale-free (`nan`, `inf`, and `-inf` are the canonical float spellings).
-Potentially growing text/byte operations honor the runtime allocation limit.
-
-`time` distinguishes unit-safe `duration` values from monotonic `instant`
-values, provides checked addition/elapsed arithmetic, and never uses wall time
-for elapsed measurement. `sys` exposes configured program arguments,
-current/executable/temp locations, and structured operating-system,
-architecture, and family fields.
-
-Networking uses typed `net.address`, `tcp-stream`, `tcp-listener`, and
-`udp-socket` resources. Address parsing is pure. TCP supports
-connect/listen/accept, bounded byte I/O, deadlines, shutdown, and deterministic
-close; UDP supports bind/connect/send-to/receive-from. All socket resources
-share the instance host resource limit and are reclaimed at instance teardown.
-Until cross-module interface method forwarding is supported,
-`net.stream-read`, `stream-write`, and `close-*` expose the common fd behavior
-directly rather than claiming an unusable
-`$fs.readable`/`writable`/`closeable` implementation.
-
-## Type System Snapshot
-
-- Primitive numerics: `$int8/$int16/$int32/$int64`, `$uint8/$uint16/$uint32/$uint64`, `$float32/$float64`
-- Canonical primitive intrinsics provide checked integer arithmetic, IEEE float arithmetic, comparisons, boolean operations, bitwise operations, bounded shifts, and explicit non-trapping exact numeric conversion with a typed fallback. Operands must have the same type; Vibra never widens or narrows them implicitly.
-- Explicit annotations are required on function signatures (`args` + `return`)
-- Algebraic unions are supported in lowering with direct syntax (`$union: [...]`, `$enum: {...}`, constructors, `$match`); optional values use the tagged `stdlib/src/option.vibra` enum because `$option` sugar and direct `$void` union members are rejected
-- Value patterns use the single ordered-arm `$match: <expr>` plus sibling `when:` form; pattern variables are written as `{ $bind: name }`, wildcard as `{ $wildcard: null }`, and arm bindings remain local to the arm
-- Generic functions and types declare type parameters via the `=where` annotation; call sites pass type params as keys alongside value args (e.g. `{ $f: { t: $int64, x: 7 } }`)
-- `$newtype` creates nominal wrappers that require explicit `$cast` to cross to/from the inner type; transparent aliases still coerce implicitly, and other conversions use explicit `$from` / `$into` interface calls
-- `=where` bounds (`t: [$some-iface, ...]`) are checked nominally against `=impl` blocks at call sites and type-position instantiations (`E-BOUND-001`)
-- Inherent operations on a type live under its `=defs` annotation; explicit interface implementations live under `=impl` and use the reserved `$self` type to refer to the implementing type
-- Interface methods can be invoked **type-qualified** (`$type.iface.method: { ... }`) or, when the method has a `$self`-typed argument, **interface-qualified** (`$iface.method: { x: $val, ... }`) -- the compiler dispatches on the static type of the `$self` argument
-- Rust-inspired tagged enums available:
-  - [stdlib/src/option.vibra](stdlib/src/option.vibra)
-  - [stdlib/src/result.vibra](stdlib/src/result.vibra)
-
-Import option and instantiate its generic type explicitly:
-
-```yaml
-option:
-  $import: ./stdlib/src/option.vibra
-maybe-name:
-  $record:
-    value:
-      $option.option:
-        t: $str
-```
-
-Construct values with `$option.option.some: "name"` or `$option.option.none`.
-Both tagged types provide `is-*` queries and `unwrap-or` defaulting. `option`
-also provides `and`/`or`; `result` provides `and`/`or` plus conversions to its
-ok/error options. These combinators are eager and effect-transparent: arguments
-are evaluated before the call. Vibra does not yet have first-class function
-values, so callback combinators such as `map` and `and-then` are intentionally
-not exposed with a misleading file-specific or dynamically typed callback.
-
-Error propagation is explicit with `$match`: return the unchanged
-`$result.result.err` payload from the error arm and continue from the ok arm.
-This preserves the exact error type and structured context and keeps effects
-visible. There is currently no implicit `?`-style control-flow form.
-
-- `io`/`fs` APIs use nominal paths and file-mode handles with reusable
-  `readable`/`writable`/`closeable` stream interfaces. Bounded reads use an
-  empty successful chunk for EOF, partial writes report progress, and file
-  rename/copy/open options and typed directory entries are fully supported
-- `process` uses a typed command record containing an explicit executable,
-  argument array, environment, cwd, and stdio mode without shell parsing;
-  capture/inherit/null execution returns typed status and output, and
-  exposes instance-owned child handles with typed wait/kill outcomes; stream
-  mode provides child pipes through the shared file reader/writer interfaces.
-  `run` rejects stream mode (use `spawn`), and live children are terminated and
-  reaped when their program instance ends
-- Kebab-case is recommended for every symbol; non-kebab symbols emit warnings
-
-## Examples
-
-```sh
-# Interactive stdin path
-cargo run -- run examples/ask-name.vibra
-
-# Filesystem roundtrip
-cargo run -- run examples/fs-roundtrip.vibra
+```vibra
+(project
+  (package "hello" "0.1.0")
+  (target hello kind: bin root: "src" entry: "main.vibra")
+  (dependency std path: "../stdlib"))
 ```
 
 ## Tests
 
-`vibra test` discovers `.vibra` files under `tests/` and runs each top-level
-`$test` declaration as an isolated test case. Test modules do not need `main`.
-The `$test` value is a non-empty kebab-case profile; a bare `vibra test` runs
-the `core` profile.
+Tests are first-class declarations. A bare `vibra test` selects the capability
+free `core` profile.
 
-```yaml
-test:
-  $import: "@std/test.vibra"
+```vibra
+(import test "@std/test.vibra")
 
-truth:
-  $test: core
-  do:
-    - $test.assert: true
+(test truth core
+  (do (test.assert true))
+  tags: (language))
 ```
 
 ```sh
-vibra test
-vibra test --filter truth
-vibra test --profile core --tag language
-vibra test --deny-skips --deny-warnings
-vibra test --jobs 4 --timeout-ms 30000 --fail-fast
-vibra test --format json --report-file report.json
+cargo run -- test
+cargo run -- test --filter truth
+cargo run -- test --profile core --tag language
+cargo run -- test --deny-skips --deny-warnings
 ```
 
-Profiles and tags only select tests. `workspace: temp` tests additionally need
-`--allow-test-workspace`; without it, they are reported as skipped. See
-[`tests/README.md`](tests/README.md) for expected errors, typed assertion
-helpers, and the complete flag reference.
+Profiles and tags select tests; they do not grant host permissions. See
+[tests/README.md](tests/README.md) for capability-gated test requirements.
 
-Tests can replace ambient clock and random inputs with isolated fixtures.
-`random-seed` selects a reproducible non-cryptographic byte stream, while
-`clock` supplies wall and monotonic millisecond values; test sleeps advance
-both fake values without waiting:
+## Data interoperability
 
-```yaml
-deterministic:
-  $test: core
-  random-seed: 42
-  clock: {unix-millis: 1000, monotonic-millis: 0}
-  do: [...]
-```
+YAML is not Vibra syntax, a manifest format, or compiler output. It remains
+available only as explicitly requested external data, for example
+`(embed "settings.yaml" format: yaml)`. The decoded result is an ordinary
+Vibra value; YAML constructs never enter the source tree.
 
-Files named `foo.<flag>.vibra` are conditional parts of `foo.vibra` when the
-base file exists. The base file is always loaded; a part is loaded only when
-all of its suffix flags are enabled. Pass repeatable `--flag <kebab-name>`
-arguments to `build`, `check`, `run`, `docs`, `effects`, `expand`, or `lsp`.
-`vibra test` enables `test` automatically, so unit tests can live beside their
-module in `foo.test.vibra` without entering normal compiler runs. See
-[the conditional compilation contract](docs/conditional-compilation.md).
+## Build and validate
 
-## Build & test
+Run both suites before a commit:
 
 ```sh
-cargo build
 cargo test
+cargo run -- test
 ```
 
 ## License
 
-MIT OR Apache-2.0 (see `Cargo.toml`).
-Test declarations can be measured explicitly with `vibra test --benchmark`;
-warm-up and iteration counts are controlled by `--benchmark-warmup` and
-`--benchmark-iterations`. JSON reports distinguish `test` and `benchmark`
-mode and expose the stable sample/statistics contract documented in
-[`tests/README.md`](tests/README.md). Normal `vibra test` execution remains a
-single pass with unchanged semantics.
+MIT OR Apache-2.0 (see [Cargo.toml](Cargo.toml)).

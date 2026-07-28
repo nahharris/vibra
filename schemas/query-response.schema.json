@@ -48,7 +48,7 @@
     },
     "macroName": {
       "type": ["string", "null"],
-      "description": "If inside a $-macro expansion, the macro key e.g. $function"
+      "description": "If inside a macro expansion, the enclosing S-expression form head, for example `fn`"
     },
     "diagnostics": {
       "type": "array",

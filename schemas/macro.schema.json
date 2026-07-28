@@ -1,34 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/macro.schema.json",
-  "title": "VibraMacroDefinition",
-  "type": "object",
-  "required": ["$macro", "return", "do"],
-  "additionalProperties": false,
-  "properties": {
-    "$macro": {
-      "type": "object",
-      "minProperties": 1,
-      "maxProperties": 1,
-      "additionalProperties": {
-        "enum": [
-          "$code.expr-syntax",
-          "$code.statement-syntax",
-          "$code.type-syntax",
-          "$code.definition-syntax",
-          "$code.module-syntax"
-        ]
-      }
-    },
-    "return": {
-      "enum": [
-        "$code.expr-syntax",
-        "$code.statement-syntax",
-        "$code.type-syntax",
-        "$code.definition-syntax",
-        "$code.module-syntax"
-      ]
-    },
-    "do": { "type": "array" }
-  }
+  "title": "VibraMacro",
+  "description": "Transport representation of a complete `(macro ...)` S-expression. Typed macro syntax is validated by the Vibra reader and macro grammar.",
+  "type": "string",
+  "contentMediaType": "text/x-vibra"
 }

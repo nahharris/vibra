@@ -3,21 +3,6 @@
   "description": "Registry of stable Vibra linter and compiler codes (reference for tooling)",
   "codes": [
     {
-      "code": "E-YAML-001",
-      "severity": "error",
-      "summary": "YAML construct outside strict subset (anchors, merge, tags, binary, etc.)"
-    },
-    {
-      "code": "E-YAML-002",
-      "severity": "error",
-      "summary": "Block comments forbidden in v1"
-    },
-    {
-      "code": "E-YAML-003",
-      "severity": "error",
-      "summary": "Ambiguous unquoted scalar (bool/null/number) where string required"
-    },
-    {
       "code": "E-SYN-001",
       "severity": "error",
       "summary": "Invalid token or character in native S-expression syntax"
@@ -371,11 +356,6 @@
       "code": "E-OPTION-001",
       "severity": "error",
       "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
-    },
-    {
-      "code": "E-YAML-002",
-      "severity": "error",
-      "summary": "YAML `#` comments are forbidden; use an attached `=comment` annotation"
     },
     {
       "code": "E-COMMENT-001",
