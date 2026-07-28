@@ -381,12 +381,7 @@ pub const HOST_ABI: &[HostImport] = &[
         &[PATH],
         ValueKind::ResultVoid,
     ),
-    entry(
-        "vibra_v1",
-        "fs_remove_file",
-        &[PATH],
-        ValueKind::ResultVoid,
-    ),
+    entry("vibra_v1", "fs_remove_file", &[PATH], ValueKind::ResultVoid),
     entry("vibra_v1", "fs_remove_dir", &[PATH], ValueKind::ResultVoid),
     entry("vibra_v1", "fs_read_dir", &[PATH], ValueKind::ResultPaths),
     entry(
@@ -523,12 +518,7 @@ pub const HOST_ABI: &[HostImport] = &[
         &[PROCESS_HANDLE],
         ValueKind::ResultReadHandle,
     ),
-    entry(
-        "vibra_v1",
-        "clock_now_unix_millis",
-        &[],
-        ValueKind::UInt64,
-    ),
+    entry("vibra_v1", "clock_now_unix_millis", &[], ValueKind::UInt64),
     entry(
         "vibra_v1",
         "clock_monotonic_millis",
@@ -553,16 +543,16 @@ pub const HOST_ABI: &[HostImport] = &[
         &[INSTANT, INSTANT],
         ValueKind::ResultAny,
     ),
-    entry("vibra_v1", "clock_sleep_millis", &[DURATION], ValueKind::Void),
+    entry(
+        "vibra_v1",
+        "clock_sleep_millis",
+        &[DURATION],
+        ValueKind::Void,
+    ),
     entry("vibra_v1", "random_bytes", &[U64], ValueKind::Bytes),
     entry("vibra_v1", "system_info", &[], ValueKind::Record),
     entry("vibra_v1", "system_args", &[], ValueKind::Array),
-    entry(
-        "vibra_v1",
-        "system_current_dir",
-        &[],
-        ValueKind::ResultStr,
-    ),
+    entry("vibra_v1", "system_current_dir", &[], ValueKind::ResultStr),
     entry("vibra_v1", "system_executable", &[], ValueKind::ResultStr),
     entry("vibra_v1", "system_temp_dir", &[], ValueKind::Str),
     // vibra_test: in-memory assertions.

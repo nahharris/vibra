@@ -1924,12 +1924,10 @@ fn exec_vibra_v1(
                 value_string(k).is_ok_and(|candidate| candidate == key)
             })))
         }
-        "stdin_open" => {
-            Ok(RuntimeValue::HostHandle(HostHandle {
-                id: files.insert_stdin(),
-                access: HandleAccess::Read,
-            }))
-        }
+        "stdin_open" => Ok(RuntimeValue::HostHandle(HostHandle {
+            id: files.insert_stdin(),
+            access: HandleAccess::Read,
+        })),
         "stdout_open" => Ok(RuntimeValue::HostHandle(HostHandle {
             id: 1,
             access: HandleAccess::Write,
@@ -3179,45 +3177,35 @@ fn exec_vibra_v1(
                     .collect(),
             ))
         }
-        "system_info" => {
-            Ok(RuntimeValue::Record(BTreeMap::from([
-                (
-                    "architecture".to_string(),
-                    RuntimeValue::Str(std::env::consts::ARCH.to_string()),
-                ),
-                (
-                    "family".to_string(),
-                    RuntimeValue::Str(std::env::consts::FAMILY.to_string()),
-                ),
-                (
-                    "operating-system".to_string(),
-                    RuntimeValue::Str(std::env::consts::OS.to_string()),
-                ),
-            ])))
-        }
-        "system_args" => {
-            Ok(RuntimeValue::Array(
-                std::iter::once(config.program_name.clone())
-                    .chain(config.argv.iter().cloned())
-                    .map(RuntimeValue::Str)
-                    .collect(),
-            ))
-        }
-        "system_current_dir" => {
-            Ok(fs_result(sig, std::env::current_dir, |path| {
-                RuntimeValue::Str(path.display().to_string())
-            }))
-        }
-        "system_executable" => {
-            Ok(fs_result(sig, std::env::current_exe, |path| {
-                RuntimeValue::Str(path.display().to_string())
-            }))
-        }
-        "system_temp_dir" => {
-            Ok(RuntimeValue::Str(
-                std::env::temp_dir().display().to_string(),
-            ))
-        }
+        "system_info" => Ok(RuntimeValue::Record(BTreeMap::from([
+            (
+                "architecture".to_string(),
+                RuntimeValue::Str(std::env::consts::ARCH.to_string()),
+            ),
+            (
+                "family".to_string(),
+                RuntimeValue::Str(std::env::consts::FAMILY.to_string()),
+            ),
+            (
+                "operating-system".to_string(),
+                RuntimeValue::Str(std::env::consts::OS.to_string()),
+            ),
+        ]))),
+        "system_args" => Ok(RuntimeValue::Array(
+            std::iter::once(config.program_name.clone())
+                .chain(config.argv.iter().cloned())
+                .map(RuntimeValue::Str)
+                .collect(),
+        )),
+        "system_current_dir" => Ok(fs_result(sig, std::env::current_dir, |path| {
+            RuntimeValue::Str(path.display().to_string())
+        })),
+        "system_executable" => Ok(fs_result(sig, std::env::current_exe, |path| {
+            RuntimeValue::Str(path.display().to_string())
+        })),
+        "system_temp_dir" => Ok(RuntimeValue::Str(
+            std::env::temp_dir().display().to_string(),
+        )),
         other => bail!("unsupported vibra_v1 import `{other}`"),
     }
 }

@@ -569,7 +569,6 @@ pub(crate) fn lower_type(
     })
 }
 
-
 fn resolve_impl_method_references(index: &mut TypedSignatureIndex) -> Result<()> {
     let functions = &index.functions;
     let visibility = &index.visibility;

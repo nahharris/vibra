@@ -2420,7 +2420,9 @@ fn static_expr_type(
                 .get(&key)
                 .map(|sig| sig.return_type.clone())
         }
-        ExprKind::Cast { into, .. } => lower_type(into, generics, module_alias, declared_aliases).ok(),
+        ExprKind::Cast { into, .. } => {
+            lower_type(into, generics, module_alias, declared_aliases).ok()
+        }
         _ => None,
     }
 }

@@ -289,8 +289,7 @@ fn run_benchmarks(options: TestOptions) -> Result<bool> {
     }
     let mut tests = Vec::with_capacity(items.len());
     for item in &items {
-        if item.skip_reason.is_some()
-            || (item.workspace.is_some() && !options.allow_test_workspace)
+        if item.skip_reason.is_some() || (item.workspace.is_some() && !options.allow_test_workspace)
         {
             let reason = item
                 .skip_reason
