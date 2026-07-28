@@ -945,19 +945,16 @@ fn newtype_and_nominal_interface_patterns_match_runtime_type_tags() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vibra");
 
-    // KNOWN BLOCKED (see the S-expression cutover handoff notes): the
-    // `(interface Type pattern)` pattern this test's first `$match` needs is
-    // structurally accepted by the reader (`PatternKind::Interface`,
-    // src/ast/surface.rs) but the adapter rejects every use with
-    // E-ADAPT-017, because legacy's own `Pattern::Interface(TypeRef)`
-    // (src/lower.rs) carries only a type, with no slot for a nested
-    // sub-pattern at all -- there is no legacy shape this can adapt to,
-    // not even for a `_` wildcard sub-pattern. This is a genuine legacy-IR
-    // limitation, not an adapter oversight: fixing it would mean extending
-    // `Pattern::Interface` itself (and its match-evaluation code) rather
-    // than bridging to an existing shape, which is out of scope for the
-    // migration-bridge adapter. Left failing deliberately; do not weaken
-    // this test to route around the gap.
+    // This test's first `$match` needs `(interface Type _)`. Legacy's own
+    // `Pattern::Interface(TypeRef)` (src/lower.rs) carries only a type, with
+    // no slot for a nested sub-pattern -- but legacy's YAML surface spelled
+    // this same construct `$interface: <type-expr>` with no inner pattern
+    // either, and legacy's match evaluation for it only ever checks the
+    // interface bound and binds nothing. A `_` wildcard sub-pattern is
+    // therefore faithfully representable (it binds nothing too), so the
+    // adapter accepts it; any other sub-pattern (a bind, a nested
+    // destructure) still has no legacy slot to land in and is rejected with
+    // E-ADAPT-017.
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self) str))))

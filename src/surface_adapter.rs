@@ -1962,11 +1962,30 @@ fn pattern_value(pattern: &AstPattern) -> Result<Value> {
             m.insert(Value::String("inner".into()), pattern_value(pattern)?);
             Ok(single_dollar("newtype", Value::Mapping(m)))
         }
-        PatternKind::Interface { .. } => bail!(
-            "E-ADAPT-017: `(interface Type pattern)` pattern is not supported by the adapter; \
-             `src/lower.rs`'s `Pattern::Interface` carries only a type, with no slot for a \
-             nested sub-pattern, so the AST's inner pattern cannot be represented"
-        ),
+        // `src/lower.rs`'s `Pattern::Interface(TypeRef)` carries only a type,
+        // with no slot for a nested sub-pattern at all -- not even to record
+        // that one was written. Legacy's own YAML surface spelled this same
+        // construct `$interface: <type-expr>` with no inner pattern (see
+        // `parse_pattern`'s `"$interface"` arm in `src/lower.rs`), and
+        // legacy's match evaluation for it (`Pattern::Interface` in
+        // `validate_pattern`) only ever checks the interface bound and binds
+        // nothing. A `_` wildcard sub-pattern is the one case that is
+        // faithfully representable: it binds nothing either, so dropping it
+        // loses no information legacy would have captured. Any other
+        // sub-pattern (a bind, a nested destructure) would need a real slot
+        // legacy does not have, so it still must fail loudly rather than be
+        // silently dropped.
+        PatternKind::Interface { ty, pattern } => {
+            if !matches!(pattern.value, PatternKind::Wildcard) {
+                bail!(
+                    "E-ADAPT-017: `(interface Type pattern)` pattern is not supported by the \
+                     adapter unless `pattern` is `_`; `src/lower.rs`'s `Pattern::Interface` \
+                     carries only a type, with no slot for a nested sub-pattern, so a non- \
+                     wildcard inner pattern cannot be represented"
+                );
+            }
+            Ok(single_dollar("interface", bare_type_value(ty)?))
+        }
     }
 }
 
