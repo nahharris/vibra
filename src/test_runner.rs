@@ -591,7 +591,19 @@ fn collect_vibra_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 
 fn is_vibra_file(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    s.ends_with(".vibra") || s.ends_with(".vibra.yaml")
+    s.ends_with(".vibra")
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::is_vibra_file;
+    use std::path::Path;
+
+    #[test]
+    fn only_discovers_sexpression_vibra_tests() {
+        assert!(is_vibra_file(Path::new("case.vibra")));
+        assert!(!is_vibra_file(Path::new("case.vibra.yaml")));
+    }
 }
 
 /// Mirrors `frontend::module_part_paths`'s naming convention: `name.flag.vibra`

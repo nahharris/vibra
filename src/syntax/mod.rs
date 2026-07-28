@@ -1,8 +1,7 @@
-//! Dormant native S-expression syntax core.
+//! Native S-expression syntax core.
 //!
-//! This module is intentionally independent from the current YAML frontend.
-//! It supplies the lossless-enough reader tree, byte spans, diagnostics, and
-//! canonical printer needed for the eventual source-language cutover.
+//! Supplies reader tree, byte spans, diagnostics, canonical printer for
+//! Vibra source and editor tooling.
 
 mod lexer;
 mod parser;
