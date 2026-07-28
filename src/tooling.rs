@@ -129,22 +129,9 @@ pub fn format_source(path: &Path, source: &str) -> Result<String> {
 /// Compile diagnostics intentionally remain workspace/disk based.
 pub fn diagnostics_for_source(path: &Path, source: &str) -> Vec<Diagnostic> {
     let suppressions = Suppressions::parse(source);
-    let mut diagnostics = Vec::new();
-    let violations = crate::yaml_subset::validate_yaml_subset(source);
-    if !violations.is_empty() {
-        diagnostics.extend(
-            violations
-                .iter()
-                .map(|violation| yaml_subset_diagnostic(path, violation)),
-        );
-    } else {
-        match serde_yaml::from_str::<serde_yaml::Value>(source) {
-            Ok(value) => match crate::annotations::validate(&value) {
-                Ok(()) => diagnostics.extend(style_diagnostics(path, source)),
-                Err(error) => diagnostics.push(annotation_diagnostic(path, source, &error)),
-            },
-            Err(error) => diagnostics.push(yaml_diagnostic(path, &error)),
-        }
+    let mut diagnostics = crate::sexpr_tooling::staged_sexpr_diagnostics(path, source);
+    if diagnostics.is_empty() {
+        diagnostics.extend(crate::sexpr_tooling::staged_lint_sexpr(path, source));
     }
     diagnostics.retain(|diagnostic| {
         diagnostic.severity == Severity::Error
@@ -368,96 +355,6 @@ fn active_categories(categories: &[Category]) -> BTreeSet<Category> {
     categories.iter().copied().collect()
 }
 
-fn yaml_diagnostic(path: &Path, err: &serde_yaml::Error) -> Diagnostic {
-    let (line, column) = err
-        .location()
-        .map(|location| {
-            (
-                location.line().saturating_sub(1),
-                location.column().saturating_sub(1),
-            )
-        })
-        .unwrap_or((0, 0));
-    Diagnostic {
-        code: "E-YAML-001".to_string(),
-        message: err.to_string(),
-        severity: Severity::Error,
-        span: point_span(path, line, column),
-        related: None,
-        fix: None,
-        category: Category::Syntax,
-    }
-}
-
-fn yaml_subset_diagnostic(
-    path: &Path,
-    violation: &crate::yaml_subset::YamlSubsetViolation,
-) -> Diagnostic {
-    Diagnostic {
-        code: violation.code.to_string(),
-        message: violation.message.clone(),
-        severity: Severity::Error,
-        span: point_span(path, violation.line, violation.column),
-        related: None,
-        fix: None,
-        category: Category::Syntax,
-    }
-}
-
-fn annotation_diagnostic(path: &Path, source: &str, error: &anyhow::Error) -> Diagnostic {
-    let message = error.to_string();
-    let code = message
-        .split_once(':')
-        .map(|(code, _)| code)
-        .filter(|code| code.starts_with("E-"))
-        .unwrap_or("E-ANNO-003");
-    let needle = match code {
-        "E-COMMENT-001" => "=comment",
-        "E-LINT-001" => "=lint",
-        _ => "=",
-    };
-    let (line, column) = source
-        .lines()
-        .enumerate()
-        .find_map(|(line, text)| text.find(needle).map(|column| (line, column)))
-        .unwrap_or((0, 0));
-    Diagnostic {
-        code: code.to_string(),
-        message,
-        severity: Severity::Error,
-        span: point_span(path, line, column),
-        related: None,
-        fix: None,
-        category: Category::Syntax,
-    }
-}
-
-fn style_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    for (line_index, line) in source.lines().enumerate() {
-        let trimmed = line.trim_start();
-        let indent = line.len() - trimmed.len();
-        if indent == 0 {
-            if let Some((key, column)) = simple_mapping_key(line) {
-                if is_symbol_key(key) && !is_kebab_case(key) {
-                    diagnostics.push(Diagnostic {
-                        code: "W-STYLE-001".to_string(),
-                        message: format!(
-                            "non-kebab-case top-level symbol: `{key}` (recommended: kebab-case)"
-                        ),
-                        severity: Severity::Warning,
-                        span: span_for_text(path, line_index, column, key.len()),
-                        related: None,
-                        fix: None,
-                        category: Category::Style,
-                    });
-                }
-            }
-        }
-    }
-    diagnostics
-}
-
 /// Compile a saved entry path and return its structured compiler diagnostics.
 /// Embedders that use in-memory documents should call this against an isolated
 /// workspace mirror rather than modifying the user's files.
@@ -586,32 +483,6 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         .find(|code| message.contains(code))
 }
 
-fn simple_mapping_key(line: &str) -> Option<(&str, usize)> {
-    let trimmed = line.trim_start();
-    if trimmed.starts_with('#') || trimmed.starts_with('"') || trimmed.starts_with('\'') {
-        return None;
-    }
-    let column = line.len() - trimmed.len();
-    let colon = trimmed.find(':')?;
-    let key = &trimmed[..colon];
-    if key.is_empty() || key.contains(' ') || key.contains('\t') {
-        return None;
-    }
-    Some((key, column))
-}
-
-fn is_symbol_key(key: &str) -> bool {
-    !key.starts_with('$') && !key.starts_with('=') && !key.starts_with('-')
-}
-
-fn is_kebab_case(name: &str) -> bool {
-    if name.is_empty() || name.starts_with('-') || name.ends_with('-') || name.contains("--") {
-        return false;
-    }
-    name.chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
 fn point_span(path: &Path, line: usize, column: usize) -> Span {
     span_for_text(path, line, column, 1)
 }
@@ -695,7 +566,27 @@ fn has_glob_meta(s: &str) -> bool {
 
 fn is_vibra_file(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    s.ends_with(".vibra") || s.ends_with(".vibra.yaml")
+    s.ends_with(".vibra")
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::{diagnostics_for_source, is_vibra_file};
+    use std::path::Path;
+
+    #[test]
+    fn only_discovers_sexpression_vibra_sources() {
+        assert!(is_vibra_file(Path::new("main.vibra")));
+        assert!(!is_vibra_file(Path::new("main.vibra.yaml")));
+    }
+
+    #[test]
+    fn editor_diagnostics_use_sexpression_surface() {
+        assert!(
+            diagnostics_for_source(Path::new("main.vibra"), "(const good-name int64 1)\n",)
+                .is_empty()
+        );
+    }
 }
 
 fn display_path(path: &Path) -> String {
