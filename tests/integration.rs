@@ -6575,7 +6575,8 @@ fn forged_stdin_read_file_handle_requires_allow_stdin() {
     let output = vibra_cmd()
         .args([
             "exec",
-            &format!("{{$fs.readable.read-string: {{$cast: 0, into: $fs.read-file}}}}"),
+            "--expr",
+            "(fs.readable.read-string (cast 0 fs.read-file))",
             "--import",
             &format!("fs={}", path_str(&fs)),
             "--import",
