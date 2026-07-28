@@ -18,7 +18,7 @@
           )
         )
       )
-      (case (result.result.err (bind _e)) (do (test.fail "expected ok")))
+      (case (result.result.err _) (do (test.fail "expected ok")))
     )
   )
 )
@@ -29,7 +29,7 @@
     (let r (result.result.err "boom"))
     (match
       r
-      (case (result.result.ok (bind _v)) (do (test.fail "expected err")))
+      (case (result.result.ok _) (do (test.fail "expected err")))
       (case
         (result.result.err (bind e))
         (do

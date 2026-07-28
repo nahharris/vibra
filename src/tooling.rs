@@ -165,35 +165,20 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let suppressions = Suppressions::parse(&source);
         let mut file_diagnostics = Vec::new();
-        let mut yaml_subset_ok = true;
+
+        // Source is always S-expression (see `src/load.rs` module docs): reader
+        // and typed-surface diagnostics come from `sexpr_tooling`, not the
+        // legacy YAML-subset/`serde_yaml` path. Style and compile passes both
+        // require a structurally valid document, so this check always runs
+        // and gates them even when the Syntax category itself is not selected.
+        let syntax_diagnostics = crate::sexpr_tooling::staged_sexpr_diagnostics(path, &source);
+        let syntax_ok = syntax_diagnostics.is_empty();
         if active_categories.contains(&Category::Syntax) {
-            for violation in crate::yaml_subset::validate_yaml_subset(&source) {
-                yaml_subset_ok = false;
-                file_diagnostics.push(yaml_subset_diagnostic(path, &violation));
-            }
+            file_diagnostics.extend(syntax_diagnostics);
         }
-        let syntax_ok = if active_categories.contains(&Category::Syntax) && yaml_subset_ok {
-            match serde_yaml::from_str::<serde_yaml::Value>(&source) {
-                Ok(value) => match crate::annotations::validate(&value) {
-                    Ok(()) => true,
-                    Err(error) => {
-                        file_diagnostics.push(annotation_diagnostic(path, &source, &error));
-                        false
-                    }
-                },
-                Err(err) => {
-                    file_diagnostics.push(yaml_diagnostic(path, &err));
-                    false
-                }
-            }
-        } else if yaml_subset_ok {
-            serde_yaml::from_str::<serde_yaml::Value>(&source).is_ok()
-        } else {
-            false
-        };
 
         if syntax_ok && active_categories.contains(&Category::Style) {
-            file_diagnostics.extend(style_diagnostics(path, &source));
+            file_diagnostics.extend(crate::sexpr_tooling::staged_lint_sexpr(path, &source));
         }
 
         if syntax_ok && active_categories.contains(&Category::Compile) {

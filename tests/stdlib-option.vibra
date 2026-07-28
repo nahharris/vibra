@@ -29,12 +29,12 @@
     (match
       present
       (case
-        (option.option.some (bind _v))
+        (option.option.some _)
         (do
           (let absent option.option.none)
           (match
             absent
-            (case (option.option.some (bind _x)) (do (test.fail "expected none")))
+            (case (option.option.some _) (do (test.fail "expected none")))
             (case (option.option.none) (do (test.assert true)))
           )
         )

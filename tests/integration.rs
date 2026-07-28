@@ -4801,7 +4801,7 @@ fn vibra_fmt_json_output_is_explicit() {
 fn vibra_lint_defaults_to_json_and_reports_kebab_case_locations() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("style.vibra");
-    std::fs::write(&source, "BadName: 1\n").unwrap();
+    std::fs::write(&source, "(fn BadName () void (do unit))\n").unwrap();
 
     let output = vibra_cmd()
         .args(["lint", &path_str(&source), "--category", "style"])
@@ -4815,37 +4815,68 @@ fn vibra_lint_defaults_to_json_and_reports_kebab_case_locations() {
     let diagnostic = &report["diagnostics"][0];
     assert_eq!(diagnostic["code"], "W-STYLE-001");
     assert_eq!(diagnostic["span"]["start"]["line"], 0);
-    assert_eq!(diagnostic["span"]["start"]["column"], 0);
-    assert!(diagnostic["span"]["start"].get("offset").is_none());
+    // `BadName` starts at byte 4 (`(fn `), not column 0 -- unlike a YAML
+    // top-level mapping key, an S-expression name can never open a line.
+    assert_eq!(diagnostic["span"]["start"]["column"], 4);
+    // Sexpr-native diagnostics (`sexpr_tooling::staged_lint_sexpr`) always
+    // carry a byte offset, unlike the legacy YAML-subset style diagnostics
+    // this test exercised before the S-expression cutover.
+    assert_eq!(diagnostic["span"]["start"]["offset"], 4);
 }
 
 #[test]
 fn vibra_lint_suppression_and_deny_warnings_are_respected() {
+    // Per-line `=lint:`/`=comment:` source annotations do not exist in the
+    // S-expression surface (see the "Definition attributes" section of
+    // docs/superpowers/specs/2026-07-25-s-expression-language-design.md:
+    // "Lint suppression moves to CLI or project configuration so source
+    // semantics do not contain diagnostic policy"). No `.vibra` source can
+    // even parse with a bare `=lint:` line -- `=` is not a valid symbol
+    // start (see `src/syntax/lexer.rs`) -- so this test now exercises the
+    // CLI-level warning suppression (`--severity error`) that replaced it,
+    // alongside the still-live `--deny-warnings` gate.
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("style.vibra");
     std::fs::write(
         &source,
-        "BadName:\n  =lint:\n    disable: [W-STYLE-001]\n  $literal: 1\nOtherBad: 2\n",
+        "(fn BadName () void (do unit))\n(fn OtherBad () void (do unit))\n",
     )
     .unwrap();
 
-    let suppressed = vibra_cmd()
+    let unfiltered = vibra_cmd()
         .args(["lint", &path_str(&source), "--category", "style"])
         .output()
         .unwrap();
     assert!(
+        unfiltered.status.success(),
+        "warning-only lint should pass without --deny-warnings: {}",
+        String::from_utf8_lossy(&unfiltered.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&unfiltered.stdout);
+    assert!(stdout.contains("BadName"), "diagnostic missing: {stdout}");
+    assert!(stdout.contains("OtherBad"), "diagnostic missing: {stdout}");
+
+    let suppressed = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "style",
+            "--severity",
+            "error",
+            "--deny-warnings",
+        ])
+        .output()
+        .unwrap();
+    assert!(
         suppressed.status.success(),
-        "lint failed: {}",
+        "--severity error should suppress warning-level diagnostics: {}",
         String::from_utf8_lossy(&suppressed.stderr)
     );
     let stdout = String::from_utf8_lossy(&suppressed.stdout);
     assert!(
-        !stdout.contains("BadName"),
-        "suppressed diagnostic leaked: {stdout}"
-    );
-    assert!(
-        stdout.contains("OtherBad"),
-        "unsuppressed diagnostic missing: {stdout}"
+        !stdout.contains("BadName") && !stdout.contains("OtherBad"),
+        "warning diagnostics leaked past --severity error: {stdout}"
     );
 
     let denied = vibra_cmd()
@@ -4863,11 +4894,18 @@ fn vibra_lint_suppression_and_deny_warnings_are_respected() {
 
 #[test]
 fn root_lint_annotation_suppresses_the_whole_file() {
+    // A root-level `=lint:` annotation cannot exist in S-expression source
+    // (see the comment in `vibra_lint_suppression_and_deny_warnings_are_respected`
+    // and docs/superpowers/specs/2026-07-25-s-expression-language-design.md,
+    // "Definition attributes"). `--severity error` is the surviving
+    // whole-file equivalent: it drops every warning-level diagnostic before
+    // `--deny-warnings` ever sees them, so a file with nothing but
+    // non-kebab-case warnings still passes.
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("style.vibra");
     std::fs::write(
         &source,
-        "=lint: { disable: [W-STYLE-001] }\nBadName: 1\nOtherBad: 2\n",
+        "(fn BadName () void (do unit))\n(fn OtherBad () void (do unit))\n",
     )
     .unwrap();
 
@@ -4877,13 +4915,15 @@ fn root_lint_annotation_suppresses_the_whole_file() {
             &path_str(&source),
             "--category",
             "style",
+            "--severity",
+            "error",
             "--deny-warnings",
         ])
         .output()
         .unwrap();
     assert!(
         output.status.success(),
-        "root suppression failed: {}{}",
+        "whole-file suppression via --severity error failed: {}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -4893,7 +4933,7 @@ fn root_lint_annotation_suppresses_the_whole_file() {
 fn vibra_lint_json_and_sarif_outputs_are_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("style.vibra");
-    std::fs::write(&source, "BadName: 1\n").unwrap();
+    std::fs::write(&source, "(fn BadName () void (do unit))\n").unwrap();
 
     let json = vibra_cmd()
         .args([
@@ -4948,22 +4988,20 @@ fn vibra_lint_json_and_sarif_outputs_are_explicit() {
 #[test]
 fn vibra_lint_reports_parse_and_compile_errors_as_structured_json() {
     let dir = tempfile::tempdir().unwrap();
-    let bad_yaml = dir.path().join("bad-yaml.vibra");
+    let bad_syntax = dir.path().join("bad-syntax.vibra");
     let bad_compile = dir.path().join("bad-compile.vibra");
-    std::fs::write(&bad_yaml, "main:\n  -\n    nope: [\n").unwrap();
-    std::fs::write(
-        &bad_compile,
-        "main:\n  $function: $void\n  return: $void\n  do:\n    - $missing: null\n",
-    )
-    .unwrap();
+    // Unclosed list: a reader-level error, not a YAML one -- source is
+    // always S-expression (see `src/load.rs` module docs).
+    std::fs::write(&bad_syntax, "(fn broken (\n").unwrap();
+    std::fs::write(&bad_compile, "(fn main () void (do (undefined-call)))\n").unwrap();
 
     let syntax = vibra_cmd()
-        .args(["lint", &path_str(&bad_yaml), "--category", "syntax"])
+        .args(["lint", &path_str(&bad_syntax), "--category", "syntax"])
         .output()
         .unwrap();
     assert!(!syntax.status.success());
     let report: serde_json::Value = serde_json::from_slice(&syntax.stdout).unwrap();
-    assert_eq!(report["diagnostics"][0]["code"], "E-YAML-001");
+    assert_eq!(report["diagnostics"][0]["code"], "E-SYN-006");
     assert!(report["diagnostics"][0]["span"]["start"]["line"].is_number());
 
     let compile = vibra_cmd()
@@ -4978,6 +5016,13 @@ fn vibra_lint_reports_parse_and_compile_errors_as_structured_json() {
 
 #[test]
 fn vibra_lint_rejects_yaml_anchors_and_aliases() {
+    // `.vibra` source is always read as S-expression (see `src/load.rs`
+    // module docs), so YAML anchor/alias syntax (`&x` / `*x`) is no longer a
+    // dialect-specific rule of its own -- it is simply not a valid symbol
+    // (`&`/`*` are not valid leading symbol characters; see
+    // `src/syntax/lexer.rs`). This test now confirms that leftover YAML
+    // anchor/alias syntax still gets a clear reader-level rejection instead
+    // of being silently misinterpreted.
     let dir = tempfile::tempdir().unwrap();
     let anchored = dir.path().join("anchored.vibra");
     std::fs::write(&anchored, "a: &x 1\nb: *x\n").unwrap();
@@ -4990,12 +5035,12 @@ fn vibra_lint_rejects_yaml_anchors_and_aliases() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let stdout = report.to_string();
     assert!(
-        stdout.contains("E-YAML-001"),
-        "expected E-YAML-001 for anchors/aliases: {stdout}"
+        stdout.contains("E-SYN-001"),
+        "expected E-SYN-001 for invalid `&`/`*` symbols: {stdout}"
     );
     assert!(
-        stdout.contains("anchor") || stdout.contains("alias"),
-        "expected anchor/alias message: {stdout}"
+        stdout.contains("invalid symbol"),
+        "expected an invalid-symbol message: {stdout}"
     );
 }
 
@@ -5072,7 +5117,7 @@ fn vibra_lint_compile_checks_library_files_without_main() {
 fn vibra_lint_percent_encodes_file_uris() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("bad#name%25.vibra");
-    std::fs::write(&source, "BadName: 1\n").unwrap();
+    std::fs::write(&source, "(fn BadName () void (do unit))\n").unwrap();
 
     let output = vibra_cmd()
         .args(["lint", &path_str(&source), "--category", "style"])

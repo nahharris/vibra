@@ -30,7 +30,7 @@
     (match
       s
       (case (signal.stop) (do (test.assert true)))
-      (case (signal.go (bind _speed)) (do (test.fail "expected stop")))
+      (case (signal.go _) (do (test.fail "expected stop")))
     )
   )
 )
@@ -62,7 +62,7 @@
     (let v opt.none)
     (match
       v
-      (case (opt.some (bind _text)) (do (test.fail "expected none")))
+      (case (opt.some _) (do (test.fail "expected none")))
       (case (opt.none) (do (test.assert true)))
     )
   )

@@ -9,7 +9,7 @@
     (match
       r
       (case (result.result.ok) (do (test.assert true)))
-      (case (result.result.err (bind _e)) (do (test.fail "print returned err")))
+      (case (result.result.err _) (do (test.fail "print returned err")))
     )
   )
 )
@@ -21,7 +21,7 @@
     (match
       r
       (case (result.result.ok) (do (test.assert true)))
-      (case (result.result.err (bind _e)) (do (test.fail "println returned err")))
+      (case (result.result.err _) (do (test.fail "println returned err")))
     )
   )
 )
@@ -33,7 +33,7 @@
     (match
       r
       (case (result.result.ok) (do (test.assert true)))
-      (case (result.result.err (bind _e)) (do (test.fail "eprintln returned err")))
+      (case (result.result.err _) (do (test.fail "eprintln returned err")))
     )
   )
 )
