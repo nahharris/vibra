@@ -415,8 +415,8 @@ fn nested_function_grants_are_rejected() {
 
 #[test]
 fn implicit_subject_function_is_rejected_with_e_one_001() {
-    // The legacy "implicit subject" fallback (a bare `$function: $str`
-    // payload meant an unnamed single parameter, reachable only via
+    // The legacy "implicit subject" fallback (a bare `$function` field set
+    // to `$str` meant an unnamed single parameter, reachable only via
     // `$args.subject`) has no S-expression form: `fn` parameters are always
     // an explicit, named, positional list. Referencing an undeclared name
     // is rejected instead, by ordinary reference resolution.
@@ -435,7 +435,7 @@ fn implicit_subject_function_is_rejected_with_e_one_001() {
 
 #[test]
 fn void_function_with_sibling_args_is_rejected_with_e_one_001() {
-    // The legacy `$function: $void` + sibling `args:` combination (two
+    // The legacy `$function` field set to `$void` plus a sibling `args:` (two
     // different ways to spell "no parameters" and "some parameters" on the
     // same envelope) has no S-expression form: parameters are always the
     // single `((name Type) ...)` list. There is nothing left to reject here
@@ -4721,7 +4721,7 @@ fn imported_macro_quotes_resolve_names_in_definition_context() {
 fn vibra_fmt_defaults_to_json_check_mode_and_write_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("messy.vibra");
-    let original = "main:\n    $function: $void\n    return: $void\n    do: []\n";
+    let original = "(fn  main () void\n(do unit))\n";
     std::fs::write(&source, original).unwrap();
 
     let check = vibra_cmd()
@@ -4760,16 +4760,31 @@ fn vibra_fmt_defaults_to_json_check_mode_and_write_is_explicit() {
 
 #[test]
 fn vibra_fmt_rejects_yaml_comments() {
+    // Inverted by the S-expression cutover: `;` comments are now a real,
+    // preserved part of the grammar (see
+    // `sexpr_tooling::staged_format_sexpr`'s idempotency test), where the
+    // legacy YAML dialect forbade comments outright (`E-YAML-002`). `#` has
+    // no meaning in S-expression source, so a leftover YAML-style comment
+    // is now rejected as an invalid symbol rather than as "comments are
+    // forbidden."
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("commented.vibra");
-    let original = "# important intent\nmain:\n  $function: $void\n  return: $void\n  do: []\n";
+    let original = "# important intent\n(fn main () void (do unit))\n";
     std::fs::write(&source, original).unwrap();
 
     let write = vibra_cmd()
         .args(["fmt", &path_str(&source), "--write"])
         .output()
         .unwrap();
-    assert!(!write.status.success(), "fmt must reject YAML comments");
+    assert!(
+        !write.status.success(),
+        "fmt must reject leftover YAML-style `#` comments"
+    );
+    assert!(
+        String::from_utf8_lossy(&write.stderr).contains("E-SYN-001"),
+        "stderr: {}",
+        String::from_utf8_lossy(&write.stderr)
+    );
     assert_eq!(std::fs::read_to_string(&source).unwrap(), original);
 }
 
@@ -4777,11 +4792,7 @@ fn vibra_fmt_rejects_yaml_comments() {
 fn vibra_fmt_json_output_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("ok.vibra");
-    std::fs::write(
-        &source,
-        "main:\n  $function: $void\n  return: $void\n  do: []\n",
-    )
-    .unwrap();
+    std::fs::write(&source, "(fn main () void (do unit))\n").unwrap();
 
     let output = vibra_cmd()
         .args(["fmt", &path_str(&source), "--format", "json"])
@@ -6394,42 +6405,18 @@ fn env_read_capability_is_case_sensitive_on_unix() {
     std::fs::write(
         &entry,
         format!(
-            r#"env:
-  $import: "{env_mod}"
-result:
-  $import: "{result}"
-test:
-  $import: "{test}"
-env-policy:
-  $policy:
-    env-read:
-    - requirement: mandatory
-      scopes:
-      - exact: VIBRA_ISSUE53_TOKEN
-main:
-  $function:
-    policy: $env-policy
-  return: $void
-  do:
-  - $let:
-      capability:
-        $policy.narrow: $args.policy
-        into: $env.read-capability
-  - $let:
-      value:
-        $env.get: vibra_issue53_token
-        capability: $capability
-  - $match: $value
-    when:
-    - case:
-        $result.result.ok:
-          $wildcard: null
-      do:
-      - $test.fail: lowercase environment name matched uppercase capability scope
-    - case:
-        $result.result.err:
-          $wildcard: null
-      do: []
+            r#"(import env "{env_mod}")
+(import result "{result}")
+(import test "{test}")
+(def env-policy (policy
+  (env-read (group requirement: mandatory scopes: ((exact "VIBRA_ISSUE53_TOKEN"))))))
+(fn main ((policy env-policy)) void
+  (do
+    (let capability (policy.narrow policy env.read-capability))
+    (let value (env.get "vibra_issue53_token" capability))
+    (match value
+      (case (result.result.ok _) (do (test.fail "lowercase environment name matched uppercase capability scope")))
+      (case (result.result.err _) (do)))))
 "#,
             env_mod = path_str(&env_mod),
             result = path_str(&result),

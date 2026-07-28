@@ -11,8 +11,6 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use yaml_edit::Document;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolOutputFormat {
@@ -86,8 +84,8 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
     for path in files {
         let original =
             fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        let formatted =
-            format_source(&original).with_context(|| format!("format {}", path.display()))?;
+        let formatted = format_source(&path, &original)
+            .with_context(|| format!("format {}", path.display()))?;
         let is_changed = formatted != original;
         let status = if is_changed && options.write {
             fs::write(&path, formatted).with_context(|| format!("write {}", path.display()))?;
@@ -119,12 +117,12 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
     Ok(options.write || report.summary.changed == 0)
 }
 
-pub fn format_source(source: &str) -> Result<String> {
-    crate::yaml_subset::validate_yaml_subset_or_err(source, Path::new("<format>"))?;
-    let _ = Document::from_str(source).context("parse Vibra code document")?;
-    let value: serde_yaml::Value = serde_yaml::from_str(source).context("parse Vibra YAML")?;
-    crate::annotations::validate(&value)?;
-    serde_yaml::to_string(&value).context("emit canonical Vibra YAML")
+/// Source is always S-expression (see `src/load.rs` module docs): this
+/// delegates to `sexpr_tooling::staged_format_sexpr`, the reader-typed,
+/// serde-free canonical printer, rather than the legacy YAML-subset path.
+pub fn format_source(path: &Path, source: &str) -> Result<String> {
+    crate::sexpr_tooling::staged_format_sexpr(path, source)
+        .map_err(|diagnostic| anyhow::anyhow!("{}: {}", diagnostic.code, diagnostic.message))
 }
 
 /// Produce syntax and style diagnostics for an in-memory editor document.

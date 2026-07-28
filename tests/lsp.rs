@@ -211,8 +211,8 @@ fn formatting_returns_a_whole_document_edit() {
     let uri = path_uri(&workspace.path().join("main.vibra"));
     let root_uri = path_uri(workspace.path());
     // Canonical output always uses LF, so CRLF input guarantees an edit on
-    // every host without relying on emitter choices around YAML flow style.
-    let source = "main:\r\n  $literal: 1\r\n";
+    // every host without relying on emitter choices around printer style.
+    let source = "(fn main () void\r\n  (do (let value 1)))\r\n";
     let mut input = Vec::new();
     for value in [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
@@ -229,7 +229,7 @@ fn formatting_returns_a_whole_document_edit() {
     assert!(output[2]["result"][0]["newText"]
         .as_str()
         .unwrap()
-        .contains("$literal"));
+        .contains("value"));
 }
 
 fn path_uri(path: &std::path::Path) -> String {
