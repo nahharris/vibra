@@ -1,5 +1,5 @@
 //! Internal, single-direction bridge from the typed S-expression surface AST
-//! (`crate::ast::surface`) into the `serde_yaml::Value` shape that
+//! (`crate::ast::surface`) into the internal compatibility value shape that
 //! `src/load.rs` and `src/lower.rs` already consume.
 //!
 //! This is a temporary migration mechanism for issue #150. It is private,
@@ -38,8 +38,8 @@ use crate::ast::{
     Test, TestMeta, TopLevel, TypeExpr, TypeExprKind, TypeMember, Visibility, WasmArgument,
     WasmImport,
 };
+use crate::legacy_value::{Mapping, Value};
 use anyhow::{bail, Result};
-use serde_yaml::{Mapping, Value};
 use std::collections::BTreeMap;
 
 // ===================== Signature index =====================
@@ -2331,7 +2331,7 @@ mod tests {
         let signatures = collect_local_signatures(&module).unwrap();
         let resolved = resolve_signatures("entry", &signatures, &[]);
         let value = module_to_value(&module, &resolved).unwrap();
-        let rendered = serde_yaml::to_string(&value).unwrap();
+        let rendered = format!("{value:?}");
         assert!(
             rendered.contains("$equal"),
             "expected bare `equal` to become `$equal`, got:\n{rendered}"
@@ -2430,10 +2430,10 @@ mod tests {
         let resolved = resolve_signatures("entry", &signatures, &[]);
         let value = module_to_value(&module, &resolved).unwrap();
         let map = value.as_mapping().unwrap();
-        let io_def = map.get(Value::String("io".into())).unwrap();
+        let io_def = map.get(&Value::String("io".into())).unwrap();
         let io_map = io_def.as_mapping().unwrap();
         assert_eq!(
-            io_map.get(Value::String("$import".into())),
+            io_map.get(&Value::String("$import".into())),
             Some(&Value::String("./io.vibra".into()))
         );
     }

@@ -198,7 +198,8 @@ Measured against current `main`:
 |------|---------|--------|
 | `E-YAML-*` diagnostics | removed | 0 |
 | `.vibra.yaml` discovery | rejected by typed frontend | none |
-| `serde_yaml` in `src/` | internal adapter/data support only | no source parser |
+| `serde_yaml` in `src/` | absent | absent |
+| internal compatibility value bridge | typed AST -> data-only map | temporary |
 | `yaml-edit` production dependency | absent | absent |
 | `yaml` crate keyword | removed | removed |
 | `src/yaml_subset.rs` | deleted | deleted |

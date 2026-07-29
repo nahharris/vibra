@@ -3,7 +3,7 @@
 //! `lower::lower_program` is the compiler's only current route from a loaded
 //! program to the semantic IR `LoweredProgram` the interpreter and Wasm
 //! backend execute. It reads exclusively from `load::LoadedProgram`, which is
-//! backed by `serde_yaml::Value`. The typed S-expression frontend
+//! backed by an internal compatibility value. The typed S-expression frontend
 //! (`frontend::load_surface_program` -> `SurfaceProgram`) has no such
 //! producer yet: `typed_lower`/`typed_body` stop at a validated signature and
 //! body index, never assembling the fields `LoweredProgram` needs.
