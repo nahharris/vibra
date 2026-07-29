@@ -1,6 +1,6 @@
 //! Convention-based `$test` runner.
 
-use crate::{execute, load, lower, project, runtime};
+use crate::{execute, frontend, load, lower, project, runtime, typed_program};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -381,12 +381,12 @@ fn run_benchmarks(options: TestOptions) -> Result<bool> {
 }
 
 pub fn run_single_test(path: &Path, name: &str, config: &runtime::RunConfig) -> ChildTestOutcome {
-    let program = match load::load_legacy_yaml_program(path, &load::CompilationFlags::new(["test"]))
+    let program = match frontend::load_surface_program(path, &load::CompilationFlags::new(["test"]))
     {
         Ok(program) => program,
         Err(error) => return failed_outcome(ChildFailurePhase::Load, error, Vec::new()),
     };
-    let test = match lower::lower_named_test(&program, name) {
+    let test = match typed_program::lower_named_typed_test(&program, name) {
         Ok(test) => test,
         Err(error) => return failed_outcome(ChildFailurePhase::Compile, error, Vec::new()),
     };
@@ -476,14 +476,13 @@ fn discover_tests(
             continue;
         }
         let display_path = normalize_path(file.strip_prefix(&base).unwrap_or(&file));
-        let (entry, entry_module) = load::load_entry_module_for_test_discovery(&file)?;
+        let program =
+            frontend::load_surface_program(&file, &load::CompilationFlags::new(["test"]))?;
+        let entry = program.entry.clone();
         if !seen_modules.insert(entry.clone()) {
             continue;
         }
-        let entry_map = entry_module
-            .as_mapping()
-            .context("entry root must be mapping")?;
-        let specs = lower::discover_test_specs_in_entry(entry_map, &entry)?;
+        let specs = typed_program::discover_typed_test_specs(&program)?;
         for spec in specs {
             let name = spec.name;
             let full_name = format!("{display_path}::{name}");
@@ -912,4 +911,20 @@ fn print_human_report(report: &TestReport) {
 
 fn normalize_path(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod migration_tests {
+    #[test]
+    fn test_execution_and_discovery_do_not_use_the_legacy_value_loader() {
+        let source = include_str!("test_runner.rs");
+        assert!(
+            !source.contains("load_legacy_yaml_program"),
+            "test execution must lower directly from the typed frontend"
+        );
+        assert!(
+            !source.contains("load_entry_module_for_test_discovery"),
+            "test discovery must read typed test declarations directly"
+        );
+    }
 }
