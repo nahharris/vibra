@@ -660,7 +660,7 @@ pub fn lower_document_with_id(
     })
 }
 
-pub(crate) fn lower_expression_node_with_id(
+pub fn lower_expression_node_with_id(
     node: &Node,
     document_id: DocumentId,
 ) -> Result<Expr, AstError> {
