@@ -16,7 +16,6 @@
 //! extension outright (`E-SYN-012`) before this module ever sees it.
 
 use crate::ast;
-use crate::code::SourceDatabase;
 use crate::frontend::{self, SourceModule, SurfaceProgram};
 use crate::surface_adapter::{self, LocalSignatures};
 use anyhow::{bail, Context, Result};
@@ -31,7 +30,6 @@ use std::path::{Path, PathBuf};
 pub struct LoadedProgram {
     pub entry: PathBuf,
     pub modules: HashMap<PathBuf, Value>,
-    pub sources: SourceDatabase,
     pub module_parts: HashMap<PathBuf, Vec<PathBuf>>,
     /// Canonical compile-time input path to raw-content SHA-256. This is part
     /// of the compiler fingerprint even when two inputs produce equal values.
@@ -121,19 +119,9 @@ pub fn load_legacy_yaml_program(entry: &Path, flags: &CompilationFlags) -> Resul
     flags.validate()?;
     let surface = frontend::load_surface_program(entry, flags)?;
     let modules = convert_surface_program(&surface)?;
-    let sources = SourceDatabase::from_sources(
-        surface
-            .entry
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf(),
-        Vec::new(),
-    )
-    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     Ok(LoadedProgram {
         entry: surface.entry,
         modules,
-        sources,
         module_parts: surface.module_parts.into_iter().collect(),
         embedded_files: surface.embedded_files,
     })
@@ -209,15 +197,12 @@ pub fn load_legacy_yaml_inline_program(base_dir: &Path, root: Value) -> Result<L
     let surface = frontend::load_surface_program_multi_root(&roots, &flags)?;
     let mut modules = convert_surface_program(&surface)?;
     modules.insert(entry.clone(), root);
-    let sources = SourceDatabase::from_sources(base_dir, Vec::new())
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let mut module_parts: HashMap<PathBuf, Vec<PathBuf>> =
         surface.module_parts.into_iter().collect();
     module_parts.insert(entry.clone(), vec![entry.clone()]);
     Ok(LoadedProgram {
         entry,
         modules,
-        sources,
         module_parts,
         embedded_files: surface.embedded_files,
     })

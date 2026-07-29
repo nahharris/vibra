@@ -2264,7 +2264,6 @@ pub(crate) fn test_discovery_value(test: &Test) -> Result<(String, Value)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::code::SourceDatabase;
     use crate::load::LoadedProgram;
     use std::collections::HashMap;
     use std::fs;
@@ -2291,8 +2290,6 @@ mod tests {
         LoadedProgram {
             entry,
             modules,
-            sources: SourceDatabase::from_sources(dir.to_path_buf(), Vec::new())
-                .expect("empty source database"),
             module_parts: HashMap::new(),
             embedded_files: Default::default(),
         }
@@ -2418,7 +2415,6 @@ mod tests {
         let program = LoadedProgram {
             entry: entry_path,
             modules,
-            sources: SourceDatabase::from_sources(dir.path().to_path_buf(), Vec::new()).unwrap(),
             module_parts: HashMap::new(),
             embedded_files: Default::default(),
         };
