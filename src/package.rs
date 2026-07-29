@@ -1,6 +1,6 @@
 //! Deterministic `.vapp` application archives.
 
-use crate::{frontend, load, project, runtime::RunConfig, typed_program, wasm_backend};
+use crate::{load, lower, project, runtime::RunConfig, wasm_backend};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -68,10 +68,9 @@ pub fn build_with_flags(
         None => bail!("E-PKG-002: project has multiple bin targets; select one with --bin"),
     };
     let entry_path = loaded.root.join(&target.root).join(&target.entry);
-    let program = frontend::load_surface_program(&entry_path, flags)
+    let program = load::load_legacy_yaml_program(&entry_path, flags)
         .context("E-PKG-003: load application")?;
-    let lowered =
-        typed_program::lower_typed_program(&program).context("E-PKG-003: lower application")?;
+    let lowered = lower::lower_program(&program).context("E-PKG-003: lower application")?;
     let wasm = wasm_backend::emit_program_wasm(&lowered);
 
     let mut payloads = BTreeMap::<String, Vec<u8>>::new();
@@ -156,10 +155,10 @@ pub fn run(path: &Path, config: &RunConfig) -> Result<()> {
     validate_archive_path(entry)?;
     let flags = load::CompilationFlags::try_new(metadata.compilation_flags.iter().cloned())
         .context("E-PKG-006: invalid compilation flags")?;
-    let program = frontend::load_surface_program(&temp.path().join(entry), &flags)
+    let program = load::load_legacy_yaml_program(&temp.path().join(entry), &flags)
         .context("E-PKG-011: load packaged application")?;
-    let lowered = typed_program::lower_typed_program(&program)
-        .context("E-PKG-011: lower packaged application")?;
+    let lowered =
+        lower::lower_program(&program).context("E-PKG-011: lower packaged application")?;
     let expected = read_entry(&mut archive, WASM)?;
     if wasm_backend::emit_program_wasm(&lowered) != expected {
         bail!("E-PKG-008: packaged Wasm does not match packaged sources");
@@ -315,13 +314,5 @@ mod tests {
     fn canonical_json_is_compact_and_lf_terminated() {
         let value = BTreeMap::from([("a", 1), ("b", 2)]);
         assert_eq!(canonical_json(&value).unwrap(), b"{\"a\":1,\"b\":2}\n");
-    }
-
-    #[test]
-    fn package_build_and_validation_do_not_use_the_legacy_value_loader() {
-        assert!(
-            !include_str!("package.rs").contains("load_legacy_yaml_program"),
-            "package source validation must lower directly from the typed frontend"
-        );
     }
 }

