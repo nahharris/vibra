@@ -108,7 +108,7 @@ pub fn load_program_with_flags(entry: &Path, flags: &CompilationFlags) -> Result
 /// Load and adapt a real `.vibra` entry module (and its transitive imports)
 /// into the legacy `Value` shape `src/lower.rs` consumes.
 ///
-/// The name is a historical artifact of `LoadedProgram`'s original YAML-only
+/// The name is a historical artifact of `LoadedProgram`'s original map-based
 /// implementation, kept because `src/lower.rs`'s roughly 240 accessor call
 /// sites and every caller of this function are the seam that shape was built
 /// around (see `crate::lower`, `crate::execute`, `crate::wasm_backend`).
