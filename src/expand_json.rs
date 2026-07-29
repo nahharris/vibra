@@ -5,6 +5,7 @@
 //! expanded syntax through the legacy YAML `Value` bridge.
 
 use crate::ast::{Module, TopLevel};
+use crate::frontend::SourceModule;
 use serde_json::{Map, Value};
 
 /// Render expanded top-level forms as a deterministic JSON object.
@@ -28,6 +29,18 @@ pub fn module_json(module: &Module) -> Value {
     Value::Object(output)
 }
 
+/// Render every physical part of a logical module in frontend merge order.
+pub fn source_module_json(module: &SourceModule) -> Value {
+    let mut output = Map::new();
+    for part in &module.parts {
+        let Value::Object(forms) = module_json(&part.module) else {
+            unreachable!("module_json always returns an object");
+        };
+        output.extend(forms);
+    }
+    Value::Object(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,6 +51,9 @@ mod tests {
     fn preserves_visible_top_level_names_as_object_keys() {
         let document = syntax::parse("(const answer int64 42)\n").unwrap();
         let module = ast::lower_document_with_id(&document, DocumentId::ANONYMOUS).unwrap();
-        assert_eq!(module_json(&module), serde_json::json!({"answer": "constant"}));
+        assert_eq!(
+            module_json(&module),
+            serde_json::json!({"answer": "constant"})
+        );
     }
 }

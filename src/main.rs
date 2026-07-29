@@ -585,7 +585,7 @@ fn run_cli() -> Result<()> {
                 .modules
                 .get(&expanded.entry)
                 .context("expanded entry module is missing")?;
-            print_structured(&vibra::expand_json::module_json(&module.parts[0].module), format)?;
+            print_structured(&vibra::expand_json::source_module_json(module), format)?;
         }
         Command::Exec {
             expr,
