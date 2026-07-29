@@ -1,10 +1,6 @@
 //! S-expression-native semantic index over the typed surface AST.
 //!
-//! This is the editor-facing successor to [`crate::code::semantic::SemanticIndex`],
-//! which walked YAML `Form::Mapping` shapes and located facts with the YAML
-//! mapping-path `Path`/`Segment` types. Those types do not exist for
-//! S-expression source and must not survive the cutover (see
-//! `docs/superpowers/specs/2026-07-25-s-expression-language-design.md`).
+//! This is the editor-facing semantic index for S-expression source.
 //!
 //! This module builds the same four fact categories — definitions, imports,
 //! references, and calls — directly from `crate::ast::{Module, TopLevel,
@@ -19,11 +15,10 @@
 //! top-level definitions, import aliases, and value/type/pattern references
 //! that name a definition, a call target, or a type. Purely lexical names
 //! (`let`/`set` bindings, loop variables, task captures, record/field
-//! labels) are not indexed, matching how the legacy index only tracked
-//! mapping keys and `$`-prefixed references rather than every YAML scalar.
+//! labels) are not indexed.
 //!
-//! Source of truth is intentionally narrow: this module never parses YAML,
-//! never touches `serde_yaml`, and never routes through `crate::code`. It
+//! Source of truth is intentionally narrow: this module never parses YAML
+//! or touches `serde_yaml`. It
 //! only understands documents that already parse and type-check as
 //! S-expression source through [`crate::frontend`].
 
@@ -40,12 +35,8 @@ use crate::frontend::{self, SurfaceProgram};
 use crate::load::CompilationFlags;
 use crate::syntax::Span;
 
-/// The four semantic fact categories. This mirrors
-/// `crate::code::semantic::SemanticKind` exactly: the typed S-expression AST
-/// distinguishes the same four relationships (a name is defined, a name
-/// aliases an imported module, a name is used as a value/type, or a name is
-/// invoked), so there is no need to grow or shrink this enum for the
-/// cutover.
+/// The four semantic fact categories for definitions, imports, references,
+/// and calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SemanticKind {
     Definition,
@@ -132,8 +123,7 @@ impl SemanticIndex {
         }
     }
 
-    /// Filter facts by kind and/or exact symbol text, mirroring
-    /// `crate::code::semantic::SemanticIndex::query`.
+    /// Filter facts by kind and/or exact symbol text.
     pub fn query(&self, kind: Option<SemanticKind>, symbol: Option<&str>) -> Vec<&SemanticFact> {
         self.facts
             .iter()

@@ -1,7 +1,8 @@
 # S-expression migration status (issue #150)
 
-Living status for the YAML → S-expression replacement. Update this file as
-slices land; it is the recovery point if a working session loses context.
+Current status for the YAML → S-expression replacement: complete. The
+historical notes below are retained as migration records, not current source
+contracts.
 
 The authoritative contract is
 [`docs/superpowers/specs/2026-07-25-s-expression-language-design.md`](superpowers/specs/2026-07-25-s-expression-language-design.md).
@@ -12,16 +13,16 @@ Its "Implementation and PR plan" defines nine steps; this file tracks them.
 | # | Step | State |
 |---|------|-------|
 | 1 | Reader, CST, spans, formatter | Done — #153, #157, #161, #166 |
-| 2 | Lowering and compiler | **Approach changed** — `src/surface_adapter.rs` bridges the typed AST into `src/lower.rs`'s existing `Value` shape instead of continuing to re-derive `src/lower.rs`'s semantics on the typed path; see below |
+| 2 | Lowering and compiler | Done — `src/surface_adapter.rs` bridges the typed AST into `src/lower.rs`'s existing `Value` shape |
 | 3 | Macros and origins | Done — #165 |
 | 4 | Language corpus | Done — #193 converted all modules; migrator has explicit `--write` opt-in |
 | 5 | Projects and packages | Done — #158, #160 |
-| 6 | LSP and rewrites | Index landed (#178); repoint blocked on step 4 |
-| 7 | Generic editor removal | Partly — #163 removed the public surface; `src/code/` internals remain |
+| 6 | LSP and rewrites | Done — typed S-expression semantic indexing powers live editor features |
+| 7 | Generic editor removal | Done — legacy `src/code/` YAML editor stack removed |
 | 8 | Output and embedding | Done — #154, #171 |
-| 9 | Removal and documentation | Not started (closing PR) |
+| 9 | Removal and documentation | Done — source contracts and migration metadata are S-expression-only |
 
-### Step 2 course correction (#150 surface-adapter)
+### Archived Step 2 course correction (#150 surface-adapter)
 
 The typed path (`typed_lower.rs`/`typed_body.rs`/`typed_program.rs`) requires
 re-deriving every semantic rule `src/lower.rs` already implements and proves
@@ -42,10 +43,10 @@ its implementation), plus a handful of measurement-harness artifacts
 build behavior. See the amendment in
 `docs/superpowers/specs/2026-07-25-s-expression-language-design.md` for the
 contract exception this relies on. The adapter is internal, private,
-single-direction, not yet wired into `src/load.rs`, and staged for deletion
-once the typed path reaches parity.
+single-direction, and now wired into `src/load.rs` after the typed path
+reached parity.
 
-### True dependency order
+### Archived dependency order
 
 Earlier planning had step 6 running parallel to step 2. That is wrong. The
 LSP cannot be repointed before the corpus is converted: every real workspace
@@ -120,7 +121,7 @@ accessor sites (`as_str` 128, `as_mapping` 84, `as_sequence` 29).
 Consequence: the remaining work is replacing the reading layer and sharing the
 semantics, not rewriting the type system.
 
-## Remaining gaps, concretely
+## Archived migration notes
 
 ### Step 2 — typed body lowering
 
@@ -184,18 +185,10 @@ sigil, so `$add` emits as bare `(add ...)`, matching the contract and #177.
 
 ### Step 6/7/9 — cutover seam
 
-`src/load.rs:3` still reads source through `crate::code::SourceDatabase`, and
-all of `src/code/` (2292 lines) is the legacy YAML document model:
-`yaml_edit::Document`/`YamlNode`, `serde_yaml`,
-`crate::yaml_subset::validate_yaml_subset_or_err` (`code/source.rs:183`), and
-`.vibra.yaml` stripping (`code/semantic.rs:352`). `src/sexpr_tooling.rs` (722
-lines) is the S-expression counterpart.
-
-Ordering constraint: `src/code/semantic.rs` backs the LSP semantic index and
-traverses `Form::Mapping`, so step 6 must land before `src/code/` can be
-deleted. `src/code/query.rs` (166 lines, `Pattern`/`Query`/`QueryMatch`) is
-already dead in production — only the `mod.rs` re-export and
-`tests/code_framework.rs` use it — so it can go early.
+`src/load.rs` reads source only through the typed frontend and adapts its
+surface AST for the internal lowering bridge. The legacy YAML editor model,
+`yaml-edit` dependency, `yaml_subset`, and `.vibra.yaml` discovery have been
+removed. `src/sexpr_semantic.rs` provides the editor semantic index.
 
 ## Acceptance gate scoreboard
 
@@ -203,17 +196,13 @@ Measured against current `main`:
 
 | Gate | Current | Target |
 |------|---------|--------|
-| `E-YAML-*` diagnostics | 21 references | 0 |
-| `.vibra.yaml` references | 23 | 0 |
-| `serde_yaml` in `src/` | 66 references | 0 (embed decoder only) |
-| `yaml-edit` production dependency | present (`Cargo.toml:33`) | absent |
-| `yaml` crate keyword | present (`Cargo.toml:10`) | removed |
-| `src/yaml_subset.rs` | 240 lines | deleted |
-| `src/code/` | 2292 lines | deleted |
-
-`serde_yaml` by file: `lower.rs` 23, `tooling.rs` 14, `load.rs` 8, `mcp.rs` 4,
-`code/form.rs` 4, `annotations.rs` 4, `project.rs` 3, `main.rs` 2,
-`macro_expand.rs` 1, `docs.rs` 1, `code/source.rs` 1.
+| `E-YAML-*` diagnostics | removed | 0 |
+| `.vibra.yaml` discovery | rejected by typed frontend | none |
+| `serde_yaml` in `src/` | internal adapter/data support only | no source parser |
+| `yaml-edit` production dependency | absent | absent |
+| `yaml` crate keyword | removed | removed |
+| `src/yaml_subset.rs` | deleted | deleted |
+| `src/code/` | deleted | deleted |
 
 ## Working rules
 

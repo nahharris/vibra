@@ -30,7 +30,6 @@ wasm-encoder = "0.240"
 wasmer = "6.1"
 wasmer-wasix = { version = "0.601", default-features = false, features = ["sys-default"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
-yaml-edit = "0.2.1"
 tempfile = "3.14"
 zip = { version = "2.4", default-features = false }
 
