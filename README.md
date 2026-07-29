@@ -76,10 +76,9 @@ Profiles and tags select tests; they do not grant host permissions. See
 
 ## Data interoperability
 
-YAML is not Vibra syntax, a manifest format, or compiler output. It remains
-available only as explicitly requested external data, for example
-`(embed "settings.yaml" format: yaml)`. The decoded result is an ordinary
-Vibra value; YAML constructs never enter the source tree.
+YAML is not Vibra syntax, a manifest format, compiler output, or an `embed`
+format. Use `text`, `binary`, `json`, `toml`, or `xml` when embedding external
+data. YAML paths and `format: yaml` are rejected with `E-SYN-008`.
 
 ## Build and validate
 
