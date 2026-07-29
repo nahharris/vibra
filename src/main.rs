@@ -580,12 +580,12 @@ fn run_cli() -> Result<()> {
             print_effects(&path, format, &compilation_flags(flag)?)?
         }
         Command::Expand { path, format, flag } => {
-            let loaded = load::load_legacy_yaml_program(&path, &compilation_flags(flag)?)?;
-            let expanded = loaded
+            let expanded = frontend::load_surface_program(&path, &compilation_flags(flag)?)?;
+            let module = expanded
                 .modules
-                .get(&loaded.entry)
+                .get(&expanded.entry)
                 .context("expanded entry module is missing")?;
-            print_structured(expanded, format)?;
+            print_structured(&vibra::expand_json::module_json(&module.parts[0].module), format)?;
         }
         Command::Exec {
             expr,

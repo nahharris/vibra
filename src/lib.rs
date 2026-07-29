@@ -6,6 +6,7 @@ pub(crate) mod body_semantics;
 pub mod diagnostics;
 pub mod docs;
 pub mod emit;
+pub mod expand_json;
 pub mod execute;
 pub mod frontend;
 pub mod host_abi;

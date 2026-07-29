@@ -65,6 +65,17 @@ fn run_expand_and_docs_receive_repeatable_compilation_flags() {
 }
 
 #[test]
+fn expand_command_does_not_route_through_the_legacy_value_loader() {
+    let source = include_str!("../src/main.rs");
+    assert!(
+        !source.contains(
+            "Command::Expand { path, format, flag } => {\n            let loaded = load::load_legacy_yaml_program"
+        ),
+        "expand must render the typed frontend directly"
+    );
+}
+
+#[test]
 fn check_and_effects_compile_only_the_selected_parts() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("src")).unwrap();
