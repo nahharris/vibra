@@ -24,7 +24,6 @@ serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 toml = "0.8"
 quick-xml = { version = "0.38", features = ["serialize"] }
 getrandom = "0.2"
-serde_yaml = "0.9"
 sha2 = "0.10"
 wasm-encoder = "0.240"
 wasmer = "6.1"

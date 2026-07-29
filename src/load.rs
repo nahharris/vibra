@@ -4,7 +4,7 @@
 //! (`crate::frontend::load_surface_program`), which produces a typed
 //! `SurfaceProgram`: imports resolved, module parts merged, macros expanded,
 //! and compile-time `embed`/`template` data expanded. This module then
-//! adapts that typed program into the legacy `serde_yaml::Value` shape
+//! adapts that typed program into the internal legacy value shape
 //! `src/lower.rs` already consumes, via `crate::surface_adapter` -- the
 //! internal migration bridge documented in the "Amendment: internal typed-
 //! AST-to-`Value` migration bridge" section of
@@ -17,15 +17,15 @@
 
 use crate::ast;
 use crate::frontend::{self, SourceModule, SurfaceProgram};
+use crate::legacy_value::{Mapping, Value};
 use crate::surface_adapter::{self, LocalSignatures};
 use anyhow::{bail, Context, Result};
-use serde_yaml::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Canonical path → parsed program root, in the legacy `Value` shape
 /// `src/lower.rs` consumes (see module docs for why it is still
-/// `serde_yaml::Value` rather than the typed AST).
+/// an internal compatibility value rather than the typed AST).
 #[derive(Debug)]
 pub struct LoadedProgram {
     pub entry: PathBuf,
@@ -141,7 +141,7 @@ pub fn load_legacy_yaml_program(entry: &Path, flags: &CompilationFlags) -> Resul
 pub fn load_entry_module_for_test_discovery(entry: &Path) -> Result<(PathBuf, Value)> {
     let (path, source_module) = frontend::load_surface_entry_for_test_discovery(entry)?;
     let module = merge_module_parts(&source_module);
-    let mut map = serde_yaml::Mapping::new();
+    let mut map = Mapping::new();
     for form in &module.forms {
         let ast::TopLevel::Test(test) = form else {
             continue;
@@ -310,6 +310,6 @@ fn merge_module_parts(source_module: &SourceModule) -> ast::Module {
     }
 }
 
-pub fn map_get_str<'a>(map: &'a serde_yaml::Mapping, key: &str) -> Option<&'a Value> {
-    map.get(Value::String(key.into()))
+pub fn map_get_str<'a>(map: &'a Mapping, key: &str) -> Option<&'a Value> {
+    map.get(&Value::String(key.into()))
 }

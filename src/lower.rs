@@ -8,6 +8,7 @@
 //! Bare `where:` / `doc:` (the pre-1.0 spelling) is rejected with
 //! `E-ANNO-002`.
 
+use crate::legacy_value::{Mapping, Value};
 use crate::load::{map_get_str, LoadedProgram};
 use crate::project;
 use crate::type_semantics::{
@@ -15,7 +16,6 @@ use crate::type_semantics::{
     substitute_self, substitute_type, type_compatible, unify_types, valid_cast_path,
 };
 use anyhow::{bail, Context, Result};
-use serde_yaml::Value;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -549,12 +549,12 @@ struct DefEnvelope<'a> {
     doc: Option<String>,
     /// `=defs` annotation: a mapping of name -> function-definition envelope
     /// for inherent operations on the enclosing type.
-    defs: Option<&'a serde_yaml::Mapping>,
+    defs: Option<&'a Mapping>,
     /// `=impl` annotation: a mapping of `$iface-alias` -> impl payload that
     /// pins iface type-args, declares any impl-local generics via `=where`,
     /// and binds each iface method to either a fresh `$function` envelope
     /// or a `$existing.qualified.name` reference.
-    impls: Option<&'a serde_yaml::Mapping>,
+    impls: Option<&'a Mapping>,
     /// `$function`-only siblings: optional extra `args` mapping, required `return` / `do`.
     function_args: Option<&'a Value>,
     function_return: Option<&'a Value>,
@@ -586,8 +586,8 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut type_params: Vec<String> = Vec::new();
     let mut type_param_bound_values: Vec<Vec<&'a Value>> = Vec::new();
     let mut doc: Option<String> = None;
-    let mut defs: Option<&'a serde_yaml::Mapping> = None;
-    let mut impls: Option<&'a serde_yaml::Mapping> = None;
+    let mut defs: Option<&'a Mapping> = None;
+    let mut impls: Option<&'a Mapping> = None;
     let mut function_args: Option<&'a Value> = None;
     let mut function_return: Option<&'a Value> = None;
     let mut function_do: Option<&'a Value> = None;
@@ -1664,7 +1664,7 @@ fn parse_instantiation_args(
     }
     let mut out = Vec::with_capacity(skel.type_params.len());
     for tp in &skel.type_params {
-        let tv = m.get(Value::String(tp.clone())).with_context(|| {
+        let tv = m.get(&Value::String(tp.clone())).with_context(|| {
             format!("E-GEN-002: missing type argument `{tp}` in instantiation of `${base}`")
         })?;
         out.push(parse_type_ref(
@@ -2296,7 +2296,7 @@ pub fn discover_test_specs(program: &LoadedProgram) -> Result<Vec<TestSpec>> {
 /// requiring its imports to load. Used by the test runner so `phase: load`
 /// expectations can exercise import/load diagnostics in their child worker.
 pub fn discover_test_specs_in_entry(
-    entry_map: &serde_yaml::Mapping,
+    entry_map: &Mapping,
     entry_path: &Path,
 ) -> Result<Vec<TestSpec>> {
     let mut scratch_warnings = Vec::new();
@@ -3271,7 +3271,7 @@ fn register_inherent_functions(
     module_alias: &str,
     qualified_type_key: &str,
     enclosing_type_params: &[String],
-    defs_map: &serde_yaml::Mapping,
+    defs_map: &Mapping,
     sigs: &mut HashMap<String, FunctionSig>,
     pending_user_bodies: &mut Vec<(String, Vec<Value>)>,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -3473,7 +3473,7 @@ fn register_impls_block(
     module_alias: &str,
     qualified_type_key: &str,
     enclosing_type_params: &[String],
-    impls_map: &serde_yaml::Mapping,
+    impls_map: &Mapping,
     sigs: &mut HashMap<String, FunctionSig>,
     impls: &mut HashMap<ImplKey, ImplBody>,
     pending_user_bodies: &mut Vec<(String, Vec<Value>)>,
@@ -3543,7 +3543,7 @@ fn register_one_impl(
     iface_def: &TypeAlias,
     iface_methods: &BTreeMap<String, TypeRef>,
     iface_alias_str: &str,
-    payload: &serde_yaml::Mapping,
+    payload: &Mapping,
     sigs: &mut HashMap<String, FunctionSig>,
     impls: &mut HashMap<ImplKey, ImplBody>,
     pending_user_bodies: &mut Vec<(String, Vec<Value>)>,
@@ -3558,7 +3558,7 @@ fn register_one_impl(
     // bound-validation sweep.
     let mut impl_local_params: Vec<String> = Vec::new();
     let mut impl_local_bound_values: Vec<Vec<&Value>> = Vec::new();
-    if let Some(where_v) = payload.get(Value::String("=where".to_string())) {
+    if let Some(where_v) = payload.get(&Value::String("=where".to_string())) {
         let wm = where_v
             .as_mapping()
             .context("`=where` must be a mapping of type-parameter name to bound list")?;
@@ -3594,7 +3594,7 @@ fn register_one_impl(
     let mut iface_args_in_order: Vec<TypeRef> = Vec::with_capacity(iface_def.type_params.len());
     for iface_param in &iface_def.type_params {
         let v = payload
-            .get(Value::String(iface_param.clone()))
+            .get(&Value::String(iface_param.clone()))
             .with_context(|| {
                 format!(
                     "E-IMPL-003: missing binding for interface type parameter `{iface_param}` in `=impl: {iface_alias_str}`"
@@ -3643,7 +3643,7 @@ fn register_one_impl(
     let mut methods: HashMap<String, ImplMethodBinding> = HashMap::new();
     for (method_name, expected_fn_type) in iface_methods {
         let v = payload
-            .get(Value::String(method_name.clone()))
+            .get(&Value::String(method_name.clone()))
             .with_context(|| {
                 format!(
                     "E-IMPL-003: `=impl: {iface_alias_str}` for `{qualified_type_key}` is missing method `{method_name}`"
@@ -4871,7 +4871,7 @@ fn parse_signature_args(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn verify_stmt_keys(m: &serde_yaml::Mapping, allowed: &[&str]) -> Result<()> {
+fn verify_stmt_keys(m: &Mapping, allowed: &[&str]) -> Result<()> {
     for k in m.keys() {
         let ks = k.as_str().context("statement key must be string")?;
         if !allowed.contains(&ks) {
@@ -4951,7 +4951,7 @@ fn lower_branch_to_body(
 
 #[allow(clippy::too_many_arguments)]
 fn parse_if_statement(
-    stmt: &serde_yaml::Mapping,
+    stmt: &Mapping,
     sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -5015,7 +5015,7 @@ fn parse_if_statement(
 
 #[allow(clippy::too_many_arguments)]
 fn parse_while_statement(
-    stmt: &serde_yaml::Mapping,
+    stmt: &Mapping,
     sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -5069,7 +5069,7 @@ fn parse_while_statement(
 
 #[allow(clippy::too_many_arguments)]
 fn parse_for_statement(
-    stmt: &serde_yaml::Mapping,
+    stmt: &Mapping,
     sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -5668,7 +5668,7 @@ fn try_resolve_iface_call(
         format!("interface-qualified call `{call_key}` requires a mapping payload")
     })?;
     let dispatch_v = payload_map
-        .get(Value::String(self_arg_name.clone()))
+        .get(&Value::String(self_arg_name.clone()))
         .with_context(|| {
             format!(
                 "interface-qualified call `{call_key}` is missing dispatch argument `{self_arg_name}`"
@@ -5842,7 +5842,7 @@ fn build_iface_dispatch_payload(
     type_aliases: &HashMap<String, TypeAlias>,
 ) -> Result<Value> {
     let self_name = iface_dispatch_arg_name(call_key, home_module, type_aliases)?;
-    let mut map = serde_yaml::Mapping::new();
+    let mut map = Mapping::new();
     map.insert(Value::String(self_name), subject.clone());
     for (k, v) in siblings {
         map.insert(Value::String(k.clone()), v.clone());
@@ -5922,7 +5922,7 @@ fn reject_iface_nested_call_bundle(
 
 type CallEnvelope = (String, Value, Vec<(String, Value)>);
 
-fn split_call_envelope(m: &serde_yaml::Mapping) -> Result<CallEnvelope> {
+fn split_call_envelope(m: &Mapping) -> Result<CallEnvelope> {
     let mut callee: Option<(String, Value)> = None;
     let mut siblings: Vec<(String, Value)> = Vec::new();
     for (k, v) in m {
@@ -5970,7 +5970,7 @@ fn reject_unknown_call_keys(
                 .filter_map(|k| k.as_str())
                 .filter(|ks| !ks.starts_with('$') && !allowed.contains(*ks))
                 .count();
-            let primary_absent = !m.contains_key(Value::String(primary.clone()));
+            let primary_absent = !m.contains_key(&Value::String(primary.clone()));
             if unknown_count == 1 && primary_absent {
                 return Ok(());
             }
@@ -6034,12 +6034,12 @@ fn report_missing_inline_call_args(
         return Ok(());
     }
     for tp in &function.type_params {
-        if !m.contains_key(Value::String(tp.clone())) {
+        if !m.contains_key(&Value::String(tp.clone())) {
             bail!("missing type argument `{tp}` in call `{call_key}`");
         }
     }
     for n in &function.arg_names {
-        if !m.contains_key(Value::String(n.clone())) {
+        if !m.contains_key(&Value::String(n.clone())) {
             bail!("missing value argument `{n}` in call `{call_key}`");
         }
     }
@@ -6081,14 +6081,14 @@ fn merge_call_payload(
                     })
                     .collect();
                 if unknown_keys.len() == 1
-                    && !subject_map.contains_key(Value::String(primary.clone()))
+                    && !subject_map.contains_key(&Value::String(primary.clone()))
                     && keys.iter().all(|k| {
                         unknown_keys.contains(k)
                             || function.type_params.iter().any(|p| p == k)
                             || function.arg_names.iter().skip(1).any(|a| a == k)
                     })
                 {
-                    let mut map = serde_yaml::Mapping::new();
+                    let mut map = Mapping::new();
                     for (k, v) in subject_map {
                         let ks = k.as_str().context("call mapping key must be string")?;
                         if ks == unknown_keys[0] {
@@ -6105,7 +6105,7 @@ fn merge_call_payload(
                         .next()
                         .expect("map length checked")
                         .clone();
-                    let mut map = serde_yaml::Mapping::new();
+                    let mut map = Mapping::new();
                     map.insert(Value::String(primary.clone()), only_value);
                     return Ok(Value::Mapping(map));
                 }
@@ -6118,7 +6118,7 @@ fn merge_call_payload(
         .chain(function.arg_names.iter().skip(1))
         .cloned()
         .collect();
-    let mut map = serde_yaml::Mapping::new();
+    let mut map = Mapping::new();
     map.insert(Value::String(primary.clone()), subject.clone());
     for (k, v) in siblings {
         if k == primary {
@@ -6209,7 +6209,7 @@ fn parse_call(
         let empty_skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
         for tp in &function.type_params {
             let tv = map
-                .get(Value::String(tp.clone()))
+                .get(&Value::String(tp.clone()))
                 .with_context(|| format!("missing type argument `{tp}` in call `{call_key}`"))?;
             // Type arguments at a call site are concrete types; `$self` makes
             // no sense here, so disallow it.
@@ -6358,7 +6358,7 @@ fn parse_call_args(
     let mut out = Vec::with_capacity(arg_names.len());
     for n in arg_names {
         let v = map
-            .get(Value::String(n.clone()))
+            .get(&Value::String(n.clone()))
             .with_context(|| format!("missing value argument `{n}`"))?;
         maybe_warn_kebab(n, "argument key", warnings);
         out.push(parse_expr(
@@ -6486,7 +6486,7 @@ pub(crate) fn conversion_fallback_fits(expr: &Expr, target: &TypeRef) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 fn parse_checked_conversion(
-    m: &serde_yaml::Mapping,
+    m: &Mapping,
     sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -6554,7 +6554,7 @@ fn parse_checked_conversion(
 
 #[allow(clippy::too_many_arguments)]
 fn parse_primitive_expr(
-    m: &serde_yaml::Mapping,
+    m: &Mapping,
     sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,
@@ -6797,11 +6797,11 @@ fn parse_expr(
             });
         }
 
-        fn mapping_keys_exactly(m: &serde_yaml::Mapping, keys: &[&str]) -> bool {
+        fn mapping_keys_exactly(m: &Mapping, keys: &[&str]) -> bool {
             m.len() == keys.len()
                 && keys
                     .iter()
-                    .all(|k| m.contains_key(Value::String((*k).into())))
+                    .all(|k| m.contains_key(&Value::String((*k).into())))
         }
 
         if mapping_keys_exactly(m, &["$cast", "into"]) {
@@ -7146,7 +7146,7 @@ fn build_function_args_mapping(
         }
         return Ok(Value::String("$void".into()));
     }
-    let mut combined = serde_yaml::Mapping::new();
+    let mut combined = Mapping::new();
     combined.insert(Value::String(primary_name.into()), first_arg_type.clone());
     if let Some(rest) = rest_args {
         let rm = rest.as_mapping().context("`args` must be a mapping")?;
@@ -7858,7 +7858,7 @@ fn is_literal_singleton_pattern(pattern: &Pattern, _target_ty: &TypeRef) -> bool
 
 #[allow(clippy::too_many_arguments)]
 fn parse_match_statement(
-    stmt: &serde_yaml::Mapping,
+    stmt: &Mapping,
     sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
     type_aliases: &HashMap<String, TypeAlias>,

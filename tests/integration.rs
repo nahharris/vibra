@@ -13,7 +13,7 @@ fn lower_exec_value(source: &str) -> anyhow::Result<vibra::lower::RuntimeValue> 
     let entry = dir.path().join("entry.vibra");
     std::fs::write(&entry, "(const placeholder bool true)\n").unwrap();
     let loaded = vibra::load::load_program(&entry).unwrap();
-    let expression: serde_yaml::Value = serde_yaml::from_str(source).unwrap();
+    let expression = vibra::load::parse_inline_exec_expression(source)?;
     let exec = vibra::lower::lower_exec_expr(&loaded, &expression, &Default::default())?;
     vibra::execute::eval_lowered_exec(
         &exec,
@@ -25,19 +25,19 @@ fn lower_exec_value(source: &str) -> anyhow::Result<vibra::lower::RuntimeValue> 
 #[test]
 fn primitive_operations_are_typed_and_evaluate() {
     assert_eq!(
-        lower_exec_value("$add: [20, 22]").unwrap(),
+        lower_exec_value("(add 20 22)").unwrap(),
         vibra::lower::RuntimeValue::Int(42)
     );
     assert_eq!(
-        lower_exec_value("$less-than: [1.0, 2.0]").unwrap(),
+        lower_exec_value("(less-than 1.0 2.0)").unwrap(),
         vibra::lower::RuntimeValue::Bool(true)
     );
     assert_eq!(
-        lower_exec_value("$and: [true, false]").unwrap(),
+        lower_exec_value("(and true false)").unwrap(),
         vibra::lower::RuntimeValue::Bool(false)
     );
     assert_eq!(
-        lower_exec_value("$shift-left: [21, 1]").unwrap(),
+        lower_exec_value("(shift-left 21 1)").unwrap(),
         vibra::lower::RuntimeValue::Int(42)
     );
 }
@@ -69,9 +69,9 @@ fn checked_numeric_conversion_is_explicit_and_non_trapping() {
 
 #[test]
 fn primitive_operations_reject_mixed_or_invalid_types() {
-    let mixed = lower_exec_value("$add: [1, 2.0]").unwrap_err().to_string();
+    let mixed = lower_exec_value("(add 1 2.0)").unwrap_err().to_string();
     assert!(mixed.contains("E-OP-001"), "unexpected error: {mixed}");
-    let invalid = lower_exec_value("$bit-and: [true, false]")
+    let invalid = lower_exec_value("(bit-and true false)")
         .unwrap_err()
         .to_string();
     assert!(invalid.contains("E-OP-001"), "unexpected error: {invalid}");
@@ -79,13 +79,13 @@ fn primitive_operations_reject_mixed_or_invalid_types() {
 
 #[test]
 fn primitive_integer_failures_have_stable_diagnostics() {
-    let divide = lower_exec_value("$divide: [1, 0]").unwrap_err().to_string();
+    let divide = lower_exec_value("(divide 1 0)").unwrap_err().to_string();
     assert!(divide.contains("E-OP-003"), "unexpected error: {divide}");
-    let shift = lower_exec_value("$shift-left: [1, 64]")
+    let shift = lower_exec_value("(shift-left 1 64)")
         .unwrap_err()
         .to_string();
     assert!(shift.contains("E-OP-004"), "unexpected error: {shift}");
-    let overflow = lower_exec_value("$add: [9223372036854775807, 1]")
+    let overflow = lower_exec_value("(add 9223372036854775807 1)")
         .unwrap_err()
         .to_string();
     assert!(
@@ -4393,7 +4393,7 @@ fn imported_macro_quotes_resolve_names_in_definition_context() {
     .unwrap();
 
     let loaded = vibra::load::load_program(&entry).unwrap();
-    let expanded = serde_yaml::to_string(loaded.modules.get(&loaded.entry).unwrap()).unwrap();
+    let expanded = format!("{:?}", loaded.modules.get(&loaded.entry).unwrap());
     assert!(expanded.contains("$m.helper"), "expanded: {expanded}");
     vibra::lower::lower_program(&loaded).unwrap();
 }
@@ -6074,7 +6074,7 @@ fn compile_time_embed_supports_text_binary_and_structured_formats() {
 
     let loaded = vibra::load::load_program(&entry).unwrap();
     assert_eq!(loaded.embedded_files.len(), 5);
-    let expanded = serde_yaml::to_string(loaded.modules.get(&loaded.entry).unwrap()).unwrap();
+    let expanded = format!("{:?}", loaded.modules.get(&loaded.entry).unwrap());
     assert!(expanded.contains("$literal-looking text"));
     assert!(expanded.contains("$uint8"));
     assert!(expanded.contains("json"));
