@@ -4,11 +4,11 @@
 //! S-expression frontend, never by this module.  It replaces the incidental
 //! YAML crate type previously used by the temporary adapter.
 
-use std::collections::BTreeMap;
+/// Preserves declaration order, matching the retired bridge's map semantics.
+/// Lowering registers module declarations in this order.
+pub type Mapping = indexmap::IndexMap<Value, Value>;
 
-pub type Mapping = BTreeMap<Value, Value>;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Number {
     Integer(i64),
     Float(u64),
@@ -50,12 +50,12 @@ impl From<f64> for Number {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaggedValue {
     pub value: Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -64,6 +64,59 @@ pub enum Value {
     Sequence(Vec<Value>),
     Mapping(Mapping),
     Tagged(Box<TaggedValue>),
+}
+
+impl std::hash::Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Self::Null => {}
+            Self::Bool(value) => value.hash(state),
+            Self::Number(value) => value.hash(state),
+            Self::String(value) => value.hash(state),
+            Self::Sequence(values) => values.hash(state),
+            Self::Mapping(values) => {
+                for (key, value) in values {
+                    key.hash(state);
+                    value.hash(state);
+                }
+            }
+            Self::Tagged(value) => value.value.hash(state),
+        }
+    }
+}
+
+impl serde::Serialize for Value {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{Error, SerializeMap, SerializeSeq};
+        match self {
+            Self::Null => serializer.serialize_unit(),
+            Self::Bool(value) => serializer.serialize_bool(*value),
+            Self::Number(Number::Integer(value)) => serializer.serialize_i64(*value),
+            Self::Number(Number::Float(bits)) => serializer.serialize_f64(f64::from_bits(*bits)),
+            Self::String(value) => serializer.serialize_str(value),
+            Self::Sequence(values) => {
+                let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    sequence.serialize_element(value)?;
+                }
+                sequence.end()
+            }
+            Self::Mapping(values) => {
+                let mut map = serializer.serialize_map(Some(values.len()))?;
+                for (key, value) in values {
+                    let Self::String(key) = key else {
+                        return Err(S::Error::custom(
+                            "legacy compatibility map has a non-string JSON key",
+                        ));
+                    };
+                    map.serialize_entry(key, value)?;
+                }
+                map.end()
+            }
+            Self::Tagged(value) => value.value.serialize(serializer),
+        }
+    }
 }
 
 impl std::ops::Index<&str> for Value {

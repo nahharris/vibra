@@ -45,20 +45,20 @@ fn primitive_operations_are_typed_and_evaluate() {
 #[test]
 fn checked_numeric_conversion_is_explicit_and_non_trapping() {
     assert_eq!(
-        lower_exec_value("$convert: 42\ninto: $int8\nor: 0").unwrap(),
+        lower_exec_value("(convert 42 int8 0)").unwrap(),
         vibra::lower::RuntimeValue::Typed {
             type_ref: vibra::lower::TypeRef::Int8,
             value: Box::new(vibra::lower::RuntimeValue::Int(42)),
         }
     );
     assert_eq!(
-        lower_exec_value("$convert: 300\ninto: $int8\nor: -1").unwrap(),
+        lower_exec_value("(convert 300 int8 -1)").unwrap(),
         vibra::lower::RuntimeValue::Typed {
             type_ref: vibra::lower::TypeRef::Int8,
             value: Box::new(vibra::lower::RuntimeValue::Int(-1)),
         }
     );
-    let invalid_fallback = lower_exec_value("$convert: 1\ninto: $uint8\nor: -1")
+    let invalid_fallback = lower_exec_value("(convert 1 uint8 -1)")
         .unwrap_err()
         .to_string();
     assert!(
