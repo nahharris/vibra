@@ -2,13 +2,14 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_yaml::{Mapping, Value};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use vibra::lower::{RuntimeValue, TypeRef};
 use vibra::{
-    docs, execute, load, lower, lsp, mcp, package, plugin, project, runtime, test_runner, tooling,
+    docs, execute, frontend, load, lower, lsp, mcp, package, plugin, project, runtime, test_runner,
+    tooling, typed_program,
 };
 
 #[derive(Parser)]
@@ -567,8 +568,8 @@ fn run_cli() -> Result<()> {
                 }
                 package::run(&path, &config)?;
             } else {
-                let program = load::load_legacy_yaml_program(&path, &compilation_flags(flag)?)?;
-                let lowered = lower::lower_program(&program)?;
+                let program = frontend::load_surface_program(&path, &compilation_flags(flag)?)?;
+                let lowered = typed_program::lower_typed_program(&program)?;
                 for warning in &lowered.warnings {
                     eprintln!("warning: {warning}");
                 }
@@ -596,11 +597,31 @@ fn run_cli() -> Result<()> {
             max_open_files,
         } => {
             let (bindings, local_types) = exec_bindings(arg, arg_file)?;
-            let root = exec_root(import)?;
             let cwd = std::env::current_dir().context("resolve current directory")?;
-            let program = load::load_legacy_yaml_inline_program(&cwd, Value::Mapping(root))?;
-            let expr_value = load::parse_inline_exec_expression(&expr)?;
-            let lowered = lower::lower_exec_expr(&program, &expr_value, &local_types)?;
+            let mut source = tempfile::Builder::new()
+                .prefix(".vibra-exec-")
+                .suffix(".vibra")
+                .tempfile_in(&cwd)
+                .context("create temporary exec module")?;
+            source
+                .write_all(exec_import_source(import)?.as_bytes())
+                .context("write temporary exec module")?;
+            let program =
+                frontend::load_surface_program(source.path(), &load::CompilationFlags::default())?;
+            let document = vibra::syntax::parse(&expr).context("parse exec expression")?;
+            let nodes = document
+                .nodes
+                .iter()
+                .filter(|node| !matches!(node.kind, vibra::syntax::NodeKind::Comment(_)))
+                .collect::<Vec<_>>();
+            let [node] = nodes.as_slice() else {
+                bail!("exec expression must contain exactly one S-expression");
+            };
+            let expression =
+                vibra::ast::lower_expression_node_with_id(node, vibra::ast::DocumentId::ANONYMOUS)
+                    .context("validate exec expression")?;
+            let lowered =
+                typed_program::lower_typed_exec_expression(&program, &expression, &local_types)?;
             for warning in &lowered.program.warnings {
                 eprintln!("warning: {warning}");
             }
@@ -744,16 +765,17 @@ fn insert_exec_binding(
     Ok(())
 }
 
-fn exec_root(imports: Vec<String>) -> Result<Mapping> {
-    let mut root = Mapping::new();
+fn exec_import_source(imports: Vec<String>) -> Result<String> {
+    let mut source = String::new();
+    let mut aliases = std::collections::BTreeSet::new();
     let code = project::locate_stdlib_source()?.join("code.vibra");
-    insert_import(&mut root, "code", &path_str(&code))?;
+    append_exec_import(&mut source, &mut aliases, "code", &path_str(&code))?;
     for raw in imports {
         let (alias, path) = split_name_value(&raw, "--import")?;
         validate_exec_import_alias(alias)?;
-        insert_import(&mut root, alias, path)?;
+        append_exec_import(&mut source, &mut aliases, alias, path)?;
     }
-    Ok(root)
+    Ok(source)
 }
 
 fn validate_exec_import_alias(alias: &str) -> Result<()> {
@@ -766,13 +788,20 @@ fn validate_exec_import_alias(alias: &str) -> Result<()> {
     Ok(())
 }
 
-fn insert_import(root: &mut Mapping, alias: &str, path: &str) -> Result<()> {
-    if root.contains_key(Value::String(alias.to_string())) {
+fn append_exec_import(
+    source: &mut String,
+    aliases: &mut std::collections::BTreeSet<String>,
+    alias: &str,
+    path: &str,
+) -> Result<()> {
+    if !aliases.insert(alias.to_string()) {
         bail!("duplicate exec import alias `{alias}`");
     }
-    let mut import = Mapping::new();
-    import.insert(Value::String("$import".into()), Value::String(path.into()));
-    root.insert(Value::String(alias.into()), Value::Mapping(import));
+    source.push_str("(import ");
+    source.push_str(alias);
+    source.push(' ');
+    source.push_str(&serde_json::to_string(path)?);
+    source.push_str(")\n");
     Ok(())
 }
 
@@ -904,8 +933,8 @@ fn print_effects(
     format: StructuredFormatArg,
     flags: &load::CompilationFlags,
 ) -> Result<()> {
-    let loaded = load::load_legacy_yaml_program(path, flags)?;
-    let lowered = lower::lower_program(&loaded)?;
+    let program = frontend::load_surface_program(path, flags)?;
+    let lowered = typed_program::lower_typed_program(&program)?;
     let reachable = reachable_functions(&lowered);
     let mut functions = lowered
         .functions
