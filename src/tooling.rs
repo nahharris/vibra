@@ -3,7 +3,7 @@
 pub use crate::diagnostics::{
     file_uri, Category, Diagnostic, Position, RelatedDiagnostic, Severity, Span,
 };
-use crate::{load, lower};
+use crate::{frontend, load, typed_program};
 use anyhow::{bail, Context, Result};
 use glob::glob;
 use serde::Serialize;
@@ -128,15 +128,10 @@ pub fn format_source(path: &Path, source: &str) -> Result<String> {
 /// Produce syntax and style diagnostics for an in-memory editor document.
 /// Compile diagnostics intentionally remain workspace/disk based.
 pub fn diagnostics_for_source(path: &Path, source: &str) -> Vec<Diagnostic> {
-    let suppressions = Suppressions::parse(source);
     let mut diagnostics = crate::sexpr_tooling::staged_sexpr_diagnostics(path, source);
     if diagnostics.is_empty() {
         diagnostics.extend(crate::sexpr_tooling::staged_lint_sexpr(path, source));
     }
-    diagnostics.retain(|diagnostic| {
-        diagnostic.severity == Severity::Error
-            || !suppressions.suppresses(&diagnostic.code, diagnostic.span.start.line)
-    });
     diagnostics
 }
 
@@ -148,14 +143,11 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
     for path in &files {
         let source =
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        let suppressions = Suppressions::parse(&source);
         let mut file_diagnostics = Vec::new();
 
-        // Source is always S-expression (see `src/load.rs` module docs): reader
-        // and typed-surface diagnostics come from `sexpr_tooling`, not the
-        // legacy YAML-subset/`serde_yaml` path. Style and compile passes both
-        // require a structurally valid document, so this check always runs
-        // and gates them even when the Syntax category itself is not selected.
+        // Reader and typed-surface diagnostics require a structurally valid
+        // S-expression document, so this check always runs and gates style
+        // and compile passes even when Syntax is not selected.
         let syntax_diagnostics = crate::sexpr_tooling::staged_sexpr_diagnostics(path, &source);
         let syntax_ok = syntax_diagnostics.is_empty();
         if active_categories.contains(&Category::Syntax) {
@@ -170,10 +162,7 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
             file_diagnostics.extend(compile_diagnostics(path));
         }
 
-        diagnostics.extend(file_diagnostics.into_iter().filter(|diagnostic| {
-            diagnostic.severity == Severity::Error
-                || !suppressions.suppresses(&diagnostic.code, diagnostic.span.start.line)
-        }));
+        diagnostics.extend(file_diagnostics);
     }
 
     if let Some(min_severity) = options.severity {
@@ -299,11 +288,6 @@ fn sarif_level(severity: Severity) -> &'static str {
 fn rule_summary(code: &str) -> &'static str {
     match code {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
-        "E-YAML-001" => "YAML parse or strict-subset violation",
-        "E-YAML-002" => "YAML comments are forbidden",
-        "E-COMMENT-001" => "`=comment` must be a string scalar",
-        "E-LINT-001" => "Malformed or invalid `=lint` annotation",
-        "E-ANNO-003" => "Annotation has no syntax in its mapping",
         "E-COMPILE-001" => "Vibra compile diagnostic",
         "E-ONE-001" => "Function declaration is not canonical labeled shorthand",
         "E-MUT-001" => "Malformed `$mut` wrapper",
@@ -366,22 +350,11 @@ pub fn compile_diagnostics_with_flags(
     path: &Path,
     flags: &load::CompilationFlags,
 ) -> Vec<Diagnostic> {
-    let result = load::load_legacy_yaml_program(path, flags).and_then(|program| {
-        let Some(entry) = program.modules.get(&program.entry) else {
-            return Ok(());
-        };
-        if contains_noncanonical_option(entry) {
-            anyhow::bail!(
-                "E-OPTION-001: noncanonical option representation; use the tagged stdlib option enum"
-            );
-        }
-        let Some(map) = entry.as_mapping() else {
-            return Ok(());
-        };
-        if !map.contains_key(serde_yaml::Value::String("main".to_string())) {
+    let result = frontend::load_surface_program(path, flags).and_then(|program| {
+        if !entry_declares_main(&program) {
             return Ok(());
         }
-        lower::lower_program(&program).map(|_| ())
+        typed_program::lower_typed_program(&program).map(|_| ())
     });
     match result {
         Ok(()) => Vec::new(),
@@ -401,46 +374,16 @@ pub fn compile_diagnostics_with_flags(
     }
 }
 
-fn contains_noncanonical_option(value: &serde_yaml::Value) -> bool {
-    match value {
-        serde_yaml::Value::Mapping(map) => {
-            if let Some(option) = map.get(serde_yaml::Value::String("$option".to_string())) {
-                if !option.as_mapping().is_some_and(|type_args| {
-                    type_args
-                        .keys()
-                        .all(|key| key.as_str().is_some_and(|name| !name.starts_with('$')))
-                }) {
-                    return true;
-                }
-            }
-            if let Some(union) = map.get(serde_yaml::Value::String("$union".to_string())) {
-                if union.as_sequence().is_some_and(|items| {
-                    items
-                        .iter()
-                        .any(|item| item.as_str().is_some_and(|s| s == "$void"))
-                }) {
-                    return true;
-                }
-            }
-            map.iter().any(|(key, value)| {
-                contains_noncanonical_option(key) || contains_noncanonical_option(value)
-            })
-        }
-        serde_yaml::Value::Sequence(items) => items.iter().any(contains_noncanonical_option),
-        serde_yaml::Value::Tagged(tagged) => contains_noncanonical_option(&tagged.value),
-        _ => false,
-    }
+fn entry_declares_main(program: &frontend::SurfaceProgram) -> bool {
+    program.modules.get(&program.entry).is_some_and(|module| {
+        module.forms().any(|form| {
+            matches!(form, crate::ast::TopLevel::Function(function) if function.name.value == "main")
+        })
+    })
 }
 
 fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
     const KNOWN_CODES: &[&str] = &[
-        "E-YAML-001",
-        "E-YAML-002",
-        "E-COMMENT-001",
-        "E-LINT-001",
-        "E-ANNO-003",
-        "E-YAML-002",
-        "E-YAML-003",
         "E-SYN-001",
         "E-ONE-001",
         "E-ONE-002",
@@ -591,84 +534,4 @@ mod discovery_tests {
 
 fn display_path(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
-}
-
-#[derive(Debug, Default)]
-struct Suppressions {
-    subtrees: Vec<(usize, usize, BTreeSet<String>)>,
-}
-
-impl Suppressions {
-    fn parse(source: &str) -> Self {
-        let mut suppressions = Self::default();
-        let lines: Vec<_> = source.lines().collect();
-        for (line_index, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-            if !trimmed.starts_with("=lint:") {
-                continue;
-            }
-            let annotation_indent = line.len() - trimmed.len();
-            let owner_start = if annotation_indent == 0 {
-                0
-            } else {
-                (0..line_index)
-                    .rev()
-                    .find(|index| {
-                        let candidate = lines[*index];
-                        !candidate.trim().is_empty()
-                            && candidate.len() - candidate.trim_start().len() < annotation_indent
-                    })
-                    .unwrap_or(0)
-            };
-            let owner_indent = lines[owner_start].len() - lines[owner_start].trim_start().len();
-            let owner_end = if annotation_indent == 0 {
-                lines.len()
-            } else {
-                ((line_index + 1)..lines.len())
-                    .find(|index| {
-                        let candidate = lines[*index];
-                        !candidate.trim().is_empty()
-                            && candidate.len() - candidate.trim_start().len() <= owner_indent
-                    })
-                    .unwrap_or(lines.len())
-            };
-            let lint_end = ((line_index + 1)..lines.len())
-                .find(|index| {
-                    let candidate = lines[*index];
-                    !candidate.trim().is_empty()
-                        && candidate.len() - candidate.trim_start().len() <= annotation_indent
-                })
-                .unwrap_or(lines.len());
-            let inline = trimmed.trim_start_matches("=lint:").trim();
-            let lint_source = if inline.is_empty() {
-                lines[line_index + 1..lint_end]
-                    .iter()
-                    .map(|line| {
-                        line.get((annotation_indent + 2).min(line.len())..)
-                            .unwrap_or_default()
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            } else {
-                inline.to_string()
-            };
-            let codes = serde_yaml::from_str::<serde_yaml::Value>(&lint_source)
-                .ok()
-                .and_then(|value| crate::annotations::lint_codes(&value).ok())
-                .map(|codes| codes.into_iter().collect())
-                .unwrap_or_default();
-            suppressions.subtrees.push((owner_start, owner_end, codes));
-        }
-        suppressions
-    }
-
-    fn suppresses(&self, code: &str, line: usize) -> bool {
-        self.subtrees
-            .iter()
-            .any(|(start, end, codes)| line >= *start && line < *end && code_matches(codes, code))
-    }
-}
-
-fn code_matches(codes: &BTreeSet<String>, code: &str) -> bool {
-    codes.contains("all") || codes.contains(code)
 }
