@@ -2,17 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/expression.schema.json",
   "title": "VibraExpression",
-  "description": "Surrogate schema: a Vibra expression is a YAML scalar, sequence, or mapping; this schema intentionally permits any JSON-safe value. Tooling narrows by context.",
-  "oneOf": [
-    { "type": "null" },
-    { "type": "boolean" },
-    { "type": "number" },
-    { "type": "string" },
-    { "type": "array", "items": { "$ref": "#" } },
-    {
-      "type": "object",
-      "additionalProperties": { "$ref": "#" },
-      "description": "Includes compile-time {$embed: path} / {$embed: {path, format}} expressions and deterministic {$template: {path, with}} text rendering. Embed formats: auto, text, binary, yaml, json, toml, xml."
-    }
-  ]
+  "description": "Transport representation of one S-expression. Parse with the Vibra reader before applying contextual expression grammar.",
+  "type": "string",
+  "contentMediaType": "text/x-vibra"
 }

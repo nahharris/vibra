@@ -1,3 +1,7 @@
+# Historical YAML-surface draft (superseded)
+
+> Historical record only. This document describes the removed YAML source surface and is not a current Vibra language contract. Current Vibra source uses S-expressions; see [`docs/superpowers/specs/2026-07-25-s-expression-language-design.md`](docs/superpowers/specs/2026-07-25-s-expression-language-design.md).
+
 # Vibra language specification (draft)
 
 Vibra is a functional, vibe-coding-first language: **YAML surface** (strict subset), **static types** (TypeScript familiarity + Rust-ish safety), compiles to **WebAssembly**, and favors **one obvious form** per construct so LLMs make fewer choices.

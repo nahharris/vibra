@@ -17,8 +17,8 @@ checking, macro expansion, lowering, effects analysis, and artifact
 fingerprinting. An inactive file therefore cannot introduce imports,
 diagnostics, effects, embedded files, or duplicate definitions.
 
-Both `.vibra` and `.vibra.yaml` are source extensions. A conditional part is
-recognized only when the unsuffixed base module exists; otherwise a dotted
+`.vibra` is the only source extension. A conditional part is recognized only
+when the unsuffixed base module exists; otherwise a dotted
 filename remains its own module. Conditional parts keep their physical paths in
 the source database and diagnostics while sharing the base module's logical
 scope. Selected parts are merged in normalized path order, preserving

@@ -2,26 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/module-surface.schema.json",
   "title": "VibraModuleSurface",
-  "description": "Schema for a parsed module root mapping (post-YAML). Module-level keys are symbol names (kebab-case, optional leading `-` for module-private). Function definitions use function.schema.json; other symbols remain loosely described here.",
-  "type": "object",
-  "propertyNames": {
-    "pattern": "^(=comment|=doc|=lint|-?[a-z][a-z0-9]*(-[a-z0-9]+)*)$"
-  },
-  "properties": {
-    "=comment": { "type": "string" },
-    "=doc": { "type": "string" },
-    "=lint": { "$ref": "source-annotations.schema.json#/properties/=lint" }
-  },
-  "additionalProperties": {
-    "if": {
-      "type": "object",
-      "required": ["$function"]
-    },
-    "then": {
-      "$ref": "function.schema.json"
-    },
-    "else": {
-      "description": "Non-function symbol definition. Bare un-prefixed annotation keys like `where` and `doc` are rejected (`E-ANNO-002`)."
-    }
-  }
+  "description": "Transport representation of UTF-8 Vibra source. A module is zero or more S-expression top-level forms, validated by the native reader.",
+  "type": "string",
+  "contentMediaType": "text/x-vibra"
 }

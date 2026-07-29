@@ -5,13 +5,11 @@ project-declared interface. It is deliberately separate from static `$wasm`
 dependencies: the plugin path is chosen at runtime and is not embedded in the
 application or lockfile.
 
-```yaml
-plugin-interfaces:
-  arithmetic:
-    functions:
-      sum:
-        params: [int32, int32]
-        result: int32
+```vibra
+(project
+  (package "plugin-host" "0.1.0")
+  (plugin-interface arithmetic
+    (function sum params: (int32 int32) result: int32)))
 ```
 
 Load and validate an implementation with dedicated authority:
@@ -41,9 +39,10 @@ signature mismatch, and instantiation failure.
 
 - Add a source-level typed plugin handle and typed calls through the declared
   interface; handles must be affine and cannot be forged.
+- Forward explicitly typed, attenuated capabilities to individual calls.
 - Add Vibra-backed implementations behind the same handle abstraction.
 - Define lifecycle, reload, state, and failure-isolation rules.
 - Add package-relative interface imports and generated wrapper ergonomics.
 
-Network/registry loading, untyped reflection, and replacement of compile-time
-`$import` remain out of scope.
+Network/registry loading, ambient capability inheritance, untyped reflection,
+and replacement of compile-time `import` remain out of scope.
