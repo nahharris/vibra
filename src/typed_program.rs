@@ -24,8 +24,9 @@ use crate::ast::{Test, TopLevel};
 use crate::body_semantics::validate_task_handles;
 use crate::frontend::SurfaceProgram;
 use crate::lower::{
-    self, ExpectedTestError, FunctionBody, FunctionSig, ImplBody, ImplKey, LoweredProgram,
-    LoweredTestCase, RuntimeValue, TestClock, TestErrorPhase, TestSpec, TestWorkspace, TypeRef,
+    self, ExpectedTestError, FunctionBody, FunctionSig, ImplBody, ImplKey, LoweredExec,
+    LoweredProgram, LoweredTestCase, RuntimeValue, TestClock, TestErrorPhase, TestSpec,
+    TestWorkspace, TypeRef,
 };
 use crate::typed_body;
 use crate::typed_lower::{self, TypedModuleInput, TypedSignatureIndex};
@@ -100,6 +101,49 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
         impls,
         warnings,
         foreign_modules,
+    })
+}
+
+/// Lower one parsed S-expression for `vibra exec` without materializing a
+/// legacy YAML value tree. `local_types` describes bindings supplied by the
+/// caller; their runtime names remain unchanged in the returned expression.
+pub fn lower_typed_exec_expression(
+    program: &SurfaceProgram,
+    expression: &crate::ast::Expr,
+    local_types: &HashMap<String, TypeRef>,
+) -> Result<LoweredExec> {
+    let order = typed_module_order(program)?;
+    let inputs = typed_module_inputs(program, &order)?;
+    let signatures = typed_lower::lower_typed_signatures(inputs.iter().copied())
+        .context("typed signature lowering")?;
+    let bodies = typed_body::lower_typed_bodies(inputs.iter().copied(), &signatures)
+        .context("typed body lowering")?;
+    let functions = typed_body::materialize_typed_functions(&signatures, &bodies)
+        .context("materializing typed functions")?;
+    let constants = typed_body::materialize_constants(&signatures, &bodies)
+        .context("materializing typed constants")?;
+    let declared_aliases = signatures.aliases.keys().cloned().collect();
+    let expression = typed_body::lower_typed_inline_expression(
+        "",
+        expression,
+        &signatures,
+        &declared_aliases,
+        &constants,
+        local_types,
+    )
+    .context("lowering typed exec expression")?;
+
+    Ok(LoweredExec {
+        expr: expression,
+        program: LoweredProgram {
+            statements: Vec::new(),
+            main_arg_bindings: Vec::new(),
+            constants,
+            functions,
+            impls: signatures.impls,
+            warnings: Vec::new(),
+            foreign_modules: BTreeMap::new(),
+        },
     })
 }
 
@@ -392,6 +436,7 @@ fn collect_typed_warnings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::DocumentId;
     use crate::load::CompilationFlags;
     use crate::lower::Statement;
     use crate::runtime::RunConfig;
@@ -557,5 +602,51 @@ mod tests {
         assert!(lowered.functions.contains_key("helper.double"));
         crate::execute::run_lowered_interpreted(&lowered, &RunConfig::default()).unwrap();
         crate::wasm_backend::run_lowered(&lowered, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn lowers_inline_expression_from_typed_ast_without_value_adapter() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vibra");
+        write(
+            &entry,
+            "(fn increment ((value int64)) int64 (do (return (add value 1))))\n",
+        );
+        let program = load(&entry);
+        let document = crate::syntax::parse("(increment input)").unwrap();
+        let expression =
+            crate::ast::lower_expression_node_with_id(&document.nodes[0], DocumentId::ANONYMOUS)
+                .unwrap();
+        let local_types = HashMap::from([("input".to_string(), TypeRef::Int64)]);
+
+        let exec = lower_typed_exec_expression(&program, &expression, &local_types).unwrap();
+        let bindings = HashMap::from([("input".to_string(), RuntimeValue::Int(41))]);
+        let value =
+            crate::execute::eval_lowered_exec(&exec, &bindings, &RunConfig::default()).unwrap();
+
+        assert_eq!(value, RuntimeValue::Int(42));
+    }
+
+    #[test]
+    fn inline_expression_resolves_entry_imports_from_typed_program() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vibra");
+        write(&entry, "(import helper \"helper.vibra\")\n");
+        write(
+            &temp.path().join("helper.vibra"),
+            "(fn double ((value int64)) int64 (do (return (add value value))))\n",
+        );
+        let program = load(&entry);
+        let document = crate::syntax::parse("(helper.double 21)").unwrap();
+        let expression =
+            crate::ast::lower_expression_node_with_id(&document.nodes[0], DocumentId::ANONYMOUS)
+                .unwrap();
+
+        let exec = lower_typed_exec_expression(&program, &expression, &HashMap::new()).unwrap();
+        let value =
+            crate::execute::eval_lowered_exec(&exec, &HashMap::new(), &RunConfig::default())
+                .unwrap();
+
+        assert_eq!(value, RuntimeValue::Int(42));
     }
 }

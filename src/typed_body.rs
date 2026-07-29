@@ -2056,6 +2056,68 @@ fn lower_expr(
     })
 }
 
+/// Lower and validate one expression evaluated outside a source function.
+///
+/// `vibra exec` bindings are runtime locals, not function parameters, so the
+/// synthetic validation context deliberately has no arguments: references
+/// retain their bare binding names rather than becoming `args.<name>`.
+pub(crate) fn lower_typed_inline_expression(
+    module_alias: &str,
+    expression: &AstExpr,
+    signatures: &TypedSignatureIndex,
+    declared_aliases: &BTreeSet<String>,
+    constants: &HashMap<String, RuntimeValue>,
+    local_types: &HashMap<String, TypeRef>,
+) -> Result<Expr> {
+    const EXEC_CONTEXT: &str = "__vibra_exec__";
+    let mut exec_signatures = signatures.clone();
+    exec_signatures.functions.insert(
+        EXEC_CONTEXT.to_string(),
+        TypedFunctionSignature {
+            alias: module_alias.to_string(),
+            symbol: EXEC_CONTEXT.to_string(),
+            type_params: Vec::new(),
+            type_param_bounds: Vec::new(),
+            arg_names: Vec::new(),
+            arg_types: Vec::new(),
+            return_type: TypeRef::Void,
+            doc: None,
+        },
+    );
+    let lowered = lower_expr(
+        module_alias,
+        expression,
+        &exec_signatures,
+        declared_aliases,
+        &BTreeSet::new(),
+        local_types,
+    )?;
+    let mut origins = Vec::new();
+    collect_expr_origin(expression, &mut origins);
+    let mut cursor = OriginCursor::new(&origins);
+    let lowered = validate_expr(
+        &lowered,
+        local_types,
+        constants,
+        &exec_signatures,
+        EXEC_CONTEXT,
+        &mut cursor,
+    )
+    .map_err(|error| cursor.annotate(error))?;
+    cursor.finish()?;
+    if infer(
+        &lowered,
+        local_types,
+        constants,
+        &exec_signatures,
+        EXEC_CONTEXT,
+    )? == TypeRef::Void
+    {
+        bail!("void function call cannot be used as an expression");
+    }
+    Ok(lowered)
+}
+
 /// Resolve a call-shaped head to a concrete, callable signature key,
 /// checking (in order) ordinary function resolution and, on failure,
 /// interface method dispatch. Mirrors the legacy `resolve_call_target` /
