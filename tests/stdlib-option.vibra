@@ -12,7 +12,7 @@
       (option.option.none)
       (do (test.fail "expected some"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -36,7 +36,7 @@
       (option.option.none)
       (do (test.fail "expected some"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -53,7 +53,7 @@
       _
       (do (test.fail "some did not preserve its value"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -78,6 +78,6 @@
       _
       (do (test.fail "option and did not select next"))
     )
-    profile: core
+    profile: @core
   )
 )

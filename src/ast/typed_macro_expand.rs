@@ -194,7 +194,7 @@ fn collect_program_macros(
             }) {
                 return Err(MacroExpansionError::at(
                     "E-MACRO-011",
-                    "definition-syntax and module-syntax macros are not supported by the typed expander",
+                    "@definition-syntax and @module-syntax macros are not supported by the typed expander",
                     &definition.origin,
                 ));
             }
@@ -2173,7 +2173,10 @@ fn qualify_generated_type_names(
                 definition_symbols,
             );
         }
-        TypeExprKind::WasmValue(_) | TypeExprKind::Handle(_) | TypeExprKind::Named(_) => {}
+        TypeExprKind::WasmValue(_)
+        | TypeExprKind::Handle(_)
+        | TypeExprKind::Named(_)
+        | TypeExprKind::Literal(_) => {}
     }
 }
 
@@ -2517,7 +2520,7 @@ fn annotate_generated_type(
         TypeExprKind::Handle(access) => {
             annotate_generated_origin(&mut access.origin, definition, call, state)?;
         }
-        TypeExprKind::Named(_) => {}
+        TypeExprKind::Named(_) | TypeExprKind::Literal(_) => {}
     }
     Ok(())
 }
@@ -2694,7 +2697,10 @@ fn generated(state: &mut ExpansionState, origin: &Origin) -> Result<u64, MacroEx
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ast::lower_document_with_id, syntax};
+    use crate::{
+        ast::{lower_document_with_id, Literal},
+        syntax,
+    };
 
     fn module(source: &str, id: u64) -> Module {
         let document = syntax::parse(source).unwrap();
@@ -2706,9 +2712,9 @@ mod tests {
         let source = "
 (macro
   twice
-  (value expr-syntax)
-  expr-syntax
-  (do (quote expr-syntax (do (let temporary (unquote value)) temporary)))
+  (value @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (do (let temporary (unquote value)) temporary)))
 )
 (defn main (temporary int64) int64 (do (twice temporary)))";
         let expanded = expand_typed_macros(module(source, 10)).unwrap();
@@ -2753,9 +2759,60 @@ mod tests {
     }
 
     #[test]
+    fn quote_unquote_and_splice_preserve_atom_literals() {
+        let source = "
+(macro
+  tag
+  (value @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (equal (unquote value) @ok)))
+)
+(macro
+  first-of
+  (values... @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (array (splice values))))
+)
+(defn matches (value atom) bool (do (return (tag value))))
+(defn tags () (array atom) (do (return (first-of @ok @error))))";
+        let expanded = expand_typed_macros(module(source, 41)).unwrap();
+        let TopLevel::Function(matches) = &expanded.forms[0] else {
+            panic!("expected function");
+        };
+        let ExprKind::Return(Some(expr)) = &matches.body[0].value else {
+            panic!("expected return");
+        };
+        let ExprKind::Call { arguments, .. } = &expr.value else {
+            panic!("expected equal call");
+        };
+        assert!(matches!(
+            arguments[1].value,
+            ExprKind::Literal(Literal::Atom(ref name)) if name == "ok"
+        ));
+
+        let TopLevel::Function(tags) = &expanded.forms[1] else {
+            panic!("expected function");
+        };
+        let ExprKind::Return(Some(expr)) = &tags.body[0].value else {
+            panic!("expected return");
+        };
+        let ExprKind::Array(items) = &expr.value else {
+            panic!("expected array");
+        };
+        let names = items
+            .iter()
+            .map(|item| match &item.value {
+                ExprKind::Literal(Literal::Atom(name)) => name.clone(),
+                other => panic!("expected atom literal, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["ok", "error"]);
+    }
+
+    #[test]
     fn rejects_parameter_and_result_category_mismatches() {
         let source = "
-(macro as-type (value type-syntax) type-syntax (do (unquote value)))
+(macro as-type (value @type-syntax) @type-syntax (do (unquote value)))
 (defn main () int64 (do (as-type 1)))";
         let error = expand_typed_macros(module(source, 1)).unwrap_err();
         assert_eq!(error.code, "E-MACRO-002");
@@ -2767,9 +2824,9 @@ mod tests {
         let source = "
 (macro
   optional
-  (value type-syntax)
-  type-syntax
-  (do (quote type-syntax (option (unquote value))))
+  (value @type-syntax)
+  @type-syntax
+  (do (quote @type-syntax (option (unquote value))))
 )
 (def maybe-int (optional int64))";
         let expanded = expand_typed_macros(module(source, 7)).unwrap();
@@ -2799,9 +2856,9 @@ mod tests {
         let source = "
 (macro
   exclusive
-  (value type-syntax)
-  type-syntax
-  (do (quote type-syntax (mut-ref (unquote value))))
+  (value @type-syntax)
+  @type-syntax
+  (do (quote @type-syntax (mut-ref (unquote value))))
 )
 (def exclusive-int (exclusive int64))";
         let expanded = expand_typed_macros(module(source, 8)).unwrap();
@@ -2831,9 +2888,9 @@ mod tests {
 (def i32 int64)
 (macro
   host-types
-  (ignored type-syntax)
-  type-syntax
-  (do (quote type-syntax (tuple (wasm i32) (handle read))))
+  (ignored @type-syntax)
+  @type-syntax
+  (do (quote @type-syntax (tuple (wasm i32) (handle @read))))
 )
 "#,
             41,
@@ -2879,14 +2936,14 @@ mod tests {
         let source = r#"
 (macro
   resources
-  (value expr-syntax)
-  expr-syntax
+  (value @expr-syntax)
+  @expr-syntax
   (do
     (quote
-      expr-syntax
+      @expr-syntax
       (do
         (let output (unquote value))
-        (embed "message.txt" format: text)
+        (embed "message.txt" format: @text)
         (template "message.mustache" with: (record (name (unquote value))))
         (wasm "vibra:host/abi@1" "io_write" output 1)
       )
@@ -2932,7 +2989,7 @@ mod tests {
     #[test]
     fn rejects_splice_outside_a_quote_sequence() {
         let source = "
-(macro invalid (value expr-syntax) expr-syntax (do (splice value)))
+(macro invalid (value @expr-syntax) @expr-syntax (do (splice value)))
 (defn main () int64 (do (invalid 1)))";
         let error = expand_typed_macros(module(source, 1)).unwrap_err();
         assert_eq!(error.code, "E-MACRO-007");
@@ -2941,8 +2998,8 @@ mod tests {
     #[test]
     fn variadic_macro_tail_binds_a_syntax_list_for_splice() {
         let source = r#"
-(macro sequence (values... expr-syntax) expr-syntax
-  (quote expr-syntax (do (splice values))))
+(macro sequence (values... @expr-syntax) @expr-syntax
+  (quote @expr-syntax (do (splice values))))
 (defn main () int64 (sequence 1 2))"#;
         let expanded = expand_typed_macros(module(source, 31)).unwrap();
         let TopLevel::Function(function) = &expanded.forms[0] else {
@@ -2957,7 +3014,7 @@ mod tests {
     #[test]
     fn labelled_macro_arguments_bind_after_macro_resolution() {
         let source = r#"
-(macro select (left expr-syntax right expr-syntax) expr-syntax (unquote left))
+(macro select (left @expr-syntax right @expr-syntax) @expr-syntax (unquote left))
 (defn main () int64 (select right: 2 left: 1))"#;
         let expanded = expand_typed_macros(module(source, 32)).unwrap();
         let TopLevel::Function(function) = &expanded.forms[0] else {
@@ -2972,8 +3029,8 @@ mod tests {
     #[test]
     fn hygiene_respects_lexical_branch_scope() {
         let source = "
-(macro scoped () expr-syntax
-  (do (quote expr-syntax
+(macro scoped () @expr-syntax
+  (do (quote @expr-syntax
     (do
       (if true (do (let branch-value 1) branch-value) (do unit))
       branch-value))))
@@ -3003,7 +3060,7 @@ mod tests {
 
     #[test]
     fn unsupported_definition_and_module_categories_are_rejected_honestly() {
-        for category in ["definition-syntax", "module-syntax"] {
+        for category in ["@definition-syntax", "@module-syntax"] {
             let source = format!(
                 "(macro unsupported () {category} (do (quote {category} (const x int64 1))))"
             );
@@ -3017,9 +3074,9 @@ mod tests {
         let source = "
 (macro
   recurse
-  (value expr-syntax)
-  expr-syntax
-  (do (quote expr-syntax (recurse (unquote value))))
+  (value @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (recurse (unquote value))))
 )
 (defn main () int64 (do (recurse 1)))";
         let error = expand_typed_macros(module(source, 22)).unwrap_err();

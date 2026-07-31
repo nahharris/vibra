@@ -25,6 +25,7 @@ pub enum NodeKind {
 pub enum Atom {
     Symbol(String),
     Label(String),
+    Atom(String),
     String(String),
     Int(i64),
     Float(f64),
@@ -105,6 +106,7 @@ impl Parser {
             }
             TokenKind::Symbol(value) => NodeKind::Atom(Atom::Symbol(value)),
             TokenKind::Label(value) => NodeKind::Atom(Atom::Label(value)),
+            TokenKind::Atom(value) => NodeKind::Atom(Atom::Atom(value)),
             TokenKind::String(value) => NodeKind::Atom(Atom::String(value)),
             TokenKind::Int(value) => NodeKind::Atom(Atom::Int(value)),
             TokenKind::Float(value) => NodeKind::Atom(Atom::Float(value)),
@@ -169,6 +171,15 @@ mod tests {
             NodeKind::Atom(Atom::Label(label)) if label == "doc"
         ));
         assert_eq!(children[2].span, Span::new(12, 16));
+    }
+
+    #[test]
+    fn preserves_atom_literals() {
+        let document = parse("@http.not-found").unwrap();
+        assert!(matches!(
+            &document.nodes[0].kind,
+            NodeKind::Atom(Atom::Atom(name)) if name == "http.not-found"
+        ));
     }
 
     #[test]

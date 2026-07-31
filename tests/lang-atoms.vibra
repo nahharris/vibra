@@ -1,0 +1,44 @@
+(import test "../stdlib/src/test.vibra")
+(import convert "../stdlib/src/convert.vibra")
+(defn
+  classify-atom
+  (value atom)
+  bool
+  (match value @ok (do (return true)) _ (do (return false)))
+)
+(defn exact-atom () @ok (return @ok))
+(defn atom-keyed-map () (map atom int64) (return (map (@ok 1) (@error 2))))
+(test.scenario
+  "first-class-atoms"
+  (test.case
+    "atom-equality"
+    (test.assert (equal @ok @ok))
+    (test.assert (not-equal @ok @error))
+    (test.assert (equal @http.not-found @http.not-found))
+    profile: @core
+  )
+  (test.case
+    "atom-patterns-and-singletons"
+    (test.assert (classify-atom @ok))
+    (test.assert (not (classify-atom @error)))
+    (test.assert (equal (exact-atom) @ok))
+    profile: @core
+  )
+  (test.case
+    "atom-keyed-maps"
+    (match
+      (atom-keyed-map)
+      (map (@ok 1) (@error 2))
+      (do (test.assert true))
+      _
+      (do (test.fail "atom-keyed map did not match"))
+    )
+    profile: @core
+  )
+  (test.case
+    "atom-rendering"
+    (test.assert-eq-str (convert.format-atom @ok) "@ok")
+    (test.assert-eq-str (convert.format-atom @http.not-found) "@http.not-found")
+    profile: @core
+  )
+)

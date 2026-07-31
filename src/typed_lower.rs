@@ -4,12 +4,12 @@
 //! the legacy path until typed expressions can produce validated bodies.
 
 use crate::ast::{
-    Annotation, AnnotationKind, Definition, DocumentId, Function, ImplItem, MethodBinding, Module,
-    TestMeta, TopLevel, TypeExpr, TypeExprKind, Visibility,
+    Annotation, AnnotationKind, Definition, DocumentId, Function, ImplItem, Literal, MethodBinding,
+    Module, TestMeta, TopLevel, TypeExpr, TypeExprKind, Visibility,
 };
 use crate::lower::{
-    FunctionTypeParameter, HandleAccess, ImplBody, ImplKey, ImplMethodBinding, Parameter,
-    TypeAlias, TypeRef,
+    FunctionTypeParameter, HandleAccess, ImplBody, ImplKey, ImplMethodBinding, LiteralType,
+    Parameter, TypeAlias, TypeRef,
 };
 use crate::type_semantics;
 use anyhow::{bail, Context, Result};
@@ -494,7 +494,12 @@ pub(crate) fn lower_type(
 ) -> Result<TypeRef> {
     let lower = |ty| lower_type(ty, generics, module_alias, declared_aliases);
     Ok(match &ty.value {
+        TypeExprKind::Literal(Literal::Atom(name)) => {
+            TypeRef::Literal(LiteralType::Atom(name.clone()))
+        }
+        TypeExprKind::Literal(_) => bail!("only atom literals are valid singleton types"),
         TypeExprKind::Named(name) if name == "any" => TypeRef::Interface(BTreeMap::new()),
+        TypeExprKind::Named(name) if name == "atom" => TypeRef::Atom,
         TypeExprKind::Named(name) if generics.contains(name) => TypeRef::Generic(name.clone()),
         TypeExprKind::Named(name) => named_type(name, module_alias, declared_aliases),
         TypeExprKind::Application {
@@ -1220,8 +1225,8 @@ mod tests {
   impls: ((impl display
     types: (t)
     methods: ((method show show-box)))))
-(const limit int64 10 visibility: private)
-(test.scenario "works" (test.case "works" unit tags: (fast typed)))"#,
+(const limit int64 10 visibility: @private)
+(test.scenario "works" (test.case "works" unit tags: (@fast @typed)))"#,
             3,
         );
         let index = lower_typed_signatures([TypedModuleInput {
@@ -1273,7 +1278,7 @@ mod tests {
         let source = module(
             r#"(defn
   host-types
-  (input (handle read) shared (ref str) exclusive (mut-ref int64) raw (wasm i32))
+  (input (handle @read) shared (ref str) exclusive (mut-ref int64) raw (wasm i32))
   int32
   (do (return raw))
 )"#,
@@ -1553,7 +1558,7 @@ mod tests {
   item
   (record)
   defs: ((defn show (value self) str (do (return "private"))))
-  visibility: private
+  visibility: @private
 )"#,
             18,
         );

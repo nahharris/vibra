@@ -18,7 +18,7 @@
       _
       (do (test.fail "range reduction or loop control failed"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -36,7 +36,7 @@
       _
       (do (test.fail "descending range failed"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -73,7 +73,7 @@
       _
       (do (test.fail "strings must traverse Unicode scalar values"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -90,7 +90,7 @@
       _
       (do (test.fail "nested traversal failed"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -107,6 +107,6 @@
       _
       (do (test.fail "mutation changed traversal snapshot"))
     )
-    profile: core
+    profile: @core
   )
 )

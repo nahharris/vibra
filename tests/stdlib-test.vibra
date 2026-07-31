@@ -9,7 +9,7 @@
     (test.assert-eq-int 42 42)
     (test.assert-eq-float 1.5 1.5)
     (test.assert-eq-str "vibra" "vibra")
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -53,8 +53,8 @@
       _
       (do (test.fail "fake monotonic clock did not use fixture"))
     )
-    profile: core
+    profile: @core
     random-seed: 42
-    clock: (fixed 1000 40)
+    clock: (@fixed 1000 40)
   )
 )

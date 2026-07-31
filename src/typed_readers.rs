@@ -585,15 +585,15 @@ mod tests {
         write(
             &entry,
             "(import helper \"helper.vibra\")\n\
-             (test.scenario \"base\" (test.case \"base\" unit tags: (fast)))\n",
+             (test.scenario \"base\" (test.case \"base\" unit tags: (@fast)))\n",
         );
         write(
             &temp.path().join("main.test.vibra"),
             "(test.scenario \"measured\" (test.case \"measured\" unit\n\
-             tags: (slow arithmetic)\n\
-             expect-error: (compile E-OP-002 \"overflow\")\n\
-             clock: (fixed 42 7)\n\
-             workspace: temp))\n",
+             tags: (@slow @arithmetic)\n\
+             expect-error: (@compile E-OP-002 \"overflow\")\n\
+             clock: (@fixed 42 7)\n\
+             workspace: @temp))\n",
         );
         write(
             &temp.path().join("helper.vibra"),

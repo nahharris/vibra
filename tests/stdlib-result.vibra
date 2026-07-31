@@ -13,7 +13,7 @@
       (result.result.err _)
       (do (test.fail "expected ok"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -28,7 +28,7 @@
       (result.result.err (bind e))
       (do (match e "boom" (test.assert true) _ (test.fail "wrong err payload")))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -65,7 +65,7 @@
       _
       (do (test.fail "ok conversion lost value"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -90,6 +90,6 @@
       _
       (do (test.fail "result and did not preserve the original error"))
     )
-    profile: core
+    profile: @core
   )
 )

@@ -15,8 +15,8 @@
       _
       (do (test.fail "path constructor changed the source string"))
     )
-    profile: core
-    tags: (stdlib filesystem)
+    profile: @core
+    tags: (@stdlib @filesystem)
   )
 )
 (test.scenario
@@ -39,7 +39,7 @@
       _
       (do (test.fail "path components were not platform-neutral"))
     )
-    profile: core
-    tags: (stdlib filesystem)
+    profile: @core
+    tags: (@stdlib @filesystem)
   )
 )

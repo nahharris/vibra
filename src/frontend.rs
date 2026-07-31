@@ -1370,7 +1370,7 @@ fn visit_type(ty: &TypeExpr, visitor: &mut impl FnMut(&str) -> Result<()>) -> Re
             Ok(())
         }
         TypeExprKind::WasmValue(domain) => visitor(&domain.value),
-        TypeExprKind::Handle(_) => Ok(()),
+        TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => Ok(()),
     }
 }
 
@@ -1857,14 +1857,14 @@ mod tests {
         );
         write(
             &temp.path().join("main.test.vibra"),
-            "(macro local (value expr-syntax) expr-syntax\n\
-               (do (quote expr-syntax (unquote value))))\n",
+            "(macro local (value @expr-syntax) @expr-syntax\n\
+               (do (quote @expr-syntax (unquote value))))\n",
         );
         write(
             &temp.path().join("helpers.vibra"),
             "(defn helper (value int64) int64 (do value))\n\
-             (macro use-helper (value expr-syntax) expr-syntax\n\
-               (do (quote expr-syntax (helper (unquote value)))))\n",
+             (macro use-helper (value @expr-syntax) @expr-syntax\n\
+               (do (quote @expr-syntax (helper (unquote value)))))\n",
         );
         let program = load_surface_program(&entry, &CompilationFlags::new(["test"])).unwrap();
         let module = &program.modules[&program.entry];
@@ -1895,8 +1895,8 @@ mod tests {
         );
         write(
             &temp.path().join("helpers.vibra"),
-            "(macro secret (value expr-syntax) expr-syntax\n\
-               (do (unquote value)) visibility: private)\n",
+            "(macro secret (value @expr-syntax) @expr-syntax\n\
+               (do (unquote value)) visibility: @private)\n",
         );
         let error = format!(
             "{:#}",

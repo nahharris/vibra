@@ -3,6 +3,21 @@
   "description": "Registry of stable Vibra linter and compiler codes (reference for tooling)",
   "codes": [
     {
+      "code": "E-ATOM-001",
+      "severity": "error",
+      "summary": "Invalid atom literal; atom names use lowercase kebab-case dot segments"
+    },
+    {
+      "code": "E-ATOM-002",
+      "severity": "error",
+      "summary": "Unknown atom in a contextual keyword position"
+    },
+    {
+      "code": "E-ATOM-003",
+      "severity": "error",
+      "summary": "Contextual keyword position requires an atom; bare symbols are the pre-atom spelling"
+    },
+    {
       "code": "E-SYN-001",
       "severity": "error",
       "summary": "Invalid token or character in native S-expression syntax"

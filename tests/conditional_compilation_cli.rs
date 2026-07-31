@@ -13,7 +13,7 @@ fn write_project(root: &Path) -> PathBuf {
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(
         root.join("project.vibra"),
-        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: bin root: \"src\" entry: \"main.vibra\"))\n",
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     let entry = root.join("src/main.vibra");
@@ -71,7 +71,7 @@ fn check_and_effects_compile_only_the_selected_parts() {
     let entry = root.path().join("src/main.vibra");
     std::fs::write(
         root.path().join("project.vibra"),
-        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: bin root: \"src\" entry: \"main.vibra\"))\n",
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     std::fs::write(&entry, "(defn main () void (do (let value 1)))\n").unwrap();

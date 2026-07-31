@@ -535,7 +535,7 @@ fn private_module_symbol_is_reachable_locally() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"(defn main-helper () void (do (return)) visibility: private)
+        r#"(defn main-helper () void (do (return)) visibility: @private)
 (defn main () void (do (main-helper)))
 "#,
     )
@@ -586,7 +586,7 @@ fn imported_module_private_helper_works_internally() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"(defn priv () void (do (return)) visibility: private)
+        r#"(defn priv () void (do (return)) visibility: @private)
 (defn pub-entry () void (do (priv)))
 "#,
     )
@@ -612,7 +612,7 @@ fn importer_cannot_reference_private_symbol_on_imported_module() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"(defn priv () void (do (return)) visibility: private)
+        r#"(defn priv () void (do (return)) visibility: @private)
 "#,
     )
     .unwrap();
@@ -641,7 +641,7 @@ fn importer_cannot_reference_private_type_on_imported_module() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"(def priv-t (record (x int32)) visibility: private)
+        r#"(def priv-t (record (x int32)) visibility: @private)
 (defn pub-nop () void (do (return)))
 "#,
     )
@@ -672,7 +672,7 @@ fn importer_cannot_use_private_enum_constructor_on_imported_module() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &lib,
-        r#"(def priv-e (enum (a void)) visibility: private)
+        r#"(def priv-e (enum (a void)) visibility: @private)
 "#,
     )
     .unwrap();
@@ -1457,7 +1457,7 @@ fn opaque_host_handle_cannot_be_cast_from_integer() {
     let entry = dir.path().join("entry.vibra");
     std::fs::write(
         &entry,
-        r#"(def read-file (handle read))
+        r#"(def read-file (handle @read))
 (defn main () void (do (let forged (cast 0 read-file))))
 "#,
     )
@@ -4071,11 +4071,11 @@ fn vibra_test_runs_top_level_test_declarations_without_main() {
         r#"(import test "@std/test.vibra")
 (test.scenario
   "passes"
-  (test.case "passes" (do (test.assert true)) profile: core)
+  (test.case "passes" (do (test.assert true)) profile: @core)
 )
 (test.scenario
   "also-passes"
-  (test.case "also-passes" (do (test.assert true)) profile: core)
+  (test.case "also-passes" (do (test.assert true)) profile: @core)
 )
 "#,
     )
@@ -4084,7 +4084,7 @@ fn vibra_test_runs_top_level_test_declarations_without_main() {
         project.join("project.vibra"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: bin root: "tests" entry: "basic.vibra")
+  (target app kind: @bin root: "tests" entry: "basic.vibra")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -4115,7 +4115,7 @@ fn vibra_test_reports_assertion_failures() {
     std::fs::write(
         tests_dir.join("fails.vibra"),
         r#"(import test "@std/test.vibra")
-(test.scenario "fails" (test.case "fails" (do (test.assert false)) profile: core))
+(test.scenario "fails" (test.case "fails" (do (test.assert false)) profile: @core))
 "#,
     )
     .unwrap();
@@ -4123,7 +4123,7 @@ fn vibra_test_reports_assertion_failures() {
         project.join("project.vibra"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: bin root: "tests" entry: "fails.vibra")
+  (target app kind: @bin root: "tests" entry: "fails.vibra")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -4155,7 +4155,7 @@ fn vibra_test_typed_equality_helpers_report_expected_and_actual_values() {
         r#"(import test "@std/test.vibra")
 (test.scenario
   "fails"
-  (test.case "fails" (do (test.assert-eq-int 1 2)) profile: core)
+  (test.case "fails" (do (test.assert-eq-int 1 2)) profile: @core)
 )
 "#,
     )
@@ -4164,7 +4164,7 @@ fn vibra_test_typed_equality_helpers_report_expected_and_actual_values() {
         project.join("project.vibra"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: bin root: "tests" entry: "fails.vibra")
+  (target app kind: @bin root: "tests" entry: "fails.vibra")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -4196,7 +4196,7 @@ fn vibra_test_writes_json_report_file() {
         r#"(import test "@std/test.vibra")
 (test.scenario
   "passes"
-  (test.case "passes" (do (test.assert true)) profile: core)
+  (test.case "passes" (do (test.assert true)) profile: @core)
 )
 "#,
     )
@@ -4205,7 +4205,7 @@ fn vibra_test_writes_json_report_file() {
         project.join("project.vibra"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: bin root: "tests" entry: "basic.vibra")
+  (target app kind: @bin root: "tests" entry: "basic.vibra")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -4256,7 +4256,7 @@ fn module_part_test_file_shares_base_module_definitions() {
   (test.case
     "uses-base-function"
     (do (let ready (is-ready)) (test.assert ready))
-    profile: core
+    profile: @core
   )
 )
 "#,
@@ -4266,7 +4266,7 @@ fn module_part_test_file_shares_base_module_definitions() {
         project.join("project.vibra"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: bin root: "tests" entry: "math.vibra")
+  (target app kind: @bin root: "tests" entry: "math.vibra")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -4340,6 +4340,21 @@ fn vibra_exec_json_output_is_explicit() {
 }
 
 #[test]
+fn vibra_exec_atom_json_output_is_exact() {
+    let output = vibra_cmd()
+        .args(["exec", "--expr", "@http.not-found", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "exec failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value, serde_json::json!({"atom": "http.not-found"}));
+}
+
+#[test]
 fn vibra_exec_help_documents_expr_flag() {
     let output = vibra_cmd().args(["exec", "--help"]).output().unwrap();
     assert!(
@@ -4382,9 +4397,9 @@ fn procedural_macro_quote_and_unquote_expand_before_lowering() {
         &entry,
         r#"(macro
   identity
-  (input expr-syntax)
-  expr-syntax
-  (do (quote expr-syntax (unquote input)))
+  (input @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (unquote input)))
 )
 (defn main () void (do (let value (identity 42))))
 "#,
@@ -4403,15 +4418,15 @@ fn vibra_expand_shows_hygienic_bindings_and_explicit_capture() {
         &entry,
         r#"(macro
   bind-temp
-  (input expr-syntax)
-  expr-syntax
-  (do (quote expr-syntax (do (let temp (unquote input)) temp)))
+  (input @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (do (let temp (unquote input)) temp)))
 )
 (macro
   capture-name
-  (input expr-syntax)
-  expr-syntax
-  (do (quote expr-syntax (capture caller)))
+  (input @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (capture caller)))
 )
 (defn main () void (do (bind-temp hello) (let captured (capture-name ignored))))
 "#,
@@ -4449,9 +4464,9 @@ fn recursive_macro_expansion_reports_the_depth_limit_and_origin() {
         &entry,
         r#"(macro
   forever
-  (input expr-syntax)
-  expr-syntax
-  (do (quote expr-syntax (forever (unquote input))))
+  (input @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (forever (unquote input))))
 )
 (defn main () void (do (let value (forever hello))))
 "#,
@@ -4490,9 +4505,9 @@ fn imported_macro_quotes_resolve_names_in_definition_context() {
         r#"(defn helper () void (do (let value 1)))
 (macro
   call-helper
-  (input expr-syntax)
-  expr-syntax
-  (do (quote expr-syntax (helper)))
+  (input @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax (helper)))
 )
 "#,
     )
@@ -4946,7 +4961,7 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
 
     std::fs::write(
         &entry,
-        "(test.scenario \"passes\" (test.case \"passes\" (do) profile: core))\n",
+        "(test.scenario \"passes\" (test.case \"passes\" (do) profile: @core))\n",
     )
     .unwrap();
     let program = vibra::load::load_program(&entry).unwrap();
@@ -4971,12 +4986,12 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
         ),
         (
             "test args",
-            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: core args: void))\n",
+            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @core args: void))\n",
             "E-SYN-011",
         ),
         (
             "test return",
-            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: core return: void))\n",
+            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @core return: void))\n",
             "E-SYN-011",
         ),
         // A string where the profile symbol is required (the closest
@@ -4999,26 +5014,23 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
         );
     }
 
-    // Uppercase/underscored profiles remain writable symbols (kebab-case
-    // violations are lint warnings, not parse errors -- see
-    // `warns_for_non_kebab_case_symbols`), so these still reach and
-    // exercise legacy's real E-TEST-001 profile-validity check.
+    // Profiles are atoms now, so kebab-case is enforced by the atom lexer
+    // itself rather than by a later E-TEST-001 semantic check.
     for (name, source) in [
         (
             "uppercase test profile",
-            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: Core))\n",
+            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @Core))\n",
         ),
         (
             "underscored test profile",
-            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: core_profile))\n",
+            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @core_profile))\n",
         ),
     ] {
         std::fs::write(&entry, source).unwrap();
-        let program = vibra::load::load_program(&entry).unwrap();
-        let err = vibra::lower::discover_test_names(&program).unwrap_err();
+        let err = vibra::load::load_program(&entry).unwrap_err();
         assert!(
-            format!("{err:#}").contains("E-TEST-001"),
-            "{name} should be rejected with E-TEST-001, got: {err:#}"
+            format!("{err:#}").contains("E-ATOM-001"),
+            "{name} should be rejected with E-ATOM-001, got: {err:#}"
         );
     }
 }
@@ -5034,16 +5046,16 @@ fn test_discovery_exposes_canonical_selection_metadata() {
   (test.case
     "fast"
     (do)
-    profile: core
-    tags: (language fast)
+    profile: @core
+    tags: (@language @fast)
     timeout-ms: 25
     random-seed: 42
-    clock: (fixed 1000 7)
+    clock: (@fixed 1000 7)
   )
 )
 (test.scenario
   "skipped"
-  (test.case "skipped" (do) profile: fs tags: (filesystem) skip: "needs a sandbox")
+  (test.case "skipped" (do) profile: @fs tags: (@filesystem) skip: "needs a sandbox")
 )
 "#,
     )
@@ -5080,7 +5092,7 @@ fn test_discovery_rejects_invalid_selection_metadata() {
     // the reader's raw (untrimmed) emptiness check -- both still reach
     // legacy's E-TEST-001 selection-metadata validation.
     for source in [
-        "(test.scenario \"bad\" (test.case \"bad\" (do) profile: core tags: (one one)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @core tags: (@one @one)))\n",
         "(test.scenario \"bad\" (test.case \"bad\" (do) skip: \"   \"))\n",
     ] {
         std::fs::write(&entry, source).unwrap();
@@ -5106,8 +5118,8 @@ fn test_discovery_rejects_invalid_selection_metadata() {
         "(test.scenario \"bad\" (test.case \"bad\" (do) skip: \"\"))\n",
         "(test.scenario \"bad\" (test.case \"bad\" (do) random-seed: -1))\n",
         "(test.scenario \"bad\" (test.case \"bad\" (do) clock: nope))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) clock: (fixed 1)))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) clock: (fixed 1 2 3)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) clock: (@fixed 1)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) clock: (@fixed 1 2 3)))\n",
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
@@ -5241,12 +5253,19 @@ fn test_discovery_trims_skip_reason_and_closes_profile_diagnostic() {
 
     std::fs::write(
         &entry,
-        "(test.scenario \"bad\" (test.case \"bad\" (do) profile: Not-Kebab))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @Not-Kebab))\n",
     )
     .unwrap();
-    let program = vibra::load::load_program(&entry).unwrap();
-    let err = vibra::lower::discover_test_specs(&program).unwrap_err();
-    assert!(format!("{err:#}").contains("got `Not-Kebab`"), "{err:#}");
+    let err = vibra::load::load_program(&entry).unwrap_err();
+    assert!(format!("{err:#}").contains("E-ATOM-001"), "{err:#}");
+
+    std::fs::write(
+        &entry,
+        "(test.scenario \"bad\" (test.case \"bad\" (do) profile: core))\n",
+    )
+    .unwrap();
+    let err = vibra::load::load_program(&entry).unwrap_err();
+    assert!(format!("{err:#}").contains("E-ATOM-003"), "{err:#}");
 }
 
 #[test]
@@ -5263,10 +5282,10 @@ fn test_discovery_rejects_malformed_expected_error_metadata() {
     let entry = dir.path().join("entry.vibra");
     for source in [
         "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: compile))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (compile)))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (runtime E-RUNTIME-001)))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (unknown \"nope\")))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (compile E-OPTION-001 \"a\" \"b\")))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@compile)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@runtime E-RUNTIME-001)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@unknown \"nope\")))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@compile E-OPTION-001 \"a\" \"b\")))\n",
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
@@ -5276,7 +5295,10 @@ fn test_discovery_rejects_malformed_expected_error_metadata() {
             ),
             Err(error) => format!("{error:#}"),
         };
-        assert!(err.contains("E-SYN"), "{source:?}: {err}");
+        assert!(
+            err.contains("E-SYN") || err.contains("E-ATOM"),
+            "{source:?}: {err}"
+        );
     }
 }
 
@@ -5298,7 +5320,7 @@ fn vibra_test_matches_structured_expected_errors() {
         format!(
             r#"(import test "{test_lib}")
 (def legacy (union void str))
-(test.scenario "compile-error" (test.case "compile-error" (do) expect-error: (compile E-OPTION-001 "removed")))
+(test.scenario "compile-error" (test.case "compile-error" (do) expect-error: (@compile E-OPTION-001 "removed")))
 "#,
             test_lib = path_str(&test_lib),
         ),
@@ -5325,7 +5347,7 @@ fn vibra_test_matches_structured_expected_errors() {
         &runtime_entry,
         format!(
             r#"(import test "{test_lib}")
-(test.scenario "runtime-error" (test.case "runtime-error" (test.assert false) expect-error: (runtime "assertion failed")))
+(test.scenario "runtime-error" (test.case "runtime-error" (test.assert false) expect-error: (@runtime "assertion failed")))
 "#,
             test_lib = path_str(&test_lib),
         ),
@@ -5350,7 +5372,7 @@ fn vibra_test_matches_load_error_before_imports_are_recursively_loaded() {
     let imported = dir.path().join("cycle.vibra");
     std::fs::write(
         &entry,
-        "(import cycle \"cycle.vibra\")\n(test.scenario \"load-error\" (test.case \"load-error\" (do) expect-error: (load E-MOD-003)))\n",
+        "(import cycle \"cycle.vibra\")\n(test.scenario \"load-error\" (test.case \"load-error\" (do) expect-error: (@load E-MOD-003)))\n",
     )
     .unwrap();
     std::fs::write(&imported, "(import entry \"load-error.vibra\")\n").unwrap();
@@ -5378,7 +5400,7 @@ fn vibra_test_reports_expected_error_mismatches_from_the_parent() {
     let entry = dir.path().join("expected-error-mismatch.vibra");
     std::fs::write(
         &entry,
-        "(test.scenario \"passes\" (test.case \"passes\" (do) expect-error: (compile E-OPTION-001)))\n",
+        "(test.scenario \"passes\" (test.case \"passes\" (do) expect-error: (@compile E-OPTION-001)))\n",
     )
     .unwrap();
 
@@ -5401,20 +5423,20 @@ fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
         (
             "wrong-phase.vibra",
             format!(
-                "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" (test.assert false) expect-error: (compile E-OPTION-001)))\n",
+                "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" (test.assert false) expect-error: (@compile E-OPTION-001)))\n",
                 path_str(&test_lib)
             ),
             "expected compile error, but test failed during runtime",
         ),
         (
             "wrong-code.vibra",
-            "(def legacy (union void str))\n(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (compile E-CALL-001)))\n".to_string(),
+            "(def legacy (union void str))\n(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@compile E-CALL-001)))\n".to_string(),
             "expected compile error code `E-CALL-001`, got `E-OPTION-001`",
         ),
         (
             "wrong-message.vibra",
             format!(
-                "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" (test.assert false) expect-error: (runtime \"expected different runtime error\")))\n",
+                "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" (test.assert false) expect-error: (@runtime \"expected different runtime error\")))\n",
                 path_str(&test_lib)
             ),
             "expected runtime error message to contain `expected different runtime error`",
@@ -5441,9 +5463,9 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
     std::fs::write(
         &entry,
         r#"(test.scenario "selection"
-  (test.case "core-language" (do) tags: (language fast))
-  (test.case "fs-language" (do) profile: fs tags: (language filesystem))
-  (test.case "skipped-core" (do) tags: (language) skip: "external fixture unavailable"))
+  (test.case "core-language" (do) tags: (@language @fast))
+  (test.case "fs-language" (do) profile: @fs tags: (@language @filesystem))
+  (test.case "skipped-core" (do) tags: (@language) skip: "external fixture unavailable"))
 "#,
     )
     .unwrap();
@@ -5549,7 +5571,7 @@ fn vibra_test_caps_command_timeout_with_test_metadata() {
 fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("workspace.vibra");
-    std::fs::write(&entry, "(test.scenario \"needs-workspace\" (test.case \"needs-workspace\" (do) workspace: temp))\n").unwrap();
+    std::fs::write(&entry, "(test.scenario \"needs-workspace\" (test.case \"needs-workspace\" (do) workspace: @temp))\n").unwrap();
 
     let skipped = vibra_cmd()
         .args(["test", &path_str(&entry), "--format", "human"])
@@ -5589,16 +5611,24 @@ fn vibra_test_workspace_metadata_rejects_unknown_values() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("workspace-invalid.vibra");
     // The reader itself now requires `workspace:`'s value to be exactly the
-    // symbol `temp` (`parse_test_meta`, src/ast/surface.rs), so an unknown
-    // value is an E-SYN-008 rejection, not legacy's lowering-time
+    // atom `@temp` (`parse_test_meta`, src/ast/surface.rs), so an unknown
+    // value is an E-ATOM-002 rejection, not legacy's lowering-time
     // E-TEST-001 check -- same rule, earlier enforcement point.
     std::fs::write(
         &entry,
-        "(test.scenario \"bad\" (test.case \"bad\" (do) workspace: persistent))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" (do) workspace: @persistent))\n",
     )
     .unwrap();
     let error = vibra::load::load_program(&entry).unwrap_err();
-    assert!(format!("{error:#}").contains("E-SYN-008"));
+    assert!(format!("{error:#}").contains("E-ATOM-002"), "{error:#}");
+
+    std::fs::write(
+        &entry,
+        "(test.scenario \"bad\" (test.case \"bad\" (do) workspace: temp))\n",
+    )
+    .unwrap();
+    let error = vibra::load::load_program(&entry).unwrap_err();
+    assert!(format!("{error:#}").contains("E-ATOM-003"), "{error:#}");
 }
 
 #[test]
@@ -5675,7 +5705,7 @@ fn vibra_test_temp_workspace_runs_fs_operations_relative_to_the_temp_cwd() {
 )
     (let readable (fs.exists path))
     (test.assert readable))
-    workspace: temp))
+    workspace: @temp))
 "#,
             result_lib =
                 path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap()),

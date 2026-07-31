@@ -12,6 +12,7 @@
 pub enum ValueKind {
     Void,
     Bool,
+    Atom,
     Int64,
     UInt64,
     Duration,
@@ -60,6 +61,7 @@ impl ValueKind {
         match self {
             Self::Void => "void",
             Self::Bool => "bool",
+            Self::Atom => "atom",
             Self::Int64 => "int64",
             Self::UInt64 => "uint64",
             Self::Duration => "duration",
@@ -97,6 +99,7 @@ impl ValueKind {
 }
 
 const BOOL: ValueKind = ValueKind::Bool;
+const ATOM: ValueKind = ValueKind::Atom;
 const I64: ValueKind = ValueKind::Int64;
 const U64: ValueKind = ValueKind::UInt64;
 const DURATION: ValueKind = ValueKind::Duration;
@@ -245,6 +248,7 @@ pub const HOST_ABI: &[HostImport] = &[
     entry("vibra_v1", "format_uint64", &[U64], ValueKind::Str),
     entry("vibra_v1", "format_float64", &[F64], ValueKind::Str),
     entry("vibra_v1", "format_bool", &[BOOL], ValueKind::Str),
+    entry("vibra_v1", "format_atom", &[ATOM], ValueKind::Str),
     // Pure, deterministic collection operations. `Any` is intentional: the
     // generic wrapper signatures are statically checked by Vibra lowering.
     entry(

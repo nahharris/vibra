@@ -13,7 +13,7 @@
       _
       (do (test.fail "fell through to wildcard"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -30,7 +30,7 @@
       _
       (do (test.fail "fell through"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -47,7 +47,7 @@
       _
       (do (test.fail "fell through bool match"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -56,7 +56,7 @@
     "wildcard-catch-all"
     (let n 99)
     (match n 0 (do (test.fail "matched 0")) _ (do (test.assert true)))
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -75,6 +75,6 @@
       _
       (do (test.fail "fell through to wildcard"))
     )
-    profile: core
+    profile: @core
   )
 )

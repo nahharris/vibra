@@ -28,21 +28,24 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::ast::{
-    self, Annotation, AnnotationKind, DocumentId, Expr, ExprKind, ImplItem, MethodBinding, Pattern,
-    PatternKind, TopLevel, TypeExpr, TypeExprKind,
+    self, Annotation, AnnotationKind, DocumentId, Expr, ExprKind, ImplItem, Literal, MethodBinding,
+    Pattern, PatternKind, TopLevel, TypeExpr, TypeExprKind,
 };
 use crate::frontend::{self, SurfaceProgram};
 use crate::load::CompilationFlags;
 use crate::syntax::Span;
 
-/// The four semantic fact categories for definitions, imports, references,
-/// and calls.
+/// The semantic fact categories for definitions, imports, references, calls,
+/// and atom literals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SemanticKind {
     Definition,
     Import,
     Reference,
     Call,
+    /// An `@name` atom literal. Atoms have no declaration site, so these
+    /// facts drive hover, references, and completion but never definition.
+    Atom,
 }
 
 /// One indexed fact, located by a document-qualified half-open byte span
@@ -302,6 +305,14 @@ fn visit_annotations(
 
 fn visit_expr(expr: &Expr, context: &DocContext<'_>, facts: &mut Vec<SemanticFact>) {
     match &expr.value {
+        ExprKind::Literal(Literal::Atom(name)) => push(
+            facts,
+            context,
+            expr.span,
+            SemanticKind::Atom,
+            name.clone(),
+            None,
+        ),
         ExprKind::Literal(_) | ExprKind::Break | ExprKind::Continue => {}
         ExprKind::Reference(name) => push(
             facts,
@@ -409,6 +420,14 @@ fn visit_exprs(values: &[Expr], context: &DocContext<'_>, facts: &mut Vec<Semant
 
 fn visit_pattern(pattern: &Pattern, context: &DocContext<'_>, facts: &mut Vec<SemanticFact>) {
     match &pattern.value {
+        PatternKind::Literal(Literal::Atom(name)) => push(
+            facts,
+            context,
+            pattern.span,
+            SemanticKind::Atom,
+            name.clone(),
+            None,
+        ),
         PatternKind::Literal(_) | PatternKind::Wildcard | PatternKind::Bind(_) => {}
         PatternKind::Constructor {
             constructor,
@@ -512,7 +531,15 @@ fn visit_type(ty: &TypeExpr, context: &DocContext<'_>, facts: &mut Vec<SemanticF
             name.value.clone(),
             resolve_reference_target(&name.value, context),
         ),
-        TypeExprKind::Handle(_) => {}
+        TypeExprKind::Literal(Literal::Atom(name)) => push(
+            facts,
+            context,
+            ty.span,
+            SemanticKind::Atom,
+            name.clone(),
+            None,
+        ),
+        TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => {}
     }
 }
 

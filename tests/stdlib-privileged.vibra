@@ -23,7 +23,7 @@
     (let info (sys.info))
     (let is-info (accepts-system-info info))
     (test.assert is-info)
-    profile: system
-    tags: (stdlib)
+    profile: @system
+    tags: (@stdlib)
   )
 )

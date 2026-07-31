@@ -157,6 +157,7 @@ fn atom_len(atom: &Atom) -> usize {
     match atom {
         Atom::Symbol(value) => value.len(),
         Atom::Label(value) => value.len() + 1,
+        Atom::Atom(value) => value.len() + 1,
         Atom::String(value) => escaped_string(value).len(),
         Atom::Int(value) => value.to_string().len(),
         Atom::Float(value) => float_text(*value).len(),
@@ -173,11 +174,29 @@ fn print_atom(atom: &Atom, output: &mut String) {
             output.push_str(value);
             output.push(':');
         }
+        Atom::Atom(value) => {
+            output.push('@');
+            output.push_str(value);
+        }
         Atom::String(value) => output.push_str(&escaped_string(value)),
         Atom::Int(value) => write!(output, "{value}").expect("write to String"),
         Atom::Float(value) => output.push_str(&float_text(*value)),
         Atom::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
         Atom::Unit => output.push_str("unit"),
+    }
+}
+
+#[cfg(test)]
+mod atom_tests {
+    use super::*;
+    use crate::syntax::parse;
+
+    #[test]
+    fn prints_atom_literals_canonically() {
+        assert_eq!(
+            print(&parse("(@ok @http.not-found)").unwrap()),
+            "(@ok @http.not-found)\n"
+        );
     }
 }
 
@@ -263,7 +282,7 @@ mod tests {
 
     #[test]
     fn redundant_body_do_is_unwrapped_without_losing_comments() {
-        let source = "(defn run () void (do ; first\n (step-one) ; second\n (step-two)) visibility: private)";
+        let source = "(defn run () void (do ; first\n (step-one) ; second\n (step-two)) visibility: @private)";
         let printed = print(&parse(source).unwrap());
         assert!(!printed.contains("(do"));
         assert!(printed.contains("; first"));

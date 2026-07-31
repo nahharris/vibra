@@ -13,7 +13,8 @@ use crate::lower::{
     conversion_fallback_fits, infer_expr_type, nominal_type_key_for_module_scope,
     primitive_integer, primitive_numeric, resolve_iface_key_for_scope, typed_primitive_op, Call,
     EnumDef, Expr, FunctionBody, FunctionSig, ImplKey, ImplMethodBinding, ImportTarget, LetValue,
-    MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef, WasmArgSpec,
+    LiteralType, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef,
+    WasmArgSpec,
 };
 use crate::type_semantics::{substitute_type, type_compatible};
 use crate::typed_lower::{
@@ -503,6 +504,7 @@ pub(crate) fn materialize_constants(
 fn ensure_safe_type(ty: &TypeRef, context: &str, location: &str) -> Result<()> {
     match ty {
         TypeRef::Bool
+        | TypeRef::Atom
         | TypeRef::Str
         | TypeRef::Int8
         | TypeRef::Int16
@@ -516,6 +518,7 @@ fn ensure_safe_type(ty: &TypeRef, context: &str, location: &str) -> Result<()> {
         | TypeRef::Float64
         | TypeRef::Void
         | TypeRef::Range => Ok(()),
+        TypeRef::Literal(LiteralType::Atom(_)) => Ok(()),
         TypeRef::Mutable(inner)
         | TypeRef::Array(inner)
         | TypeRef::Reference { inner, .. } => ensure_safe_type(inner, context, location),
@@ -650,7 +653,9 @@ fn validate_statements(
                     }
                 }
                 let actual = infer(&expr, locals, constants, signatures, context)?;
-                if &actual != return_type {
+                let atom_singleton_return = return_type == &TypeRef::Atom
+                    && matches!(actual, TypeRef::Literal(LiteralType::Atom(_)));
+                if &actual != return_type && !atom_singleton_return {
                     bail!("typed return in `{context}` expects {return_type:?}, got {actual:?}");
                 }
                 Statement::Return(expr)
@@ -1180,8 +1185,15 @@ fn validate_expr(
                 .iter()
                 .map(|arg| infer(arg, locals, constants, signatures, context))
                 .collect::<Result<Vec<_>>>()?;
-            let operand_type = types[0].clone();
-            if types.iter().any(|ty| ty != &operand_type) {
+            let atoms = types
+                .iter()
+                .all(|ty| matches!(ty, TypeRef::Atom | TypeRef::Literal(LiteralType::Atom(_))));
+            let operand_type = if atoms {
+                TypeRef::Atom
+            } else {
+                types[0].clone()
+            };
+            if !atoms && types.iter().any(|ty| ty != &operand_type) {
                 bail!(
                     "E-OP-001: `{}` operands must have the same primitive type; explicit `cast` is required",
                     typed_primitive_name(*op)
@@ -3112,7 +3124,14 @@ fn typed_primitive_valid_for(op: PrimitiveOp, operand_type: &TypeRef) -> bool {
                     ))
         }
         Equal | NotEqual => {
-            primitive_numeric(operand_type) || matches!(operand_type, TypeRef::Bool | TypeRef::Str)
+            primitive_numeric(operand_type)
+                || matches!(
+                    operand_type,
+                    TypeRef::Bool
+                        | TypeRef::Str
+                        | TypeRef::Atom
+                        | TypeRef::Literal(LiteralType::Atom(_))
+                )
         }
         LessThan | LessOrEqual | GreaterThan | GreaterOrEqual => {
             primitive_numeric(operand_type) || operand_type == &TypeRef::Str
@@ -3202,6 +3221,7 @@ fn lower_pattern(
 
 fn lower_literal(value: &Literal) -> RuntimeValue {
     match value {
+        Literal::Atom(value) => RuntimeValue::Atom(value.clone()),
         Literal::String(value) => RuntimeValue::Str(value.clone()),
         Literal::Bool(value) => RuntimeValue::Bool(*value),
         Literal::Int(value) => RuntimeValue::Int(*value),
@@ -3254,6 +3274,105 @@ mod tests {
             bodies.function_origin("copy").unwrap().document,
             DocumentId::from_raw(20)
         );
+    }
+
+    #[test]
+    fn lowers_atom_literals_singleton_types_patterns_and_equality() {
+        let source = module(
+            r#"(defn status () atom (return @ok))
+(defn exact () @ok (return @ok))
+(defn same () bool (return (equal @ok @ok)))
+(defn different () bool (return (not-equal @ok @error)))
+(defn classify (value atom) bool (match value @ok true _ false))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        assert_eq!(signatures.functions["status"].return_type, TypeRef::Atom);
+        assert_eq!(
+            signatures.functions["exact"].return_type,
+            TypeRef::Literal(LiteralType::Atom("ok".into()))
+        );
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["status"] else {
+            panic!()
+        };
+        assert!(
+            matches!(&statements[0], Statement::Return(Expr::Value(RuntimeValue::Atom(name))) if name == "ok")
+        );
+        assert_eq!(
+            crate::execute::eval_primitive(
+                PrimitiveOp::Equal,
+                &TypeRef::Atom,
+                &TypeRef::Bool,
+                &[
+                    RuntimeValue::Atom("ok".into()),
+                    RuntimeValue::Atom("ok".into()),
+                ],
+            )
+            .unwrap(),
+            RuntimeValue::Bool(true)
+        );
+        assert_eq!(
+            crate::execute::eval_primitive(
+                PrimitiveOp::NotEqual,
+                &TypeRef::Atom,
+                &TypeRef::Bool,
+                &[
+                    RuntimeValue::Atom("ok".into()),
+                    RuntimeValue::Atom("error".into()),
+                ],
+            )
+            .unwrap(),
+            RuntimeValue::Bool(true)
+        );
+        let FunctionBody::User { statements } = &bodies.functions["classify"] else {
+            panic!()
+        };
+        let Statement::Match { arms, .. } = &statements[0] else {
+            panic!()
+        };
+        let program = LoweredProgram {
+            statements: Vec::new(),
+            main_arg_bindings: Vec::new(),
+            constants: HashMap::new(),
+            functions: HashMap::new(),
+            impls: HashMap::new(),
+            warnings: Vec::new(),
+            foreign_modules: BTreeMap::new(),
+        };
+        assert!(crate::execute::pattern_matches(
+            &arms[0].pattern,
+            &RuntimeValue::Atom("ok".into()),
+            &program,
+            &mut HashMap::new(),
+        )
+        .unwrap());
+        assert!(!crate::execute::pattern_matches(
+            &arms[0].pattern,
+            &RuntimeValue::Atom("error".into()),
+            &program,
+            &mut HashMap::new(),
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn typed_returns_do_not_accept_mismatched_numeric_widths() {
+        let source = module("(defn bad () int8 (return 1))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = format!(
+            "{:#}",
+            materialize_typed_functions(&signatures, &bodies).unwrap_err()
+        );
+        assert!(error.contains("expects Int8, got Int64"), "{error}");
     }
 
     #[test]
@@ -3420,6 +3539,59 @@ mod tests {
     }
 
     #[test]
+    fn atoms_execute_identically_in_both_backends() {
+        let source = module(
+            r#"(defn echo (value atom) atom (do (return value)))
+(defn same (left atom right atom) bool (do (return (equal left right))))
+(defn exact () @ok (do (return @ok)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let statements = vec![
+            Statement::Call(Call {
+                callee_key: "echo".into(),
+                type_args: Vec::new(),
+                args: vec![Expr::Value(RuntimeValue::Atom("ok".into()))],
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
+            }),
+            Statement::Call(Call {
+                callee_key: "same".into(),
+                type_args: Vec::new(),
+                args: vec![
+                    Expr::Value(RuntimeValue::Atom("ok".into())),
+                    Expr::Value(RuntimeValue::Atom("http.not-found".into())),
+                ],
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
+            }),
+            Statement::Call(Call {
+                callee_key: "exact".into(),
+                type_args: Vec::new(),
+                args: Vec::new(),
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
+            }),
+        ];
+        let program = LoweredProgram {
+            statements,
+            main_arg_bindings: Vec::new(),
+            constants: HashMap::new(),
+            functions,
+            impls: HashMap::new(),
+            warnings: Vec::new(),
+            foreign_modules: BTreeMap::new(),
+        };
+        crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
+        crate::wasm_backend::run_lowered(&program, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
     fn executable_subset_rejects_incomplete_or_unchecked_bodies() {
         let signatures = TypedSignatureIndex {
             imports: BTreeMap::new(),
@@ -3498,8 +3670,8 @@ mod tests {
         let library = module(
             r#"(defn echo (value int64) int64 (do (return value)))
 (const answer int64 42)
-(defn hidden (value int64) int64 (do (return value)) visibility: private)
-(const secret int64 7 visibility: private)"#,
+(defn hidden (value int64) int64 (do (return value)) visibility: @private)
+(const secret int64 7 visibility: @private)"#,
         );
         let entry = module(
             r#"(import lib "./lib.vibra")
@@ -3547,10 +3719,10 @@ mod tests {
     #[test]
     fn validation_diagnostics_retain_macro_expansion_origins() {
         let expanded = crate::ast::expand_typed_macros(module(
-            r#"(macro unrelated () expr-syntax
-  (do (quote expr-syntax 1)))
-(macro wrong () expr-syntax
-  (do (quote expr-syntax true)))
+            r#"(macro unrelated () @expr-syntax
+  (do (quote @expr-syntax 1)))
+(macro wrong () @expr-syntax
+  (do (quote @expr-syntax true)))
 (defn bad () int64 (do (unrelated) (return (wrong))))"#,
         ))
         .unwrap();
@@ -3579,8 +3751,8 @@ mod tests {
     #[test]
     fn for_shadowing_selects_binding_statement_after_macro_source_validation() {
         let expanded = crate::ast::expand_typed_macros(module(
-            r#"(macro source () expr-syntax
-  (do (quote expr-syntax (array 1))))
+            r#"(macro source () @expr-syntax
+  (do (quote @expr-syntax (array 1))))
 (defn bad (item int64) void (do (for item (source) (do unit))))"#,
         ))
         .unwrap();
@@ -3609,8 +3781,8 @@ mod tests {
     #[test]
     fn range_validation_selects_the_exact_failing_bound_origin() {
         let expanded = crate::ast::expand_typed_macros(module(
-            r#"(macro wrong-bound () expr-syntax
-  (do (quote expr-syntax true)))
+            r#"(macro wrong-bound () @expr-syntax
+  (do (quote @expr-syntax true)))
 (defn bad () void (do (range 0 (wrong-bound) 1)))"#,
         ))
         .unwrap();

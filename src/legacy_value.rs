@@ -57,6 +57,7 @@ pub struct TaggedValue {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
+    Atom(String),
     Null,
     Bool(bool),
     Number(Number),
@@ -70,6 +71,7 @@ impl std::hash::Hash for Value {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
+            Self::Atom(value) => value.hash(state),
             Self::Null => {}
             Self::Bool(value) => value.hash(state),
             Self::Number(value) => value.hash(state),
@@ -90,6 +92,11 @@ impl serde::Serialize for Value {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::{Error, SerializeMap, SerializeSeq};
         match self {
+            Self::Atom(value) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("atom", value)?;
+                map.end()
+            }
             Self::Null => serializer.serialize_unit(),
             Self::Bool(value) => serializer.serialize_bool(*value),
             Self::Number(Number::Integer(value)) => serializer.serialize_i64(*value),
@@ -156,6 +163,13 @@ impl Value {
             None
         }
     }
+    pub fn as_atom(&self) -> Option<&str> {
+        if let Self::Atom(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
     pub fn as_i64(&self) -> Option<i64> {
         if let Self::Number(value) = self {
             value.as_i64()
@@ -188,5 +202,18 @@ impl Value {
     }
     pub fn is_string(&self) -> bool {
         matches!(self, Self::String(_))
+    }
+}
+
+#[cfg(test)]
+mod atom_json_tests {
+    use super::*;
+
+    #[test]
+    fn atom_serializes_to_the_public_json_contract() {
+        assert_eq!(
+            serde_json::to_value(Value::Atom("ok".into())).unwrap(),
+            serde_json::json!({"atom": "ok"})
+        );
     }
 }

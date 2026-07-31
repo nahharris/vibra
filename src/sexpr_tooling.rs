@@ -352,7 +352,7 @@ fn lint_type(path: &Path, source: &str, ty: &TypeExpr, diagnostics: &mut Vec<Dia
         TypeExprKind::WasmValue(name) => {
             lint_name(path, source, name, "wasm value type", diagnostics)
         }
-        TypeExprKind::Handle(_) => {}
+        TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => {}
     }
 }
 
@@ -762,7 +762,7 @@ mod tests {
     #[test]
     fn expect_error_codes_are_not_kebab_linted() {
         let source = "(test.scenario \"fails\" (test.case \"fails\" unit\n\
-                      expect-error: (compile E-OP-002 \"overflow\")))\n";
+                      expect-error: (@compile E-OP-002 \"overflow\")))\n";
         assert!(staged_lint_sexpr(Path::new("test.vibra"), source).is_empty());
     }
 }

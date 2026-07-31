@@ -87,8 +87,8 @@ fn docs_reads_package_docs_and_requires_a_target_when_ambiguous() {
         dir.path().join("project.vibra"),
         r#"(project
   (package "docs-sample" "0.1.0" doc: "Package-level documentation.")
-  (target one kind: lib root: "src/one" entry: "lib.vibra")
-  (target two kind: lib root: "src/two" entry: "lib.vibra"))
+  (target one kind: @lib root: "src/one" entry: "lib.vibra")
+  (target two kind: @lib root: "src/two" entry: "lib.vibra"))
 "#,
     )
     .unwrap();
@@ -362,8 +362,8 @@ fn project_check_rejects_invalid_manifest_shapes() {
         project.join("project.vibra"),
         r#"(project
   (package "bad" "0.1.0")
-  (target dup kind: lib root: "src/a" entry: "main.vibra")
-  (target dup kind: bin root: "/tmp/outside" entry: "main.vibra")
+  (target dup kind: @lib root: "src/a" entry: "main.vibra")
+  (target dup kind: @bin root: "/tmp/outside" entry: "main.vibra")
   (dependency remote git: "https://example.com/remote.git"))
 "#,
     )
@@ -394,7 +394,7 @@ fn project_check_rejects_abbreviated_git_revisions() {
         project.join("project.vibra"),
         r#"(project
   (package "short-rev" "0.1.0")
-  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (target app kind: @bin root: "src/app" entry: "main.vibra")
   (dependency dep git: "https://example.test/dep.git" rev: "deadbee"))
 "#,
     )
@@ -436,7 +436,7 @@ fn project_check_resolves_local_dependency_without_copying_it() {
         format!(
             r#"(project
   (package "app" "0.1.0")
-  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (target app kind: @bin root: "src/app" entry: "main.vibra")
   (dependency std path: "{}")
   (dependency local-utils path: "{}"))
 "#,
@@ -480,7 +480,7 @@ fn project_check_resolves_dependency_library_source_root() {
         dep.join("project.vibra"),
         r#"(project
   (package "packaged-utils" "0.1.0")
-  (target packaged-utils kind: lib root: "src" entry: "util.vibra"))
+  (target packaged-utils kind: @lib root: "src" entry: "util.vibra"))
 "#,
     )
     .unwrap();
@@ -497,7 +497,7 @@ fn project_check_resolves_dependency_library_source_root() {
         format!(
             r#"(project
   (package "app" "0.1.0")
-  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (target app kind: @bin root: "src/app" entry: "main.vibra")
   (dependency packaged-utils path: "{}"))
 "#,
             path_str(&dep)
@@ -572,7 +572,7 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
         format!(
             r#"(project
   (package "app" "0.1.0")
-  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (target app kind: @bin root: "src/app" entry: "main.vibra")
   (dependency math git: "{}" rev: "{}"))
 "#,
             path_str(&remote),
@@ -672,7 +672,7 @@ fn project_sync_vendors_nested_diamond_dependencies_package_locally() {
         format!(
             r#"(project
   (package "diamond-app" "0.1.0")
-  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (target app kind: @bin root: "src/app" entry: "main.vibra")
   (dependency left git: "{}" rev: "{}")
   (dependency right git: "{}" rev: "{}"))
 "#,
@@ -718,7 +718,7 @@ fn create_git_package(path: &Path, name: &str, dependencies: &str) -> String {
     std::fs::write(
         path.join("project.vibra"),
         format!(
-            "(project\n  (package {name:?} \"0.1.0\")\n  (target {name} kind: lib root: \"src\" entry: \"lib.vibra\")\n{dependencies})\n"
+            "(project\n  (package {name:?} \"0.1.0\")\n  (target {name} kind: @lib root: \"src\" entry: \"lib.vibra\")\n{dependencies})\n"
         ),
     )
     .unwrap();
@@ -811,7 +811,7 @@ fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
     std::fs::write(project.join("foreign/math.wasm"), scalar_ffi_module(0)).unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        "(project\n  (package \"ffi-app\" \"0.1.0\")\n  (target ffi-app kind: bin root: \"src\" entry: \"main.vibra\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
+        "(project\n  (package \"ffi-app\" \"0.1.0\")\n  (target ffi-app kind: @bin root: \"src\" entry: \"main.vibra\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
@@ -957,7 +957,7 @@ fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
     std::fs::write(project.join("foreign/text.wasm"), buffer_ffi_module()).unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        "(project\n  (package \"ffi-buffer-app\" \"0.1.0\")\n  (target ffi-buffer-app kind: bin root: \"src\" entry: \"main.vibra\")\n  (dependency text-ffi path: \"foreign\" wasm: \"text.wasm\"))\n",
+        "(project\n  (package \"ffi-buffer-app\" \"0.1.0\")\n  (target ffi-buffer-app kind: @bin root: \"src\" entry: \"main.vibra\")\n  (dependency text-ffi path: \"foreign\" wasm: \"text.wasm\"))\n",
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
@@ -1033,7 +1033,7 @@ fn runtime_plugin_load_is_capability_gated_typed_and_deterministic() {
     std::fs::write(project.join("plugins/math.wasm"), scalar_ffi_module(0)).unwrap();
     std::fs::write(
         project.join("project.vibra"),
-        "(project\n  (package \"plugin-host\" \"0.1.0\")\n  (target plugin-host kind: bin root: \"src\" entry: \"main.vibra\")\n  (plugin-interface arithmetic\n    (function sum params: (int32 int32) result: int32)))\n",
+        "(project\n  (package \"plugin-host\" \"0.1.0\")\n  (target plugin-host kind: @bin root: \"src\" entry: \"main.vibra\")\n  (plugin-interface arithmetic\n    (function sum params: (int32 int32) result: int32)))\n",
     ).unwrap();
     let plugin = project.join("plugins/math.wasm");
     let base = vec![

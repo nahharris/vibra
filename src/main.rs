@@ -230,7 +230,7 @@ enum Command {
         /// Fail tests that produce compiler warnings.
         #[arg(long = "deny-warnings")]
         deny_warnings: bool,
-        /// Allow an isolated `workspace: temp` test to run in its temporary cwd.
+        /// Allow an isolated `workspace: @temp` test to run in its temporary cwd.
         #[arg(long = "allow-test-workspace")]
         allow_test_workspace: bool,
         /// Number of test worker processes.
@@ -1049,6 +1049,7 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
 fn runtime_value_to_json(value: RuntimeValue) -> Result<serde_json::Value> {
     let value = vibra::execute::materialize_runtime_value(value);
     Ok(match value {
+        RuntimeValue::Atom(name) => serde_json::json!({"atom": name}),
         RuntimeValue::Bool(b) => serde_json::Value::Bool(b),
         RuntimeValue::Int(i) => serde_json::Value::Number(i.into()),
         RuntimeValue::Float(f) => serde_json::to_value(f)?,
@@ -1113,6 +1114,34 @@ fn runtime_value_to_json(value: RuntimeValue) -> Result<serde_json::Value> {
             unreachable!("runtime place handles are materialized before rendering")
         }
     })
+}
+
+#[cfg(test)]
+mod atom_json_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn atom_json_contract_is_exact_and_recursive() {
+        assert_eq!(
+            runtime_value_to_json(RuntimeValue::Atom("ok".into())).unwrap(),
+            serde_json::json!({"atom": "ok"})
+        );
+        assert_eq!(
+            runtime_value_to_json(RuntimeValue::Array(vec![
+                RuntimeValue::Atom("ok".into()),
+                RuntimeValue::Record(BTreeMap::from([(
+                    "status".into(),
+                    RuntimeValue::Atom("error.not-found".into()),
+                )])),
+            ]))
+            .unwrap(),
+            serde_json::json!([
+                {"atom": "ok"},
+                {"status": {"atom": "error.not-found"}}
+            ])
+        );
+    }
 }
 
 fn path_str(path: &std::path::Path) -> String {

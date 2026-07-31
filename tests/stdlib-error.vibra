@@ -14,7 +14,7 @@
       _
       (do (test.fail "error context lost structured detail"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -38,6 +38,6 @@
       _
       (do (test.fail "filesystem error kind was not normalized"))
     )
-    profile: core
+    profile: @core
   )
 )

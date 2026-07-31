@@ -21,7 +21,7 @@
       _
       (do (test.fail "set did not update mutable binding"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -38,7 +38,7 @@
       _
       (do (test.fail "mutable ref did not update pointee"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -54,7 +54,7 @@
       _
       (do (test.fail "mutable temporary ref did not retain storage"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -69,6 +69,6 @@
       _
       (do (test.fail "mutable argument was not writable"))
     )
-    profile: core
+    profile: @core
   )
 )

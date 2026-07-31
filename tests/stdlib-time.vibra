@@ -21,7 +21,7 @@
       (result.result.err _)
       (do (test.fail "monotonic clock moved backwards"))
     )
-    profile: system
-    tags: (stdlib)
+    profile: @system
+    tags: (@stdlib)
   )
 )

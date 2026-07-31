@@ -16,7 +16,7 @@
       (option.option.none)
       (do (test.fail "expected value"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -50,7 +50,7 @@
       )
       (do (test.assert true))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -82,6 +82,6 @@
       _
       (do (test.fail "wrong map removal"))
     )
-    profile: core
+    profile: @core
   )
 )
