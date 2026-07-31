@@ -127,7 +127,7 @@ pub fn init_project(path: &Path, template: InitTemplate) -> Result<()> {
         .context("copy stdlib into dep/std")?;
     fs::write(
         path.join("dep/std").join(MANIFEST_FILE),
-        "(project\n  (package \"std\" \"0.1.0\")\n  (target std kind: lib root: \"src\" entry: \"lib.vibra\"))\n",
+        "(project\n  (package \"std\" \"0.1.0\")\n  (target std kind: @lib root: \"src\" entry: \"lib.vibra\"))\n",
     )?;
 
     let name = path
@@ -267,7 +267,7 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
                     &["kind", "root", "entry"],
                     "target",
                 )?;
-                let kind = symbol(attrs.get("kind").copied(), "target kind")?;
+                let kind = atom_word(attrs.get("kind").copied(), "target kind")?;
                 let root = PathBuf::from(string(attrs["root"], "target root")?);
                 let entry = PathBuf::from(string(attrs["entry"], "target entry")?);
                 let target = Target { name, root, entry };
@@ -275,7 +275,7 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
                     "lib" => targets.libs.push(target),
                     "bin" => targets.bins.push(target),
                     other => {
-                        bail!("E-PROJECT-001: target kind must be `lib` or `bin`, found `{other}`")
+                        bail!("E-ATOM-002: target kind must be `@lib` or `@bin`, found `@{other}`")
                     }
                 }
             }
@@ -383,6 +383,13 @@ fn symbol<'a>(node: Option<&'a crate::syntax::Node>, context: &str) -> Result<&'
     match node.map(|node| &node.kind) {
         Some(crate::syntax::NodeKind::Atom(crate::syntax::Atom::Symbol(value))) => Ok(value),
         _ => bail!("E-PROJECT-001: {context} must start with a symbol"),
+    }
+}
+
+fn atom_word<'a>(node: Option<&'a crate::syntax::Node>, context: &str) -> Result<&'a str> {
+    match node.map(|node| &node.kind) {
+        Some(crate::syntax::NodeKind::Atom(crate::syntax::Atom::Atom(value))) => Ok(value),
+        _ => bail!("E-ATOM-003: {context} must be an atom such as `@name`"),
     }
 }
 
@@ -1438,7 +1445,7 @@ fn manifest_text(name: &str, targets: &[(&str, &str, &str, &str)]) -> String {
     let mut text = format!("(project\n  (package \"{name}\" \"0.1.0\")\n");
     for (kind, target_name, root, entry) in targets {
         text.push_str(&format!(
-            "  (target {target_name} kind: {kind} root: \"{root}\" entry: \"{entry}\")\n"
+            "  (target {target_name} kind: @{kind} root: \"{root}\" entry: \"{entry}\")\n"
         ));
     }
     text.push_str(&format!(
@@ -1543,8 +1550,8 @@ mod tests {
         let manifest = parse_manifest(
             r#"(project
   (package "sample" "0.1.0" doc: "Sample package.")
-  (target core kind: lib root: "src/core" entry: "lib.vibra")
-  (target app kind: bin root: "src/app" entry: "main.vibra")
+  (target core kind: @lib root: "src/core" entry: "lib.vibra")
+  (target app kind: @bin root: "src/app" entry: "main.vibra")
   (dependency local path: "../local")
   (dependency remote git: "https://example.invalid/remote.git" rev: "0123456789abcdef0123456789abcdef01234567" wasm: "remote.wasm")
   (plugin-interface arithmetic
@@ -1568,10 +1575,10 @@ mod tests {
         assert!(error.to_string().contains("legacy YAML"));
 
         for invalid in [
-            "(project (package \"x\" \"1\") (target app kind: bin root: \"src\"))",
-            "(project (package \"x\" \"1\") (target app kind: bin kind: lib root: \"src\" entry: \"main.vibra\"))",
-            "(project (package \"x\" \"1\") (target app kind: bin root: \"src\" entry: \"main.vibra\" extra: true))",
-            "(project (package name: \"x\" \"1\") (target app kind: bin root: \"src\" entry: \"main.vibra\"))",
+            "(project (package \"x\" \"1\") (target app kind: @bin root: \"src\"))",
+            "(project (package \"x\" \"1\") (target app kind: @bin kind: @lib root: \"src\" entry: \"main.vibra\"))",
+            "(project (package \"x\" \"1\") (target app kind: @bin root: \"src\" entry: \"main.vibra\" extra: true))",
+            "(project (package name: \"x\" \"1\") (target app kind: @bin root: \"src\" entry: \"main.vibra\"))",
         ] {
             assert!(parse_manifest(invalid).is_err(), "{invalid}");
         }
@@ -1725,7 +1732,7 @@ mod tests {
         }
         fs::write(
             temp.path().join(MANIFEST_FILE),
-            "(project\n  (package \"ffi-test\" \"0.1.0\")\n  (target ffi-test kind: bin root: \"src\" entry: \"main.vibra\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
+            "(project\n  (package \"ffi-test\" \"0.1.0\")\n  (target ffi-test kind: @bin root: \"src\" entry: \"main.vibra\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
         ).unwrap();
         temp
     }

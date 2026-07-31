@@ -15,7 +15,7 @@ fn public_commands_accept_a_typed_sexpression_project() {
     std::fs::create_dir_all(root.path().join("tests")).unwrap();
     std::fs::write(
         root.path().join("project.vibra"),
-        "(project\n  (package \"typed-cli\" \"0.1.0\")\n  (target app kind: bin root: \"src/app\" entry: \"main.vibra\"))\n",
+        "(project\n  (package \"typed-cli\" \"0.1.0\")\n  (target app kind: @bin root: \"src/app\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     std::fs::write(
@@ -25,7 +25,7 @@ fn public_commands_accept_a_typed_sexpression_project() {
     .unwrap();
     std::fs::write(
         root.path().join("tests/typed.vibra"),
-        "(test.scenario \"typed-command\" (test.case \"typed-command\" (do) profile: core))\n",
+        "(test.scenario \"typed-command\" (test.case \"typed-command\" (do) profile: @core))\n",
     )
     .unwrap();
 

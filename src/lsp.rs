@@ -156,10 +156,22 @@ impl Server {
                 let mut names = workspace.visible_symbols(&document);
                 names.sort();
                 names.dedup();
-                let symbols = names
+                let mut symbols = names
                     .into_iter()
                     .map(|name| json!({"label":name,"kind":6,"detail":"Vibra workspace symbol"}))
                     .collect::<Vec<_>>();
+                let mut atoms = workspace
+                    .index
+                    .facts()
+                    .iter()
+                    .filter(|fact| fact.kind == SemanticKind::Atom)
+                    .map(|fact| fact.symbol.clone())
+                    .collect::<Vec<_>>();
+                atoms.sort();
+                atoms.dedup();
+                symbols.extend(atoms.into_iter().map(
+                    |atom| json!({"label":format!("@{atom}"),"kind":21,"detail":"Vibra atom"}),
+                ));
                 Ok(Value::Array(symbols))
             }
             "textDocument/hover" => self.hover(params),
@@ -267,6 +279,11 @@ impl Server {
         let Some(word) = word_at(&source, pos.0, pos.1) else {
             return Ok(Value::Null);
         };
+        if let Some(atom) = word.strip_prefix('@') {
+            return Ok(
+                json!({"contents":{"kind":"markdown","value":format!("`@{atom}` — Vibra atom (singleton type `@{atom}`, widens to `atom`)")}}),
+            );
+        }
         let workspace = self.workspace()?;
         let document = uri_path(&uri).context("hover requires a file URI")?;
         let Some((_target, name)) = workspace.resolve(&document, &word) else {
@@ -284,6 +301,10 @@ impl Server {
         let Some(word) = word_at(&source, pos.0, pos.1) else {
             return Ok(Value::Null);
         };
+        // Atom literals have no declaration site.
+        if word.starts_with('@') {
+            return Ok(Value::Null);
+        }
         let workspace = self.workspace()?;
         let document = uri_path(&uri).context("definition requires a file URI")?;
         let Some((target, name)) = workspace.resolve(&document, &word) else {
@@ -311,6 +332,9 @@ impl Server {
         };
         let workspace = self.workspace()?;
         let document = uri_path(&uri).context("references require a file URI")?;
+        if let Some(atom) = word.strip_prefix('@') {
+            return Ok(Value::Array(self.atom_references(&workspace, atom)));
+        }
         let Some((target, name)) = workspace.resolve(&document, &word) else {
             return Ok(json!([]));
         };
@@ -339,6 +363,30 @@ impl Server {
         result.sort_by_key(|item| item.to_string());
         result.dedup();
         Ok(Value::Array(result))
+    }
+
+    fn atom_references(&self, workspace: &Workspace, atom: &str) -> Vec<Value> {
+        let mut result = workspace
+            .index
+            .facts()
+            .iter()
+            .filter(|fact| fact.kind == SemanticKind::Atom && fact.symbol == atom)
+            .filter_map(|fact| {
+                workspace
+                    .sources
+                    .get(&workspace.original_path(&fact.document))
+                    .map(|source| {
+                        location_span(
+                            &path_uri(&workspace.original_path(&fact.document)),
+                            source,
+                            fact.span,
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        result.sort_by_key(|item| item.to_string());
+        result.dedup();
+        result
     }
 
     fn document_symbols(&self, params: &Value) -> Result<Value> {
@@ -539,6 +587,11 @@ fn word_at(source: &str, line: usize, column: usize) -> Option<String> {
     }
     while b < bytes.len() && is_word(bytes[b]) {
         b += 1
+    }
+    // `@` only ever leads a token, so it is picked up here rather than in
+    // `is_word` where it would also match mid-word.
+    if a > 0 && bytes[a - 1] == b'@' {
+        a -= 1;
     }
     (a < b).then(|| text[a..b].to_string())
 }

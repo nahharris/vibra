@@ -398,6 +398,7 @@ struct AttributeRef<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeExprKind {
     Named(String),
+    Literal(Literal),
     Application {
         constructor: Name,
         arguments: Vec<TypeExpr>,
@@ -439,6 +440,7 @@ pub struct TypeMember {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
+    Atom(String),
     String(String),
     Bool(bool),
     Int(i64),
@@ -983,26 +985,23 @@ fn parse_owned_macro_body(nodes: &[&Node]) -> Result<Vec<MacroExpr>, AstError> {
 }
 
 fn parse_syntax_category(node: &Node) -> Result<Spanned<SyntaxCategory>, AstError> {
-    let category = match symbol(node) {
-        Some("expr-syntax") => SyntaxCategory::Expression,
-        Some("type-syntax") => SyntaxCategory::Type,
-        Some("pattern-syntax") => SyntaxCategory::Pattern,
-        Some("definition-syntax") => SyntaxCategory::Definition,
-        Some("module-syntax") => SyntaxCategory::Module,
-        Some(value) => {
-            return Err(AstError::new(
-                "E-SYN-008",
-                format!("unknown syntax category `{value}`"),
-                node.span,
-            ));
-        }
-        None => {
-            return Err(AstError::new(
-                "E-SYN-010",
-                "expected a syntax category symbol",
-                node.span,
-            ));
-        }
+    let word = contextual_atom(
+        node,
+        "syntax category",
+        &[
+            "expr-syntax",
+            "type-syntax",
+            "pattern-syntax",
+            "definition-syntax",
+            "module-syntax",
+        ],
+    )?;
+    let category = match word.value.as_str() {
+        "expr-syntax" => SyntaxCategory::Expression,
+        "type-syntax" => SyntaxCategory::Type,
+        "pattern-syntax" => SyntaxCategory::Pattern,
+        "definition-syntax" => SyntaxCategory::Definition,
+        _ => SyntaxCategory::Module,
     };
     Ok(Spanned::source(category, node.span))
 }
@@ -1132,7 +1131,7 @@ fn parse_test_case(node: &Node) -> Result<TestCase, AstError> {
     let mut profile = None;
     for attribute in &attributes {
         if label(attribute.label)?.value == "profile" {
-            profile = Some(name(attribute.value)?);
+            profile = Some(open_atom(attribute.value, "`profile:`")?);
         }
     }
     let profile = profile.unwrap_or_else(|| Spanned::source("core".to_string(), node.span));
@@ -1220,15 +1219,12 @@ fn parse_visibility(
     else {
         return Ok(default);
     };
-    match symbol(attribute.value) {
-        Some("public") => Ok(Visibility::Public),
-        Some("private") => Ok(Visibility::Private),
-        _ => Err(AstError::new(
-            "E-SYN-008",
-            "visibility must be `public` or `private`",
-            attribute.value.span,
-        )),
-    }
+    let visibility = contextual_atom(attribute.value, "visibility", &["public", "private"])?;
+    Ok(if visibility.value == "public" {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    })
 }
 
 fn parse_body(node: &Node) -> Result<Vec<Expr>, AstError> {
@@ -1240,6 +1236,12 @@ fn parse_body(node: &Node) -> Result<Vec<Expr>, AstError> {
 }
 
 fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
+    if let NodeKind::Atom(Atom::Atom(value)) = &node.kind {
+        return Ok(Spanned::source(
+            TypeExprKind::Literal(Literal::Atom(value.clone())),
+            node.span,
+        ));
+    }
     if let Some(symbol) = symbol(node) {
         return Ok(Spanned::source(
             TypeExprKind::Named(symbol.to_string()),
@@ -1352,22 +1354,17 @@ fn parse_function_type_parameters(node: &Node) -> Result<Vec<FunctionTypeParamet
 }
 
 fn parse_handle_access(node: &Node) -> Result<Spanned<HandleAccess>, AstError> {
-    let access = match symbol(node) {
-        Some("read") => Ok(HandleAccess::Read),
-        Some("write") => Ok(HandleAccess::Write),
-        Some("read-write") => Ok(HandleAccess::ReadWrite),
-        Some("process") => Ok(HandleAccess::Process),
-        Some(access) => Err(AstError::new(
-            "E-SYN-008",
-            format!("unknown opaque handle access `{access}`"),
-            node.span,
-        )),
-        None => Err(AstError::new(
-            "E-SYN-010",
-            "handle access must be a symbol",
-            node.span,
-        )),
-    }?;
+    let word = contextual_atom(
+        node,
+        "handle access",
+        &["read", "write", "read-write", "process"],
+    )?;
+    let access = match word.value.as_str() {
+        "read" => HandleAccess::Read,
+        "write" => HandleAccess::Write,
+        "read-write" => HandleAccess::ReadWrite,
+        _ => HandleAccess::Process,
+    };
     Ok(Spanned::source(access, node.span))
 }
 
@@ -1696,29 +1693,26 @@ fn parse_call_arguments(
 }
 
 fn parse_embed_format(node: &Node) -> Result<Spanned<EmbedFormat>, AstError> {
-    let format = match symbol(node) {
-        Some("auto") => Ok(EmbedFormat::Auto),
-        Some("text") => Ok(EmbedFormat::Text),
-        Some("binary") => Ok(EmbedFormat::Binary),
-        Some("json") => Ok(EmbedFormat::Json),
-        Some("toml") => Ok(EmbedFormat::Toml),
-        Some("xml") => Ok(EmbedFormat::Xml),
-        Some("yaml" | "yml") => Err(AstError::new(
+    if matches!(atom_word(node), Some("yaml" | "yml")) {
+        return Err(AstError::new(
             "E-SYN-008",
             "YAML embed format was removed",
             node.span,
-        )),
-        Some(format) => Err(AstError::new(
-            "E-SYN-008",
-            format!("unknown embed format `{format}`"),
-            node.span,
-        )),
-        None => Err(AstError::new(
-            "E-SYN-010",
-            "embed format must be a symbol",
-            node.span,
-        )),
-    }?;
+        ));
+    }
+    let word = contextual_atom(
+        node,
+        "embed format",
+        &["auto", "text", "binary", "json", "toml", "xml"],
+    )?;
+    let format = match word.value.as_str() {
+        "auto" => EmbedFormat::Auto,
+        "text" => EmbedFormat::Text,
+        "binary" => EmbedFormat::Binary,
+        "json" => EmbedFormat::Json,
+        "toml" => EmbedFormat::Toml,
+        _ => EmbedFormat::Xml,
+    };
     Ok(Spanned::source(format, node.span))
 }
 
@@ -2042,7 +2036,7 @@ fn parse_test_meta(attribute: &AttributeRef<'_>) -> Result<TestMeta, AstError> {
     match label.value.as_str() {
         "tags" => Ok(TestMeta::Tags(
             semantic_nodes(list(attribute.value)?)
-                .map(name)
+                .map(|node| open_atom(node, "`tags:` entry"))
                 .collect::<Result<_, _>>()?,
         )),
         "timeout-ms" => {
@@ -2081,32 +2075,30 @@ fn parse_test_meta(attribute: &AttributeRef<'_>) -> Result<TestMeta, AstError> {
         "expect-error" => {
             let args = semantic_nodes(list(attribute.value)?).collect::<Vec<_>>();
             min_arity("expect-error", &args, 1, attribute.span)?;
-            let expected = match symbol(args[0]) {
-                Some("load") | Some("compile") => {
+            let phase = contextual_atom(
+                args[0],
+                "expect-error phase",
+                &["load", "compile", "runtime"],
+            )?;
+            let expected = match phase.value.as_str() {
+                "runtime" => {
+                    exact_arity("runtime expect-error", &args, 2, attribute.span)?;
+                    ExpectedError::Runtime {
+                        message: non_empty_string(args[1], "`expect-error` message")?,
+                    }
+                }
+                phase => {
                     range_arity("load/compile expect-error", &args, 2, 3, attribute.span)?;
                     let code = name(args[1])?;
                     let message = args
                         .get(2)
                         .map(|node| non_empty_string(node, "`expect-error` message"))
                         .transpose()?;
-                    if symbol(args[0]) == Some("load") {
+                    if phase == "load" {
                         ExpectedError::Load { code, message }
                     } else {
                         ExpectedError::Compile { code, message }
                     }
-                }
-                Some("runtime") => {
-                    exact_arity("runtime expect-error", &args, 2, attribute.span)?;
-                    ExpectedError::Runtime {
-                        message: non_empty_string(args[1], "`expect-error` message")?,
-                    }
-                }
-                _ => {
-                    return Err(AstError::new(
-                        "E-SYN-008",
-                        "expected-error phase must be `load`, `compile`, or `runtime`",
-                        args[0].span,
-                    ));
                 }
             };
             Ok(TestMeta::ExpectError(expected))
@@ -2114,13 +2106,7 @@ fn parse_test_meta(attribute: &AttributeRef<'_>) -> Result<TestMeta, AstError> {
         "clock" => {
             let args = semantic_nodes(list(attribute.value)?).collect::<Vec<_>>();
             exact_arity("clock", &args, 3, attribute.span)?;
-            if symbol(args[0]) != Some("fixed") {
-                return Err(AstError::new(
-                    "E-SYN-008",
-                    "clock mode must be `fixed`",
-                    args[0].span,
-                ));
-            }
+            contextual_atom(args[0], "clock mode", &["fixed"])?;
             let unix_millis = integer(args[1])?;
             let monotonic_millis = integer(args[2])?;
             if unix_millis.value < 0 || monotonic_millis.value < 0 {
@@ -2139,17 +2125,11 @@ fn parse_test_meta(attribute: &AttributeRef<'_>) -> Result<TestMeta, AstError> {
                 monotonic_millis,
             })
         }
-        "workspace" => {
-            let workspace = name(attribute.value)?;
-            if workspace.value != "temp" {
-                return Err(AstError::new(
-                    "E-SYN-008",
-                    "workspace mode must be `temp`",
-                    workspace.span,
-                ));
-            }
-            Ok(TestMeta::Workspace(workspace))
-        }
+        "workspace" => Ok(TestMeta::Workspace(contextual_atom(
+            attribute.value,
+            "workspace mode",
+            &["temp"],
+        )?)),
         _ => Err(AstError::new(
             "E-SYN-011",
             format!("unknown test attribute `{}:`", label.value),
@@ -2226,6 +2206,7 @@ fn literal_node(node: &Node) -> Result<Spanned<Literal>, AstError> {
 
 fn literal(atom: &Atom) -> Option<Literal> {
     match atom {
+        Atom::Atom(value) => Some(Literal::Atom(value.clone())),
         Atom::String(value) => Some(Literal::String(value.clone())),
         Atom::Bool(value) => Some(Literal::Bool(*value)),
         Atom::Int(value) => Some(Literal::Int(*value)),
@@ -2264,6 +2245,50 @@ fn symbol(node: &Node) -> Option<&str> {
     match &node.kind {
         NodeKind::Atom(Atom::Symbol(value)) => Some(value),
         _ => None,
+    }
+}
+
+fn atom_word(node: &Node) -> Option<&str> {
+    match &node.kind {
+        NodeKind::Atom(Atom::Atom(value)) => Some(value),
+        _ => None,
+    }
+}
+
+/// Contextual keyword positions accept only atoms; a bare symbol there is the
+/// pre-atom spelling and must be rejected rather than silently accepted.
+fn open_atom(node: &Node, context: &str) -> Result<Name, AstError> {
+    atom_word(node)
+        .map(|value| Spanned::source(value.to_string(), node.span))
+        .ok_or_else(|| {
+            AstError::new(
+                "E-ATOM-003",
+                format!("{context} must be an atom such as `@name`"),
+                node.span,
+            )
+        })
+}
+
+fn contextual_atom(node: &Node, context: &str, allowed: &[&str]) -> Result<Name, AstError> {
+    let expected = allowed
+        .iter()
+        .map(|value| format!("`@{value}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match atom_word(node) {
+        Some(value) if allowed.contains(&value) => {
+            Ok(Spanned::source(value.to_string(), node.span))
+        }
+        Some(value) => Err(AstError::new(
+            "E-ATOM-002",
+            format!("unknown {context} `@{value}`; expected one of {expected}"),
+            node.span,
+        )),
+        None => Err(AstError::new(
+            "E-ATOM-003",
+            format!("{context} must be an atom; expected one of {expected}"),
+            node.span,
+        )),
     }
 }
 
@@ -2398,14 +2423,14 @@ mod tests {
         let source = r#"
 (import io "./io.vibra")
 (def option (enum (some t) (none void)) where: (t any) doc: "Optional.")
-(const limit int64 10 visibility: private)
+(const limit int64 10 visibility: @private)
 (defn
   choose
   (value bool fallback bool)
   bool
   (do (if value (do (return value)) (do (return fallback))))
 )
-(test.scenario "suite" (test.case "works" (test.assert true) tags: (fast language) clock: (fixed 0 0)))
+(test.scenario "suite" (test.case "works" (test.assert true) tags: (@fast @language) clock: (@fixed 0 0)))
 "#;
         let module = module(source).unwrap();
         assert_eq!(module.forms.len(), 5);
@@ -2428,7 +2453,7 @@ mod tests {
         let parsed = module(
             r#"(defn collect (head int64 rest... int64) void
   (return)
-  visibility: private
+  visibility: @private
   doc: "Collect values.")"#,
         )
         .unwrap();
@@ -2472,7 +2497,7 @@ mod tests {
     #[test]
     fn lowers_macro_with_flat_variadic_parameters_and_direct_body() {
         let parsed = module(
-            "(macro emit (head expr-syntax tail... expr-syntax) expr-syntax (quote expr-syntax head))",
+            "(macro emit (head @expr-syntax tail... @expr-syntax) @expr-syntax (quote @expr-syntax head))",
         )
         .unwrap();
         let TopLevel::Macro(definition) = &parsed.forms[0] else {
@@ -2583,9 +2608,9 @@ mod tests {
     #[test]
     fn visibility_attribute_replaces_private_wrapper_for_all_declarations() {
         let parsed = module(
-            r#"(def hidden (record) visibility: private)
-(const secret int64 1 visibility: private)
-(macro concealed () expr-syntax (quote expr-syntax 1) visibility: private)"#,
+            r#"(def hidden (record) visibility: @private)
+(const secret int64 1 visibility: @private)
+(macro concealed () @expr-syntax (quote @expr-syntax 1) visibility: @private)"#,
         )
         .unwrap();
         assert!(
@@ -2624,7 +2649,7 @@ mod tests {
   ()
   void
   (do
-    (embed "message.txt" format: text)
+    (embed "message.txt" format: @text)
     (template "message.mustache" with: (record (name "Vibra")))
     (wasm "vibra:host/abi@1" "io_write" output 1 "suffix")
   )
@@ -2655,7 +2680,7 @@ mod tests {
         ));
 
         let yaml =
-            module(r#"(defn bad () void (do (embed "legacy.yaml" format: yaml)))"#).unwrap_err();
+            module(r#"(defn bad () void (do (embed "legacy.yaml" format: @yaml)))"#).unwrap_err();
         assert_eq!(yaml.code, "E-SYN-008");
         assert_eq!(
             module(r#"(defn bad () void (do (embed "legacy.YML")))"#)
@@ -2688,7 +2713,7 @@ mod tests {
 
     #[test]
     fn lowers_explicit_security_types_and_validates_their_closed_shapes() {
-        let parsed = module(r#"(def input-handle (handle read))"#).unwrap();
+        let parsed = module(r#"(def input-handle (handle @read))"#).unwrap();
         assert!(matches!(
             parsed.forms[0],
             TopLevel::Definition(Definition {
@@ -2708,14 +2733,14 @@ mod tests {
     fn lowers_complete_test_metadata_with_trailing_labels() {
         let parsed = module(
             r#"
-(test.scenario "suite" (test.case "complete" (test.assert true) profile: fs
-  tags: (filesystem)
+(test.scenario "suite" (test.case "complete" (test.assert true) profile: @fs
+  tags: (@filesystem)
   timeout-ms: 25
   random-seed: 42
   skip: "sandbox unavailable"
-  expect-error: (compile E-FS-001 "denied")
-  clock: (fixed 1000 7)
-  workspace: temp))
+  expect-error: (@compile E-FS-001 "denied")
+  clock: (@fixed 1000 7)
+  workspace: @temp))
 "#,
         )
         .unwrap();
@@ -2735,13 +2760,13 @@ mod tests {
             "E-SYN-008"
         );
         assert_eq!(
-            module(r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (runtime E-RUN "boom")))"#)
+            module(r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (@runtime E-RUN "boom")))"#)
                 .unwrap_err()
                 .code,
             "E-SYN-009"
         );
         let runtime = module(
-            r#"(test.scenario "suite" (test.case "runtime" (do) expect-error: (runtime "boom")))"#,
+            r#"(test.scenario "suite" (test.case "runtime" (do) expect-error: (@runtime "boom")))"#,
         )
         .unwrap();
         let TopLevel::TestScenario(scenario) = &runtime.forms[0] else {
@@ -2753,9 +2778,9 @@ mod tests {
             TestMeta::ExpectError(ExpectedError::Runtime { .. })
         ));
         for source in [
-            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (runtime "")))"#,
-            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (load E-LOAD-001 "")))"#,
-            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (compile E-COMPILE-001 "")))"#,
+            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (@runtime "")))"#,
+            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (@load E-LOAD-001 "")))"#,
+            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (@compile E-COMPILE-001 "")))"#,
         ] {
             let error = module(source).unwrap_err();
             assert_eq!(error.code, "E-SYN-008");
@@ -2879,20 +2904,20 @@ mod tests {
         let source = r#"
 (macro
   unless
-  (condition expr-syntax body expr-syntax)
-  expr-syntax
+  (condition @expr-syntax body @expr-syntax)
+  @expr-syntax
   (do
-    (let fallback (quote expr-syntax unit))
+    (let fallback (quote @expr-syntax unit))
     (if
       condition
       (do
-        (quote expr-syntax (if (unquote condition) (do unit) (do (splice body))))
+        (quote @expr-syntax (if (unquote condition) (do unit) (do (splice body))))
       )
       (do (capture caller))
     )
   )
   doc: "Conditional syntax."
-  visibility: private
+  visibility: @private
 )
 "#;
         let parsed = module(source).unwrap();
@@ -2916,16 +2941,19 @@ mod tests {
 
     #[test]
     fn validates_macro_categories_body_and_operator_arity() {
-        let error = module("(macro m (x value-syntax) expr-syntax (do x))").unwrap_err();
-        assert_eq!(error.code, "E-SYN-008");
+        let error = module("(macro m (x @value-syntax) @expr-syntax (do x))").unwrap_err();
+        assert_eq!(error.code, "E-ATOM-002");
 
-        let error = module("(macro m () expr-syntax (do))").unwrap_err();
+        let error = module("(macro m (x expr-syntax) @expr-syntax (do x))").unwrap_err();
+        assert_eq!(error.code, "E-ATOM-003");
+
+        let error = module("(macro m () @expr-syntax (do))").unwrap_err();
         assert_eq!(error.code, "E-SYN-009");
 
-        let error = module("(macro m () expr-syntax (do (quote expr-syntax a b)))").unwrap_err();
+        let error = module("(macro m () @expr-syntax (do (quote @expr-syntax a b)))").unwrap_err();
         assert_eq!(error.code, "E-SYN-009");
 
-        let error = module("(macro m () expr-syntax (do (unquote)))").unwrap_err();
+        let error = module("(macro m () @expr-syntax (do (unquote)))").unwrap_err();
         assert_eq!(error.code, "E-SYN-009");
 
         let error = module("(private (test no core (do)))").unwrap_err();
@@ -2966,7 +2994,7 @@ mod tests {
             "(defn f () void (do) doc:)",
             "(defn f () void (do) doc: \"a\" doc: \"b\")",
             "(defn f () void (do) unknown: unit)",
-            "(test.scenario \"suite\" (test.case \"t\" (do) tags: (fast) tags: (slow)))",
+            "(test.scenario \"suite\" (test.case \"t\" (do) tags: (@fast) tags: (@slow)))",
         ] {
             let error = module(source).unwrap_err();
             assert_eq!(error.code, "E-SYN-011", "source: {source}");
@@ -2977,10 +3005,10 @@ mod tests {
     fn lowers_all_test_attribute_roles() {
         let parsed = module(
             "(test.scenario \"suite\" (test.case \"measured\" (do)\n\
-             tags: (fast arithmetic)\n\
-             expect-error: (compile E-OP-002 \"overflow\")\n\
-             clock: (fixed 0 0)\n\
-             workspace: temp))",
+             tags: (@fast @arithmetic)\n\
+             expect-error: (@compile E-OP-002 \"overflow\")\n\
+             clock: (@fixed 0 0)\n\
+             workspace: @temp))",
         )
         .unwrap();
         let TopLevel::TestScenario(scenario) = &parsed.forms[0] else {

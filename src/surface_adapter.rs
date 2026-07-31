@@ -275,6 +275,7 @@ fn visible_key(name: &str, visibility: Visibility) -> String {
 
 fn literal_value(literal: &Literal) -> Value {
     match literal {
+        Literal::Atom(name) => Value::Atom(name.clone()),
         Literal::String(s) => string_literal_value(s),
         Literal::Bool(b) => Value::Bool(*b),
         Literal::Int(i) => Value::Number((*i).into()),
@@ -517,6 +518,7 @@ impl<'a> Converter<'a> {
 
     fn type_value(&mut self, ty: &TypeExpr) -> Result<Value> {
         match &ty.value {
+            TypeExprKind::Literal(literal) => Ok(single_dollar("literal", literal_value(literal))),
             TypeExprKind::Named(name) => Ok(dollar_name(&self.dashify_private_reference(name))),
             TypeExprKind::Application {
                 constructor,
@@ -2484,7 +2486,7 @@ mod tests {
 (test.scenario "arithmetic"
   (test.case "addition-is-checked"
     (let ok (equal 1 1))
-    tags: (fast language)))
+    tags: (@fast @language)))
 "#,
         );
         let signatures = collect_local_signatures(&module).unwrap();
@@ -2516,7 +2518,7 @@ mod tests {
     fn handle_types_lower() {
         assert_lowers(
             r#"
-(def out-handle (handle write))
+(def out-handle (handle @write))
 "#,
         );
     }
@@ -2529,10 +2531,10 @@ mod tests {
             r#"
 (macro
   unless
-  (condition expr-syntax body expr-syntax)
-  expr-syntax
+  (condition @expr-syntax body @expr-syntax)
+  @expr-syntax
   (do
-    (quote expr-syntax (if (not (unquote condition)) (do (unquote body)) (do)))
+    (quote @expr-syntax (if (not (unquote condition)) (do (unquote body)) (do)))
   )
 )
 "#,

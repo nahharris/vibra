@@ -72,6 +72,7 @@ fn stmt_home_module(fn_ctx: Option<&UserFnContext>) -> &str {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RuntimeValue {
+    Atom(String),
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -211,6 +212,7 @@ pub enum WasmArgSpec {
 /// A literal type pins a single value (e.g. the string `"ok"`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LiteralType {
+    Atom(String),
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -219,6 +221,7 @@ pub enum LiteralType {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TypeRef {
+    Atom,
     Bool,
     Str,
     Int8,
@@ -1392,6 +1395,7 @@ fn parse_type_ref(
         .with_context(|| format!("type annotation `{raw}` must start with `$`"))?;
     let ty = match name {
         "bool" => TypeRef::Bool,
+        "atom" => TypeRef::Atom,
         "str" => TypeRef::Str,
         "int8" => TypeRef::Int8,
         "int16" => TypeRef::Int16,
@@ -1628,6 +1632,7 @@ fn parse_type_constructor(
         }
         "$literal" => {
             let lit = match v {
+                Value::Atom(name) => LiteralType::Atom(name.clone()),
                 Value::Bool(b) => LiteralType::Bool(*b),
                 Value::Number(n) => {
                     if let Some(i) = n.as_i64() {
@@ -1639,7 +1644,7 @@ fn parse_type_constructor(
                     }
                 }
                 Value::String(s) => LiteralType::Str(s.clone()),
-                _ => bail!("`$literal` must be a string, number, or boolean"),
+                _ => bail!("`$literal` must be an atom, string, number, or boolean"),
             };
             Ok(TypeRef::Literal(lit))
         }
@@ -3312,6 +3317,10 @@ pub(crate) fn abi_value_type_matches(
     match kind {
         A::Void => matches!(resolved, TypeRef::Void),
         A::Bool => matches!(resolved, TypeRef::Bool),
+        A::Atom => matches!(
+            resolved,
+            TypeRef::Atom | TypeRef::Literal(LiteralType::Atom(_))
+        ),
         A::Int64 => matches!(resolved, TypeRef::Int64),
         A::UInt64 => matches!(resolved, TypeRef::UInt64),
         A::Duration => named_ends("duration"),
@@ -3352,6 +3361,7 @@ pub(crate) fn host_result_type(kind: crate::host_abi::ValueKind) -> Result<TypeR
     Ok(match kind {
         K::Void => TypeRef::Void,
         K::Bool => TypeRef::Bool,
+        K::Atom => TypeRef::Atom,
         K::Int64 => TypeRef::Int64,
         K::UInt64 => TypeRef::UInt64,
         K::Float64 => TypeRef::Float64,
@@ -6778,8 +6788,15 @@ fn parse_primitive_expr(
                 .context("E-OP-001: could not infer primitive operand type")
         })
         .collect::<Result<Vec<_>>>()?;
-    let operand_type = types[0].clone();
-    if types.iter().any(|ty| ty != &operand_type) {
+    let atoms = types
+        .iter()
+        .all(|ty| matches!(ty, TypeRef::Atom | TypeRef::Literal(LiteralType::Atom(_))));
+    let operand_type = if atoms {
+        TypeRef::Atom
+    } else {
+        types[0].clone()
+    };
+    if !atoms && types.iter().any(|ty| ty != &operand_type) {
         bail!(
             "E-OP-001: `{}` operands must have the same primitive type; explicit `$cast` is required",
             key.as_str().unwrap()
@@ -6797,7 +6814,14 @@ fn parse_primitive_expr(
                     ))
         }
         Equal | NotEqual => {
-            primitive_numeric(&operand_type) || matches!(operand_type, TypeRef::Bool | TypeRef::Str)
+            primitive_numeric(&operand_type)
+                || matches!(
+                    operand_type,
+                    TypeRef::Bool
+                        | TypeRef::Str
+                        | TypeRef::Atom
+                        | TypeRef::Literal(LiteralType::Atom(_))
+                )
         }
         LessThan | LessOrEqual | GreaterThan | GreaterOrEqual => {
             primitive_numeric(&operand_type) || operand_type == TypeRef::Str
@@ -6873,6 +6897,7 @@ fn parse_expr(
                     bail!("`$literal` typed form only supports uint8 values from 0 through 255");
                 }
                 return match literal {
+                    Value::Atom(value) => Ok(Expr::Value(RuntimeValue::Atom(value.clone()))),
                     Value::String(value) => Ok(Expr::Value(RuntimeValue::Str(value.clone()))),
                     Value::Bool(value) => Ok(Expr::Value(RuntimeValue::Bool(*value))),
                     Value::Number(value) if value.as_i64().is_some() => {
@@ -7316,6 +7341,9 @@ fn parse_expr(
     if let Some(b) = v.as_bool() {
         return Ok(Expr::Value(RuntimeValue::Bool(b)));
     }
+    if let Some(atom) = v.as_atom() {
+        return Ok(Expr::Value(RuntimeValue::Atom(atom.to_string())));
+    }
     if let Some(s) = v.as_str() {
         if let Some(var) = s.strip_prefix('$') {
             maybe_warn_kebab_qualified(var, "symbol reference", warnings);
@@ -7488,6 +7516,9 @@ pub(crate) fn infer_expr_type(
         Expr::Value(RuntimeValue::Int(_)) => Some(TypeRef::Int64),
         Expr::Value(RuntimeValue::Float(_)) => Some(TypeRef::Float64),
         Expr::Value(RuntimeValue::Str(_)) => Some(TypeRef::Str),
+        Expr::Value(RuntimeValue::Atom(name)) => {
+            Some(TypeRef::Literal(LiteralType::Atom(name.clone())))
+        }
         Expr::Value(RuntimeValue::Array(items)) => {
             infer_array_type(items, constants, locals, aliases, enums)
         }
@@ -7659,14 +7690,14 @@ fn infer_map_type(
     enums: &HashMap<String, EnumDef>,
 ) -> Option<TypeRef> {
     let (first_k, first_v) = items.first()?;
-    let key_ty = infer_expr_type(
+    let mut key_ty = infer_expr_type(
         &Expr::Value(first_k.clone()),
         constants,
         locals,
         aliases,
         enums,
     )?;
-    let value_ty = infer_expr_type(
+    let mut value_ty = infer_expr_type(
         &Expr::Value(first_v.clone()),
         constants,
         locals,
@@ -7676,9 +7707,8 @@ fn infer_map_type(
     for (k, v) in &items[1..] {
         let kt = infer_expr_type(&Expr::Value(k.clone()), constants, locals, aliases, enums)?;
         let vt = infer_expr_type(&Expr::Value(v.clone()), constants, locals, aliases, enums)?;
-        if !type_compatible(&key_ty, &kt, aliases) || !type_compatible(&value_ty, &vt, aliases) {
-            return None;
-        }
+        key_ty = merge_map_item_type(key_ty, kt, aliases)?;
+        value_ty = merge_map_item_type(value_ty, vt, aliases)?;
     }
     Some(TypeRef::Map {
         key: Box::new(key_ty),
@@ -7694,19 +7724,96 @@ fn infer_expr_map_type(
     enums: &HashMap<String, EnumDef>,
 ) -> Option<TypeRef> {
     let (first_k, first_v) = items.first()?;
-    let key_ty = infer_expr_type(first_k, constants, locals, aliases, enums)?;
-    let value_ty = infer_expr_type(first_v, constants, locals, aliases, enums)?;
+    let mut key_ty = infer_expr_type(first_k, constants, locals, aliases, enums)?;
+    let mut value_ty = infer_expr_type(first_v, constants, locals, aliases, enums)?;
     for (k, v) in &items[1..] {
         let kt = infer_expr_type(k, constants, locals, aliases, enums)?;
         let vt = infer_expr_type(v, constants, locals, aliases, enums)?;
-        if !type_compatible(&key_ty, &kt, aliases) || !type_compatible(&value_ty, &vt, aliases) {
-            return None;
-        }
+        key_ty = merge_map_item_type(key_ty, kt, aliases)?;
+        value_ty = merge_map_item_type(value_ty, vt, aliases)?;
     }
     Some(TypeRef::Map {
         key: Box::new(key_ty),
         value: Box::new(value_ty),
     })
+}
+
+fn merge_map_item_type(
+    current: TypeRef,
+    next: TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> Option<TypeRef> {
+    if matches!(
+        (&current, &next),
+        (
+            TypeRef::Atom | TypeRef::Literal(LiteralType::Atom(_)),
+            TypeRef::Atom | TypeRef::Literal(LiteralType::Atom(_))
+        )
+    ) {
+        return Some(if current == next {
+            current
+        } else {
+            TypeRef::Atom
+        });
+    }
+    type_compatible(&current, &next, aliases).then_some(current)
+}
+
+#[cfg(test)]
+mod atom_map_inference_tests {
+    use super::*;
+
+    fn empty_context() -> (
+        HashMap<String, RuntimeValue>,
+        HashMap<String, TypeRef>,
+        HashMap<String, TypeAlias>,
+        HashMap<String, EnumDef>,
+    ) {
+        (
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        )
+    }
+
+    #[test]
+    fn runtime_map_with_distinct_atom_keys_widens_to_atom() {
+        let (constants, locals, aliases, enums) = empty_context();
+        let expr = Expr::Value(RuntimeValue::Map(vec![
+            (RuntimeValue::Atom("ok".into()), RuntimeValue::Int(1)),
+            (RuntimeValue::Atom("error".into()), RuntimeValue::Int(2)),
+        ]));
+        assert_eq!(
+            infer_expr_type(&expr, &constants, &locals, &aliases, &enums),
+            Some(TypeRef::Map {
+                key: Box::new(TypeRef::Atom),
+                value: Box::new(TypeRef::Int64),
+            })
+        );
+    }
+
+    #[test]
+    fn expression_map_with_distinct_atom_keys_widens_to_atom() {
+        let (constants, locals, aliases, enums) = empty_context();
+        let expr = Expr::Map(vec![
+            (
+                Expr::Value(RuntimeValue::Atom("ok".into())),
+                Expr::Value(RuntimeValue::Int(1)),
+            ),
+            (
+                Expr::Value(RuntimeValue::Atom("error".into())),
+                Expr::Value(RuntimeValue::Int(2)),
+            ),
+        ]);
+        assert_eq!(
+            infer_expr_type(&expr, &constants, &locals, &aliases, &enums),
+            Some(TypeRef::Map {
+                key: Box::new(TypeRef::Atom),
+                value: Box::new(TypeRef::Int64),
+            })
+        );
+    }
 }
 
 fn parse_pattern(
@@ -7846,6 +7953,9 @@ fn parse_pattern(
     }
     if let Some(b) = v.as_bool() {
         return Ok(Pattern::Literal(RuntimeValue::Bool(b)));
+    }
+    if let Some(atom) = v.as_atom() {
+        return Ok(Pattern::Literal(RuntimeValue::Atom(atom.to_string())));
     }
     if let Some(i) = v.as_i64() {
         return Ok(Pattern::Literal(RuntimeValue::Int(i)));

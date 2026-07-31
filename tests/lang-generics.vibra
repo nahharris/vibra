@@ -7,7 +7,7 @@
     "identity-bool"
     (let x (identity bool true))
     (test.assert x)
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -16,7 +16,7 @@
     "identity-int"
     (let n (identity int64 5))
     (match n 5 (do (test.assert true)) _ (do (test.fail "expected 5")))
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -25,6 +25,6 @@
     "two-type-params"
     (let r (first-of bool str true "ignored"))
     (test.assert r)
-    profile: core
+    profile: @core
   )
 )

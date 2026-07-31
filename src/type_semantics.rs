@@ -357,6 +357,7 @@ pub(crate) fn unify_types(
 
 pub(crate) fn literal_fits_primitive(literal: &LiteralType, primitive: &TypeRef) -> bool {
     match (literal, primitive) {
+        (LiteralType::Atom(_), TypeRef::Atom) => true,
         (LiteralType::Bool(_), TypeRef::Bool) | (LiteralType::Str(_), TypeRef::Str) => true,
         (LiteralType::Int(_), primitive) if is_numeric_type(primitive) => true,
         (LiteralType::Float(_), TypeRef::Float32 | TypeRef::Float64) => true,
@@ -484,6 +485,28 @@ mod tests {
             body,
             doc: None,
         }
+    }
+
+    #[test]
+    fn atom_singletons_fit_atom_and_only_equal_singletons_unify() {
+        let aliases = HashMap::new();
+        let ok = TypeRef::Literal(LiteralType::Atom("ok".into()));
+        let error = TypeRef::Literal(LiteralType::Atom("error".into()));
+        assert!(type_compatible(&TypeRef::Atom, &ok, &aliases));
+        assert!(!type_compatible(&ok, &TypeRef::Atom, &aliases));
+        assert!(type_compatible(&ok, &ok, &aliases));
+        assert!(!type_compatible(&ok, &error, &aliases));
+        assert!(!type_compatible(&TypeRef::Str, &ok, &aliases));
+        assert!(!type_compatible(
+            &TypeRef::Literal(LiteralType::Str("ok".into())),
+            &TypeRef::Str,
+            &aliases
+        ));
+        assert!(!type_compatible(
+            &TypeRef::Literal(LiteralType::Int(1)),
+            &TypeRef::Int64,
+            &aliases
+        ));
     }
 
     #[test]

@@ -2,8 +2,8 @@
 
 use crate::async_runtime::{JoinHandle as RuntimeJoinHandle, Scheduler, TaskOutcome};
 use crate::lower::{
-    Call, Expr, FunctionBody, HandleAccess, HostHandle, LetValue, LoweredExec, LoweredProgram,
-    Pattern, PrimitiveOp, RuntimeValue, Statement, TypeRef, WasmArgSpec,
+    Call, Expr, FunctionBody, HandleAccess, HostHandle, LetValue, LiteralType, LoweredExec,
+    LoweredProgram, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeRef, WasmArgSpec,
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
@@ -790,6 +790,23 @@ pub(crate) fn eval_primitive(
             _ => bail!("E-OP-001: invalid string operation"),
         }));
     }
+    if matches!(
+        operand_type,
+        TypeRef::Atom | TypeRef::Literal(LiteralType::Atom(_))
+    ) {
+        let atoms = values
+            .iter()
+            .map(|value| match primitive_inner(value) {
+                RuntimeValue::Atom(name) => Ok(name.as_str()),
+                _ => bail!("E-OP-001: expected atom operand"),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        return Ok(RuntimeValue::Bool(match op {
+            Equal => atoms[0] == atoms[1],
+            NotEqual => atoms[0] != atoms[1],
+            _ => bail!("E-OP-001: invalid atom operation"),
+        }));
+    }
     if matches!(operand_type, TypeRef::Float32 | TypeRef::Float64) {
         let floats = values
             .iter()
@@ -1527,6 +1544,13 @@ fn value_bool(value: &RuntimeValue) -> Result<bool> {
     match untyped(value) {
         RuntimeValue::Bool(b) => Ok(*b),
         other => bail!("expected bool, got {other:?}"),
+    }
+}
+
+fn value_atom(value: &RuntimeValue) -> Result<&str> {
+    match untyped(value) {
+        RuntimeValue::Atom(name) => Ok(name),
+        other => bail!("expected atom, got {other:?}"),
     }
 }
 
@@ -2466,6 +2490,9 @@ fn exec_vibra_v1(
             }))
         }
         "format_bool" => Ok(RuntimeValue::Str(value_bool(&args[0])?.to_string())),
+        // Atoms render with their sigil so round-tripping through text keeps
+        // them distinguishable from an ordinary string of the same name.
+        "format_atom" => Ok(RuntimeValue::Str(format!("@{}", value_atom(&args[0])?))),
         "bytes_len" => Ok(RuntimeValue::Int(
             i64::try_from(value_byte_items(&args[0])?.len()).unwrap_or(i64::MAX),
         )),

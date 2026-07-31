@@ -24,7 +24,7 @@
       _
       (do (test.fail "run stream mode was not rejected as unsupported"))
     )
-    profile: process
-    tags: (stdlib process)
+    profile: @process
+    tags: (@stdlib @process)
   )
 )

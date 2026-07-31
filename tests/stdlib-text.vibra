@@ -16,7 +16,7 @@
       _
       (do (test.fail "find did not return a scalar offset"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -35,7 +35,7 @@
       _
       (do (test.fail "scalar-at must be bounds safe"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -90,6 +90,6 @@
       _
       (do (test.fail "Unicode uppercase failed"))
     )
-    profile: core
+    profile: @core
   )
 )

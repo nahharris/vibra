@@ -42,6 +42,29 @@ Use `;` for reader comments. Persisted documentation belongs in a trailing
 )
 ```
 
+## Atoms
+
+An atom is a self-naming constant written `@name`, with lowercase kebab-case
+dot segments (`@ok`, `@http.not-found`). Atoms compare by identity, match in
+patterns, and key maps. Each atom also names a singleton type that widens to
+`atom`.
+
+```vibra
+(defn classify (value atom) bool
+  (do (match value @ok (do (return true)) _ (do (return false)))))
+
+(defn always-ok () @ok (do (return @ok)))
+```
+
+Contextual keywords are atoms too: `visibility: @public`, `kind: @bin`,
+`format: @json`, `profile: @core`, `tags: (@language)`, `workspace: @temp`,
+`expect-error: (@compile E-OP-002 "overflow")`, and macro syntax categories
+such as `@expr-syntax`. A bare symbol in those positions is rejected with
+`E-ATOM-003`.
+
+`convert.format-atom` renders an atom back to its written form, sigil
+included.
+
 ## Projects
 
 `project.vibra` is an S-expression manifest and source files use the `.vibra`
@@ -50,7 +73,7 @@ extension. Lockfiles and compiler-owned package metadata are canonical JSON.
 ```vibra
 (project
   (package "hello" "0.1.0")
-  (target hello kind: bin root: "src" entry: "main.vibra")
+  (target hello kind: @bin root: "src" entry: "main.vibra")
   (dependency std path: "../stdlib"))
 ```
 
@@ -65,7 +88,7 @@ free `core` profile.
 (test.scenario "truth"
   (test.case "is true"
     (test.assert true)
-    tags: (language)))
+    tags: (@language)))
 ```
 
 ```sh

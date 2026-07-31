@@ -5,7 +5,7 @@
 (defn check () bool (let r (ready)) (return r))
 (test.scenario
   "zero-arg-call"
-  (test.case "zero-arg-call" (let v (ready)) (test.assert v) profile: core)
+  (test.case "zero-arg-call" (let v (ready)) (test.assert v) profile: @core)
 )
 (test.scenario
   "single-arg-call"
@@ -13,7 +13,7 @@
     "single-arg-call"
     (let v (echo-bool true))
     (test.assert v)
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -22,10 +22,10 @@
     "multi-arg-call"
     (let v (second false true))
     (test.assert v)
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
   "nested-call"
-  (test.case "nested-call" (let v (check)) (test.assert v) profile: core)
+  (test.case "nested-call" (let v (check)) (test.assert v) profile: @core)
 )

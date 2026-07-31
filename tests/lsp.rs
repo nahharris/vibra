@@ -53,7 +53,7 @@ fn compilation_flags_flow_from_initialization_and_configuration_changes() {
     let main = "(defn main () void (do (enabled)))\n";
     std::fs::write(
         workspace.path().join("project.vibra"),
-        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: bin root: \".\" entry: \"main.vibra\"))\n",
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \".\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     std::fs::write(&main_path, main).unwrap();
@@ -239,7 +239,7 @@ fn navigation_uses_unsaved_s_expression_buffers() {
     let workspace = tempfile::tempdir().unwrap();
     let main_path = workspace.path().join("main.vibra");
     let helper_path = workspace.path().join("helper.vibra");
-    let manifest = "(project (package \"overlay-nav\" \"0.1.0\") (target app kind: bin root: \".\" entry: \"main.vibra\"))\n";
+    let manifest = "(project (package \"overlay-nav\" \"0.1.0\") (target app kind: @bin root: \".\" entry: \"main.vibra\"))\n";
     let disk_main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.old)))\n";
     let live_main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.live)))\n";
     let disk_helper = "(defn old () void (do unit))\n";
@@ -270,6 +270,52 @@ fn navigation_uses_unsaved_s_expression_buffers() {
     );
 }
 
+#[test]
+fn atom_literals_hover_complete_and_list_references_but_have_no_definition() {
+    let workspace = tempfile::tempdir().unwrap();
+    let main_path = workspace.path().join("main.vibra");
+    let manifest = "(project (package \"atoms\" \"0.1.0\") (target app kind: @bin root: \".\" entry: \"main.vibra\"))\n";
+    let main = "(defn classify (value atom) bool (do (match value @ok (do (return true)) _ (do (return false)))))\n(defn main () void (do (classify @ok)))\n";
+    std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
+    std::fs::write(&main_path, main).unwrap();
+    let main_uri = path_uri(&main_path);
+    let arm = main.lines().next().unwrap().find("@ok").unwrap();
+    let call = main.lines().nth(1).unwrap().find("@ok").unwrap();
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":path_uri(workspace.path())}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":main_uri,"text":main}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":main_uri},"position":{"line":0,"character":arm+1}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":main_uri},"position":{"line":0,"character":arm+1}}}),
+        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/references","params":{"textDocument":{"uri":main_uri},"position":{"line":1,"character":call+1}}}),
+        json!({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":main_uri},"position":{"line":1,"character":call+1}}}),
+        json!({"jsonrpc":"2.0","id":6,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    let by_id = |id: i64| {
+        output
+            .iter()
+            .find(|message| message["id"] == id)
+            .unwrap_or_else(|| panic!("no response for id {id}"))
+    };
+    assert!(by_id(2)["result"]["contents"]["value"]
+        .as_str()
+        .unwrap()
+        .contains("@ok"));
+    assert_eq!(by_id(3)["result"], Value::Null);
+    assert_eq!(by_id(4)["result"].as_array().unwrap().len(), 2);
+    assert!(by_id(5)["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["label"] == "@ok"));
+}
+
 fn path_uri(path: &std::path::Path) -> String {
     let value = path.to_string_lossy().replace('\\', "/");
     if value.starts_with('/') {
@@ -282,7 +328,7 @@ fn path_uri(path: &std::path::Path) -> String {
 #[test]
 fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     let workspace = tempfile::tempdir().unwrap();
-    let manifest = "(project\n  (package \"overlay-test\" \"0.1.0\")\n  (target app kind: bin root: \".\" entry: \"main.vibra\"))\n";
+    let manifest = "(project\n  (package \"overlay-test\" \"0.1.0\")\n  (target app kind: @bin root: \".\" entry: \"main.vibra\"))\n";
     let main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.run)))\n";
     let valid = "(defn run () void (do (let value 1)))\n";
     let broken = "(defn run () void (do (missing) (let value 1)))\n";
@@ -396,9 +442,9 @@ fn semantic_navigation_resolves_project_at_imports() {
     let workspace = tempfile::tempdir().unwrap();
     let dependency = workspace.path().join("packages/util");
     std::fs::create_dir_all(dependency.join("src")).unwrap();
-    let manifest="(project\n  (package \"app\" \"0.1.0\")\n  (target app kind: bin root: \".\" entry: \"main.vibra\")\n  (dependency util path: \"packages/util\"))\n";
+    let manifest="(project\n  (package \"app\" \"0.1.0\")\n  (target app kind: @bin root: \".\" entry: \"main.vibra\")\n  (dependency util path: \"packages/util\"))\n";
     let dependency_manifest =
-        "(project\n  (package \"util\" \"0.1.0\")\n  (target util kind: lib root: \"src\" entry: \"greet.vibra\"))\n";
+        "(project\n  (package \"util\" \"0.1.0\")\n  (target util kind: @lib root: \"src\" entry: \"greet.vibra\"))\n";
     let main="util:\n  $import: '@util/greet.vibra'\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $util.greet: null\n";
     let library="greet:\n  $function: $void\n  =doc: Dependency greeting\n  return: $void\n  do:\n    - $let:\n        value: 1\n";
     let main_path = workspace.path().join("main.vibra");

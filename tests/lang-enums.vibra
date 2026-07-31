@@ -13,7 +13,7 @@
       (signal.stop)
       (do (test.fail "expected go"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -28,7 +28,7 @@
       (signal.go _)
       (do (test.fail "expected stop"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -43,7 +43,7 @@
       (opt.none)
       (do (test.fail "expected some"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -58,6 +58,6 @@
       (opt.none)
       (do (test.assert true))
     )
-    profile: core
+    profile: @core
   )
 )

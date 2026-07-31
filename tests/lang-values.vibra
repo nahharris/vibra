@@ -1,11 +1,11 @@
 (import test "../stdlib/src/test.vibra")
 (test.scenario
   "bool-literal"
-  (test.case "bool-literal" (test.assert true) profile: core)
+  (test.case "bool-literal" (test.assert true) profile: @core)
 )
 (test.scenario
   "bound-bool"
-  (test.case "bound-bool" (let flag true) (test.assert flag) profile: core)
+  (test.case "bound-bool" (let flag true) (test.assert flag) profile: @core)
 )
 (test.scenario
   "int-literal"
@@ -13,7 +13,7 @@
     "int-literal"
     (let n 7)
     (match n 7 (do (test.assert true)) _ (do (test.fail "expected 7")))
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -22,7 +22,7 @@
     "float-literal"
     (let x 1.5)
     (match x 1.5 (do (test.assert true)) _ (do (test.fail "expected 1.5")))
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -31,7 +31,7 @@
     "string-literal"
     (let s "hello")
     (match s "hello" (do (test.assert true)) _ (do (test.fail "expected hello")))
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -42,6 +42,6 @@
     (let subject 1)
     (match subject 1 (do (let outer false)) _ (do))
     (test.assert outer)
-    profile: core
+    profile: @core
   )
 )

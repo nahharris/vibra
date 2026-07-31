@@ -107,10 +107,9 @@ fn dependency_library_root(root: &Path, dependency_name: &str) -> Result<PathBuf
         }
         let name = symbol(values.first().context("target requires a name")?)?;
         let labels = labels(&values[1..])?;
-        if !labels
-            .get("kind")
-            .is_some_and(|node| symbol(node).ok() == Some("lib"))
-        {
+        if !labels.get("kind").is_some_and(
+            |node| matches!(&node.kind, NodeKind::Atom(Atom::Atom(kind)) if kind == "lib"),
+        ) {
             continue;
         }
         let target_root = string(labels.get("root").context("target requires `root:`")?)?;

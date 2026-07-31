@@ -6,8 +6,8 @@ S-expression grammar and is metadata, not a source module.
 ```vibra
 (project
   (package "hello" "0.1.0")
-  (target core kind: lib root: "src/core" entry: "lib.vibra")
-  (target hello kind: bin root: "src/hello" entry: "main.vibra")
+  (target core kind: @lib root: "src/core" entry: "lib.vibra")
+  (target hello kind: @bin root: "src/hello" entry: "main.vibra")
   (dependency std
     git: "https://github.com/nahharris/vibra-stdlib.git"
     rev: "6b9fa5838e4f4122ff141e13a5ef737e99955dad")
@@ -17,7 +17,7 @@ S-expression grammar and is metadata, not a source module.
 ## Fields
 
 - `(package <name> <version>)` declares package identity.
-- `(target <name> kind: <bin|lib> root: <root> entry: <entry>)` declares a source target.
+- `(target <name> kind: <@bin|@lib> root: <root> entry: <entry>)` declares a source target.
 - `(dependency <alias> ...)` declares a local, Git, or static Wasm dependency.
 
 Target names and dependency names share one namespace. A name can be used once.

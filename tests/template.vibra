@@ -20,6 +20,6 @@
       _
       (do (test.fail "compile-time template rendered unexpected text"))
     )
-    profile: core
+    profile: @core
   )
 )

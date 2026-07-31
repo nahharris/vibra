@@ -8,7 +8,7 @@
     (test.assert-eq-int (multiply 6 7) 42)
     (test.assert-eq-int (divide 85 2) 42)
     (test.assert-eq-int (remainder 85 43) 42)
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -17,7 +17,7 @@
     "boolean-and-comparison"
     (test.assert (and (less-than 1 2) (equal 42 42)))
     (test.assert (not (not-equal "same" "same")))
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -26,7 +26,7 @@
     "bitwise-and-shift"
     (test.assert-eq-int (bit-or 32 10) 42)
     (test.assert-eq-int (shift-left 21 1) 42)
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -34,7 +34,7 @@
   (test.case
     "float-arithmetic"
     (test.assert-eq-float (divide 84.0 2.0) 42.0)
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -43,6 +43,6 @@
     "checked-numeric-conversion"
     (test.assert-eq-int (convert 42.0 int64 0) 42)
     (test.assert-eq-int (convert 42.5 int64 7) 7)
-    profile: core
+    profile: @core
   )
 )

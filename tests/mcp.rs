@@ -48,13 +48,13 @@ fn write_project(root: &Path) {
     std::fs::create_dir_all(root.join("tests")).unwrap();
     std::fs::write(
         root.join("project.vibra"),
-        "(project\n  (package \"mcp-fixture\" \"0.1.0\")\n  (target app kind: bin root: \"src\" entry: \"main.vibra\"))\n",
+        "(project\n  (package \"mcp-fixture\" \"0.1.0\")\n  (target app kind: @bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
     std::fs::write(root.join("src/main.vibra"), "(defn main () void (do))\n").unwrap();
     std::fs::write(
         root.join("tests/basic.vibra"),
-        "(test.scenario \"works\" (test.case \"works\" (do) profile: core))\n",
+        "(test.scenario \"works\" (test.case \"works\" (do) profile: @core))\n",
     )
     .unwrap();
 }

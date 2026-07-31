@@ -13,7 +13,7 @@
       (result.result.err _)
       (do (test.fail "print returned err"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -28,7 +28,7 @@
       (result.result.err _)
       (do (test.fail "println returned err"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -43,6 +43,6 @@
       (result.result.err _)
       (do (test.fail "eprintln returned err"))
     )
-    profile: core
+    profile: @core
   )
 )

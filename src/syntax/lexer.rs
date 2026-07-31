@@ -12,6 +12,7 @@ pub enum TokenKind {
     CloseParen,
     Symbol(String),
     Label(String),
+    Atom(String),
     String(String),
     Int(i64),
     Float(f64),
@@ -201,6 +202,15 @@ impl<'a> Lexer<'a> {
             "true" => Ok(TokenKind::Bool(true)),
             "false" => Ok(TokenKind::Bool(false)),
             "unit" => Ok(TokenKind::Unit),
+            _ if text.starts_with('@') => text
+                .strip_prefix('@')
+                .filter(|name| is_atom_name(name))
+                .map(|name| TokenKind::Atom(name.to_string()))
+                .ok_or_else(|| SyntaxError::new(
+                    "E-ATOM-001",
+                    format!("invalid atom literal `{text}`; expected `@` followed by lowercase kebab-case dot segments"),
+                    Span::new(start, self.offset),
+                )),
             _ if looks_numeric(text) => parse_number(text, Span::new(start, self.offset)),
             _ if text.strip_suffix(':').is_some_and(is_label_name) => Ok(TokenKind::Label(
                 text.strip_suffix(':')
@@ -228,6 +238,10 @@ impl<'a> Lexer<'a> {
         self.offset += ch.len_utf8();
         ch
     }
+}
+
+fn is_atom_name(text: &str) -> bool {
+    !text.is_empty() && text.split('.').all(is_label_name)
 }
 
 fn is_delimiter(ch: char) -> bool {
@@ -418,6 +432,22 @@ mod tests {
             assert_eq!(lex(source).unwrap_err().code, "E-SYN-001", "{source}");
         }
         assert_eq!(lex("doc:").unwrap()[0].span, Span::new(0, 4));
+    }
+
+    #[test]
+    fn lexes_canonical_atom_literals_and_rejects_invalid_names() {
+        assert_eq!(
+            kinds("@ok @http.not-found @v2.ready"),
+            vec![
+                TokenKind::Atom("ok".into()),
+                TokenKind::Atom("http.not-found".into()),
+                TokenKind::Atom("v2.ready".into()),
+            ]
+        );
+        for source in ["@", "@Bad", "@bad_name", "@bad..name", "@bad.", "@-bad"] {
+            let error = lex(source).unwrap_err();
+            assert_eq!(error.code, "E-ATOM-001", "source: {source}");
+        }
     }
 
     #[test]

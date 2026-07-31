@@ -13,7 +13,7 @@
       _
       (do (test.fail "random bytes returned the wrong length"))
     )
-    profile: random
-    tags: (stdlib)
+    profile: @random
+    tags: (@stdlib)
   )
 )

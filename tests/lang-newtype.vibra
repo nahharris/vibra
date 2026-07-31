@@ -13,7 +13,7 @@
       _
       (do (test.fail "expected meters newtype"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -30,6 +30,6 @@
       _
       (do (test.fail "expected label newtype"))
     )
-    profile: core
+    profile: @core
   )
 )

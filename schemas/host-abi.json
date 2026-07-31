@@ -593,6 +593,17 @@
     },
     {
       "module": "vibra_v1",
+      "name": "format_atom",
+      "params": [
+        {
+          "kind": "value",
+          "type": "atom"
+        }
+      ],
+      "return": "str"
+    },
+    {
+      "module": "vibra_v1",
       "name": "array_len",
       "params": [
         {

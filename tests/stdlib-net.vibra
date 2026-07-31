@@ -21,7 +21,7 @@
       _
       (do (test.fail "invalid socket address was accepted"))
     )
-    profile: core
-    tags: (stdlib network)
+    profile: @core
+    tags: (@stdlib @network)
   )
 )

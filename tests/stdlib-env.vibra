@@ -17,8 +17,8 @@
     (let names (env.list))
     (let names-have-the-declared-type (accepts-names names))
     (test.assert names-have-the-declared-type)
-    profile: env
-    tags: (stdlib)
+    profile: @env
+    tags: (@stdlib)
   )
 )
 (test.scenario
@@ -42,7 +42,7 @@
       _
       (do (test.fail "removed environment variable remained visible"))
     )
-    profile: env
-    tags: (stdlib)
+    profile: @env
+    tags: (@stdlib)
   )
 )

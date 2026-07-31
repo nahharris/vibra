@@ -1,5 +1,5 @@
 (project
   (package "lsp-app" "0.1.0")
-  (target lsp-app kind: bin root: "." entry: "main.vibra")
+  (target lsp-app kind: @bin root: "." entry: "main.vibra")
   (dependency greeting path: "packages/greeting")
 )

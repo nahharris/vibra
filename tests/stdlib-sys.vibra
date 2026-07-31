@@ -23,7 +23,7 @@
       (result.result.err _)
       (do (test.fail "current directory was unavailable"))
     )
-    profile: system
-    tags: (stdlib)
+    profile: @system
+    tags: (@stdlib)
   )
 )

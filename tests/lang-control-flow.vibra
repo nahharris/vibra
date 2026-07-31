@@ -4,7 +4,7 @@
   (test.case
     "if-true-takes-then"
     (if true (do (test.assert true)) (do (test.fail "then branch was skipped")))
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -12,7 +12,7 @@
   (test.case
     "if-false-takes-else"
     (if false (do (test.fail "then branch ran on false")) (do (test.assert true)))
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -25,7 +25,7 @@
       (do (test.assert true))
       (do (test.fail "bound true condition took else"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -39,7 +39,7 @@
       )
       (do (test.fail "outer true took else"))
     )
-    profile: core
+    profile: @core
   )
 )
 (test.scenario
@@ -48,6 +48,6 @@
     "while-false-never-runs"
     (while false (test.fail "while body ran on false condition"))
     (test.assert true)
-    profile: core
+    profile: @core
   )
 )
