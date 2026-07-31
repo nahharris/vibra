@@ -1,2 +1,2 @@
 (import io "../stdlib/src/io.vibra")
-(fn main () void (do (io.println "Hello, World!")))
+(defn main () void (io.println "Hello, World!"))

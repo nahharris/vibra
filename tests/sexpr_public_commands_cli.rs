@@ -20,12 +20,12 @@ fn public_commands_accept_a_typed_sexpression_project() {
     .unwrap();
     std::fs::write(
         root.path().join("src/app/main.vibra"),
-        "(fn main () void (do) doc: \"Typed command entry.\")\n",
+        "(defn main () void (do) doc: \"Typed command entry.\")\n",
     )
     .unwrap();
     std::fs::write(
         root.path().join("tests/typed.vibra"),
-        "(test typed-command core (do))\n",
+        "(test.scenario \"typed-command\" (test.case \"typed-command\" (do) profile: core))\n",
     )
     .unwrap();
 

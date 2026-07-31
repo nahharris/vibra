@@ -13,15 +13,16 @@ the artifact is resolved inside the synced `dep/<alias>` tree. Absolute paths
 and traversal are rejected. The dependency alias is the stable module name:
 
 ```vibra
-(fn foreign-sum ((left int32) (right int32)) int32
-  (do
-    (wasm
-      import: (import "@math" "sum")
-      args: ((arg left) (arg right)))))
+(defn
+  foreign-sum
+  (left int32 right int32)
+  int32
+  (wasm "@math" "sum" left right)
+)
 ```
 
-The visible `wasm` form is the explicit unsafe boundary. It must be the
-wrapper's only body statement. The wrapper owns conversion of integer status
+The visible `wasm` form is the explicit unsafe boundary and may appear wherever
+its result type is valid. The wrapper owns conversion of integer status
 codes into typed Vibra `result` values; v1 performs no automatic foreign error
 translation.
 

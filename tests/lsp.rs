@@ -50,7 +50,7 @@ fn lifecycle_and_capabilities_use_lsp_framing() {
 fn compilation_flags_flow_from_initialization_and_configuration_changes() {
     let workspace = tempfile::tempdir().unwrap();
     let main_path = workspace.path().join("main.vibra");
-    let main = "(fn main () void (do (enabled)))\n";
+    let main = "(defn main () void (do (enabled)))\n";
     std::fs::write(
         workspace.path().join("project.vibra"),
         "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: bin root: \".\" entry: \"main.vibra\"))\n",
@@ -59,7 +59,7 @@ fn compilation_flags_flow_from_initialization_and_configuration_changes() {
     std::fs::write(&main_path, main).unwrap();
     std::fs::write(
         workspace.path().join("main.release.vibra"),
-        "(fn enabled () void (do (let value 1)))\n",
+        "(defn enabled () void (do (let value 1)))\n",
     )
     .unwrap();
     let root_uri = path_uri(workspace.path());
@@ -214,7 +214,7 @@ fn formatting_returns_a_whole_document_edit() {
     let root_uri = path_uri(workspace.path());
     // Canonical output always uses LF, so CRLF input guarantees an edit on
     // every host without relying on emitter choices around printer style.
-    let source = "(fn main () void\r\n  (do (let value 1)))\r\n";
+    let source = "(defn main () void\r\n  (do (let value 1)))\r\n";
     let mut input = Vec::new();
     for value in [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
@@ -240,10 +240,10 @@ fn navigation_uses_unsaved_s_expression_buffers() {
     let main_path = workspace.path().join("main.vibra");
     let helper_path = workspace.path().join("helper.vibra");
     let manifest = "(project (package \"overlay-nav\" \"0.1.0\") (target app kind: bin root: \".\" entry: \"main.vibra\"))\n";
-    let disk_main = "(import helper \"helper.vibra\")\n(fn main () void (do (helper.old)))\n";
-    let live_main = "(import helper \"helper.vibra\")\n(fn main () void (do (helper.live)))\n";
-    let disk_helper = "(fn old () void (do unit))\n";
-    let live_helper = "(fn live () void (do unit))\n";
+    let disk_main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.old)))\n";
+    let live_main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.live)))\n";
+    let disk_helper = "(defn old () void (do unit))\n";
+    let live_helper = "(defn live () void (do unit))\n";
     std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
     std::fs::write(&main_path, disk_main).unwrap();
     std::fs::write(&helper_path, disk_helper).unwrap();
@@ -266,7 +266,7 @@ fn navigation_uses_unsaved_s_expression_buffers() {
     assert_eq!(output[4]["result"]["uri"], helper_uri);
     assert_eq!(
         output[4]["result"]["range"]["start"],
-        json!({"line":0,"character":4})
+        json!({"line":0,"character":6})
     );
 }
 
@@ -283,9 +283,9 @@ fn path_uri(path: &std::path::Path) -> String {
 fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     let workspace = tempfile::tempdir().unwrap();
     let manifest = "(project\n  (package \"overlay-test\" \"0.1.0\")\n  (target app kind: bin root: \".\" entry: \"main.vibra\"))\n";
-    let main = "(import helper \"helper.vibra\")\n(fn main () void (do (helper.run)))\n";
-    let valid = "(fn run () void (do (let value 1)))\n";
-    let broken = "(fn run () void (do (missing) (let value 1)))\n";
+    let main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.run)))\n";
+    let valid = "(defn run () void (do (let value 1)))\n";
+    let broken = "(defn run () void (do (missing) (let value 1)))\n";
     std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
     std::fs::write(workspace.path().join("main.vibra"), main).unwrap();
     std::fs::write(workspace.path().join("helper.vibra"), valid).unwrap();

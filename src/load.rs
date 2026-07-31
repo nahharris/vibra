@@ -143,15 +143,28 @@ pub fn load_entry_module_for_test_discovery(entry: &Path) -> Result<(PathBuf, Va
     let module = merge_module_parts(&source_module);
     let mut map = serde_yaml::Mapping::new();
     for form in &module.forms {
-        let ast::TopLevel::Test(test) = form else {
-            continue;
+        let cases = match form {
+            ast::TopLevel::Test(test) => vec![(test.name.value.clone(), test)],
+            ast::TopLevel::TestScenario(scenario) => scenario
+                .cases
+                .iter()
+                .map(|test| {
+                    (
+                        format!("{}::{}", scenario.name.value, test.name.value),
+                        test,
+                    )
+                })
+                .collect(),
+            _ => continue,
         };
-        let (key, value) = surface_adapter::test_discovery_value(test)?;
-        if map.insert(Value::String(key.clone()), value).is_some() {
-            bail!(
-                "E-MOD-002: duplicate top-level symbol `{key}` across module parts of {}",
-                path.display()
-            );
+        for (name, test) in cases {
+            let (_, value) = surface_adapter::test_discovery_value(test)?;
+            if map.insert(Value::String(name.clone()), value).is_some() {
+                bail!(
+                    "E-MOD-002: duplicate top-level symbol `{name}` across module parts of {}",
+                    path.display()
+                );
+            }
         }
     }
     Ok((path, Value::Mapping(map)))

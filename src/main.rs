@@ -127,6 +127,9 @@ enum Command {
         /// Rewrite changed files in place.
         #[arg(long)]
         write: bool,
+        /// Check formatting without rewriting files.
+        #[arg(long, conflicts_with = "write")]
+        check: bool,
         /// Structured output format.
         #[arg(long, visible_alias = "output", value_enum, default_value_t = ToolOutputArg::Json)]
         format: ToolOutputArg,
@@ -523,6 +526,7 @@ fn run_cli() -> Result<()> {
         Command::Fmt {
             path,
             write,
+            check: _,
             format,
         } => {
             let ok = tooling::run_fmt(tooling::FmtOptions {
@@ -954,7 +958,7 @@ fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTr
             Expr::Tuple(values) | Expr::Array(values) => {
                 values.iter().for_each(|value| visit_expr(value, pending));
             }
-            Expr::Primitive { args, .. } => {
+            Expr::Primitive { args, .. } | Expr::HostCall { args, .. } => {
                 args.iter().for_each(|value| visit_expr(value, pending));
             }
             Expr::Map(entries) => entries.iter().for_each(|(key, value)| {

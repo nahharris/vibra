@@ -220,7 +220,8 @@ pub enum TopLevel {
     Constant(Constant),
     Function(Function),
     Macro(Macro),
-    Test(Test),
+    Test(TestCase),
+    TestScenario(TestScenario),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -286,6 +287,7 @@ pub struct Macro {
 pub struct MacroParameter {
     pub name: Name,
     pub category: Spanned<SyntaxCategory>,
+    pub variadic: bool,
     pub span: Span,
 }
 
@@ -325,18 +327,37 @@ pub enum MacroExprKind {
 pub struct Parameter {
     pub name: Name,
     pub ty: TypeExpr,
+    pub variadic: bool,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Test {
+pub struct FunctionTypeParameter {
     pub name: Name,
+    pub ty: TypeExpr,
+    pub variadic: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestScenario {
+    pub name: Spanned<String>,
+    pub cases: Vec<TestCase>,
+    pub span: Span,
+    pub origin: Origin,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestCase {
+    pub name: Spanned<String>,
     pub profile: Name,
     pub body: Vec<Expr>,
     pub metadata: Vec<TestMeta>,
     pub span: Span,
     pub origin: Origin,
 }
+
+pub type Test = TestCase;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TestMeta {
@@ -389,7 +410,7 @@ pub enum TypeExprKind {
     Enum(Vec<TypeMember>),
     Interface(Vec<TypeMember>),
     Function {
-        parameters: Vec<TypeExpr>,
+        parameters: Vec<FunctionTypeParameter>,
         result: Box<TypeExpr>,
     },
     Newtype(Box<TypeExpr>),
@@ -431,7 +452,13 @@ pub enum ExprKind {
     Reference(String),
     Call {
         callee: Name,
-        arguments: Vec<Expr>,
+        arguments: Vec<CallArgument>,
+        type_arguments: Vec<TypeExpr>,
+    },
+    AnonymousFunction {
+        parameters: Vec<Parameter>,
+        return_type: TypeExpr,
+        body: Vec<Expr>,
     },
     Do(Vec<Expr>),
     Let {
@@ -507,6 +534,50 @@ pub enum ExprKind {
     },
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum CallArgument {
+    Positional(Expr),
+    Labelled { label: Name, value: Expr },
+}
+
+impl CallArgument {
+    pub fn value(&self) -> &Expr {
+        match self {
+            Self::Positional(value) | Self::Labelled { value, .. } => value,
+        }
+    }
+
+    pub fn value_mut(&mut self) -> &mut Expr {
+        match self {
+            Self::Positional(value) | Self::Labelled { value, .. } => value,
+        }
+    }
+
+    pub fn map_value<E>(self, map: impl FnOnce(Expr) -> Result<Expr, E>) -> Result<Self, E> {
+        Ok(match self {
+            Self::Positional(value) => Self::Positional(map(value)?),
+            Self::Labelled { label, value } => Self::Labelled {
+                label,
+                value: map(value)?,
+            },
+        })
+    }
+
+    pub fn into_value(self) -> Expr {
+        match self {
+            Self::Positional(value) | Self::Labelled { value, .. } => value,
+        }
+    }
+}
+
+impl std::ops::Deref for CallArgument {
+    type Target = Expr;
+
+    fn deref(&self) -> &Self::Target {
+        self.value()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmbedFormat {
     Auto,
@@ -529,6 +600,7 @@ pub enum WasmArgument {
     Parameter(Name),
     ConstInt(Spanned<i64>),
     ConstString(Spanned<String>),
+    Expression(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -650,8 +722,21 @@ pub fn lower_document_with_id(
 ) -> Result<Module, AstError> {
     let _guard = DocumentGuard::enter(document_id);
     let mut forms = Vec::new();
+    let mut scenario_names = std::collections::BTreeSet::new();
     for node in semantic_nodes(&document.nodes) {
-        forms.push(parse_top(node)?);
+        match parse_top(node)? {
+            TopLevel::TestScenario(scenario) => {
+                if !scenario_names.insert(scenario.name.value.clone()) {
+                    return Err(AstError::new(
+                        "E-TEST-010",
+                        format!("duplicate test scenario `{}`", scenario.name.value),
+                        scenario.name.span,
+                    ));
+                }
+                forms.push(TopLevel::TestScenario(scenario));
+            }
+            form => forms.push(form),
+        }
     }
     Ok(Module {
         forms,
@@ -698,10 +783,9 @@ fn parse_top(node: &Node) -> Result<TopLevel, AstError> {
         "import" => parse_import(node, args).map(TopLevel::Import),
         "def" => parse_definition(node, args, Visibility::Public).map(TopLevel::Definition),
         "const" => parse_constant(node, args, Visibility::Public).map(TopLevel::Constant),
-        "fn" => parse_function(node, args, Visibility::Public).map(TopLevel::Function),
+        "defn" => parse_function(node, args, Visibility::Public).map(TopLevel::Function),
         "macro" => parse_macro(node, args, Visibility::Public).map(TopLevel::Macro),
-        "test" => parse_test(node, args).map(TopLevel::Test),
-        "private" => parse_private(node, args),
+        "test.scenario" => parse_test_scenario(node, args).map(TopLevel::TestScenario),
         _ => Err(AstError::new(
             "E-SYN-007",
             format!("`{}` is not a valid top-level form", head.value),
@@ -728,11 +812,17 @@ fn parse_definition<'a>(
 ) -> Result<Definition, AstError> {
     let args = args.as_ref();
     let attributes = trailing_attributes("def", args, 2, node.span)?;
+    let visibility = parse_visibility(&attributes, visibility)?;
+    let annotations = attributes
+        .iter()
+        .copied()
+        .filter(|attribute| label(attribute.label).is_ok_and(|name| name.value != "visibility"))
+        .collect::<Vec<_>>();
     Ok(Definition {
         visibility,
         name: name(args[0])?,
         body: parse_type(args[1])?,
-        annotations: parse_annotations(&attributes)?,
+        annotations: parse_annotations(&annotations)?,
         span: node.span,
         origin: source_origin(node.span),
     })
@@ -745,12 +835,18 @@ fn parse_constant<'a>(
 ) -> Result<Constant, AstError> {
     let args = args.as_ref();
     let attributes = trailing_attributes("const", args, 3, node.span)?;
+    let visibility = parse_visibility(&attributes, visibility)?;
+    let annotations = attributes
+        .iter()
+        .copied()
+        .filter(|attribute| label(attribute.label).is_ok_and(|name| name.value != "visibility"))
+        .collect::<Vec<_>>();
     Ok(Constant {
         visibility,
         name: name(args[0])?,
         ty: parse_type(args[1])?,
         value: parse_expr(args[2])?,
-        annotations: parse_annotations(&attributes)?,
+        annotations: parse_annotations(&annotations)?,
         span: node.span,
         origin: source_origin(node.span),
     })
@@ -762,14 +858,34 @@ fn parse_function<'a>(
     visibility: Visibility,
 ) -> Result<Function, AstError> {
     let args = args.as_ref();
-    let attributes = trailing_attributes("fn", args, 4, node.span)?;
+    if args.len() < 3 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            format!(
+                "`defn` expects at least 3 positional operands, found {}",
+                args.len()
+            ),
+            node.span,
+        ));
+    }
+    let attribute_start = args[3..]
+        .iter()
+        .position(|candidate| matches!(candidate.kind, NodeKind::Atom(Atom::Label(_))))
+        .map_or(args.len(), |index| index + 3);
+    let attributes = trailing_attributes("defn", args, attribute_start, node.span)?;
+    let visibility = parse_visibility(&attributes, visibility)?;
+    let annotation_attributes = attributes
+        .iter()
+        .copied()
+        .filter(|attribute| label(attribute.label).is_ok_and(|name| name.value != "visibility"))
+        .collect::<Vec<_>>();
     Ok(Function {
         visibility,
         name: name(args[0])?,
         parameters: parse_parameters(args[1])?,
         return_type: parse_type(args[2])?,
-        body: parse_body(args[3])?,
-        annotations: parse_annotations(&attributes)?,
+        body: parse_owned_body(&args[3..attribute_start])?,
+        annotations: parse_annotations(&annotation_attributes)?,
         span: node.span,
         origin: source_origin(node.span),
     })
@@ -781,31 +897,89 @@ fn parse_macro<'a>(
     visibility: Visibility,
 ) -> Result<Macro, AstError> {
     let args = args.as_ref();
-    let attributes = trailing_attributes("macro", args, 4, node.span)?;
+    if args.len() < 4 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            format!("`macro` expects at least 4 operands, found {}", args.len()),
+            node.span,
+        ));
+    }
+    let attribute_start = args[3..]
+        .iter()
+        .position(|candidate| matches!(candidate.kind, NodeKind::Atom(Atom::Label(_))))
+        .map_or(args.len(), |index| index + 3);
+    let attributes = trailing_attributes("macro", args, attribute_start, node.span)?;
     Ok(Macro {
-        visibility,
+        visibility: parse_visibility(&attributes, visibility)?,
         name: name(args[0])?,
         parameters: parse_macro_parameters(args[1])?,
         result: parse_syntax_category(args[2])?,
-        body: parse_macro_body(args[3])?,
-        annotations: parse_annotations(&attributes)?,
+        body: parse_owned_macro_body(&args[3..attribute_start])?,
+        annotations: parse_annotations(
+            &attributes
+                .iter()
+                .copied()
+                .filter(|attribute| {
+                    label(attribute.label).is_ok_and(|name| name.value != "visibility")
+                })
+                .collect::<Vec<_>>(),
+        )?,
         span: node.span,
         origin: source_origin(node.span),
     })
 }
 
 fn parse_macro_parameters(node: &Node) -> Result<Vec<MacroParameter>, AstError> {
-    semantic_nodes(list(node)?)
-        .map(|parameter| {
-            let values = semantic_nodes(list(parameter)?).collect::<Vec<_>>();
-            exact_arity("macro parameter", &values, 2, parameter.span)?;
+    let values = semantic_nodes(list(node)?).collect::<Vec<_>>();
+    if values.len() % 2 != 0 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            "macro parameter list expects flat `name category` pairs",
+            node.span,
+        ));
+    }
+    let parameter_count = values.len() / 2;
+    values
+        .chunks_exact(2)
+        .enumerate()
+        .map(|(index, values)| {
+            let raw_name = name(values[0])?;
+            let variadic = raw_name.value.ends_with("...");
+            if variadic && index + 1 != parameter_count {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "variadic macro parameter must be final",
+                    raw_name.span,
+                ));
+            }
+            let parameter_name = raw_name
+                .value
+                .strip_suffix("...")
+                .unwrap_or(&raw_name.value);
+            if parameter_name == "types" {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "`types` is reserved for explicit generic call arguments",
+                    raw_name.span,
+                ));
+            }
             Ok(MacroParameter {
-                name: name(values[0])?,
+                name: Spanned::source(parameter_name.to_string(), raw_name.span),
                 category: parse_syntax_category(values[1])?,
-                span: parameter.span,
+                variadic,
+                span: values[0].span.cover(values[1].span),
             })
         })
         .collect()
+}
+
+fn parse_owned_macro_body(nodes: &[&Node]) -> Result<Vec<MacroExpr>, AstError> {
+    if let [only] = nodes {
+        if headed(only).is_ok_and(|(head, _)| head.value == "do") {
+            return parse_macro_body(only);
+        }
+    }
+    nodes.iter().map(|node| parse_macro_expr(node)).collect()
 }
 
 fn parse_syntax_category(node: &Node) -> Result<Spanned<SyntaxCategory>, AstError> {
@@ -900,53 +1074,75 @@ fn parse_macro_expr(node: &Node) -> Result<MacroExpr, AstError> {
     Ok(Spanned::source(value, node.span))
 }
 
-fn parse_private<'a>(node: &Node, args: impl AsRef<[&'a Node]>) -> Result<TopLevel, AstError> {
+fn parse_test_scenario<'a>(
+    node: &Node,
+    args: impl AsRef<[&'a Node]>,
+) -> Result<TestScenario, AstError> {
     let args = args.as_ref();
-    exact_arity("private", args, 1, node.span)?;
-    let inner = args[0];
-    let (head, inner_args) = headed(inner)?;
-    match head.value.as_str() {
-        "def" => {
-            let mut definition = parse_definition(inner, inner_args, Visibility::Private)?;
-            definition.span = node.span;
-            definition.origin = source_origin(node.span);
-            Ok(TopLevel::Definition(definition))
-        }
-        "const" => {
-            let mut constant = parse_constant(inner, inner_args, Visibility::Private)?;
-            constant.span = node.span;
-            constant.origin = source_origin(node.span);
-            Ok(TopLevel::Constant(constant))
-        }
-        "fn" => {
-            let mut function = parse_function(inner, inner_args, Visibility::Private)?;
-            function.span = node.span;
-            function.origin = source_origin(node.span);
-            Ok(TopLevel::Function(function))
-        }
-        "macro" => {
-            let mut definition = parse_macro(inner, inner_args, Visibility::Private)?;
-            definition.span = node.span;
-            definition.origin = source_origin(node.span);
-            Ok(TopLevel::Macro(definition))
-        }
-        _ => Err(AstError::new(
-            "E-SYN-008",
-            "`private` accepts exactly one def, const, fn, or macro",
-            head.span,
-        )),
+    if args.len() < 2 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            "`test.scenario` expects a name and at least one `test.case`",
+            node.span,
+        ));
     }
+    let scenario_name = string(args[0])?;
+    let cases = args[1..]
+        .iter()
+        .map(|case| parse_test_case(case))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut names = std::collections::BTreeSet::new();
+    for case in &cases {
+        if !names.insert(case.name.value.clone()) {
+            return Err(AstError::new(
+                "E-TEST-011",
+                format!(
+                    "duplicate test case `{}` in scenario `{}`",
+                    case.name.value, scenario_name.value
+                ),
+                case.name.span,
+            ));
+        }
+    }
+    Ok(TestScenario {
+        name: scenario_name,
+        cases,
+        span: node.span,
+        origin: source_origin(node.span),
+    })
 }
 
-fn parse_test<'a>(node: &Node, args: impl AsRef<[&'a Node]>) -> Result<Test, AstError> {
-    let args = args.as_ref();
-    let attributes = trailing_attributes("test", args, 3, node.span)?;
-    Ok(Test {
-        name: name(args[0])?,
-        profile: name(args[1])?,
-        body: parse_body(args[2])?,
+fn parse_test_case(node: &Node) -> Result<TestCase, AstError> {
+    let (head, args) = headed(node)?;
+    if head.value != "test.case" {
+        return Err(expected_head("test.case", &head));
+    }
+    if args.len() < 2 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            "`test.case` expects a name and at least one expression",
+            node.span,
+        ));
+    }
+    let attribute_start = args[1..]
+        .iter()
+        .position(|candidate| matches!(candidate.kind, NodeKind::Atom(Atom::Label(_))))
+        .map_or(args.len(), |index| index + 1);
+    let attributes = trailing_attributes("test.case", &args, attribute_start, node.span)?;
+    let mut profile = None;
+    for attribute in &attributes {
+        if label(attribute.label)?.value == "profile" {
+            profile = Some(name(attribute.value)?);
+        }
+    }
+    let profile = profile.unwrap_or_else(|| Spanned::source("core".to_string(), node.span));
+    Ok(TestCase {
+        name: string(args[0])?,
+        profile,
+        body: parse_owned_body(&args[1..attribute_start])?,
         metadata: attributes
             .iter()
+            .filter(|attribute| label(attribute.label).is_ok_and(|name| name.value != "profile"))
             .map(parse_test_meta)
             .collect::<Result<_, _>>()?,
         span: node.span,
@@ -955,19 +1151,84 @@ fn parse_test<'a>(node: &Node, args: impl AsRef<[&'a Node]>) -> Result<Test, Ast
 }
 
 fn parse_parameters(node: &Node) -> Result<Vec<Parameter>, AstError> {
-    let children = list(node)?;
-    semantic_nodes(children)
-        .map(|parameter| {
-            let values = list(parameter)?;
-            let values = semantic_nodes(values).collect::<Vec<_>>();
-            exact_arity("parameter", &values, 2, parameter.span)?;
+    let values = semantic_nodes(list(node)?).collect::<Vec<_>>();
+    if values.len() % 2 != 0 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            "parameter list expects flat `name type` pairs",
+            node.span,
+        ));
+    }
+    let parameter_count = values.len() / 2;
+    values
+        .chunks_exact(2)
+        .enumerate()
+        .map(|(index, values)| {
+            let raw_name = name(values[0])?;
+            let variadic = raw_name.value.ends_with("...");
+            if variadic && index + 1 != parameter_count {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "variadic parameter must be the final parameter",
+                    raw_name.span,
+                ));
+            }
+            let parameter_name = raw_name
+                .value
+                .strip_suffix("...")
+                .unwrap_or(&raw_name.value);
+            if parameter_name.is_empty() {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "variadic parameter requires a name before `...`",
+                    raw_name.span,
+                ));
+            }
+            if parameter_name == "types" {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "`types` is reserved for explicit generic call arguments",
+                    raw_name.span,
+                ));
+            }
             Ok(Parameter {
-                name: name(values[0])?,
+                name: Spanned::source(parameter_name.to_string(), raw_name.span),
                 ty: parse_type(values[1])?,
-                span: parameter.span,
+                variadic,
+                span: values[0].span.cover(values[1].span),
             })
         })
         .collect()
+}
+
+fn parse_owned_body(nodes: &[&Node]) -> Result<Vec<Expr>, AstError> {
+    if let [only] = nodes {
+        if headed(only).is_ok_and(|(head, _)| head.value == "do") {
+            return parse_body(only);
+        }
+    }
+    parse_exprs(nodes)
+}
+
+fn parse_visibility(
+    attributes: &[AttributeRef<'_>],
+    default: Visibility,
+) -> Result<Visibility, AstError> {
+    let Some(attribute) = attributes
+        .iter()
+        .find(|attribute| label(attribute.label).is_ok_and(|name| name.value == "visibility"))
+    else {
+        return Ok(default);
+    };
+    match symbol(attribute.value) {
+        Some("public") => Ok(Visibility::Public),
+        Some("private") => Ok(Visibility::Private),
+        _ => Err(AstError::new(
+            "E-SYN-008",
+            "visibility must be `public` or `private`",
+            attribute.value.span,
+        )),
+    }
 }
 
 fn parse_body(node: &Node) -> Result<Vec<Expr>, AstError> {
@@ -1009,9 +1270,7 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
         "fn-type" => {
             exact_arity("fn-type", &args, 2, node.span)?;
             TypeExprKind::Function {
-                parameters: semantic_nodes(list(args[0])?)
-                    .map(parse_type)
-                    .collect::<Result<_, _>>()?,
+                parameters: parse_function_type_parameters(args[0])?,
                 result: Box::new(parse_type(args[1])?),
             }
         }
@@ -1053,6 +1312,43 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
         }
     };
     Ok(Spanned::source(value, node.span))
+}
+
+fn parse_function_type_parameters(node: &Node) -> Result<Vec<FunctionTypeParameter>, AstError> {
+    let values = semantic_nodes(list(node)?).collect::<Vec<_>>();
+    if values.len() % 2 != 0 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            "fn-type parameter list expects flat `name type` pairs",
+            node.span,
+        ));
+    }
+    let parameter_count = values.len() / 2;
+    values
+        .chunks_exact(2)
+        .enumerate()
+        .map(|(index, values)| {
+            let raw_name = name(values[0])?;
+            let variadic = raw_name.value.ends_with("...");
+            if variadic && index + 1 != parameter_count {
+                return Err(AstError::new(
+                    "E-SYN-008",
+                    "variadic fn-type parameter must be final",
+                    raw_name.span,
+                ));
+            }
+            let parameter_name = raw_name
+                .value
+                .strip_suffix("...")
+                .unwrap_or(&raw_name.value);
+            Ok(FunctionTypeParameter {
+                name: Spanned::source(parameter_name.to_string(), raw_name.span),
+                ty: parse_type(values[1])?,
+                variadic,
+                span: values[0].span.cover(values[1].span),
+            })
+        })
+        .collect()
 }
 
 fn parse_handle_access(node: &Node) -> Result<Spanned<HandleAccess>, AstError> {
@@ -1113,6 +1409,14 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
     let (head, args) = headed(node)?;
     let value = match head.value.as_str() {
         "do" => ExprKind::Do(parse_exprs(args)?),
+        "fn" => {
+            min_arity("fn", &args, 3, node.span)?;
+            ExprKind::AnonymousFunction {
+                parameters: parse_parameters(args[0])?,
+                return_type: parse_type(args[1])?,
+                body: parse_owned_body(&args[2..])?,
+            }
+        }
         "let" => {
             exact_arity("let", &args, 2, node.span)?;
             ExprKind::Let {
@@ -1149,32 +1453,45 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
             exact_arity("if", &args, 3, node.span)?;
             ExprKind::If {
                 condition: Box::new(parse_expr(args[0])?),
-                then_body: parse_body(args[1])?,
-                else_body: parse_body(args[2])?,
+                then_body: vec![parse_expr(args[1])?],
+                else_body: vec![parse_expr(args[2])?],
             }
         }
         "while" => {
-            exact_arity("while", &args, 2, node.span)?;
+            min_arity("while", &args, 2, node.span)?;
             ExprKind::While {
                 condition: Box::new(parse_expr(args[0])?),
-                body: parse_body(args[1])?,
+                body: parse_owned_body(&args[1..])?,
             }
         }
         "for" => {
-            exact_arity("for", &args, 3, node.span)?;
+            min_arity("for", &args, 3, node.span)?;
             ExprKind::For {
                 binding: name(args[0])?,
                 source: Box::new(parse_expr(args[1])?),
-                body: parse_body(args[2])?,
+                body: parse_owned_body(&args[2..])?,
             }
         }
         "match" => {
             min_arity("match", &args, 2, node.span)?;
+            if (args.len() - 1) % 2 != 0 {
+                return Err(AstError::new(
+                    "E-SYN-009",
+                    "match expects alternating `pattern expression` arms",
+                    node.span,
+                ));
+            }
             ExprKind::Match {
                 target: Box::new(parse_expr(args[0])?),
                 cases: args[1..]
-                    .iter()
-                    .map(|node| parse_case(node))
+                    .chunks_exact(2)
+                    .map(|arm| {
+                        Ok(MatchCase {
+                            pattern: parse_pattern(arm[0])?,
+                            body: vec![parse_expr(arm[1])?],
+                            span: arm[0].span.cover(arm[1].span),
+                        })
+                    })
                     .collect::<Result<_, _>>()?,
             }
         }
@@ -1286,18 +1603,24 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
         }
         "wasm" => parse_wasm_expr(node, &args)?,
         "task" => {
-            exact_arity("task", &args, 2, node.span)?;
+            let attribute_start = args
+                .iter()
+                .position(|candidate| matches!(candidate.kind, NodeKind::Atom(Atom::Label(_))))
+                .unwrap_or(args.len());
+            let attributes = trailing_attributes("task", &args, attribute_start, node.span)?;
+            let captures = required_capture_attribute("task", &attributes, node.span)?;
             ExprKind::Task {
-                captures: parse_captures(args[0])?,
-                body: parse_body(args[1])?,
+                captures,
+                body: parse_owned_body(&args[..attribute_start])?,
             }
         }
         "spawn" => {
-            exact_arity("spawn", &args, 3, node.span)?;
+            let attributes = trailing_attributes("spawn", &args, 2, node.span)?;
+            let captures = required_capture_attribute("spawn", &attributes, node.span)?;
             ExprKind::Spawn {
                 handle: name(args[0])?,
-                captures: parse_captures(args[1])?,
-                value: Box::new(parse_expr(args[2])?),
+                captures,
+                value: Box::new(parse_expr(args[1])?),
             }
         }
         "join" => {
@@ -1307,12 +1630,69 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
                 binding: name(args[1])?,
             }
         }
-        _ => ExprKind::Call {
-            callee: head,
-            arguments: parse_exprs(args)?,
-        },
+        "apply" => {
+            return Err(AstError::new(
+                "E-SYN-008",
+                "`apply` was removed; pass explicit generic arguments with `types:`",
+                head.span,
+            ));
+        }
+        _ => {
+            let (arguments, type_arguments) = parse_call_arguments(&args, node.span)?;
+            ExprKind::Call {
+                callee: head,
+                arguments,
+                type_arguments,
+            }
+        }
     };
     Ok(Spanned::source(value, node.span))
+}
+
+fn parse_call_arguments(
+    args: &[&Node],
+    call_span: Span,
+) -> Result<(Vec<CallArgument>, Vec<TypeExpr>), AstError> {
+    let mut arguments = Vec::new();
+    let mut type_arguments = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        if let NodeKind::Atom(Atom::Label(label_name)) = &args[index].kind {
+            let Some(value) = args.get(index + 1) else {
+                return Err(AstError::new(
+                    "E-SYN-011",
+                    format!("call argument `{label_name}:` is missing its value"),
+                    args[index].span,
+                ));
+            };
+            if label_name == "types" {
+                if index + 2 != args.len() {
+                    return Err(AstError::new(
+                        "E-SYN-011",
+                        "`types:` must be the final call attribute",
+                        args[index].span,
+                    ));
+                }
+                type_arguments = semantic_nodes(list(value)?)
+                    .map(parse_type)
+                    .collect::<Result<_, _>>()?;
+                index += 2;
+                continue;
+            }
+            arguments.push(CallArgument::Labelled {
+                label: Spanned::source(label_name.clone(), args[index].span),
+                value: parse_expr(value)?,
+            });
+            index += 2;
+        } else {
+            arguments.push(CallArgument::Positional(parse_expr(args[index])?));
+            index += 1;
+        }
+    }
+    if arguments.is_empty() && type_arguments.is_empty() && args.is_empty() {
+        let _ = call_span;
+    }
+    Ok((arguments, type_arguments))
 }
 
 fn parse_embed_format(node: &Node) -> Result<Spanned<EmbedFormat>, AstError> {
@@ -1343,75 +1723,34 @@ fn parse_embed_format(node: &Node) -> Result<Spanned<EmbedFormat>, AstError> {
 }
 
 fn parse_wasm_expr(node: &Node, args: &[&Node]) -> Result<ExprKind, AstError> {
-    let attributes = trailing_attributes("wasm", args, 0, node.span)?;
-    let mut import = None;
-    let mut arguments = None;
-    for attribute in attributes {
-        let attribute_name = label(attribute.label)?;
-        match attribute_name.value.as_str() {
-            "import" => {
-                let (head, values) = headed(attribute.value)?;
-                if head.value != "import" {
-                    return Err(expected_head("import", &head));
-                }
-                exact_arity("wasm import", &values, 2, attribute.value.span)?;
-                import = Some(WasmImport {
-                    module: string(values[0])?,
-                    name: string(values[1])?,
-                    span: attribute.value.span,
-                });
-            }
-            "args" => {
-                arguments = Some(
-                    semantic_nodes(list(attribute.value)?)
-                        .map(parse_wasm_argument)
-                        .collect::<Result<_, _>>()?,
-                );
-            }
-            _ => {
-                return Err(AstError::new(
-                    "E-SYN-011",
-                    format!("unknown wasm attribute `{}:`", attribute_name.value),
-                    attribute_name.span,
-                ));
-            }
-        }
+    if args.len() < 2 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            "`wasm` expects a module, symbol, and optional arguments",
+            node.span,
+        ));
     }
     Ok(ExprKind::Wasm {
-        import: import.ok_or_else(|| {
-            AstError::new("E-SYN-011", "wasm body is missing `import:`", node.span)
-        })?,
-        arguments: arguments
-            .ok_or_else(|| AstError::new("E-SYN-011", "wasm body is missing `args:`", node.span))?,
-    })
-}
-
-fn parse_wasm_argument(node: &Node) -> Result<WasmArgument, AstError> {
-    let (head, args) = headed(node)?;
-    exact_arity("wasm argument", &args, 1, node.span)?;
-    match head.value.as_str() {
-        "arg" => Ok(WasmArgument::Parameter(name(args[0])?)),
-        "const" => match &args[0].kind {
-            NodeKind::Atom(Atom::Int(value)) => Ok(WasmArgument::ConstInt(Spanned::source(
-                *value,
-                args[0].span,
-            ))),
-            NodeKind::Atom(Atom::String(value)) => Ok(WasmArgument::ConstString(Spanned::source(
-                value.clone(),
-                args[0].span,
-            ))),
-            _ => Err(AstError::new(
-                "E-SYN-010",
-                "wasm constant must be an integer or string literal",
-                args[0].span,
-            )),
+        import: WasmImport {
+            module: string(args[0])?,
+            name: string(args[1])?,
+            span: node.span,
         },
-        _ => Err(AstError::new(
-            "E-SYN-008",
-            "wasm argument must use `arg` or `const`",
-            head.span,
-        )),
-    }
+        arguments: args[2..]
+            .iter()
+            .map(|argument| match &argument.kind {
+                NodeKind::Atom(Atom::Symbol(_)) => name(argument).map(WasmArgument::Parameter),
+                NodeKind::Atom(Atom::Int(value)) => Ok(WasmArgument::ConstInt(Spanned::source(
+                    *value,
+                    argument.span,
+                ))),
+                NodeKind::Atom(Atom::String(value)) => Ok(WasmArgument::ConstString(
+                    Spanned::source(value.clone(), argument.span),
+                )),
+                _ => parse_expr(argument).map(WasmArgument::Expression),
+            })
+            .collect::<Result<_, _>>()?,
+    })
 }
 
 fn parse_exprs<'a>(args: impl AsRef<[&'a Node]>) -> Result<Vec<Expr>, AstError> {
@@ -1446,19 +1785,6 @@ fn parse_pairs<'a, T>(
             Ok((parse(values[0])?, parse(values[1])?))
         })
         .collect()
-}
-
-fn parse_case(node: &Node) -> Result<MatchCase, AstError> {
-    let (head, args) = headed(node)?;
-    if head.value != "case" {
-        return Err(expected_head("case", &head));
-    }
-    exact_arity("case", &args, 2, node.span)?;
-    Ok(MatchCase {
-        pattern: parse_pattern(args[0])?,
-        body: parse_body(args[1])?,
-        span: node.span,
-    })
 }
 
 fn parse_pattern(node: &Node) -> Result<Pattern, AstError> {
@@ -1525,12 +1851,41 @@ fn parse_patterns<'a>(args: impl AsRef<[&'a Node]>) -> Result<Vec<Pattern>, AstE
     args.iter().map(|node| parse_pattern(node)).collect()
 }
 
-fn parse_captures(node: &Node) -> Result<Vec<Name>, AstError> {
-    let (head, args) = headed(node)?;
-    if head.value != "captures" {
-        return Err(expected_head("captures", &head));
+fn required_capture_attribute(
+    owner: &str,
+    attributes: &[AttributeRef<'_>],
+    span: Span,
+) -> Result<Vec<Name>, AstError> {
+    let mut captures = None;
+    for attribute in attributes {
+        let attribute_name = label(attribute.label)?;
+        if attribute_name.value != "captures" {
+            return Err(AstError::new(
+                "E-SYN-011",
+                format!("unknown {owner} attribute `{}:`", attribute_name.value),
+                attribute_name.span,
+            ));
+        }
+        if captures.is_some() {
+            return Err(AstError::new(
+                "E-SYN-011",
+                format!("duplicate `{owner}` captures attribute"),
+                attribute.span,
+            ));
+        }
+        captures = Some(
+            semantic_nodes(list(attribute.value)?)
+                .map(name)
+                .collect::<Result<_, _>>()?,
+        );
     }
-    args.iter().map(|node| name(node)).collect()
+    captures.ok_or_else(|| {
+        AstError::new(
+            "E-SYN-011",
+            format!("{owner} is missing required `captures:` attribute"),
+            span,
+        )
+    })
 }
 
 fn parse_annotations(attributes: &[AttributeRef<'_>]) -> Result<Vec<Annotation>, AstError> {
@@ -1571,14 +1926,21 @@ fn parse_annotations(attributes: &[AttributeRef<'_>]) -> Result<Vec<Annotation>,
 }
 
 fn parse_where_value(node: &Node) -> Result<Vec<TypeParameter>, AstError> {
-    semantic_nodes(list(node)?)
-        .map(|node| {
-            let values = semantic_nodes(list(node)?).collect::<Vec<_>>();
-            min_arity("type parameter", &values, 1, node.span)?;
+    let values = semantic_nodes(list(node)?).collect::<Vec<_>>();
+    if values.len() % 2 != 0 {
+        return Err(AstError::new(
+            "E-SYN-009",
+            "where expects flat `name bound` pairs",
+            node.span,
+        ));
+    }
+    values
+        .chunks_exact(2)
+        .map(|values| {
             Ok(TypeParameter {
                 name: name(values[0])?,
-                bounds: parse_types(&values[1..])?,
-                span: node.span,
+                bounds: vec![parse_type(values[1])?],
+                span: values[0].span.cover(values[1].span),
             })
         })
         .collect()
@@ -1588,8 +1950,8 @@ fn parse_defs_value(node: &Node) -> Result<Vec<Function>, AstError> {
     semantic_nodes(list(node)?)
         .map(|node| {
             let (head, args) = headed(node)?;
-            if head.value != "fn" {
-                return Err(expected_head("fn", &head));
+            if head.value != "defn" {
+                return Err(expected_head("defn", &head));
             }
             parse_function(node, args, Visibility::Public)
         })
@@ -1637,6 +1999,7 @@ fn parse_method(node: &Node) -> Result<ImplItem, AstError> {
         return Err(expected_head("method", &head));
     }
     exact_arity("method", &args, 2, node.span)?;
+    let method_name = name(args[0])?;
     let binding = if symbol(args[1]).is_some() {
         MethodBinding::Reference(name(args[1])?)
     } else {
@@ -1644,10 +2007,31 @@ fn parse_method(node: &Node) -> Result<ImplItem, AstError> {
         if fn_head.value != "fn" {
             return Err(expected_head("fn", &fn_head));
         }
-        MethodBinding::Function(parse_function(args[1], fn_args, Visibility::Public)?)
+        if fn_args.len() < 3 {
+            return Err(AstError::new(
+                "E-SYN-009",
+                "inline `fn` expects parameters, return type, and at least one body expression",
+                args[1].span,
+            ));
+        }
+        let attribute_start = fn_args[2..]
+            .iter()
+            .position(|candidate| matches!(candidate.kind, NodeKind::Atom(Atom::Label(_))))
+            .map_or(fn_args.len(), |index| index + 2);
+        let attributes = trailing_attributes("fn", &fn_args, attribute_start, args[1].span)?;
+        MethodBinding::Function(Function {
+            visibility: Visibility::Public,
+            name: method_name.clone(),
+            parameters: parse_parameters(fn_args[0])?,
+            return_type: parse_type(fn_args[1])?,
+            body: parse_owned_body(&fn_args[2..attribute_start])?,
+            annotations: parse_annotations(&attributes)?,
+            span: args[1].span,
+            origin: source_origin(args[1].span),
+        })
     };
     Ok(ImplItem::Method {
-        name: name(args[0])?,
+        name: method_name,
         binding,
         span: node.span,
     })
@@ -2013,11 +2397,15 @@ mod tests {
     fn lowers_complete_module_surface_with_source_origins() {
         let source = r#"
 (import io "./io.vibra")
-(def option (enum (some t) (none void)) where: ((t)) doc: "Optional.")
-(private (const limit int64 10))
-(fn choose ((value bool) (fallback bool)) bool
-  (do (if value (do (return value)) (do (return fallback)))))
-(test works core (do (test.assert true)) tags: (fast language) clock: (fixed 0 0))
+(def option (enum (some t) (none void)) where: (t any) doc: "Optional.")
+(const limit int64 10 visibility: private)
+(defn
+  choose
+  (value bool fallback bool)
+  bool
+  (do (if value (do (return value)) (do (return fallback))))
+)
+(test.scenario "suite" (test.case "works" (test.assert true) tags: (fast language) clock: (fixed 0 0)))
 "#;
         let module = module(source).unwrap();
         assert_eq!(module.forms.len(), 5);
@@ -2036,16 +2424,211 @@ mod tests {
     }
 
     #[test]
+    fn lowers_defn_with_flat_variadic_parameters_direct_body_and_visibility() {
+        let parsed = module(
+            r#"(defn collect (head int64 rest... int64) void
+  (return)
+  visibility: private
+  doc: "Collect values.")"#,
+        )
+        .unwrap();
+        let TopLevel::Function(function) = &parsed.forms[0] else {
+            panic!("expected function definition");
+        };
+        assert_eq!(function.visibility, Visibility::Private);
+        assert_eq!(function.parameters.len(), 2);
+        assert_eq!(function.parameters[0].name.value, "head");
+        assert!(!function.parameters[0].variadic);
+        assert_eq!(function.parameters[1].name.value, "rest");
+        assert!(function.parameters[1].variadic);
+        assert!(matches!(function.body[0].value, ExprKind::Return(None)));
+    }
+
+    #[test]
+    fn preserves_mixed_labelled_call_arguments_and_explicit_types_in_source_order() {
+        let parsed =
+            module("(defn caller () void (target first: 1 2 second: 3 types: (int64)))").unwrap();
+        let TopLevel::Function(function) = &parsed.forms[0] else {
+            panic!("expected function definition");
+        };
+        let ExprKind::Call {
+            arguments,
+            type_arguments,
+            ..
+        } = &function.body[0].value
+        else {
+            panic!("expected call");
+        };
+        assert!(
+            matches!(arguments[0], CallArgument::Labelled { ref label, .. } if label.value == "first")
+        );
+        assert!(matches!(arguments[1], CallArgument::Positional(_)));
+        assert!(
+            matches!(arguments[2], CallArgument::Labelled { ref label, .. } if label.value == "second")
+        );
+        assert_eq!(type_arguments.len(), 1);
+    }
+
+    #[test]
+    fn lowers_macro_with_flat_variadic_parameters_and_direct_body() {
+        let parsed = module(
+            "(macro emit (head expr-syntax tail... expr-syntax) expr-syntax (quote expr-syntax head))",
+        )
+        .unwrap();
+        let TopLevel::Macro(definition) = &parsed.forms[0] else {
+            panic!("expected macro definition");
+        };
+        assert_eq!(definition.parameters.len(), 2);
+        assert_eq!(definition.parameters[0].name.value, "head");
+        assert!(!definition.parameters[0].variadic);
+        assert_eq!(definition.parameters[1].name.value, "tail");
+        assert!(definition.parameters[1].variadic);
+        assert_eq!(definition.body.len(), 1);
+    }
+
+    #[test]
+    fn fn_type_uses_named_flat_parameters_and_final_variadic_status() {
+        let parsed = module("(def callback (fn-type (value int64 rest... str) bool))").unwrap();
+        let TopLevel::Definition(definition) = &parsed.forms[0] else {
+            panic!("expected definition");
+        };
+        let TypeExprKind::Function { parameters, .. } = &definition.body.value else {
+            panic!("expected function type");
+        };
+        assert_eq!(parameters[0].name.value, "value");
+        assert!(!parameters[0].variadic);
+        assert_eq!(parameters[1].name.value, "rest");
+        assert!(parameters[1].variadic);
+    }
+
+    #[test]
+    fn where_attribute_uses_flat_name_bound_pairs_and_any_sentinel() {
+        let parsed = module("(def box (record (value t)) where: (t any))").unwrap();
+        let TopLevel::Definition(definition) = &parsed.forms[0] else {
+            panic!("expected definition");
+        };
+        let AnnotationKind::Where(parameters) = &definition.annotations[0].value else {
+            panic!("expected where annotation");
+        };
+        assert_eq!(parameters[0].name.value, "t");
+        assert!(
+            matches!(parameters[0].bounds[0].value, TypeExprKind::Named(ref name) if name == "any")
+        );
+    }
+
+    #[test]
+    fn body_forms_use_direct_expressions_flat_match_arms_and_capture_attributes() {
+        let parsed = module(
+            r#"(defn flow (value bool items (array int64)) void
+  (if value (return) (return))
+  (while value (set value false) (continue))
+  (for item items (let seen item) (continue))
+  (match value true (return) false (return))
+  (task (return) captures: (value)))"#,
+        )
+        .unwrap();
+        let TopLevel::Function(function) = &parsed.forms[0] else {
+            panic!("expected function");
+        };
+        assert!(
+            matches!(&function.body[0].value, ExprKind::If { then_body, else_body, .. } if then_body.len() == 1 && else_body.len() == 1)
+        );
+        assert!(matches!(&function.body[1].value, ExprKind::While { body, .. } if body.len() == 2));
+        assert!(matches!(&function.body[2].value, ExprKind::For { body, .. } if body.len() == 2));
+        assert!(
+            matches!(&function.body[3].value, ExprKind::Match { cases, .. } if cases.len() == 2)
+        );
+        assert!(
+            matches!(&function.body[4].value, ExprKind::Task { captures, body } if captures.len() == 1 && body.len() == 1)
+        );
+    }
+
+    #[test]
+    fn anonymous_function_is_a_typed_value_node() {
+        let parsed =
+            module("(const callback any (fn (value int64) int64 (return value)))").unwrap();
+        let TopLevel::Constant(constant) = &parsed.forms[0] else {
+            panic!("expected constant");
+        };
+        assert!(matches!(
+            &constant.value.value,
+            ExprKind::AnonymousFunction { parameters, body, .. }
+                if parameters.len() == 1 && body.len() == 1
+        ));
+    }
+
+    #[test]
+    fn inline_implementation_method_uses_anonymous_fn_syntax() {
+        let parsed = module(
+            r#"(def display (interface (show (fn-type (self self) str))))
+(def box (record (value str))
+  impls: ((impl display methods: ((method show (fn (value self) str (return "box")))))))"#,
+        )
+        .unwrap();
+        let TopLevel::Definition(definition) = &parsed.forms[1] else {
+            panic!("expected definition");
+        };
+        let AnnotationKind::Implementation { items, .. } = &definition.annotations[0].value else {
+            panic!("expected implementation");
+        };
+        assert!(matches!(
+            items[0],
+            ImplItem::Method {
+                binding: MethodBinding::Function(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn visibility_attribute_replaces_private_wrapper_for_all_declarations() {
+        let parsed = module(
+            r#"(def hidden (record) visibility: private)
+(const secret int64 1 visibility: private)
+(macro concealed () expr-syntax (quote expr-syntax 1) visibility: private)"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(&parsed.forms[0], TopLevel::Definition(value) if value.visibility == Visibility::Private)
+        );
+        assert!(
+            matches!(&parsed.forms[1], TopLevel::Constant(value) if value.visibility == Visibility::Private)
+        );
+        assert!(
+            matches!(&parsed.forms[2], TopLevel::Macro(value) if value.visibility == Visibility::Private)
+        );
+        let error = module("(private (const legacy int64 1))").unwrap_err();
+        assert_eq!(error.code, "E-SYN-007");
+    }
+
+    #[test]
+    fn removed_declaration_call_and_helper_spellings_are_rejected() {
+        for source in [
+            "(fn named () void unit)",
+            "(test sample unit)",
+            "(apply identity (int64) 1)",
+            "(defn main () void (spawn worker (captures) 1))",
+            "(defn main () void (match 1 (case 1 unit)))",
+            "(defn main () void (wasm import: (host symbol) args: ()))",
+        ] {
+            assert!(module(source).is_err(), "accepted removed syntax: {source}");
+        }
+    }
+
+    #[test]
     fn lowers_embed_template_and_wasm_bodies_as_typed_nodes() {
         let parsed = module(
             r#"
-(fn assets () void
+(defn
+  assets
+  ()
+  void
   (do
     (embed "message.txt" format: text)
     (template "message.mustache" with: (record (name "Vibra")))
-    (wasm
-      import: (import "vibra:host/abi@1" "io_write")
-      args: ((arg output) (const 1) (const "suffix")))))
+    (wasm "vibra:host/abi@1" "io_write" output 1 "suffix")
+  )
+)
 "#,
         )
         .unwrap();
@@ -2072,10 +2655,10 @@ mod tests {
         ));
 
         let yaml =
-            module(r#"(fn bad () void (do (embed "legacy.yaml" format: yaml)))"#).unwrap_err();
+            module(r#"(defn bad () void (do (embed "legacy.yaml" format: yaml)))"#).unwrap_err();
         assert_eq!(yaml.code, "E-SYN-008");
         assert_eq!(
-            module(r#"(fn bad () void (do (embed "legacy.YML")))"#)
+            module(r#"(defn bad () void (do (embed "legacy.YML")))"#)
                 .unwrap_err()
                 .code,
             "E-SYN-008"
@@ -2084,7 +2667,7 @@ mod tests {
 
     #[test]
     fn convert_preserves_the_fallback_literals_own_span() {
-        let source = "(fn narrow ((value int64)) int32 (do (return (convert value int32 5))))";
+        let source = "(defn narrow (value int64) int32 (do (return (convert value int32 5))))";
         let parsed = module(source).unwrap();
         let TopLevel::Function(function) = &parsed.forms[0] else {
             panic!("expected function");
@@ -2125,49 +2708,54 @@ mod tests {
     fn lowers_complete_test_metadata_with_trailing_labels() {
         let parsed = module(
             r#"
-(test complete fs (do (test.assert true))
+(test.scenario "suite" (test.case "complete" (test.assert true) profile: fs
   tags: (filesystem)
   timeout-ms: 25
   random-seed: 42
   skip: "sandbox unavailable"
   expect-error: (compile E-FS-001 "denied")
   clock: (fixed 1000 7)
-  workspace: temp)
+  workspace: temp))
 "#,
         )
         .unwrap();
-        let TopLevel::Test(test) = &parsed.forms[0] else {
-            panic!("expected test");
+        let TopLevel::TestScenario(scenario) = &parsed.forms[0] else {
+            panic!("expected scenario");
         };
+        let test = &scenario.cases[0];
         assert_eq!(test.metadata.len(), 7);
         assert!(matches!(test.metadata[1], TestMeta::TimeoutMillis(_)));
         assert!(matches!(test.metadata[2], TestMeta::RandomSeed(_)));
         assert!(matches!(test.metadata[3], TestMeta::Skip(_)));
 
         assert_eq!(
-            module("(test bad core (do) timeout-ms: 0)")
+            module("(test.scenario \"suite\" (test.case \"bad\" (do) timeout-ms: 0))")
                 .unwrap_err()
                 .code,
             "E-SYN-008"
         );
         assert_eq!(
-            module(r#"(test bad core (do) expect-error: (runtime E-RUN "boom"))"#)
+            module(r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (runtime E-RUN "boom")))"#)
                 .unwrap_err()
                 .code,
             "E-SYN-009"
         );
-        let runtime = module(r#"(test runtime core (do) expect-error: (runtime "boom"))"#).unwrap();
-        let TopLevel::Test(runtime) = &runtime.forms[0] else {
-            panic!("expected test");
+        let runtime = module(
+            r#"(test.scenario "suite" (test.case "runtime" (do) expect-error: (runtime "boom")))"#,
+        )
+        .unwrap();
+        let TopLevel::TestScenario(scenario) = &runtime.forms[0] else {
+            panic!("expected scenario");
         };
+        let runtime = &scenario.cases[0];
         assert!(matches!(
             runtime.metadata[0],
             TestMeta::ExpectError(ExpectedError::Runtime { .. })
         ));
         for source in [
-            r#"(test bad core (do) expect-error: (runtime ""))"#,
-            r#"(test bad core (do) expect-error: (load E-LOAD-001 ""))"#,
-            r#"(test bad core (do) expect-error: (compile E-COMPILE-001 ""))"#,
+            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (runtime "")))"#,
+            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (load E-LOAD-001 "")))"#,
+            r#"(test.scenario "suite" (test.case "bad" (do) expect-error: (compile E-COMPILE-001 "")))"#,
         ] {
             let error = module(source).unwrap_err();
             assert_eq!(error.code, "E-SYN-008");
@@ -2181,17 +2769,24 @@ mod tests {
     #[test]
     fn lowers_expression_type_pattern_and_annotation_roles() {
         let source = r#"
-(fn unwrap ((input (option int64))) int64
+(defn
+  unwrap
+  (input (option int64))
+  int64
   (do
     (let-as fallback int64 0)
-    (match input
-      (case (option.some (bind value)) (do (return value)))
-      (case (option.none) (do (return fallback)))))
+    (match
+  input
+  (option.some (bind value))
+  (do (return value))
+  (option.none)
+  (do (return fallback))
+)
+  )
   doc: "unwrap"
-  where: ((t comparable))
-  impls: ((impl display
-    types: (int64)
-    methods: ((method show display.show)))))
+  where: (t comparable)
+  impls: ((impl display types: (int64) methods: ((method show display.show))))
+)
 "#;
         let module = module(source).unwrap();
         let TopLevel::Function(function) = &module.forms[0] else {
@@ -2227,14 +2822,10 @@ mod tests {
     fn rejects_invalid_private_target_body_and_special_form_arity() {
         assert_eq!(
             module("(private (import io \"x\"))").unwrap_err().code,
-            "E-SYN-008"
+            "E-SYN-007"
         );
         assert_eq!(
-            module("(fn f () void (array))").unwrap_err().code,
-            "E-SYN-008"
-        );
-        assert_eq!(
-            module("(fn f () void (do (break 1)))").unwrap_err().code,
+            module("(defn f () void (do (break 1)))").unwrap_err().code,
             "E-SYN-009"
         );
     }
@@ -2242,7 +2833,7 @@ mod tests {
     #[test]
     fn ignores_reader_comments_in_all_grammar_positions() {
         let module =
-            module("(fn ; head\n f (; params\n (x int64)) int64 (do ; body\n (return x)))")
+            module("(defn ; head\n f (; params\n x int64) int64 (do ; body\n (return x)))")
                 .unwrap();
         let TopLevel::Function(function) = &module.forms[0] else {
             panic!("expected function");
@@ -2286,14 +2877,23 @@ mod tests {
     #[test]
     fn lowers_typed_macros_and_retains_quoted_cst() {
         let source = r#"
-(private
-  (macro unless ((condition expr-syntax) (body expr-syntax)) expr-syntax
-    (do
-      (let fallback (quote expr-syntax unit))
-      (if condition
-        (do (quote expr-syntax (if (unquote condition) (do unit) (do (splice body)))))
-        (do (capture caller))))
-    doc: "Conditional syntax."))
+(macro
+  unless
+  (condition expr-syntax body expr-syntax)
+  expr-syntax
+  (do
+    (let fallback (quote expr-syntax unit))
+    (if
+      condition
+      (do
+        (quote expr-syntax (if (unquote condition) (do unit) (do (splice body))))
+      )
+      (do (capture caller))
+    )
+  )
+  doc: "Conditional syntax."
+  visibility: private
+)
 "#;
         let parsed = module(source).unwrap();
         let TopLevel::Macro(definition) = &parsed.forms[0] else {
@@ -2316,7 +2916,7 @@ mod tests {
 
     #[test]
     fn validates_macro_categories_body_and_operator_arity() {
-        let error = module("(macro m ((x value-syntax)) expr-syntax (do x))").unwrap_err();
+        let error = module("(macro m (x value-syntax) expr-syntax (do x))").unwrap_err();
         assert_eq!(error.code, "E-SYN-008");
 
         let error = module("(macro m () expr-syntax (do))").unwrap_err();
@@ -2329,15 +2929,15 @@ mod tests {
         assert_eq!(error.code, "E-SYN-009");
 
         let error = module("(private (test no core (do)))").unwrap_err();
-        assert_eq!(error.code, "E-SYN-008");
+        assert_eq!(error.code, "E-SYN-007");
     }
 
     #[test]
     fn identical_list_has_contextual_type_expression_and_pattern_meaning() {
         let parsed = module(
             "(const typed (option int64) (option int64))\n\
-             (fn inspect ((x int64)) bool\n\
-               (do (match x (case (option int64) (do true)))))",
+             (defn inspect (x int64) bool\n\
+               (do (match x (option int64) (do true))))",
         )
         .unwrap();
         let TopLevel::Constant(constant) = &parsed.forms[0] else {
@@ -2363,12 +2963,10 @@ mod tests {
     #[test]
     fn validates_trailing_attributes_and_keeps_calls_positional() {
         for source in [
-            "(fn f () doc: \"early\" void (do))",
-            "(fn f () void (do) doc:)",
-            "(fn f () void (do) doc: \"a\" doc: \"b\")",
-            "(fn f () void (do) unknown: unit)",
-            "(test t core (do) tags: (fast) tags: (slow))",
-            "(fn f () void (do (call value: 1)))",
+            "(defn f () void (do) doc:)",
+            "(defn f () void (do) doc: \"a\" doc: \"b\")",
+            "(defn f () void (do) unknown: unit)",
+            "(test.scenario \"suite\" (test.case \"t\" (do) tags: (fast) tags: (slow)))",
         ] {
             let error = module(source).unwrap_err();
             assert_eq!(error.code, "E-SYN-011", "source: {source}");
@@ -2378,23 +2976,24 @@ mod tests {
     #[test]
     fn lowers_all_test_attribute_roles() {
         let parsed = module(
-            "(test measured core (do)\n\
+            "(test.scenario \"suite\" (test.case \"measured\" (do)\n\
              tags: (fast arithmetic)\n\
              expect-error: (compile E-OP-002 \"overflow\")\n\
              clock: (fixed 0 0)\n\
-             workspace: temp)",
+             workspace: temp))",
         )
         .unwrap();
-        let TopLevel::Test(test) = &parsed.forms[0] else {
-            panic!("expected test");
+        let TopLevel::TestScenario(scenario) = &parsed.forms[0] else {
+            panic!("expected scenario");
         };
+        let test = &scenario.cases[0];
         assert_eq!(test.metadata.len(), 4);
         assert!(matches!(test.metadata[3], TestMeta::Workspace(_)));
     }
 
     #[test]
     fn document_and_ast_ids_are_stable_per_snapshot_and_document_qualified() {
-        let syntax = parse("(fn main () void (do (return)))").unwrap();
+        let syntax = parse("(defn main () void (do (return)))").unwrap();
         let document_a = DocumentId::from_raw(41);
         let document_b = DocumentId::from_raw(42);
 

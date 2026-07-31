@@ -1,55 +1,35 @@
 (import io "../stdlib/src/io.vibra")
 (import fs "../stdlib/src/fs.vibra")
 (import result "../stdlib/src/result.vibra")
-(fn
+(defn
   main
-  (
-    (policy
-      (policy
-        (fs-write (group requirement: mandatory scopes: ((dir "./tmp"))))
-        (fs-read (group requirement: mandatory scopes: ((dir "./tmp"))))
-      )
-    )
-  )
+  ()
   void
-  (do
-    (let path (fs.path.new "tmp/hello.txt"))
-    (let write-capability (policy.narrow policy fs.write-capability))
-    (let read-capability (policy.narrow policy fs.read-capability))
-    (let opened-write (fs.open-write path write-capability))
-    (match
-      opened-write
-      (case
-        (result.result.ok (bind out))
-        (do (fs.writable.write-string out "from vibra fs") (fs.closeable.close out))
+  (let path (fs.path.new "tmp/hello.txt"))
+  (let opened-write (fs.open-write path))
+  (match
+    opened-write
+    (result.result.ok (bind out))
+    (do (fs.writable.write-string out "from vibra fs") (fs.closeable.close out))
+    (result.result.err (bind write-err))
+    (do (io.eprintln "failed to open file for writing"))
+  )
+  (let opened-read (fs.open-read path))
+  (match
+    opened-read
+    (result.result.ok (bind input))
+    (do
+      (let text-result (fs.readable.read-string input))
+      (match
+        text-result
+        (result.result.ok (bind text))
+        (io.println text)
+        (result.result.err (bind read-err))
+        (io.eprintln "failed to read file")
       )
-      (case
-        (result.result.err (bind write-err))
-        (do (io.eprintln "failed to open file for writing"))
-      )
+      (fs.closeable.close input)
     )
-    (let opened-read (fs.open-read path read-capability))
-    (match
-      opened-read
-      (case
-        (result.result.ok (bind input))
-        (do
-          (let text-result (fs.readable.read-string input))
-          (match
-            text-result
-            (case (result.result.ok (bind text)) (do (io.println text)))
-            (case
-              (result.result.err (bind read-err))
-              (do (io.eprintln "failed to read file"))
-            )
-          )
-          (fs.closeable.close input)
-        )
-      )
-      (case
-        (result.result.err (bind open-err))
-        (do (io.eprintln "failed to open file for reading"))
-      )
-    )
+    (result.result.err (bind open-err))
+    (do (io.eprintln "failed to open file for reading"))
   )
 )

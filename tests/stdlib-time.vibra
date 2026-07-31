@@ -1,12 +1,12 @@
 (import test "../stdlib/src/test.vibra")
 (import time "../stdlib/src/time.vibra")
 (import result "../stdlib/src/result.vibra")
-(fn accepts-unix-millis ((value uint64)) bool (do (return true)))
-(fn accepts-duration ((value time.duration)) bool (do (return true)))
-(test
-  now-unix-millis-reads-the-clock
-  system
-  (do
+(defn accepts-unix-millis (value uint64) bool (return true))
+(defn accepts-duration (value time.duration) bool (return true))
+(test.scenario
+  "now-unix-millis-reads-the-clock"
+  (test.case
+    "now-unix-millis-reads-the-clock"
     (let now (time.now-unix-millis))
     (let is-millis (accepts-unix-millis now))
     (test.assert is-millis)
@@ -16,12 +16,12 @@
     (let elapsed (time.duration-between start finish))
     (match
       elapsed
-      (case
-        (result.result.ok (bind duration))
-        (do (let is-duration (accepts-duration duration)) (test.assert is-duration))
-      )
-      (case (result.result.err _) (do (test.fail "monotonic clock moved backwards")))
+      (result.result.ok (bind duration))
+      (do (let is-duration (accepts-duration duration)) (test.assert is-duration))
+      (result.result.err _)
+      (do (test.fail "monotonic clock moved backwards"))
     )
+    profile: system
+    tags: (stdlib)
   )
-  tags: (stdlib)
 )

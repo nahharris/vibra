@@ -1,12 +1,12 @@
 (import test "../stdlib/src/test.vibra")
 (import sys "../stdlib/src/sys.vibra")
 (import result "../stdlib/src/result.vibra")
-(fn accepts-args ((value (array str))) bool (do (return true)))
-(fn accepts-info ((value sys.info-record)) bool (do (return true)))
-(test
-  info-returns-system-information
-  system
-  (do
+(defn accepts-args (value (array str)) bool (return true))
+(defn accepts-info (value sys.info-record) bool (return true))
+(test.scenario
+  "info-returns-system-information"
+  (test.case
+    "info-returns-system-information"
     (let info (sys.info))
     (let info-has-the-declared-type (accepts-info info))
     (test.assert info-has-the-declared-type)
@@ -18,12 +18,12 @@
     (let cwd (sys.current-dir))
     (match
       cwd
-      (case (result.result.ok _) (do (test.assert true)))
-      (case
-        (result.result.err _)
-        (do (test.fail "current directory was unavailable"))
-      )
+      (result.result.ok _)
+      (do (test.assert true))
+      (result.result.err _)
+      (do (test.fail "current directory was unavailable"))
     )
+    profile: system
+    tags: (stdlib)
   )
-  tags: (stdlib)
 )

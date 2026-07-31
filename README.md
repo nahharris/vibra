@@ -26,17 +26,20 @@ definitions; calls are positional and labels configure enclosing forms.
 ```vibra
 (import io "../stdlib/src/io.vibra")
 
-(fn main () void
-  (do (io.println "Hello, World!")))
+(defn main () void (do (io.println "Hello, World!")))
 ```
 
 Use `;` for reader comments. Persisted documentation belongs in a trailing
 `doc:` attribute, not in comments.
 
 ```vibra
-(fn greet ((name str)) void
+(defn
+  greet
+  (name str)
+  void
   (do (io.println name))
-  doc: "Write a name followed by a newline.")
+  doc: "Write a name followed by a newline."
+)
 ```
 
 ## Projects
@@ -59,9 +62,10 @@ free `core` profile.
 ```vibra
 (import test "@std/test.vibra")
 
-(test truth core
-  (do (test.assert true))
-  tags: (language))
+(test.scenario "truth"
+  (test.case "is true"
+    (test.assert true)
+    tags: (language)))
 ```
 
 ```sh

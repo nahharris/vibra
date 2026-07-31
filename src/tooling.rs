@@ -121,6 +121,10 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
 /// delegates to `sexpr_tooling::staged_format_sexpr`, the reader-typed,
 /// serde-free canonical printer, rather than the legacy YAML-subset path.
 pub fn format_source(path: &Path, source: &str) -> Result<String> {
+    if path.file_name().and_then(|name| name.to_str()) == Some("project.vibra") {
+        let document = crate::syntax::parse(source)?;
+        return Ok(crate::syntax::print(&document));
+    }
     crate::sexpr_tooling::staged_format_sexpr(path, source)
         .map_err(|diagnostic| anyhow::anyhow!("{}: {}", diagnostic.code, diagnostic.message))
 }
@@ -148,6 +152,9 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
     for path in &files {
         let source =
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        if path.file_name().and_then(|name| name.to_str()) == Some("project.vibra") {
+            continue;
+        }
         let suppressions = Suppressions::parse(&source);
         let mut file_diagnostics = Vec::new();
 
@@ -348,9 +355,7 @@ fn rule_summary(code: &str) -> &'static str {
 
 fn active_categories(categories: &[Category]) -> BTreeSet<Category> {
     if categories.is_empty() {
-        return [Category::Style, Category::Syntax, Category::Compile]
-            .into_iter()
-            .collect();
+        return [Category::Style, Category::Syntax].into_iter().collect();
     }
     categories.iter().copied().collect()
 }

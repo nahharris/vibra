@@ -146,7 +146,7 @@
 >
 > (def option
 >   (enum (some t) (none void))
->   where: ((t))
+>   where: (t any)
 >   doc: "A value that may be absent.")
 >
 > This better reflects the semantic AST: where/doc configure the containing definition rather than being independent forms/calls. Recommended contract:

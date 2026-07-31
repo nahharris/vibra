@@ -1,73 +1,73 @@
 (import test "../stdlib/src/test.vibra")
 (import convert "../stdlib/src/convert.vibra")
 (import result "../stdlib/src/result.vibra")
-(test
-  integer-parse-format-and-errors
-  core
-  (do
+(test.scenario
+  "integer-parse-format-and-errors"
+  (test.case
+    "integer-parse-format-and-errors"
     (let parsed (convert.parse-int64 "-42"))
     (match
       parsed
-      (case
-        (result.result.ok -42)
-        (do (test.assert-eq-str (convert.format-int64 -42) "-42"))
-      )
-      (case _ (do (test.fail "signed integer round trip failed")))
+      (result.result.ok -42)
+      (do (test.assert-eq-str (convert.format-int64 -42) "-42"))
+      _
+      (do (test.fail "signed integer round trip failed"))
     )
     (let invalid (convert.parse-int64 "42x"))
     (match
       invalid
-      (case
-        (result.result.err (convert.parse-error.invalid))
-        (do (test.assert true))
-      )
-      (case _ (do (test.fail "invalid integer was accepted")))
+      (result.result.err (convert.parse-error.invalid))
+      (do (test.assert true))
+      _
+      (do (test.fail "invalid integer was accepted"))
     )
     (let overflow (convert.parse-int64 "9223372036854775808"))
     (match
       overflow
-      (case
-        (result.result.err (convert.parse-error.overflow))
-        (do (test.assert true))
-      )
-      (case _ (do (test.fail "integer overflow was not typed")))
+      (result.result.err (convert.parse-error.overflow))
+      (do (test.assert true))
+      _
+      (do (test.fail "integer overflow was not typed"))
     )
+    profile: core
   )
 )
-(test
-  float-special-values-and-round-trip
-  core
-  (do
+(test.scenario
+  "float-special-values-and-round-trip"
+  (test.case
+    "float-special-values-and-round-trip"
     (test.assert-eq-str (convert.format-float64 1.25) "1.25")
     (let parsed (convert.parse-float64 "1.25"))
     (match
       parsed
-      (case (result.result.ok 1.25) (do (test.assert true)))
-      (case _ (do (test.fail "float round trip failed")))
+      (result.result.ok 1.25)
+      (do (test.assert true))
+      _
+      (do (test.fail "float round trip failed"))
     )
     (let infinity (convert.parse-float64 "inf"))
     (match
       infinity
-      (case
-        (result.result.ok (bind value))
-        (do (test.assert-eq-str (convert.format-float64 value) "inf"))
-      )
-      (case _ (do (test.fail "infinity contract failed")))
+      (result.result.ok (bind value))
+      (do (test.assert-eq-str (convert.format-float64 value) "inf"))
+      _
+      (do (test.fail "infinity contract failed"))
     )
+    profile: core
   )
 )
-(test
-  boolean-is-exact
-  core
-  (do
+(test.scenario
+  "boolean-is-exact"
+  (test.case
+    "boolean-is-exact"
     (let parsed (convert.parse-bool "true"))
     (match
       parsed
-      (case
-        (result.result.ok true)
-        (do (test.assert-eq-str (convert.format-bool false) "false"))
-      )
-      (case _ (do (test.fail "bool conversion failed")))
+      (result.result.ok true)
+      (do (test.assert-eq-str (convert.format-bool false) "false"))
+      _
+      (do (test.fail "bool conversion failed"))
     )
+    profile: core
   )
 )

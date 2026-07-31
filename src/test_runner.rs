@@ -59,7 +59,8 @@ struct TestPlanItem {
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredTest {
     pub path: String,
-    pub name: String,
+    pub scenario: String,
+    pub case: String,
     pub profile: String,
     pub tags: Vec<String>,
     pub timeout_ms: u64,
@@ -78,14 +79,18 @@ pub fn list_tests(
     discover_tests(path, filter, profiles, tags, Duration::from_secs(30)).map(|items| {
         items
             .into_iter()
-            .map(|item| DiscoveredTest {
-                path: item.display_path,
-                name: item.name,
-                profile: item.profile,
-                tags: item.tags,
-                timeout_ms: item.timeout.as_millis().min(u128::from(u64::MAX)) as u64,
-                skip_reason: item.skip_reason,
-                requires_workspace: item.workspace.is_some(),
+            .map(|item| {
+                let (scenario, case) = test_identity(&item.name);
+                DiscoveredTest {
+                    path: item.display_path,
+                    scenario,
+                    case,
+                    profile: item.profile,
+                    tags: item.tags,
+                    timeout_ms: item.timeout.as_millis().min(u128::from(u64::MAX)) as u64,
+                    skip_reason: item.skip_reason,
+                    requires_workspace: item.workspace.is_some(),
+                }
             })
             .collect()
     })
@@ -125,7 +130,8 @@ pub struct TestReport {
 pub struct TestResult {
     #[serde(skip)]
     index: usize,
-    name: String,
+    scenario: String,
+    case: String,
     path: String,
     status: String,
     duration_ms: u128,
@@ -534,9 +540,11 @@ fn discover_tests(
 }
 
 fn skipped_result(item: &TestPlanItem, reason: &str) -> TestResult {
+    let (scenario, case) = test_identity(&item.name);
     TestResult {
         index: item.index,
-        name: item.name.clone(),
+        scenario,
+        case,
         path: item.display_path.clone(),
         status: "skipped".to_string(),
         duration_ms: 0,
@@ -715,8 +723,10 @@ fn run_one_child(
                 passed = false;
                 message = format!("compiler warnings denied: {}", warnings.join("; "));
             }
+            let (scenario, case) = test_identity(&item.name);
             return Ok(TestResult {
-                name: item.name.clone(),
+                scenario,
+                case,
                 index: item.index,
                 path: item.display_path.clone(),
                 status: if passed { "passed" } else { "failed" }.to_string(),
@@ -739,8 +749,10 @@ fn run_one_child(
             let _ = result_file.close();
             let stdout = join_output_reader(stdout_reader, "stdout").unwrap_or_default();
             let stderr = join_output_reader(stderr_reader, "stderr").unwrap_or_default();
+            let (scenario, case) = test_identity(&item.name);
             return Ok(TestResult {
-                name: item.name.clone(),
+                scenario,
+                case,
                 index: item.index,
                 path: item.display_path.clone(),
                 status: "timed_out".to_string(),
@@ -894,7 +906,10 @@ fn append_run_config_args(cmd: &mut Command, config: &runtime::RunConfig) {
 
 fn print_human_report(report: &TestReport) {
     for test in &report.tests {
-        println!("{} {}::{}", test.status, test.path, test.name);
+        println!(
+            "{} {}::{}::{}",
+            test.status, test.path, test.scenario, test.case
+        );
         if test.status == "skipped" {
             if let Some(reason) = &test.skip_reason {
                 println!("  {reason}");
@@ -908,6 +923,12 @@ fn print_human_report(report: &TestReport) {
         "{} passed; {} failed; {} timed out; {} skipped; {} total",
         report.passed, report.failed, report.timed_out, report.skipped, report.total
     );
+}
+
+fn test_identity(name: &str) -> (String, String) {
+    name.split_once("::")
+        .map(|(scenario, case)| (scenario.to_string(), case.to_string()))
+        .unwrap_or_else(|| (name.to_string(), name.to_string()))
 }
 
 fn normalize_path(path: &Path) -> String {

@@ -133,6 +133,11 @@ pub enum Expr {
         call: Box<Call>,
         return_type: TypeRef,
     },
+    HostCall {
+        import: ImportTarget,
+        args: Vec<Expr>,
+        return_type: TypeRef,
+    },
     Primitive {
         op: PrimitiveOp,
         args: Vec<Expr>,
@@ -270,7 +275,7 @@ pub enum TypeRef {
     Interface(BTreeMap<String, TypeRef>),
     Intersect(Vec<TypeRef>),
     FnType {
-        args: Box<TypeRef>,
+        parameters: Vec<FunctionTypeParameter>,
         return_type: Box<TypeRef>,
     },
     /// The reserved `$self` type. Inside an `$interface` body it is an
@@ -278,6 +283,13 @@ pub enum TypeRef {
     /// (Phases 3/4) it is substituted by the enclosing type. Outside of
     /// those positions it is a parse-time error (`E-SELF-001`).
     SelfType,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FunctionTypeParameter {
+    pub name: String,
+    pub ty: TypeRef,
+    pub variadic: bool,
 }
 
 /// A registered top-level type-form definition. Generic aliases carry
@@ -316,8 +328,7 @@ pub struct FunctionSig {
     pub type_params: Vec<String>,
     /// Parallel to `type_params`. See `TypeAlias::type_param_bounds`.
     pub type_param_bounds: Vec<Vec<TypeRef>>,
-    pub arg_names: Vec<String>,
-    pub arg_types: Vec<TypeRef>,
+    pub parameters: Vec<Parameter>,
     pub return_type: TypeRef,
     pub body: FunctionBody,
     /// Compile-time documentation string from the symbol's `=doc` annotation.
@@ -325,10 +336,72 @@ pub struct FunctionSig {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Parameter {
+    pub name: String,
+    pub ty: TypeRef,
+    pub variadic: bool,
+}
+
+fn parameters_from_parts(
+    names: Vec<String>,
+    types: Vec<TypeRef>,
+    variadic: Vec<bool>,
+) -> Vec<Parameter> {
+    names
+        .into_iter()
+        .zip(types)
+        .enumerate()
+        .map(|(index, (name, ty))| Parameter {
+            name,
+            ty,
+            variadic: variadic.get(index).copied().unwrap_or(false),
+        })
+        .collect()
+}
+
+fn function_type_parameters_from_type(args: TypeRef) -> Vec<FunctionTypeParameter> {
+    match args {
+        TypeRef::Void => Vec::new(),
+        TypeRef::Record(fields) => fields
+            .into_iter()
+            .map(|(name, ty)| FunctionTypeParameter {
+                name,
+                ty,
+                variadic: false,
+            })
+            .collect(),
+        TypeRef::Tuple(types) => types
+            .into_iter()
+            .enumerate()
+            .map(|(index, ty)| FunctionTypeParameter {
+                name: format!("arg-{index}"),
+                ty,
+                variadic: false,
+            })
+            .collect(),
+        ty => vec![FunctionTypeParameter {
+            name: "arg-0".to_string(),
+            ty,
+            variadic: false,
+        }],
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Call {
     pub callee_key: String,
     pub type_args: Vec<TypeRef>,
     pub args: Vec<Expr>,
+    #[serde(default)]
+    pub source_args: Vec<Expr>,
+    #[serde(default)]
+    pub argument_targets: Vec<CallArgumentTarget>,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum CallArgumentTarget {
+    Fixed(usize),
+    Variadic,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1541,14 +1614,9 @@ fn parse_type_constructor(
             }
             let args = map_get_str(m, "args").context("$fn-type missing `args`")?;
             let ret = map_get_str(m, "return").context("$fn-type missing `return`")?;
+            let args = parse_type_ref(args, scope, skeletons, warnings, self_allowed)?;
             Ok(TypeRef::FnType {
-                args: Box::new(parse_type_ref(
-                    args,
-                    scope,
-                    skeletons,
-                    warnings,
-                    self_allowed,
-                )?),
+                parameters: function_type_parameters_from_type(args),
                 return_type: Box::new(parse_type_ref(
                     ret,
                     scope,
@@ -1853,8 +1921,18 @@ fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAl
                 .map(|t| qualify_named_type(alias, t, aliases))
                 .collect(),
         ),
-        TypeRef::FnType { args, return_type } => TypeRef::FnType {
-            args: Box::new(qualify_named_type(alias, *args, aliases)),
+        TypeRef::FnType {
+            parameters,
+            return_type,
+        } => TypeRef::FnType {
+            parameters: parameters
+                .into_iter()
+                .map(|parameter| FunctionTypeParameter {
+                    name: parameter.name,
+                    ty: qualify_named_type(alias, parameter.ty, aliases),
+                    variadic: parameter.variadic,
+                })
+                .collect(),
             return_type: Box::new(qualify_named_type(alias, *return_type, aliases)),
         },
         _ => ty,
@@ -2552,8 +2630,8 @@ fn lower_pending_user_functions(
             bail!("internal: pending body for non-user function `{key}`");
         };
         let mut locals: HashMap<String, TypeRef> = HashMap::new();
-        for (n, t) in sig.arg_names.iter().zip(sig.arg_types.iter()) {
-            locals.insert(format!("args.{n}"), t.clone());
+        for parameter in &sig.parameters {
+            locals.insert(format!("args.{}", parameter.name), parameter.ty.clone());
         }
         let fn_ctx = UserFnContext {
             return_type: sig.return_type.clone(),
@@ -3046,8 +3124,7 @@ fn try_register_function(
             symbol: name.to_string(),
             type_params: env.type_params.clone(),
             type_param_bounds: resolved_bounds,
-            arg_names,
-            arg_types,
+            parameters: parameters_from_parts(arg_names, arg_types, Vec::new()),
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -3125,16 +3202,20 @@ pub(crate) fn validate_wasm_bodies(
             continue;
         };
         if import.module.starts_with('@') {
-            if wasm_args.len() != sig.arg_types.len() {
+            if wasm_args.len() != sig.parameters.len() {
                 bail!(
                     "E-WASM-007: `{key}` forwards {} values but declares {} parameters",
                     wasm_args.len(),
-                    sig.arg_types.len()
+                    sig.parameters.len()
                 );
             }
             for spec in wasm_args {
                 match spec {
-                    WasmArgSpec::Arg(name) if sig.arg_names.contains(name) => {}
+                    WasmArgSpec::Arg(name)
+                        if sig
+                            .parameters
+                            .iter()
+                            .any(|parameter| parameter.name == *name) => {}
                     WasmArgSpec::ConstInt(_) => {}
                     WasmArgSpec::Arg(name) => {
                         bail!("E-WASM-007: `{key}` forwards unknown argument `$args.{name}`")
@@ -3181,10 +3262,10 @@ pub(crate) fn validate_wasm_bodies(
             let arg_type = match spec {
                 WasmArgSpec::Arg(name) => {
                     sig
-                        .arg_names
+                        .parameters
                         .iter()
-                        .position(|n| n == name)
-                        .map(|idx| &sig.arg_types[idx])
+                        .find(|parameter| parameter.name == *name)
+                        .map(|parameter| &parameter.ty)
                         .with_context(|| {
                             format!(
                                 "E-WASM-003: `{key}` forwards unknown argument `$args.{name}` to `{}.{}`",
@@ -3209,7 +3290,7 @@ pub(crate) fn validate_wasm_bodies(
     Ok(())
 }
 
-fn abi_value_type_matches(
+pub(crate) fn abi_value_type_matches(
     kind: crate::host_abi::ValueKind,
     ty: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
@@ -3264,6 +3345,26 @@ fn abi_value_type_matches(
         A::OptionAny => instantiated("option").is_some(),
         A::ResultAny => instantiated("result").is_some(),
     }
+}
+
+pub(crate) fn host_result_type(kind: crate::host_abi::ValueKind) -> Result<TypeRef> {
+    use crate::host_abi::ValueKind as K;
+    Ok(match kind {
+        K::Void => TypeRef::Void,
+        K::Bool => TypeRef::Bool,
+        K::Int64 => TypeRef::Int64,
+        K::UInt64 => TypeRef::UInt64,
+        K::Float64 => TypeRef::Float64,
+        K::Str => TypeRef::Str,
+        K::ReadHandle => TypeRef::HostHandle(HandleAccess::Read),
+        K::WriteHandle => TypeRef::HostHandle(HandleAccess::Write),
+        K::ProcessHandle => TypeRef::HostHandle(HandleAccess::Process),
+        K::AnyHandle => TypeRef::HostHandle(HandleAccess::ReadWrite),
+        K::Any | K::OptionAny | K::ResultAny | K::Array | K::StringMap | K::Record => {
+            TypeRef::Named("$host-context".into())
+        }
+        _ => TypeRef::Named(kind.as_str().to_string()),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3425,8 +3526,7 @@ fn register_one_inherent_function(
             symbol: sig_symbol,
             type_params: all_type_params,
             type_param_bounds: full_bounds,
-            arg_names,
-            arg_types,
+            parameters: parameters_from_parts(arg_names, arg_types, Vec::new()),
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -3808,9 +3908,17 @@ fn bind_impl_method(
     let return_type = substitute_type(&return_type, iface_subst);
     let return_type = substitute_self(&return_type, self_ty);
 
-    // Compare against the expected (already-substituted) iface fn-type.
     let actual = TypeRef::FnType {
-        args: Box::new(record_from_named_args(&arg_names, &arg_types)),
+        parameters: arg_names
+            .iter()
+            .cloned()
+            .zip(arg_types.iter().cloned())
+            .map(|(name, ty)| FunctionTypeParameter {
+                name,
+                ty,
+                variadic: false,
+            })
+            .collect(),
         return_type: Box::new(return_type.clone()),
     };
     if !signatures_match(expected_fn_type, &actual, type_aliases) {
@@ -3882,8 +3990,7 @@ fn bind_impl_method(
             symbol: sig_symbol,
             type_params: sig_type_params,
             type_param_bounds: sig_bounds,
-            arg_names,
-            arg_types,
+            parameters: parameters_from_parts(arg_names, arg_types, Vec::new()),
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
@@ -3905,30 +4012,21 @@ fn enclosing_type_params_len(self_ty: &TypeRef) -> usize {
     }
 }
 
-/// Build a `TypeRef::FnType` from a `FunctionSig`. The `args` side becomes a
-/// `$record` keyed by the original argument names so it matches the shape
-/// produced by `parse_type_constructor` for `$fn-type`.
 fn sig_function_type(sig: &FunctionSig) -> TypeRef {
     TypeRef::FnType {
-        args: Box::new(record_from_named_args(&sig.arg_names, &sig.arg_types)),
+        parameters: sig
+            .parameters
+            .iter()
+            .map(|parameter| FunctionTypeParameter {
+                name: parameter.name.clone(),
+                ty: parameter.ty.clone(),
+                variadic: parameter.variadic,
+            })
+            .collect(),
         return_type: Box::new(sig.return_type.clone()),
     }
 }
 
-fn record_from_named_args(arg_names: &[String], arg_types: &[TypeRef]) -> TypeRef {
-    if arg_names.is_empty() {
-        return TypeRef::Void;
-    }
-    let mut fields = BTreeMap::new();
-    for (n, t) in arg_names.iter().zip(arg_types.iter()) {
-        fields.insert(n.clone(), t.clone());
-    }
-    TypeRef::Record(fields)
-}
-
-/// Two function signatures match for the purposes of `=impl` checking iff
-/// their arguments match invariantly while the concrete impl return can flow
-/// into the interface-declared return type.
 fn signatures_match(
     expected: &TypeRef,
     actual: &TypeRef,
@@ -3936,11 +4034,11 @@ fn signatures_match(
 ) -> bool {
     let (
         TypeRef::FnType {
-            args: expected_args,
+            parameters: expected_parameters,
             return_type: expected_return,
         },
         TypeRef::FnType {
-            args: actual_args,
+            parameters: actual_parameters,
             return_type: actual_return,
         },
     ) = (expected, actual)
@@ -3948,18 +4046,41 @@ fn signatures_match(
         return false;
     };
 
-    let mut bindings: HashMap<String, TypeRef> = HashMap::new();
-    if !unify_types(expected_args, actual_args, type_aliases, &mut bindings) {
+    if expected_parameters.len() != actual_parameters.len() {
         return false;
     }
-
-    let mut reverse_bindings = bindings.clone();
-    unify_types(
-        actual_args,
-        expected_args,
-        type_aliases,
-        &mut reverse_bindings,
-    ) && unify_types(expected_return, actual_return, type_aliases, &mut bindings)
+    let names_match = expected_parameters.iter().all(|expected| {
+        actual_parameters
+            .iter()
+            .any(|actual| actual.name == expected.name)
+    });
+    let mut bindings = HashMap::new();
+    for (index, expected) in expected_parameters.iter().enumerate() {
+        let actual = if names_match {
+            actual_parameters
+                .iter()
+                .find(|actual| actual.name == expected.name)
+                .expect("matched function parameter name")
+        } else {
+            &actual_parameters[index]
+        };
+        if expected.variadic != actual.variadic {
+            return false;
+        }
+        if !unify_types(&expected.ty, &actual.ty, type_aliases, &mut bindings) {
+            return false;
+        }
+        let mut reverse_bindings = bindings.clone();
+        if !unify_types(
+            &actual.ty,
+            &expected.ty,
+            type_aliases,
+            &mut reverse_bindings,
+        ) {
+            return false;
+        }
+    }
+    unify_types(expected_return, actual_return, type_aliases, &mut bindings)
 }
 
 // ===== Phase 5: bound resolution and validation =====
@@ -3970,6 +4091,7 @@ fn signatures_match(
 fn is_interface_bound(ty: &TypeRef, type_aliases: &HashMap<String, TypeAlias>) -> bool {
     match ty {
         TypeRef::Interface(_) => true,
+        TypeRef::Named(n) if n == "any" => true,
         TypeRef::Named(n) => type_aliases
             .get(n)
             .is_some_and(|ta| is_interface_bound(&ta.body, type_aliases)),
@@ -4191,15 +4313,20 @@ fn check_typeref_bounds(
                 context,
             )?;
         }
-        TypeRef::FnType { args, return_type } => {
-            check_typeref_bounds(
-                args,
-                type_aliases,
-                impls,
-                enclosing_params,
-                enclosing_bounds,
-                context,
-            )?;
+        TypeRef::FnType {
+            parameters,
+            return_type,
+        } => {
+            for parameter in parameters {
+                check_typeref_bounds(
+                    &parameter.ty,
+                    type_aliases,
+                    impls,
+                    enclosing_params,
+                    enclosing_bounds,
+                    context,
+                )?;
+            }
             check_typeref_bounds(
                 return_type,
                 type_aliases,
@@ -4270,8 +4397,13 @@ fn check_typeref_module_private_access(
             check_typeref_module_private_access(key, owner_prefix, context)?;
             check_typeref_module_private_access(value, owner_prefix, context)
         }
-        TypeRef::FnType { args, return_type } => {
-            check_typeref_module_private_access(args, owner_prefix, context)?;
+        TypeRef::FnType {
+            parameters,
+            return_type,
+        } => {
+            for parameter in parameters {
+                check_typeref_module_private_access(&parameter.ty, owner_prefix, context)?;
+            }
             check_typeref_module_private_access(return_type, owner_prefix, context)
         }
         TypeRef::Newtype { inner, .. } => {
@@ -4315,12 +4447,11 @@ fn validate_all_instantiation_bounds(
                 check_typeref_module_private_access(b, owner, key)?;
             }
         }
-        for (i, at) in sig.arg_types.iter().enumerate() {
-            let arg_name = &sig.arg_names[i];
-            let ctx = format!("{key} (arg `{arg_name}`)");
-            check_typeref_module_private_access(at, owner, &ctx)?;
+        for parameter in &sig.parameters {
+            let ctx = format!("{key} (arg `{}`)", parameter.name);
+            check_typeref_module_private_access(&parameter.ty, owner, &ctx)?;
             check_typeref_bounds(
-                at,
+                &parameter.ty,
                 type_aliases,
                 impls,
                 &sig.type_params,
@@ -4405,7 +4536,7 @@ fn check_expr_call_bounds(
             referrer_owner,
             context,
         )?,
-        Expr::Primitive { args, .. } => {
+        Expr::Primitive { args, .. } | Expr::HostCall { args, .. } => {
             for arg in args {
                 check_expr_call_bounds(
                     arg,
@@ -5405,7 +5536,7 @@ fn lower_statement(
         }
         let ctx = fn_ctx.context("`$return` is only valid inside user-defined functions")?;
         let ret_v = map_get_str(stmt, "$return").expect("checked");
-        let expr = parse_expr(
+        let mut expr = parse_expr(
             ret_v,
             sigs,
             constants,
@@ -5416,6 +5547,11 @@ fn lower_statement(
             home,
             warnings,
         )?;
+        if let Expr::HostCall { return_type, .. } = &mut expr {
+            if *return_type == TypeRef::Named("$host-context".into()) {
+                *return_type = ctx.return_type.clone();
+            }
+        }
         let actual = infer_expr_type(&expr, constants, locals, type_aliases, enums)
             .context("could not infer type for `$return` expression")?;
         if !type_compatible(&ctx.return_type, &actual, type_aliases) {
@@ -5497,6 +5633,18 @@ fn lower_statement(
             bail!("`$continue` is only valid inside `$for` or `$while`");
         }
         Ok(Statement::Continue)
+    } else if map_get_str(stmt, "$host-call").is_some() {
+        Ok(Statement::Eval(parse_expr(
+            step,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            home,
+            warnings,
+        )?))
     } else {
         let call = parse_call(
             step,
@@ -5637,22 +5785,16 @@ fn try_resolve_iface_call(
         format!("interface `{iface_qualified}` has no method `{method}` (called via `{call_key}`)")
     })?;
 
-    let TypeRef::FnType { args, .. } = expected else {
+    let TypeRef::FnType { parameters, .. } = expected else {
         bail!(
             "interface `{iface_qualified}` method `{method}` is not a `$fn-type`; got `{:?}`",
             expected
         );
     };
-    let TypeRef::Record(args_record) = args.as_ref() else {
-        bail!(
-            "interface `{iface_qualified}` method `{method}` has non-record `args`; got `{:?}`",
-            args
-        );
-    };
-    let self_arg_name = args_record
+    let self_arg_name = parameters
         .iter()
-        .find(|(_, t)| matches!(t, TypeRef::SelfType))
-        .map(|(n, _)| n.clone());
+        .find(|parameter| matches!(parameter.ty, TypeRef::SelfType))
+        .map(|parameter| parameter.name.clone());
     let Some(self_arg_name) = self_arg_name else {
         bail!(
             "E-CALL-IFACE-NOSELF: interface method `{iface_qualified}.{method}` has no `$self` argument; \
@@ -5805,22 +5947,16 @@ fn iface_dispatch_arg_name(
         format!("interface `{iface_qualified}` has no method `{method}` (called via `{call_key}`)")
     })?;
 
-    let TypeRef::FnType { args, .. } = expected else {
+    let TypeRef::FnType { parameters, .. } = expected else {
         bail!(
             "interface `{iface_qualified}` method `{method}` is not a `$fn-type`; got `{:?}`",
             expected
         );
     };
-    let TypeRef::Record(args_record) = args.as_ref() else {
-        bail!(
-            "interface `{iface_qualified}` method `{method}` has non-record `args`; got `{:?}`",
-            args
-        );
-    };
-    let self_arg_name = args_record
+    let self_arg_name = parameters
         .iter()
-        .find(|(_, t)| matches!(t, TypeRef::SelfType))
-        .map(|(n, _)| n.clone());
+        .find(|parameter| matches!(parameter.ty, TypeRef::SelfType))
+        .map(|parameter| parameter.name.clone());
     let Some(self_arg_name) = self_arg_name else {
         bail!(
             "E-CALL-IFACE-NOSELF: interface method `{iface_qualified}.{method}` has no `$self` argument; \
@@ -5878,13 +6014,15 @@ fn iface_method_record_field_names(
     let Some(expected) = iface_methods.get(method) else {
         return Ok(None);
     };
-    let TypeRef::FnType { args, .. } = expected else {
+    let TypeRef::FnType { parameters, .. } = expected else {
         return Ok(None);
     };
-    let TypeRef::Record(args_record) = args.as_ref() else {
-        return Ok(None);
-    };
-    Ok(Some(args_record.keys().cloned().collect::<Vec<_>>()))
+    Ok(Some(
+        parameters
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect(),
+    ))
 }
 
 /// Rejects nesting the full parameter map under the callee (`$f: {{ t: ..., x: ... }}`).
@@ -5951,7 +6089,7 @@ fn reject_unknown_call_keys(
     let allowed: HashSet<String> = function
         .type_params
         .iter()
-        .chain(function.arg_names.iter())
+        .chain(function.parameters.iter().map(|parameter| &parameter.name))
         .cloned()
         .collect();
     if let Some(m) = subject.as_mapping() {
@@ -5963,8 +6101,8 @@ fn reject_unknown_call_keys(
         {
             return Ok(());
         }
-        if siblings.is_empty() && !function.arg_names.is_empty() {
-            let primary = &function.arg_names[0];
+        if siblings.is_empty() && !function.parameters.is_empty() {
+            let primary = &function.parameters[0].name;
             let unknown_count = m
                 .keys()
                 .filter_map(|k| k.as_str())
@@ -5976,7 +6114,7 @@ fn reject_unknown_call_keys(
             }
         }
         if siblings.is_empty()
-            && function.arg_names.len() == 1
+            && function.parameters.len() == 1
             && m.len() == 1
             && m.keys()
                 .all(|k| k.as_str().is_some_and(|ks| ks.starts_with('$')))
@@ -5984,7 +6122,7 @@ fn reject_unknown_call_keys(
             return Ok(());
         }
         if siblings.is_empty()
-            && function.arg_names.len() == 1
+            && function.parameters.len() == 1
             && m.len() == 1
             && m.keys()
                 .all(|k| k.as_str().is_some_and(|ks| !ks.starts_with('$')))
@@ -6023,7 +6161,7 @@ fn report_missing_inline_call_args(
     let allowed: HashSet<String> = function
         .type_params
         .iter()
-        .chain(function.arg_names.iter())
+        .chain(function.parameters.iter().map(|parameter| &parameter.name))
         .cloned()
         .collect();
     if m.is_empty()
@@ -6038,9 +6176,12 @@ fn report_missing_inline_call_args(
             bail!("missing type argument `{tp}` in call `{call_key}`");
         }
     }
-    for n in &function.arg_names {
-        if !m.contains_key(Value::String(n.clone())) {
-            bail!("missing value argument `{n}` in call `{call_key}`");
+    for parameter in &function.parameters {
+        if !m.contains_key(Value::String(parameter.name.clone())) {
+            bail!(
+                "missing value argument `{}` in call `{call_key}`",
+                parameter.name
+            );
         }
     }
     Ok(())
@@ -6051,7 +6192,7 @@ fn merge_call_payload(
     subject: &Value,
     siblings: &[(String, Value)],
 ) -> Result<Value> {
-    if function.arg_names.is_empty() {
+    if function.parameters.is_empty() {
         if !siblings.is_empty() {
             bail!("unexpected labeled arguments on zero-argument call");
         }
@@ -6060,14 +6201,17 @@ fn merge_call_payload(
         }
         return Ok(Value::Null);
     }
-    let primary = &function.arg_names[0];
+    let primary = &function.parameters[0].name;
     if siblings.is_empty() {
         if let Some(subject_map) = subject.as_mapping() {
             let keys: Vec<&str> = subject_map.keys().filter_map(|k| k.as_str()).collect();
             if !keys.is_empty() && keys.iter().all(|k| !k.starts_with('$')) {
                 let all_known = keys.iter().all(|k| {
                     function.type_params.iter().any(|p| p == k)
-                        || function.arg_names.iter().any(|a| a == k)
+                        || function
+                            .parameters
+                            .iter()
+                            .any(|parameter| parameter.name == **k)
                 });
                 if all_known {
                     return Ok(subject.clone());
@@ -6077,7 +6221,10 @@ fn merge_call_payload(
                     .copied()
                     .filter(|k| {
                         !function.type_params.iter().any(|p| p == k)
-                            && !function.arg_names.iter().any(|a| a == k)
+                            && !function
+                                .parameters
+                                .iter()
+                                .any(|parameter| parameter.name == **k)
                     })
                     .collect();
                 if unknown_keys.len() == 1
@@ -6085,7 +6232,11 @@ fn merge_call_payload(
                     && keys.iter().all(|k| {
                         unknown_keys.contains(k)
                             || function.type_params.iter().any(|p| p == k)
-                            || function.arg_names.iter().skip(1).any(|a| a == k)
+                            || function
+                                .parameters
+                                .iter()
+                                .skip(1)
+                                .any(|parameter| parameter.name == **k)
                     })
                 {
                     let mut map = serde_yaml::Mapping::new();
@@ -6099,7 +6250,7 @@ fn merge_call_payload(
                     }
                     return Ok(Value::Mapping(map));
                 }
-                if function.arg_names.len() == 1 && keys.len() == 1 {
+                if function.parameters.len() == 1 && keys.len() == 1 {
                     let only_value = subject_map
                         .values()
                         .next()
@@ -6115,7 +6266,13 @@ fn merge_call_payload(
     let allowed: HashSet<String> = function
         .type_params
         .iter()
-        .chain(function.arg_names.iter().skip(1))
+        .chain(
+            function
+                .parameters
+                .iter()
+                .skip(1)
+                .map(|parameter| &parameter.name),
+        )
         .cloned()
         .collect();
     let mut map = serde_yaml::Mapping::new();
@@ -6222,7 +6379,7 @@ fn parse_call(
         let allowed: HashSet<String> = function
             .type_params
             .iter()
-            .chain(function.arg_names.iter())
+            .chain(function.parameters.iter().map(|parameter| &parameter.name))
             .cloned()
             .collect();
         for k in map.keys() {
@@ -6248,25 +6405,25 @@ fn parse_call(
         warnings,
     )?;
     for (idx, expr) in args.iter().enumerate() {
-        let expected = substitute_type(&function.arg_types[idx], &subst);
+        let expected = substitute_type(&function.parameters[idx].ty, &subst);
         let Some(actual) = infer_expr_type(expr, constants, locals, type_aliases, enums) else {
             bail!(
                 "could not infer type for call `{call_key}` argument `{}` (unbound variable or incompatible sub-expressions)",
-                function.arg_names[idx]
+                function.parameters[idx].name
             );
         };
         if !type_compatible(&expected, &actual, type_aliases) {
             if crosses_newtype_boundary(&expected, &actual, type_aliases) {
                 bail!(
                     "E-NEWTYPE-001: implicit coercion between `$newtype` and its inner type is forbidden in call `{call_key}` arg `{}`; use `$cast` (expected {:?}, got {:?})",
-                    function.arg_names[idx],
+                    function.parameters[idx].name,
                     expected,
                     actual
                 );
             }
             bail!(
                 "type mismatch in call `{call_key}` arg `{}`: expected {:?}, got {:?}",
-                function.arg_names[idx],
+                function.parameters[idx].name,
                 expected,
                 actual
             );
@@ -6276,6 +6433,8 @@ fn parse_call(
         callee_key,
         type_args,
         args,
+        source_args: Vec::new(),
+        argument_targets: Vec::new(),
     })
 }
 
@@ -6294,7 +6453,11 @@ fn parse_call_args(
     home_module: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<Expr>> {
-    let arg_names = &function.arg_names;
+    let arg_names = function
+        .parameters
+        .iter()
+        .map(|parameter| &parameter.name)
+        .collect::<Vec<_>>();
     if arg_names.is_empty() {
         if av.is_null() {
             return Ok(Vec::new());
@@ -6347,7 +6510,7 @@ fn parse_call_args(
         .as_mapping()
         .context("expected mapping arguments for this call")?;
     if !generic_call {
-        let allowed: HashSet<&str> = arg_names.iter().map(String::as_str).collect();
+        let allowed: HashSet<&str> = arg_names.iter().map(|name| name.as_str()).collect();
         for k in map.keys() {
             let ks = k.as_str().context("call argument key must be string")?;
             if !allowed.contains(ks) {
@@ -6756,6 +6919,60 @@ fn parse_expr(
                     mutable,
                 });
             }
+        }
+        if let Some(host) = map_get_str(m, "$host-call") {
+            let host = host
+                .as_mapping()
+                .context("E-WASM-003: host call payload must be a mapping")?;
+            let module = map_get_str(host, "module")
+                .and_then(Value::as_str)
+                .context("E-WASM-003: host call module must be a string")?;
+            let name = map_get_str(host, "name")
+                .and_then(Value::as_str)
+                .context("E-WASM-003: host call symbol must be a string")?;
+            let entry = crate::host_abi::lookup(module, name)
+                .with_context(|| format!("E-WASM-002: unknown host import `{module}.{name}`"))?;
+            let values = map_get_str(host, "args")
+                .and_then(Value::as_sequence)
+                .context("E-WASM-003: host call args must be a sequence")?;
+            if values.len() != entry.params.len() {
+                bail!(
+                    "E-WASM-003: host import `{module}.{name}` expects {} arguments, got {}",
+                    entry.params.len(),
+                    values.len()
+                );
+            }
+            let args = values
+                .iter()
+                .map(|value| {
+                    parse_expr(
+                        value,
+                        sigs,
+                        constants,
+                        type_aliases,
+                        enums,
+                        impls,
+                        locals,
+                        home_module,
+                        warnings,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            for (index, (arg, kind)) in args.iter().zip(entry.params).enumerate() {
+                let ty = infer_expr_type(arg, constants, locals, type_aliases, enums)
+                    .context("E-WASM-003: cannot infer host-call argument type")?;
+                if !abi_value_type_matches(*kind, &ty, type_aliases) {
+                    bail!("E-WASM-003: host import `{module}.{name}` argument {index} requires `{}`, got {ty:?}", kind.as_str());
+                }
+            }
+            return Ok(Expr::HostCall {
+                import: ImportTarget {
+                    module: module.to_string(),
+                    name: name.to_string(),
+                },
+                args,
+                return_type: host_result_type(entry.result)?,
+            });
         }
         if let Some(expr) = parse_primitive_expr(
             m,
@@ -7218,26 +7435,22 @@ fn canonical_function_first_arg<'a>(
     Ok((key.to_string(), v))
 }
 
-/// Primary parameter name for an `=impl` `$function` envelope: the `$self` field if present,
-/// otherwise the first record field (declaration order in the stored record).
 fn iface_impl_primary_field_name(expected_fn_type: &TypeRef) -> Result<String> {
-    let TypeRef::FnType { args, .. } = expected_fn_type else {
+    let TypeRef::FnType { parameters, .. } = expected_fn_type else {
         bail!("internal: expected interface method `$fn-type`");
     };
-    let TypeRef::Record(rec) = args.as_ref() else {
-        bail!("internal: interface method args must be a record");
-    };
-    if let Some((n, _)) = rec.iter().find(|(_, t)| matches!(t, TypeRef::SelfType)) {
-        return Ok(n.clone());
+    if let Some(parameter) = parameters
+        .iter()
+        .find(|parameter| matches!(parameter.ty, TypeRef::SelfType))
+    {
+        return Ok(parameter.name.clone());
     }
-    // After `$self` substitution the receiver is no longer `SelfType`, but the field is
-    // still conventionally named `self` — prefer that over lexicographic-first keys like `b`.
-    if rec.contains_key("self") {
+    if parameters.iter().any(|parameter| parameter.name == "self") {
         return Ok("self".to_string());
     }
-    rec.keys()
-        .next()
-        .cloned()
+    parameters
+        .first()
+        .map(|parameter| parameter.name.clone())
         .context("interface method must declare at least one argument")
 }
 
@@ -7331,7 +7544,9 @@ pub(crate) fn infer_expr_type(
                     infer_expr_type(&Expr::Value(rv.clone()), constants, locals, aliases, enums)
                 })
             }),
-        Expr::Call { return_type, .. } => Some(return_type.clone()),
+        Expr::Call { return_type, .. } | Expr::HostCall { return_type, .. } => {
+            Some(return_type.clone())
+        }
         Expr::Primitive { return_type, .. } => Some(return_type.clone()),
         Expr::Cast { target, .. } => Some(target.clone()),
         Expr::Record(fields) => fields
@@ -8042,7 +8257,7 @@ fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: 
 /// Widened to `pub(crate)` so `typed_program.rs` can reuse the exact legacy
 /// wording for the kebab-case advisory instead of re-deriving it.
 pub(crate) fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {
-    if !is_kebab_case(name) {
+    if !name.split("::").all(is_kebab_case) {
         warnings.push(format!(
             "non-kebab-case {context}: `{name}` (recommended: kebab-case)"
         ));

@@ -41,14 +41,14 @@ hello/
 ## Tests
 
 Project tests live under `tests/` by convention. `vibra test` recursively
-discovers `.vibra` files there and runs each top-level `test` declaration.
+discovers `.vibra` files there and runs each `test.case` declaration.
 Test files may contain several tests and do not need a `main` function.
 
 ```vibra
 (import test "@std/test.vibra")
 
-(test opens-file core
-  (do (test.assert true)))
+(test.scenario "files"
+  (test.case "opens file" (test.assert true)))
 ```
 
 Use `--filter`, `--jobs`, `--timeout-ms`, `--fail-fast`, and
@@ -97,7 +97,7 @@ Git dependencies:
 
 A path or Git dependency may expose a static WebAssembly library with a
 package-relative `wasm: path/to/library.wasm` field. Typed wrappers bind its
-exports through `(wasm import: (import "@dependency-name" "function") ...)`; see
+exports through `(wasm "@dependency-name" "function" argument...)`; see
 [static-wasm-ffi.md](static-wasm-ffi.md) for the ABI and safety contract.
 
 Git dependencies must pin a full 40-hex `rev`. `vibra sync` recursively exports clean source trees into package-local `dep/<name>` directories; nested repositories use their own `dep/` directories, so diamond edges may select different revisions without a global namespace collision. Exported trees contain no `.git` metadata. Local dependencies are not copied and published Git dependencies may not declare path dependencies.

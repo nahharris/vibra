@@ -15,12 +15,12 @@ fn docs_resolves_local_and_imported_symbols_in_all_formats() {
     let main = dir.path().join("main.vibra");
     std::fs::write(
         &helper,
-        "(fn greet ((name str)) str\n  (do (return name))\n  doc: \"Return a friendly greeting.\\n\\n```vibra\\n$helper.greet: {name: Vibra}\\n```\\n\")\n",
+        "(defn greet (name str) str\n  (return name)\n  doc: \"Return a friendly greeting.\\n\\n```vibra\\n$helper.greet: {name: Vibra}\\n```\\n\")\n",
     )
     .unwrap();
     std::fs::write(
         &main,
-        "(import helper \"./helper.vibra\")\n(fn main () void (do) doc: \"Run the example application.\")\n",
+        "(import helper \"./helper.vibra\")\n(defn main () void (do) doc: \"Run the example application.\")\n",
     )
     .unwrap();
 
@@ -428,7 +428,7 @@ fn project_check_resolves_local_dependency_without_copying_it() {
     std::fs::create_dir_all(project.join("src/app")).unwrap();
     std::fs::write(
         project.join("src/app/main.vibra"),
-        "(import utils \"@local-utils/util.vibra\")\n(fn main () void (do))\n",
+        "(import utils \"@local-utils/util.vibra\")\n(defn main () void (do))\n",
     )
     .unwrap();
     std::fs::write(
@@ -489,7 +489,7 @@ fn project_check_resolves_dependency_library_source_root() {
     std::fs::create_dir_all(project.join("src/app")).unwrap();
     std::fs::write(
         project.join("src/app/main.vibra"),
-        "(import utils \"@packaged-utils/util.vibra\")\n(fn main () void (do))\n",
+        "(import utils \"@packaged-utils/util.vibra\")\n(defn main () void (do))\n",
     )
     .unwrap();
     std::fs::write(
@@ -564,7 +564,7 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
     std::fs::create_dir_all(project.join("src/app")).unwrap();
     std::fs::write(
         project.join("src/app/main.vibra"),
-        "(import math \"@math/math.vibra\")\n(fn main () void (do))\n",
+        "(import math \"@math/math.vibra\")\n(defn main () void (do))\n",
     )
     .unwrap();
     std::fs::write(
@@ -815,14 +815,19 @@ fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
-        r#"(fn foreign-sum ((left int32) (right int32)) int32
-  (do (wasm import: (import "@math" "sum") args: ((arg left) (arg right)))))
-(fn foreign-assert ((value int32)) void
-  (do (wasm import: (import "@math" "assert_42") args: ((arg value)))))
-(fn main () void
-  (do
-    (let answer (foreign-sum 20 22))
-    (foreign-assert answer)))
+        r#"(defn
+  foreign-sum
+  (left int32 right int32)
+  int32
+  (do (wasm "@math" "sum" left right))
+)
+(defn
+  foreign-assert
+  (value int32)
+  void
+  (do (wasm "@math" "assert_42" value))
+)
+(defn main () void (do (let answer (foreign-sum 20 22)) (foreign-assert answer)))
 "#,
     )
     .unwrap();
@@ -956,14 +961,24 @@ fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
-        r#"(fn foreign-status ((text str)) int32
-  (do (wasm import: (import "@text-ffi" "utf8_status") args: ((arg text)))))
-(fn foreign-assert ((status int32)) void
-  (do (wasm import: (import "@text-ffi" "assert_89") args: ((arg status)))))
-(fn main () void
-  (do
-    (let status (foreign-status "Vï"))
-    (foreign-assert status)))
+        r#"(defn
+  foreign-status
+  (text str)
+  int32
+  (do (wasm "@text-ffi" "utf8_status" text))
+)
+(defn
+  foreign-assert
+  (status int32)
+  void
+  (do (wasm "@text-ffi" "assert_89" status))
+)
+(defn
+  main
+  ()
+  void
+  (do (let status (foreign-status "Vï")) (foreign-assert status))
+)
 "#,
     )
     .unwrap();

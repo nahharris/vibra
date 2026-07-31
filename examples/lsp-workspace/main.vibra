@@ -1,2 +1,2 @@
 (import greeting "@greeting/greet.vibra")
-(fn main () void (do (greeting.greet)))
+(defn main () void (greeting.greet))

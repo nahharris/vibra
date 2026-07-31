@@ -1,82 +1,83 @@
 (import test "../stdlib/src/test.vibra")
 (import option "../stdlib/src/option.vibra")
-(test
-  some-carries-payload
-  core
-  (do
+(test.scenario
+  "some-carries-payload"
+  (test.case
+    "some-carries-payload"
     (let o (option.option.some 7))
     (match
       o
-      (case
-        (option.option.some (bind v))
-        (do
-          (match
-            v
-            (case 7 (do (test.assert true)))
-            (case _ (do (test.fail "wrong some payload")))
-          )
-        )
-      )
-      (case (option.option.none) (do (test.fail "expected some")))
+      (option.option.some (bind v))
+      (do (match v 7 (test.assert true) _ (test.fail "wrong some payload")))
+      (option.option.none)
+      (do (test.fail "expected some"))
     )
+    profile: core
   )
 )
-(test
-  none-variant
-  core
-  (do
+(test.scenario
+  "none-variant"
+  (test.case
+    "none-variant"
     (let present (option.option.some 1))
     (match
       present
-      (case
-        (option.option.some _)
-        (do
-          (let absent option.option.none)
-          (match
-            absent
-            (case (option.option.some _) (do (test.fail "expected none")))
-            (case (option.option.none) (do (test.assert true)))
-          )
+      (option.option.some _)
+      (do
+        (let absent option.option.none)
+        (match
+          absent
+          (option.option.some _)
+          (test.fail "expected none")
+          (option.option.none)
+          (test.assert true)
         )
       )
-      (case (option.option.none) (do (test.fail "expected some")))
+      (option.option.none)
+      (do (test.fail "expected some"))
     )
+    profile: core
   )
 )
-(test
-  queries-and-defaulting
-  core
-  (do
+(test.scenario
+  "queries-and-defaulting"
+  (test.case
+    "queries-and-defaulting"
     (let present (option.option.some 7))
     (test.assert (option.is-some int64 present))
     (let present-value (option.unwrap-or int64 present 11))
     (match
       present-value
-      (case 7 (do (test.assert true)))
-      (case _ (do (test.fail "some did not preserve its value")))
+      7
+      (do (test.assert true))
+      _
+      (do (test.fail "some did not preserve its value"))
     )
+    profile: core
   )
 )
-(test
-  and-or-combinators
-  core
-  (do
+(test.scenario
+  "and-or-combinators"
+  (test.case
+    "and-or-combinators"
     (let present (option.from-value int64 1))
     (let absent (option.empty int64 false))
     (let next (option.from-value str "next"))
     (match
       (option.and int64 str present next)
-      (case
-        (option.option.some "next")
-        (do
-          (match
-            (option.or int64 absent present)
-            (case (option.option.some 1) (do (test.assert true)))
-            (case _ (do (test.fail "option or did not select fallback")))
-          )
+      (option.option.some "next")
+      (do
+        (match
+          (option.or int64 absent present)
+          (option.option.some 1)
+          (test.assert true)
+          _
+          (test.fail "option or did not select fallback")
         )
       )
-      (case _ (do (test.fail "option and did not select next")))
+      _
+      (do (test.fail "option and did not select next"))
     )
+    profile: core
   )
 )

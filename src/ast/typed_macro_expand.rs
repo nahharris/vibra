@@ -14,9 +14,9 @@ use crate::syntax::{Atom, Node, Span};
 
 use super::{
     lower_expression_node_with_id, lower_pattern_node_with_id, lower_top_level_node_with_id,
-    lower_type_node_with_id, AstError, DocumentId, Expr, ExprKind, Function, Macro, MacroExpr,
-    MacroExprKind, Module, Origin, Pattern, PatternKind, SourceLocation, Spanned, SyntaxCategory,
-    TopLevel, TypeExpr, TypeExprKind, Visibility, WasmArgument,
+    lower_type_node_with_id, AstError, CallArgument, DocumentId, Expr, ExprKind, Function, Macro,
+    MacroExpr, MacroExprKind, Module, Origin, Pattern, PatternKind, SourceLocation, Spanned,
+    SyntaxCategory, TopLevel, TypeExpr, TypeExprKind, Visibility, WasmArgument,
 };
 
 // Keep recursive expansion below the smallest supported native thread stack.
@@ -87,6 +87,7 @@ impl std::error::Error for MacroExpansionError {}
 #[derive(Debug, Clone)]
 enum SyntaxFragment {
     Expression(Expr),
+    ExpressionList(Vec<Expr>),
     Type(TypeExpr),
     Pattern(Pattern),
     Definition(TopLevel),
@@ -98,6 +99,7 @@ impl SyntaxFragment {
     fn category(&self) -> Option<SyntaxCategory> {
         match self {
             Self::Expression(_) => Some(SyntaxCategory::Expression),
+            Self::ExpressionList(_) => None,
             Self::Type(_) => Some(SyntaxCategory::Type),
             Self::Pattern(_) => Some(SyntaxCategory::Pattern),
             Self::Definition(value) => {
@@ -237,6 +239,7 @@ fn top_level_symbol(form: &TopLevel) -> Option<&str> {
         TopLevel::Function(value) => Some(&value.name.value),
         TopLevel::Macro(value) => Some(&value.name.value),
         TopLevel::Test(value) => Some(&value.name.value),
+        TopLevel::TestScenario(_) => None,
     }
 }
 
@@ -318,6 +321,12 @@ fn expand_top_level(
             test.body = expand_exprs(test.body, macros, state, depth)?;
             TopLevel::Test(test)
         }
+        TopLevel::TestScenario(mut scenario) => {
+            for case in &mut scenario.cases {
+                case.body = expand_exprs(std::mem::take(&mut case.body), macros, state, depth)?;
+            }
+            TopLevel::TestScenario(scenario)
+        }
         TopLevel::Macro(_) => unreachable!("macro definitions are removed before expansion"),
     })
 }
@@ -342,7 +351,10 @@ fn expand_expr(
     state: &mut ExpansionState,
     depth: usize,
 ) -> Result<Expr, MacroExpansionError> {
-    if let ExprKind::Call { callee, arguments } = &expression.value {
+    if let ExprKind::Call {
+        callee, arguments, ..
+    } = &expression.value
+    {
         if let Some(entry) = macros.get(&callee.value) {
             let definition = &entry.definition;
             if entry.caller_alias.is_some() && definition.visibility == Visibility::Private {
@@ -364,11 +376,7 @@ fn expand_expr(
                 )
                 .related("macro defined here", &definition.origin));
             }
-            let arguments = arguments
-                .iter()
-                .cloned()
-                .map(SyntaxFragment::Expression)
-                .collect();
+            let arguments = bind_macro_call_arguments(definition, arguments, &expression.origin)?;
             let fragment = invoke(
                 definition,
                 arguments,
@@ -390,11 +398,38 @@ fn expand_expr(
     }
 
     expression.value = match expression.value {
-        ExprKind::Call { callee, arguments } => ExprKind::Call {
+        ExprKind::Call {
             callee,
-            arguments: expand_exprs(arguments, macros, state, depth)?,
+            arguments,
+            type_arguments,
+        } => ExprKind::Call {
+            callee,
+            arguments: arguments
+                .into_iter()
+                .map(|argument| {
+                    argument.map_value(|value| expand_expr(value, macros, state, depth))
+                })
+                .collect::<Result<_, _>>()?,
+            type_arguments: type_arguments
+                .into_iter()
+                .map(|ty| expand_type(ty, macros, state, depth))
+                .collect::<Result<_, _>>()?,
         },
         ExprKind::Do(values) => ExprKind::Do(expand_exprs(values, macros, state, depth)?),
+        ExprKind::AnonymousFunction {
+            mut parameters,
+            return_type,
+            body,
+        } => {
+            for parameter in &mut parameters {
+                parameter.ty = expand_type(parameter.ty.clone(), macros, state, depth)?;
+            }
+            ExprKind::AnonymousFunction {
+                parameters,
+                return_type: expand_type(return_type, macros, state, depth)?,
+                body: expand_exprs(body, macros, state, depth)?,
+            }
+        }
         ExprKind::Let { name, ty, value } => ExprKind::Let {
             name,
             ty: ty
@@ -518,6 +553,80 @@ fn expand_expr(
     Ok(expression)
 }
 
+fn bind_macro_call_arguments(
+    definition: &Macro,
+    arguments: &[CallArgument],
+    call_origin: &Origin,
+) -> Result<Vec<SyntaxFragment>, MacroExpansionError> {
+    let variadic = definition
+        .parameters
+        .last()
+        .is_some_and(|parameter| parameter.variadic);
+    let fixed_count = definition
+        .parameters
+        .len()
+        .saturating_sub(usize::from(variadic));
+    let mut fixed = vec![None; fixed_count];
+    let mut tail = Vec::new();
+    let mut next = 0;
+    for argument in arguments {
+        match argument {
+            CallArgument::Labelled { label, value } => {
+                let Some(index) = definition.parameters[..fixed_count]
+                    .iter()
+                    .position(|parameter| parameter.name.value == label.value)
+                else {
+                    return Err(MacroExpansionError::at(
+                        "E-MACRO-001",
+                        format!(
+                            "macro `{}` has no parameter named `{}`",
+                            definition.name.value, label.value
+                        ),
+                        call_origin,
+                    ));
+                };
+                if fixed[index].replace(value).is_some() {
+                    return Err(MacroExpansionError::at(
+                        "E-MACRO-001",
+                        format!("macro parameter `{}` is bound more than once", label.value),
+                        call_origin,
+                    ));
+                }
+            }
+            CallArgument::Positional(value) => {
+                while next < fixed_count && fixed[next].is_some() {
+                    next += 1;
+                }
+                if next < fixed_count {
+                    fixed[next] = Some(value);
+                    next += 1;
+                } else {
+                    tail.push(value);
+                }
+            }
+        }
+    }
+    let mut ordered = Vec::new();
+    for (index, value) in fixed.into_iter().enumerate() {
+        let Some(value) = value else {
+            return Err(MacroExpansionError::at(
+                "E-MACRO-001",
+                format!(
+                    "macro `{}` is missing parameter `{}`",
+                    definition.name.value, definition.parameters[index].name.value
+                ),
+                call_origin,
+            ));
+        };
+        ordered.push(SyntaxFragment::Expression(value.clone()));
+    }
+    ordered.extend(
+        tail.into_iter()
+            .map(|value| SyntaxFragment::Expression(value.clone())),
+    );
+    Ok(ordered)
+}
+
 fn expand_exprs(
     expressions: Vec<Expr>,
     macros: &MacroTable,
@@ -628,7 +737,10 @@ fn map_type_children(
         TypeExprKind::Function { parameters, result } => TypeExprKind::Function {
             parameters: parameters
                 .into_iter()
-                .map(&mut map)
+                .map(|mut parameter| {
+                    parameter.ty = map(parameter.ty)?;
+                    Ok(parameter)
+                })
                 .collect::<Result<_, _>>()?,
             result: Box::new(map(*result)?),
         },
@@ -763,13 +875,25 @@ fn invoke(
     caller_alias: Option<&str>,
     definition_symbols: &BTreeSet<String>,
 ) -> Result<SyntaxFragment, MacroExpansionError> {
-    if definition.parameters.len() != arguments.len() {
+    let variadic = definition
+        .parameters
+        .last()
+        .is_some_and(|parameter| parameter.variadic);
+    let fixed_count = definition
+        .parameters
+        .len()
+        .saturating_sub(usize::from(variadic));
+    if arguments.len() < fixed_count || (!variadic && arguments.len() != fixed_count) {
         return Err(MacroExpansionError::at(
             "E-MACRO-001",
             format!(
                 "macro `{}` expects {} arguments but received {}",
                 definition.name.value,
-                definition.parameters.len(),
+                if variadic {
+                    fixed_count
+                } else {
+                    definition.parameters.len()
+                },
                 arguments.len()
             ),
             call_origin,
@@ -777,7 +901,9 @@ fn invoke(
         .related("macro defined here", &definition.origin));
     }
     let mut environment = BTreeMap::new();
-    for (parameter, argument) in definition.parameters.iter().zip(arguments) {
+    let mut arguments = arguments.into_iter();
+    for parameter in definition.parameters.iter().take(fixed_count) {
+        let argument = arguments.next().expect("arity checked above");
         if argument.category() != Some(parameter.category.value) {
             return Err(MacroExpansionError::at(
                 "E-MACRO-002",
@@ -790,6 +916,34 @@ fn invoke(
             .related("parameter declared here", &parameter.name.origin));
         }
         environment.insert(parameter.name.value.clone(), argument);
+    }
+    if variadic {
+        let parameter = &definition.parameters[fixed_count];
+        let mut values = Vec::new();
+        for argument in arguments {
+            match argument {
+                SyntaxFragment::Expression(value)
+                    if parameter.category.value == SyntaxCategory::Expression =>
+                {
+                    values.push(value)
+                }
+                _ => {
+                    return Err(MacroExpansionError::at(
+                        "E-MACRO-002",
+                        format!(
+                            "variadic argument `{}` requires {:?} syntax",
+                            parameter.name.value, parameter.category.value
+                        ),
+                        call_origin,
+                    )
+                    .related("parameter declared here", &parameter.name.origin));
+                }
+            }
+        }
+        environment.insert(
+            parameter.name.value.clone(),
+            SyntaxFragment::ExpressionList(values),
+        );
     }
     let result = evaluate_body(
         &definition.body,
@@ -1047,9 +1201,12 @@ fn substitute_expr(
     environment: &BTreeMap<String, SyntaxFragment>,
     call_origin: &Origin,
 ) -> Result<Expr, MacroExpansionError> {
-    if let ExprKind::Call { callee, arguments } = &expression.value {
+    if let ExprKind::Call {
+        callee, arguments, ..
+    } = &expression.value
+    {
         if callee.value == "unquote" && arguments.len() == 1 {
-            let name = expression_reference(&arguments[0]).ok_or_else(|| {
+            let name = expression_reference(arguments[0].value()).ok_or_else(|| {
                 MacroExpansionError::at(
                     "E-MACRO-007",
                     "unquote requires one binding name",
@@ -1071,7 +1228,7 @@ fn substitute_expr(
             };
         }
         if callee.value == "capture" && arguments.len() == 1 {
-            let name = expression_reference(&arguments[0]).ok_or_else(|| {
+            let name = expression_reference(arguments[0].value()).ok_or_else(|| {
                 MacroExpansionError::at(
                     "E-MACRO-007",
                     "capture requires one binding name",
@@ -1103,9 +1260,22 @@ fn substitute_expr_kind(
 ) -> Result<ExprKind, MacroExpansionError> {
     let one = |value| substitute_expr(value, environment, call_origin);
     Ok(match value {
-        ExprKind::Call { callee, arguments } => ExprKind::Call {
+        ExprKind::Call {
             callee,
-            arguments: substitute_exprs(arguments, environment, call_origin)?,
+            arguments,
+            type_arguments,
+        } => ExprKind::Call {
+            callee,
+            arguments: arguments
+                .into_iter()
+                .map(|argument| {
+                    argument.map_value(|value| substitute_expr(value, environment, call_origin))
+                })
+                .collect::<Result<_, _>>()?,
+            type_arguments: type_arguments
+                .into_iter()
+                .map(|ty| substitute_type(ty, environment))
+                .collect::<Result<_, _>>()?,
         },
         ExprKind::Do(values) => ExprKind::Do(substitute_exprs(values, environment, call_origin)?),
         ExprKind::Let { name, ty, value } => ExprKind::Let {
@@ -1235,6 +1405,7 @@ fn substitute_exprs(
                     ..
                 })) => output.extend(values.clone()),
                 Some(SyntaxFragment::Expression(value)) => output.push(value.clone()),
+                Some(SyntaxFragment::ExpressionList(values)) => output.extend(values.clone()),
                 Some(_) => {
                     return Err(MacroExpansionError::at(
                         "E-MACRO-002",
@@ -1258,11 +1429,14 @@ fn substitute_exprs(
 }
 
 fn splice_name(expression: &Expr) -> Option<&str> {
-    let ExprKind::Call { callee, arguments } = &expression.value else {
+    let ExprKind::Call {
+        callee, arguments, ..
+    } = &expression.value
+    else {
         return None;
     };
     (callee.value == "splice" && arguments.len() == 1)
-        .then(|| expression_reference(&arguments[0]))
+        .then(|| expression_reference(arguments[0].value()))
         .flatten()
 }
 
@@ -1444,7 +1618,9 @@ fn hygienize_expr(
                 bindings.insert(original, replacement);
             }
         }
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             if generated {
                 if let Some(replacement) = bindings.get(&callee.value) {
                     callee.value = replacement.clone();
@@ -1456,9 +1632,9 @@ fn hygienize_expr(
                     );
                 }
             }
-            for value in arguments {
+            for argument in arguments {
                 hygienize_expr(
-                    value,
+                    argument.value_mut(),
                     definition_document,
                     definition_span,
                     hygiene_id,
@@ -1731,12 +1907,24 @@ fn hygienize_expr(
         }
         ExprKind::Wasm { arguments, .. } => {
             for argument in arguments {
-                if let WasmArgument::Parameter(name) = argument {
-                    if generated {
-                        if let Some(replacement) = bindings.get(&name.value) {
-                            name.value = replacement.clone();
+                match argument {
+                    WasmArgument::Parameter(name) => {
+                        if generated {
+                            if let Some(replacement) = bindings.get(&name.value) {
+                                name.value = replacement.clone();
+                            }
                         }
                     }
+                    WasmArgument::Expression(expression) => hygienize_expr(
+                        expression,
+                        definition_document,
+                        definition_span,
+                        hygiene_id,
+                        bindings,
+                        caller_alias,
+                        definition_symbols,
+                    ),
+                    _ => {}
                 }
             }
         }
@@ -1970,7 +2158,7 @@ fn qualify_generated_type_names(
         TypeExprKind::Function { parameters, result } => {
             for parameter in parameters {
                 qualify_generated_type_names(
-                    parameter,
+                    &mut parameter.ty,
                     definition_document,
                     definition_span,
                     caller_alias,
@@ -2104,14 +2292,30 @@ fn annotate_generated_expr(
 ) -> Result<(), MacroExpansionError> {
     annotate_generated_origin(&mut expression.origin, definition, call, state)?;
     match &mut expression.value {
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             annotate_generated_name(callee, definition, call, state)?;
-            for value in arguments {
-                annotate_generated_expr(value, definition, call, state)?;
+            for argument in arguments {
+                annotate_generated_expr(argument.value_mut(), definition, call, state)?;
             }
         }
         ExprKind::Do(values) | ExprKind::Tuple(values) | ExprKind::Array(values) => {
             for value in values {
+                annotate_generated_expr(value, definition, call, state)?;
+            }
+        }
+        ExprKind::AnonymousFunction {
+            parameters,
+            return_type,
+            body,
+        } => {
+            for parameter in parameters {
+                annotate_generated_name(&mut parameter.name, definition, call, state)?;
+                annotate_generated_type(&mut parameter.ty, definition, call, state)?;
+            }
+            annotate_generated_type(return_type, definition, call, state)?;
+            for value in body {
                 annotate_generated_expr(value, definition, call, state)?;
             }
         }
@@ -2220,6 +2424,9 @@ fn annotate_generated_expr(
                     WasmArgument::ConstString(value) => {
                         annotate_generated_name(value, definition, call, state)?;
                     }
+                    WasmArgument::Expression(expression) => {
+                        annotate_generated_expr(expression, definition, call, state)?;
+                    }
                 }
             }
         }
@@ -2300,7 +2507,7 @@ fn annotate_generated_type(
         }
         TypeExprKind::Function { parameters, result } => {
             for parameter in parameters {
-                annotate_generated_type(parameter, definition, call, state)?;
+                annotate_generated_type(&mut parameter.ty, definition, call, state)?;
             }
             annotate_generated_type(result, definition, call, state)?;
         }
@@ -2497,10 +2704,13 @@ mod tests {
     #[test]
     fn expands_expression_macros_with_hygiene_and_document_origins() {
         let source = "
-(macro twice ((value expr-syntax)) expr-syntax
-  (do (quote expr-syntax
-    (do (let temporary (unquote value)) temporary))))
-(fn main ((temporary int64)) int64 (do (twice temporary)))";
+(macro
+  twice
+  (value expr-syntax)
+  expr-syntax
+  (do (quote expr-syntax (do (let temporary (unquote value)) temporary)))
+)
+(defn main (temporary int64) int64 (do (twice temporary)))";
         let expanded = expand_typed_macros(module(source, 10)).unwrap();
         assert_eq!(expanded.forms.len(), 1);
         let TopLevel::Function(function) = &expanded.forms[0] else {
@@ -2545,9 +2755,8 @@ mod tests {
     #[test]
     fn rejects_parameter_and_result_category_mismatches() {
         let source = "
-(macro as-type ((value type-syntax)) type-syntax
-  (do (unquote value)))
-(fn main () int64 (do (as-type 1)))";
+(macro as-type (value type-syntax) type-syntax (do (unquote value)))
+(defn main () int64 (do (as-type 1)))";
         let error = expand_typed_macros(module(source, 1)).unwrap_err();
         assert_eq!(error.code, "E-MACRO-002");
         assert!(!error.related.is_empty());
@@ -2556,8 +2765,12 @@ mod tests {
     #[test]
     fn expands_type_category_without_an_untyped_bridge() {
         let source = "
-(macro optional ((value type-syntax)) type-syntax
-  (do (quote type-syntax (option (unquote value)))))
+(macro
+  optional
+  (value type-syntax)
+  type-syntax
+  (do (quote type-syntax (option (unquote value))))
+)
 (def maybe-int (optional int64))";
         let expanded = expand_typed_macros(module(source, 7)).unwrap();
         let TopLevel::Definition(definition) = &expanded.forms[0] else {
@@ -2584,8 +2797,12 @@ mod tests {
     #[test]
     fn expands_and_annotates_mutable_reference_types() {
         let source = "
-(macro exclusive ((value type-syntax)) type-syntax
-  (do (quote type-syntax (mut-ref (unquote value)))))
+(macro
+  exclusive
+  (value type-syntax)
+  type-syntax
+  (do (quote type-syntax (mut-ref (unquote value))))
+)
 (def exclusive-int (exclusive int64))";
         let expanded = expand_typed_macros(module(source, 8)).unwrap();
         let TopLevel::Definition(definition) = &expanded.forms[0] else {
@@ -2612,11 +2829,12 @@ mod tests {
         let helper = module(
             r#"
 (def i32 int64)
-(macro host-types ((ignored type-syntax)) type-syntax
-  (do (quote type-syntax
-    (tuple
-      (wasm i32)
-      (handle read)))))
+(macro
+  host-types
+  (ignored type-syntax)
+  type-syntax
+  (do (quote type-syntax (tuple (wasm i32) (handle read))))
+)
 "#,
             41,
         );
@@ -2659,16 +2877,23 @@ mod tests {
     #[test]
     fn expands_compile_time_forms_and_traverses_template_and_wasm_children() {
         let source = r#"
-(macro resources ((value expr-syntax)) expr-syntax
-  (do (quote expr-syntax
-    (do
-      (let output (unquote value))
-      (embed "message.txt" format: text)
-      (template "message.mustache" with: (record (name (unquote value))))
-      (wasm
-        import: (import "vibra:host/abi@1" "io_write")
-        args: ((arg output) (const 1)))))))
-(fn main () void (do (resources "Vibra")))
+(macro
+  resources
+  (value expr-syntax)
+  expr-syntax
+  (do
+    (quote
+      expr-syntax
+      (do
+        (let output (unquote value))
+        (embed "message.txt" format: text)
+        (template "message.mustache" with: (record (name (unquote value))))
+        (wasm "vibra:host/abi@1" "io_write" output 1)
+      )
+    )
+  )
+)
+(defn main () void (do (resources "Vibra")))
 "#;
         let expanded = expand_typed_macros(module(source, 32)).unwrap();
         let TopLevel::Function(function) = &expanded.forms[0] else {
@@ -2707,11 +2932,41 @@ mod tests {
     #[test]
     fn rejects_splice_outside_a_quote_sequence() {
         let source = "
-(macro invalid ((value expr-syntax)) expr-syntax
-  (do (splice value)))
-(fn main () int64 (do (invalid 1)))";
+(macro invalid (value expr-syntax) expr-syntax (do (splice value)))
+(defn main () int64 (do (invalid 1)))";
         let error = expand_typed_macros(module(source, 1)).unwrap_err();
         assert_eq!(error.code, "E-MACRO-007");
+    }
+
+    #[test]
+    fn variadic_macro_tail_binds_a_syntax_list_for_splice() {
+        let source = r#"
+(macro sequence (values... expr-syntax) expr-syntax
+  (quote expr-syntax (do (splice values))))
+(defn main () int64 (sequence 1 2))"#;
+        let expanded = expand_typed_macros(module(source, 31)).unwrap();
+        let TopLevel::Function(function) = &expanded.forms[0] else {
+            panic!("expected function");
+        };
+        let ExprKind::Do(values) = &function.body[0].value else {
+            panic!("expected expanded do");
+        };
+        assert_eq!(values.len(), 2);
+    }
+
+    #[test]
+    fn labelled_macro_arguments_bind_after_macro_resolution() {
+        let source = r#"
+(macro select (left expr-syntax right expr-syntax) expr-syntax (unquote left))
+(defn main () int64 (select right: 2 left: 1))"#;
+        let expanded = expand_typed_macros(module(source, 32)).unwrap();
+        let TopLevel::Function(function) = &expanded.forms[0] else {
+            panic!("expected function");
+        };
+        assert!(matches!(
+            function.body[0].value,
+            ExprKind::Literal(super::super::Literal::Int(1))
+        ));
     }
 
     #[test]
@@ -2722,7 +2977,7 @@ mod tests {
     (do
       (if true (do (let branch-value 1) branch-value) (do unit))
       branch-value))))
-(fn main () int64 (do (scoped)))";
+(defn main () int64 (do (scoped)))";
         let expanded = expand_typed_macros(module(source, 9)).unwrap();
         let TopLevel::Function(function) = &expanded.forms[0] else {
             panic!("expected function");
@@ -2733,8 +2988,11 @@ mod tests {
         let ExprKind::If { then_body, .. } = &values[0].value else {
             panic!("expected if");
         };
+        let ExprKind::Do(then_values) = &then_body[0].value else {
+            panic!("expected sequenced branch do");
+        };
         assert!(matches!(
-            then_body[1].value,
+            then_values[1].value,
             ExprKind::Reference(ref name) if name == "branch-value--macro-1"
         ));
         assert!(matches!(
@@ -2757,9 +3015,13 @@ mod tests {
     #[test]
     fn expansion_depth_limit_retains_call_and_definition_locations() {
         let source = "
-(macro recurse ((value expr-syntax)) expr-syntax
-  (do (quote expr-syntax (recurse (unquote value)))))
-(fn main () int64 (do (recurse 1)))";
+(macro
+  recurse
+  (value expr-syntax)
+  expr-syntax
+  (do (quote expr-syntax (recurse (unquote value))))
+)
+(defn main () int64 (do (recurse 1)))";
         let error = expand_typed_macros(module(source, 22)).unwrap_err();
         assert_eq!(error.code, "E-MACRO-006");
         assert_eq!(error.document, Some(DocumentId::from_raw(22)));

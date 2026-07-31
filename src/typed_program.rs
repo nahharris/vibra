@@ -76,10 +76,10 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
     let statements = statements.clone();
 
     let mut main_arg_bindings: Vec<(String, TypeRef)> = Vec::new();
-    for (name, ty) in main_sig.arg_names.iter().zip(main_sig.arg_types.iter()) {
+    for parameter in &main_sig.parameters {
         lower::seed_arg_type_bindings(
-            &format!("args.{name}"),
-            ty,
+            &format!("args.{}", parameter.name),
+            &parameter.ty,
             &signatures.aliases,
             &mut main_arg_bindings,
         );
@@ -147,6 +147,12 @@ fn find_typed_test<'a>(program: &'a SurfaceProgram, name: &str) -> Result<&'a Te
             if let TopLevel::Test(test) = form {
                 if test.name.value == name {
                     return Ok(test);
+                }
+            } else if let TopLevel::TestScenario(scenario) = form {
+                for test in &scenario.cases {
+                    if format!("{}::{}", scenario.name.value, test.name.value) == name {
+                        return Ok(test);
+                    }
                 }
             }
         }
@@ -411,8 +417,8 @@ mod tests {
         write(
             &entry,
             "(const greeting str \"hi\")\n\
-             (fn double ((value int64)) int64 (do (return (add value value))))\n\
-             (fn main ((count int64)) void\n\
+             (defn double (value int64) int64 (do (return (add value value))))\n\
+             (defn main (count int64) void\n\
                (do (let doubled (double count)) (return unit)))\n",
         );
         let program = load(&entry);
@@ -438,7 +444,7 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(const answer int64 42)\n(fn main () void (do unit))\n",
+            "(const answer int64 42)\n(defn main () void (do unit))\n",
         );
         let program = load(&entry);
         let lowered = lower_typed_program(&program).unwrap();
@@ -452,7 +458,7 @@ mod tests {
     fn bad_main_return_type_is_rejected() {
         let temp = tempfile::tempdir().unwrap();
         let entry = temp.path().join("main.vibra");
-        write(&entry, "(fn main () int64 (do (return 1)))\n");
+        write(&entry, "(defn main () int64 (do (return 1)))\n");
         let program = load(&entry);
         let error = format!("{:#}", lower_typed_program(&program).unwrap_err());
         assert!(
@@ -465,7 +471,7 @@ mod tests {
     fn missing_main_is_rejected() {
         let temp = tempfile::tempdir().unwrap();
         let entry = temp.path().join("main.vibra");
-        write(&entry, "(fn helper () void (do unit))\n");
+        write(&entry, "(defn helper () void (do unit))\n");
         let program = load(&entry);
         let error = format!("{:#}", lower_typed_program(&program).unwrap_err());
         assert!(
@@ -480,9 +486,8 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(fn main () void (do unit))\n\
-             (test fast-path core (do unit) tags: (fast smoke))\n\
-             (test slow-path core (do unit) tags: (slow) timeout-ms: 500 skip: \"flaky\")\n",
+            "(defn main () void (do unit))\n\
+             (test.scenario \"paths\" (test.case \"fast-path\" unit tags: (fast smoke)) (test.case \"slow-path\" unit tags: (slow) timeout-ms: 500 skip: \"flaky\"))\n",
         );
         let program = load(&entry);
         let specs = discover_typed_test_specs(&program).unwrap();
@@ -491,17 +496,17 @@ mod tests {
                 .iter()
                 .map(|spec| spec.name.as_str())
                 .collect::<Vec<_>>(),
-            ["fast-path", "slow-path"]
+            ["paths::fast-path", "paths::slow-path"]
         );
-        let fast = specs.iter().find(|s| s.name == "fast-path").unwrap();
+        let fast = specs.iter().find(|s| s.name == "paths::fast-path").unwrap();
         assert_eq!(fast.profile, "core");
         assert_eq!(fast.tags, ["fast", "smoke"]);
-        let slow = specs.iter().find(|s| s.name == "slow-path").unwrap();
+        let slow = specs.iter().find(|s| s.name == "paths::slow-path").unwrap();
         assert_eq!(slow.timeout_ms, Some(500));
         assert_eq!(slow.skip.as_deref(), Some("flaky"));
 
         let names = discover_typed_test_names(&program).unwrap();
-        assert_eq!(names, ["fast-path", "slow-path"]);
+        assert_eq!(names, ["paths::fast-path", "paths::slow-path"]);
     }
 
     #[test]
@@ -510,18 +515,18 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(fn main () void (do unit))\n\
-             (test arithmetic core (do (let sum (add 2 2))))\n",
+            "(defn main () void (do unit))\n\
+             (test.scenario \"arithmetic\" (test.case \"arithmetic\" (let sum (add 2 2))))\n",
         );
         let program = load(&entry);
-        let case = lower_named_typed_test(&program, "arithmetic").unwrap();
-        assert_eq!(case.name, "arithmetic");
+        let case = lower_named_typed_test(&program, "arithmetic::arithmetic").unwrap();
+        assert_eq!(case.name, "arithmetic::arithmetic");
         crate::execute::run_lowered_interpreted(&case.program, &RunConfig::default()).unwrap();
         crate::wasm_backend::run_lowered(&case.program, &RunConfig::default()).unwrap();
 
         let all = lower_typed_tests(&program).unwrap();
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].name, "arithmetic");
+        assert_eq!(all[0].name, "arithmetic::arithmetic");
     }
 
     #[test]
@@ -530,8 +535,8 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(fn triple ((value int64)) int64 (do (return (multiply value 3))))\n\
-             (fn main () void (do (let result (triple 4))))\n",
+            "(defn triple (value int64) int64 (do (return (multiply value 3))))\n\
+             (defn main () void (do (let result (triple 4))))\n",
         );
         let program = load(&entry);
         let lowered = lower_typed_program(&program).unwrap();
@@ -546,11 +551,11 @@ mod tests {
         write(
             &entry,
             "(import helper \"helper.vibra\")\n\
-             (fn main () void (do (let doubled (helper.double 5))))\n",
+             (defn main () void (do (let doubled (helper.double 5))))\n",
         );
         write(
             &temp.path().join("helper.vibra"),
-            "(fn double ((value int64)) int64 (do (return (add value value))))\n",
+            "(defn double (value int64) int64 (do (return (add value value))))\n",
         );
         let program = load(&entry);
         let lowered = lower_typed_program(&program).unwrap();

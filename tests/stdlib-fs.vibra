@@ -2,36 +2,44 @@
 (import fs "../stdlib/src/fs.vibra")
 (import option "../stdlib/src/option.vibra")
 (import result "../stdlib/src/result.vibra")
-(test
-  path-new-wraps-a-string
-  core
-  (do
+(test.scenario
+  "path-new-wraps-a-string"
+  (test.case
+    "path-new-wraps-a-string"
     (let path (fs.path.new "contract.txt"))
     (let raw (cast path str))
     (match
       raw
-      (case "contract.txt" (do (test.assert true)))
-      (case _ (do (test.fail "path constructor changed the source string")))
+      "contract.txt"
+      (do (test.assert true))
+      _
+      (do (test.fail "path constructor changed the source string"))
     )
+    profile: core
+    tags: (stdlib filesystem)
   )
-  tags: (stdlib filesystem)
 )
-(test
-  path-name-and-components-are-structural
-  core
-  (do
+(test.scenario
+  "path-name-and-components-are-structural"
+  (test.case
+    "path-name-and-components-are-structural"
     (let base (fs.path.new "alpha"))
     (let path (fs.path.join base "beta.txt"))
     (match
       (fs.path.file-name path)
-      (case (option.option.some "beta.txt") (do (test.assert true)))
-      (case _ (do (test.fail "file name was not the final component")))
+      (option.option.some "beta.txt")
+      (do (test.assert true))
+      _
+      (do (test.fail "file name was not the final component"))
     )
     (match
       (fs.path.components path)
-      (case (result.result.ok (array "alpha" "beta.txt")) (do (test.assert true)))
-      (case _ (do (test.fail "path components were not platform-neutral")))
+      (result.result.ok (array "alpha" "beta.txt"))
+      (do (test.assert true))
+      _
+      (do (test.fail "path components were not platform-neutral"))
     )
+    profile: core
+    tags: (stdlib filesystem)
   )
-  tags: (stdlib filesystem)
 )

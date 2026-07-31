@@ -2,24 +2,27 @@
 (import text "../stdlib/src/text.vibra")
 (import option "../stdlib/src/option.vibra")
 (import result "../stdlib/src/result.vibra")
-(test
-  unicode-units-and-search
-  core
-  (do
+(test.scenario
+  "unicode-units-and-search"
+  (test.case
+    "unicode-units-and-search"
     (test.assert-eq-int (text.scalar-len "aé🙂") 3)
     (test.assert-eq-int (text.byte-len "aé🙂") 7)
     (let found (text.find "aé🙂" "🙂"))
     (match
       found
-      (case (option.option.some 2) (do (test.assert true)))
-      (case _ (do (test.fail "find did not return a scalar offset")))
+      (option.option.some 2)
+      (do (test.assert true))
+      _
+      (do (test.fail "find did not return a scalar offset"))
     )
+    profile: core
   )
 )
-(test
-  queries-and-empty-input
-  core
-  (do
+(test.scenario
+  "queries-and-empty-input"
+  (test.case
+    "queries-and-empty-input"
     (test.assert (text.is-empty ""))
     (test.assert (text.contains "alphabet" "pha"))
     (test.assert (text.starts-with "alphabet" "alpha"))
@@ -27,53 +30,66 @@
     (let missing (text.scalar-at "aé" 2))
     (match
       missing
-      (case (option.option.none) (do (test.assert true)))
-      (case _ (do (test.fail "scalar-at must be bounds safe")))
+      (option.option.none)
+      (do (test.assert true))
+      _
+      (do (test.fail "scalar-at must be bounds safe"))
     )
+    profile: core
   )
 )
-(test
-  split-trim-replace-join-and-case
-  core
-  (do
+(test.scenario
+  "split-trim-replace-join-and-case"
+  (test.case
+    "split-trim-replace-join-and-case"
     (let split (text.split "a,,b," ","))
     (match
       split
-      (case (result.result.ok (array "a" "" "b" "")) (do (test.assert true)))
-      (case _ (do (test.fail "split did not preserve empty fields")))
+      (result.result.ok (array "a" "" "b" ""))
+      (do (test.assert true))
+      _
+      (do (test.fail "split did not preserve empty fields"))
     )
     (let joined (text.join (array "a" "b" "c") "-"))
     (match
       joined
-      (case (result.result.ok "a-b-c") (do (test.assert true)))
-      (case _ (do (test.fail "join failed")))
+      (result.result.ok "a-b-c")
+      (do (test.assert true))
+      _
+      (do (test.fail "join failed"))
     )
     (let replaced (text.replace "aéa" "a" "zz"))
     (match
       replaced
-      (case (result.result.ok "zzézz") (do (test.assert true)))
-      (case _ (do (test.fail "replace failed")))
+      (result.result.ok "zzézz")
+      (do (test.assert true))
+      _
+      (do (test.fail "replace failed"))
     )
     (let invalid (text.replace "abc" "" "x"))
     (match
       invalid
-      (case
-        (result.result.err (text.text-error.empty-pattern))
-        (do (test.assert true))
-      )
-      (case _ (do (test.fail "empty replacement pattern was not typed")))
+      (result.result.err (text.text-error.empty-pattern))
+      (do (test.assert true))
+      _
+      (do (test.fail "empty replacement pattern was not typed"))
     )
     (let trimmed (text.trim "  hé  "))
     (match
       trimmed
-      (case (result.result.ok "hé") (do (test.assert true)))
-      (case _ (do (test.fail "trim failed")))
+      (result.result.ok "hé")
+      (do (test.assert true))
+      _
+      (do (test.fail "trim failed"))
     )
     (let upper (text.uppercase "Straße"))
     (match
       upper
-      (case (result.result.ok "STRASSE") (do (test.assert true)))
-      (case _ (do (test.fail "Unicode uppercase failed")))
+      (result.result.ok "STRASSE")
+      (do (test.assert true))
+      _
+      (do (test.fail "Unicode uppercase failed"))
     )
+    profile: core
   )
 )

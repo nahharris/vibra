@@ -541,6 +541,21 @@
       "code": "E-BENCH-001",
       "severity": "error",
       "summary": "Benchmark iteration configuration is invalid"
+    },
+    {
+      "code": "E-FN-001",
+      "severity": "error",
+      "summary": "Anonymous function use requires deferred first-class closure support"
+    },
+    {
+      "code": "E-TEST-010",
+      "severity": "error",
+      "summary": "Duplicate test scenario name in a module"
+    },
+    {
+      "code": "E-TEST-011",
+      "severity": "error",
+      "summary": "Duplicate test case name in a scenario"
     }
   ]
 }

@@ -51,8 +51,12 @@ fn write_project(root: &Path) {
         "(project\n  (package \"mcp-fixture\" \"0.1.0\")\n  (target app kind: bin root: \"src\" entry: \"main.vibra\"))\n",
     )
     .unwrap();
-    std::fs::write(root.join("src/main.vibra"), "(fn main () void (do))\n").unwrap();
-    std::fs::write(root.join("tests/basic.vibra"), "(test works core (do))\n").unwrap();
+    std::fs::write(root.join("src/main.vibra"), "(defn main () void (do))\n").unwrap();
+    std::fs::write(
+        root.join("tests/basic.vibra"),
+        "(test.scenario \"works\" (test.case \"works\" (do) profile: core))\n",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -72,7 +76,11 @@ fn project_and_test_introspection_are_structured_and_non_executing() {
         "mcp-fixture"
     );
     assert_eq!(
-        responses[1]["result"]["structuredContent"]["tests"][0]["name"],
+        responses[1]["result"]["structuredContent"]["tests"][0]["scenario"],
+        "works"
+    );
+    assert_eq!(
+        responses[1]["result"]["structuredContent"]["tests"][0]["case"],
         "works"
     );
     assert_eq!(
@@ -115,7 +123,7 @@ fn transitive_imports_cannot_read_outside_the_workspace() {
     .unwrap();
     std::fs::write(
         workspace.join("src/main.vibra"),
-        "(import secret \"../../secret.vibra\")\n(fn main () void (do))\n",
+        "(import secret \"../../secret.vibra\")\n(defn main () void (do))\n",
     )
     .unwrap();
     let responses = run_mcp(
@@ -141,7 +149,7 @@ fn s_expression_imports_reject_absolute_paths_and_allow_project_imports() {
     let absolute = secret.to_string_lossy().replace('\\', "\\\\");
     std::fs::write(
         workspace.join("src/main.vibra"),
-        format!("(import secret \"{absolute}\")\n(fn main () void (do))\n"),
+        format!("(import secret \"{absolute}\")\n(defn main () void (do))\n"),
     )
     .unwrap();
     let responses = run_mcp(
@@ -155,10 +163,14 @@ fn s_expression_imports_reject_absolute_paths_and_allow_project_imports() {
         "path-outside-workspace"
     );
 
-    std::fs::write(workspace.join("src/main.vibra"), "(fn main () void (do))\n").unwrap();
+    std::fs::write(
+        workspace.join("src/main.vibra"),
+        "(defn main () void (do))\n",
+    )
+    .unwrap();
     std::fs::write(
         workspace.join("src/feature.vibra"),
-        "(import app \"@app/main.vibra\")\n(fn feature () void (do))\n",
+        "(import app \"@app/main.vibra\")\n(defn feature () void (do))\n",
     )
     .unwrap();
     let responses = run_mcp(

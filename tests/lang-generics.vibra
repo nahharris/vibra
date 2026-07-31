@@ -1,21 +1,30 @@
 (import test "../stdlib/src/test.vibra")
-(fn identity ((subject t)) t (do (return subject)) where: ((t)))
-(fn first-of ((subject t) (other u)) t (do (return subject)) where: ((t) (u)))
-(test identity-bool core (do (let x (identity bool true)) (test.assert x)))
-(test
-  identity-int
-  core
-  (do
-    (let n (identity int64 5))
-    (match
-      n
-      (case 5 (do (test.assert true)))
-      (case _ (do (test.fail "expected 5")))
-    )
+(defn identity (subject t) t (return subject) where: (t any))
+(defn first-of (subject t other u) t (return subject) where: (t any u any))
+(test.scenario
+  "identity-bool"
+  (test.case
+    "identity-bool"
+    (let x (identity bool true))
+    (test.assert x)
+    profile: core
   )
 )
-(test
-  two-type-params
-  core
-  (do (let r (first-of bool str true "ignored")) (test.assert r))
+(test.scenario
+  "identity-int"
+  (test.case
+    "identity-int"
+    (let n (identity int64 5))
+    (match n 5 (do (test.assert true)) _ (do (test.fail "expected 5")))
+    profile: core
+  )
+)
+(test.scenario
+  "two-type-params"
+  (test.case
+    "two-type-params"
+    (let r (first-of bool str true "ignored"))
+    (test.assert r)
+    profile: core
+  )
 )

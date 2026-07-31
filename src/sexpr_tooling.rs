@@ -180,7 +180,6 @@ fn lint_module_names(
                 lint_annotations(path, source, &value.annotations, diagnostics);
             }
             TopLevel::Test(value) => {
-                lint_name(path, source, &value.name, "test", diagnostics);
                 lint_name(path, source, &value.profile, "test profile", diagnostics);
                 for metadata in &value.metadata {
                     match metadata {
@@ -201,6 +200,31 @@ fn lint_module_names(
                 }
                 for expression in &value.body {
                     lint_expr(path, source, expression, diagnostics);
+                }
+            }
+            TopLevel::TestScenario(scenario) => {
+                for value in &scenario.cases {
+                    lint_name(path, source, &value.profile, "test profile", diagnostics);
+                    for metadata in &value.metadata {
+                        match metadata {
+                            TestMeta::Tags(names) => {
+                                for name in names {
+                                    lint_name(path, source, name, "test tag", diagnostics);
+                                }
+                            }
+                            TestMeta::ExpectError(_) => {}
+                            TestMeta::Workspace(name) => {
+                                lint_name(path, source, name, "workspace mode", diagnostics)
+                            }
+                            TestMeta::Clock { .. }
+                            | TestMeta::TimeoutMillis(_)
+                            | TestMeta::RandomSeed(_)
+                            | TestMeta::Skip(_) => {}
+                        }
+                    }
+                    for expression in &value.body {
+                        lint_expr(path, source, expression, diagnostics);
+                    }
                 }
             }
         }
@@ -314,7 +338,14 @@ fn lint_type(path: &Path, source: &str, ty: &TypeExpr, diagnostics: &mut Vec<Dia
         }
         TypeExprKind::Function { parameters, result } => {
             for parameter in parameters {
-                lint_type(path, source, parameter, diagnostics);
+                lint_name(
+                    path,
+                    source,
+                    &parameter.name,
+                    "fn-type parameter",
+                    diagnostics,
+                );
+                lint_type(path, source, &parameter.ty, diagnostics);
             }
             lint_type(path, source, result, diagnostics);
         }
@@ -331,9 +362,31 @@ fn lint_expr(path: &Path, source: &str, expr: &Expr, diagnostics: &mut Vec<Diagn
         ExprKind::Reference(name) => {
             lint_spanned_value(path, source, name, expr.span, "reference", diagnostics)
         }
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             lint_name(path, source, callee, "callee", diagnostics);
-            lint_exprs(path, source, arguments, diagnostics);
+            for argument in arguments {
+                lint_expr(path, source, argument.value(), diagnostics);
+            }
+        }
+        ExprKind::AnonymousFunction {
+            parameters,
+            return_type,
+            body,
+        } => {
+            for parameter in parameters {
+                lint_name(
+                    path,
+                    source,
+                    &parameter.name,
+                    "function parameter",
+                    diagnostics,
+                );
+                lint_type(path, source, &parameter.ty, diagnostics);
+            }
+            lint_type(path, source, return_type, diagnostics);
+            lint_exprs(path, source, body, diagnostics);
         }
         ExprKind::Do(values) | ExprKind::Tuple(values) | ExprKind::Array(values) => {
             lint_exprs(path, source, values, diagnostics)
@@ -616,7 +669,7 @@ mod tests {
     #[test]
     fn formatting_is_typed_idempotent_and_preserves_comments_and_labels() {
         let path = Path::new("src/main.vibra");
-        let source = "; lead\n(fn  hello-world ((name str)) str\n(do ; body\n(return name)) doc: \"Greets\")\n";
+        let source = "; lead\n(defn hello-world (name str) str\n(do ; body\n(return name)) doc: \"Greets\")\n";
         let once = staged_format_sexpr(path, source).unwrap();
         let twice = staged_format_sexpr(path, &once).unwrap();
         assert_eq!(once, twice);
@@ -627,7 +680,7 @@ mod tests {
 
     #[test]
     fn unicode_byte_spans_map_to_zero_based_lsp_columns() {
-        let source = "; λ\n(fn valid () void (do unit))\n)\n";
+        let source = "; λ\n(defn valid () void (do unit))\n)\n";
         let diagnostics = staged_sexpr_diagnostics(Path::new("unicode.vibra"), source);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E-SYN-005");
@@ -641,7 +694,7 @@ mod tests {
 
     #[test]
     fn ast_errors_use_precise_unicode_ranges() {
-        let source = "; λ\n(fn bad () void (do unit) mystery: true)\n";
+        let source = "; λ\n(defn bad () void (do unit) mystery: true)\n";
         let diagnostics = staged_sexpr_diagnostics(Path::new("unicode.vibra"), source);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E-SYN-011");
@@ -655,7 +708,7 @@ mod tests {
 
     #[test]
     fn diagnostic_columns_use_utf16_code_units() {
-        let source = "(fn valid () void (do unit) doc: \"😀\" mystery: true)\n";
+        let source = "(defn valid () void (do unit) doc: \"😀\" mystery: true)\n";
         let diagnostics = staged_sexpr_diagnostics(Path::new("emoji.vibra"), source);
         assert_eq!(diagnostics.len(), 1);
         let offset = source.find("mystery:").unwrap();
@@ -673,7 +726,7 @@ mod tests {
     #[test]
     fn typed_lint_visits_nested_names() {
         let source =
-            "(fn Bad_Name ((BadArg int64)) int64 (do (let Local_Value BadArg) Local_Value))\n";
+            "(defn Bad_Name (BadArg int64) int64 (do (let Local_Value BadArg) Local_Value))\n";
         let diagnostics = staged_lint_sexpr(Path::new("lint.vibra"), source);
         assert!(diagnostics
             .iter()
@@ -689,7 +742,7 @@ mod tests {
 
     #[test]
     fn typed_lint_visits_mutable_reference_inner_types() {
-        let source = "(fn borrow ((value (mut-ref Bad_Type))) void (do unit))\n";
+        let source = "(defn borrow (value (mut-ref Bad_Type)) void (do unit))\n";
         let diagnostics = staged_lint_sexpr(Path::new("lint.vibra"), source);
         assert!(diagnostics
             .iter()
@@ -698,16 +751,18 @@ mod tests {
 
     #[test]
     fn formatter_rejects_typed_invalid_source() {
-        let error =
-            staged_format_sexpr(Path::new("bad.vibra"), "(fn bad () void (do unit) nope: 1)")
-                .unwrap_err();
+        let error = staged_format_sexpr(
+            Path::new("bad.vibra"),
+            "(defn bad () void (do unit) nope: 1)",
+        )
+        .unwrap_err();
         assert_eq!(error.code, "E-SYN-011");
     }
 
     #[test]
     fn expect_error_codes_are_not_kebab_linted() {
-        let source = "(test fails core (do unit)\n\
-                      expect-error: (compile E-OP-002 \"overflow\"))\n";
+        let source = "(test.scenario \"fails\" (test.case \"fails\" unit\n\
+                      expect-error: (compile E-OP-002 \"overflow\")))\n";
         assert!(staged_lint_sexpr(Path::new("test.vibra"), source).is_empty());
     }
 }
