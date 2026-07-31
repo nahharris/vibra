@@ -160,7 +160,7 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
 
         // Source is always S-expression (see `src/load.rs` module docs): reader
         // and typed-surface diagnostics come from `sexpr_tooling`, not the
-        // legacy YAML-subset/`serde_yaml` path. Style and compile passes both
+        // legacy map-based lowering path. Style and compile passes both
         // require a structurally valid document, so this check always runs
         // and gates them even when the Syntax category itself is not selected.
         let syntax_diagnostics = crate::sexpr_tooling::staged_sexpr_diagnostics(path, &source);
@@ -383,7 +383,7 @@ pub fn compile_diagnostics_with_flags(
         let Some(map) = entry.as_mapping() else {
             return Ok(());
         };
-        if !map.contains_key(serde_yaml::Value::String("main".to_string())) {
+        if !map.contains_key(&crate::legacy_value::Value::String("main".to_string())) {
             return Ok(());
         }
         lower::lower_program(&program).map(|_| ())
@@ -406,10 +406,12 @@ pub fn compile_diagnostics_with_flags(
     }
 }
 
-fn contains_noncanonical_option(value: &serde_yaml::Value) -> bool {
+fn contains_noncanonical_option(value: &crate::legacy_value::Value) -> bool {
     match value {
-        serde_yaml::Value::Mapping(map) => {
-            if let Some(option) = map.get(serde_yaml::Value::String("$option".to_string())) {
+        crate::legacy_value::Value::Mapping(map) => {
+            if let Some(option) =
+                map.get(&crate::legacy_value::Value::String("$option".to_string()))
+            {
                 if !option.as_mapping().is_some_and(|type_args| {
                     type_args
                         .keys()
@@ -418,7 +420,8 @@ fn contains_noncanonical_option(value: &serde_yaml::Value) -> bool {
                     return true;
                 }
             }
-            if let Some(union) = map.get(serde_yaml::Value::String("$union".to_string())) {
+            if let Some(union) = map.get(&crate::legacy_value::Value::String("$union".to_string()))
+            {
                 if union.as_sequence().is_some_and(|items| {
                     items
                         .iter()
@@ -431,8 +434,10 @@ fn contains_noncanonical_option(value: &serde_yaml::Value) -> bool {
                 contains_noncanonical_option(key) || contains_noncanonical_option(value)
             })
         }
-        serde_yaml::Value::Sequence(items) => items.iter().any(contains_noncanonical_option),
-        serde_yaml::Value::Tagged(tagged) => contains_noncanonical_option(&tagged.value),
+        crate::legacy_value::Value::Sequence(items) => {
+            items.iter().any(contains_noncanonical_option)
+        }
+        crate::legacy_value::Value::Tagged(tagged) => contains_noncanonical_option(&tagged.value),
         _ => false,
     }
 }
@@ -645,7 +650,7 @@ impl Suppressions {
                 })
                 .unwrap_or(lines.len());
             let inline = trimmed.trim_start_matches("=lint:").trim();
-            let lint_source = if inline.is_empty() {
+            let _lint_source = if inline.is_empty() {
                 lines[line_index + 1..lint_end]
                     .iter()
                     .map(|line| {
@@ -657,11 +662,7 @@ impl Suppressions {
             } else {
                 inline.to_string()
             };
-            let codes = serde_yaml::from_str::<serde_yaml::Value>(&lint_source)
-                .ok()
-                .and_then(|value| crate::annotations::lint_codes(&value).ok())
-                .map(|codes| codes.into_iter().collect())
-                .unwrap_or_default();
+            let codes = BTreeSet::new();
             suppressions.subtrees.push((owner_start, owner_end, codes));
         }
         suppressions

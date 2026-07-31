@@ -762,7 +762,7 @@ itself, so this amendment records that exception explicitly rather than
 leaving it implied.
 
 `src/surface_adapter.rs` (issue #150) converts the typed S-expression surface
-AST (`crate::ast`) directly into the `serde_yaml::Value` shape `src/load.rs`
+AST (`crate::ast`) directly into the internal compatibility `Value` shape `src/load.rs`
 and `src/lower.rs` already consume, so S-expression source can reach the
 existing, proven lowering semantics without re-deriving them on the typed
 path (`typed_lower`/`typed_body`/`typed_program`), whose measured readiness
@@ -779,17 +779,15 @@ by the adapter's own structure:
 - **Not a dual-syntax state.** The adapter does not parse YAML, does not
   select a parser from file contents, and does not change what `vibra`
   accepts as source. Until a follow-up PR repoints `src/load.rs`, the
-  compiler's only source parser remains the legacy YAML one; the adapter is
-  reachable only from its own tests.
+  compiler's only source parser remains the typed S-expression reader; the
+  adapter is an internal lowering seam.
 - **Not a supported interface.** It carries no stability guarantee, is not
   documented as a public API, and is not the intended long-term shape of the
   compiler: it is a bridge to be deleted, not a permanent third pillar
   alongside the legacy and typed lowering paths.
 - **Temporary.** It is slated for removal as the typed path's own coverage
-  reaches parity with `src/lower.rs` and the legacy YAML parser is deleted
-  at cutover (step 9 of the plan above) -- at which point the adapter's
-  target shape (`serde_yaml::Value`) disappears along with it, so it cannot
-  outlive the migration it exists to perform.
+  reaches parity with `src/lower.rs`; the adapter remains slated for deletion
+  with that legacy map-based reader.
 - **Fails closed.** Every construct the adapter cannot map to a precise
   legacy shape produces a specific, path-qualified `E-ADAPT-*` error rather
   than a best-effort guess, because a silently wrong `Value` would be a

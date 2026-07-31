@@ -1,6 +1,5 @@
 //! Library surface for tests and future embedding.
 
-pub mod annotations;
 pub mod ast;
 pub mod async_runtime;
 pub(crate) mod body_semantics;
@@ -10,10 +9,10 @@ pub mod emit;
 pub mod execute;
 pub mod frontend;
 pub mod host_abi;
+pub mod legacy_value;
 pub mod load;
 pub mod lower;
 pub mod lsp;
-pub mod macro_expand;
 pub mod mcp;
 pub mod package;
 pub mod plugin;

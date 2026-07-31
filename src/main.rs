@@ -2,10 +2,10 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_yaml::{Mapping, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
+use vibra::legacy_value::{Mapping, Value};
 use vibra::lower::{RuntimeValue, TypeRef};
 use vibra::{
     docs, execute, load, lower, lsp, mcp, package, plugin, project, runtime, test_runner, tooling,
@@ -771,7 +771,7 @@ fn validate_exec_import_alias(alias: &str) -> Result<()> {
 }
 
 fn insert_import(root: &mut Mapping, alias: &str, path: &str) -> Result<()> {
-    if root.contains_key(Value::String(alias.to_string())) {
+    if root.contains_key(&Value::String(alias.to_string())) {
         bail!("duplicate exec import alias `{alias}`");
     }
     let mut import = Mapping::new();
