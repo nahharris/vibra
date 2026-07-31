@@ -4,8 +4,9 @@
 //! after every expression in their body has lowered successfully.
 
 use crate::ast::{
-    AnnotationKind, Expr as AstExpr, ExprKind, Function, ImplItem, Literal, MethodBinding, Module,
-    Origin, Pattern as AstPattern, PatternKind, SourceLocation, TopLevel, WasmArgument,
+    AnnotationKind, CallArgument, Expr as AstExpr, ExprKind, Function, ImplItem, Literal,
+    MethodBinding, Module, Origin, Pattern as AstPattern, PatternKind, SourceLocation, TopLevel,
+    WasmArgument,
 };
 use crate::body_semantics::{validate_function_body, validate_task_handles};
 use crate::lower::{
@@ -197,6 +198,33 @@ pub fn lower_typed_bodies<'a>(
                         bail!("duplicate typed test body `{key}`");
                     }
                 }
+                TopLevel::TestScenario(scenario) => {
+                    for test in &scenario.cases {
+                        let name = format!("{}::{}", scenario.name.value, test.name.value);
+                        let key = qualify(input.alias, &name);
+                        let mut test_local_types = HashMap::new();
+                        extend_static_local_types(
+                            &test.body,
+                            input.alias,
+                            signatures,
+                            &declared_aliases,
+                            &BTreeSet::new(),
+                            &mut test_local_types,
+                        );
+                        let statements = lower_statements(
+                            input.alias,
+                            &test.body,
+                            signatures,
+                            &declared_aliases,
+                            &BTreeSet::new(),
+                            &test_local_types,
+                        )
+                        .with_context(|| format!("lowering typed test `{key}`"))?;
+                        if bodies.tests.insert(key.clone(), statements).is_some() {
+                            bail!("duplicate typed test body `{key}");
+                        }
+                    }
+                }
                 TopLevel::Import(_) | TopLevel::Macro(_) => {}
             }
         }
@@ -246,7 +274,12 @@ pub fn materialize_typed_functions(
                     "typed executable subset does not support generic function `{key}` {location}"
                 );
             }
-            for ty in signature.arg_types.iter().chain([&signature.return_type]) {
+            for ty in signature
+                .parameters
+                .iter()
+                .map(|parameter| &parameter.ty)
+                .chain([&signature.return_type])
+            {
                 ensure_safe_type(ty, key, &location)?;
             }
             let checked = match body {
@@ -280,10 +313,9 @@ pub fn materialize_typed_functions(
                 }
                 FunctionBody::User { statements } => {
                     let mut locals: HashMap<_, _> = signature
-                        .arg_names
+                        .parameters
                         .iter()
-                        .cloned()
-                        .zip(signature.arg_types.iter().cloned())
+                        .map(|parameter| (parameter.name.clone(), parameter.ty.clone()))
                         .collect();
                     let mut origins = OriginCursor::new(
                         bodies
@@ -535,8 +567,13 @@ fn validate_statements(
                 }
                 let (value, ty) = match value {
                     LetValue::Expr(expr) => {
-                        let expr =
+                        let mut expr =
                             validate_expr(expr, locals, constants, signatures, context, origins)?;
+                        if let Some(expected) = let_types.get(var) {
+                            apply_host_context(&mut expr, expected);
+                        } else if has_unresolved_host_context(&expr) {
+                            bail!("host call bound to `{var}` requires an explicit type");
+                        }
                         let ty = infer(&expr, locals, constants, signatures, context)?;
                         (LetValue::Expr(expr), ty)
                     }
@@ -583,7 +620,9 @@ fn validate_statements(
                     } => inner.as_ref(),
                     _ => bail!("E-SET-002: typed symbol `{var}` is not writable"),
                 };
-                let value = validate_expr(value, locals, constants, signatures, context, origins)?;
+                let mut value =
+                    validate_expr(value, locals, constants, signatures, context, origins)?;
+                apply_host_context(&mut value, writable);
                 let actual = infer(&value, locals, constants, signatures, context)?;
                 if writable != &actual {
                     bail!(
@@ -599,7 +638,17 @@ fn validate_statements(
                 if in_task {
                     bail!("typed task bodies cannot return from their enclosing function");
                 }
-                let expr = validate_expr(expr, locals, constants, signatures, context, origins)?;
+                let mut expr =
+                    validate_expr(expr, locals, constants, signatures, context, origins)?;
+                if let Expr::HostCall {
+                    return_type: host_return,
+                    ..
+                } = &mut expr
+                {
+                    if *host_return == TypeRef::Named("$host-context".into()) {
+                        *host_return = return_type.clone();
+                    }
+                }
                 let actual = infer(&expr, locals, constants, signatures, context)?;
                 if &actual != return_type {
                     bail!("typed return in `{context}` expects {return_type:?}, got {actual:?}");
@@ -861,21 +910,23 @@ fn validate_call(
             call.callee_key
         );
     }
-    if call.args.len() != signature.arg_types.len() {
+    if call.args.len() != signature.parameters.len() {
         bail!(
             "typed call `{}` expects {} arguments, got {}",
             call.callee_key,
-            signature.arg_types.len(),
+            signature.parameters.len(),
             call.args.len()
         );
     }
-    let args = call
+    let args: Vec<Expr> = call
         .args
         .iter()
-        .zip(&signature.arg_types)
-        .map(|(argument, expected)| {
-            let argument =
+        .zip(&signature.parameters)
+        .map(|(argument, parameter)| {
+            let expected = &parameter.ty;
+            let mut argument =
                 validate_expr(argument, locals, constants, signatures, context, origins)?;
+            apply_host_context(&mut argument, expected);
             let actual = infer(&argument, locals, constants, signatures, context)?;
             if &actual != expected {
                 bail!(
@@ -886,11 +937,45 @@ fn validate_call(
             Ok(argument)
         })
         .collect::<Result<_>>()?;
+    let mut variadic_values = args.last().and_then(|argument| match argument {
+        Expr::Array(values) => Some(values.iter()),
+        _ => None,
+    });
+    let source_args = call
+        .argument_targets
+        .iter()
+        .map(|target| match target {
+            crate::lower::CallArgumentTarget::Fixed(index) => args[*index].clone(),
+            crate::lower::CallArgumentTarget::Variadic => variadic_values
+                .as_mut()
+                .and_then(Iterator::next)
+                .cloned()
+                .expect("validated variadic argument"),
+        })
+        .collect();
     Ok(Call {
         callee_key: call.callee_key.clone(),
         type_args: Vec::new(),
         args,
+        source_args,
+        argument_targets: call.argument_targets.clone(),
     })
+}
+
+fn apply_host_context(expr: &mut Expr, expected: &TypeRef) {
+    if let Expr::HostCall { return_type, .. } = expr {
+        if *return_type == TypeRef::Named("$host-context".into()) {
+            *return_type = expected.clone();
+        }
+    }
+}
+
+fn has_unresolved_host_context(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::HostCall { return_type, .. }
+            if *return_type == TypeRef::Named("$host-context".into())
+    )
 }
 
 fn validate_expr(
@@ -951,6 +1036,34 @@ fn validate_expr(
             )?),
             return_type: return_type.clone(),
         },
+        Expr::HostCall {
+            import,
+            args,
+            return_type,
+        } => {
+            let entry =
+                crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
+                    format!(
+                        "E-WASM-002: unknown host import `{}.{}`",
+                        import.module, import.name
+                    )
+                })?;
+            let args = args
+                .iter()
+                .map(|arg| validate_expr(arg, locals, constants, signatures, context, origins))
+                .collect::<Result<Vec<_>>>()?;
+            for (index, (arg, kind)) in args.iter().zip(entry.params).enumerate() {
+                let ty = infer(arg, locals, constants, signatures, context)?;
+                if !crate::lower::abi_value_type_matches(*kind, &ty, &signatures.aliases) {
+                    bail!("E-WASM-003: host import `{}.{}` argument {index} requires `{}`, got {ty:?}", import.module, import.name, kind.as_str());
+                }
+            }
+            Expr::HostCall {
+                import: import.clone(),
+                args,
+                return_type: return_type.clone(),
+            }
+        }
         Expr::Record(fields) => Expr::Record(
             fields
                 .iter()
@@ -1225,8 +1338,7 @@ fn materialize(signature: &TypedFunctionSignature, body: FunctionBody) -> Functi
         symbol: signature.symbol.clone(),
         type_params: signature.type_params.clone(),
         type_param_bounds: signature.type_param_bounds.clone(),
-        arg_names: signature.arg_names.clone(),
-        arg_types: signature.arg_types.clone(),
+        parameters: signature.parameters.clone(),
         return_type: signature.return_type.clone(),
         body,
         doc: signature.doc.clone(),
@@ -1242,46 +1354,45 @@ fn lower_function(
     declared_aliases: &BTreeSet<String>,
     bodies: &mut TypedBodyIndex,
 ) -> Result<()> {
-    // A `$wasm`-only body is a distinct function *body kind* (like legacy
-    // `is_wasm_only_body`/`extract_wasm_body`), not an ordinary statement
-    // sequence: it commits only when the entire body is a single `(wasm
-    // import: ... args: ...)` form. It produces no `Statement`/`Expr` IR, so
-    // it skips `lower_statements`, `collect_body_metadata`, and origin
-    // collection entirely -- there is nothing for those passes to walk.
     if let [AstExpr {
         value: ExprKind::Wasm { import, arguments },
         ..
     }] = function.body.as_slice()
     {
-        let wasm_import = ImportTarget {
-            module: import.module.value.clone(),
-            name: import.name.value.clone(),
-        };
-        let wasm_args = arguments.iter().map(lower_wasm_argument).collect();
-        if bodies
-            .functions
-            .insert(
-                key.to_string(),
-                FunctionBody::Wasm {
-                    import: wasm_import,
-                    wasm_args,
-                },
-            )
-            .is_some()
+        if arguments
+            .iter()
+            .all(|argument| !matches!(argument, WasmArgument::Expression(_)))
         {
-            bail!("duplicate typed function body `{key}`");
+            let wasm_import = ImportTarget {
+                module: import.module.value.clone(),
+                name: import.name.value.clone(),
+            };
+            let wasm_args = arguments.iter().map(lower_wasm_argument).collect();
+            if bodies
+                .functions
+                .insert(
+                    key.to_string(),
+                    FunctionBody::Wasm {
+                        import: wasm_import,
+                        wasm_args,
+                    },
+                )
+                .is_some()
+            {
+                bail!("duplicate typed function body `{key}`");
+            }
+            let location = SourceLocation {
+                document: function.origin.document_id().unwrap_or(module.document_id),
+                span: function.origin.primary_span(),
+            };
+            bodies.origins.insert(key.to_string(), location);
+            bodies.let_types.insert(key.to_string(), HashMap::new());
+            bodies
+                .lexical_bindings
+                .insert(key.to_string(), BTreeSet::new());
+            bodies.node_origins.insert(key.to_string(), Vec::new());
+            return Ok(());
         }
-        let location = SourceLocation {
-            document: function.origin.document_id().unwrap_or(module.document_id),
-            span: function.origin.primary_span(),
-        };
-        bodies.origins.insert(key.to_string(), location);
-        bodies.let_types.insert(key.to_string(), HashMap::new());
-        bodies
-            .lexical_bindings
-            .insert(key.to_string(), BTreeSet::new());
-        bodies.node_origins.insert(key.to_string(), Vec::new());
-        return Ok(());
     }
     let own_signature = signatures
         .functions
@@ -1289,16 +1400,10 @@ fn lower_function(
         .with_context(|| format!("typed function `{key}` has no signature"))?;
     let generic_names = own_signature.type_params.iter().cloned().collect();
     // A best-effort, purely static type environment for the sole purpose of
-    // resolving interface method dispatch (`lower_call`'s fallback): it needs
-    // to know a dispatch subject's *declared* type before locals/inference
-    // are available (those only exist in the later `validate_*` pass). Seed
-    // it with the function's own parameters, then extend with anything the
-    // body's own `$let`/match-bind shapes statically reveal.
     let mut local_types: HashMap<String, TypeRef> = own_signature
-        .arg_names
+        .parameters
         .iter()
-        .cloned()
-        .zip(own_signature.arg_types.iter().cloned())
+        .map(|parameter| (parameter.name.clone(), parameter.ty.clone()))
         .collect();
     extend_static_local_types(
         &function.body,
@@ -1360,15 +1465,19 @@ fn lower_wasm_argument(argument: &WasmArgument) -> WasmArgSpec {
         WasmArgument::Parameter(name) => WasmArgSpec::Arg(name.value.clone()),
         WasmArgument::ConstInt(value) => WasmArgSpec::ConstInt(value.value),
         WasmArgument::ConstString(value) => WasmArgSpec::ConstStr(value.value.clone()),
+        WasmArgument::Expression(_) => {
+            unreachable!("expression host arguments are not wrapper forwarding specs")
+        }
     }
 }
 
 fn runtime_name(name: &str, context: &str, signatures: &TypedSignatureIndex) -> String {
-    if signatures
-        .functions
-        .get(context)
-        .is_some_and(|signature| signature.arg_names.iter().any(|argument| argument == name))
-    {
+    if signatures.functions.get(context).is_some_and(|signature| {
+        signature
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name == name)
+    }) {
         format!("args.{name}")
     } else {
         name.to_string()
@@ -1553,7 +1662,9 @@ fn collect_statement_origin(
 ) {
     origins.push(expression.origin.clone());
     match &expression.value {
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             if typed_primitive_head(&callee.value).is_some()
                 || typed_enum_constructor_head(&callee.value, module_alias, signatures).is_some()
             {
@@ -1564,7 +1675,9 @@ fn collect_statement_origin(
                 // node itself, matching the default arm below.
                 origins.push(expression.origin.clone());
             }
-            collect_expr_origins(arguments, origins)
+            for argument in arguments {
+                collect_expr_origin(argument.value(), origins);
+            }
         }
         ExprKind::Let { value, .. } | ExprKind::Set { value, .. } => {
             collect_expr_origin(value, origins)
@@ -1624,7 +1737,11 @@ fn collect_expr_origin(expression: &AstExpr, origins: &mut Vec<Origin>) {
 
 fn collect_expr_children(expression: &AstExpr, origins: &mut Vec<Origin>) {
     match &expression.value {
-        ExprKind::Call { arguments, .. } => collect_expr_origins(arguments, origins),
+        ExprKind::Call { arguments, .. } => {
+            for argument in arguments {
+                collect_expr_origin(argument.value(), origins);
+            }
+        }
         ExprKind::Record(fields) => {
             for field in fields {
                 collect_expr_origin(&field.value, origins);
@@ -1793,10 +1910,15 @@ fn lower_statement(
         )
     };
     Ok(match &expression.value {
-        ExprKind::Call { callee, arguments } => match lower_typed_call(
+        ExprKind::Call {
+            callee,
+            arguments,
+            type_arguments,
+        } => match lower_typed_call(
             module_alias,
             &callee.value,
             arguments,
+            type_arguments,
             signatures,
             declared_aliases,
             generics,
@@ -1810,10 +1932,15 @@ fn lower_statement(
                 let _ = lower_type(ty, generics, module_alias, declared_aliases)?;
             }
             let value = match &value.value {
-                ExprKind::Call { callee, arguments } => match lower_typed_call(
+                ExprKind::Call {
+                    callee,
+                    arguments,
+                    type_arguments,
+                } => match lower_typed_call(
                     module_alias,
                     &callee.value,
                     arguments,
+                    type_arguments,
                     signatures,
                     declared_aliases,
                     generics,
@@ -1930,10 +2057,18 @@ fn lower_expr(
     Ok(match &expression.value {
         ExprKind::Literal(value) => Expr::Value(lower_literal(value)),
         ExprKind::Reference(name) => Expr::VarRef(name.clone()),
-        ExprKind::Call { callee, arguments } => match lower_typed_call(
+        ExprKind::AnonymousFunction { .. } => bail!(
+            "E-FN-001: anonymous functions are currently executable only as inline implementation methods"
+        ),
+        ExprKind::Call {
+            callee,
+            arguments,
+            type_arguments,
+        } => match lower_typed_call(
             module_alias,
             &callee.value,
             arguments,
+            type_arguments,
             signatures,
             declared_aliases,
             generics,
@@ -2013,8 +2148,23 @@ fn lower_expr(
         // body (e.g. alongside other statements, or inside an `if`), which
         // has no legacy equivalent and stays rejected explicitly rather
         // than silently accepted.
-        ExprKind::Wasm { .. } => {
-            bail!("typed `wasm` import body must be a function's entire body, not a nested expression")
+        ExprKind::Wasm { import, arguments } => {
+            let entry = crate::host_abi::lookup(&import.module.value, &import.name.value)
+                .with_context(|| format!("E-WASM-002: unknown host import `{}.{}`", import.module.value, import.name.value))?;
+            if arguments.len() != entry.params.len() {
+                bail!("E-WASM-003: host import `{}.{}` expects {} arguments, got {}", import.module.value, import.name.value, entry.params.len(), arguments.len());
+            }
+            let args = arguments.iter().map(|argument| match argument {
+                WasmArgument::Parameter(name) => Ok(Expr::VarRef(name.value.clone())),
+                WasmArgument::ConstInt(value) => Ok(Expr::Value(RuntimeValue::Int(value.value))),
+                WasmArgument::ConstString(value) => Ok(Expr::Value(RuntimeValue::Str(value.value.clone()))),
+                WasmArgument::Expression(value) => lower(value),
+            }).collect::<Result<Vec<_>>>()?;
+            Expr::HostCall {
+                import: ImportTarget { module: import.module.value.clone(), name: import.name.value.clone() },
+                args,
+                return_type: crate::lower::host_result_type(entry.result)?,
+            }
         }
         ExprKind::If {
             condition,
@@ -2065,12 +2215,17 @@ fn lower_expr(
 fn lower_call(
     module_alias: &str,
     callee: &str,
-    arguments: &[AstExpr],
+    arguments: &[CallArgument],
+    type_arguments: &[crate::ast::TypeExpr],
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
     local_types: &HashMap<String, TypeRef>,
 ) -> Result<Call> {
+    let source_values = arguments
+        .iter()
+        .map(|argument| argument.value().clone())
+        .collect::<Vec<_>>();
     let callee_key =
         if let Some(key) = resolve_ordinary_call_target(module_alias, callee, signatures) {
             key
@@ -2078,7 +2233,7 @@ fn lower_call(
             resolve_interface_call_target(
                 module_alias,
                 callee,
-                arguments,
+                &source_values,
                 signatures,
                 declared_aliases,
                 generics,
@@ -2086,22 +2241,184 @@ fn lower_call(
             )
             .with_context(|| format!("unknown typed callee `{callee}`"))?
         };
+    let signature = signatures
+        .functions
+        .get(&callee_key)
+        .with_context(|| format!("missing typed signature for `{callee_key}`"))?;
+    let bound_arguments = bind_call_arguments(callee, arguments, signature)?;
+    let source_args = bound_arguments
+        .source
+        .iter()
+        .map(|argument| {
+            lower_expr(
+                module_alias,
+                argument.value,
+                signatures,
+                declared_aliases,
+                generics,
+                local_types,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let argument_targets = bound_arguments
+        .source
+        .iter()
+        .map(|argument| argument.target)
+        .collect();
+    let mut lowered_arguments = bound_arguments
+        .fixed
+        .iter()
+        .map(|argument| {
+            lower_expr(
+                module_alias,
+                argument,
+                signatures,
+                declared_aliases,
+                generics,
+                local_types,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if signature
+        .parameters
+        .last()
+        .is_some_and(|parameter| parameter.variadic)
+    {
+        lowered_arguments.push(Expr::Array(
+            bound_arguments
+                .variadic
+                .iter()
+                .map(|argument| {
+                    lower_expr(
+                        module_alias,
+                        argument,
+                        signatures,
+                        declared_aliases,
+                        generics,
+                        local_types,
+                    )
+                })
+                .collect::<Result<_>>()?,
+        ));
+    }
     Ok(Call {
         callee_key,
-        type_args: Vec::new(),
-        args: arguments
+        type_args: type_arguments
             .iter()
-            .map(|argument| {
-                lower_expr(
-                    module_alias,
-                    argument,
-                    signatures,
-                    declared_aliases,
-                    generics,
-                    local_types,
-                )
-            })
+            .map(|ty| lower_type(ty, generics, module_alias, declared_aliases))
             .collect::<Result<_>>()?,
+        args: lowered_arguments,
+        source_args,
+        argument_targets,
+    })
+}
+
+struct BoundCallArguments<'a> {
+    fixed: Vec<&'a AstExpr>,
+    variadic: Vec<&'a AstExpr>,
+    source: Vec<BoundSourceArgument<'a>>,
+}
+
+struct BoundSourceArgument<'a> {
+    value: &'a AstExpr,
+    target: crate::lower::CallArgumentTarget,
+}
+
+fn bind_call_arguments<'a>(
+    callee: &str,
+    arguments: &'a [CallArgument],
+    signature: &TypedFunctionSignature,
+) -> Result<BoundCallArguments<'a>> {
+    let variadic = signature
+        .parameters
+        .last()
+        .is_some_and(|parameter| parameter.variadic);
+    let fixed_count = signature
+        .parameters
+        .len()
+        .saturating_sub(usize::from(variadic));
+    let mut fixed = vec![None; fixed_count];
+    let mut tail = Vec::new();
+    let mut source = Vec::with_capacity(arguments.len());
+    let mut next_fixed = 0;
+
+    for argument in arguments {
+        match argument {
+            CallArgument::Labelled { label, value } => {
+                let Some(index) = signature.parameters[..fixed_count]
+                    .iter()
+                    .position(|parameter| parameter.name == label.value)
+                else {
+                    if variadic
+                        && signature
+                            .parameters
+                            .last()
+                            .is_some_and(|parameter| parameter.name == label.value)
+                    {
+                        bail!(
+                            "typed call `{callee}` variadic parameter `{}` is positional-only",
+                            label.value
+                        );
+                    }
+                    bail!(
+                        "typed call `{callee}` has no parameter named `{}`",
+                        label.value
+                    );
+                };
+                if fixed[index].replace(value).is_some() {
+                    bail!(
+                        "typed call `{callee}` binds parameter `{}` more than once",
+                        label.value
+                    );
+                }
+                source.push(BoundSourceArgument {
+                    value,
+                    target: crate::lower::CallArgumentTarget::Fixed(index),
+                });
+                while next_fixed < fixed_count && fixed[next_fixed].is_some() {
+                    next_fixed += 1;
+                }
+            }
+            CallArgument::Positional(value) => {
+                while next_fixed < fixed_count && fixed[next_fixed].is_some() {
+                    next_fixed += 1;
+                }
+                if next_fixed < fixed_count {
+                    source.push(BoundSourceArgument {
+                        value,
+                        target: crate::lower::CallArgumentTarget::Fixed(next_fixed),
+                    });
+                    fixed[next_fixed] = Some(value);
+                    next_fixed += 1;
+                } else if variadic {
+                    tail.push(value);
+                    source.push(BoundSourceArgument {
+                        value,
+                        target: crate::lower::CallArgumentTarget::Variadic,
+                    });
+                } else {
+                    bail!(
+                        "typed call `{callee}` expects {} arguments, got more",
+                        signature.parameters.len()
+                    );
+                }
+            }
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(fixed_count);
+    for (index, value) in fixed.into_iter().enumerate() {
+        ordered.push(value.with_context(|| {
+            format!(
+                "typed call `{callee}` is missing parameter `{}`",
+                signature.parameters[index].name
+            )
+        })?);
+    }
+    Ok(BoundCallArguments {
+        fixed: ordered,
+        variadic: tail,
+        source,
     })
 }
 
@@ -2189,27 +2506,14 @@ fn resolve_interface_call_target(
     let expected = iface_methods
         .get(method)
         .with_context(|| format!("interface `{iface_qualified}` has no method `{method}`"))?;
-    let TypeRef::FnType { args, .. } = expected else {
+    let TypeRef::FnType { parameters, .. } = expected else {
         bail!(
             "interface `{iface_qualified}` method `{method}` is not a `$fn-type`; got `{expected:?}`"
         );
     };
-    // The typed surface's function types are positional (`TypeRef::Tuple`,
-    // not legacy's named `TypeRef::Record`): `typed_lower::lower_type`
-    // lowers an interface method's `TypeExprKind::Function { parameters,
-    // .. }` straight into `FnType { args: Tuple(parameter types), .. }`, and
-    // `typed_lower`'s own impl-conformance check (`#182`) zips that same
-    // `Tuple` positionally against the concrete implementation's
-    // `arg_types`. The self-typed parameter's *index* in that tuple is
-    // therefore exactly the index of the dispatch subject among the call's
-    // positional arguments.
-    let expected_args = match args.as_ref() {
-        TypeRef::Tuple(args) => args.as_slice(),
-        other => std::slice::from_ref(other),
-    };
-    let Some(self_index) = expected_args
+    let Some(self_index) = parameters
         .iter()
-        .position(|ty| matches!(ty, TypeRef::SelfType))
+        .position(|parameter| matches!(parameter.ty, TypeRef::SelfType))
     else {
         bail!(
             "E-CALL-IFACE-NOSELF: interface method `{iface_qualified}.{method}` has no `$self` \
@@ -2401,14 +2705,6 @@ fn static_expr_type(
     types: &HashMap<String, TypeRef>,
 ) -> Option<TypeRef> {
     match &expression.value {
-        // A migrated legacy body spells its own function parameters
-        // `args.name` (the literal legacy `$args.` envelope, preserved
-        // verbatim by the corpus migrator's `sym()`), while `types` is
-        // seeded from `TypedFunctionSignature::arg_names`, which holds the
-        // bare declared name. Bridge the same way `infer`'s
-        // `inference_locals` bridges it for the shared `infer_expr_type`
-        // path: try the name as written first, then its `args.`-stripped
-        // form.
         ExprKind::Reference(name) => types
             .get(name)
             .or_else(|| name.strip_prefix("args.").and_then(|bare| types.get(bare)))
@@ -2525,19 +2821,24 @@ enum TypedCallResolution {
 fn lower_typed_call(
     module_alias: &str,
     callee: &str,
-    arguments: &[AstExpr],
+    arguments: &[CallArgument],
+    type_arguments: &[crate::ast::TypeExpr],
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
     local_types: &HashMap<String, TypeRef>,
 ) -> Result<TypedCallResolution> {
+    let positional_arguments = arguments
+        .iter()
+        .map(|argument| argument.value().clone())
+        .collect::<Vec<_>>();
     if let Some((op, arity)) = typed_primitive_head(callee) {
         return Ok(TypedCallResolution::Expr(lower_primitive_call(
             module_alias,
             callee,
             op,
             arity,
-            arguments,
+            &positional_arguments,
             signatures,
             declared_aliases,
             generics,
@@ -2549,7 +2850,7 @@ fn lower_typed_call(
             module_alias,
             &enum_key,
             &tag,
-            arguments,
+            &positional_arguments,
             signatures,
             declared_aliases,
             generics,
@@ -2560,6 +2861,7 @@ fn lower_typed_call(
         module_alias,
         callee,
         arguments,
+        type_arguments,
         signatures,
         declared_aliases,
         generics,
@@ -2692,6 +2994,19 @@ fn lower_if_branch(
 ) -> Result<Expr> {
     match body {
         [] => Ok(Expr::Value(RuntimeValue::Void)),
+        [single] if matches!(single.value, ExprKind::Do(_)) => {
+            let ExprKind::Do(values) = &single.value else {
+                unreachable!()
+            };
+            lower_if_branch(
+                module_alias,
+                values,
+                signatures,
+                declared_aliases,
+                generics,
+                local_types,
+            )
+        }
         [single] => lower_expr(
             module_alias,
             single,
@@ -2912,10 +3227,9 @@ mod tests {
     #[test]
     fn lowers_staged_sexpression_function_constant_and_test_bodies() {
         let source = module(
-            r#"(fn copy ((value int64)) int64
-  (do (let-as copy int64 value) (return copy)))
+            r#"(defn copy (value int64) int64 (do (let-as copy int64 value) (return copy)))
 (const answer int64 42)
-(test smoke core (do (copy answer)))"#,
+(test.scenario "smoke" (test.case "smoke" (copy answer)))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -2933,7 +3247,7 @@ mod tests {
             Expr::Value(RuntimeValue::Int(42))
         ));
         assert!(matches!(
-            bodies.staged_test("smoke").unwrap()[0],
+            bodies.staged_test("smoke::smoke").unwrap()[0],
             Statement::Call(_)
         ));
         assert_eq!(
@@ -2952,11 +3266,11 @@ mod tests {
         // `close-box`'s own key, already handled by the `TopLevel::Function`
         // arm, and must not be duplicated.
         let source = module(
-            r#"(def display (interface (show (fn-type (self) str))))
-(def closeable (interface (close (fn-type (self) str))))
-(fn close-box ((value self)) str (do (return "closed")))
+            r#"(def display (interface (show (fn-type (self self) str))))
+(def closeable (interface (close (fn-type (self self) str))))
+(defn close-box (value self) str (do (return "closed")))
 (def box (record (value str))
-  impls: ((impl display methods: ((method show (fn show-box ((value self)) str (do (return "box"))))))
+  impls: ((impl display methods: ((method show (fn (value self) str (do (return "box"))))))
           (impl closeable methods: ((method close close-box)))))"#,
         );
         let inputs = [TypedModuleInput {
@@ -2966,17 +3280,12 @@ mod tests {
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
         let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
 
-        // The staged key is owner + the inline function's *own* name
-        // (`show-box`), not the interface method name (`show`) -- matching
-        // `typed_lower::lower_implementation`'s `ImplMethodBinding::Fresh(
-        // lower_function(..., function, &owner, ...))`, where `function` is
-        // the inline `(fn show-box ...)` node.
         assert!(
-            signatures.functions.contains_key("box.display.show-box"),
+            signatures.functions.contains_key("box.display.show"),
             "signature tier should have registered the fresh method's key, got {:?}",
             signatures.functions.keys().collect::<Vec<_>>()
         );
-        let FunctionBody::User { statements } = &bodies.functions["box.display.show-box"] else {
+        let FunctionBody::User { statements } = &bodies.functions["box.display.show"] else {
             panic!("expected a lowered user body for the fresh impl method");
         };
         assert!(matches!(statements[0], Statement::Return(_)));
@@ -3001,7 +3310,7 @@ mod tests {
 
     #[test]
     fn identity_subset_executes_in_interpreter_and_wasm() {
-        let source = module("(fn identity ((value int64)) int64 (do (return value)))");
+        let source = module("(defn identity (value int64) int64 (do (return value)))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3014,6 +3323,8 @@ mod tests {
                 callee_key: "identity".into(),
                 type_args: Vec::new(),
                 args: vec![Expr::Value(RuntimeValue::Int(7))],
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
@@ -3029,21 +3340,36 @@ mod tests {
     #[test]
     fn pure_calls_control_collections_and_mutation_execute_in_both_backends() {
         let source = module(
-            r#"(fn choose ((flag bool) (left int64) (right int64)) int64
-  (do (if flag (do (return left)) (do (return right)))))
-(fn collect ((value int64)) (array int64)
-  (do (let values (array value value)) (return values)))
-(fn mutate ((value int64)) int64
-  (do (let cell (mut value)) (set cell 9) (return cell)))
-(fn forward ((value int64)) int64
-  (do (return (choose true value answer))))
-(fn observe ((value int64)) void
-  (do (task (captures value) (do value))))
-(fn loop-over ((value int64)) int64
+            r#"(defn
+  choose
+  (flag bool left int64 right int64)
+  int64
+  (do (if flag (do (return left)) (do (return right))))
+)
+(defn
+  collect
+  (value int64)
+  (array int64)
+  (do (let values (array value value)) (return values))
+)
+(defn
+  mutate
+  (value int64)
+  int64
+  (do (let cell (mut value)) (set cell 9) (return cell))
+)
+(defn forward (value int64) int64 (do (return (choose true value answer))))
+(defn observe (value int64) void (do (task (do value) captures: (value))))
+(defn
+  loop-over
+  (value int64)
+  int64
   (do
     (while false (do (break)))
     (for item (array value) (do item))
-    (return value)))
+    (return value)
+  )
+)
 (const answer int64 42)"#,
         );
         let inputs = [TypedModuleInput {
@@ -3075,6 +3401,8 @@ mod tests {
                 callee_key: callee.into(),
                 type_args: Vec::new(),
                 args,
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
             })
         })
         .collect();
@@ -3112,15 +3440,25 @@ mod tests {
             .contains("set mismatch"));
 
         for source in [
-            "(fn bad ((value int64)) int64 (do (return missing)))",
-            "(fn bad ((value int64)) bool (do (return value)))",
-            "(fn bad ((value t)) t (do (return value)) where: ((t)))",
-            "(fn bad ((value int64)) int64 (do (if value (do (return value)) (do (return value)))))",
-            "(fn bad ((value int64)) int64 (do (break) (return value)))",
-            "(fn bad ((value int64)) int64 (do (set value 2) (return value)))",
-            "(fn bad ((value int64)) int64 (do (let-as copy bool value) (return copy)))",
-            "(fn bad ((value int64)) void (do (let cell (mut value)) (task (captures cell) (do cell))))",
-            "(fn target ((value int64)) int64 (do (return value))) (fn bad () int64 (do (return (target true))))",
+            "(defn bad (value int64) int64 (do (return missing)))",
+            "(defn bad (value int64) bool (do (return value)))",
+            "(defn bad (value t) t (do (return value)) where: (t any))",
+            "(defn
+  bad
+  (value int64)
+  int64
+  (do (if value (do (return value)) (do (return value))))
+)",
+            "(defn bad (value int64) int64 (do (break) (return value)))",
+            "(defn bad (value int64) int64 (do (set value 2) (return value)))",
+            "(defn bad (value int64) int64 (do (let-as copy bool value) (return copy)))",
+            "(defn
+  bad
+  (value int64)
+  void
+  (do (let cell (mut value)) (task (do cell) captures: (cell)))
+)",
+            "(defn target (value int64) int64 (do (return value))) (defn bad () int64 (do (return (target true))))",
         ] {
             let module = module(source);
             let inputs = [TypedModuleInput {
@@ -3139,8 +3477,12 @@ mod tests {
     #[test]
     fn interface_patterns_are_not_lowered_lossily() {
         let source = module(
-            "(fn bad ((value int64)) int64
-               (do (match value (case (interface int64 (bind inner)) (do (return inner))))))",
+            "(defn
+  bad
+  (value int64)
+  int64
+  (do (match value (interface int64 (bind inner)) (do (return inner))))
+)",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3154,15 +3496,19 @@ mod tests {
     #[test]
     fn imported_calls_and_constants_require_scope_and_public_visibility() {
         let library = module(
-            r#"(fn echo ((value int64)) int64 (do (return value)))
+            r#"(defn echo (value int64) int64 (do (return value)))
 (const answer int64 42)
-(private (fn hidden ((value int64)) int64 (do (return value))))
-(private (const secret int64 7))"#,
+(defn hidden (value int64) int64 (do (return value)) visibility: private)
+(const secret int64 7 visibility: private)"#,
         );
         let entry = module(
             r#"(import lib "./lib.vibra")
-(fn use-public ((value int64)) int64
-  (do (let copy (lib.echo value)) (return lib.answer)))"#,
+(defn
+  use-public
+  (value int64)
+  int64
+  (do (let copy (lib.echo value)) (return lib.answer))
+)"#,
         );
         let inputs = [
             TypedModuleInput {
@@ -3180,7 +3526,7 @@ mod tests {
 
         for reference in ["(lib.hidden value)", "lib.secret"] {
             let entry = module(&format!(
-                "(import lib \"./lib.vibra\")\n(fn bad ((value int64)) int64 (do (return {reference})))"
+                "(import lib \"./lib.vibra\")\n(defn bad (value int64) int64 (do (return {reference})))"
             ));
             let inputs = [
                 TypedModuleInput {
@@ -3205,7 +3551,7 @@ mod tests {
   (do (quote expr-syntax 1)))
 (macro wrong () expr-syntax
   (do (quote expr-syntax true)))
-(fn bad () int64 (do (unrelated) (return (wrong))))"#,
+(defn bad () int64 (do (unrelated) (return (wrong))))"#,
         ))
         .unwrap();
         let TopLevel::Function(function) = &expanded.forms[0] else {
@@ -3235,8 +3581,7 @@ mod tests {
         let expanded = crate::ast::expand_typed_macros(module(
             r#"(macro source () expr-syntax
   (do (quote expr-syntax (array 1))))
-(fn bad ((item int64)) void
-  (do (for item (source) (do unit))))"#,
+(defn bad (item int64) void (do (for item (source) (do unit))))"#,
         ))
         .unwrap();
         let TopLevel::Function(function) = &expanded.forms[0] else {
@@ -3266,7 +3611,7 @@ mod tests {
         let expanded = crate::ast::expand_typed_macros(module(
             r#"(macro wrong-bound () expr-syntax
   (do (quote expr-syntax true)))
-(fn bad () void (do (range 0 (wrong-bound) 1)))"#,
+(defn bad () void (do (range 0 (wrong-bound) 1)))"#,
         ))
         .unwrap();
         let TopLevel::Function(function) = &expanded.forms[0] else {
@@ -3308,18 +3653,18 @@ mod tests {
     #[test]
     fn primitive_arithmetic_and_bitwise_ops_lower_with_operand_and_return_type() {
         let source = module(
-            r#"(fn addition ((a int64) (b int64)) int64 (do (return (add a b))))
-(fn subtraction ((a int64) (b int64)) int64 (do (return (subtract a b))))
-(fn multiplication ((a int64) (b int64)) int64 (do (return (multiply a b))))
-(fn division ((a int64) (b int64)) int64 (do (return (divide a b))))
-(fn remaindering ((a int64) (b int64)) int64 (do (return (remainder a b))))
-(fn negation ((a int64)) int64 (do (return (negate a))))
-(fn bitwise-and ((a int64) (b int64)) int64 (do (return (bit-and a b))))
-(fn bitwise-or ((a int64) (b int64)) int64 (do (return (bit-or a b))))
-(fn bitwise-xor ((a int64) (b int64)) int64 (do (return (bit-xor a b))))
-(fn bitwise-not ((a int64)) int64 (do (return (bit-not a))))
-(fn shift-left-by ((a int64) (b int64)) int64 (do (return (shift-left a b))))
-(fn shift-right-by ((a int64) (b int64)) int64 (do (return (shift-right a b))))"#,
+            r#"(defn addition (a int64 b int64) int64 (do (return (add a b))))
+(defn subtraction (a int64 b int64) int64 (do (return (subtract a b))))
+(defn multiplication (a int64 b int64) int64 (do (return (multiply a b))))
+(defn division (a int64 b int64) int64 (do (return (divide a b))))
+(defn remaindering (a int64 b int64) int64 (do (return (remainder a b))))
+(defn negation (a int64) int64 (do (return (negate a))))
+(defn bitwise-and (a int64 b int64) int64 (do (return (bit-and a b))))
+(defn bitwise-or (a int64 b int64) int64 (do (return (bit-or a b))))
+(defn bitwise-xor (a int64 b int64) int64 (do (return (bit-xor a b))))
+(defn bitwise-not (a int64) int64 (do (return (bit-not a))))
+(defn shift-left-by (a int64 b int64) int64 (do (return (shift-left a b))))
+(defn shift-right-by (a int64 b int64) int64 (do (return (shift-right a b))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3362,16 +3707,16 @@ mod tests {
     #[test]
     fn primitive_comparison_and_logical_ops_return_bool() {
         let source = module(
-            r#"(fn less ((a int64) (b int64)) bool (do (return (less-than a b))))
-(fn less-eq ((a int64) (b int64)) bool (do (return (less-or-equal a b))))
-(fn greater ((a int64) (b int64)) bool (do (return (greater-than a b))))
-(fn greater-eq ((a int64) (b int64)) bool (do (return (greater-or-equal a b))))
-(fn eq ((a int64) (b int64)) bool (do (return (equal a b))))
-(fn not-eq ((a int64) (b int64)) bool (do (return (not-equal a b))))
-(fn str-cmp ((a str) (b str)) bool (do (return (less-than a b))))
-(fn either ((a bool) (b bool)) bool (do (return (or a b))))
-(fn both ((a bool) (b bool)) bool (do (return (and a b))))
-(fn negation ((a bool)) bool (do (return (not a))))"#,
+            r#"(defn less (a int64 b int64) bool (do (return (less-than a b))))
+(defn less-eq (a int64 b int64) bool (do (return (less-or-equal a b))))
+(defn greater (a int64 b int64) bool (do (return (greater-than a b))))
+(defn greater-eq (a int64 b int64) bool (do (return (greater-or-equal a b))))
+(defn eq (a int64 b int64) bool (do (return (equal a b))))
+(defn not-eq (a int64 b int64) bool (do (return (not-equal a b))))
+(defn str-cmp (a str b str) bool (do (return (less-than a b))))
+(defn either (a bool b bool) bool (do (return (or a b))))
+(defn both (a bool b bool) bool (do (return (and a b))))
+(defn negation (a bool) bool (do (return (not a))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3402,8 +3747,12 @@ mod tests {
     #[test]
     fn primitive_call_as_a_let_value_and_as_a_bare_statement_lowers_and_executes() {
         let source = module(
-            r#"(fn compute ((a int64) (b int64)) int64
-  (do (let sum (add a b)) (add a b) (return sum)))"#,
+            r#"(defn
+  compute
+  (a int64 b int64)
+  int64
+  (do (let sum (add a b)) (add a b) (return sum))
+)"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3420,6 +3769,8 @@ mod tests {
                     Expr::Value(RuntimeValue::Int(3)),
                     Expr::Value(RuntimeValue::Int(4)),
                 ],
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
@@ -3435,9 +3786,9 @@ mod tests {
     #[test]
     fn primitive_arity_mismatch_is_rejected_at_lowering_time() {
         for source in [
-            "(fn bad () int64 (do (return (add 1))))",
-            "(fn bad () int64 (do (return (negate 1 2))))",
-            "(fn bad () bool (do (return (not true false))))",
+            "(defn bad () int64 (do (return (add 1))))",
+            "(defn bad () int64 (do (return (negate 1 2))))",
+            "(defn bad () bool (do (return (not true false))))",
         ] {
             let source = module(source);
             let inputs = [TypedModuleInput {
@@ -3453,7 +3804,7 @@ mod tests {
 
     #[test]
     fn primitive_mixed_operand_types_require_an_explicit_cast() {
-        let source = module("(fn bad ((a int64) (b bool)) int64 (do (return (add a b))))");
+        let source = module("(defn bad (a int64 b bool) int64 (do (return (add a b))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3471,7 +3822,7 @@ mod tests {
 
     #[test]
     fn negate_on_unsigned_operand_is_rejected() {
-        let source = module("(fn bad ((a uint32)) uint32 (do (return (negate a))))");
+        let source = module("(defn bad (a uint32) uint32 (do (return (negate a))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3489,7 +3840,7 @@ mod tests {
 
     #[test]
     fn and_on_non_bool_operand_is_rejected() {
-        let source = module("(fn bad ((a int64) (b int64)) bool (do (return (and a b))))");
+        let source = module("(defn bad (a int64 b int64) bool (do (return (and a b))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3507,8 +3858,7 @@ mod tests {
 
     #[test]
     fn bitwise_on_float_operand_is_rejected() {
-        let source =
-            module("(fn bad ((a float64) (b float64)) float64 (do (return (bit-and a b))))");
+        let source = module("(defn bad (a float64 b float64) float64 (do (return (bit-and a b))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3529,10 +3879,10 @@ mod tests {
         // `lib` never declares `add`, so a qualified `lib.add` call must not
         // silently resolve to the `add` primitive: it must fail as an
         // unresolved callee.
-        let library = module("(fn echo ((value int64)) int64 (do (return value)))");
+        let library = module("(defn echo (value int64) int64 (do (return value)))");
         let entry = module(
             r#"(import lib "./lib.vibra")
-(fn bad ((value int64)) int64 (do (return (lib.add value 1))))"#,
+(defn bad (value int64) int64 (do (return (lib.add value 1))))"#,
         );
         let inputs = [
             TypedModuleInput {
@@ -3555,7 +3905,7 @@ mod tests {
         // Exercises the branch that previously read
         // `signatures.functions.get(&call.callee_key).expect("resolved typed
         // call")`: this must surface as an `Err`, never as a panic.
-        let source = module("(fn bad () int64 (do (return (totally-unknown-fn))))");
+        let source = module("(defn bad () int64 (do (return (totally-unknown-fn))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3576,7 +3926,7 @@ mod tests {
     #[test]
     fn convert_lowers_a_valid_narrowing_conversion_with_correct_operand_and_return_types() {
         let source =
-            module("(fn narrow ((value int64)) int32 (do (return (convert value int32 5))))");
+            module("(defn narrow (value int64) int32 (do (return (convert value int32 5))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3607,7 +3957,7 @@ mod tests {
     #[test]
     fn convert_fallback_that_does_not_fit_target_is_rejected() {
         let source =
-            module("(fn narrow ((value int64)) int8 (do (return (convert value int8 999))))");
+            module("(defn narrow (value int64) int8 (do (return (convert value int8 999))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3625,8 +3975,8 @@ mod tests {
     #[test]
     fn convert_rejects_non_numeric_source_or_target() {
         for source in [
-            "(fn bad ((value bool)) int32 (do (return (convert value int32 0))))",
-            "(fn bad ((value int64)) bool (do (return (convert value bool 0))))",
+            "(defn bad (value bool) int32 (do (return (convert value int32 0))))",
+            "(defn bad (value int64) bool (do (return (convert value bool 0))))",
         ] {
             let source = module(source);
             let inputs = [TypedModuleInput {
@@ -3649,7 +3999,7 @@ mod tests {
         // 1.5 is exactly representable in f32, so narrowing and widening it
         // back reproduces the original f64 bit pattern.
         let exact = module(
-            "(fn narrow ((value float64)) float32 (do (return (convert value float32 1.5))))",
+            "(defn narrow (value float64) float32 (do (return (convert value float32 1.5))))",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3663,7 +4013,7 @@ mod tests {
         // 0.1 does not: narrowing to f32 and back yields a different f64
         // value (0.10000000149011612), so the fallback must be rejected.
         let lossy = module(
-            "(fn narrow ((value float64)) float32 (do (return (convert value float32 0.1))))",
+            "(defn narrow (value float64) float32 (do (return (convert value float32 0.1))))",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3682,7 +4032,7 @@ mod tests {
     #[test]
     fn convert_executes_through_interpreter_and_wasm() {
         let source =
-            module("(fn narrow ((value int64)) int32 (do (return (convert value int32 999))))");
+            module("(defn narrow (value int64) int32 (do (return (convert value int32 999))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3695,6 +4045,8 @@ mod tests {
                 callee_key: "narrow".into(),
                 type_args: Vec::new(),
                 args: vec![Expr::Value(RuntimeValue::Int(5))],
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
@@ -3712,7 +4064,7 @@ mod tests {
         // The standard library names combinators `option.and`, `option.or`,
         // `result.and`, and `result.or`. Those declarations are reachable
         // through their qualified names, so rejecting them would be wrong.
-        let source = module("(fn and ((a int64) (b int64)) int64 (do (return a)))");
+        let source = module("(defn and (a int64 b int64) int64 (do (return a)))");
         let inputs = [TypedModuleInput {
             alias: "lib",
             module: &source,
@@ -3728,8 +4080,8 @@ mod tests {
         // on what the enclosing module happens to declare. Inside a module that
         // declares `and`, an unqualified `(and ...)` is still the primitive.
         let source = module(
-            "(fn and ((a bool) (b bool)) bool (do (return a)))\n\
-             (fn use-it ((x bool) (y bool)) bool (do (return (and x y))))",
+            "(defn and (a bool b bool) bool (do (return a)))\n\
+             (defn use-it (x bool y bool) bool (do (return (and x y))))",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3750,10 +4102,13 @@ mod tests {
     fn enum_constructor_lowers_and_validates_nullary_and_payload_tags() {
         let source = module(
             r#"(def color (enum (red void) (custom int64)))
-(fn pick-red () int64
-  (do (let chosen (color.red)) (return 1)))
-(fn pick-custom ((value int64)) int64
-  (do (let chosen (color.custom value)) (return value)))"#,
+(defn pick-red () int64 (do (let chosen (color.red)) (return 1)))
+(defn
+  pick-custom
+  (value int64)
+  int64
+  (do (let chosen (color.custom value)) (return value))
+)"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3814,7 +4169,7 @@ mod tests {
         // must not be silently misdiagnosed as an enum-constructor problem;
         // it falls back to ordinary call resolution and fails there.
         let source =
-            module("(fn bad () int64 (do (let chosen (nonexistent-type.tag)) (return 1)))");
+            module("(defn bad () int64 (do (let chosen (nonexistent-type.tag)) (return 1)))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3834,7 +4189,7 @@ mod tests {
         // rather than misreporting an "unknown enum tag".
         let source = module(
             r#"(def color (enum (red void)))
-(fn bad () int64 (do (let chosen (color.mystery)) (return 1)))"#,
+(defn bad () int64 (do (let chosen (color.mystery)) (return 1)))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3859,8 +4214,8 @@ mod tests {
         // hard-error as a bogus `empty` tag on the `option` enum.
         let source = module(
             "(def option (enum (some int64) (none void)))
-(fn empty ((ignored bool)) int64 (do (return 0)))
-(fn caller () int64 (do (return (option.empty true))))",
+(defn empty (ignored bool) int64 (do (return 0)))
+(defn caller () int64 (do (return (option.empty true))))",
         );
         let inputs = [TypedModuleInput {
             alias: "option",
@@ -3884,10 +4239,10 @@ mod tests {
         for source in [
             // `red` takes no payload.
             r#"(def color (enum (red void) (custom int64)))
-(fn bad () int64 (do (let chosen (color.red 1)) (return 1)))"#,
+(defn bad () int64 (do (let chosen (color.red 1)) (return 1)))"#,
             // `custom` requires exactly one payload.
             r#"(def color (enum (red void) (custom int64)))
-(fn bad () int64 (do (let chosen (color.custom)) (return 1)))"#,
+(defn bad () int64 (do (let chosen (color.custom)) (return 1)))"#,
         ] {
             let source = module(source);
             let inputs = [TypedModuleInput {
@@ -3904,7 +4259,7 @@ mod tests {
     fn enum_constructor_payload_type_mismatch_is_rejected_at_validation_time() {
         let source = module(
             r#"(def color (enum (custom int64)))
-(fn bad () int64 (do (let chosen (color.custom true)) (return 1)))"#,
+(defn bad () int64 (do (let chosen (color.custom true)) (return 1)))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3924,8 +4279,12 @@ mod tests {
     #[test]
     fn expression_if_lowers_and_infers_the_common_branch_type() {
         let source = module(
-            "(fn choose ((flag bool) (left int64) (right int64)) int64
-               (do (return (if flag (do left) (do right)))))",
+            "(defn
+  choose
+  (flag bool left int64 right int64)
+  int64
+  (do (return (if flag (do left) (do right))))
+)",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3944,7 +4303,7 @@ mod tests {
 
     #[test]
     fn expression_if_with_empty_branches_is_unit() {
-        let source = module("(fn noop ((flag bool)) void (do (return (if flag (do) (do)))))");
+        let source = module("(defn noop (flag bool) void (do (return (if flag (do) (do)))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -3957,8 +4316,12 @@ mod tests {
     #[test]
     fn expression_if_condition_must_be_bool() {
         let source = module(
-            "(fn bad ((flag int64) (left int64) (right int64)) int64
-               (do (return (if flag (do left) (do right)))))",
+            "(defn
+  bad
+  (flag int64 left int64 right int64)
+  int64
+  (do (return (if flag (do left) (do right))))
+)",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3976,8 +4339,12 @@ mod tests {
     #[test]
     fn expression_if_branches_must_have_compatible_types() {
         let source = module(
-            "(fn bad ((flag bool) (left int64) (right bool)) int64
-               (do (return (if flag (do left) (do right)))))",
+            "(defn
+  bad
+  (flag bool left int64 right bool)
+  int64
+  (do (return (if flag (do left) (do right))))
+)",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -3995,8 +4362,12 @@ mod tests {
     #[test]
     fn expression_if_branch_with_more_than_one_form_is_rejected_at_lowering_time() {
         let source = module(
-            "(fn bad ((flag bool) (left int64) (right int64)) int64
-               (do (return (if flag (do left left) (do right)))))",
+            "(defn
+  bad
+  (flag bool left int64 right int64)
+  int64
+  (do (return (if flag (do left left) (do right))))
+)",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4012,11 +4383,16 @@ mod tests {
     #[test]
     fn spawn_and_join_lower_validate_and_execute_in_both_backends() {
         let source = module(
-            "(fn spawn-and-join ((value int64)) int64
-               (do
-                 (spawn worker (captures value) (add value 1))
-                 (join worker outcome)
-                 (return outcome)))",
+            "(defn
+  spawn-and-join
+  (value int64)
+  int64
+  (do
+    (spawn worker (add value 1) captures: (value))
+    (join worker outcome)
+    (return outcome)
+  )
+)",
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4051,6 +4427,8 @@ mod tests {
                 callee_key: "spawn-and-join".into(),
                 type_args: Vec::new(),
                 args: vec![Expr::Value(RuntimeValue::Int(41))],
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
@@ -4067,11 +4445,24 @@ mod tests {
     fn spawn_rejects_mutable_captures_and_non_void_result() {
         for source in [
             // `cell` is mutable; captures must be immutable snapshots.
-            "(fn bad ((value int64)) int64
-               (do (let cell (mut value)) (spawn worker (captures cell) value) (join worker outcome) (return outcome)))",
+            "(defn
+  bad
+  (value int64)
+  int64
+  (do
+    (let cell (mut value))
+    (spawn worker value captures: (cell))
+    (join worker outcome)
+    (return outcome)
+  )
+)",
             // A spawned computation must produce a non-void result.
-            "(fn bad () int64
-               (do (spawn worker (captures) unit) (join worker outcome) (return 1)))",
+            "(defn
+  bad
+  ()
+  int64
+  (do (spawn worker unit captures: ()) (join worker outcome) (return 1))
+)",
         ] {
             let source = module(source);
             let inputs = [TypedModuleInput {
@@ -4089,10 +4480,8 @@ mod tests {
 
     #[test]
     fn join_requires_a_live_unjoined_handle() {
-        let source = module(
-            "(fn bad ((value int64)) int64
-               (do (join worker outcome) (return value)))",
-        );
+        let source =
+            module("(defn bad (value int64) int64 (do (join worker outcome) (return value)))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -4109,8 +4498,12 @@ mod tests {
     #[test]
     fn wasm_import_body_lowers_with_correct_signature_and_executes_in_both_backends() {
         let source = module(
-            r#"(fn scalar-len ((value str)) uint64
-  (do (wasm import: (import "vibra_v1" "str_scalar_len") args: ((arg value)))))"#,
+            r#"(defn
+  scalar-len
+  (value str)
+  uint64
+  (do (wasm "vibra_v1" "str_scalar_len" value))
+)"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4143,6 +4536,8 @@ mod tests {
                 callee_key: "scalar-len".into(),
                 type_args: Vec::new(),
                 args: vec![Expr::Value(RuntimeValue::Str("hi".into()))],
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
@@ -4161,8 +4556,12 @@ mod tests {
         // rejected the same way the legacy `$wasm` path rejects it
         // (`E-WASM-003`), not silently coerced or accepted.
         let source = module(
-            r#"(fn bad ((value bool)) uint64
-  (do (wasm import: (import "vibra_v1" "str_scalar_len") args: ((arg value)))))"#,
+            r#"(defn
+  bad
+  (value bool)
+  uint64
+  (do (wasm "vibra_v1" "str_scalar_len" value))
+)"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4184,8 +4583,12 @@ mod tests {
         // accepted on the strength of syntactic well-formedness alone; a
         // `$wasm` body crosses a trust boundary out to host functions.
         let source = module(
-            r#"(fn bad () void
-  (do (wasm import: (import "not-a-real-host-module" "whatever") args: ())))"#,
+            r#"(defn
+  bad
+  ()
+  void
+  (do (wasm "not-a-real-host-module" "whatever"))
+)"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4201,25 +4604,28 @@ mod tests {
     }
 
     #[test]
-    fn wasm_import_nested_in_a_larger_body_is_rejected_explicitly() {
-        // `$wasm` is a function *body kind*, matching the legacy path's
-        // `is_wasm_only_body`/`extract_wasm_body`: it only lowers when it is
-        // the function's entire body. Appearing alongside another statement
-        // has no legacy equivalent and must fail explicitly, not be
-        // silently accepted or panic.
+    fn wasm_import_is_a_general_expression() {
         let source = module(
-            r#"(fn bad ((flag bool)) void
+            r#"(defn
+  bad
+  (flag bool)
+  void
   (do
-    (wasm import: (import "vibra_test" "assert") args: ((arg flag)))
-    (wasm import: (import "vibra_test" "assert") args: ((arg flag)))))"#,
+    (wasm "vibra_test" "assert" flag)
+    (wasm "vibra_test" "assert" flag)
+  )
+)"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
         }];
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
-        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
-        assert!(error.contains("entire body"), "{error}");
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["bad"] else {
+            panic!("expected user body");
+        };
+        assert_eq!(statements.len(), 2);
     }
 
     // ---- Interface and inherent method dispatch (issue #150) ----
@@ -4234,8 +4640,8 @@ mod tests {
         // ever considering interface dispatch.
         let source = module(
             r#"(def registry (record (count int64))
-  defs: ((fn get ((self registry)) int64 (do (return 5)))))
-(fn caller ((r registry)) int64 (do (return (registry.get r))))"#,
+  defs: ((defn get (self registry) int64 (do (return 5)))))
+(defn caller (r registry) int64 (do (return (registry.get r))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4267,8 +4673,8 @@ mod tests {
         // change is not just structurally accepted but semantically correct
         // end to end.
         let source = module(
-            r#"(fn helper () int64 (do (return 3)))
-(fn caller () int64 (do (return (io.helper))))"#,
+            r#"(defn helper () int64 (do (return 3)))
+(defn caller () int64 (do (return (io.helper))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "io",
@@ -4293,6 +4699,8 @@ mod tests {
                 callee_key: "io.caller".into(),
                 type_args: Vec::new(),
                 args: Vec::new(),
+                source_args: Vec::new(),
+                argument_targets: Vec::new(),
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
@@ -4316,8 +4724,8 @@ mod tests {
         // enum-constructor resolution.
         let source = module(
             r#"(def pipe (record (id int64))
-  defs: ((fn write-string ((self pipe) (s str)) int64 (do (return 1)))))
-(fn send ((p pipe)) int64 (do (return (fs.pipe.write-string p "hi"))))"#,
+  defs: ((defn write-string (self pipe s str) int64 (do (return 1)))))
+(defn send (p pipe) int64 (do (return (fs.pipe.write-string p "hi"))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "fs",
@@ -4344,11 +4752,11 @@ mod tests {
     /// one registered `ImplKey` for the same interface, exactly like the
     /// real `writable` interface's three implementors in `stdlib/src/fs.vibra`)
     /// would be caught by asserting *which* one was chosen.
-    const SHAPE_FIXTURE: &str = r#"(def shape (interface (area (fn-type (self) int64))))
-(fn square-area ((value square)) int64 (do (return 4)))
+    const SHAPE_FIXTURE: &str = r#"(def shape (interface (area (fn-type (self self) int64))))
+(defn square-area (value square) int64 (do (return 4)))
 (def square (record (side int64))
   impls: ((impl shape methods: ((method area square-area)))))
-(fn circle-area ((value circle)) int64 (do (return 9)))
+(defn circle-area (value circle) int64 (do (return 9)))
 (def circle (record (radius int64))
   impls: ((impl shape methods: ((method area circle-area)))))"#;
 
@@ -4359,7 +4767,7 @@ mod tests {
         // function's own parameter, so its type is known from the function's
         // signature alone, no `$let`/match tracking required.
         let source = module(&format!(
-            "{SHAPE_FIXTURE}\n(fn direct-dispatch ((value square)) int64 (do (return (shape.area value))))"
+            "{SHAPE_FIXTURE}\n(defn direct-dispatch (value square) int64 (do (return (shape.area value))))"
         ));
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4386,8 +4794,13 @@ mod tests {
         // explicit type annotation): the dispatch subject's type comes from
         // the declared return type of the function it was let-bound from.
         let source = module(&format!(
-            "{SHAPE_FIXTURE}\n(fn make-square () square (do (return unit)))
-(fn dispatch-via-let () int64 (do (let value (make-square)) (return (shape.area value))))"
+            "{SHAPE_FIXTURE}\n(defn make-square () square (do (return unit)))
+(defn
+  dispatch-via-let
+  ()
+  int64
+  (do (let value (make-square)) (return (shape.area value)))
+)"
         ));
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4417,12 +4830,22 @@ mod tests {
         // from the match target's inferred instantiation -- not just
         // reading a declared annotation.
         let source = module(&format!(
-            "{SHAPE_FIXTURE}\n(def box (enum (ok t) (err e)) where: ((t) (e)))
-(fn make-boxed-square () (box square int64) (do (return unit)))
-(fn dispatch-via-match () int64
-  (do (match (make-boxed-square)
-        (case (box.ok (bind out)) (do (return (shape.area out))))
-        (case (box.err (bind reason)) (do (return reason))))))"
+            "{SHAPE_FIXTURE}\n(def box (enum (ok t) (err e)) where: (t any e any))
+(defn make-boxed-square () (box square int64) (do (return unit)))
+(defn
+  dispatch-via-match
+  ()
+  int64
+  (do
+    (match
+  (make-boxed-square)
+  (box.ok (bind out))
+  (do (return (shape.area out)))
+  (box.err (bind reason))
+  (do (return reason))
+)
+  )
+)"
         ));
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4450,7 +4873,7 @@ mod tests {
         // not some new or silent behavior.
         let source = module(&format!(
             "{SHAPE_FIXTURE}\n(def triangle (record (base int64)))
-(fn bad ((value triangle)) int64 (do (return (shape.area value))))"
+(defn bad (value triangle) int64 (do (return (shape.area value))))"
         ));
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4470,7 +4893,7 @@ mod tests {
         // gets, not a confusing interface-specific error about a path that
         // was never real to begin with.
         let source =
-            module("(fn bad ((value int64)) int64 (do (return (nonexistent.thing.method value))))");
+            module("(defn bad (value int64) int64 (do (return (nonexistent.thing.method value))))");
         let inputs = [TypedModuleInput {
             alias: "",
             module: &source,
@@ -4479,5 +4902,88 @@ mod tests {
         let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
         assert!(error.contains("unknown typed callee"), "{error}");
         assert!(error.contains("nonexistent.thing.method"), "{error}");
+    }
+
+    #[test]
+    fn labelled_arguments_bind_by_name_and_variadic_tail_lowers_to_one_array_operand() {
+        let source = module(
+            r#"(defn target (first int64 second int64 rest... int64) int64
+  (return first))
+(defn caller () int64
+  (return (target second: 2 1 3 4)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["caller"] else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::Call { call, .. }) = &statements[0] else {
+            panic!("expected returned call");
+        };
+        assert!(matches!(call.args[0], Expr::Value(RuntimeValue::Int(1))));
+        assert!(matches!(call.args[1], Expr::Value(RuntimeValue::Int(2))));
+        let Expr::Array(tail) = &call.args[2] else {
+            panic!("expected one array operand for variadic tail");
+        };
+        assert_eq!(tail.len(), 2);
+        assert!(matches!(tail[0], Expr::Value(RuntimeValue::Int(3))));
+        assert!(matches!(tail[1], Expr::Value(RuntimeValue::Int(4))));
+        assert!(matches!(
+            call.source_args[0],
+            Expr::Value(RuntimeValue::Int(2))
+        ));
+        assert!(matches!(
+            call.source_args[1],
+            Expr::Value(RuntimeValue::Int(1))
+        ));
+        assert!(matches!(
+            call.source_args[2],
+            Expr::Value(RuntimeValue::Int(3))
+        ));
+        assert!(matches!(
+            call.source_args[3],
+            Expr::Value(RuntimeValue::Int(4))
+        ));
+        assert!(matches!(
+            call.argument_targets.as_slice(),
+            [
+                crate::lower::CallArgumentTarget::Fixed(1),
+                crate::lower::CallArgumentTarget::Fixed(0),
+                crate::lower::CallArgumentTarget::Variadic,
+                crate::lower::CallArgumentTarget::Variadic
+            ]
+        ));
+    }
+
+    #[test]
+    fn labelled_argument_binding_rejects_invalid_bindings() {
+        for (call, expected) in [
+            ("target unknown: 1 2", "no parameter named `unknown`"),
+            (
+                "target first: 1 first: 2",
+                "binds parameter `first` more than once",
+            ),
+            ("target first: 1", "missing parameter `second`"),
+            (
+                "target 1 2 rest: 3",
+                "variadic parameter `rest` is positional-only",
+            ),
+        ] {
+            let source = module(&format!(
+                "(defn target (first int64 second int64 rest... int64) int64 (return first))\n\
+                 (defn caller () int64 (return ({call})))"
+            ));
+            let inputs = [TypedModuleInput {
+                alias: "",
+                module: &source,
+            }];
+            let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+            let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+            assert!(error.contains(expected), "{error}");
+        }
     }
 }

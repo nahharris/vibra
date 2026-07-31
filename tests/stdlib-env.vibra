@@ -1,46 +1,48 @@
 (import test "../stdlib/src/test.vibra")
 (import env "../stdlib/src/env.vibra")
 (import result "../stdlib/src/result.vibra")
-(fn accepts-names ((value (array str))) bool (do (return true)))
-(test
-  get-reads-an-explicitly-granted-variable
-  env
-  (do
+(defn accepts-names (value (array str)) bool (return true))
+(test.scenario
+  "get-reads-an-explicitly-granted-variable"
+  (test.case
+    "get-reads-an-explicitly-granted-variable"
     (let value (env.get "PATH"))
     (match
       value
-      (case (result.result.ok _) (do (test.assert true)))
-      (case
-        (result.result.err _)
-        (do (test.fail "granted environment variable was not readable"))
-      )
+      (result.result.ok _)
+      (do (test.assert true))
+      (result.result.err _)
+      (do (test.fail "granted environment variable was not readable"))
     )
     (let names (env.list))
     (let names-have-the-declared-type (accepts-names names))
     (test.assert names-have-the-declared-type)
+    profile: env
+    tags: (stdlib)
   )
-  tags: (stdlib)
 )
-(test
-  set-and-remove-use-the-exact-write-grant
-  env
-  (do
-    (let
-      set-result
-      (env.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present")
-    )
+(test.scenario
+  "set-and-remove-use-the-exact-write-grant"
+  (test.case
+    "set-and-remove-use-the-exact-write-grant"
+    (let set-result (env.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present"))
     (let remove-result (env.remove "VIBRA_STDLIB_ENV_REMOVE_TEST"))
     (match
       remove-result
-      (case (result.result.ok) (do (test.assert true)))
-      (case _ (do (test.fail "environment removal returned an error")))
+      (result.result.ok)
+      (do (test.assert true))
+      _
+      (do (test.fail "environment removal returned an error"))
     )
     (let after-remove (env.get "VIBRA_STDLIB_ENV_REMOVE_TEST"))
     (match
       after-remove
-      (case (result.result.err _) (do (test.assert true)))
-      (case _ (do (test.fail "removed environment variable remained visible")))
+      (result.result.err _)
+      (do (test.assert true))
+      _
+      (do (test.fail "removed environment variable remained visible"))
     )
+    profile: env
+    tags: (stdlib)
   )
-  tags: (stdlib)
 )

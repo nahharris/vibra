@@ -32,7 +32,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "name",
+        "scenario",
+        "case",
         "path",
         "status",
         "duration_ms",
@@ -45,7 +46,8 @@
         "warnings"
       ],
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
+        "scenario": { "type": "string", "minLength": 1 },
+        "case": { "type": "string", "minLength": 1 },
         "path": { "type": "string", "minLength": 1 },
         "status": {
           "enum": ["passed", "failed", "timed_out", "skipped"]

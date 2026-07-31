@@ -1,16 +1,19 @@
 (import test "../stdlib/src/test.vibra")
 (import random "../stdlib/src/random.vibra")
-(test
-  bytes-uses-the-random-source
-  random
-  (do
+(test.scenario
+  "bytes-uses-the-random-source"
+  (test.case
+    "bytes-uses-the-random-source"
     (let value (random.bytes 8))
     (let raw (cast value (array uint8)))
     (match
       raw
-      (case (array _ _ _ _ _ _ _ _) (do (test.assert true)))
-      (case _ (do (test.fail "random bytes returned the wrong length")))
+      (array _ _ _ _ _ _ _ _)
+      (do (test.assert true))
+      _
+      (do (test.fail "random bytes returned the wrong length"))
     )
+    profile: random
+    tags: (stdlib)
   )
-  tags: (stdlib)
 )

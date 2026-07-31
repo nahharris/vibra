@@ -1,52 +1,40 @@
 (import test "../stdlib/src/test.vibra")
 (import result "../stdlib/src/result.vibra")
 (import option "../stdlib/src/option.vibra")
-(test
-  ok-carries-payload
-  core
-  (do
+(test.scenario
+  "ok-carries-payload"
+  (test.case
+    "ok-carries-payload"
     (let r (result.result.ok 99))
     (match
       r
-      (case
-        (result.result.ok (bind v))
-        (do
-          (match
-            v
-            (case 99 (do (test.assert true)))
-            (case _ (do (test.fail "wrong ok payload")))
-          )
-        )
-      )
-      (case (result.result.err _) (do (test.fail "expected ok")))
+      (result.result.ok (bind v))
+      (do (match v 99 (test.assert true) _ (test.fail "wrong ok payload")))
+      (result.result.err _)
+      (do (test.fail "expected ok"))
     )
+    profile: core
   )
 )
-(test
-  err-carries-payload
-  core
-  (do
+(test.scenario
+  "err-carries-payload"
+  (test.case
+    "err-carries-payload"
     (let r (result.result.err "boom"))
     (match
       r
-      (case (result.result.ok _) (do (test.fail "expected err")))
-      (case
-        (result.result.err (bind e))
-        (do
-          (match
-            e
-            (case "boom" (do (test.assert true)))
-            (case _ (do (test.fail "wrong err payload")))
-          )
-        )
-      )
+      (result.result.ok _)
+      (do (test.fail "expected err"))
+      (result.result.err (bind e))
+      (do (match e "boom" (test.assert true) _ (test.fail "wrong err payload")))
     )
+    profile: core
   )
 )
-(test
-  queries-defaulting-and-option-conversion
-  core
-  (do
+(test.scenario
+  "queries-defaulting-and-option-conversion"
+  (test.case
+    "queries-defaulting-and-option-conversion"
     (let success (result.from-ok int64 str 5))
     (let failure (result.from-err int64 str "boom"))
     (test.assert (result.is-ok int64 str success))
@@ -56,49 +44,52 @@
     (let error-option (result.into-err-option int64 str failure))
     (match
       value-option
-      (case
-        (option.option.some 5)
-        (do
-          (match
-            error-option
-            (case
-              (option.option.some "boom")
-              (do
-                (match
-                  fallback
-                  (case 9 (do (test.assert true)))
-                  (case _ (do (test.fail "err did not use default")))
-                )
-              )
+      (option.option.some 5)
+      (do
+        (match
+          error-option
+          (option.option.some "boom")
+          (do
+            (match
+              fallback
+              9
+              (test.assert true)
+              _
+              (test.fail "err did not use default")
             )
-            (case _ (do (test.fail "err conversion lost error")))
           )
+          _
+          (test.fail "err conversion lost error")
         )
       )
-      (case _ (do (test.fail "ok conversion lost value")))
+      _
+      (do (test.fail "ok conversion lost value"))
     )
+    profile: core
   )
 )
-(test
-  and-or-preserve-error-types
-  core
-  (do
+(test.scenario
+  "and-or-preserve-error-types"
+  (test.case
+    "and-or-preserve-error-types"
     (let failure (result.from-err int64 str "original"))
     (let next (result.from-ok bool str true))
     (let chained (result.and int64 bool str failure next))
     (match
       chained
-      (case
-        (result.result.err "original")
-        (do
-          (match
-            (result.or int64 str bool failure (result.from-ok int64 bool 9))
-            (case (result.result.ok 9) (do (test.assert true)))
-            (case _ (do (test.fail "result or did not select fallback")))
-          )
+      (result.result.err "original")
+      (do
+        (match
+          (result.or int64 str bool failure (result.from-ok int64 bool 9))
+          (result.result.ok 9)
+          (test.assert true)
+          _
+          (test.fail "result or did not select fallback")
         )
       )
-      (case _ (do (test.fail "result and did not preserve the original error")))
+      _
+      (do (test.fail "result and did not preserve the original error"))
     )
+    profile: core
   )
 )

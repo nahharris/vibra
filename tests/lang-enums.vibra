@@ -1,69 +1,63 @@
 (import test "../stdlib/src/test.vibra")
 (def signal (enum (stop void) (go int64)))
 (def opt (enum (none void) (some str)))
-(test
-  construct-and-match-payload
-  core
-  (do
+(test.scenario
+  "construct-and-match-payload"
+  (test.case
+    "construct-and-match-payload"
     (let s (signal.go 3))
     (match
       s
-      (case
-        (signal.go (bind speed))
-        (do
-          (match
-            speed
-            (case 3 (do (test.assert true)))
-            (case _ (do (test.fail "wrong payload")))
-          )
-        )
-      )
-      (case (signal.stop) (do (test.fail "expected go")))
+      (signal.go (bind speed))
+      (do (match speed 3 (test.assert true) _ (test.fail "wrong payload")))
+      (signal.stop)
+      (do (test.fail "expected go"))
     )
+    profile: core
   )
 )
-(test
-  void-variant-constructor
-  core
-  (do
+(test.scenario
+  "void-variant-constructor"
+  (test.case
+    "void-variant-constructor"
     (let s signal.stop)
     (match
       s
-      (case (signal.stop) (do (test.assert true)))
-      (case (signal.go _) (do (test.fail "expected stop")))
+      (signal.stop)
+      (do (test.assert true))
+      (signal.go _)
+      (do (test.fail "expected stop"))
     )
+    profile: core
   )
 )
-(test
-  option-like-some
-  core
-  (do
+(test.scenario
+  "option-like-some"
+  (test.case
+    "option-like-some"
     (let v (opt.some "hi"))
     (match
       v
-      (case
-        (opt.some (bind text))
-        (do
-          (match
-            text
-            (case "hi" (do (test.assert true)))
-            (case _ (do (test.fail "wrong text")))
-          )
-        )
-      )
-      (case (opt.none) (do (test.fail "expected some")))
+      (opt.some (bind text))
+      (do (match text "hi" (test.assert true) _ (test.fail "wrong text")))
+      (opt.none)
+      (do (test.fail "expected some"))
     )
+    profile: core
   )
 )
-(test
-  option-like-none
-  core
-  (do
+(test.scenario
+  "option-like-none"
+  (test.case
+    "option-like-none"
     (let v opt.none)
     (match
       v
-      (case (opt.some _) (do (test.fail "expected none")))
-      (case (opt.none) (do (test.assert true)))
+      (opt.some _)
+      (do (test.fail "expected none"))
+      (opt.none)
+      (do (test.assert true))
     )
+    profile: core
   )
 )

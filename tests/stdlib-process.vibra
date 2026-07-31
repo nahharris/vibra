@@ -1,10 +1,10 @@
 (import test "../stdlib/src/test.vibra")
 (import process "../stdlib/src/process.vibra")
 (import result "../stdlib/src/result.vibra")
-(test
-  run-rejects-stream-stdio-without-spawning
-  process
-  (do
+(test.scenario
+  "run-rejects-stream-stdio-without-spawning"
+  (test.case
+    "run-rejects-stream-stdio-without-spawning"
     (let
       outcome
       (process.run
@@ -19,12 +19,12 @@
     )
     (match
       outcome
-      (case
-        (result.result.err (process.process-error.unsupported _))
-        (do (test.assert true))
-      )
-      (case _ (do (test.fail "run stream mode was not rejected as unsupported")))
+      (result.result.err (process.process-error.unsupported _))
+      (do (test.assert true))
+      _
+      (do (test.fail "run stream mode was not rejected as unsupported"))
     )
+    profile: process
+    tags: (stdlib process)
   )
-  tags: (stdlib process)
 )

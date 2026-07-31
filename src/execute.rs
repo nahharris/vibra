@@ -489,7 +489,7 @@ impl HandleLifecycleError {
     }
 }
 
-fn eval_expr(
+pub(crate) fn eval_expr(
     expr: &Expr,
     env: &HashMap<String, RuntimeValue>,
     program: &LoweredProgram,
@@ -541,6 +541,40 @@ fn eval_expr(
             })
         }
         Expr::Call { call, .. } => exec_call(call, program, env, files, config),
+        Expr::HostCall {
+            import,
+            args,
+            return_type,
+        } => {
+            let values = args
+                .iter()
+                .map(|arg| eval_expr(arg, env, program, files, config))
+                .collect::<Result<Vec<_>>>()?;
+            let entry =
+                crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
+                    format!(
+                        "E-WASM-002: unknown host import `{}.{}`",
+                        import.module, import.name
+                    )
+                })?;
+            let signature = crate::lower::FunctionSig {
+                alias: String::new(),
+                symbol: import.name.clone(),
+                type_params: Vec::new(),
+                type_param_bounds: Vec::new(),
+                parameters: Vec::new(),
+                return_type: return_type.clone(),
+                body: FunctionBody::User {
+                    statements: Vec::new(),
+                },
+                doc: None,
+            };
+            match entry.module {
+                "vibra_v1" => exec_vibra_v1(entry.name, &signature, &values, files, config),
+                "vibra_test" => exec_vibra_test(entry.name, &values),
+                other => bail!("unsupported host module `{other}`"),
+            }
+        }
         Expr::Primitive {
             op,
             args,
@@ -1345,17 +1379,20 @@ mod iteration_tests {
     #[test]
     fn canonical_iteration_runs_in_interpreter_and_wasm() {
         let (_dir, program) = lower(
-            r#"(fn main () void
+            r#"(defn
+  main
+  ()
+  void
   (do
     (let sum (mut 0))
-    (for value (range 0 4 1)
-      (do
-        (if (equal value 1)
-          (do (continue))
-          (do))
-        (set sum (add sum value))))
-    (for scalar "é🙂"
-      (do (break)))))
+    (for
+      value
+      (range 0 4 1)
+      (do (if (equal value 1) (do (continue)) (do)) (set sum (add sum value)))
+    )
+    (for scalar "é🙂" (do (break)))
+  )
+)
 "#,
         );
         run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -1365,9 +1402,7 @@ mod iteration_tests {
     #[test]
     fn zero_step_fails_consistently_in_both_runtimes() {
         let (_dir, program) = lower(
-            r#"(fn main () void
-  (do
-    (for value (range 0 2 0) (do))))
+            r#"(defn main () void (do (for value (range 0 2 0) (do))))
 "#,
         );
         let interpreted = run_lowered_interpreted(&program, &RunConfig::default()).unwrap_err();
@@ -1381,7 +1416,7 @@ mod iteration_tests {
         // Outside a `for`/`while`, `break`/`continue` are semantically
         // rejected by `src/lower.rs` regardless of source syntax.
         for statement in ["(break)", "(continue)"] {
-            let error = lower_error(&format!("(fn main () void (do {statement}))\n"));
+            let error = lower_error(&format!("(defn main () void (do {statement}))\n"));
             assert!(
                 error.contains("only valid inside `$for` or `$while`"),
                 "{error}"
@@ -1397,7 +1432,7 @@ mod iteration_tests {
         // by the reader/typed-surface lowering itself, not by a separate
         // "canonical form" semantic check.
         for statement in ["(break false)", "(continue unit)", "(break unit unit)"] {
-            let error = lower_error(&format!("(fn main () void (do {statement}))\n"));
+            let error = lower_error(&format!("(defn main () void (do {statement}))\n"));
             assert!(
                 error.contains("E-AST") || error.contains("E-SYN"),
                 "{error}"
@@ -1407,7 +1442,7 @@ mod iteration_tests {
 
     #[test]
     fn while_is_an_existing_loop_control_target() {
-        let (_dir, program) = lower("(fn main () void (do (while true (do (break)))))\n");
+        let (_dir, program) = lower("(defn main () void (do (while true (do (break)))))\n");
         run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
         run_lowered(&program, &RunConfig::default()).unwrap();
     }
@@ -1688,13 +1723,14 @@ pub(crate) fn exec_call(
         .functions
         .get(&call.callee_key)
         .with_context(|| format!("missing function `{}`", call.callee_key))?;
+    let evaluated_args = evaluate_call_arguments(call, env, program, files, config)?;
 
     match &sig.body {
         FunctionBody::User { statements } => {
             let mut fn_env: HashMap<String, RuntimeValue> = HashMap::new();
-            for (idx, name) in sig.arg_names.iter().enumerate() {
-                let val = eval_expr(&call.args[idx], env, program, files, config)?;
-                fn_env.insert(format!("args.{name}"), val);
+            for (idx, parameter) in sig.parameters.iter().enumerate() {
+                let val = evaluated_args[idx].clone();
+                fn_env.insert(format!("args.{}", parameter.name), val);
             }
             match run_block(statements, program, &mut fn_env, files, config)? {
                 ExecFlow::Return(value) => return Ok(value),
@@ -1734,17 +1770,14 @@ pub(crate) fn exec_call(
             for spec in wasm_args {
                 host_args.push(match spec {
                     WasmArgSpec::Arg(name) => {
-                        let idx =
-                            sig.arg_names
-                                .iter()
-                                .position(|n| n == name)
-                                .with_context(|| {
-                                    format!(
-                                        "`{}` forwards unknown argument `$args.{name}`",
-                                        sig.symbol
-                                    )
-                                })?;
-                        eval_expr(&call.args[idx], env, program, files, config)?
+                        let idx = sig
+                            .parameters
+                            .iter()
+                            .position(|parameter| parameter.name == *name)
+                            .with_context(|| {
+                                format!("`{}` forwards unknown argument `$args.{name}`", sig.symbol)
+                            })?;
+                        evaluated_args[idx].clone()
                     }
                     WasmArgSpec::ConstInt(value) => RuntimeValue::Int(*value),
                     WasmArgSpec::ConstStr(value) => RuntimeValue::Str(value.clone()),
@@ -1757,6 +1790,55 @@ pub(crate) fn exec_call(
             }
         }
     }
+}
+
+fn evaluate_call_arguments(
+    call: &Call,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<Vec<RuntimeValue>> {
+    if call.source_args.is_empty() {
+        return call
+            .args
+            .iter()
+            .map(|argument| eval_expr(argument, env, program, files, config))
+            .collect();
+    }
+    let fixed_count = call
+        .argument_targets
+        .iter()
+        .filter_map(|target| match target {
+            crate::lower::CallArgumentTarget::Fixed(index) => Some(index + 1),
+            crate::lower::CallArgumentTarget::Variadic => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let has_variadic = call
+        .argument_targets
+        .iter()
+        .any(|target| matches!(target, crate::lower::CallArgumentTarget::Variadic));
+    let mut fixed = vec![None; fixed_count];
+    let mut variadic = Vec::new();
+    for (argument, target) in call.source_args.iter().zip(&call.argument_targets) {
+        let value = eval_expr(argument, env, program, files, config)?;
+        match target {
+            crate::lower::CallArgumentTarget::Fixed(index) => fixed[*index] = Some(value),
+            crate::lower::CallArgumentTarget::Variadic => variadic.push(value),
+        }
+    }
+    let mut result = fixed
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value.with_context(|| format!("call argument target {index} was not initialized"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if has_variadic {
+        result.push(RuntimeValue::Array(variadic));
+    }
+    Ok(result)
 }
 
 fn exec_vibra_v1(
@@ -3291,12 +3373,17 @@ mod source_task_tests {
         let entry = dir.path().join("entry.vibra");
         std::fs::write(
             &entry,
-            r#"(fn main () void
+            r#"(defn
+  main
+  ()
+  void
   (do
-    (spawn first (captures) 41)
-    (spawn second (captures) 42)
+    (spawn first 41 captures: ())
+    (spawn second 42 captures: ())
     (join second second-result)
-    (join first first-result)))
+    (join first first-result)
+  )
+)
 "#,
         )
         .unwrap();
@@ -3356,10 +3443,15 @@ mod collection_tests {
             format!(
                 r#"(import collections "{collections}")
 (import test "{test}")
-(fn main () void
+(defn
+  main
+  ()
+  void
   (do
     (let found (collections.array-contains int64 (array 1 2 3) 2))
-    (test.assert found)))
+    (test.assert found)
+  )
+)
 "#
             ),
         )
@@ -3387,7 +3479,7 @@ mod text_conversion_tests {
         std::fs::write(
             &entry,
             format!(
-                "(import text \"{}\")\n(import convert \"{}\")\n(import bytes \"{}\")\n(import option \"{}\")\n(import result \"{}\")\n(import test \"{}\")\n(fn main () void\n  (do\n{}))\n",
+                "(import text \"{}\")\n(import convert \"{}\")\n(import bytes \"{}\")\n(import option \"{}\")\n(import result \"{}\")\n(import test \"{}\")\n(defn main () void\n  (do\n{}))\n",
                 import("text"),
                 import("convert"),
                 import("bytes"),
@@ -3407,14 +3499,22 @@ mod text_conversion_tests {
         let program = lower(
             r#"    (test.assert-eq-int (text.scalar-len "aé🙂") 3)
     (let parsed (convert.parse-int64 "-42"))
-    (match parsed
-      (case (result.result.ok -42) (do (test.assert true)))
-      (case _ (do (test.fail "parse-failed"))))
+    (match
+  parsed
+  (result.result.ok -42)
+  (do (test.assert true))
+  _
+  (do (test.fail "parse-failed"))
+)
     (let raw (cast (array 255) bytes.bytes))
     (let decoded (bytes.bytes.decode-utf8 raw))
-    (match decoded
-      (case (result.result.err (bytes.bytes-error.invalid-utf8)) (do (test.assert true)))
-      (case _ (do (test.fail "invalid-utf8-was-accepted"))))
+    (match
+  decoded
+  (result.result.err (bytes.bytes-error.invalid-utf8))
+  (do (test.assert true))
+  _
+  (do (test.fail "invalid-utf8-was-accepted"))
+)
 "#,
         );
         run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -3425,32 +3525,56 @@ mod text_conversion_tests {
     fn text_growth_limit_is_a_typed_result_in_both_backends() {
         let program = lower(
             r#"    (let replaced (text.replace "a" "a" "xx"))
-    (match replaced
-      (case (result.result.err (text.text-error.limit-exceeded)) (do (test.assert true)))
-      (case _ (do (test.fail "replace-limit-was-not-enforced"))))
+    (match
+  replaced
+  (result.result.err (text.text-error.limit-exceeded))
+  (do (test.assert true))
+  _
+  (do (test.fail "replace-limit-was-not-enforced"))
+)
     (let joined (text.join (array "a" "a") ""))
-    (match joined
-      (case (result.result.err (text.text-error.limit-exceeded)) (do (test.assert true)))
-      (case _ (do (test.fail "join-limit-was-not-enforced"))))
+    (match
+  joined
+  (result.result.err (text.text-error.limit-exceeded))
+  (do (test.assert true))
+  _
+  (do (test.fail "join-limit-was-not-enforced"))
+)
     (let uppercase (text.uppercase "ß"))
-    (match uppercase
-      (case (result.result.err (text.text-error.limit-exceeded)) (do (test.assert true)))
-      (case _ (do (test.fail "case-limit-was-not-enforced"))))
+    (match
+  uppercase
+  (result.result.err (text.text-error.limit-exceeded))
+  (do (test.assert true))
+  _
+  (do (test.fail "case-limit-was-not-enforced"))
+)
     (let split (text.split "a," ","))
-    (match split
-      (case (result.result.err (text.text-error.limit-exceeded)) (do (test.assert true)))
-      (case _ (do (test.fail "split-element-limit-was-not-enforced"))))
+    (match
+  split
+  (result.result.err (text.text-error.limit-exceeded))
+  (do (test.assert true))
+  _
+  (do (test.fail "split-element-limit-was-not-enforced"))
+)
     (let left (cast (array 97) bytes.bytes))
     (let right (cast (array 98) bytes.bytes))
     (let concatenated (bytes.bytes.concat left right))
-    (match concatenated
-      (case (result.result.err (bytes.bytes-error.limit-exceeded)) (do (test.assert true)))
-      (case _ (do (test.fail "bytes-concat-limit-was-not-enforced"))))
+    (match
+  concatenated
+  (result.result.err (bytes.bytes-error.limit-exceeded))
+  (do (test.assert true))
+  _
+  (do (test.fail "bytes-concat-limit-was-not-enforced"))
+)
     (let raw (cast (array 97 98) bytes.bytes))
     (let decoded (bytes.bytes.decode-utf8 raw))
-    (match decoded
-      (case (result.result.err (bytes.bytes-error.limit-exceeded)) (do (test.assert true)))
-      (case _ (do (test.fail "bytes-decode-limit-was-not-enforced"))))
+    (match
+  decoded
+  (result.result.err (bytes.bytes-error.limit-exceeded))
+  (do (test.assert true))
+  _
+  (do (test.fail "bytes-decode-limit-was-not-enforced"))
+)
 "#,
         );
         let config = RunConfig {

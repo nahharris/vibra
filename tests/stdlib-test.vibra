@@ -1,32 +1,37 @@
 (import test "../stdlib/src/test.vibra")
 (import random "../stdlib/src/random.vibra")
 (import time "../stdlib/src/time.vibra")
-(test
-  typed-equality-helpers
-  core
-  (do
+(test.scenario
+  "typed-equality-helpers"
+  (test.case
+    "typed-equality-helpers"
     (test.assert-eq-bool true true)
     (test.assert-eq-int 42 42)
     (test.assert-eq-float 1.5 1.5)
     (test.assert-eq-str "vibra" "vibra")
+    profile: core
   )
 )
-(test
-  seeded-random-and-fake-clock
-  core
-  (do
+(test.scenario
+  "seeded-random-and-fake-clock"
+  (test.case
+    "seeded-random-and-fake-clock"
     (let value (random.bytes 8))
     (let raw (cast value (array uint8)))
     (match
       raw
-      (case (array 149 110 235 47 38 50 215 189) (do (test.assert true)))
-      (case _ (do (test.fail "seeded random sequence changed")))
+      (array 149 110 235 47 38 50 215 189)
+      (do (test.assert true))
+      _
+      (do (test.fail "seeded random sequence changed"))
     )
     (let wall (time.now-unix-millis))
     (match
       wall
-      (case 1000 (do (test.assert true)))
-      (case _ (do (test.fail "fake wall clock did not use fixture")))
+      1000
+      (do (test.assert true))
+      _
+      (do (test.fail "fake wall clock did not use fixture"))
     )
     (let before (time.monotonic-now))
     (time.sleep (time.milliseconds 7))
@@ -35,19 +40,21 @@
     (let after-raw (cast after uint64))
     (match
       before-raw
-      (case
-        40
-        (do
-          (match
-            after-raw
-            (case 47 (do (test.assert true)))
-            (case _ (do (test.fail "fake monotonic clock did not advance")))
-          )
+      40
+      (do
+        (match
+          after-raw
+          47
+          (test.assert true)
+          _
+          (test.fail "fake monotonic clock did not advance")
         )
       )
-      (case _ (do (test.fail "fake monotonic clock did not use fixture")))
+      _
+      (do (test.fail "fake monotonic clock did not use fixture"))
     )
+    profile: core
+    random-seed: 42
+    clock: (fixed 1000 40)
   )
-  random-seed: 42
-  clock: (fixed 1000 40)
 )

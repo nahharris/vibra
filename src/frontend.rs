@@ -317,6 +317,12 @@ fn expand_top_level(
             )
         }
         TopLevel::Test(test) => expand_exprs(&mut test.body, module_path, package_root, embedded),
+        TopLevel::TestScenario(scenario) => {
+            for case in &mut scenario.cases {
+                expand_exprs(&mut case.body, module_path, package_root, embedded)?;
+            }
+            Ok(())
+        }
         TopLevel::Definition(definition) => expand_annotations(
             &mut definition.annotations,
             module_path,
@@ -388,11 +394,16 @@ fn expand_expr(
     embedded: &mut BTreeMap<PathBuf, String>,
 ) -> Result<()> {
     match &mut expression.value {
-        ExprKind::Call { arguments, .. }
-        | ExprKind::Do(arguments)
-        | ExprKind::Tuple(arguments)
-        | ExprKind::Array(arguments) => {
+        ExprKind::Call { arguments, .. } => {
+            for argument in arguments {
+                expand_expr(argument.value_mut(), module_path, package_root, embedded)?;
+            }
+        }
+        ExprKind::Do(arguments) | ExprKind::Tuple(arguments) | ExprKind::Array(arguments) => {
             expand_exprs(arguments, module_path, package_root, embedded)?
+        }
+        ExprKind::AnonymousFunction { body, .. } => {
+            expand_exprs(body, module_path, package_root, embedded)?
         }
         ExprKind::Let { value, .. }
         | ExprKind::Set { value, .. }
@@ -1061,10 +1072,16 @@ fn visit_exprs(exprs: &[Expr], visitor: &mut impl FnMut(&Expr) -> Result<()>) ->
 fn visit_expr(expr: &Expr, visitor: &mut impl FnMut(&Expr) -> Result<()>) -> Result<()> {
     visitor(expr)?;
     match &expr.value {
-        ExprKind::Call { arguments, .. }
-        | ExprKind::Do(arguments)
-        | ExprKind::Tuple(arguments)
-        | ExprKind::Array(arguments) => visit_exprs(arguments, visitor),
+        ExprKind::Call { arguments, .. } => {
+            for argument in arguments {
+                visit_expr(argument.value(), visitor)?;
+            }
+            Ok(())
+        }
+        ExprKind::Do(arguments) | ExprKind::Tuple(arguments) | ExprKind::Array(arguments) => {
+            visit_exprs(arguments, visitor)
+        }
+        ExprKind::AnonymousFunction { body, .. } => visit_exprs(body, visitor),
         ExprKind::Let { value, .. }
         | ExprKind::Set { value, .. }
         | ExprKind::Mutable(value)
@@ -1272,6 +1289,14 @@ fn validate_top_level_aliases(
             }
             Ok(())
         }
+        TopLevel::TestScenario(scenario) => {
+            for case in &scenario.cases {
+                for expr in &case.body {
+                    visit_expr_aliases(expr, &mut validate_name)?;
+                }
+            }
+            Ok(())
+        }
         TopLevel::Import(_) | TopLevel::Macro(_) => Ok(()),
     }
 }
@@ -1317,18 +1342,17 @@ fn visit_type(ty: &TypeExpr, visitor: &mut impl FnMut(&str) -> Result<()>) -> Re
             }
             Ok(())
         }
-        TypeExprKind::Tuple(types)
-        | TypeExprKind::Union(types)
-        | TypeExprKind::Function {
-            parameters: types, ..
-        } => {
+        TypeExprKind::Tuple(types) | TypeExprKind::Union(types) => {
             for ty in types {
                 visit_type(ty, visitor)?;
             }
-            if let TypeExprKind::Function { result, .. } = &ty.value {
-                visit_type(result, visitor)?;
-            }
             Ok(())
+        }
+        TypeExprKind::Function { parameters, result } => {
+            for parameter in parameters {
+                visit_type(&parameter.ty, visitor)?;
+            }
+            visit_type(result, visitor)
         }
         TypeExprKind::Array(ty)
         | TypeExprKind::Newtype(ty)
@@ -1437,6 +1461,7 @@ fn top_level_name(form: &TopLevel) -> Option<&str> {
         TopLevel::Function(value) => Some(&value.name.value),
         TopLevel::Macro(value) => Some(&value.name.value),
         TopLevel::Test(value) => Some(&value.name.value),
+        TopLevel::TestScenario(_) => None,
     }
 }
 
@@ -1513,11 +1538,11 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(import helper \"helper.vibra\")\n(fn main () void (do (helper.run)))\n",
+            "(import helper \"helper.vibra\")\n(defn main () void (do (helper.run)))\n",
         );
         write(
             &temp.path().join("main.test.vibra"),
-            "(test main-runs core (do unit))\n",
+            "(test.scenario \"main-runs\" (test.case \"main-runs\" unit))\n",
         );
         write(
             &temp.path().join("main.unix.vibra"),
@@ -1525,7 +1550,7 @@ mod tests {
         );
         write(
             &temp.path().join("helper.vibra"),
-            "(fn run () void (do unit))\n",
+            "(defn run () void (do unit))\n",
         );
         let program = load_surface_program(&entry, &CompilationFlags::new(["test"])).unwrap();
         assert_eq!(program.modules.len(), 2);
@@ -1827,18 +1852,18 @@ mod tests {
         write(
             &entry,
             "(import helpers \"helpers.vibra\")\n\
-             (fn main ((caller int64)) int64\n\
+             (defn main (caller int64) int64\n\
                (do (local caller) (helpers.use-helper caller)))\n",
         );
         write(
             &temp.path().join("main.test.vibra"),
-            "(macro local ((value expr-syntax)) expr-syntax\n\
+            "(macro local (value expr-syntax) expr-syntax\n\
                (do (quote expr-syntax (unquote value))))\n",
         );
         write(
             &temp.path().join("helpers.vibra"),
-            "(fn helper ((value int64)) int64 (do value))\n\
-             (macro use-helper ((value expr-syntax)) expr-syntax\n\
+            "(defn helper (value int64) int64 (do value))\n\
+             (macro use-helper (value expr-syntax) expr-syntax\n\
                (do (quote expr-syntax (helper (unquote value)))))\n",
         );
         let program = load_surface_program(&entry, &CompilationFlags::new(["test"])).unwrap();
@@ -1866,12 +1891,12 @@ mod tests {
         write(
             &entry,
             "(import helpers \"helpers.vibra\")\n\
-             (fn main () void (do (helpers.secret unit)))\n",
+             (defn main () void (do (helpers.secret unit)))\n",
         );
         write(
             &temp.path().join("helpers.vibra"),
-            "(private (macro secret ((value expr-syntax)) expr-syntax\n\
-               (do (unquote value))))\n",
+            "(macro secret (value expr-syntax) expr-syntax\n\
+               (do (unquote value)) visibility: private)\n",
         );
         let error = format!(
             "{:#}",
@@ -1887,11 +1912,13 @@ mod tests {
         write(&entry, "(import missing \"missing.vibra\")\n");
         write(
             &temp.path().join("main.test.vibra"),
-            "(test selected core (do unit))\n",
+            "(test.scenario \"selected\" (test.case \"selected\" unit))\n",
         );
         let (_, module) = load_surface_entry_for_test_discovery(&entry).unwrap();
         assert_eq!(module.parts.len(), 2);
-        assert!(module.forms().any(|form| matches!(form, TopLevel::Test(_))));
+        assert!(module
+            .forms()
+            .any(|form| matches!(form, TopLevel::TestScenario(_))));
     }
 
     #[test]
@@ -1900,15 +1927,15 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(import middle \"middle.vibra\")\n(fn main () void (do (leaf.run)))\n",
+            "(import middle \"middle.vibra\")\n(defn main () void (do (leaf.run)))\n",
         );
         write(
             &temp.path().join("middle.vibra"),
-            "(import leaf \"leaf.vibra\")\n(fn run () void (do (leaf.run)))\n",
+            "(import leaf \"leaf.vibra\")\n(defn run () void (do (leaf.run)))\n",
         );
         write(
             &temp.path().join("leaf.vibra"),
-            "(fn run () void (do unit))\n",
+            "(defn run () void (do unit))\n",
         );
 
         let error = load_surface_program(&entry, &CompilationFlags::default())

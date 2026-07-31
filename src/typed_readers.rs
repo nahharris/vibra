@@ -130,123 +130,130 @@ pub fn staged_discover_typed_tests(program: &SurfaceProgram) -> Result<Vec<Stage
     let mut tests = Vec::new();
     for part in &module.parts {
         for form in &part.module.forms {
-            let TopLevel::Test(test) = form else {
-                continue;
+            let cases = match form {
+                TopLevel::Test(test) => vec![(test.name.value.clone(), test)],
+                TopLevel::TestScenario(scenario) => scenario
+                    .cases
+                    .iter()
+                    .map(|test| {
+                        (
+                            format!("{}::{}", scenario.name.value, test.name.value),
+                            test,
+                        )
+                    })
+                    .collect(),
+                _ => continue,
             };
-            let mut discovered = StagedTypedTest {
-                name: test.name.value.clone(),
-                profile: test.profile.value.clone(),
-                tags: Vec::new(),
-                timeout_ms: None,
-                skip: None,
-                random_seed: None,
-                expect_error: None,
-                clock: None,
-                workspace: None,
-                module: module.path.clone(),
-                source_part: part.path.clone(),
-                source: StagedSourceLocation {
-                    document: part.module.document_id,
-                    span: test.span,
-                },
-                metadata: Vec::new(),
-            };
-            for metadata in &test.metadata {
-                match metadata {
-                    TestMeta::Tags(tags) => {
-                        discovered.tags = tags.iter().map(|tag| tag.value.clone()).collect();
-                        discovered.metadata.push(StagedTestMetadata::Tags(
-                            tags.iter()
-                                .map(|tag| metadata_value(part.module.document_id, tag))
-                                .collect(),
-                        ));
-                    }
-                    TestMeta::ExpectError(expected) => match expected {
-                        crate::ast::ExpectedError::Load { code, message } => {
-                            discovered.expect_error = Some(StagedExpectedError::Load {
-                                code: code.value.clone(),
-                                message: message.as_ref().map(|value| value.value.clone()),
-                            });
-                            discovered.metadata.push(StagedTestMetadata::LoadError {
-                                code: metadata_value(part.module.document_id, code),
-                                message: message
-                                    .as_ref()
-                                    .map(|value| metadata_value(part.module.document_id, value)),
-                            });
-                        }
-                        crate::ast::ExpectedError::Compile { code, message } => {
-                            discovered.expect_error = Some(StagedExpectedError::Compile {
-                                code: code.value.clone(),
-                                message: message.as_ref().map(|value| value.value.clone()),
-                            });
-                            discovered.metadata.push(StagedTestMetadata::CompileError {
-                                code: metadata_value(part.module.document_id, code),
-                                message: message
-                                    .as_ref()
-                                    .map(|value| metadata_value(part.module.document_id, value)),
-                            });
-                        }
-                        crate::ast::ExpectedError::Runtime { message } => {
-                            discovered.expect_error = Some(StagedExpectedError::Runtime {
-                                message: message.value.clone(),
-                            });
-                            discovered.metadata.push(StagedTestMetadata::RuntimeError {
-                                message: metadata_value(part.module.document_id, message),
-                            });
-                        }
+            for (name, test) in cases {
+                let mut discovered = StagedTypedTest {
+                    name,
+                    profile: test.profile.value.clone(),
+                    tags: Vec::new(),
+                    timeout_ms: None,
+                    skip: None,
+                    random_seed: None,
+                    expect_error: None,
+                    clock: None,
+                    workspace: None,
+                    module: module.path.clone(),
+                    source_part: part.path.clone(),
+                    source: StagedSourceLocation {
+                        document: part.module.document_id,
+                        span: test.span,
                     },
-                    TestMeta::Clock {
-                        unix_millis,
-                        monotonic_millis,
-                    } => {
-                        discovered.clock = Some(StagedTestClock {
-                            unix_millis: unix_millis.value,
-                            monotonic_millis: monotonic_millis.value,
-                        });
-                        discovered.metadata.push(StagedTestMetadata::Clock {
-                            unix_millis: metadata_value(part.module.document_id, unix_millis),
-                            monotonic_millis: metadata_value(
-                                part.module.document_id,
-                                monotonic_millis,
-                            ),
-                        });
-                    }
-                    TestMeta::Workspace(name) => {
-                        discovered.workspace = Some(name.value.clone());
-                        discovered
-                            .metadata
-                            .push(StagedTestMetadata::Workspace(metadata_value(
-                                part.module.document_id,
-                                name,
-                            )));
-                    }
-                    TestMeta::TimeoutMillis(value) => {
-                        discovered.timeout_ms = Some(value.value as u64);
-                        discovered.metadata.push(StagedTestMetadata::TimeoutMillis(
-                            metadata_value(part.module.document_id, value),
-                        ));
-                    }
-                    TestMeta::RandomSeed(value) => {
-                        discovered.random_seed = Some(value.value as u64);
-                        discovered
-                            .metadata
-                            .push(StagedTestMetadata::RandomSeed(metadata_value(
-                                part.module.document_id,
-                                value,
-                            )));
-                    }
-                    TestMeta::Skip(value) => {
-                        discovered.skip = Some(value.value.clone());
-                        discovered
-                            .metadata
-                            .push(StagedTestMetadata::Skip(metadata_value(
-                                part.module.document_id,
-                                value,
-                            )));
+                    metadata: Vec::new(),
+                };
+                for metadata in &test.metadata {
+                    match metadata {
+                        TestMeta::Tags(tags) => {
+                            discovered.tags = tags.iter().map(|tag| tag.value.clone()).collect();
+                            discovered.metadata.push(StagedTestMetadata::Tags(
+                                tags.iter()
+                                    .map(|tag| metadata_value(part.module.document_id, tag))
+                                    .collect(),
+                            ));
+                        }
+                        TestMeta::ExpectError(expected) => match expected {
+                            crate::ast::ExpectedError::Load { code, message } => {
+                                discovered.expect_error = Some(StagedExpectedError::Load {
+                                    code: code.value.clone(),
+                                    message: message.as_ref().map(|value| value.value.clone()),
+                                });
+                                discovered.metadata.push(StagedTestMetadata::LoadError {
+                                    code: metadata_value(part.module.document_id, code),
+                                    message: message.as_ref().map(|value| {
+                                        metadata_value(part.module.document_id, value)
+                                    }),
+                                });
+                            }
+                            crate::ast::ExpectedError::Compile { code, message } => {
+                                discovered.expect_error = Some(StagedExpectedError::Compile {
+                                    code: code.value.clone(),
+                                    message: message.as_ref().map(|value| value.value.clone()),
+                                });
+                                discovered.metadata.push(StagedTestMetadata::CompileError {
+                                    code: metadata_value(part.module.document_id, code),
+                                    message: message.as_ref().map(|value| {
+                                        metadata_value(part.module.document_id, value)
+                                    }),
+                                });
+                            }
+                            crate::ast::ExpectedError::Runtime { message } => {
+                                discovered.expect_error = Some(StagedExpectedError::Runtime {
+                                    message: message.value.clone(),
+                                });
+                                discovered.metadata.push(StagedTestMetadata::RuntimeError {
+                                    message: metadata_value(part.module.document_id, message),
+                                });
+                            }
+                        },
+                        TestMeta::Clock {
+                            unix_millis,
+                            monotonic_millis,
+                        } => {
+                            discovered.clock = Some(StagedTestClock {
+                                unix_millis: unix_millis.value,
+                                monotonic_millis: monotonic_millis.value,
+                            });
+                            discovered.metadata.push(StagedTestMetadata::Clock {
+                                unix_millis: metadata_value(part.module.document_id, unix_millis),
+                                monotonic_millis: metadata_value(
+                                    part.module.document_id,
+                                    monotonic_millis,
+                                ),
+                            });
+                        }
+                        TestMeta::Workspace(name) => {
+                            discovered.workspace = Some(name.value.clone());
+                            discovered.metadata.push(StagedTestMetadata::Workspace(
+                                metadata_value(part.module.document_id, name),
+                            ));
+                        }
+                        TestMeta::TimeoutMillis(value) => {
+                            discovered.timeout_ms = Some(value.value as u64);
+                            discovered.metadata.push(StagedTestMetadata::TimeoutMillis(
+                                metadata_value(part.module.document_id, value),
+                            ));
+                        }
+                        TestMeta::RandomSeed(value) => {
+                            discovered.random_seed = Some(value.value as u64);
+                            discovered.metadata.push(StagedTestMetadata::RandomSeed(
+                                metadata_value(part.module.document_id, value),
+                            ));
+                        }
+                        TestMeta::Skip(value) => {
+                            discovered.skip = Some(value.value.clone());
+                            discovered
+                                .metadata
+                                .push(StagedTestMetadata::Skip(metadata_value(
+                                    part.module.document_id,
+                                    value,
+                                )));
+                        }
                     }
                 }
+                tests.push(discovered);
             }
-            tests.push(discovered);
         }
     }
     tests.sort_by(|left, right| {
@@ -358,7 +365,7 @@ fn collect_module_docs(
                         docs,
                     );
                 }
-                TopLevel::Test(_) => {}
+                TopLevel::Test(_) | TopLevel::TestScenario(_) => {}
             }
         }
     }
@@ -526,7 +533,7 @@ mod tests {
         write(
             &entry,
             "(import helper \"helper.vibra\")\n\
-             (fn main () void (do unit) doc: \"Entry docs\")\n",
+             (defn main () void (do unit) doc: \"Entry docs\")\n",
         );
         write(
             &temp.path().join("main.test.vibra"),
@@ -536,9 +543,9 @@ mod tests {
             &temp.path().join("helper.vibra"),
             "(def box (record (value int64))\n\
              doc: \"Box docs\"\n\
-             defs: ((fn get ((input self)) int64 (do (return 0)) doc: \"Getter docs\"))\n\
+             defs: ((defn get (input self) int64 (do (return 0)) doc: \"Getter docs\"))\n\
              impls: ((impl display methods: ((method show\n\
-               (fn show ((input self)) str (do (return \"box\")) doc: \"Show docs\"))))))\n",
+               (fn (input self) str (do (return \"box\")) doc: \"Show docs\"))))))\n",
         );
         let program =
             crate::frontend::load_surface_program(&entry, &CompilationFlags::new(["test"]))
@@ -578,19 +585,19 @@ mod tests {
         write(
             &entry,
             "(import helper \"helper.vibra\")\n\
-             (test base core (do unit) tags: (fast))\n",
+             (test.scenario \"base\" (test.case \"base\" unit tags: (fast)))\n",
         );
         write(
             &temp.path().join("main.test.vibra"),
-            "(test measured core (do unit)\n\
+            "(test.scenario \"measured\" (test.case \"measured\" unit\n\
              tags: (slow arithmetic)\n\
              expect-error: (compile E-OP-002 \"overflow\")\n\
              clock: (fixed 42 7)\n\
-             workspace: temp)\n",
+             workspace: temp))\n",
         );
         write(
             &temp.path().join("helper.vibra"),
-            "(test imported core (do unit))\n",
+            "(test.scenario \"imported\" (test.case \"imported\" unit))\n",
         );
         let program =
             crate::frontend::load_surface_program(&entry, &CompilationFlags::new(["test"]))
@@ -601,9 +608,12 @@ mod tests {
                 .iter()
                 .map(|test| test.name.as_str())
                 .collect::<Vec<_>>(),
-            ["base", "measured"]
+            ["base::base", "measured::measured"]
         );
-        let measured = tests.iter().find(|test| test.name == "measured").unwrap();
+        let measured = tests
+            .iter()
+            .find(|test| test.name == "measured::measured")
+            .unwrap();
         assert_eq!(measured.tags, ["slow", "arithmetic"]);
         assert_eq!(
             measured.expect_error,

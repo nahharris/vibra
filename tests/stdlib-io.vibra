@@ -1,39 +1,48 @@
 (import test "../stdlib/src/test.vibra")
 (import io "../stdlib/src/io.vibra")
 (import result "../stdlib/src/result.vibra")
-(test
-  print-statement-runs
-  core
-  (do
+(test.scenario
+  "print-statement-runs"
+  (test.case
+    "print-statement-runs"
     (let r (io.print "stdout from vibra test"))
     (match
       r
-      (case (result.result.ok) (do (test.assert true)))
-      (case (result.result.err _) (do (test.fail "print returned err")))
+      (result.result.ok)
+      (do (test.assert true))
+      (result.result.err _)
+      (do (test.fail "print returned err"))
     )
+    profile: core
   )
 )
-(test
-  println-returns-ok
-  core
-  (do
+(test.scenario
+  "println-returns-ok"
+  (test.case
+    "println-returns-ok"
     (let r (io.println "line from vibra test"))
     (match
       r
-      (case (result.result.ok) (do (test.assert true)))
-      (case (result.result.err _) (do (test.fail "println returned err")))
+      (result.result.ok)
+      (do (test.assert true))
+      (result.result.err _)
+      (do (test.fail "println returned err"))
     )
+    profile: core
   )
 )
-(test
-  eprintln-statement-runs
-  core
-  (do
+(test.scenario
+  "eprintln-statement-runs"
+  (test.case
+    "eprintln-statement-runs"
     (let r (io.eprintln "stderr from vibra test"))
     (match
       r
-      (case (result.result.ok) (do (test.assert true)))
-      (case (result.result.err _) (do (test.fail "eprintln returned err")))
+      (result.result.ok)
+      (do (test.assert true))
+      (result.result.err _)
+      (do (test.fail "eprintln returned err"))
     )
+    profile: core
   )
 )

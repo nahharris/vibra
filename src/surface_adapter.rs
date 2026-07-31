@@ -33,10 +33,10 @@
 
 use crate::ast::{
     Annotation, AnnotationKind, Constant, Definition, EmbedFormat as AstEmbedFormat, ExpectedError,
-    Expr as AstExpr, ExprField, ExprKind, Function, HandleAccess as AstHandleAccess, ImplItem,
-    Import, Literal, MatchCase, MethodBinding, Module, Pattern as AstPattern, PatternKind, Spanned,
-    Test, TestMeta, TopLevel, TypeExpr, TypeExprKind, TypeMember, Visibility, WasmArgument,
-    WasmImport,
+    Expr as AstExpr, ExprField, ExprKind, Function, FunctionTypeParameter,
+    HandleAccess as AstHandleAccess, ImplItem, Import, Literal, MatchCase, MethodBinding, Module,
+    Pattern as AstPattern, PatternKind, Spanned, Test, TestMeta, TopLevel, TypeExpr, TypeExprKind,
+    TypeMember, Visibility, WasmArgument, WasmImport,
 };
 use crate::legacy_value::{Mapping, Value};
 use anyhow::{bail, Result};
@@ -121,7 +121,10 @@ pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignature
                                 format!("{}.{}", definition.name.value, member.name.value),
                                 CallSignature {
                                     type_params: Vec::new(),
-                                    arg_names: canonical_arg_names(parameters.len()),
+                                    arg_names: parameters
+                                        .iter()
+                                        .map(|parameter| parameter.name.value.clone())
+                                        .collect(),
                                 },
                             );
                         }
@@ -231,14 +234,6 @@ pub(crate) fn resolve_signatures(
     }
 }
 
-/// Canonical positional argument names the adapter assigns to a fn-type
-/// whose parameters carry no names of their own (interface members and bare
-/// `fn-type` forms only ever list parameter *types*). `"self"` for the
-/// first slot is a naming convention only -- legacy's interface dispatch
-/// (`iface_dispatch_arg_name` in `src/lower.rs`) locates the receiver by
-/// *type* (`SelfType`), not by field name, so any unique name set works as
-/// long as it is used consistently between an interface's declared args
-/// record and every impl that binds it (see `impl_method_value`).
 fn canonical_arg_names(arity: usize) -> Vec<String> {
     (0..arity)
         .map(|i| {
@@ -404,6 +399,14 @@ pub(crate) fn module_to_value(module: &Module, sig: &ResolvedSignatures) -> Resu
             TopLevel::Test(test) => {
                 let (key, value) = converter.test_value(test)?;
                 insert_unique(&mut map, key, value)?;
+            }
+            TopLevel::TestScenario(scenario) => {
+                for test in &scenario.cases {
+                    let mut test = test.clone();
+                    test.name.value = format!("{}::{}", scenario.name.value, test.name.value);
+                    let (key, value) = converter.test_value(&test)?;
+                    insert_unique(&mut map, key, value)?;
+                }
             }
             TopLevel::Macro(macro_def) => {
                 bail!(
@@ -626,15 +629,21 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn fn_type_value(&mut self, parameters: &[TypeExpr], result: &TypeExpr) -> Result<Value> {
+    fn fn_type_value(
+        &mut self,
+        parameters: &[FunctionTypeParameter],
+        result: &TypeExpr,
+    ) -> Result<Value> {
         let args = match parameters.len() {
             0 => Value::String("$void".into()),
-            1 => self.type_value(&parameters[0])?,
-            n => {
-                let names = canonical_arg_names(n);
+            1 => self.type_value(&parameters[0].ty)?,
+            _ => {
                 let mut m = Mapping::new();
-                for (name, ty) in names.iter().zip(parameters) {
-                    m.insert(Value::String(name.clone()), self.type_value(ty)?);
+                for parameter in parameters {
+                    m.insert(
+                        Value::String(parameter.name.value.clone()),
+                        self.type_value(&parameter.ty)?,
+                    );
                 }
                 single_dollar("record", Value::Mapping(m))
             }
@@ -646,24 +655,20 @@ impl<'a> Converter<'a> {
         Ok(single_dollar("fn-type", Value::Mapping(m)))
     }
 
-    /// Interface member fn-types are special-cased vs. `fn_type_value`:
-    /// legacy's impl-binding machinery (`iface_impl_primary_field_name`,
-    /// `bind_impl_method`) requires `args` to be a `$record` even for a
-    /// single-parameter method (the sole parameter is conventionally the
-    /// dispatch receiver and must be *named*), where the general
-    /// `(fn-type ...)` shape allows a bare single type with no name.
     fn interface_fn_type_value(
         &mut self,
-        parameters: &[TypeExpr],
+        parameters: &[FunctionTypeParameter],
         result: &TypeExpr,
     ) -> Result<Value> {
         let args = if parameters.is_empty() {
             Value::String("$void".into())
         } else {
-            let names = canonical_arg_names(parameters.len());
             let mut m = Mapping::new();
-            for (name, ty) in names.iter().zip(parameters) {
-                m.insert(Value::String(name.clone()), self.type_value(ty)?);
+            for parameter in parameters {
+                m.insert(
+                    Value::String(parameter.name.value.clone()),
+                    self.type_value(&parameter.ty)?,
+                );
             }
             single_dollar("record", Value::Mapping(m))
         };
@@ -833,22 +838,6 @@ impl<'a> Converter<'a> {
         ))
     }
 
-    /// Interface implementations are validated in `src/lower.rs` by
-    /// comparing `TypeRef::Record` field *names* between the interface's
-    /// declared args and the concrete method's own args
-    /// (`bind_impl_method`/`signatures_match`/`unify_types`). Since the
-    /// surface AST's interface member types carry no parameter names at
-    /// all (`(fn-type (Type...) Return)` is positional), the adapter
-    /// assigns a canonical name set (`canonical_arg_names`) to the
-    /// interface once, then always binds each impl method through a
-    /// synthesized forwarding shim using those same canonical names --
-    /// rather than renaming the real implementing function's own
-    /// parameters (and every reference to them in its body), which would
-    /// be considerably riskier. The real function keeps its own names
-    /// untouched; only the thin shim uses the canonical ones.
-    // (helper functions `close_over_self`/`substitute_self_type`/
-    // `substitute_self_member` are defined below this impl block)
-
     fn impl_method_value(
         &mut self,
         owner: &str,
@@ -966,7 +955,10 @@ impl<'a> Converter<'a> {
             ),
             MethodBinding::Reference(_) => {
                 let (p, r) = self.interface_member(iface_name, method)?;
-                (p.to_vec(), r.clone())
+                (
+                    p.iter().map(|parameter| parameter.ty.clone()).collect(),
+                    r.clone(),
+                )
             }
         };
         // Same flattening problem as the synthesized helper above: this
@@ -1030,7 +1022,11 @@ impl<'a> Converter<'a> {
     /// closed rather than being given a guessed member shape, since a wrong
     /// legacy `$record` args shape would be a miscompilation, not a test
     /// failure.
-    fn interface_member(&self, iface_name: &str, method: &str) -> Result<(&[TypeExpr], &TypeExpr)> {
+    fn interface_member(
+        &self,
+        iface_name: &str,
+        method: &str,
+    ) -> Result<(&[FunctionTypeParameter], &TypeExpr)> {
         let members = self.sig.interfaces.get(iface_name).ok_or_else(|| {
             anyhow::anyhow!(
                 "E-ADAPT-041: interface `{iface_name}` is not declared in this module or any \
@@ -1130,9 +1126,14 @@ impl<'a> Converter<'a> {
     fn body_to_do(&mut self, body: &[AstExpr]) -> Result<Value> {
         if body.len() == 1 {
             if let ExprKind::Wasm { import, arguments } = &body[0].value {
-                return Ok(Value::Sequence(vec![
-                    self.wasm_statement_value(import, arguments)?
-                ]));
+                if arguments
+                    .iter()
+                    .all(|argument| !matches!(argument, WasmArgument::Expression(_)))
+                {
+                    return Ok(Value::Sequence(vec![
+                        self.wasm_statement_value(import, arguments)?
+                    ]));
+                }
             }
         }
         let mut seq = Vec::new();
@@ -1197,6 +1198,9 @@ impl<'a> Converter<'a> {
                         );
                     }
                     Value::String(v.value.clone())
+                }
+                WasmArgument::Expression(_) => {
+                    unreachable!("expression arguments use general host-call lowering")
                 }
             });
         }
@@ -1338,7 +1342,12 @@ impl<'a> Converter<'a> {
             ExprKind::Reference(name) => {
                 Ok(Value::String(format!("${}", self.local_name_ref(name))))
             }
-            ExprKind::Call { callee, arguments } => self.call_value(&callee.value, arguments),
+            ExprKind::Call {
+                callee, arguments, ..
+            } => self.call_value(&callee.value, arguments),
+            ExprKind::AnonymousFunction { .. } => bail!(
+                "E-ADAPT-046: anonymous function values are staged and cannot be represented by the legacy adapter"
+            ),
             ExprKind::Do(items) => match items.as_slice() {
                 [single] if !is_control_form(&single.value) => self.expr_value(single),
                 _ => bail!(
@@ -1426,10 +1435,19 @@ impl<'a> Converter<'a> {
             }
             ExprKind::Embed { path, format } => Ok(embed_value(path, format.value)),
             ExprKind::Template { path, bindings } => self.template_value(path, bindings),
-            ExprKind::Wasm { .. } => bail!(
-                "E-ADAPT-020: a `wasm` host-import body is only representable as a function's \
-                 sole statement (`src/lower.rs` `is_wasm_only_body`), not as a nested expression"
-            ),
+            ExprKind::Wasm { import, arguments } => {
+                let mut host = Mapping::new();
+                host.insert(Value::String("module".into()), Value::String(import.module.value.clone()));
+                host.insert(Value::String("name".into()), Value::String(import.name.value.clone()));
+                let args = arguments.iter().map(|argument| match argument {
+                    WasmArgument::Parameter(name) => Ok(Value::String(format!("${}", self.local_name_ref(&name.value)))),
+                    WasmArgument::ConstInt(value) => Ok(Value::Number(value.value.into())),
+                    WasmArgument::ConstString(value) => Ok(Value::String(value.value.clone())),
+                    WasmArgument::Expression(value) => self.expr_value(value),
+                }).collect::<Result<Vec<_>>>()?;
+                host.insert(Value::String("args".into()), Value::Sequence(args));
+                Ok(single_dollar("host-call", Value::Mapping(host)))
+            }
             ExprKind::While { .. }
             | ExprKind::For { .. }
             | ExprKind::Match { .. }
@@ -1515,14 +1533,18 @@ impl<'a> Converter<'a> {
         qualified.to_string()
     }
 
-    fn call_value(&mut self, callee: &str, args: &[AstExpr]) -> Result<Value> {
+    fn call_value(&mut self, callee: &str, args: &[crate::ast::CallArgument]) -> Result<Value> {
+        let args = args
+            .iter()
+            .map(|argument| argument.value().clone())
+            .collect::<Vec<_>>();
         if !callee.contains('.') {
             if let Some((_, arity)) = crate::lower::typed_primitive_op(callee) {
-                return self.primitive_value(callee, arity, args);
+                return self.primitive_value(callee, arity, &args);
             }
         }
         if let Some(sig) = self.sig.calls.get(callee).cloned() {
-            return self.named_call_value(callee, &sig, args);
+            return self.named_call_value(callee, &sig, &args);
         }
         let key = self.dashify_private_reference(callee);
         match args.len() {
@@ -1657,7 +1679,9 @@ impl<'a> Converter<'a> {
     fn expr_as_type_value(&mut self, expr: &AstExpr) -> Result<Value> {
         match &expr.value {
             ExprKind::Reference(name) => Ok(dollar_name(name)),
-            ExprKind::Call { callee, arguments } => {
+            ExprKind::Call {
+                callee, arguments, ..
+            } => {
                 let params = self.sig.types.get(&callee.value).cloned().ok_or_else(|| {
                     anyhow::anyhow!(
                         "E-ADAPT-009: generic type application `({} ...)` used as a call's type \
@@ -1676,7 +1700,7 @@ impl<'a> Converter<'a> {
                 }
                 let mut m = Mapping::new();
                 for (name, arg) in params.iter().zip(arguments) {
-                    let v = self.expr_as_type_value(arg)?;
+                    let v = self.expr_as_type_value(arg.value())?;
                     m.insert(Value::String(name.clone()), v);
                 }
                 Ok(single_dollar(&callee.value, Value::Mapping(m)))
@@ -1772,7 +1796,12 @@ fn collect_binding_names_expr(expr: &AstExpr, names: &mut Vec<String>) {
         }
         ExprKind::Call { arguments, .. } => {
             for arg in arguments {
-                collect_binding_names_expr(arg, names);
+                collect_binding_names_expr(arg.value(), names);
+            }
+        }
+        ExprKind::AnonymousFunction { body, .. } => {
+            for value in body {
+                collect_binding_names_expr(value, names);
             }
         }
         ExprKind::Template { bindings, .. } => {
@@ -2200,7 +2229,12 @@ fn substitute_self_type(ty: &TypeExpr, owner: &str) -> TypeExpr {
         TypeExprKind::Function { parameters, result } => TypeExprKind::Function {
             parameters: parameters
                 .iter()
-                .map(|parameter| substitute_self_type(parameter, owner))
+                .map(|parameter| FunctionTypeParameter {
+                    name: parameter.name.clone(),
+                    ty: substitute_self_type(&parameter.ty, owner),
+                    variadic: parameter.variadic,
+                    span: parameter.span,
+                })
                 .collect(),
             result: Box::new(substitute_self_type(result, owner)),
         },
@@ -2314,12 +2348,15 @@ mod tests {
     fn function_with_args_return_body_and_primitives_lowers() {
         assert_lowers(
             r#"
-(fn combine ((left int64) (right int64)) int64
+(defn
+  combine
+  (left int64 right int64)
+  int64
   (do
     (let sum (add left right))
-    (if (greater-than sum 0)
-      (do (return sum))
-      (do (return (negate sum))))))
+    (if (greater-than sum 0) (do (return sum)) (do (return (negate sum))))
+  )
+)
 "#,
         );
     }
@@ -2327,7 +2364,7 @@ mod tests {
     #[test]
     fn primitive_call_uses_dollar_keyed_shape() {
         let module =
-            module_from_source("(fn f ((a int64) (b int64)) bool (do (return (equal a b))))");
+            module_from_source("(defn f (a int64 b int64) bool (do (return (equal a b))))");
         let signatures = collect_local_signatures(&module).unwrap();
         let resolved = resolve_signatures("entry", &signatures, &[]);
         let value = module_to_value(&module, &resolved).unwrap();
@@ -2344,12 +2381,9 @@ mod tests {
     fn generic_function_with_where_lowers() {
         assert_lowers(
             r#"
-(fn pair-up ((a t) (b t)) (tuple t t)
-  (do (return (tuple a b)))
-  where: ((t)))
+(defn pair-up (a t b t) (tuple t t) (do (return (tuple a b))) where: (t any))
 
-(fn use-pair-up () (tuple int64 int64)
-  (do (return (pair-up int64 1 2))))
+(defn use-pair-up () (tuple int64 int64) (do (return (pair-up int64 1 2))))
 "#,
         );
     }
@@ -2362,8 +2396,8 @@ mod tests {
             r#"
 (def color (enum (red void) (green void) (blue void)))
 (def point (record (x int64) (y int64)))
-(fn origin () point (do (return (record (x 0) (y 0)))))
-(fn favorite () color (do (return (color.red))))
+(defn origin () point (do (return (record (x 0) (y 0)))))
+(defn favorite () color (do (return (color.red))))
 "#,
         );
     }
@@ -2374,10 +2408,10 @@ mod tests {
     fn impls_with_methods_lowers() {
         assert_lowers(
             r#"
-(def shape (interface (area (fn-type (self) int64))))
+(def shape (interface (area (fn-type (self self) int64))))
 (def square
   (record (side int64))
-  impls: ((impl shape methods: ((method area (fn area ((self square)) int64 (do (return 1))))))))
+  impls: ((impl shape methods: ((method area (fn (self square) int64 (do (return 1))))))))
 "#,
         );
     }
@@ -2387,7 +2421,7 @@ mod tests {
     #[test]
     fn import_with_alias_lowers_across_modules() {
         let util_module =
-            module_from_source("(fn double ((x int64)) int64 (do (return (multiply x 2))))");
+            module_from_source("(defn double (x int64) int64 (do (return (multiply x 2))))");
         let util_local = collect_local_signatures(&util_module).unwrap();
         let util_resolved = resolve_signatures("util", &util_local, &[]);
         let util_value = module_to_value(&util_module, &util_resolved).unwrap();
@@ -2395,7 +2429,7 @@ mod tests {
         let entry_module = module_from_source(
             r#"
 (import util "./util.vibra")
-(fn compute ((x int64)) int64 (do (return (util.double x))))
+(defn compute (x int64) int64 (do (return (util.double x))))
 "#,
         );
         let entry_local = collect_local_signatures(&entry_module).unwrap();
@@ -2447,9 +2481,10 @@ mod tests {
         // expression built only from primitives instead.
         let module = module_from_source(
             r#"
-(test addition-is-checked core
-  (do (let ok (equal 1 1)))
-  tags: (fast language))
+(test.scenario "arithmetic"
+  (test.case "addition-is-checked"
+    (let ok (equal 1 1))
+    tags: (fast language)))
 "#,
         );
         let signatures = collect_local_signatures(&module).unwrap();
@@ -2459,7 +2494,7 @@ mod tests {
         let program = single_module_program(dir.path(), value);
         let tests = crate::lower::lower_tests(&program).expect("lower_tests");
         assert_eq!(tests.len(), 1);
-        assert_eq!(tests[0].name, "addition-is-checked");
+        assert_eq!(tests[0].name, "arithmetic::addition-is-checked");
     }
 
     // ---- convert / cast ----
@@ -2469,8 +2504,8 @@ mod tests {
         assert_lowers(
             r#"
 (def meters (newtype int64))
-(fn narrow ((x int64)) int32 (do (return (convert x int32 5))))
-(fn wrap ((x int64)) meters (do (return (cast x meters))))
+(defn narrow (x int64) int32 (do (return (convert x int32 5))))
+(defn wrap (x int64) meters (do (return (cast x meters))))
 "#,
         );
     }
@@ -2492,14 +2527,14 @@ mod tests {
     fn top_level_macro_fails_closed_with_specific_error() {
         let module = module_from_source(
             r#"
-(macro unless
-  ((condition expr-syntax) (body expr-syntax))
+(macro
+  unless
+  (condition expr-syntax body expr-syntax)
   expr-syntax
   (do
-    (quote expr-syntax
-      (if (not (unquote condition))
-        (do (unquote body))
-        (do)))))
+    (quote expr-syntax (if (not (unquote condition)) (do (unquote body)) (do)))
+  )
+)
 "#,
         );
         let signatures = collect_local_signatures(&module).unwrap();
@@ -2519,9 +2554,7 @@ mod tests {
         // `lower.rs` would silently misinterpret.
         let module = module_from_source(
             r#"
-(fn odd () void
-  (do
-    (let x (tuple (while true (do)) 1))))
+(defn odd () void (do (let x (tuple (while true (do)) 1))))
 "#,
         );
         let signatures = collect_local_signatures(&module).unwrap();

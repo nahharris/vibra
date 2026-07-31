@@ -210,6 +210,21 @@ fn index_top_level(form: &TopLevel, context: &DocContext<'_>, facts: &mut Vec<Se
                 visit_expr(expr, context, facts);
             }
         }
+        TopLevel::TestScenario(scenario) => {
+            for test in &scenario.cases {
+                push(
+                    facts,
+                    context,
+                    test.name.span,
+                    SemanticKind::Definition,
+                    format!("{}::{}", scenario.name.value, test.name.value),
+                    Some(context.document.to_path_buf()),
+                );
+                for expr in &test.body {
+                    visit_expr(expr, context, facts);
+                }
+            }
+        }
     }
 }
 
@@ -296,7 +311,9 @@ fn visit_expr(expr: &Expr, context: &DocContext<'_>, facts: &mut Vec<SemanticFac
             name.clone(),
             resolve_reference_target(name, context),
         ),
-        ExprKind::Call { callee, arguments } => {
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
             push(
                 facts,
                 context,
@@ -305,8 +322,11 @@ fn visit_expr(expr: &Expr, context: &DocContext<'_>, facts: &mut Vec<SemanticFac
                 callee.value.clone(),
                 resolve_reference_target(&callee.value, context),
             );
-            visit_exprs(arguments, context, facts);
+            for argument in arguments {
+                visit_expr(argument.value(), context, facts);
+            }
         }
+        ExprKind::AnonymousFunction { body, .. } => visit_exprs(body, context, facts),
         ExprKind::Do(values) | ExprKind::Tuple(values) | ExprKind::Array(values) => {
             visit_exprs(values, context, facts)
         }
@@ -480,7 +500,7 @@ fn visit_type(ty: &TypeExpr, context: &DocContext<'_>, facts: &mut Vec<SemanticF
         }
         TypeExprKind::Function { parameters, result } => {
             for parameter in parameters {
-                visit_type(parameter, context, facts);
+                visit_type(&parameter.ty, context, facts);
             }
             visit_type(result, context, facts);
         }
@@ -541,8 +561,8 @@ mod tests {
             &entry,
             "(def widget (record (name str)))\n\
              (const answer int64 1)\n\
-             (fn double ((value int64)) int64 (do value))\n\
-             (test doubling core (do unit))\n",
+             (defn double (value int64) int64 (do value))\n\
+             (test.scenario \"doubling\" (test.case \"doubling\" unit))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let mut names = index
@@ -551,7 +571,7 @@ mod tests {
             .map(|fact| fact.symbol.as_str())
             .collect::<Vec<_>>();
         names.sort();
-        assert_eq!(names, ["answer", "double", "doubling", "widget"]);
+        assert_eq!(names, ["answer", "double", "doubling::doubling", "widget"]);
     }
 
     #[test]
@@ -561,7 +581,7 @@ mod tests {
         write(&entry, "(import helper \"helper.vibra\")\n");
         write(
             &temp.path().join("helper.vibra"),
-            "(fn run () void (do unit))\n",
+            "(defn run () void (do unit))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let imports = index.query(Some(SemanticKind::Import), Some("helper"));
@@ -576,8 +596,8 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(fn helper () int64 (do 1))\n\
-             (fn main () int64 (do (helper)))\n",
+            "(defn helper () int64 (do 1))\n\
+             (defn main () int64 (do (helper)))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let calls = index.query(Some(SemanticKind::Call), Some("helper"));
@@ -599,8 +619,8 @@ mod tests {
         // counting bug in either the lexer or this module would shift the
         // recorded span away from the real occurrence of `helper`.
         let source = "; λ comment\n\
-                       (fn helper () str (do \"unicode: \u{3bb} \u{1f600}\"))\n\
-                       (fn main () str (do (helper)))\n";
+                       (defn helper () str (do \"unicode: \u{3bb} \u{1f600}\"))\n\
+                       (defn main () str (do (helper)))\n";
         write(&entry, source);
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let calls = index.query(Some(SemanticKind::Call), Some("helper"));
@@ -626,11 +646,11 @@ mod tests {
         // span, these two definitions would be indistinguishable. Keying by
         // `(document_id, span)` — the whole point of PR #161's
         // document-qualified identities — keeps them apart.
-        write(&helper_a, "(fn same-shape () int64 (do 1))\n");
-        write(&helper_b, "(fn same-shape () int64 (do 2))\n");
+        write(&helper_a, "(defn same-shape () int64 (do 1))\n");
+        write(&helper_b, "(defn same-shape () int64 (do 2))\n");
         write(
             &entry,
-            "(import a \"a.vibra\")\n(import b \"b.vibra\")\n(fn main () int64 (do (a.same-shape)))\n",
+            "(import a \"a.vibra\")\n(import b \"b.vibra\")\n(defn main () int64 (do (a.same-shape)))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let definitions = index.query(Some(SemanticKind::Definition), Some("same-shape"));
@@ -660,11 +680,11 @@ mod tests {
         write(
             &entry,
             "(import util \"util.vibra\")\n\
-             (fn main () str (do (util.greet)))\n",
+             (defn main () str (do (util.greet)))\n",
         );
         write(
             &temp.path().join("util.vibra"),
-            "(fn greet () str (do \"hi\"))\n",
+            "(defn greet () str (do \"hi\"))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
 
@@ -692,11 +712,11 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(import util \"util.vibra\")\n(fn main () str (do (util.greet)))\n",
+            "(import util \"util.vibra\")\n(defn main () str (do (util.greet)))\n",
         );
         write(
             &temp.path().join("util.vibra"),
-            "(fn greet () str (do \"hi\"))\n",
+            "(defn greet () str (do \"hi\"))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let calls = index.query(Some(SemanticKind::Call), Some("util.greet"));
@@ -710,7 +730,7 @@ mod tests {
         let entry = temp.path().join("main.vibra");
         write(
             &entry,
-            "(fn helper () int64 (do 1))\n(fn main () int64 (do (helper)))\n",
+            "(defn helper () int64 (do 1))\n(defn main () int64 (do (helper)))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let calls = index.query(Some(SemanticKind::Call), Some("helper"));

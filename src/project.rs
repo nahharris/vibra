@@ -1390,7 +1390,7 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
     fs::create_dir_all(&src)?;
     fs::write(
         src.join("main.vibra"),
-        "(import io \"@std/io.vibra\")\n(fn main () void (do (io.println \"Hello, World!\")))\n",
+        "(import io \"@std/io.vibra\")\n(defn main () void (do (io.println \"Hello, World!\")))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
@@ -1419,7 +1419,7 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
     )?;
     fs::write(
         root.join("src").join(name).join("main.vibra"),
-        "(import io \"@std/io.vibra\")\n(import core \"@core/lib.vibra\")\n(fn main () void (do (io.println core.message)))\n",
+        "(import io \"@std/io.vibra\")\n(import core \"@core/lib.vibra\")\n(defn main () void (do (io.println core.message)))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
@@ -1730,7 +1730,7 @@ mod tests {
         temp
     }
 
-    const FFI_WRAPPER: &str = "(fn sum ((left int32) (right int32)) int32\n  (do (wasm import: (import \"@math\" \"sum\") args: ((arg left) (arg right)))))\n(fn main () void (do))\n";
+    const FFI_WRAPPER: &str = "(defn sum (left int32 right int32) int32\n  (do (wasm \"@math\" \"sum\" left right)))\n(defn main () void (do))\n";
 
     #[test]
     fn check_accepts_matching_static_wasm_export() {
@@ -1747,7 +1747,7 @@ mod tests {
     #[test]
     fn check_rejects_missing_static_wasm_symbol_before_execution() {
         let project = ffi_project(
-            &FFI_WRAPPER.replace("\"sum\")", "\"absent\")"),
+            &FFI_WRAPPER.replace("\"sum\" left", "\"absent\" left"),
             Some(wasm_fixture(
                 vec![wasm_encoder::ValType::I32; 2],
                 vec![wasm_encoder::ValType::I32],
@@ -1788,7 +1788,7 @@ mod tests {
 
     #[test]
     fn check_rejects_buffer_wrapper_without_ffi_memory_import() {
-        let wrapper = "(fn sum ((text str)) int32\n  (do (wasm import: (import \"@math\" \"sum\") args: ((arg text)))))\n(fn main () void (do))\n";
+        let wrapper = "(defn sum (text str) int32\n  (do (wasm \"@math\" \"sum\" text)))\n(defn main () void (do))\n";
         let project = ffi_project(
             wrapper,
             Some(wasm_fixture(

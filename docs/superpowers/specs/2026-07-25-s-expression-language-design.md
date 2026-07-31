@@ -25,11 +25,9 @@ module visibility, generics, nominal implementations, tests, and WebAssembly
 runtime behavior. It changes their spelling and removes syntax that exists only
 to fit semantic nodes into YAML mappings.
 
-The design chooses positional calls. A function signature defines argument
-order, and every call supplies values in that order. There are no named call
-arguments, primary-argument shorthand, nullary `null` payloads, property lists,
-or a separate invocation form. Generic type arguments are explicit only through
-`apply`, and are never mixed into the value argument list.
+Calls accept positional and labelled arguments. Labels and positional arguments
+may interleave, and unlabelled values fill the next unbound parameter. Generic
+type arguments use the reserved final `types:` call attribute.
 
 ## Reader contract
 
@@ -93,7 +91,7 @@ Trailing labeled attributes configure their containing form:
 ```vibra
 (def option
   (enum (some t) (none void))
-  where: ((t))
+  where: (t any)
   doc: "A value that may be absent.")
 ```
 
@@ -125,15 +123,14 @@ Every non-special executable list is a call:
 ```
 
 Nullary invocation is `(ready)` and the function value is `ready`. Calls are
-positional and arity checked against the signature. The language never infers
-argument names from list structure.
+checked against the resolved signature.
 
-Generic calls normally infer types. When inference is impossible, `apply`
+Generic calls normally infer types. When inference is impossible, `types:`
 supplies all generic arguments in declaration order:
 
 ```vibra
-(apply identity (types bool) true)
-(apply first-of (types bool str) true "ignored")
+(identity true types: (bool))
+(first-of true "ignored" types: (bool str))
 ```
 
 Partial type application and named type arguments are invalid.
@@ -162,17 +159,12 @@ be wrapped. `main` remains the program entrypoint.
 ```vibra
 (import io "../stdlib/src/io.vibra")
 
-(private
-  (fn write-prefix ((text str)) void
-    (do (io.print text))))
+(defn write-prefix (text str) void (do (io.print text)) visibility: private)
 
-(fn main () void
-  (do
-    (write-prefix "Hello")
-    (io.println ", World!")))
+(defn main () void (do (write-prefix "Hello") (io.println ", World!")))
 ```
 
-Constants are `(const name Type expression ...)`, not untyped top-level
+Constants are `(def name Type expression ...)`, not untyped top-level
 expressions. Type definitions use `def` and place a type constructor directly
 after the name.
 
@@ -229,20 +221,27 @@ requires order.
 Examples:
 
 ```vibra
-(def pair (tuple a b) where: ((a) (b)))
+(def pair (tuple a b) where: (a any b any))
 (def option
   (enum (some t) (none void))
-  where: ((t))
+  where: (t any)
   doc: "A value that may be absent.")
 
-(fn unwrap-or
-  ((input (option t)) (fallback t))
+(defn
+  unwrap-or
+  (input (option t) fallback t)
   t
   (do
-    (match input
-      (case (option.some (bind value)) (do (return value)))
-      (case (option.none) (do (return fallback)))))
-  where: ((t)))
+    (match
+  input
+  (option.some (bind value))
+  (do (return value))
+  (option.none)
+  (do (return fallback))
+)
+  )
+  where: (t any)
+)
 ```
 
 Capability, handle, policy, function-interface, and WebAssembly signature
@@ -386,11 +385,12 @@ project configuration so source semantics do not contain diagnostic policy.
 The canonical test form is:
 
 ```vibra
-(test addition-is-checked core
-  (do (test.assert-eq-int (add 1 1) 2))
-  tags: (language arithmetic)
-  expect-error: (compile E-OP-002 "overflow")
-  clock: (fixed 0))
+(test.scenario "arithmetic"
+  (test.case "addition is checked"
+    (test.assert-eq-int (add 1 1) 2)
+    tags: (language arithmetic)
+    expect-error: (compile E-OP-002 "overflow")
+    clock: (fixed 0 0)))
 ```
 
 Each metadata label consumes one value with its own positional schema. Known
@@ -542,14 +542,14 @@ syntax and macro resolution precedes value-call resolution only in expression
 or definition positions:
 
 ```vibra
-(macro unless
-  ((condition expr-syntax) (body expr-syntax))
+(macro
+  unless
+  (condition expr-syntax body expr-syntax)
   expr-syntax
   (do
-    (quote expr-syntax
-      (if (not (unquote condition))
-        (do (unquote body))
-        (do)))))
+    (quote expr-syntax (if (not (unquote condition)) (do (unquote body)) (do)))
+  )
+)
 
 (unless ready (io.println "not ready"))
 ```
@@ -671,41 +671,6 @@ service over the shared CST/AST. MCP receives no arbitrary write tool. If a
 remote client needs rename, it may request a read-only rename plan; applying
 filesystem changes remains an explicit CLI or LSP workspace action.
 
-## Mechanical migration table
-
-| YAML surface | S-expression |
-| --- | --- |
-| `io: {$import: ./io.vibra}` | `(import io "./io.vibra")` |
-| function envelope | `(fn name ((arg Type) ...) Return (do ...))` |
-| `$args.x` | `x` |
-| `{$ready: null}` | `(ready)` |
-| `{$second: {a: false, b: true}}` | `(second false true)` |
-| `$let: {x: value}` | `(let x value)` |
-| typed `$let`/`$as`/`$init` | `(let-as x Type value)` |
-| `$set: {x: value}` | `(set x value)` |
-| `$if` plus `then`/`else` siblings | `(if condition (do ...) (do ...))` |
-| `$match` plus `when` siblings | `(match value (case pattern (do ...)) ...)` |
-| `{$wildcard: null}` | `_` |
-| `{$bind: x}` | `(bind x)` |
-| `$for` plus `in`/`do` | `(for x source (do ...))` |
-| `$while` plus `do` | `(while condition (do ...))` |
-| `$record: {x: value}` | `(record (x value))` |
-| `$tuple: [a, b]` | `(tuple a b)` |
-| `$array: [a, b]` | `(array a b)` |
-| `$map: [{key: k, value: v}]` | `(map (k v))` |
-| `{$option: {t: $int64}}` | `(option int64)` |
-| `$task`/captures/do siblings | `(task (captures ...) (do ...))` |
-| `$spawn`/captures/value siblings | `(spawn handle (captures ...) value)` |
-| `$join`/into sibling | `(join handle result)` |
-| `$convert`/into/or siblings | `(convert value Type fallback)` |
-| `$cast`/into sibling | `(cast value Type)` |
-| `{$capability.<domain>: null}` | `(capability <domain>)` |
-| `{$capability.<domain>: [groups]}` | `(capability <domain> (group ...) ...)` |
-| `{$handle.<access>: null}` | `(handle <access>)` |
-| `$policy.narrow`/into sibling | `(policy.narrow value Type)` |
-| leading `-private-name` | `(private (fn private-name ...))` |
-| `=doc`, `=where`, `=defs`, `=impl` | trailing `doc:`, `where:`, `defs:`, `impls:` attributes |
-
 ## Implementation and PR plan
 
 Work lands on a temporary issue integration branch. Each PR is independently
@@ -749,7 +714,7 @@ part of the supported compiler.
 - Every `.vibra` source, stdlib module, test, example, and template uses the
   grammar in this document.
 - The parser rejects YAML source and `.vibra.yaml` discovery is absent.
-- Positional calls, generic `apply`, atoms, strings, escapes, comments,
+- Positional and labelled calls, `types:`, atoms, strings, escapes, comments,
   definitions, visibility, types, expressions, patterns, attributes, and tests
   have focused positive and negative parser tests.
 - Parser and diagnostic tests verify exact half-open byte spans, including

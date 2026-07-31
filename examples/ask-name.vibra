@@ -1,20 +1,16 @@
 (import io "../stdlib/src/io.vibra")
 (import result "../stdlib/src/result.vibra")
-(fn
+(defn
   main
-  ((policy (policy (stdin-read (group requirement: mandatory scopes: ((any)))))))
+  ()
   void
-  (do
-    (io.print "What is your name? ")
-    (let stdin (policy.narrow policy io.stdin-capability))
-    (let name-result (io.readln stdin))
-    (match
-      name-result
-      (case (result.result.ok (bind name)) (do (io.println name)))
-      (case
-        (result.result.err (bind err))
-        (do (io.eprintln "failed to read stdin"))
-      )
-    )
+  (io.print "What is your name? ")
+  (let name-result (io.readln))
+  (match
+    name-result
+    (result.result.ok (bind name))
+    (do (io.println name))
+    (result.result.err (bind err))
+    (do (io.eprintln "failed to read stdin"))
   )
 )

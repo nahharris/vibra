@@ -2,86 +2,86 @@
 (import collections "../stdlib/src/collections.vibra")
 (import option "../stdlib/src/option.vibra")
 (import result "../stdlib/src/result.vibra")
-(test
-  array-generic-get
-  core
-  (do
+(test.scenario
+  "array-generic-get"
+  (test.case
+    "array-generic-get"
     (let found (collections.array-get str (array "alpha" "beta") 1))
     (match
       found
-      (case (option.option.some "beta") (do (test.assert true)))
-      (case (option.option.some (bind wrong)) (do (test.fail "wrong value")))
-      (case (option.option.none) (do (test.fail "expected value")))
+      (option.option.some "beta")
+      (do (test.assert true))
+      (option.option.some (bind wrong))
+      (do (test.fail "wrong value"))
+      (option.option.none)
+      (do (test.fail "expected value"))
     )
+    profile: core
   )
 )
-(test
-  array-copy-on-write-and-bounds
-  core
-  (do
+(test.scenario
+  "array-copy-on-write-and-bounds"
+  (test.case
+    "array-copy-on-write-and-bounds"
     (let original (array 1 2))
     (let changed (collections.array-set int64 original 0 9))
     (match
       changed
-      (case
-        (result.result.ok (array 9 2))
-        (do
-          (match
-            original
-            (case (array 1 2) (do (test.assert true)))
-            (case _ (do (test.fail "original was aliased")))
-          )
+      (result.result.ok (array 9 2))
+      (do
+        (match
+          original
+          (array 1 2)
+          (test.assert true)
+          _
+          (test.fail "original was aliased")
         )
       )
-      (case
-        (result.result.err (bind error))
-        (do (test.fail "unexpected set error"))
-      )
+      (result.result.err (bind error))
+      (do (test.fail "unexpected set error"))
     )
     (let missing (collections.array-remove int64 original 2))
     (match
       missing
-      (case
-        (result.result.ok (bind value))
-        (do (test.fail "expected bounds error"))
+      (result.result.ok (bind value))
+      (do (test.fail "expected bounds error"))
+      (result.result.err
+        (collections.collection-error.out-of-bounds (record (index 2) (len 2)))
       )
-      (case
-        (result.result.err
-          (collections.collection-error.out-of-bounds (record (index 2) (len 2)))
-        )
-        (do (test.assert true))
-      )
+      (do (test.assert true))
     )
+    profile: core
   )
 )
-(test
-  map-upsert-is-deterministic
-  core
-  (do
+(test.scenario
+  "map-upsert-is-deterministic"
+  (test.case
+    "map-upsert-is-deterministic"
     (let words (map ("alpha" 1) ("beta" 2)))
     (let updated (collections.map-insert int64 words "alpha" 3))
     (match
       updated
-      (case
-        (result.result.ok (map ("alpha" 3) ("beta" 2)))
-        (do (test.assert true))
-      )
-      (case
-        (result.result.err (bind error))
-        (do (test.fail "unexpected map error"))
-      )
+      (result.result.ok (map ("alpha" 3) ("beta" 2)))
+      (do (test.assert true))
+      (result.result.err (bind error))
+      (do (test.fail "unexpected map error"))
     )
     (let absent (collections.map-get int64 words "gamma"))
     (match
       absent
-      (case (option.option.none) (do (test.assert true)))
-      (case (option.option.some (bind value)) (do (test.fail "expected none")))
+      (option.option.none)
+      (do (test.assert true))
+      (option.option.some (bind value))
+      (do (test.fail "expected none"))
     )
     (let removed (collections.map-remove int64 words "alpha"))
     (match
       removed
-      (case (option.option.some (map ("beta" 2))) (do (test.assert true)))
-      (case _ (do (test.fail "wrong map removal")))
+      (option.option.some (map ("beta" 2)))
+      (do (test.assert true))
+      _
+      (do (test.fail "wrong map removal"))
     )
+    profile: core
   )
 )

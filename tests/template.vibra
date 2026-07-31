@@ -1,8 +1,8 @@
 (import test "../stdlib/src/test.vibra")
-(test
-  compile-time-template-renders-sections
-  core
-  (do
+(test.scenario
+  "compile-time-template-renders-sections"
+  (test.case
+    "compile-time-template-renders-sections"
     (let
       rendered
       (template
@@ -15,8 +15,11 @@
     )
     (match
       rendered
-      (case "Hello: Ada, Lin, \n" (do (test.assert true)))
-      (case _ (do (test.fail "compile-time template rendered unexpected text")))
+      "Hello: Ada, Lin, \n"
+      (do (test.assert true))
+      _
+      (do (test.fail "compile-time template rendered unexpected text"))
     )
+    profile: core
   )
 )

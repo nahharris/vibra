@@ -44,7 +44,7 @@ and trailing `label: value` attributes for optional configuration:
 ```lisp
 (def option
   (enum (some t) (none void))
-  where: ((t))
+  where: (t any)
   doc: "A value that may be absent.")
 ```
 

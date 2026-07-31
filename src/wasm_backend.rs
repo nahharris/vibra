@@ -418,6 +418,21 @@ impl HostExecution {
                 return_type,
                 ..
             } => crate::execute::eval_primitive(op, &operand_type, &return_type, &values)?,
+            Expr::HostCall {
+                import,
+                return_type,
+                ..
+            } => crate::execute::eval_expr(
+                &Expr::HostCall {
+                    import,
+                    args: values.into_iter().map(Expr::Value).collect(),
+                    return_type,
+                },
+                &HashMap::new(),
+                &self.program,
+                &mut self.files,
+                &self.config,
+            )?,
             Expr::EnumConstructor {
                 enum_key,
                 tag,
@@ -630,7 +645,10 @@ fn exec_static_wasm_scalar(
             ),
         }
     }
-    let has_buffer = signature.arg_types.iter().any(is_foreign_buffer_type);
+    let has_buffer = signature
+        .parameters
+        .iter()
+        .any(|parameter| is_foreign_buffer_type(&parameter.ty));
     if has_buffer && memory_type.is_none() {
         bail!("E-WASM-005: buffer wrapper requires the artifact to import `vibra_ffi.memory`");
     }
@@ -647,7 +665,8 @@ fn exec_static_wasm_scalar(
     let mut wasm_args = Vec::new();
     let mut buffers = Vec::new();
     let mut next_pointer = 8_u64;
-    for (value, ty) in args.iter().zip(&signature.arg_types) {
+    for (value, parameter) in args.iter().zip(&signature.parameters) {
+        let ty = &parameter.ty;
         if is_foreign_buffer_type(ty) {
             let bytes = runtime_buffer_bytes(value, ty)?;
             if bytes.is_empty() {
@@ -1023,7 +1042,7 @@ impl<'a> Compiler<'a> {
         types.ty().function([], [ValType::I32]); // 5
         let mut arity_types = BTreeMap::new();
         for function in &self.user_functions {
-            let arity = self.program.functions[&function.name].arg_names.len();
+            let arity = self.program.functions[&function.name].parameters.len();
             if !arity_types.contains_key(&arity) {
                 let id = 6 + arity_types.len() as u32;
                 types
@@ -1056,7 +1075,7 @@ impl<'a> Compiler<'a> {
         let mut functions = FunctionSection::new();
         for function in &self.user_functions {
             functions
-                .function(arity_types[&self.program.functions[&function.name].arg_names.len()]);
+                .function(arity_types[&self.program.functions[&function.name].parameters.len()]);
         }
         functions.function(5);
 
@@ -1101,9 +1120,9 @@ impl<'a> Compiler<'a> {
             unreachable!()
         };
         let args: Vec<_> = sig
-            .arg_names
+            .parameters
             .iter()
-            .map(|name| format!("args.{name}"))
+            .map(|parameter| format!("args.{}", parameter.name))
             .collect();
         let mut context = FunctionCompiler::new(self, args, vec![], statements, false);
         context.emit_statements(statements);
@@ -1171,6 +1190,8 @@ struct FunctionCompiler<'a, 'b> {
     for_depth: usize,
     control_depth: u32,
     loop_stack: Vec<(u32, u32)>,
+    call_temps: Vec<u32>,
+    call_temp_depth: usize,
 }
 
 impl<'a, 'b> FunctionCompiler<'a, 'b> {
@@ -1213,6 +1234,9 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             for_temps.push((next, next + 1));
             next += 2;
         }
+        let call_temp_count = max_call_temp_depth_in_statements(statements);
+        let call_temps = (next..next + call_temp_count as u32).collect::<Vec<_>>();
+        next += call_temp_count as u32;
         let extra = next - args.len() as u32;
         Self {
             compiler,
@@ -1229,6 +1253,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             for_depth: 0,
             control_depth: 0,
             loop_stack: Vec::new(),
+            call_temps,
+            call_temp_depth: 0,
         }
     }
 
@@ -1500,6 +1526,10 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         }
     }
     fn emit_call(&mut self, call: &Call) {
+        if !call.source_args.is_empty() {
+            self.emit_source_ordered_call(call);
+            return;
+        }
         if let Some(index) = self
             .compiler
             .function_indexes
@@ -1523,6 +1553,85 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             self.function.instruction(&Instruction::Call(HOST_CALL));
         }
     }
+
+    fn emit_source_ordered_call(&mut self, call: &Call) {
+        let start = self.call_temp_depth;
+        self.call_temp_depth += call.source_args.len();
+        for (offset, argument) in call.source_args.iter().enumerate() {
+            self.emit_expr(argument);
+            self.function
+                .instruction(&Instruction::LocalSet(self.call_temps[start + offset]));
+        }
+        self.call_temp_depth = start;
+
+        let fixed_count = call
+            .argument_targets
+            .iter()
+            .filter_map(|target| match target {
+                crate::lower::CallArgumentTarget::Fixed(index) => Some(index + 1),
+                crate::lower::CallArgumentTarget::Variadic => None,
+            })
+            .max()
+            .unwrap_or(0);
+        let push_arguments = |this: &mut Self, push_to_frame: bool| {
+            for fixed_index in 0..fixed_count {
+                let source_index = call
+                    .argument_targets
+                    .iter()
+                    .position(|target| matches!(target, crate::lower::CallArgumentTarget::Fixed(index) if *index == fixed_index))
+                    .expect("fixed call argument was bound");
+                this.function.instruction(&Instruction::LocalGet(
+                    this.call_temps[start + source_index],
+                ));
+                if push_to_frame {
+                    this.function
+                        .instruction(&Instruction::Call(HOST_FRAME_PUSH));
+                }
+            }
+            if call
+                .argument_targets
+                .iter()
+                .any(|target| matches!(target, crate::lower::CallArgumentTarget::Variadic))
+            {
+                this.function
+                    .instruction(&Instruction::Call(HOST_FRAME_BEGIN));
+                for (source_index, target) in call.argument_targets.iter().enumerate() {
+                    if matches!(target, crate::lower::CallArgumentTarget::Variadic) {
+                        this.function.instruction(&Instruction::LocalGet(
+                            this.call_temps[start + source_index],
+                        ));
+                        this.function
+                            .instruction(&Instruction::Call(HOST_FRAME_PUSH));
+                    }
+                }
+                let id = this.compiler.expr_id(Expr::Array(Vec::new()));
+                this.function.instruction(&Instruction::I32Const(id as i32));
+                this.function
+                    .instruction(&Instruction::Call(HOST_CONSTRUCT));
+                if push_to_frame {
+                    this.function
+                        .instruction(&Instruction::Call(HOST_FRAME_PUSH));
+                }
+            }
+        };
+
+        if let Some(index) = self
+            .compiler
+            .function_indexes
+            .get(&call_instance_key(call))
+            .copied()
+        {
+            push_arguments(self, false);
+            self.function.instruction(&Instruction::Call(index));
+        } else {
+            self.function
+                .instruction(&Instruction::Call(HOST_FRAME_BEGIN));
+            push_arguments(self, true);
+            let id = self.compiler.call_id(call.clone());
+            self.function.instruction(&Instruction::I32Const(id as i32));
+            self.function.instruction(&Instruction::Call(HOST_CALL));
+        }
+    }
     fn emit_const_value(&mut self, value: RuntimeValue) {
         self.emit_expr(&Expr::Value(value));
     }
@@ -1536,7 +1645,10 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::Reference { target, .. } => vec![target],
         Expr::EnumConstructor { payload, .. } => payload.iter().map(|v| v.as_ref()).collect(),
         Expr::Record(fields) => fields.values().collect(),
-        Expr::Tuple(v) | Expr::Array(v) | Expr::Primitive { args: v, .. } => v.iter().collect(),
+        Expr::Tuple(v)
+        | Expr::Array(v)
+        | Expr::Primitive { args: v, .. }
+        | Expr::HostCall { args: v, .. } => v.iter().collect(),
         Expr::Map(v) => v.iter().flat_map(|(k, v)| [k, v]).collect(),
         Expr::Range { start, end, step } => vec![start, end, step],
         _ => vec![],
@@ -1628,6 +1740,12 @@ fn max_for_depth(statements: &[Statement]) -> usize {
         })
         .max()
         .unwrap_or(0)
+}
+
+fn max_call_temp_depth_in_statements(statements: &[Statement]) -> usize {
+    let mut calls = Vec::new();
+    collect_calls_in_statements(statements, &mut calls);
+    calls.iter().map(|call| call.source_args.len()).sum()
 }
 
 fn collect_pattern_bindings(pattern: &Pattern, names: &mut Vec<String>) {
@@ -1901,13 +2019,10 @@ mod tests {
         let entry = temp.path().join("entry.vibra");
         std::fs::write(
             &entry,
-            r#"(fn identity ((value t)) t (do (return value)) where: ((t)))
-(fn unused-one () void (do (let x 1)))
-(fn unused-two () void (do (let y 2)))
-(fn main () void
-  (do
-    (identity bool true)
-    (identity int64 7)))
+            r#"(defn identity (value t) t (do (return value)) where: (t any))
+(defn unused-one () void (do (let x 1)))
+(defn unused-two () void (do (let y 2)))
+(defn main () void (do (identity bool true) (identity int64 7)))
 "#,
         )
         .unwrap();

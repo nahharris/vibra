@@ -7,6 +7,10 @@ const INLINE_WIDTH: usize = 88;
 
 /// Render deterministic canonical source. Reader comments are retained.
 pub fn print(document: &Document) -> String {
+    let mut document = document.clone();
+    for node in &mut document.nodes {
+        normalize_node(node);
+    }
     let mut output = String::new();
     for (index, node) in document.nodes.iter().enumerate() {
         if index > 0 {
@@ -18,6 +22,60 @@ pub fn print(document: &Document) -> String {
         output.push('\n');
     }
     output
+}
+
+fn normalize_node(node: &mut Node) {
+    let NodeKind::List(children) = &mut node.kind else {
+        return;
+    };
+    for child in children.iter_mut() {
+        normalize_node(child);
+    }
+    let Some(head) = children.first().and_then(symbol) else {
+        return;
+    };
+    let body_start = match head {
+        "defn" => 4,
+        "macro" => 4,
+        "while" => 2,
+        "for" => 3,
+        "task" => 1,
+        "test.case" => 2,
+        _ => return,
+    };
+    if children.len() <= body_start {
+        return;
+    }
+    let attribute_start = children
+        .iter()
+        .enumerate()
+        .skip(body_start)
+        .find_map(|(index, child)| {
+            matches!(child.kind, NodeKind::Atom(Atom::Label(_))).then_some(index)
+        })
+        .unwrap_or(children.len());
+    let body_nodes = (body_start..attribute_start)
+        .filter(|index| !matches!(children[*index].kind, NodeKind::Comment(_)))
+        .collect::<Vec<_>>();
+    if body_nodes.len() != 1 {
+        return;
+    }
+    let index = body_nodes[0];
+    let NodeKind::List(body) = &children[index].kind else {
+        return;
+    };
+    if body.first().and_then(symbol) != Some("do") {
+        return;
+    }
+    let replacement = body[1..].to_vec();
+    children.splice(index..=index, replacement);
+}
+
+fn symbol(node: &Node) -> Option<&str> {
+    match &node.kind {
+        NodeKind::Atom(Atom::Symbol(value)) => Some(value),
+        _ => None,
+    }
 }
 
 fn print_node(node: &Node, indent: usize, output: &mut String) {
@@ -175,7 +233,7 @@ mod tests {
 
     #[test]
     fn multiline_attributes_keep_each_label_with_its_value() {
-        let source = "(def option (enum (some type-with-a-very-long-name-that-forces-multiline-layout) (none void)) where: ((type-with-a-very-long-name-that-forces-multiline-layout)) doc: \"Maybe\")";
+        let source = "(def option (enum (some type-with-a-very-long-name-that-forces-multiline-layout) (none void)) where: (type-with-a-very-long-name-that-forces-multiline-layout any) doc: \"Maybe\")";
         let printed = print(&parse(source).unwrap());
         assert!(printed.contains("\n  where: ("));
         assert!(printed.contains("\n  doc: \"Maybe\"\n"));
@@ -200,6 +258,16 @@ mod tests {
     fn printer_escapes_control_characters() {
         let printed = print(&parse("\"\\u{1f}\"").unwrap());
         assert_eq!(printed, "\"\\u{1f}\"\n");
+        assert_eq!(print(&parse(&printed).unwrap()), printed);
+    }
+
+    #[test]
+    fn redundant_body_do_is_unwrapped_without_losing_comments() {
+        let source = "(defn run () void (do ; first\n (step-one) ; second\n (step-two)) visibility: private)";
+        let printed = print(&parse(source).unwrap());
+        assert!(!printed.contains("(do"));
+        assert!(printed.contains("; first"));
+        assert!(printed.contains("; second"));
         assert_eq!(print(&parse(&printed).unwrap()), printed);
     }
 }

@@ -4,7 +4,7 @@
 //! (including the legacy YAML reader) must lower into [`TypeRef`] before using
 //! these relations.
 
-use crate::lower::{LiteralType, TypeAlias, TypeRef};
+use crate::lower::{FunctionTypeParameter, LiteralType, TypeAlias, TypeRef};
 use std::collections::{BTreeSet, HashMap};
 
 pub(crate) fn substitute_self(ty: &TypeRef, self_ty: &TypeRef) -> TypeRef {
@@ -62,8 +62,18 @@ pub(crate) fn substitute(
                 .collect(),
         ),
         TypeRef::Intersect(items) => TypeRef::Intersect(items.iter().map(recurse).collect()),
-        TypeRef::FnType { args, return_type } => TypeRef::FnType {
-            args: Box::new(recurse(args)),
+        TypeRef::FnType {
+            parameters,
+            return_type,
+        } => TypeRef::FnType {
+            parameters: parameters
+                .iter()
+                .map(|parameter| FunctionTypeParameter {
+                    name: parameter.name.clone(),
+                    ty: recurse(&parameter.ty),
+                    variadic: parameter.variadic,
+                })
+                .collect(),
             return_type: Box::new(recurse(return_type)),
         },
         TypeRef::Instantiated { base, type_args } => TypeRef::Instantiated {
@@ -211,8 +221,18 @@ fn normalize_type_ref_guarded(
                 .map(|item| normalize_type_ref_guarded(item, aliases, visiting))
                 .collect(),
         ),
-        TypeRef::FnType { args, return_type } => TypeRef::FnType {
-            args: Box::new(normalize_type_ref_guarded(args, aliases, visiting)),
+        TypeRef::FnType {
+            parameters,
+            return_type,
+        } => TypeRef::FnType {
+            parameters: parameters
+                .iter()
+                .map(|parameter| FunctionTypeParameter {
+                    name: parameter.name.clone(),
+                    ty: normalize_type_ref_guarded(&parameter.ty, aliases, visiting),
+                    variadic: parameter.variadic,
+                })
+                .collect(),
             return_type: Box::new(normalize_type_ref_guarded(return_type, aliases, visiting)),
         },
         TypeRef::Newtype { name, inner } => TypeRef::Newtype {
@@ -309,15 +329,23 @@ pub(crate) fn unify_types(
             .all(|part| unify_types(part, actual, aliases, bindings)),
         (
             TypeRef::FnType {
-                args: left_args,
+                parameters: left_parameters,
                 return_type: left_return,
             },
             TypeRef::FnType {
-                args: right_args,
+                parameters: right_parameters,
                 return_type: right_return,
             },
         ) => {
-            unify_types(left_args, right_args, aliases, bindings)
+            left_parameters.len() == right_parameters.len()
+                && left_parameters
+                    .iter()
+                    .zip(right_parameters)
+                    .all(|(left, right)| {
+                        left.name == right.name
+                            && left.variadic == right.variadic
+                            && unify_types(&left.ty, &right.ty, aliases, bindings)
+                    })
                 && unify_types(left_return, right_return, aliases, bindings)
         }
         (left, right) if is_numeric_type(left) && is_numeric_type(right) => true,

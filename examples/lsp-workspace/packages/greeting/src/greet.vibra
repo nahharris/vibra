@@ -1,1 +1,1 @@
-(fn greet () void (do (let value 1)) doc: "Greets from a local package.")
+(defn greet () void (let value 1) doc: "Greets from a local package.")

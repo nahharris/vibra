@@ -7,7 +7,10 @@ use crate::ast::{
     Annotation, AnnotationKind, Definition, DocumentId, Function, ImplItem, MethodBinding, Module,
     TestMeta, TopLevel, TypeExpr, TypeExprKind, Visibility,
 };
-use crate::lower::{HandleAccess, ImplBody, ImplKey, ImplMethodBinding, TypeAlias, TypeRef};
+use crate::lower::{
+    FunctionTypeParameter, HandleAccess, ImplBody, ImplKey, ImplMethodBinding, Parameter,
+    TypeAlias, TypeRef,
+};
 use crate::type_semantics;
 use anyhow::{bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -30,8 +33,7 @@ pub struct TypedFunctionSignature {
     pub symbol: String,
     pub type_params: Vec<String>,
     pub type_param_bounds: Vec<Vec<TypeRef>>,
-    pub arg_names: Vec<String>,
-    pub arg_types: Vec<TypeRef>,
+    pub parameters: Vec<Parameter>,
     pub return_type: TypeRef,
     pub doc: Option<String>,
 }
@@ -177,6 +179,36 @@ fn lower_module(
                     bail!("duplicate typed test `{key}`");
                 }
             }
+            TopLevel::TestScenario(scenario) => {
+                for test in &scenario.cases {
+                    let tags = test
+                        .metadata
+                        .iter()
+                        .find_map(|metadata| match metadata {
+                            TestMeta::Tags(tags) => {
+                                Some(tags.iter().map(|tag| tag.value.clone()).collect())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let name = format!("{}::{}", scenario.name.value, test.name.value);
+                    let key = qualify(input.alias, &name);
+                    if index
+                        .tests
+                        .insert(
+                            key.clone(),
+                            TypedTestSignature {
+                                module: module_identity.clone(),
+                                profile: test.profile.value.clone(),
+                                tags,
+                            },
+                        )
+                        .is_some()
+                    {
+                        bail!("duplicate typed test `{key}`");
+                    }
+                }
+            }
             TopLevel::Macro(_) => {}
         }
     }
@@ -283,15 +315,21 @@ fn lower_function(
         symbol,
         type_params,
         type_param_bounds,
-        arg_names: function
+        parameters: function
             .parameters
             .iter()
-            .map(|parameter| parameter.name.value.clone())
-            .collect(),
-        arg_types: function
-            .parameters
-            .iter()
-            .map(|parameter| lower_type(&parameter.ty, &generics, module_alias, declared_aliases))
+            .map(|parameter| {
+                let ty = lower_type(&parameter.ty, &generics, module_alias, declared_aliases)?;
+                Ok(Parameter {
+                    name: parameter.name.value.clone(),
+                    ty: if parameter.variadic {
+                        TypeRef::Array(Box::new(ty))
+                    } else {
+                        ty
+                    },
+                    variadic: parameter.variadic,
+                })
+            })
             .collect::<Result<_>>()?,
         return_type: lower_type(
             &function.return_type,
@@ -456,6 +494,7 @@ pub(crate) fn lower_type(
 ) -> Result<TypeRef> {
     let lower = |ty| lower_type(ty, generics, module_alias, declared_aliases);
     Ok(match &ty.value {
+        TypeExprKind::Named(name) if name == "any" => TypeRef::Interface(BTreeMap::new()),
         TypeExprKind::Named(name) if generics.contains(name) => TypeRef::Generic(name.clone()),
         TypeExprKind::Named(name) => named_type(name, module_alias, declared_aliases),
         TypeExprKind::Application {
@@ -503,9 +542,16 @@ pub(crate) fn lower_type(
                 .collect::<Result<_>>()?,
         ),
         TypeExprKind::Function { parameters, result } => TypeRef::FnType {
-            args: Box::new(TypeRef::Tuple(
-                parameters.iter().map(lower).collect::<Result<_>>()?,
-            )),
+            parameters: parameters
+                .iter()
+                .map(|parameter| {
+                    Ok(FunctionTypeParameter {
+                        name: parameter.name.value.clone(),
+                        ty: lower(&parameter.ty)?,
+                        variadic: parameter.variadic,
+                    })
+                })
+                .collect::<Result<_>>()?,
             return_type: Box::new(lower(result)?),
         },
         TypeExprKind::Newtype(inner) => TypeRef::Newtype {
@@ -630,7 +676,12 @@ fn validate_index(index: &TypedSignatureIndex) -> Result<()> {
             &function.type_param_bounds,
             index,
         )?;
-        for ty in function.arg_types.iter().chain([&function.return_type]) {
+        for ty in function
+            .parameters
+            .iter()
+            .map(|parameter| &parameter.ty)
+            .chain([&function.return_type])
+        {
             validate_type(
                 ty,
                 &function.type_params,
@@ -742,8 +793,10 @@ fn validate_index(index: &TypedSignatureIndex) -> Result<()> {
             }
         };
         for (method, expected) in required_methods {
-            let TypeRef::FnType { args, return_type } =
-                type_semantics::substitute(expected, &substitutions, Some(&self_type))
+            let TypeRef::FnType {
+                parameters: expected_parameters,
+                return_type,
+            } = type_semantics::substitute(expected, &substitutions, Some(&self_type))
             else {
                 bail!(
                     "E-IMPL-005: interface method `{}.{method}` is not a function type",
@@ -757,35 +810,30 @@ fn validate_index(index: &TypedSignatureIndex) -> Result<()> {
             let actual = index.functions.get(signature_key).with_context(|| {
                 format!("E-IMPL-006: implementation method `{signature_key}` is not registered")
             })?;
-            // The registered method signature may still refer to `Self` in
-            // receiver, argument, or return position (e.g. an inherent
-            // method bound into the impl via a fresh `$function`, or an
-            // alias to one). Substitute it with the implementing type here,
-            // the same way `expected` above was substituted, so conformance
-            // is checked between two fully concrete signatures.
             let actual_arg_types: Vec<TypeRef> = actual
-                .arg_types
+                .parameters
                 .iter()
-                .map(|ty| type_semantics::substitute_self(ty, &self_type))
+                .map(|parameter| type_semantics::substitute_self(&parameter.ty, &self_type))
                 .collect();
             let actual_return_type =
                 type_semantics::substitute_self(&actual.return_type, &self_type);
-            let expected_args = match *args {
-                TypeRef::Tuple(args) => args,
-                other => vec![other],
-            };
-            let args_match = actual_arg_types
+            let args_match = actual
+                .parameters
                 .iter()
-                .zip(&expected_args)
-                .all(|(actual, expected)| equivalent_type(actual, expected, index));
-            if actual_arg_types.len() != expected_args.len()
+                .zip(&expected_parameters)
+                .zip(&actual_arg_types)
+                .all(|((actual_parameter, expected_parameter), actual_ty)| {
+                    actual_parameter.variadic == expected_parameter.variadic
+                        && equivalent_type(actual_ty, &expected_parameter.ty, index)
+                });
+            if actual_arg_types.len() != expected_parameters.len()
                 || !args_match
                 || !equivalent_type(&actual_return_type, &return_type, index)
             {
                 bail!(
                     "E-IMPL-005: signature of `{signature_key}` does not match `{}.{method}`; expected {:?} -> {:?}, got {:?} -> {:?}",
                     key.interface,
-                    expected_args,
+                    expected_parameters,
                     return_type,
                     actual_arg_types,
                     actual_return_type
@@ -921,8 +969,13 @@ fn validate_type(
                 validate_type(item, parameters, bounds, context, index)?;
             }
         }
-        TypeRef::FnType { args, return_type } => {
-            validate_type(args, parameters, bounds, context, index)?;
+        TypeRef::FnType {
+            parameters: function_parameters,
+            return_type,
+        } => {
+            for parameter in function_parameters {
+                validate_type(&parameter.ty, parameters, bounds, context, index)?;
+            }
             validate_type(return_type, parameters, bounds, context, index)?;
         }
         _ => {}
@@ -937,6 +990,9 @@ fn satisfies_bound(
     bounds: &[Vec<TypeRef>],
     index: &TypedSignatureIndex,
 ) -> bool {
+    if matches!(required, TypeRef::Interface(methods) if methods.is_empty()) {
+        return true;
+    }
     let required_interfaces = interface_requirements(required, index);
     match argument {
         TypeRef::Named(name) | TypeRef::Instantiated { base: name, .. } => {
@@ -1108,10 +1164,8 @@ mod tests {
     fn lowers_identity_bearing_modules_and_direct_applications_without_yaml() {
         let entry = module(
             r#"(import model "./model.vibra")
-(def option (union t void) where: ((t)))
-(fn unwrap ((input (option int64))) int64
-  (do (return 0))
-  doc: "Typed signature.")"#,
+(def option (union t void) where: (t any))
+(defn unwrap (input (option int64)) int64 (do (return 0)) doc: "Typed signature.")"#,
             1,
         );
         let model = module("(def item (record (id int64)))", 2);
@@ -1128,7 +1182,11 @@ mod tests {
         .unwrap();
         let signature = &index.functions["unwrap"];
         assert_eq!(
-            signature.arg_types,
+            signature
+                .parameters
+                .iter()
+                .map(|parameter| parameter.ty.clone())
+                .collect::<Vec<_>>(),
             vec![TypeRef::Instantiated {
                 base: "option".into(),
                 type_args: vec![TypeRef::Int64],
@@ -1153,17 +1211,17 @@ mod tests {
     fn registers_labels_defs_and_impls_as_non_executable_signatures() {
         let source = module(
             r#"(def comparable (interface))
-(def display (interface (show (fn-type (self) str))) where: ((t)))
-(fn show-box ((value (box t))) str (do (return "box")) where: ((t comparable)))
+(def display (interface (show (fn-type (self self) str))) where: (t any))
+(defn show-box (value (box t)) str (do (return "box")) where: (t comparable))
 (def box (record (value t))
-  where: ((t comparable))
+  where: (t comparable)
   doc: "A box."
-  defs: ((fn get ((input self)) t (do (return unit))))
+  defs: ((defn get (input self) t (do (return unit))))
   impls: ((impl display
     types: (t)
     methods: ((method show show-box)))))
-(private (const limit int64 10))
-(test works core (do unit) tags: (fast typed))"#,
+(const limit int64 10 visibility: private)
+(test.scenario "works" (test.case "works" unit tags: (fast typed)))"#,
             3,
         );
         let index = lower_typed_signatures([TypedModuleInput {
@@ -1178,14 +1236,14 @@ mod tests {
             interface: "pkg.display".into(),
         }));
         assert_eq!(index.constants["pkg.limit"], TypeRef::Int64);
-        assert_eq!(index.tests["pkg.works"].tags, ["fast", "typed"]);
+        assert_eq!(index.tests["pkg.works::works"].tags, ["fast", "typed"]);
         assert_eq!(index.visibility["pkg.limit"], Visibility::Private);
     }
 
     #[test]
     fn rejects_ambiguous_generic_heads_and_impl_type_arguments() {
         let generic_head = module(
-            "(fn bad ((value (t int64))) int64 (do (return 0)) where: ((t)))",
+            "(defn bad (value (t int64)) int64 (do (return 0)) where: (t any))",
             4,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1213,13 +1271,12 @@ mod tests {
     #[test]
     fn lowers_domain_reference_and_wasm_types_without_yaml_adapters() {
         let source = module(
-            r#"(fn host-types
-  ((input (handle read))
-   (shared (ref str))
-   (exclusive (mut-ref int64))
-   (raw (wasm i32)))
+            r#"(defn
+  host-types
+  (input (handle read) shared (ref str) exclusive (mut-ref int64) raw (wasm i32))
   int32
-  (do (return raw)))"#,
+  (do (return raw))
+)"#,
             6,
         );
         let index = lower_typed_signatures([TypedModuleInput {
@@ -1229,32 +1286,32 @@ mod tests {
         .unwrap();
         let signature = &index.functions["host-types"];
         assert_eq!(
-            signature.arg_types[0],
+            signature.parameters[0].ty,
             TypeRef::HostHandle(HandleAccess::Read)
         );
         assert_eq!(
-            signature.arg_types[1],
+            signature.parameters[1].ty,
             TypeRef::Reference {
                 inner: Box::new(TypeRef::Str),
                 mutable: false,
             }
         );
         assert_eq!(
-            signature.arg_types[2],
+            signature.parameters[2].ty,
             TypeRef::Reference {
                 inner: Box::new(TypeRef::Int64),
                 mutable: true,
             }
         );
-        assert_eq!(signature.arg_types[3], TypeRef::Int32);
+        assert_eq!(signature.parameters[3].ty, TypeRef::Int32);
         assert_eq!(signature.return_type, TypeRef::Int32);
     }
 
     #[test]
     fn validates_alias_arity_bounds_and_complete_interfaces() {
         let wrong_arity = module(
-            r#"(def pair (record (left t) (right t)) where: ((t)))
-(fn bad ((value pair)) void (do (return unit)))"#,
+            r#"(def pair (record (left t) (right t)) where: (t any))
+(defn bad (value pair) void (do (return unit)))"#,
             7,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1265,10 +1322,10 @@ mod tests {
         assert!(error.to_string().contains("E-TYPE-ARITY"));
 
         let unsatisfied_bound = module(
-            r#"(def display (interface (show (fn-type (self) str))))
-(def printable-box (record (value t)) where: ((t display)))
+            r#"(def display (interface (show (fn-type (self self) str))))
+(def printable-box (record (value t)) where: (t display))
 (def plain (record (value str)))
-(fn bad ((value (printable-box plain))) void (do (return unit)))"#,
+(defn bad (value (printable-box plain)) void (do (return unit)))"#,
             8,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1280,9 +1337,9 @@ mod tests {
 
         let incomplete_impl = module(
             r#"(def display (interface
-  (show (fn-type (self) str))
-  (debug (fn-type (self) str))))
-(fn show-item ((value item)) str (do (return "item")))
+  (show (fn-type (self self) str))
+  (debug (fn-type (self self) str))))
+(defn show-item (value item) str (do (return "item")))
 (def item (record (value str))
   impls: ((impl display
     methods: ((method show show-item)))))"#,
@@ -1299,7 +1356,7 @@ mod tests {
     #[test]
     fn rejects_unknown_applications_bad_impl_signatures_and_nested_mutability() {
         let unknown = module(
-            "(fn bad ((value (missing int64))) void (do (return unit)))",
+            "(defn bad (value (missing int64)) void (do (return unit)))",
             10,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1310,8 +1367,8 @@ mod tests {
         assert!(error.to_string().contains("E-TYPE-UNKNOWN"));
 
         let mismatch = module(
-            r#"(def display (interface (show (fn-type (self) str))))
-(fn wrong ((value int64)) int64 (do (return value)))
+            r#"(def display (interface (show (fn-type (self self) str))))
+(defn wrong (value int64) int64 (do (return value)))
 (def item (record (value str))
   impls: ((impl display methods: ((method show wrong)))))"#,
             11,
@@ -1324,11 +1381,10 @@ mod tests {
         assert!(error.to_string().contains("E-IMPL-005"));
 
         let fresh_mismatch = module(
-            r#"(def display (interface (show (fn-type (self) str))))
+            r#"(def display (interface (show (fn-type (self self) str))))
 (def item (record (value str))
   impls: ((impl display
-    methods: ((method show
-      (fn wrong ((value int64)) int64 (do (return value))))))))"#,
+    methods: ((method show (fn (value int64) int64 (do (return value))))))))"#,
             16,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1339,7 +1395,7 @@ mod tests {
         assert!(error.to_string().contains("E-IMPL-005"));
 
         let nested = module(
-            "(fn bad ((value (mut-ref (ref int64)))) void (do (return unit)))",
+            "(defn bad (value (mut-ref (ref int64))) void (do (return unit)))",
             12,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1350,7 +1406,7 @@ mod tests {
         assert!(error.to_string().contains("cannot wrap"));
 
         let hidden_nested = module(
-            "(fn bad ((value (ref (mut (ref int64))))) void (do (return unit)))",
+            "(defn bad (value (ref (mut (ref int64)))) void (do (return unit)))",
             20,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1361,7 +1417,7 @@ mod tests {
         assert!(error.to_string().contains("cannot contain"));
 
         let normalized = module(
-            "(fn borrow ((value (ref (mut int64)))) void (do (return unit)))",
+            "(defn borrow (value (ref (mut int64))) void (do (return unit)))",
             13,
         );
         let index = lower_typed_signatures([TypedModuleInput {
@@ -1370,7 +1426,11 @@ mod tests {
         }])
         .unwrap();
         assert_eq!(
-            index.functions["borrow"].arg_types,
+            index.functions["borrow"]
+                .parameters
+                .iter()
+                .map(|parameter| parameter.ty.clone())
+                .collect::<Vec<_>>(),
             [TypeRef::Reference {
                 inner: Box::new(TypeRef::Int64),
                 mutable: true,
@@ -1385,11 +1445,10 @@ mod tests {
         // names the concrete implementing type. Conformance must substitute
         // `Self` on the impl side before comparing.
         let receiver_self = module(
-            r#"(def closeable (interface (close (fn-type (self) str))))
+            r#"(def closeable (interface (close (fn-type (self self) str))))
 (def thing (record (value str))
   impls: ((impl closeable
-    methods: ((method close
-      (fn close-thing ((value self)) str (do (return "closed"))))))))"#,
+    methods: ((method close (fn (value self) str (do (return "closed"))))))))"#,
             21,
         );
         lower_typed_signatures([TypedModuleInput {
@@ -1400,11 +1459,10 @@ mod tests {
 
         // Self in receiver position plus an additional, non-Self argument.
         let receiver_self_plus_arg = module(
-            r#"(def appendable (interface (append-bytes (fn-type (self int64) str))))
+            r#"(def appendable (interface (append-bytes (fn-type (self self arg-1 int64) str))))
 (def thing2 (record (value str))
   impls: ((impl appendable
-    methods: ((method append-bytes
-      (fn append-thing ((value self) (extra int64)) str (do (return "appended"))))))))"#,
+    methods: ((method append-bytes (fn (value self extra int64) str (do (return "appended"))))))))"#,
             22,
         );
         lower_typed_signatures([TypedModuleInput {
@@ -1415,11 +1473,10 @@ mod tests {
 
         // Self in return position.
         let return_self = module(
-            r#"(def cloneable (interface (clone (fn-type (self) self))))
+            r#"(def cloneable (interface (clone (fn-type (self self) self))))
 (def thing3 (record (value str))
   impls: ((impl cloneable
-    methods: ((method clone
-      (fn clone-thing ((value self)) self (do (return value))))))))"#,
+    methods: ((method clone (fn (value self) self (do (return value))))))))"#,
             23,
         );
         lower_typed_signatures([TypedModuleInput {
@@ -1431,11 +1488,10 @@ mod tests {
         // A genuine signature mismatch (wrong return type) must still be
         // rejected: substitution must not weaken the conformance check.
         let genuine_mismatch = module(
-            r#"(def closeable2 (interface (close (fn-type (self) str))))
+            r#"(def closeable2 (interface (close (fn-type (self self) str))))
 (def bad-thing (record (value str))
   impls: ((impl closeable2
-    methods: ((method close
-      (fn close-bad ((value self)) int64 (do (return 0))))))))"#,
+    methods: ((method close (fn (value self) int64 (do (return 0))))))))"#,
             24,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1449,8 +1505,8 @@ mod tests {
     #[test]
     fn enforces_interface_argument_bounds_and_referenced_method_scope() {
         let bound = module(
-            r#"(def display (interface (show (fn-type (self) str))))
-(def factory (interface) where: ((t display)))
+            r#"(def display (interface (show (fn-type (self self) str))))
+(def factory (interface) where: (t display))
 (def plain (record (value str)))
 (def maker (record)
   impls: ((impl factory types: (plain) methods: ())))"#,
@@ -1464,8 +1520,8 @@ mod tests {
         assert!(error.to_string().contains("E-BOUND-001"));
 
         let parameterized_bound = module(
-            r#"(def relates (interface) where: ((u)))
-(def displayable (interface) where: ((t (relates int64))))
+            r#"(def relates (interface) where: (u any))
+(def displayable (interface) where: (t (relates int64)))
 (def plain (record)
   impls: ((impl relates types: (bool) methods: ())))
 (def holder (record)
@@ -1480,7 +1536,7 @@ mod tests {
         assert!(error.to_string().contains("E-BOUND-001"));
 
         let unresolved = module(
-            r#"(def display (interface (show (fn-type (self) str))))
+            r#"(def display (interface (show (fn-type (self self) str))))
 (def item (record)
   impls: ((impl display methods: ((method show missing)))))"#,
             15,
@@ -1493,13 +1549,17 @@ mod tests {
         assert!(error.to_string().contains("E-IMPL-006"));
 
         let library = module(
-            r#"(private (def item (record)
-  defs: ((fn show ((value self)) str (do (return "private"))))))"#,
+            r#"(def
+  item
+  (record)
+  defs: ((defn show (value self) str (do (return "private"))))
+  visibility: private
+)"#,
             18,
         );
         let consumer = module(
             r#"(import lib "./lib.vibra")
-(def display (interface (show (fn-type (self) str))))
+(def display (interface (show (fn-type (self self) str))))
 (def item (record)
   impls: ((impl display methods: ((method show lib.item.show)))))"#,
             19,
@@ -1516,5 +1576,23 @@ mod tests {
         ])
         .unwrap_err();
         assert!(error.to_string().contains("not publicly visible"));
+    }
+
+    #[test]
+    fn any_bound_is_an_always_satisfied_empty_interface_sentinel() {
+        let source = module(
+            r#"(def box (record (value t)) where: (t any))
+(defn take (value (box int64)) int64 (return 1))"#,
+            90,
+        );
+        let index = lower_typed_signatures([TypedModuleInput {
+            alias: "",
+            module: &source,
+        }])
+        .unwrap();
+        assert_eq!(
+            index.aliases["box"].type_param_bounds[0],
+            vec![TypeRef::Interface(BTreeMap::new())]
+        );
     }
 }
