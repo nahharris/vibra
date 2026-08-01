@@ -3339,6 +3339,7 @@ mod tests {
             panic!()
         };
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements: Vec::new(),
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
@@ -3442,6 +3443,7 @@ mod tests {
         let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
         let functions = materialize_typed_identity_functions(&signatures, &bodies).unwrap();
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements: vec![Statement::Call(Call {
                 callee_key: "identity".into(),
                 type_args: Vec::new(),
@@ -3530,6 +3532,7 @@ mod tests {
         })
         .collect();
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements,
             main_arg_bindings: Vec::new(),
             constants: HashMap::from([("answer".into(), RuntimeValue::Int(42))]),
@@ -3583,6 +3586,7 @@ mod tests {
             }),
         ];
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements,
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
@@ -3938,6 +3942,7 @@ mod tests {
         let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
         let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements: vec![Statement::Call(Call {
                 callee_key: "compute".into(),
                 type_args: Vec::new(),
@@ -4217,6 +4222,7 @@ mod tests {
         let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
         let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements: vec![Statement::Call(Call {
                 callee_key: "narrow".into(),
                 type_args: Vec::new(),
@@ -4599,6 +4605,7 @@ mod tests {
         assert_eq!(var, "outcome");
 
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements: vec![Statement::Call(Call {
                 callee_key: "spawn-and-join".into(),
                 type_args: Vec::new(),
@@ -4708,6 +4715,7 @@ mod tests {
         ));
 
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements: vec![Statement::Call(Call {
                 callee_key: "scalar-len".into(),
                 type_args: Vec::new(),
@@ -4871,6 +4879,7 @@ mod tests {
 
         let functions = materialize_typed_identity_functions(&signatures, &bodies).unwrap();
         let program = LoweredProgram {
+            main_effects: Default::default(),
             statements: vec![Statement::Call(Call {
                 callee_key: "io.caller".into(),
                 type_args: Vec::new(),

@@ -1329,6 +1329,137 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
     );
 }
 
+/// Run effect inference over a lowered program and render every function whose body
+/// exceeds its declaration.
+///
+/// This drives `effect_semantics` directly rather than reading `LoweredProgram`
+/// warnings, because lowering does not call the checker yet: `effects:` is not
+/// mandatory and the stdlib submodule is still unannotated, so wiring it in now would
+/// print a warning for every stdlib wrapper on every run. It is wired in as a hard
+/// error once the stdlib declares its effects.
+fn report_effects(lowered: &vibra::lower::LoweredProgram) -> String {
+    use vibra::effect_semantics::{infer_function, undeclared_effect_message};
+
+    let mut owners: Vec<&String> = lowered.functions.keys().collect();
+    owners.sort();
+    let mut reported = Vec::new();
+    for owner in owners {
+        let sig = &lowered.functions[owner];
+        let performed = infer_function(sig, &lowered.functions);
+        for witness in performed.undeclared(&sig.effects) {
+            reported.push(undeclared_effect_message(owner, &sig.effects, witness));
+        }
+    }
+    let performed =
+        vibra::effect_semantics::infer_statements(&lowered.statements, &lowered.functions);
+    for witness in performed.undeclared(&lowered.main_effects) {
+        reported.push(undeclared_effect_message(
+            "main",
+            &lowered.main_effects,
+            witness,
+        ));
+    }
+    reported.join("\n")
+}
+
+/// A host-import body's effects come from the registry, so declaring `effects: ()` on
+/// one cannot launder the effect away. This is the check the whole model rests on.
+#[test]
+fn wasm_body_effects_come_from_the_registry_not_the_declaration() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(defn now () (array str) (wasm "vibra_v1" "env_list"))
+(defn main () void (do (let t (now))))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let reported = report_effects(&lowered);
+    assert!(
+        reported.contains("E-EFFECT-001")
+            && reported.contains("@env @read")
+            && reported.contains("env_list"),
+        "expected an undeclared registry effect to be reported with its witness, got: {reported}"
+    );
+}
+
+/// Declaring the effect silences it, and declaring more than the body performs is
+/// fine -- the row is a ceiling, not an equality.
+#[test]
+fn declared_effects_are_a_ceiling() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def now-effect (effect @env @read))
+(defn exact () (array str) (wasm "vibra_v1" "env_list") effects: (now-effect))
+(defn main () void (do (let t (exact))) effects: (now-effect (effect @fs @read)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let reported = report_effects(&lowered);
+    assert!(
+        reported.is_empty(),
+        "declaring an effect, or more than the body performs, should be silent: {reported}"
+    );
+}
+
+/// Effects propagate through calls using the callee's *declaration*, which is what
+/// makes inference a single pass rather than a fixpoint.
+#[test]
+fn effects_propagate_to_callers_through_declarations() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def now-effect (effect @env @read))
+(defn leaf () (array str) (wasm "vibra_v1" "env_list") effects: (now-effect))
+(defn middle () (array str) (do (return (leaf))))
+(defn main () void (do (let t (middle))))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let reported = report_effects(&lowered);
+    assert!(
+        reported.contains("`middle` declares no effects") && reported.contains("via `leaf`"),
+        "expected the caller to inherit the callee's declared effect, got: {reported}"
+    );
+}
+
+/// A task has no runtime isolation, so work it spawns still counts against the
+/// enclosing function.
+#[test]
+fn task_effects_belong_to_the_enclosing_function() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def now-effect (effect @env @read))
+(defn leaf () (array str) (wasm "vibra_v1" "env_list") effects: (now-effect))
+(defn main () void (do (task (do (let t (leaf))) captures: ())))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let reported = report_effects(&lowered);
+    assert!(
+        reported.contains("`main` declares no effects") && reported.contains("@env @read"),
+        "expected a task body's effects to belong to its parent, got: {reported}"
+    );
+}
+
 /// `effects:` accepts a bound name or an inline construction, and an absent attribute
 /// means pure.
 #[test]

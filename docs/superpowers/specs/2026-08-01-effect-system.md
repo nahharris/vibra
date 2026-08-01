@@ -206,9 +206,9 @@ not `@clock @now`; `@sys @info`, not `@system @info`.
 | `fs`      | `@fs @read`, `@fs @write`, `@fs @metadata`                  |
 | `net`     | `@net @connect`, `@listen`, `@send`, `@receive`             |
 | `io`      | `@io @read`, `@io @write`                                   |
-| `process` | `@process @spawn`, `@process @wait`                         |
+| `process` | `@process @spawn`, `@process @wait`, `@process @kill`       |
 | `env`     | `@env @read`, `@env @write`                                 |
-| `time`    | `@time @now`                                                |
+| `time`    | `@time @now`, `@time @sleep`                                |
 | `sys`     | `@sys @info`                                                |
 | `random`  | `@random @generate`                                         |
 
