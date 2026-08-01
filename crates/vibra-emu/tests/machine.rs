@@ -1,4 +1,4 @@
-use vibra_emu::{Capability, Machine, Permissions, Word};
+use vibra_emu::{Capability, Instruction, Machine, Permissions, Word};
 
 #[test]
 fn boot_matches_isa_v01_reset_state() {
@@ -41,4 +41,15 @@ fn boot_matches_isa_v01_reset_state() {
         )
         .unwrap()
     );
+}
+
+#[test]
+fn halt_produces_a_trace_and_stops_the_machine() {
+    let mut machine = Machine::boot(&[Instruction::halt().encode()]).unwrap();
+    let trace = machine.step().unwrap();
+    assert_eq!(trace.pc, 0);
+    assert_eq!(trace.insn, Instruction::halt().encode());
+    assert_eq!(trace.trap, None);
+    assert!(machine.status().is_halted());
+    assert_eq!(machine.status().exit_code(), Some(0));
 }

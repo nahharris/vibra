@@ -697,6 +697,17 @@ impl Instruction {
         }
     }
 
+    pub const fn nop() -> Self {
+        Self {
+            opcode: Opcode::Nop,
+            eff: 0,
+            a: 0,
+            b: 0,
+            c: 0,
+            imm10: 0,
+        }
+    }
+
     pub const fn format(self) -> Format {
         self.opcode.format()
     }
