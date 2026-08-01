@@ -165,6 +165,20 @@ enum Command {
         #[arg(long = "flag", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
+    /// Run a Vibra Machine v0.1 hex image.
+    Emu {
+        /// Newline-delimited 32-bit instruction image.
+        program: PathBuf,
+        /// Maximum number of instructions to execute.
+        #[arg(long = "max-steps", default_value_t = 1_000_000)]
+        max_steps: u64,
+        /// Include the per-instruction trace in the report.
+        #[arg(long)]
+        trace: bool,
+        /// Report format.
+        #[arg(long, value_enum, default_value_t = EmuFormatArg::Json)]
+        format: EmuFormatArg,
+    },
     /// Print the statically referenced host effect surface as JSON.
     Effects {
         /// Entry module path.
@@ -312,6 +326,12 @@ enum TemplateArg {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum ReportArg {
+    Human,
+    Json,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum EmuFormatArg {
     Human,
     Json,
 }
@@ -579,6 +599,12 @@ fn run_cli() -> Result<()> {
                 execute::run_lowered(&lowered, &config)?;
             }
         }
+        Command::Emu {
+            program,
+            max_steps,
+            trace,
+            format,
+        } => run_emu(&program, max_steps, trace, format)?,
         Command::Effects { path, format, flag } => {
             print_effects(&path, format, &compilation_flags(flag)?)?
         }
@@ -690,6 +716,86 @@ fn run_cli() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn run_emu(
+    program: &std::path::Path,
+    max_steps: u64,
+    include_trace: bool,
+    format: EmuFormatArg,
+) -> Result<()> {
+    let source = std::fs::read_to_string(program)
+        .with_context(|| format!("read Vibra Machine image `{}`", program.display()))?;
+    let image = vibra_emu::parse_hex_program(&source)
+        .with_context(|| format!("parse Vibra Machine image `{}`", program.display()))?;
+    let mut machine = vibra_emu::Machine::boot(&image)?;
+    let report = machine.run(max_steps)?;
+
+    match format {
+        EmuFormatArg::Json => print_emu_json(&report, include_trace)?,
+        EmuFormatArg::Human => print_emu_human(&report),
+    }
+
+    if let Some(cause) = report.status.trap_cause() {
+        bail!(
+            "Vibra Machine trapped with {} (0x{cause:02x})",
+            vibra_emu::trap_name(cause)
+        );
+    }
+    if report.step_limit_reached {
+        bail!("Vibra Machine reached the step limit ({max_steps})");
+    }
+    Ok(())
+}
+
+fn print_emu_json(report: &vibra_emu::RunReport, include_trace: bool) -> Result<()> {
+    let traces = if include_trace {
+        serde_json::to_value(&report.traces)?
+    } else {
+        serde_json::json!([])
+    };
+    let trap = report.status.trap_cause().map(|cause| {
+        serde_json::json!({
+            "code": cause,
+            "name": vibra_emu::trap_name(cause),
+        })
+    });
+    let status = match report.status {
+        vibra_emu::MachineStatus::Running => "running",
+        vibra_emu::MachineStatus::Halted { .. } => "halted",
+        vibra_emu::MachineStatus::Trapped { .. } => "trapped",
+    };
+    let value = serde_json::json!({
+        "status": status,
+        "steps": report.steps,
+        "step_limit_reached": report.step_limit_reached,
+        "exit_code": report.status.exit_code(),
+        "trap": trap,
+        "traces": traces,
+    });
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
+fn print_emu_human(report: &vibra_emu::RunReport) {
+    match report.status {
+        vibra_emu::MachineStatus::Running => {
+            println!("step limit reached after {} step(s)", report.steps);
+        }
+        vibra_emu::MachineStatus::Halted { exit_code } => {
+            println!(
+                "halted with exit code {exit_code} after {} step(s)",
+                report.steps
+            );
+        }
+        vibra_emu::MachineStatus::Trapped { cause, tpc, .. } => {
+            println!(
+                "trapped with {} (0x{cause:02x}) at PC 0x{tpc:08x} after {} step(s)",
+                vibra_emu::trap_name(cause),
+                report.steps
+            );
+        }
+    }
 }
 
 fn exec_bindings(

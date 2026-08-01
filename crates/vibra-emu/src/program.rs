@@ -14,12 +14,17 @@ pub fn parse_hex_program(source: &str) -> Result<Vec<u32>, ProgramError> {
             return Err(ProgramError::MultipleWords(line_number));
         }
         let token = content;
-        let (digits, radix) = match token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
+        let (digits, radix) = match token
+            .strip_prefix("0x")
+            .or_else(|| token.strip_prefix("0X"))
+        {
             Some(value) => (value, 16),
             None => (token, 10),
         };
-        let word = u32::from_str_radix(digits, radix)
-            .map_err(|_| ProgramError::InvalidWord { line: line_number, token: token.to_string() })?;
+        let word = u32::from_str_radix(digits, radix).map_err(|_| ProgramError::InvalidWord {
+            line: line_number,
+            token: token.to_string(),
+        })?;
         if words.len() == MAX_PROGRAM_WORDS {
             return Err(ProgramError::TooManyWords(line_number));
         }
@@ -39,10 +44,19 @@ impl fmt::Display for ProgramError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidWord { line, token } => {
-                write!(formatter, "invalid instruction word `{token}` on line {line}")
+                write!(
+                    formatter,
+                    "invalid instruction word `{token}` on line {line}"
+                )
             }
-            Self::MultipleWords(line) => write!(formatter, "line {line} contains more than one instruction word"),
-            Self::TooManyWords(line) => write!(formatter, "program exceeds the 65536-word limit at line {line}"),
+            Self::MultipleWords(line) => write!(
+                formatter,
+                "line {line} contains more than one instruction word"
+            ),
+            Self::TooManyWords(line) => write!(
+                formatter,
+                "program exceeds the 65536-word limit at line {line}"
+            ),
         }
     }
 }

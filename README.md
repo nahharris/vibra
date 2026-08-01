@@ -32,6 +32,14 @@ definitions; calls are positional and labels configure enclosing forms.
 Use `;` for reader comments. Persisted documentation belongs in a trailing
 `doc:` attribute, not in comments.
 
+### Vibra Machine emulator
+
+`cargo run -- emu program.vmi` executes a newline-delimited 32-bit instruction
+image. Blank lines and lines beginning with `#` are ignored; words may be
+decimal or `0x` hexadecimal. Use `--trace --format json` for the v0.1 trace
+contract. A `HALT` exits successfully; an architectural trap or step limit
+prints its report and exits nonzero.
+
 ```vibra
 (defn
   greet

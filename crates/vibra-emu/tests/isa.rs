@@ -39,7 +39,10 @@ fn capability_derivation_can_only_narrow_authority() {
     assert_eq!(child.len(), 20);
     assert_eq!(child.permissions(), parent.permissions());
     assert!(parent.derive(40, 20).is_err());
-    assert_eq!(parent.attenuate(Permissions::READ).permissions(), Permissions::READ);
+    assert_eq!(
+        parent.attenuate(Permissions::READ).permissions(),
+        Permissions::READ
+    );
 }
 
 #[test]

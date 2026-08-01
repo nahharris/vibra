@@ -91,9 +91,7 @@ impl Word {
                 Err(ValueError::NonZeroPayload { tag, payload })
             }
             Tag::Bool if payload > 1 => Err(ValueError::InvalidBoolean(payload)),
-            Tag::Char if char::from_u32(payload).is_none() => {
-                Err(ValueError::InvalidChar(payload))
-            }
+            Tag::Char if char::from_u32(payload).is_none() => Err(ValueError::InvalidChar(payload)),
             _ => Ok(Self { tag, payload }),
         }
     }
@@ -132,10 +130,15 @@ impl fmt::Display for ValueError {
         match self {
             Self::ReservedTag(tag) => write!(formatter, "reserved data tag {tag}"),
             Self::NonZeroPayload { tag, payload } => {
-                write!(formatter, "tag {tag:?} requires a zero payload, got {payload}")
+                write!(
+                    formatter,
+                    "tag {tag:?} requires a zero payload, got {payload}"
+                )
             }
             Self::InvalidBoolean(payload) => write!(formatter, "invalid boolean payload {payload}"),
-            Self::InvalidChar(payload) => write!(formatter, "invalid Unicode scalar value {payload}"),
+            Self::InvalidChar(payload) => {
+                write!(formatter, "invalid Unicode scalar value {payload}")
+            }
             Self::ExpectedTag { expected, actual } => {
                 write!(formatter, "expected tag {expected:?}, got {actual:?}")
             }
@@ -164,6 +167,10 @@ impl Permissions {
 
     pub const fn bits(self) -> u8 {
         self.0
+    }
+
+    pub const fn from_bits(bits: u8) -> Self {
+        Self(bits)
     }
 
     pub const fn contains(self, required: Self) -> bool {
@@ -278,7 +285,9 @@ pub enum CapabilityError {
 impl fmt::Display for CapabilityError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::LengthTooLarge(len) => write!(formatter, "capability length {len} exceeds 24 bits"),
+            Self::LengthTooLarge(len) => {
+                write!(formatter, "capability length {len} exceeds 24 bits")
+            }
             Self::Bounds => write!(formatter, "derived capability is outside its parent bounds"),
         }
     }
@@ -607,12 +616,7 @@ impl Instruction {
         )
     }
 
-    pub fn l(
-        opcode: Opcode,
-        eff: u8,
-        rd: u8,
-        immediate: i32,
-    ) -> Result<Self, InstructionError> {
+    pub fn l(opcode: Opcode, eff: u8, rd: u8, immediate: i32) -> Result<Self, InstructionError> {
         Self::ensure_format(opcode, Format::L)?;
         let immediate = encode_signed(immediate, 18, "imm18")? as u32;
         Self::new(
@@ -661,14 +665,7 @@ impl Instruction {
     ) -> Result<Self, InstructionError> {
         Self::ensure_format(opcode, Format::M)?;
         let immediate = encode_signed(immediate, 10, "imm10")? as u32;
-        Self::new(
-            opcode,
-            eff,
-            rd,
-            capability,
-            base_reg,
-            immediate as u16,
-        )
+        Self::new(opcode, eff, rd, capability, base_reg, immediate as u16)
     }
 
     pub fn c(
@@ -755,6 +752,10 @@ impl Instruction {
         )
     }
 
+    pub const fn imm18_bits(self) -> u32 {
+        ((self.b as u32) << 14) | ((self.c as u32) << 10) | self.imm10 as u32
+    }
+
     pub const fn imm22(self) -> i32 {
         sign_extend(
             ((self.a as u32) << 18)
@@ -763,6 +764,13 @@ impl Instruction {
                 | self.imm10 as u32,
             22,
         )
+    }
+
+    pub const fn imm22_bits(self) -> u32 {
+        ((self.a as u32) << 18)
+            | ((self.b as u32) << 14)
+            | ((self.c as u32) << 10)
+            | self.imm10 as u32
     }
 
     pub const fn cap(self) -> u8 {
@@ -823,7 +831,11 @@ impl Instruction {
         if actual == expected {
             Ok(())
         } else {
-            Err(InstructionError::WrongFormat { opcode, expected, actual })
+            Err(InstructionError::WrongFormat {
+                opcode,
+                expected,
+                actual,
+            })
         }
     }
 }
@@ -833,7 +845,10 @@ fn encode_signed(value: i32, bits: u32, field: &'static str) -> Result<u32, Inst
     let max = (1_i64 << (bits - 1)) - 1;
     let value = i64::from(value);
     if value < min || value > max {
-        return Err(InstructionError::ImmediateOutOfRange { field, value: value as i32 });
+        return Err(InstructionError::ImmediateOutOfRange {
+            field,
+            value: value as i32,
+        });
     }
     Ok((value as i64 & ((1_i64 << bits) - 1)) as u32)
 }
@@ -852,17 +867,29 @@ pub enum InstructionError {
         actual: Format,
     },
     FieldOutOfRange(&'static str, u32),
-    ImmediateOutOfRange { field: &'static str, value: i32 },
+    ImmediateOutOfRange {
+        field: &'static str,
+        value: i32,
+    },
 }
 
 impl fmt::Display for InstructionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownOpcode(opcode) => write!(formatter, "undefined opcode 0x{opcode:02x}"),
-            Self::WrongFormat { opcode, expected, actual } => {
-                write!(formatter, "opcode {opcode:?} requires {expected:?}, got {actual:?}")
+            Self::WrongFormat {
+                opcode,
+                expected,
+                actual,
+            } => {
+                write!(
+                    formatter,
+                    "opcode {opcode:?} requires {expected:?}, got {actual:?}"
+                )
             }
-            Self::FieldOutOfRange(field, value) => write!(formatter, "{field} field value {value} is out of range"),
+            Self::FieldOutOfRange(field, value) => {
+                write!(formatter, "{field} field value {value} is out of range")
+            }
             Self::ImmediateOutOfRange { field, value } => {
                 write!(formatter, "{field} immediate {value} is out of range")
             }
