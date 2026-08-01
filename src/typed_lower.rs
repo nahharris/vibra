@@ -498,6 +498,10 @@ pub(crate) fn lower_type(
             TypeRef::Literal(LiteralType::Atom(name.clone()))
         }
         TypeExprKind::Literal(_) => bail!("only atom literals are valid singleton types"),
+        TypeExprKind::Effect { domain, action } => TypeRef::Effect {
+            domain: domain.value.clone(),
+            action: action.value.clone(),
+        },
         TypeExprKind::Named(name) if name == "any" => TypeRef::Interface(BTreeMap::new()),
         TypeExprKind::Named(name) if name == "atom" => TypeRef::Atom,
         TypeExprKind::Named(name) if generics.contains(name) => TypeRef::Generic(name.clone()),

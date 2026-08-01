@@ -349,6 +349,8 @@ fn rule_summary(code: &str) -> &'static str {
         "E-IMPL-005" => "`=impl` method signature does not match interface declaration",
         "E-IMPL-006" => "`=impl` method alias does not resolve",
         "E-OPTION-001" => "Noncanonical option representation",
+        "E-EFFECT-004" => "Malformed effect construction",
+        "E-EFFECT-007" => "Reserved effect syntax (handler operands or row tail)",
         "E-TY-001" => "Call argument type does not match the parameter type",
         "E-TY-002" => "Returned value type does not match the declared return type",
         "E-MATCH-001" => "`match` over an enum is missing an arm for a tag",
@@ -494,6 +496,8 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-MATCH-002",
         "E-TY-001",
         "E-TY-002",
+        "E-EFFECT-004",
+        "E-EFFECT-007",
     ];
     KNOWN_CODES
         .iter()

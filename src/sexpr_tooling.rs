@@ -352,7 +352,8 @@ fn lint_type(path: &Path, source: &str, ty: &TypeExpr, diagnostics: &mut Vec<Dia
         TypeExprKind::WasmValue(name) => {
             lint_name(path, source, name, "wasm value type", diagnostics)
         }
-        TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => {}
+        // Effect operands are atoms, which carry no kebab-case symbol lint.
+        TypeExprKind::Effect { .. } | TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => {}
     }
 }
 

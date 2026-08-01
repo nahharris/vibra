@@ -1370,7 +1370,8 @@ fn visit_type(ty: &TypeExpr, visitor: &mut impl FnMut(&str) -> Result<()>) -> Re
             Ok(())
         }
         TypeExprKind::WasmValue(domain) => visitor(&domain.value),
-        TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => Ok(()),
+        // Effect operands are atoms, so an effect names no module alias to validate.
+        TypeExprKind::Effect { .. } | TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => Ok(()),
     }
 }
 

@@ -35,7 +35,6 @@ universe of effects is closed.
 
 ```lisp
 (def read (effect @fs @read))     ; construct and bind, as (def t (newtype str)) does
-(def other-read read)             ; plain alias, via existing transparent aliases
 
 (defn load (p fs.path) str
   (do ...)
@@ -44,8 +43,14 @@ universe of effects is closed.
 
 **Effect identity is structural**: the ordered pair of atoms. `(effect @fs @read)`
 written in two different modules denotes the *same* effect. Names are a
-readability convenience layered on top, exactly as transparent type aliases
-already work.
+readability convenience layered on top.
+
+A consequence worth stating, because it removes a whole class of question: giving
+an effect a second name needs no aliasing mechanism. Re-declaring
+`(def alt-read (effect @fs @read))` already denotes the same effect. (A bare
+`(def alt-read read)` alias is rejected by `E-ADAPT-002`, but that is a
+pre-existing limitation on *all* bare type aliases — a `newtype` behaves
+identically — and is orthogonal to this design.)
 
 Structural identity is what keeps the compiler out of the effect *namespace*.
 It removes any need for canonical-name derivation from module paths, a closed

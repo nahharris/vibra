@@ -190,16 +190,20 @@ type-expr = symbol
           | "(", "mut", type-expr, ")"
           | "(", "ref", type-expr, ")"
           | "(", "intersect", type-expr+, ")"
-          | capability-type | handle-type | policy-type ;
+          | handle-type | effect-type ;
 
 field-type       = "(", symbol, type-expr, ")" ;
 enum-tag         = "(", symbol, type-expr, ")" ;
 interface-member = "(", symbol, type-expr, ")" ;
 
-capability-type  = "(", "capability", symbol, policy-group*, ")" ;
 handle-type      = "(", "handle", symbol, ")" ;
-policy-type      = "(", "policy", policy-domain*, ")" ;
+effect-type      = "(", "effect", atom, atom, ")" ;
 ```
+
+`capability-type` and `policy-type` were removed with the authority system in
+#213. `effect-type` was added by the effect system (see
+`docs/superpowers/specs/2026-08-01-effect-system.md`); its two operands are the
+domain and the action, and further operands are reserved for handler definitions.
 
 The capability domain and handle access are positional operands, not part of
 the head. The legacy surface fused them in — `$capability.env-read`,

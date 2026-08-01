@@ -1329,6 +1329,136 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
     );
 }
 
+/// An effect binds like any other type-form definition.
+#[test]
+fn effect_declaration_lowers() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def read (effect @fs @read) doc: "Reads file contents.")
+(def write (effect @fs @write))
+(defn main () void (do (let ok true)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("effect declarations should lower");
+}
+
+/// Effects share the `def` namespace with types, so a collision is caught by the
+/// existing duplicate-symbol check rather than by a bespoke rule.
+#[test]
+fn effect_binding_collides_with_a_type_of_the_same_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def read (effect @fs @read))
+(def read (newtype str))
+(defn main () void (do (let ok true)))
+"#,
+    )
+    .unwrap();
+
+    let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(
+        err.contains("E-MOD-002"),
+        "expected an effect to collide with a same-named type, got: {err}"
+    );
+}
+
+/// Pins that effects are not special here: binding one name to another is rejected
+/// for an effect exactly as it is for a `newtype`, by the pre-existing `E-ADAPT-002`.
+/// Bare type aliases are unsupported language-wide, not just for effects. Because
+/// effect identity is structural, re-declaring `(effect @fs @read)` under a second
+/// name already denotes the same effect, so nothing about the design depends on this.
+#[test]
+fn bare_type_aliases_are_unsupported_for_effects_and_newtypes_alike() {
+    for body in ["(effect @fs @read)", "(newtype int64)"] {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(
+            &entry,
+            format!(
+                r#"(def original {body})
+(def renamed original)
+(defn main () void (do (let ok true)))
+"#
+            ),
+        )
+        .unwrap();
+
+        let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+        assert!(
+            err.contains("E-ADAPT-002"),
+            "expected a bare alias of `{body}` to hit the shared adapter limit, got: {err}"
+        );
+    }
+}
+
+/// The operands are atoms, not symbols: a bare `(effect fs read)` is the pre-atom
+/// spelling and must be rejected rather than silently read as a generic application.
+#[test]
+fn effect_operands_must_be_atoms() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def read (effect fs read))
+(defn main () void (do (let ok true)))
+"#,
+    )
+    .unwrap();
+
+    let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(
+        err.contains("E-ATOM-003"),
+        "expected bare symbols in effect operand position to be rejected, got: {err}"
+    );
+}
+
+#[test]
+fn effect_requires_exactly_a_domain_and_an_action() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def read (effect @fs))
+(defn main () void (do (let ok true)))
+"#,
+    )
+    .unwrap();
+
+    let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(
+        err.contains("E-SYN-009") || err.contains("effect"),
+        "expected a one-operand effect to be rejected, got: {err}"
+    );
+}
+
+/// Operands past the action are reserved for handler definitions. This is the
+/// reservation that keeps handlers from being a syntax-breaking retrofit later.
+#[test]
+fn effect_extra_operands_are_reserved_for_handlers() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def read (effect @fs @read @extra))
+(defn main () void (do (let ok true)))
+"#,
+    )
+    .unwrap();
+
+    let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(
+        err.contains("E-EFFECT-007") && err.contains("reserved"),
+        "expected extra effect operands to be reserved, got: {err}"
+    );
+}
+
 /// DRAFT.md: "No implicit numeric widening or narrowing occurs." A literal may take the
 /// parameter's width because it has none of its own, but a *local* carries `int64` and
 /// must be converted explicitly.
