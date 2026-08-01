@@ -1,15 +1,38 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vibra.dev/schemas/effects.schema.json",
+  "$id": "https://vibra.dev/schemas/effects-v2.schema.json",
   "title": "Vibra static effect surface",
+  "description": "The effect surface of a program, derived from declared effect rows rather than from a call-graph walk. Declarations are checked against inference during lowering, so `effects` is exact rather than an approximation. Breaking change from effects.schema.json, whose single `effects` array is now `host-imports`.",
   "type": "object",
-  "required": ["effects"],
+  "required": ["effects", "functions", "host-imports"],
   "properties": {
     "effects": {
+      "description": "Every effect reachable from the entry point: what this program can do.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/effect" }
+    },
+    "functions": {
+      "description": "Per-function declared rows, for auditing which part of the program is responsible for each effect. Functions declaring no effects are omitted.",
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["source", "module", "name", "params", "return"],
+        "required": ["source", "effects"],
+        "properties": {
+          "source": { "type": "string" },
+          "effects": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/effect" }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "host-imports": {
+      "description": "The reachable host-import surface beneath the declared rows.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "module", "name", "params", "return", "effects"],
         "properties": {
           "source": { "type": "string" },
           "module": { "enum": ["vibra_v1", "vibra_test"] },
@@ -23,11 +46,28 @@
               "additionalProperties": false
             }
           },
-          "return": { "type": "string" }
+          "return": { "type": "string" },
+          "effects": {
+            "description": "The effects the ABI registry declares for this import.",
+            "type": "array",
+            "items": { "$ref": "#/$defs/effect" }
+          }
         },
         "additionalProperties": false
       }
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "effect": {
+      "description": "An effect label, identified structurally by its domain and action rather than by any name bound to it.",
+      "type": "object",
+      "required": ["domain", "action"],
+      "properties": {
+        "domain": { "type": "string" },
+        "action": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
 }
