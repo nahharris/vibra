@@ -1861,7 +1861,7 @@ fn effect_extra_operands_are_reserved_for_handlers() {
     );
 }
 
-/// DRAFT.md: "No implicit numeric widening or narrowing occurs." A literal may take the
+/// The language contract says: "No implicit numeric widening or narrowing occurs." A literal may take the
 /// parameter's width because it has none of its own, but a *local* carries `int64` and
 /// must be converted explicitly.
 #[test]
@@ -5364,7 +5364,7 @@ fn vibra_lint_defaults_to_json_and_reports_kebab_case_locations() {
 fn vibra_lint_suppression_and_deny_warnings_are_respected() {
     // Per-line `=lint:`/`=comment:` source annotations do not exist in the
     // S-expression surface (see the "Definition attributes" section of
-    // docs/superpowers/specs/2026-07-25-s-expression-language-design.md:
+    // docs/decisions/s-expression-language.md:
     // "Lint suppression moves to CLI or project configuration so source
     // semantics do not contain diagnostic policy"). No `.vibra` source can
     // even parse with a bare `=lint:` line -- `=` is not a valid symbol
@@ -5432,7 +5432,7 @@ fn vibra_lint_suppression_and_deny_warnings_are_respected() {
 fn root_lint_annotation_suppresses_the_whole_file() {
     // A root-level `=lint:` annotation cannot exist in S-expression source
     // (see the comment in `vibra_lint_suppression_and_deny_warnings_are_respected`
-    // and docs/superpowers/specs/2026-07-25-s-expression-language-design.md,
+    // and docs/decisions/s-expression-language.md,
     // "Definition attributes"). `--severity error` is the surviving
     // whole-file equivalent: it drops every warning-level diagnostic before
     // `--deny-warnings` ever sees them, so a file with nothing but
@@ -7059,8 +7059,8 @@ fn compile_time_embed_supports_text_binary_and_structured_formats() {
 
 #[test]
 fn compile_time_embed_rejects_yaml_as_a_data_format() {
-    // NOTE: the spec (`docs/superpowers/specs/2026-07-25-s-expression-
-    // language-design.md`, "Embedded data") states YAML *should* be usable
+    // NOTE: the spec (`docs/decisions/s-expression-language.md`,
+    // "Embedded data") states YAML *should* be usable
     // for `embed` as an external data-interoperability format -- "accepted
     // by explicit `(embed "path" format: yaml)` and may be inferred from
     // `.yaml` or `.yml`" -- which step 8 of the migration plan ("isolate

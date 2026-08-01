@@ -2,10 +2,10 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $readme = Get-Content -Raw (Join-Path $repoRoot 'README.md')
-$guidePath = Join-Path $repoRoot 'docs/containers.md'
+$guidePath = Join-Path $repoRoot 'docs/reference/containers.md'
 
 if (-not (Test-Path $guidePath)) {
-    throw 'Container guide is missing: docs/containers.md'
+    throw 'Container guide is missing: docs/reference/containers.md'
 }
 
 $guide = Get-Content -Raw $guidePath
@@ -50,8 +50,8 @@ if ($guide -notmatch 'X\.Y\.Z` remains the initial immutable r0/source\s+tag') {
     throw 'The guide must state that X.Y.Z remains the immutable r0/source tag.'
 }
 
-if ($readme -notmatch '\[Container images\]\(docs/containers\.md\)') {
-    throw 'README must link to docs/containers.md as Container images.'
+if ($readme -notmatch '\[Container images\]\(docs/reference/containers\.md\)') {
+    throw 'README must link to docs/reference/containers.md as Container images.'
 }
 
 Write-Host 'Container documentation checks passed.'

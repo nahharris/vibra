@@ -1,4 +1,4 @@
-//! Vibra compiler CLI. See [DRAFT.md](../DRAFT.md).
+//! Vibra compiler CLI. See [the language contract](../docs/decisions/s-expression-language.md).
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};

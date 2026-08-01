@@ -8,7 +8,7 @@
 //! `src/lower.rs` already consumes, via `crate::surface_adapter` -- the
 //! internal migration bridge documented in the "Amendment: internal typed-
 //! AST-to-`Value` migration bridge" section of
-//! `docs/superpowers/specs/2026-07-25-s-expression-language-design.md`.
+//! `docs/decisions/s-expression-language.md`.
 //!
 //! There is no second source parser and no content-based dialect selection:
 //! `.vibra` source is always read as S-expression, and

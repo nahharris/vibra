@@ -60,6 +60,20 @@ tests. Tests that require `workspace: temp` also need
 
 - Keep `README.md` accurate for user-facing commands, test syntax, and
   interface behavior when those interfaces change.
+- Read [`docs/index.md`](docs/index.md) before changing language behavior or
+  adding documentation. It defines the documentation source-of-truth map and
+  the folders for references, decisions, status reports, and history.
+- Update the canonical document in the same change as the language, runtime,
+  standard-library, CLI, schema, or workflow change. Do not leave competing
+  root-level drafts or status notes that look normative.
+- Put accepted contracts in `docs/decisions/`, stable operational guides in
+  `docs/reference/`, dated snapshots in `docs/status/`, and superseded
+  material in `docs/archive/`. Add every new document to `docs/index.md`.
+- Store implementation plans in `docs/plans/`; plans are working records, not
+  language contracts.
+- The repository-owned agent skills are under `skills/`. The `.agents/`
+  directory is local-only and fully gitignored; do not copy third-party or
+  machine-local skills into the repository.
 - For changes to machine-readable interfaces, update the relevant JSON Schema
   under `schemas/`: source shape, project manifest, diagnostics, structural
   code, or editor query response. Add newly introduced stable diagnostic codes
