@@ -373,6 +373,16 @@
       "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
     },
     {
+      "code": "E-EFFECT-004",
+      "severity": "error",
+      "summary": "Malformed effect: `(effect ...)` takes exactly a domain and an action atom"
+    },
+    {
+      "code": "E-EFFECT-007",
+      "severity": "error",
+      "summary": "Reserved effect syntax: operands beyond the domain and action are reserved for handler definitions, and effect-row tails are reserved for effect polymorphism"
+    },
+    {
       "code": "E-TY-002",
       "severity": "error",
       "summary": "Returned value type does not match the declared return type"

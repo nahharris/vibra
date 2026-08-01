@@ -624,6 +624,13 @@ impl<'a> Converter<'a> {
                 let head = format!("handle.{}", handle_access_str(access.value));
                 Ok(single_dollar(&head, Value::Null))
             }
+            TypeExprKind::Effect { domain, action } => Ok(single_dollar(
+                "effect",
+                Value::Sequence(vec![
+                    Value::String(domain.value.clone()),
+                    Value::String(action.value.clone()),
+                ]),
+            )),
             TypeExprKind::WasmValue(name) => bail!(
                 "E-ADAPT-008: `(wasm {})` host ABI value type has no legacy `Value` shape",
                 name.value

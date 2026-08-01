@@ -469,6 +469,7 @@ fn definition_kind(body: &TypeExpr) -> &'static str {
         TypeExprKind::Interface(_) => "interface",
         TypeExprKind::Newtype(_) => "newtype",
         TypeExprKind::Function { .. } => "function-type",
+        TypeExprKind::Effect { .. } => "effect",
         _ => "type",
     }
 }

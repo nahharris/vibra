@@ -420,6 +420,13 @@ pub enum TypeExprKind {
     MutableReference(Box<TypeExpr>),
     Intersect(Vec<TypeExpr>),
     Handle(Spanned<HandleAccess>),
+    /// An effect label, identified structurally by its `(domain, action)` atom pair
+    /// rather than by the name it is bound to. `(effect @fs @read)` written in two
+    /// modules denotes the same effect.
+    Effect {
+        domain: Name,
+        action: Name,
+    },
     WasmValue(Name),
 }
 
@@ -1293,6 +1300,22 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
         "handle" => {
             exact_arity("handle", &args, 1, node.span)?;
             TypeExprKind::Handle(parse_handle_access(args[0])?)
+        }
+        "effect" => {
+            // Operands beyond the domain and action are reserved for handler
+            // definitions; reject them by name so the reservation is visible.
+            if args.len() > 2 {
+                return Err(AstError::new(
+                    "E-EFFECT-007",
+                    "`effect` takes exactly a domain and an action atom; additional operands are reserved for handler definitions",
+                    args[2].span,
+                ));
+            }
+            exact_arity("effect", &args, 2, node.span)?;
+            TypeExprKind::Effect {
+                domain: open_atom(args[0], "effect domain")?,
+                action: open_atom(args[1], "effect action")?,
+            }
         }
         "wasm" => {
             exact_arity("wasm type", &args, 1, node.span)?;

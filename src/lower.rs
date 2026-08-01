@@ -256,6 +256,13 @@ pub enum TypeRef {
     /// An affine handle to a structured child task producing `T`.
     /// This type has no source spelling and can only be created by `$spawn`.
     JoinHandle(Box<TypeRef>),
+    /// An effect label. Identity is *structural* -- the `(domain, action)` pair --
+    /// so `(effect @fs @read)` written in two modules denotes the same effect and
+    /// the name it is bound to is a convenience, not part of its identity.
+    Effect {
+        domain: String,
+        action: String,
+    },
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
     /// A use of a generic type alias with explicit type arguments. `type_args`
@@ -1171,6 +1178,7 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$literal",
     "$union",
     "$enum",
+    "$effect",
 ];
 
 fn is_builtin_type_form(form: &str) -> bool {
@@ -1466,6 +1474,21 @@ fn parse_type_constructor(
         return Ok(TypeRef::HostHandle(parse_handle_access(access)?));
     }
     match form {
+        "$effect" => {
+            let parts = v
+                .as_sequence()
+                .context("E-EFFECT-004: `effect` body must be a `[domain, action]` sequence")?;
+            let [domain, action] = parts.as_slice() else {
+                bail!("E-EFFECT-004: `effect` takes exactly a domain and an action atom");
+            };
+            let (Some(domain), Some(action)) = (domain.as_str(), action.as_str()) else {
+                bail!("E-EFFECT-004: `effect` domain and action must be atoms");
+            };
+            Ok(TypeRef::Effect {
+                domain: domain.to_string(),
+                action: action.to_string(),
+            })
+        }
         "$mut" => Ok(TypeRef::Mutable(Box::new(parse_type_ref(
             v,
             scope,
