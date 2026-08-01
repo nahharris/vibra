@@ -373,6 +373,16 @@
       "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
     },
     {
+      "code": "E-EFFECT-001",
+      "severity": "error",
+      "summary": "A function body performs an effect its `effects:` attribute does not declare; the declared row is a ceiling the body may not exceed"
+    },
+    {
+      "code": "E-EFFECT-005",
+      "severity": "error",
+      "summary": "A `(wasm ...)` body must declare exactly the effects the host ABI registry states for that import, so a host import cannot be laundered through an empty declaration"
+    },
+    {
       "code": "E-EFFECT-002",
       "severity": "error",
       "summary": "A name in `effects:` does not resolve to an effect declared with `(def <name> (effect @domain @action))`"

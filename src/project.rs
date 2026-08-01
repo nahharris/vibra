@@ -1397,7 +1397,7 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
     fs::create_dir_all(&src)?;
     fs::write(
         src.join("main.vibra"),
-        "(import io \"@std/io.vibra\")\n(defn main () void (do (io.println \"Hello, World!\")))\n",
+        "(import io \"@std/io.vibra\")\n(import effects \"@std/effects.vibra\")\n(defn main () void (do (io.println \"Hello, World!\")) effects: (effects.io-write))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
@@ -1426,7 +1426,7 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
     )?;
     fs::write(
         root.join("src").join(name).join("main.vibra"),
-        "(import io \"@std/io.vibra\")\n(import core \"@core/lib.vibra\")\n(defn main () void (do (io.println core.message)))\n",
+        "(import io \"@std/io.vibra\")\n(import core \"@core/lib.vibra\")\n(import effects \"@std/effects.vibra\")\n(defn main () void (do (io.println core.message)) effects: (effects.io-write))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),

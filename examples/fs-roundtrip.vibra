@@ -1,6 +1,7 @@
 (import io "../stdlib/src/io.vibra")
 (import fs "../stdlib/src/fs.vibra")
 (import result "../stdlib/src/result.vibra")
+(import effects "../stdlib/src/effects.vibra")
 (defn
   main
   ()
@@ -32,4 +33,5 @@
     (result.result.err (bind open-err))
     (do (io.eprintln "failed to open file for reading"))
   )
+  effects: (effects.fs-read effects.fs-write effects.io-read effects.io-write)
 )
