@@ -287,6 +287,8 @@ pub enum TypeRef {
     FnType {
         parameters: Vec<FunctionTypeParameter>,
         return_type: Box<TypeRef>,
+        /// The effect ceiling an implementation of this signature may not exceed.
+        effects: BTreeSet<(String, String)>,
     },
     /// The reserved `$self` type. Inside an `$interface` body it is an
     /// existential placeholder bound at impl time. Inside `=defs` / `=impl`
@@ -1683,13 +1685,33 @@ fn parse_type_constructor(
                 .context("`$fn-type` must be a mapping with `args` and `return`")?;
             for (k, _) in m {
                 let ks = k.as_str().context("$fn-type key must be string")?;
-                if ks != "args" && ks != "return" {
-                    bail!("$fn-type only accepts `args` and `return`, got `{ks}`");
+                if ks != "args" && ks != "return" && ks != "effects" {
+                    bail!("$fn-type only accepts `args`, `return`, and `effects`, got `{ks}`");
                 }
             }
             let args = map_get_str(m, "args").context("$fn-type missing `args`")?;
             let ret = map_get_str(m, "return").context("$fn-type missing `return`")?;
             let args = parse_type_ref(args, scope, skeletons, warnings, self_allowed)?;
+            let mut effects = BTreeSet::new();
+            if let Some(labels) = map_get_str(m, "effects") {
+                for label in labels
+                    .as_sequence()
+                    .context("$fn-type `effects` must be a sequence")?
+                {
+                    let TypeRef::Effect { domain, action } =
+                        parse_type_ref(label, scope, skeletons, warnings, self_allowed)?
+                    else {
+                        // Type parsing runs before alias resolution, so a named
+                        // reference is still an unresolved `Named` here. Inline
+                        // construction needs no resolution and is always available,
+                        // so `fn-type` takes that spelling for now.
+                        bail!(
+                            "E-EFFECT-002: `fn-type` effects must be written inline as `(effect @domain @action)`; a named effect reference is not resolvable in this position"
+                        );
+                    };
+                    effects.insert((domain, action));
+                }
+            }
             Ok(TypeRef::FnType {
                 parameters: function_type_parameters_from_type(args),
                 return_type: Box::new(parse_type_ref(
@@ -1699,6 +1721,7 @@ fn parse_type_constructor(
                     warnings,
                     self_allowed,
                 )?),
+                effects,
             })
         }
         "$literal" => {
@@ -2079,6 +2102,7 @@ fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAl
         TypeRef::FnType {
             parameters,
             return_type,
+            effects,
         } => TypeRef::FnType {
             parameters: parameters
                 .into_iter()
@@ -2089,6 +2113,7 @@ fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAl
                 })
                 .collect(),
             return_type: Box::new(qualify_named_type(alias, *return_type, aliases)),
+            effects,
         },
         _ => ty,
     }
@@ -4124,6 +4149,9 @@ fn bind_impl_method(
             })
             .collect(),
         return_type: Box::new(return_type.clone()),
+        // Effects are checked separately against the interface ceiling below;
+        // `signatures_match` deliberately ignores them.
+        effects: BTreeSet::new(),
     };
     if !signatures_match(expected_fn_type, &actual, type_aliases) {
         bail!(
@@ -4189,6 +4217,22 @@ fn bind_impl_method(
     let declared_effects =
         resolve_effect_row(&env, module_alias, type_aliases, &sig_key, warnings)?;
 
+    // An interface method's row is a ceiling: an implementation may perform fewer
+    // effects than the interface allows, never more. Checked here rather than inside
+    // `signatures_match` because that relation is also reached through `unify_types`,
+    // where a directional subset test would be wrong.
+    if let TypeRef::FnType {
+        effects: allowed, ..
+    } = expected_fn_type
+    {
+        let excess: Vec<_> = declared_effects.labels.difference(allowed).collect();
+        if let Some((domain, action)) = excess.first() {
+            bail!(
+                "E-EFFECT-003: impl method `{method_name}` declares (effect @{domain} @{action}), which interface method `{iface_qualified}.{method_name}` does not permit; an implementation may not exceed the interface's declared effects"
+            );
+        }
+    }
+
     sigs.insert(
         sig_key.clone(),
         FunctionSig {
@@ -4231,6 +4275,7 @@ fn sig_function_type(sig: &FunctionSig) -> TypeRef {
             })
             .collect(),
         return_type: Box::new(sig.return_type.clone()),
+        effects: sig.effects.labels.clone(),
     }
 }
 
@@ -4243,10 +4288,12 @@ fn signatures_match(
         TypeRef::FnType {
             parameters: expected_parameters,
             return_type: expected_return,
+            ..
         },
         TypeRef::FnType {
             parameters: actual_parameters,
             return_type: actual_return,
+            ..
         },
     ) = (expected, actual)
     else {
@@ -4523,6 +4570,7 @@ fn check_typeref_bounds(
         TypeRef::FnType {
             parameters,
             return_type,
+            ..
         } => {
             for parameter in parameters {
                 check_typeref_bounds(
@@ -4607,6 +4655,7 @@ fn check_typeref_module_private_access(
         TypeRef::FnType {
             parameters,
             return_type,
+            ..
         } => {
             for parameter in parameters {
                 check_typeref_module_private_access(&parameter.ty, owner_prefix, context)?;

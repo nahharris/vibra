@@ -383,6 +383,11 @@
       "summary": "A `(wasm ...)` body must declare exactly the effects the host ABI registry states for that import, so a host import cannot be laundered through an empty declaration"
     },
     {
+      "code": "E-EFFECT-003",
+      "severity": "error",
+      "summary": "An impl method declares an effect its interface method does not permit; an interface's effect row is a ceiling implementations may not exceed"
+    },
+    {
       "code": "E-EFFECT-002",
       "severity": "error",
       "summary": "A name in `effects:` does not resolve to an effect declared with `(def <name> (effect @domain @action))`"

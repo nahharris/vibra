@@ -605,9 +605,11 @@ impl<'a> Converter<'a> {
                 let mut m = Mapping::new();
                 for member in members {
                     let value = match &member.ty.value {
-                        TypeExprKind::Function { parameters, result } => {
-                            self.interface_fn_type_value(parameters, result)?
-                        }
+                        TypeExprKind::Function {
+                            parameters,
+                            result,
+                            effects,
+                        } => self.interface_fn_type_value(parameters, result, effects)?,
                         _ => self.type_value(&member.ty)?,
                     };
                     if m.insert(Value::String(member.name.value.clone()), value)
@@ -621,7 +623,11 @@ impl<'a> Converter<'a> {
                 }
                 Ok(single_dollar("interface", Value::Mapping(m)))
             }
-            TypeExprKind::Function { parameters, result } => self.fn_type_value(parameters, result),
+            TypeExprKind::Function {
+                parameters,
+                result,
+                effects,
+            } => self.fn_type_value(parameters, result, effects),
             TypeExprKind::Newtype(inner) => Ok(single_dollar("newtype", self.type_value(inner)?)),
             TypeExprKind::Mutable(inner) => Ok(single_dollar("mut", self.type_value(inner)?)),
             TypeExprKind::Reference(inner) => Ok(single_dollar("ref", self.type_value(inner)?)),
@@ -658,6 +664,7 @@ impl<'a> Converter<'a> {
         &mut self,
         parameters: &[FunctionTypeParameter],
         result: &TypeExpr,
+        effects: &EffectRow,
     ) -> Result<Value> {
         let args = match parameters.len() {
             0 => Value::String("$void".into()),
@@ -677,6 +684,14 @@ impl<'a> Converter<'a> {
         let mut m = Mapping::new();
         m.insert(Value::String("args".into()), args);
         m.insert(Value::String("return".into()), ret);
+        if !effects.labels.is_empty() {
+            let labels = effects
+                .labels
+                .iter()
+                .map(|label| self.type_value(label))
+                .collect::<Result<Vec<_>>>()?;
+            m.insert(Value::String("effects".into()), Value::Sequence(labels));
+        }
         Ok(single_dollar("fn-type", Value::Mapping(m)))
     }
 
@@ -684,6 +699,7 @@ impl<'a> Converter<'a> {
         &mut self,
         parameters: &[FunctionTypeParameter],
         result: &TypeExpr,
+        effects: &EffectRow,
     ) -> Result<Value> {
         let args = if parameters.is_empty() {
             Value::String("$void".into())
@@ -701,6 +717,14 @@ impl<'a> Converter<'a> {
         let mut m = Mapping::new();
         m.insert(Value::String("args".into()), args);
         m.insert(Value::String("return".into()), ret);
+        if !effects.labels.is_empty() {
+            let labels = effects
+                .labels
+                .iter()
+                .map(|label| self.type_value(label))
+                .collect::<Result<Vec<_>>>()?;
+            m.insert(Value::String("effects".into()), Value::Sequence(labels));
+        }
         Ok(single_dollar("fn-type", Value::Mapping(m)))
     }
 
@@ -1084,7 +1108,10 @@ impl<'a> Converter<'a> {
             .ok_or_else(|| {
                 anyhow::anyhow!("E-ADAPT-042: interface `{iface_name}` has no method `{method}`")
             })?;
-        let TypeExprKind::Function { parameters, result } = &member.ty.value else {
+        let TypeExprKind::Function {
+            parameters, result, ..
+        } = &member.ty.value
+        else {
             bail!("E-ADAPT-006: interface member `{iface_name}.{method}` must be a `fn-type`");
         };
         Ok((parameters.as_slice(), result.as_ref()))
@@ -2271,7 +2298,12 @@ fn substitute_self_type(ty: &TypeExpr, owner: &str) -> TypeExpr {
                 .map(|member| substitute_self_member(member, owner))
                 .collect(),
         ),
-        TypeExprKind::Function { parameters, result } => TypeExprKind::Function {
+        TypeExprKind::Function {
+            parameters,
+            result,
+            effects,
+        } => TypeExprKind::Function {
+            effects: effects.clone(),
             parameters: parameters
                 .iter()
                 .map(|parameter| FunctionTypeParameter {

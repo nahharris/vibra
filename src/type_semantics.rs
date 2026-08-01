@@ -65,6 +65,7 @@ pub(crate) fn substitute(
         TypeRef::FnType {
             parameters,
             return_type,
+            effects,
         } => TypeRef::FnType {
             parameters: parameters
                 .iter()
@@ -75,6 +76,7 @@ pub(crate) fn substitute(
                 })
                 .collect(),
             return_type: Box::new(recurse(return_type)),
+            effects: effects.clone(),
         },
         TypeRef::Instantiated { base, type_args } => TypeRef::Instantiated {
             base: base.clone(),
@@ -224,6 +226,7 @@ fn normalize_type_ref_guarded(
         TypeRef::FnType {
             parameters,
             return_type,
+            effects,
         } => TypeRef::FnType {
             parameters: parameters
                 .iter()
@@ -234,6 +237,7 @@ fn normalize_type_ref_guarded(
                 })
                 .collect(),
             return_type: Box::new(normalize_type_ref_guarded(return_type, aliases, visiting)),
+            effects: effects.clone(),
         },
         TypeRef::Newtype { name, inner } => TypeRef::Newtype {
             name: name.clone(),
@@ -331,10 +335,12 @@ pub(crate) fn unify_types(
             TypeRef::FnType {
                 parameters: left_parameters,
                 return_type: left_return,
+                effects: left_effects,
             },
             TypeRef::FnType {
                 parameters: right_parameters,
                 return_type: right_return,
+                effects: right_effects,
             },
         ) => {
             left_parameters.len() == right_parameters.len()
@@ -347,6 +353,9 @@ pub(crate) fn unify_types(
                             && unify_types(&left.ty, &right.ty, aliases, bindings)
                     })
                 && unify_types(left_return, right_return, aliases, bindings)
+                // Rows compare by equality here. Subsumption is directional and
+                // belongs to the interface/impl check, not to unification.
+                && left_effects == right_effects
         }
         (TypeRef::Named(left), TypeRef::Named(right)) => bare_name(left) == bare_name(right),
         (TypeRef::Enum(left), TypeRef::Enum(right)) => left == right,

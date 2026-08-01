@@ -734,7 +734,11 @@ fn map_type_children(
         TypeExprKind::Union(values) => {
             TypeExprKind::Union(values.into_iter().map(&mut map).collect::<Result<_, _>>()?)
         }
-        TypeExprKind::Function { parameters, result } => TypeExprKind::Function {
+        TypeExprKind::Function {
+            parameters,
+            result,
+            effects,
+        } => TypeExprKind::Function {
             parameters: parameters
                 .into_iter()
                 .map(|mut parameter| {
@@ -743,6 +747,7 @@ fn map_type_children(
                 })
                 .collect::<Result<_, _>>()?,
             result: Box::new(map(*result)?),
+            effects: effects.clone(),
         },
         TypeExprKind::Newtype(value) => TypeExprKind::Newtype(Box::new(map(*value)?)),
         TypeExprKind::Mutable(value) => TypeExprKind::Mutable(Box::new(map(*value)?)),
@@ -2155,7 +2160,9 @@ fn qualify_generated_type_names(
                 definition_symbols,
             );
         }
-        TypeExprKind::Function { parameters, result } => {
+        TypeExprKind::Function {
+            parameters, result, ..
+        } => {
             for parameter in parameters {
                 qualify_generated_type_names(
                     &mut parameter.ty,
@@ -2511,7 +2518,9 @@ fn annotate_generated_type(
             annotate_generated_type(key, definition, call, state)?;
             annotate_generated_type(value, definition, call, state)?;
         }
-        TypeExprKind::Function { parameters, result } => {
+        TypeExprKind::Function {
+            parameters, result, ..
+        } => {
             for parameter in parameters {
                 annotate_generated_type(&mut parameter.ty, definition, call, state)?;
             }
