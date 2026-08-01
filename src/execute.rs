@@ -3524,7 +3524,7 @@ mod text_conversion_tests {
     #[test]
     fn unicode_parse_and_invalid_utf8_match_in_interpreter_and_wasm() {
         let program = lower(
-            r#"    (test.assert-eq-int (text.scalar-len "aé🙂") 3)
+            r#"    (test.assert-eq-int (convert (text.scalar-len "aé🙂") int64 0) 3)
     (let parsed (convert.parse-int64 "-42"))
     (match
   parsed

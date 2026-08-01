@@ -349,6 +349,10 @@ fn rule_summary(code: &str) -> &'static str {
         "E-IMPL-005" => "`=impl` method signature does not match interface declaration",
         "E-IMPL-006" => "`=impl` method alias does not resolve",
         "E-OPTION-001" => "Noncanonical option representation",
+        "E-TY-001" => "Call argument type does not match the parameter type",
+        "E-TY-002" => "Returned value type does not match the declared return type",
+        "E-MATCH-001" => "`match` over an enum is missing an arm for a tag",
+        "E-MATCH-002" => "`match` over an open-ended type requires a `_` arm",
         _ => "Vibra diagnostic",
     }
 }
@@ -486,6 +490,10 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-IMPL-005",
         "E-IMPL-006",
         "E-OPTION-001",
+        "E-MATCH-001",
+        "E-MATCH-002",
+        "E-TY-001",
+        "E-TY-002",
     ];
     KNOWN_CODES
         .iter()

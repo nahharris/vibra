@@ -970,6 +970,8 @@ fn record_tuple_array_and_map_patterns_bind_values() {
     (table (map ("lang" (bind language))))
   )
   (do (io.println word) (io.println language))
+  _
+  (do (io.println "no match"))
 )
   )
 )
@@ -983,6 +985,94 @@ fn record_tuple_array_and_map_patterns_bind_values() {
     let lowered = vibra::lower::lower_program(&prog).unwrap();
     vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
         .expect("composite pattern should bind nested values");
+}
+
+/// A `_` in payload position makes that payload irrefutable, not the arm. Before this
+/// was scoped to top-level patterns, the arm below counted as total and the missing
+/// `signal.stop` case trapped at runtime instead of failing to compile.
+#[test]
+fn nested_wildcard_does_not_satisfy_enum_exhaustiveness() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def signal (enum (go int64) (stop void)))
+(defn classify (s signal) int64 (do (match s (signal.go _) (do (return 1)))))
+(defn main () void (do (let n (classify (signal.go 1)))))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-MATCH-001") && err.contains("stop"),
+        "expected a nested `_` to leave `signal.stop` uncovered, got: {err}"
+    );
+}
+
+/// Enum coverage is keyed by `(enum, tag)`, so a nested pattern cannot mark an outer
+/// tag covered just because the two enums happen to share a tag name.
+#[test]
+fn nested_enum_tag_does_not_cover_same_named_outer_tag() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def inner (enum (yes void) (no void)))
+(def outer (enum (yes inner) (no void)))
+(defn classify (o outer) int64
+  (do (match o (outer.yes (inner.no)) (do (return 1)) (outer.yes (inner.yes)) (do (return 2)))))
+(defn main () void (do (let n (classify (outer.no)))))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-MATCH-001") && err.contains("`no`"),
+        "expected the nested `inner.no` arm not to cover `outer.no`, got: {err}"
+    );
+}
+
+/// A single literal arm is only total when the target is that literal's singleton type.
+/// Over an open type like `int64` every other value is unmatched.
+#[test]
+fn single_literal_arm_does_not_exhaust_open_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(defn classify (n int64) int64 (do (match n 3 (do (return 1)))))
+(defn main () void (do (let r (classify 7))))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-MATCH-002"),
+        "expected a lone literal arm over `int64` to require a `_` arm, got: {err}"
+    );
+}
+
+/// `(bind x)` matches every value, so it satisfies totality exactly as `_` does.
+#[test]
+fn sole_bind_arm_is_total() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(defn echo (s str) str (do (match s (bind captured) (do (return captured)))))
+(defn main () void (do (let out (echo "hi"))))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("a sole `(bind x)` arm should be total");
 }
 
 #[test]
@@ -1237,6 +1327,91 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
         lowered.is_ok(),
         "expected numeric literals to be compatible with explicit numeric primitive types"
     );
+}
+
+/// DRAFT.md: "No implicit numeric widening or narrowing occurs." A literal may take the
+/// parameter's width because it has none of its own, but a *local* carries `int64` and
+/// must be converted explicitly.
+#[test]
+fn int64_local_does_not_narrow_to_int32_parameter() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(defn accepts-int32 (input int32) void (do (let ok true)))
+(defn main () void (do (let wide 7) (accepts-int32 wide)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("type mismatch") && err.contains("Int32"),
+        "expected an `int64` local to need an explicit conversion for an `int32` parameter, got: {err}"
+    );
+}
+
+/// Literal widening is range-checked, so a literal that does not fit is still an error.
+#[test]
+fn out_of_range_int_literal_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(defn accepts-int8 (input int8) void (do (let ok true)))
+(defn main () void (do (accepts-int8 300)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("type mismatch"),
+        "expected 300 to be rejected as an `int8` literal, got: {err}"
+    );
+}
+
+/// Signedness is not a width choice: a `uint64` value never silently becomes `int64`.
+#[test]
+fn uint64_value_does_not_implicitly_become_int64() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(defn produce () uint64 (do (return 7)))
+(defn accepts-int64 (input int64) void (do (let ok true)))
+(defn main () void (do (accepts-int64 (produce))))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("type mismatch"),
+        "expected `uint64` to need an explicit conversion for an `int64` parameter, got: {err}"
+    );
+}
+
+/// An array literal has no element width of its own, so it may still reach a newtype
+/// over a narrower array through an explicit `cast`.
+#[test]
+fn array_literal_casts_into_narrower_element_newtype() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def octets (newtype (array uint8)))
+(defn main () void (do (let raw (cast (array 1 255) octets))))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog)
+        .expect("an integer array literal should reach `(array uint8)` through a cast");
 }
 
 #[test]

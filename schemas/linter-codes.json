@@ -373,6 +373,21 @@
       "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
     },
     {
+      "code": "E-TY-002",
+      "severity": "error",
+      "summary": "Returned value type does not match the declared return type"
+    },
+    {
+      "code": "E-MATCH-001",
+      "severity": "error",
+      "summary": "`match` over an enum is missing an arm for one of its tags; add the arm or a `_` arm"
+    },
+    {
+      "code": "E-MATCH-002",
+      "severity": "error",
+      "summary": "`match` over an open-ended type requires a `_` arm; a single literal arm is only total when the target is that literal's singleton type"
+    },
+    {
       "code": "E-COMMENT-001",
       "severity": "error",
       "summary": "`=comment` annotation must be a string scalar"
@@ -388,9 +403,9 @@
       "summary": "`=comment` and `=lint` must share a mapping with the syntax they describe"
     },
     {
-      "code": "E-CAP-001",
+      "code": "E-TY-001",
       "severity": "error",
-      "summary": "Opaque host handles cannot be constructed or cast"
+      "summary": "Call argument type does not match the parameter type; no implicit numeric widening or narrowing occurs"
     },
     {
       "code": "E-CAP-004",
