@@ -728,6 +728,14 @@ impl<'a> Converter<'a> {
                 AnnotationKind::Doc(text) => {
                     insert_unique(map, "=doc".into(), Value::String(text.clone()))?;
                 }
+                AnnotationKind::Effects(row) => {
+                    let labels = row
+                        .labels
+                        .iter()
+                        .map(|label| self.type_value(label))
+                        .collect::<Result<Vec<_>>>()?;
+                    insert_unique(map, "=effects".into(), Value::Sequence(labels))?;
+                }
                 AnnotationKind::Where(params) => {
                     let mut m = Mapping::new();
                     for param in params {
