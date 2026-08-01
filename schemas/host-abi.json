@@ -3,24 +3,48 @@
   "description": "Versioned Vibra host ABI registry: every host import a `$wasm` body may bind",
   "imports": [
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "stdin_open",
       "params": [],
       "return": "read-handle"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "stdout_open",
       "params": [],
       "return": "write-handle"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "stderr_open",
       "params": [],
       "return": "write-handle"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_read",
       "params": [
@@ -32,6 +56,12 @@
       "return": "result-str"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_read_bytes",
       "params": [
@@ -43,6 +73,12 @@
       "return": "result-bytes"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_read_line",
       "params": [
@@ -54,6 +90,12 @@
       "return": "result-str"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_read_bytes_up_to",
       "params": [
@@ -69,6 +111,12 @@
       "return": "result-bytes"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_write",
       "params": [
@@ -84,6 +132,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_write_bytes",
       "params": [
@@ -99,6 +153,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_write_bytes_some",
       "params": [
@@ -114,6 +174,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_sync",
       "params": [
@@ -125,6 +191,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_close",
       "params": [
@@ -136,6 +208,7 @@
       "return": "result-void"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "path_new",
       "params": [
@@ -147,6 +220,7 @@
       "return": "path"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "path_join",
       "params": [
@@ -162,6 +236,7 @@
       "return": "path"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "path_parent",
       "params": [
@@ -173,6 +248,7 @@
       "return": "option-path"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "path_extension",
       "params": [
@@ -184,6 +260,7 @@
       "return": "option-str"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "path_file_name",
       "params": [
@@ -195,6 +272,7 @@
       "return": "option-str"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "path_components",
       "params": [
@@ -206,6 +284,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "bytes_len",
       "params": [
@@ -217,6 +296,7 @@
       "return": "uint64"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "bytes_slice",
       "params": [
@@ -236,6 +316,7 @@
       "return": "bytes"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "bytes_from_str",
       "params": [
@@ -247,6 +328,7 @@
       "return": "bytes"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "bytes_get",
       "params": [
@@ -262,6 +344,7 @@
       "return": "option-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "bytes_concat",
       "params": [
@@ -277,6 +360,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "bytes_find",
       "params": [
@@ -292,6 +376,7 @@
       "return": "option-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "bytes_from_array",
       "params": [
@@ -303,6 +388,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "bytes_decode_utf8",
       "params": [
@@ -314,6 +400,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_scalar_len",
       "params": [
@@ -325,6 +412,7 @@
       "return": "uint64"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_byte_len",
       "params": [
@@ -336,6 +424,7 @@
       "return": "uint64"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_is_empty",
       "params": [
@@ -347,6 +436,7 @@
       "return": "bool"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_contains",
       "params": [
@@ -362,6 +452,7 @@
       "return": "bool"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_starts_with",
       "params": [
@@ -377,6 +468,7 @@
       "return": "bool"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_ends_with",
       "params": [
@@ -392,6 +484,7 @@
       "return": "bool"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_find",
       "params": [
@@ -407,6 +500,7 @@
       "return": "option-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_scalar_at",
       "params": [
@@ -422,6 +516,7 @@
       "return": "option-str"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_split",
       "params": [
@@ -437,6 +532,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_trim",
       "params": [
@@ -448,6 +544,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_replace",
       "params": [
@@ -467,6 +564,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_join",
       "params": [
@@ -482,6 +580,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_lowercase",
       "params": [
@@ -493,6 +592,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "str_uppercase",
       "params": [
@@ -504,6 +604,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "parse_int64",
       "params": [
@@ -515,6 +616,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "parse_uint64",
       "params": [
@@ -526,6 +628,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "parse_float64",
       "params": [
@@ -537,6 +640,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "parse_bool",
       "params": [
@@ -548,6 +652,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "format_int64",
       "params": [
@@ -559,6 +664,7 @@
       "return": "str"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "format_uint64",
       "params": [
@@ -570,6 +676,7 @@
       "return": "str"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "format_float64",
       "params": [
@@ -581,6 +688,7 @@
       "return": "str"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "format_bool",
       "params": [
@@ -592,6 +700,7 @@
       "return": "str"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "format_atom",
       "params": [
@@ -603,6 +712,7 @@
       "return": "str"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "array_len",
       "params": [
@@ -614,6 +724,7 @@
       "return": "uint64"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "array_get",
       "params": [
@@ -629,6 +740,7 @@
       "return": "option-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "array_set",
       "params": [
@@ -648,6 +760,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "array_slice",
       "params": [
@@ -667,6 +780,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "array_append",
       "params": [
@@ -682,6 +796,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "array_insert",
       "params": [
@@ -701,6 +816,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "array_remove",
       "params": [
@@ -716,6 +832,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "array_contains",
       "params": [
@@ -731,6 +848,7 @@
       "return": "bool"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "map_len",
       "params": [
@@ -742,6 +860,7 @@
       "return": "uint64"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "map_get",
       "params": [
@@ -757,6 +876,7 @@
       "return": "option-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "map_insert",
       "params": [
@@ -776,6 +896,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "map_remove",
       "params": [
@@ -791,6 +912,7 @@
       "return": "option-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "map_contains_key",
       "params": [
@@ -806,6 +928,12 @@
       "return": "bool"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_read",
       "params": [
@@ -817,6 +945,12 @@
       "return": "result-read-handle"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_write",
       "params": [
@@ -828,6 +962,12 @@
       "return": "result-write-handle"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_write_options",
       "params": [
@@ -851,6 +991,12 @@
       "return": "result-write-handle"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_append",
       "params": [
@@ -862,6 +1008,16 @@
       "return": "result-write-handle"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "fs"
+        },
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_read_write",
       "params": [
@@ -873,6 +1029,12 @@
       "return": "result-read-handle"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_read_to_string",
       "params": [
@@ -884,6 +1046,12 @@
       "return": "result-str"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_write_string_all",
       "params": [
@@ -899,6 +1067,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_append_string",
       "params": [
@@ -914,6 +1088,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "metadata",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_exists",
       "params": [
@@ -925,6 +1105,12 @@
       "return": "bool"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_create_dir_all",
       "params": [
@@ -936,6 +1122,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_remove_file",
       "params": [
@@ -947,6 +1139,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_remove_dir",
       "params": [
@@ -958,6 +1156,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_read_dir",
       "params": [
@@ -969,6 +1173,12 @@
       "return": "result-paths"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_read_dir_entries",
       "params": [
@@ -980,6 +1190,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "metadata",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_metadata",
       "params": [
@@ -991,6 +1207,12 @@
       "return": "result-str"
     },
     {
+      "effects": [
+        {
+          "action": "metadata",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_canonicalize",
       "params": [
@@ -1002,6 +1224,12 @@
       "return": "result-path"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_rename",
       "params": [
@@ -1017,6 +1245,16 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "fs"
+        },
+        {
+          "action": "write",
+          "domain": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_copy",
       "params": [
@@ -1032,6 +1270,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "env"
+        }
+      ],
       "module": "vibra_v1",
       "name": "env_get",
       "params": [
@@ -1043,6 +1287,12 @@
       "return": "result-str"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "env"
+        }
+      ],
       "module": "vibra_v1",
       "name": "env_set",
       "params": [
@@ -1058,6 +1308,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "write",
+          "domain": "env"
+        }
+      ],
       "module": "vibra_v1",
       "name": "env_remove",
       "params": [
@@ -1069,12 +1325,19 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "read",
+          "domain": "env"
+        }
+      ],
       "module": "vibra_v1",
       "name": "env_list",
       "params": [],
       "return": "array"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "net_address_parse",
       "params": [
@@ -1086,6 +1349,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "connect",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_resolve",
       "params": [
@@ -1097,6 +1366,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "connect",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_connect",
       "params": [
@@ -1108,6 +1383,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "listen",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_listen",
       "params": [
@@ -1119,6 +1400,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "listen",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_accept",
       "params": [
@@ -1130,6 +1417,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "net_local_address",
       "params": [
@@ -1141,6 +1429,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "net_set_deadline",
       "params": [
@@ -1156,6 +1445,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "send",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_shutdown",
       "params": [
@@ -1171,6 +1466,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "listen",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_udp_bind",
       "params": [
@@ -1182,6 +1483,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "connect",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_udp_connect",
       "params": [
@@ -1197,6 +1504,12 @@
       "return": "result-void"
     },
     {
+      "effects": [
+        {
+          "action": "send",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_udp_send_to",
       "params": [
@@ -1216,6 +1529,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "receive",
+          "domain": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_udp_recv_from",
       "params": [
@@ -1231,6 +1550,16 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "spawn",
+          "domain": "process"
+        },
+        {
+          "action": "wait",
+          "domain": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_run",
       "params": [
@@ -1242,6 +1571,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "spawn",
+          "domain": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_spawn",
       "params": [
@@ -1253,6 +1588,12 @@
       "return": "result-process-handle"
     },
     {
+      "effects": [
+        {
+          "action": "wait",
+          "domain": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_wait",
       "params": [
@@ -1264,6 +1605,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "wait",
+          "domain": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_kill",
       "params": [
@@ -1275,6 +1622,7 @@
       "return": "result-void"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "process_child_stdin",
       "params": [
@@ -1286,6 +1634,7 @@
       "return": "result-write-handle"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "process_child_stdout",
       "params": [
@@ -1297,6 +1646,7 @@
       "return": "result-read-handle"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "process_child_stderr",
       "params": [
@@ -1308,18 +1658,31 @@
       "return": "result-read-handle"
     },
     {
+      "effects": [
+        {
+          "action": "now",
+          "domain": "time"
+        }
+      ],
       "module": "vibra_v1",
       "name": "clock_now_unix_millis",
       "params": [],
       "return": "uint64"
     },
     {
+      "effects": [
+        {
+          "action": "now",
+          "domain": "time"
+        }
+      ],
       "module": "vibra_v1",
       "name": "clock_monotonic_millis",
       "params": [],
       "return": "instant"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "clock_duration_from_millis",
       "params": [
@@ -1331,6 +1694,7 @@
       "return": "duration"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "clock_duration_add",
       "params": [
@@ -1346,6 +1710,7 @@
       "return": "result-any"
     },
     {
+      "effects": [],
       "module": "vibra_v1",
       "name": "clock_duration_between",
       "params": [
@@ -1361,6 +1726,12 @@
       "return": "result-any"
     },
     {
+      "effects": [
+        {
+          "action": "now",
+          "domain": "time"
+        }
+      ],
       "module": "vibra_v1",
       "name": "clock_sleep_millis",
       "params": [
@@ -1372,6 +1743,12 @@
       "return": "void"
     },
     {
+      "effects": [
+        {
+          "action": "generate",
+          "domain": "random"
+        }
+      ],
       "module": "vibra_v1",
       "name": "random_bytes",
       "params": [
@@ -1383,36 +1760,67 @@
       "return": "bytes"
     },
     {
+      "effects": [
+        {
+          "action": "info",
+          "domain": "sys"
+        }
+      ],
       "module": "vibra_v1",
       "name": "system_info",
       "params": [],
       "return": "record"
     },
     {
+      "effects": [
+        {
+          "action": "info",
+          "domain": "sys"
+        }
+      ],
       "module": "vibra_v1",
       "name": "system_args",
       "params": [],
       "return": "array"
     },
     {
+      "effects": [
+        {
+          "action": "info",
+          "domain": "sys"
+        }
+      ],
       "module": "vibra_v1",
       "name": "system_current_dir",
       "params": [],
       "return": "result-str"
     },
     {
+      "effects": [
+        {
+          "action": "info",
+          "domain": "sys"
+        }
+      ],
       "module": "vibra_v1",
       "name": "system_executable",
       "params": [],
       "return": "result-str"
     },
     {
+      "effects": [
+        {
+          "action": "info",
+          "domain": "sys"
+        }
+      ],
       "module": "vibra_v1",
       "name": "system_temp_dir",
       "params": [],
       "return": "str"
     },
     {
+      "effects": [],
       "module": "vibra_test",
       "name": "assert",
       "params": [
@@ -1424,6 +1832,7 @@
       "return": "void"
     },
     {
+      "effects": [],
       "module": "vibra_test",
       "name": "fail",
       "params": [
@@ -1435,6 +1844,7 @@
       "return": "void"
     },
     {
+      "effects": [],
       "module": "vibra_test",
       "name": "assert-eq-bool",
       "params": [
@@ -1450,6 +1860,7 @@
       "return": "void"
     },
     {
+      "effects": [],
       "module": "vibra_test",
       "name": "assert-eq-int",
       "params": [
@@ -1465,6 +1876,7 @@
       "return": "void"
     },
     {
+      "effects": [],
       "module": "vibra_test",
       "name": "assert-eq-float",
       "params": [
@@ -1480,6 +1892,7 @@
       "return": "void"
     },
     {
+      "effects": [],
       "module": "vibra_test",
       "name": "assert-eq-str",
       "params": [
