@@ -592,6 +592,123 @@ const fn entry(
     }
 }
 
+/// One effect, as its structural `(domain, action)` identity.
+pub type Effect = (&'static str, &'static str);
+
+/// The effects each host import performs.
+///
+/// This is the ground truth a `(wasm ...)` body is checked against, so a user module
+/// cannot launder an effect by declaring `effects: ()` on a raw host import. The
+/// registry declares these in good faith: the compiler treats the pairs as opaque
+/// data and holds no opinion about what any particular effect means.
+///
+/// Kept as one table rather than a field on all ~130 `HostImport` rows so the
+/// complete host effect surface is reviewable in a single place. Any import absent
+/// from this table is pure -- which covers the `str`, `bytes`, `array`, `map`,
+/// `path`, `format`, and `parse` algebra, and the `vibra_test` harness intrinsics.
+/// A unit test asserts every key names a real import.
+///
+/// Domains follow stdlib module names rather than host ABI spellings: `@time @now`
+/// rather than `@clock @now`, `@sys @info` rather than `@system @info`.
+///
+/// The split between `fs` and `io` is by *what* is addressed, not by direction:
+/// `fs.*` covers the filesystem namespace (opening, removing, renaming, metadata,
+/// whole-file convenience calls) while `io.*` covers stream reads and writes on an
+/// already-open handle, whichever kind it is.
+const HOST_EFFECTS: &[(&str, &str, &[Effect])] = &[
+    // Filesystem namespace.
+    ("vibra_v1", "fs_open_read", &[("fs", "read")]),
+    ("vibra_v1", "fs_read_to_string", &[("fs", "read")]),
+    ("vibra_v1", "fs_read_dir", &[("fs", "read")]),
+    ("vibra_v1", "fs_read_dir_entries", &[("fs", "read")]),
+    ("vibra_v1", "fs_open_write", &[("fs", "write")]),
+    ("vibra_v1", "fs_open_write_options", &[("fs", "write")]),
+    ("vibra_v1", "fs_open_append", &[("fs", "write")]),
+    ("vibra_v1", "fs_write_string_all", &[("fs", "write")]),
+    ("vibra_v1", "fs_append_string", &[("fs", "write")]),
+    ("vibra_v1", "fs_create_dir_all", &[("fs", "write")]),
+    ("vibra_v1", "fs_remove_file", &[("fs", "write")]),
+    ("vibra_v1", "fs_remove_dir", &[("fs", "write")]),
+    ("vibra_v1", "fs_rename", &[("fs", "write")]),
+    (
+        "vibra_v1",
+        "fs_open_read_write",
+        &[("fs", "read"), ("fs", "write")],
+    ),
+    ("vibra_v1", "fs_copy", &[("fs", "read"), ("fs", "write")]),
+    ("vibra_v1", "fs_metadata", &[("fs", "metadata")]),
+    ("vibra_v1", "fs_exists", &[("fs", "metadata")]),
+    ("vibra_v1", "fs_canonicalize", &[("fs", "metadata")]),
+    // Stream reads and writes on an open handle of any kind.
+    ("vibra_v1", "fd_read", &[("io", "read")]),
+    ("vibra_v1", "fd_read_line", &[("io", "read")]),
+    ("vibra_v1", "fd_read_bytes", &[("io", "read")]),
+    ("vibra_v1", "fd_read_bytes_up_to", &[("io", "read")]),
+    ("vibra_v1", "fd_write", &[("io", "write")]),
+    ("vibra_v1", "fd_write_bytes", &[("io", "write")]),
+    ("vibra_v1", "fd_write_bytes_some", &[("io", "write")]),
+    ("vibra_v1", "fd_sync", &[("io", "write")]),
+    ("vibra_v1", "fd_close", &[("io", "write")]),
+    ("vibra_v1", "stdin_open", &[("io", "read")]),
+    ("vibra_v1", "stdout_open", &[("io", "write")]),
+    ("vibra_v1", "stderr_open", &[("io", "write")]),
+    // Network. `net_address_parse` is pure string work; `net_local_address` and
+    // `net_set_deadline` only inspect or configure a socket already held.
+    ("vibra_v1", "net_connect", &[("net", "connect")]),
+    ("vibra_v1", "net_udp_connect", &[("net", "connect")]),
+    ("vibra_v1", "net_resolve", &[("net", "connect")]),
+    ("vibra_v1", "net_listen", &[("net", "listen")]),
+    ("vibra_v1", "net_accept", &[("net", "listen")]),
+    ("vibra_v1", "net_udp_bind", &[("net", "listen")]),
+    ("vibra_v1", "net_udp_send_to", &[("net", "send")]),
+    ("vibra_v1", "net_shutdown", &[("net", "send")]),
+    ("vibra_v1", "net_udp_recv_from", &[("net", "receive")]),
+    // Processes. `process_run` both creates and awaits. `process_kill` is lifecycle
+    // control over a child that already exists, so it sits with `wait` rather than
+    // `spawn`; the distinction that matters is creating a process versus controlling
+    // one you were already handed. The `process_child_std*` accessors only return
+    // handles, and reads or writes through them are `io.*`.
+    ("vibra_v1", "process_spawn", &[("process", "spawn")]),
+    (
+        "vibra_v1",
+        "process_run",
+        &[("process", "spawn"), ("process", "wait")],
+    ),
+    ("vibra_v1", "process_wait", &[("process", "wait")]),
+    ("vibra_v1", "process_kill", &[("process", "wait")]),
+    // Environment.
+    ("vibra_v1", "env_get", &[("env", "read")]),
+    ("vibra_v1", "env_list", &[("env", "read")]),
+    ("vibra_v1", "env_set", &[("env", "write")]),
+    ("vibra_v1", "env_remove", &[("env", "write")]),
+    // Clock. Duration arithmetic is pure; reading and sleeping are not.
+    ("vibra_v1", "clock_now_unix_millis", &[("time", "now")]),
+    ("vibra_v1", "clock_monotonic_millis", &[("time", "now")]),
+    ("vibra_v1", "clock_sleep_millis", &[("time", "now")]),
+    // Host introspection.
+    ("vibra_v1", "system_info", &[("sys", "info")]),
+    ("vibra_v1", "system_args", &[("sys", "info")]),
+    ("vibra_v1", "system_current_dir", &[("sys", "info")]),
+    ("vibra_v1", "system_executable", &[("sys", "info")]),
+    ("vibra_v1", "system_temp_dir", &[("sys", "info")]),
+    ("vibra_v1", "random_bytes", &[("random", "generate")]),
+];
+
+/// The effects a host import performs, or an empty slice if it is pure.
+pub fn effects_for(module: &str, name: &str) -> &'static [Effect] {
+    HOST_EFFECTS
+        .iter()
+        .find(|(entry_module, entry_name, _)| *entry_module == module && *entry_name == name)
+        .map_or(&[], |(_, _, effects)| *effects)
+}
+
+impl HostImport {
+    /// The effects this import performs, declared by the registry.
+    pub fn effects(&self) -> &'static [Effect] {
+        effects_for(self.module, self.name)
+    }
+}
+
 /// Look up a host import by `(module, name)`.
 pub fn lookup(module: &str, name: &str) -> Option<&'static HostImport> {
     HOST_ABI
@@ -619,11 +736,17 @@ pub fn schema_document() -> serde_json::Value {
                     })
                 })
                 .collect();
+            let effects: Vec<serde_json::Value> = import
+                .effects()
+                .iter()
+                .map(|(domain, action)| serde_json::json!({ "domain": domain, "action": action }))
+                .collect();
             serde_json::json!({
                 "module": import.module,
                 "name": import.name,
                 "params": params,
                 "return": import.result.as_str(),
+                "effects": effects,
             })
         })
         .collect();
@@ -648,6 +771,65 @@ mod tests {
                 "duplicate host ABI entry {}.{}",
                 import.module,
                 import.name
+            );
+        }
+    }
+
+    /// The cost of keeping effects in their own table instead of on every row: a key
+    /// could name an import that does not exist, or two, and nothing would notice.
+    #[test]
+    fn every_effect_table_key_names_exactly_one_real_import() {
+        for (idx, (module, name, effects)) in HOST_EFFECTS.iter().enumerate() {
+            assert!(
+                lookup(module, name).is_some(),
+                "effect table names unknown host import {module}.{name}"
+            );
+            assert!(
+                !effects.is_empty(),
+                "{module}.{name} is listed with no effects; omit it instead, absence means pure"
+            );
+            assert!(
+                !HOST_EFFECTS[..idx]
+                    .iter()
+                    .any(|(other_module, other_name, _)| other_module == module
+                        && other_name == name),
+                "duplicate effect table entry {module}.{name}"
+            );
+        }
+    }
+
+    /// Pins the two halves of the split that is easiest to get wrong: reaching the
+    /// host is an effect, and pure algebra over values already in hand is not.
+    #[test]
+    fn effects_distinguish_host_access_from_pure_algebra() {
+        assert_eq!(
+            lookup("vibra_v1", "fs_open_read").unwrap().effects(),
+            &[("fs", "read")]
+        );
+        assert_eq!(
+            lookup("vibra_v1", "fs_copy").unwrap().effects(),
+            &[("fs", "read"), ("fs", "write")]
+        );
+        for pure in [
+            "path_join",
+            "bytes_len",
+            "array_len",
+            "str_trim",
+            "clock_duration_from_millis",
+            "net_address_parse",
+        ] {
+            assert!(
+                lookup("vibra_v1", pure).unwrap().effects().is_empty(),
+                "{pure} computes over values already in hand and must stay pure"
+            );
+        }
+        for intrinsic in ["assert", "fail"] {
+            assert!(
+                lookup("vibra_test", intrinsic)
+                    .unwrap()
+                    .effects()
+                    .is_empty(),
+                "{intrinsic} is a harness intrinsic with no host authority"
             );
         }
     }
