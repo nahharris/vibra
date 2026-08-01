@@ -297,6 +297,8 @@ impl HostExecution {
             .collect();
         let program = LoweredProgram {
             statements: vec![],
+            // Effects are erased before codegen; the backend never consults them.
+            main_effects: Default::default(),
             main_arg_bindings: plan.main_arg_bindings.clone(),
             constants: HashMap::new(),
             functions,
@@ -1859,6 +1861,7 @@ mod tests {
         LoweredProgram {
             statements: vec![],
             main_arg_bindings: vec![],
+            main_effects: Default::default(),
             constants: HashMap::new(),
             functions: HashMap::new(),
             impls: HashMap::new(),

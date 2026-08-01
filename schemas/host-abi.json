@@ -1607,7 +1607,7 @@
     {
       "effects": [
         {
-          "action": "wait",
+          "action": "kill",
           "domain": "process"
         }
       ],
@@ -1728,7 +1728,7 @@
     {
       "effects": [
         {
-          "action": "now",
+          "action": "sleep",
           "domain": "time"
         }
       ],

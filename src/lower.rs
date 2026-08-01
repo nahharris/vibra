@@ -586,6 +586,10 @@ pub enum ImplMethodBinding {
 #[derive(Debug, Clone)]
 pub struct LoweredProgram {
     pub statements: Vec<Statement>,
+    /// `main`'s declared effect row. `main` is never registered in `functions`
+    /// -- it is skipped during collection and lowered inline -- so its declaration
+    /// has to be carried separately.
+    pub main_effects: EffectRow,
     pub main_arg_bindings: Vec<(String, TypeRef)>,
     pub constants: HashMap<String, RuntimeValue>,
     pub functions: HashMap<String, FunctionSig>,
@@ -2188,10 +2192,12 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     validate_all_where_bounds(&type_aliases, &sigs, &enums)?;
     validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
     validate_wasm_bodies(&sigs, &type_aliases)?;
+    let main_effects = resolve_effect_row(&main_env, "", &type_aliases, "main", &mut warnings)?;
 
     let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
     Ok(LoweredProgram {
         statements,
+        main_effects,
         main_arg_bindings,
         constants,
         functions: sigs,
@@ -2381,6 +2387,7 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
             program: LoweredProgram {
                 statements,
                 main_arg_bindings,
+                main_effects: Default::default(),
                 constants: ctx.constants.clone(),
                 functions: ctx.sigs.clone(),
                 impls: ctx.impls.clone(),
@@ -2451,6 +2458,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         program: LoweredProgram {
             statements,
             main_arg_bindings,
+            main_effects: Default::default(),
             constants,
             functions: sigs,
             impls,
@@ -2642,6 +2650,7 @@ pub fn lower_exec_expr(
         program: LoweredProgram {
             statements: Vec::new(),
             main_arg_bindings: Vec::new(),
+            main_effects: Default::default(),
             constants,
             functions: sigs,
             impls,

@@ -95,6 +95,7 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
     Ok(LoweredProgram {
         statements,
         main_arg_bindings,
+        main_effects: Default::default(),
         constants,
         functions,
         impls,
@@ -180,6 +181,7 @@ fn lower_typed_test_case(
         program: LoweredProgram {
             statements,
             main_arg_bindings,
+            main_effects: Default::default(),
             constants: ctx.constants.clone(),
             functions: ctx.functions.clone(),
             impls: ctx.signatures.impls.clone(),

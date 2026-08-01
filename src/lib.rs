@@ -5,6 +5,7 @@ pub mod async_runtime;
 pub(crate) mod body_semantics;
 pub mod diagnostics;
 pub mod docs;
+pub mod effect_semantics;
 pub mod emit;
 pub mod execute;
 pub mod frontend;

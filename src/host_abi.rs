@@ -663,11 +663,11 @@ const HOST_EFFECTS: &[(&str, &str, &[Effect])] = &[
     ("vibra_v1", "net_udp_send_to", &[("net", "send")]),
     ("vibra_v1", "net_shutdown", &[("net", "send")]),
     ("vibra_v1", "net_udp_recv_from", &[("net", "receive")]),
-    // Processes. `process_run` both creates and awaits. `process_kill` is lifecycle
-    // control over a child that already exists, so it sits with `wait` rather than
-    // `spawn`; the distinction that matters is creating a process versus controlling
-    // one you were already handed. The `process_child_std*` accessors only return
-    // handles, and reads or writes through them are `io.*`.
+    // Processes. `process_run` both creates and awaits. Killing is its own effect
+    // rather than a flavour of waiting: waiting observes a child, killing terminates
+    // it, and a program may legitimately be allowed to do the former without the
+    // latter. The `process_child_std*` accessors only return handles, and reads or
+    // writes through them are `io.*`.
     ("vibra_v1", "process_spawn", &[("process", "spawn")]),
     (
         "vibra_v1",
@@ -675,16 +675,19 @@ const HOST_EFFECTS: &[(&str, &str, &[Effect])] = &[
         &[("process", "spawn"), ("process", "wait")],
     ),
     ("vibra_v1", "process_wait", &[("process", "wait")]),
-    ("vibra_v1", "process_kill", &[("process", "wait")]),
+    ("vibra_v1", "process_kill", &[("process", "kill")]),
     // Environment.
     ("vibra_v1", "env_get", &[("env", "read")]),
     ("vibra_v1", "env_list", &[("env", "read")]),
     ("vibra_v1", "env_set", &[("env", "write")]),
     ("vibra_v1", "env_remove", &[("env", "write")]),
-    // Clock. Duration arithmetic is pure; reading and sleeping are not.
+    // Clock. Duration arithmetic is pure. Reading the clock and sleeping are
+    // distinct effects: sleeping does not observe the time, it yields wall-clock
+    // duration, which is separately reviewable (a program may legitimately read the
+    // clock without being allowed to block).
     ("vibra_v1", "clock_now_unix_millis", &[("time", "now")]),
     ("vibra_v1", "clock_monotonic_millis", &[("time", "now")]),
-    ("vibra_v1", "clock_sleep_millis", &[("time", "now")]),
+    ("vibra_v1", "clock_sleep_millis", &[("time", "sleep")]),
     // Host introspection.
     ("vibra_v1", "system_info", &[("sys", "info")]),
     ("vibra_v1", "system_args", &[("sys", "info")]),
