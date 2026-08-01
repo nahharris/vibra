@@ -1,5 +1,6 @@
 (import io "../stdlib/src/io.vibra")
 (import result "../stdlib/src/result.vibra")
+(import effects "../stdlib/src/effects.vibra")
 (defn
   main
   ()
@@ -13,4 +14,5 @@
     (result.result.err (bind err))
     (do (io.eprintln "failed to read stdin"))
   )
+  effects: (effects.io-write effects.io-read)
 )

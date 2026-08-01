@@ -1,2 +1,3 @@
 (import io "../stdlib/src/io.vibra")
-(defn main () void (io.println "Hello, World!"))
+(import effects "../stdlib/src/effects.vibra")
+(defn main () void (io.println "Hello, World!") effects: (effects.io-write))

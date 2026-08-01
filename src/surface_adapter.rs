@@ -32,8 +32,8 @@
 #![allow(dead_code)]
 
 use crate::ast::{
-    Annotation, AnnotationKind, Constant, Definition, EmbedFormat as AstEmbedFormat, ExpectedError,
-    Expr as AstExpr, ExprField, ExprKind, Function, FunctionTypeParameter,
+    Annotation, AnnotationKind, Constant, Definition, EffectRow, EmbedFormat as AstEmbedFormat,
+    ExpectedError, Expr as AstExpr, ExprField, ExprKind, Function, FunctionTypeParameter,
     HandleAccess as AstHandleAccess, ImplItem, Import, Literal, MatchCase, MethodBinding, Module,
     Pattern as AstPattern, PatternKind, Spanned, Test, TestMeta, TopLevel, TypeExpr, TypeExprKind,
     TypeMember, Visibility, WasmArgument, WasmImport,
@@ -168,6 +168,22 @@ fn insert_call_signature(
             arg_names,
         },
     );
+}
+
+/// The `effects:` row on an inline impl method, if it declares one.
+///
+/// An inline `(method m (fn ... effects: (...)))` is split by the adapter into a
+/// hoisted helper carrying the real body and a forwarding shim bound into the impl.
+/// The helper inherits the annotation through `function_envelope`, but the shim's
+/// envelope is built by hand, so without copying the row across it would declare
+/// nothing while calling straight into an effectful helper.
+fn effects_annotation<'a>(annotations: &'a [Annotation]) -> Option<&'a EffectRow> {
+    annotations
+        .iter()
+        .find_map(|annotation| match &annotation.value {
+            AnnotationKind::Effects(row) => Some(row),
+            _ => None,
+        })
 }
 
 fn where_param_names(annotations: &[Annotation]) -> Vec<String> {
@@ -1027,6 +1043,18 @@ impl<'a> Converter<'a> {
             Value::Sequence(vec![single_dollar("return", call)])
         };
         fn_map.insert(Value::String("do".into()), do_body);
+        // The shim forwards into the target, so it performs whatever the target
+        // declares. Copy the row across rather than leaving the shim looking pure.
+        if let MethodBinding::Function(inline) = binding {
+            if let Some(row) = effects_annotation(&inline.annotations) {
+                let labels = row
+                    .labels
+                    .iter()
+                    .map(|label| self.type_value(label))
+                    .collect::<Result<Vec<_>>>()?;
+                fn_map.insert(Value::String("=effects".into()), Value::Sequence(labels));
+            }
+        }
         Ok(Value::Mapping(fn_map))
     }
 

@@ -1921,6 +1921,42 @@ fn join_module_prefix(parent: &str, child: &str) -> String {
 /// `$fs.read-file` inside module `io` resolve to `io.fs.read-file` (and `a.io.fs.read-file`
 /// when `io` is mounted under `a`). If the prefix misses, accept `name` when it is already
 /// a registered key (fully-qualified reference). Otherwise keep `name` unqualified.
+/// Check every function body against its declared effect row.
+///
+/// `main` is handled alongside the registered functions because it is never in
+/// `sigs` -- it is skipped during collection and lowered inline.
+///
+/// Reporting is sorted and stops at the first offender so the diagnostic is
+/// deterministic rather than dependent on hash order.
+fn validate_declared_effects(
+    sigs: &HashMap<String, FunctionSig>,
+    main_statements: &[Statement],
+    main_effects: &EffectRow,
+) -> Result<()> {
+    let mut owners: Vec<&String> = sigs.keys().collect();
+    owners.sort();
+    for owner in owners {
+        let sig = &sigs[owner];
+        let performed = crate::effect_semantics::infer_function(sig, sigs);
+        if let Some(witness) = performed.undeclared(&sig.effects).first() {
+            bail!(crate::effect_semantics::undeclared_effect_message(
+                owner,
+                &sig.effects,
+                witness
+            ));
+        }
+    }
+    let performed = crate::effect_semantics::infer_statements(main_statements, sigs);
+    if let Some(witness) = performed.undeclared(main_effects).first() {
+        bail!(crate::effect_semantics::undeclared_effect_message(
+            "main",
+            main_effects,
+            witness
+        ));
+    }
+    Ok(())
+}
+
 /// Resolve a declaration's `=effects` labels to their structural identities.
 ///
 /// Each label is either an inline `(effect @d @a)` -- which needs no resolution at
@@ -2193,6 +2229,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
     validate_wasm_bodies(&sigs, &type_aliases)?;
     let main_effects = resolve_effect_row(&main_env, "", &type_aliases, "main", &mut warnings)?;
+    validate_declared_effects(&sigs, &statements, &main_effects)?;
 
     let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
     Ok(LoweredProgram {
@@ -3323,10 +3360,43 @@ pub(crate) fn validate_wasm_bodies(
     sigs: &HashMap<String, FunctionSig>,
     type_aliases: &HashMap<String, TypeAlias>,
 ) -> Result<()> {
-    for (key, sig) in sigs {
+    let mut keys: Vec<&String> = sigs.keys().collect();
+    keys.sort();
+    for key in keys {
+        let sig = &sigs[key];
         let FunctionBody::Wasm { import, wasm_args } = &sig.body else {
             continue;
         };
+        // A host import's effects are the registry's, not whatever the wrapper felt
+        // like claiming. Equality rather than inclusion: under-declaring would launder
+        // the effect away, and over-declaring would misreport the host surface.
+        if !import.module.starts_with('@') {
+            let registry: BTreeSet<(String, String)> =
+                crate::host_abi::effects_for(&import.module, &import.name)
+                    .iter()
+                    .map(|(domain, action)| ((*domain).to_string(), (*action).to_string()))
+                    .collect();
+            if registry != sig.effects.labels {
+                let render = |labels: &BTreeSet<(String, String)>| {
+                    if labels.is_empty() {
+                        "no effects".to_string()
+                    } else {
+                        labels
+                            .iter()
+                            .map(effect_label_display)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    }
+                };
+                bail!(
+                    "E-EFFECT-005: `{key}` binds host import `{}.{}`, which performs {}, but declares {}; a host-import body must declare exactly the registry's effects",
+                    import.module,
+                    import.name,
+                    render(&registry),
+                    render(&sig.effects.labels),
+                );
+            }
+        }
         if import.module.starts_with('@') {
             if wasm_args.len() != sig.parameters.len() {
                 bail!(
