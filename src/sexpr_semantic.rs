@@ -262,6 +262,13 @@ fn visit_annotations(
     for annotation in annotations {
         match &annotation.value {
             AnnotationKind::Doc(_) => {}
+            // Indexing the labels as types is what makes go-to-definition and
+            // find-references work on an effect name inside `effects:`.
+            AnnotationKind::Effects(row) => {
+                for label in &row.labels {
+                    visit_type(label, context, facts);
+                }
+            }
             AnnotationKind::Where(parameters) => {
                 for parameter in parameters {
                     for bound in &parameter.bounds {

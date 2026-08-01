@@ -478,6 +478,10 @@ fn annotations<'a>(
                     .collect::<Result<_>>()?;
             }
             AnnotationKind::Definitions(functions) => result.definitions.extend(functions),
+            // The staged typed path has no live caller and does not yet carry effect
+            // rows on its signatures; the legacy lowering in `src/lower.rs` owns the
+            // effect contract.
+            AnnotationKind::Effects(_) => {}
             implementation @ AnnotationKind::Implementation { .. } => {
                 result.implementations.push(implementation)
             }

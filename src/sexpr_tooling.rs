@@ -258,6 +258,11 @@ fn lint_annotations(
     for annotation in annotations {
         match &annotation.value {
             AnnotationKind::Doc(_) => {}
+            AnnotationKind::Effects(row) => {
+                for label in &row.labels {
+                    lint_type(path, source, label, diagnostics);
+                }
+            }
             AnnotationKind::Where(parameters) => {
                 for parameter in parameters {
                     lint_name(path, source, &parameter.name, "type parameter", diagnostics);

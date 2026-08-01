@@ -568,6 +568,9 @@ pub(crate) fn eval_expr(
                     statements: Vec::new(),
                 },
                 doc: None,
+                // Synthetic signature for host dispatch; effects are a static
+                // property and never consulted at runtime.
+                effects: Default::default(),
             };
             match entry.module {
                 "vibra_v1" => exec_vibra_v1(entry.name, &signature, &values, files, config),

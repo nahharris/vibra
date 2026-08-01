@@ -373,6 +373,16 @@
       "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
     },
     {
+      "code": "E-EFFECT-002",
+      "severity": "error",
+      "summary": "A name in `effects:` does not resolve to an effect declared with `(def <name> (effect @domain @action))`"
+    },
+    {
+      "code": "E-EFFECT-006",
+      "severity": "error",
+      "summary": "`effects:` declares what a function body may perform and has no meaning on `def`, `const`, or `macro`"
+    },
+    {
       "code": "E-EFFECT-004",
       "severity": "error",
       "summary": "Malformed effect: `(effect ...)` takes exactly a domain and an action atom"

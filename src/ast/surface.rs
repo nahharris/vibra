@@ -661,10 +661,56 @@ pub enum AnnotationKind {
     Doc(String),
     Where(Vec<TypeParameter>),
     Definitions(Vec<Function>),
+    Effects(EffectRow),
     Implementation {
         interface: TypeExpr,
         items: Vec<ImplItem>,
     },
+}
+
+/// The complete set of effects a function's body may perform.
+///
+/// Each label is an ordinary [`TypeExpr`]: either a name bound to an effect
+/// (`fs.read`) or an inline `(effect @fs @read)` construction. Representing them as
+/// type expressions rather than a bespoke node means alias validation, macro
+/// qualification, the semantic index, and the legacy adapter all handle them with
+/// the machinery they already have for types.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectRow {
+    pub labels: Vec<TypeExpr>,
+    /// Reserved for effect polymorphism. Always `None`: first-class functions are
+    /// still rejected (`E-FN-001`), so nothing can propagate a callee's effects yet,
+    /// and no surface spelling for a tail has been allocated. The field exists now
+    /// because retrofitting the row shape once higher-order functions land is the
+    /// single hardest change in the effect design.
+    pub tail: Option<Name>,
+    pub span: Span,
+}
+
+/// Which declaration form an annotation list belongs to. Only functions accept
+/// `effects:`, and `parse_annotations` is shared by five callers, so the owner has
+/// to be threaded in to reject it at the surface -- the only layer with spans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnnotationOwner {
+    Definition,
+    Constant,
+    Function,
+    Macro,
+}
+
+impl AnnotationOwner {
+    fn allows_effects(self) -> bool {
+        matches!(self, Self::Function)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Definition => "def",
+            Self::Constant => "const",
+            Self::Function => "defn",
+            Self::Macro => "macro",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -831,7 +877,7 @@ fn parse_definition<'a>(
         visibility,
         name: name(args[0])?,
         body: parse_type(args[1])?,
-        annotations: parse_annotations(&annotations)?,
+        annotations: parse_annotations(&annotations, AnnotationOwner::Definition)?,
         span: node.span,
         origin: source_origin(node.span),
     })
@@ -855,7 +901,7 @@ fn parse_constant<'a>(
         name: name(args[0])?,
         ty: parse_type(args[1])?,
         value: parse_expr(args[2])?,
-        annotations: parse_annotations(&annotations)?,
+        annotations: parse_annotations(&annotations, AnnotationOwner::Constant)?,
         span: node.span,
         origin: source_origin(node.span),
     })
@@ -894,7 +940,7 @@ fn parse_function<'a>(
         parameters: parse_parameters(args[1])?,
         return_type: parse_type(args[2])?,
         body: parse_owned_body(&args[3..attribute_start])?,
-        annotations: parse_annotations(&annotation_attributes)?,
+        annotations: parse_annotations(&annotation_attributes, AnnotationOwner::Function)?,
         span: node.span,
         origin: source_origin(node.span),
     })
@@ -932,6 +978,7 @@ fn parse_macro<'a>(
                     label(attribute.label).is_ok_and(|name| name.value != "visibility")
                 })
                 .collect::<Vec<_>>(),
+            AnnotationOwner::Macro,
         )?,
         span: node.span,
         origin: source_origin(node.span),
@@ -1905,11 +1952,28 @@ fn required_capture_attribute(
     })
 }
 
-fn parse_annotations(attributes: &[AttributeRef<'_>]) -> Result<Vec<Annotation>, AstError> {
+fn parse_annotations(
+    attributes: &[AttributeRef<'_>],
+    owner: AnnotationOwner,
+) -> Result<Vec<Annotation>, AstError> {
     let mut annotations = Vec::new();
     for attribute in attributes {
         let label = label(attribute.label)?;
         match label.value.as_str() {
+            "effects" if !owner.allows_effects() => {
+                return Err(AstError::new(
+                    "E-EFFECT-006",
+                    format!(
+                        "`effects:` declares what a function body may perform and has no meaning on `{}`",
+                        owner.label()
+                    ),
+                    label.span,
+                ));
+            }
+            "effects" => annotations.push(Spanned::source(
+                AnnotationKind::Effects(parse_effects_value(attribute.value)?),
+                attribute.span,
+            )),
             "doc" => annotations.push(Spanned::source(
                 AnnotationKind::Doc(string(attribute.value)?.value),
                 attribute.span,
@@ -1940,6 +2004,32 @@ fn parse_annotations(attributes: &[AttributeRef<'_>]) -> Result<Vec<Annotation>,
         }
     }
     Ok(annotations)
+}
+
+/// `effects: (fs.read (effect @fs @write))` -- a flat list whose elements are each
+/// either a name bound to an effect or an inline construction. An empty list is
+/// legal and means the same as omitting the attribute.
+fn parse_effects_value(node: &Node) -> Result<EffectRow, AstError> {
+    let labels = semantic_nodes(list(node)?)
+        .map(parse_type)
+        .collect::<Result<Vec<_>, _>>()?;
+    for label in &labels {
+        if !matches!(
+            label.value,
+            TypeExprKind::Named(_) | TypeExprKind::Effect { .. }
+        ) {
+            return Err(AstError::new(
+                "E-EFFECT-004",
+                "each `effects:` element must be an effect name or an inline `(effect @domain @action)`",
+                label.span,
+            ));
+        }
+    }
+    Ok(EffectRow {
+        labels,
+        tail: None,
+        span: node.span,
+    })
 }
 
 fn parse_where_value(node: &Node) -> Result<Vec<TypeParameter>, AstError> {
@@ -2042,7 +2132,7 @@ fn parse_method(node: &Node) -> Result<ImplItem, AstError> {
             parameters: parse_parameters(fn_args[0])?,
             return_type: parse_type(fn_args[1])?,
             body: parse_owned_body(&fn_args[2..attribute_start])?,
-            annotations: parse_annotations(&attributes)?,
+            annotations: parse_annotations(&attributes, AnnotationOwner::Function)?,
             span: args[1].span,
             origin: source_origin(args[1].span),
         })

@@ -17,7 +17,7 @@ use crate::type_semantics::{
 };
 use anyhow::{bail, Context, Result};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -343,6 +343,40 @@ pub struct FunctionSig {
     pub body: FunctionBody,
     /// Compile-time documentation string from the symbol's `=doc` annotation.
     pub doc: Option<String>,
+    /// The complete set of effects this function's body may perform, from its
+    /// `effects:` attribute. An absent attribute means pure. This is a *ceiling*:
+    /// the body may perform fewer effects, never more.
+    pub effects: EffectRow,
+}
+
+/// A declared effect set.
+///
+/// Labels are stored as their structural `(domain, action)` identity rather than as
+/// the names they were spelled with, so two modules naming the same effect
+/// differently still produce the same row. The `BTreeSet` gives deduplication and a
+/// deterministic order for free.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EffectRow {
+    pub labels: BTreeSet<(String, String)>,
+    /// Reserved for effect polymorphism; always `None`. See the surface
+    /// `EffectRow::tail` for why it exists before it can be written.
+    pub tail: Option<String>,
+}
+
+impl EffectRow {
+    pub fn is_empty(&self) -> bool {
+        self.labels.is_empty()
+    }
+
+    /// Labels in `self` that `other` does not declare.
+    pub fn difference(&self, other: &EffectRow) -> Vec<(String, String)> {
+        self.labels.difference(&other.labels).cloned().collect()
+    }
+}
+
+/// Render a `(domain, action)` pair the way source spells it, for diagnostics.
+pub fn effect_label_display(label: &(String, String)) -> String {
+    format!("(effect @{} @{})", label.0, label.1)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -630,6 +664,9 @@ struct DefEnvelope<'a> {
     /// known (so a bound can reference an iface declared later in the file).
     type_param_bound_values: Vec<Vec<&'a Value>>,
     doc: Option<String>,
+    /// `=effects` annotation: the raw label list. Resolved to an `EffectRow` once
+    /// all type aliases are known, so a label may name an effect declared later.
+    effect_values: Option<&'a Vec<Value>>,
     /// `=defs` annotation: a mapping of name -> function-definition envelope
     /// for inherent operations on the enclosing type.
     defs: Option<&'a Mapping>,
@@ -659,7 +696,7 @@ const INHERENT_FN_PRIMARY_ARG: &str = "self";
 /// Annotation keys we currently understand. Anything else with a `=` prefix
 /// is rejected with `E-ANNO-001`. Any sibling key that does not start with
 /// `$` or `=` is rejected with `E-ANNO-002` (legacy un-prefixed annotation).
-const KNOWN_ANNOTATIONS: &[&str] = &["=where", "=doc", "=defs", "=impl"];
+const KNOWN_ANNOTATIONS: &[&str] = &["=where", "=doc", "=defs", "=impl", "=effects"];
 
 fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<DefEnvelope<'a>> {
     let m = v.as_mapping().context("definition must be a mapping")?;
@@ -669,6 +706,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut type_params: Vec<String> = Vec::new();
     let mut type_param_bound_values: Vec<Vec<&'a Value>> = Vec::new();
     let mut doc: Option<String> = None;
+    let mut effect_values: Option<&Vec<Value>> = None;
     let mut defs: Option<&'a Mapping> = None;
     let mut impls: Option<&'a Mapping> = None;
     let mut function_args: Option<&'a Value> = None;
@@ -731,6 +769,11 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 type_params.push(name.to_string());
                 type_param_bound_values.push(entry_values);
             }
+        } else if ks == "=effects" {
+            let labels = val.as_sequence().context(
+                "E-EFFECT-004: `=effects` annotation must be a sequence of effect labels",
+            )?;
+            effect_values = Some(labels);
         } else if ks == "=doc" {
             let s = val.as_str().with_context(|| {
                 format!("E-DOC-001: `=doc` annotation must be a string scalar (got non-string for `{ks}`)")
@@ -900,6 +943,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         type_params,
         type_param_bound_values,
         doc,
+        effect_values,
         defs,
         impls,
         function_args,
@@ -1873,6 +1917,49 @@ fn join_module_prefix(parent: &str, child: &str) -> String {
 /// `$fs.read-file` inside module `io` resolve to `io.fs.read-file` (and `a.io.fs.read-file`
 /// when `io` is mounted under `a`). If the prefix misses, accept `name` when it is already
 /// a registered key (fully-qualified reference). Otherwise keep `name` unqualified.
+/// Resolve a declaration's `=effects` labels to their structural identities.
+///
+/// Each label is either an inline `(effect @d @a)` -- which needs no resolution at
+/// all, and so works without importing the module that names it -- or a name, which
+/// goes through the same `qualify_type_name_key` path as any other type reference
+/// and must land on an effect rather than an ordinary type.
+fn resolve_effect_row(
+    env: &DefEnvelope<'_>,
+    alias: &str,
+    type_aliases: &HashMap<String, TypeAlias>,
+    owner: &str,
+    warnings: &mut Vec<String>,
+) -> Result<EffectRow> {
+    let mut labels = BTreeSet::new();
+    let empty_skeletons: HashMap<String, AliasSkeleton> = HashMap::new();
+    for value in env.effect_values.into_iter().flatten() {
+        let ty = parse_type_ref(value, &[], &empty_skeletons, warnings, false)
+            .context("E-EFFECT-004: invalid `effects:` label")?;
+        let resolved = match ty {
+            TypeRef::Effect { domain, action } => (domain, action),
+            TypeRef::Named(name) => {
+                let key = qualify_type_name_key(alias, name.clone(), type_aliases);
+                match type_aliases.get(&key).map(|alias| &alias.body) {
+                    Some(TypeRef::Effect { domain, action }) => {
+                        (domain.clone(), action.clone())
+                    }
+                    Some(_) => bail!(
+                        "E-EFFECT-002: `{owner}` declares effect `{name}`, but `{key}` is a type, not an effect"
+                    ),
+                    None => bail!(
+                        "E-EFFECT-002: `{owner}` declares unknown effect `{name}`; no `(def {name} (effect @domain @action))` is visible"
+                    ),
+                }
+            }
+            other => bail!(
+                "E-EFFECT-002: `{owner}` declares `{other:?}` as an effect; expected an effect name or an inline `(effect @domain @action)`"
+            ),
+        };
+        labels.insert(resolved);
+    }
+    Ok(EffectRow { labels, tail: None })
+}
+
 fn qualify_type_name_key(
     alias: &str,
     name: String,
@@ -3142,6 +3229,7 @@ fn try_register_function(
     };
     let raw_bounds = resolve_def_envelope_bounds(&env, skeletons, warnings)?;
     let resolved_bounds = qualify_bounds(alias, raw_bounds, type_aliases);
+    let declared_effects = resolve_effect_row(&env, alias, type_aliases, &sig_key, warnings)?;
     if sigs.contains_key(&sig_key) {
         bail!("duplicate function `{sig_key}`");
     }
@@ -3156,6 +3244,7 @@ fn try_register_function(
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
+            effects: declared_effects,
         },
     );
     if !is_wasm_only {
@@ -3552,6 +3641,8 @@ fn register_one_inherent_function(
         .unwrap_or_default();
     let mut full_bounds = enclosing_bounds;
     full_bounds.extend(local_bounds);
+    let declared_effects =
+        resolve_effect_row(&env, module_alias, type_aliases, &sig_key, warnings)?;
     sigs.insert(
         sig_key.clone(),
         FunctionSig {
@@ -3563,6 +3654,7 @@ fn register_one_inherent_function(
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
+            effects: declared_effects,
         },
     );
     if !is_wasm_only {
@@ -4015,6 +4107,8 @@ fn bind_impl_method(
     let raw_method_bounds = resolve_def_envelope_bounds(&env, skeletons, warnings)?;
     let method_bounds = qualify_bounds(module_alias, raw_method_bounds, type_aliases);
     sig_bounds.extend(method_bounds);
+    let declared_effects =
+        resolve_effect_row(&env, module_alias, type_aliases, &sig_key, warnings)?;
 
     sigs.insert(
         sig_key.clone(),
@@ -4027,6 +4121,7 @@ fn bind_impl_method(
             return_type,
             body: body_kind,
             doc: env.doc.clone(),
+            effects: declared_effects,
         },
     );
     if !is_wasm_only {

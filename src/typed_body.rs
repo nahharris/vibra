@@ -156,7 +156,9 @@ pub fn lower_typed_bodies<'a>(
                                     )?;
                                 }
                             }
-                            AnnotationKind::Doc(_) | AnnotationKind::Where(_) => {}
+                            AnnotationKind::Doc(_)
+                            | AnnotationKind::Where(_)
+                            | AnnotationKind::Effects(_) => {}
                         }
                     }
                 }
@@ -1354,6 +1356,8 @@ fn materialize(signature: &TypedFunctionSignature, body: FunctionBody) -> Functi
         return_type: signature.return_type.clone(),
         body,
         doc: signature.doc.clone(),
+        // The staged typed path does not carry effect rows; see `typed_lower`.
+        effects: Default::default(),
     }
 }
 

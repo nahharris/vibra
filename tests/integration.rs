@@ -1329,6 +1329,180 @@ fn numeric_literals_are_compatible_with_explicit_numeric_types() {
     );
 }
 
+/// `effects:` accepts a bound name or an inline construction, and an absent attribute
+/// means pure.
+#[test]
+fn effects_attribute_accepts_named_and_inline_labels() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def read (effect @fs @read))
+(defn named () void (do (let ok true)) effects: (read))
+(defn inline () void (do (let ok true)) effects: ((effect @net @connect) read))
+(defn pure-fn () void (do (let ok true)))
+(defn main () void (do (named) (inline) (pure-fn)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).expect("effects: should lower");
+
+    let named = &lowered.functions["named"].effects;
+    assert_eq!(
+        named.labels,
+        [("fs".to_string(), "read".to_string())]
+            .into_iter()
+            .collect()
+    );
+    let inline = &lowered.functions["inline"].effects;
+    assert_eq!(inline.labels.len(), 2);
+    assert!(lowered.functions["pure-fn"].effects.is_empty());
+}
+
+/// The guarantee the whole design rests on: identity is the atom pair, not the name.
+/// Two modules that independently declare the same pair, under different names,
+/// produce the same row.
+#[test]
+fn the_same_atom_pair_in_two_modules_is_the_same_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first.vibra");
+    let second = dir.path().join("second.vibra");
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(&first, "(def read (effect @fs @read))\n").unwrap();
+    std::fs::write(&second, "(def fetch (effect @fs @read))\n").unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"(import a "{a}")
+(import b "{b}")
+(defn via-first () void (do (let ok true)) effects: (a.read))
+(defn via-second () void (do (let ok true)) effects: (b.fetch))
+(defn via-inline () void (do (let ok true)) effects: ((effect @fs @read)))
+(defn main () void (do (via-first) (via-second) (via-inline)))
+"#,
+            a = first.display().to_string().replace('\\', "/"),
+            b = second.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let first_row = &lowered.functions["via-first"].effects;
+    assert_eq!(first_row, &lowered.functions["via-second"].effects);
+    assert_eq!(first_row, &lowered.functions["via-inline"].effects);
+}
+
+/// An inline construction resolves nothing, so it works without importing the module
+/// that happens to name the same effect.
+#[test]
+fn inline_effect_needs_no_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(defn touches-fs () void (do (let ok true)) effects: ((effect @fs @read)))
+(defn main () void (do (touches-fs)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog).expect("an inline effect should need no import");
+}
+
+#[test]
+fn effects_is_rejected_on_non_function_declarations() {
+    for (owner, source) in [
+        ("def", "(def thing (newtype str) effects: ())\n"),
+        ("const", "(const limit int64 7 effects: ())\n"),
+        (
+            "macro",
+            "(macro twice (a @expr-syntax) @expr-syntax (do a) effects: ())\n",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(
+            &entry,
+            format!("{source}(defn main () void (do (let ok true)))\n"),
+        )
+        .unwrap();
+
+        let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+        assert!(
+            err.contains("E-EFFECT-006") && err.contains(owner),
+            "expected `effects:` to be rejected on `{owner}`, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn unknown_or_non_effect_names_are_rejected() {
+    for (label, extra) in [("missing", ""), ("thing", "(def thing (newtype str))\n")] {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vibra");
+        std::fs::write(
+            &entry,
+            format!(
+                r#"{extra}(defn f () void (do (let ok true)) effects: ({label}))
+(defn main () void (do (f)))
+"#
+            ),
+        )
+        .unwrap();
+
+        let prog = vibra::load::load_program(&entry).unwrap();
+        let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+        assert!(
+            err.contains("E-EFFECT-002"),
+            "expected `{label}` to be rejected as an effect, got: {err}"
+        );
+    }
+}
+
+/// A named label is a cross-module reference like any other. Without visiting
+/// annotations in `validate_top_level_aliases`, an `effects:` reference would slip
+/// past the undeclared-alias rule that every other type reference obeys.
+#[test]
+fn named_effect_reference_obeys_the_declared_alias_rule() {
+    let dir = tempfile::tempdir().unwrap();
+    let inner = dir.path().join("inner.vibra");
+    let middle = dir.path().join("middle.vibra");
+    let entry = dir.path().join("entry.vibra");
+
+    std::fs::write(&inner, "(def read (effect @fs @read))\n").unwrap();
+    std::fs::write(
+        &middle,
+        format!(
+            "(import inner \"{inner}\")\n(defn noop () void (do (let ok true)))\n",
+            inner = inner.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+    // `inner` is a known alias in the program, but `entry` never imported it.
+    std::fs::write(
+        &entry,
+        format!(
+            r#"(import middle "{middle}")
+(defn f () void (do (middle.noop)) effects: (inner.read))
+(defn main () void (do (f)))
+"#,
+            middle = middle.display().to_string().replace('\\', "/"),
+        ),
+    )
+    .unwrap();
+
+    let err = format!("{:#}", vibra::load::load_program(&entry).unwrap_err());
+    assert!(
+        err.contains("E-MOD-004"),
+        "expected an indirectly-imported alias in `effects:` to be rejected, got: {err}"
+    );
+}
+
 /// An effect binds like any other type-form definition.
 #[test]
 fn effect_declaration_lowers() {

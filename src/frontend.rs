@@ -369,7 +369,8 @@ fn expand_annotations(
                     }
                 }
             }
-            AnnotationKind::Doc(_) | AnnotationKind::Where(_) => {}
+            // Effect labels are type expressions with no embeddable body.
+            AnnotationKind::Doc(_) | AnnotationKind::Where(_) | AnnotationKind::Effects(_) => {}
         }
     }
     Ok(())
@@ -1278,6 +1279,16 @@ fn validate_top_level_aliases(
                 visit_type(&parameter.ty, &mut validate_name)?;
             }
             visit_type(&function.return_type, &mut validate_name)?;
+            // A named `effects:` label is an ordinary cross-module reference and must
+            // obey the same direct-import rule (`E-MOD-004`) as any other type name.
+            // Inline `(effect @d @a)` labels name no alias and pass through.
+            for annotation in &function.annotations {
+                if let AnnotationKind::Effects(row) = &annotation.value {
+                    for label in &row.labels {
+                        visit_type(label, &mut validate_name)?;
+                    }
+                }
+            }
             for expr in &function.body {
                 visit_expr_aliases(expr, &mut validate_name)?;
             }
