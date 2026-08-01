@@ -53,6 +53,17 @@ impl Word {
         }
     }
 
+    pub const fn bool(value: bool) -> Self {
+        Self {
+            tag: Tag::Bool,
+            payload: value as u32,
+        }
+    }
+
+    pub fn char(value: char) -> Result<Self, ValueError> {
+        Self::try_new(Tag::Char, value as u32)
+    }
+
     pub const fn poison() -> Self {
         Self {
             tag: Tag::Poison,
