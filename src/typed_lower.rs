@@ -554,7 +554,11 @@ pub(crate) fn lower_type(
                 .map(|method| Ok((method.name.value.clone(), lower(&method.ty)?)))
                 .collect::<Result<_>>()?,
         ),
-        TypeExprKind::Function { parameters, result } => TypeRef::FnType {
+        TypeExprKind::Function {
+            parameters,
+            result,
+            effects,
+        } => TypeRef::FnType {
             parameters: parameters
                 .iter()
                 .map(|parameter| {
@@ -566,6 +570,16 @@ pub(crate) fn lower_type(
                 })
                 .collect::<Result<_>>()?,
             return_type: Box::new(lower(result)?),
+            effects: effects
+                .labels
+                .iter()
+                .map(|label| match lower(label)? {
+                    TypeRef::Effect { domain, action } => Ok((domain, action)),
+                    other => {
+                        bail!("E-EFFECT-002: `fn-type` effects entry is not an effect: {other:?}")
+                    }
+                })
+                .collect::<Result<_>>()?,
         },
         TypeExprKind::Newtype(inner) => TypeRef::Newtype {
             name: String::new(),
@@ -809,6 +823,7 @@ fn validate_index(index: &TypedSignatureIndex) -> Result<()> {
             let TypeRef::FnType {
                 parameters: expected_parameters,
                 return_type,
+                ..
             } = type_semantics::substitute(expected, &substitutions, Some(&self_type))
             else {
                 bail!(
@@ -985,6 +1000,7 @@ fn validate_type(
         TypeRef::FnType {
             parameters: function_parameters,
             return_type,
+            ..
         } => {
             for parameter in function_parameters {
                 validate_type(&parameter.ty, parameters, bounds, context, index)?;

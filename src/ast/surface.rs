@@ -413,6 +413,8 @@ pub enum TypeExprKind {
     Function {
         parameters: Vec<FunctionTypeParameter>,
         result: Box<TypeExpr>,
+        /// The ceiling an implementation of this signature may not exceed.
+        effects: EffectRow,
     },
     Newtype(Box<TypeExpr>),
     Mutable(Box<TypeExpr>),
@@ -1324,10 +1326,30 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
         "enum" => TypeExprKind::Enum(parse_type_members(args)?),
         "interface" => TypeExprKind::Interface(parse_type_members(args)?),
         "fn-type" => {
-            exact_arity("fn-type", &args, 2, node.span)?;
+            // An interface method's effects are part of its contract, so `fn-type`
+            // takes an optional trailing `effects:` attribute after its two
+            // positional operands.
+            let attributes = trailing_attributes("fn-type", &args, 2, node.span)?;
+            let mut effects = EffectRow {
+                labels: Vec::new(),
+                tail: None,
+                span: node.span,
+            };
+            for attribute in &attributes {
+                let label = label(attribute.label)?;
+                if label.value != "effects" {
+                    return Err(AstError::new(
+                        "E-SYN-011",
+                        format!("unknown `fn-type` attribute `{}:`", label.value),
+                        label.span,
+                    ));
+                }
+                effects = parse_effects_value(attribute.value)?;
+            }
             TypeExprKind::Function {
                 parameters: parse_function_type_parameters(args[0])?,
                 result: Box::new(parse_type(args[1])?),
+                effects,
             }
         }
         "newtype" | "mut" | "ref" | "mut-ref" => {

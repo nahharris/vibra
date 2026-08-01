@@ -341,7 +341,9 @@ fn lint_type(path: &Path, source: &str, ty: &TypeExpr, diagnostics: &mut Vec<Dia
             lint_type(path, source, key, diagnostics);
             lint_type(path, source, value, diagnostics);
         }
-        TypeExprKind::Function { parameters, result } => {
+        TypeExprKind::Function {
+            parameters, result, ..
+        } => {
             for parameter in parameters {
                 lint_name(
                     path,

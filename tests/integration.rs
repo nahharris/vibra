@@ -1369,6 +1369,58 @@ fn report_effects(lowered: &vibra::lower::LoweredProgram) -> String {
 
 /// A host-import body's effects come from the registry, so declaring `effects: ()` on
 /// one cannot launder the effect away. This is the check the whole model rests on.
+/// An interface method's effect row is a ceiling: an implementation may perform fewer
+/// effects than the interface allows, never more.
+#[test]
+fn impl_method_may_not_exceed_the_interface_effect_ceiling() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def lister (interface (all (fn-type (self self) (array str)))))
+(def env-lister (newtype int64)
+  impls: ((impl lister
+    methods: ((method all
+      (fn (self self) (array str)
+        (do (return (wasm "vibra_v1" "env_list")))
+        effects: ((effect @env @read))))))))
+(defn main () void (do (let ok true)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let err = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        err.contains("E-EFFECT-003") && err.contains("@env @read"),
+        "expected an impl to be held to the interface's effect ceiling, got: {err}"
+    );
+}
+
+/// Declaring the effect on the interface too makes the same implementation legal.
+#[test]
+fn interface_effect_ceiling_admits_a_matching_impl() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        r#"(def lister (interface (all (fn-type (self self) (array str) effects: ((effect @env @read))))))
+(def env-lister (newtype int64)
+  impls: ((impl lister
+    methods: ((method all
+      (fn (self self) (array str)
+        (do (return (wasm "vibra_v1" "env_list")))
+        effects: ((effect @env @read))))))))
+(defn main () void (do (let ok true)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&prog)
+        .expect("an impl within the interface's declared ceiling should lower");
+}
+
 /// An inline impl method is split by the adapter into a hoisted helper carrying the
 /// real body and a forwarding shim bound into the impl. The shim's envelope is built
 /// by hand, so it has to be handed the declared row explicitly -- otherwise it looks

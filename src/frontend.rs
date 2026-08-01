@@ -1359,7 +1359,9 @@ fn visit_type(ty: &TypeExpr, visitor: &mut impl FnMut(&str) -> Result<()>) -> Re
             }
             Ok(())
         }
-        TypeExprKind::Function { parameters, result } => {
+        TypeExprKind::Function {
+            parameters, result, ..
+        } => {
             for parameter in parameters {
                 visit_type(&parameter.ty, visitor)?;
             }

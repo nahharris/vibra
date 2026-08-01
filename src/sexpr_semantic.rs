@@ -524,7 +524,9 @@ fn visit_type(ty: &TypeExpr, context: &DocContext<'_>, facts: &mut Vec<SemanticF
             visit_type(key, context, facts);
             visit_type(value, context, facts);
         }
-        TypeExprKind::Function { parameters, result } => {
+        TypeExprKind::Function {
+            parameters, result, ..
+        } => {
             for parameter in parameters {
                 visit_type(&parameter.ty, context, facts);
             }
