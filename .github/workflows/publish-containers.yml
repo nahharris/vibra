@@ -144,12 +144,12 @@ jobs:
         run: |
           echo "runtime=$(docker buildx imagetools inspect "$RUNTIME_IMAGE:${{ needs.validate.outputs.version }}" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
           echo "dev=$(docker buildx imagetools inspect "$DEV_IMAGE:${{ needs.validate.outputs.version }}" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
-      - uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-name: ${{ env.RUNTIME_IMAGE }}
           subject-digest: ${{ steps.promoted.outputs.runtime }}
           push-to-registry: true
-      - uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-name: ${{ env.DEV_IMAGE }}
           subject-digest: ${{ steps.promoted.outputs.dev }}
