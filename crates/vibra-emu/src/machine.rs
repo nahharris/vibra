@@ -1,5 +1,6 @@
 use crate::{Capability, Instruction, Opcode, Permissions, Tag, Word};
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::fmt;
 
 pub const TAG_TRAP: u8 = 0x01;
@@ -29,6 +30,33 @@ const BUTTON: usize = 0x11;
 const CYCLE_LO: usize = 0x20;
 const CYCLE_HI: usize = 0x21;
 const RNG: usize = 0x30;
+const EFFECT_IO: u8 = 1;
+const EFFECT_RAND: u8 = 5;
+const EFFECT_TIME: u8 = 6;
+
+#[derive(Clone, Copy)]
+struct MmioRule {
+    readable: bool,
+    writable: bool,
+    effect: u8,
+}
+
+const fn mmio_rule(offset: usize) -> Option<MmioRule> {
+    let (readable, writable, effect) = match offset {
+        UART_TX => (false, true, EFFECT_IO),
+        UART_RX | UART_STAT => (true, false, EFFECT_IO),
+        LED => (false, true, EFFECT_IO),
+        BUTTON => (true, false, EFFECT_IO),
+        CYCLE_LO | CYCLE_HI => (true, false, EFFECT_TIME),
+        RNG => (true, false, EFFECT_RAND),
+        _ => return None,
+    };
+    Some(MmioRule {
+        readable,
+        writable,
+        effect,
+    })
+}
 
 #[derive(Clone, Copy)]
 struct Fault {
@@ -73,6 +101,7 @@ pub struct Machine {
     instruction_memory: Vec<u32>,
     data_memory: Vec<Word>,
     mmio: [Word; MMIO_WORDS],
+    uart_input: VecDeque<u8>,
     uart_output: Vec<u8>,
     cycles: u64,
     rng_state: u32,
@@ -124,7 +153,7 @@ impl Machine {
         caps[2] = devices;
         let mut mmio = [Word::int(0); MMIO_WORDS];
         mmio[UART_RX] = Word::int(0);
-        mmio[UART_STAT] = Word::int(1);
+        mmio[UART_STAT] = Word::int(0);
         mmio[LED] = Word::int(0);
         mmio[BUTTON] = Word::int(0);
 
@@ -140,6 +169,7 @@ impl Machine {
             instruction_memory,
             data_memory: vec![Word::poison(); DATA_WORDS],
             mmio,
+            uart_input: VecDeque::new(),
             uart_output: Vec::new(),
             cycles: 0,
             rng_state: 0x1234_5678,
@@ -192,10 +222,26 @@ impl Machine {
     }
 
     pub fn run(&mut self, max_steps: u64) -> Result<RunReport, MachineError> {
+        self.run_internal(max_steps, true)
+    }
+
+    pub fn run_quiet(&mut self, max_steps: u64) -> Result<RunReport, MachineError> {
+        self.run_internal(max_steps, false)
+    }
+
+    fn run_internal(
+        &mut self,
+        max_steps: u64,
+        collect_traces: bool,
+    ) -> Result<RunReport, MachineError> {
         let mut traces = Vec::new();
         let mut steps = 0_u64;
         while self.status.is_running() && steps < max_steps {
-            traces.push(self.step()?);
+            if collect_traces {
+                traces.push(self.step()?);
+            } else {
+                self.step()?;
+            }
             steps += 1;
         }
         Ok(RunReport {
@@ -269,6 +315,14 @@ impl Machine {
         &self.uart_output
     }
 
+    pub fn push_uart_input(&mut self, bytes: &[u8]) {
+        self.uart_input.extend(bytes.iter().copied());
+    }
+
+    pub fn set_button(&mut self, pressed: bool) {
+        self.mmio[BUTTON] = Word::int(if pressed { 1 } else { 0 });
+    }
+
     fn execute(&mut self, instruction: Instruction, pc: u32) -> Result<Option<(u32, Word)>, Fault> {
         match instruction.opcode() {
             Opcode::Nop => Ok(None),
@@ -305,6 +359,9 @@ impl Machine {
                 let tag = Tag::try_from((instruction.imm14_bits() & 0x0f) as u8).map_err(|_| {
                     Fault::new(TAG_TRAP, Word::int(instruction.imm14_bits() as i32))
                 })?;
+                if matches!(tag, Tag::CapIdx | Tag::Sealed) {
+                    return Err(Fault::new(TAG_TRAP, Word::int(tag as i32)));
+                }
                 let value = Word::try_new(tag, source.payload())
                     .map_err(|_| Fault::new(TAG_TRAP, source))?;
                 self.write_reg(instruction.rd(), value);
@@ -646,8 +703,22 @@ impl Machine {
                     Word::int(capability_index as i32),
                 ));
             }
-            if instruction.eff() != 1 {
-                return Err(Fault::new(EFFECT_TRAP, Word::int(instruction.eff() as i32)));
+            let offset = (address - MMIO_BASE) as usize;
+            let rule = mmio_rule(offset)
+                .ok_or_else(|| Fault::new(BAD_OP_TRAP, Word::int(address as i32)))?;
+            let allowed = if permission == Permissions::READ {
+                rule.readable
+            } else {
+                rule.writable
+            };
+            if !allowed {
+                return Err(Fault::new(
+                    CAP_PERM_TRAP,
+                    Word::int(capability_index as i32),
+                ));
+            }
+            if instruction.eff() != rule.effect {
+                return Err(Fault::new(EFFECT_TRAP, Word::int(rule.effect as i32)));
             }
         } else if address as usize >= DATA_WORDS {
             return Err(Fault::new(CAP_BOUND_TRAP, Word::int(address as i32)));
@@ -729,7 +800,6 @@ impl Machine {
         instruction: Instruction,
     ) -> Result<Option<(u32, Word)>, Fault> {
         let parent = self.caps[instruction.cs() as usize];
-        self.require_derive(parent)?;
         let permissions = Permissions::from_bits((instruction.aux10_bits() & 0xff) as u8);
         self.write_cap(instruction.cd(), parent.attenuate(permissions));
         Ok(None)
@@ -740,7 +810,6 @@ impl Machine {
         instruction: Instruction,
     ) -> Result<Option<(u32, Word)>, Fault> {
         let parent = self.caps[instruction.cs() as usize];
-        self.require_derive(parent)?;
         let offset = self.nonnegative_int(instruction.base_reg())?;
         let len = parent
             .len()
@@ -758,7 +827,7 @@ impl Machine {
         instruction: Instruction,
     ) -> Result<Option<(u32, Word)>, Fault> {
         let capability = self.caps[instruction.cs() as usize];
-        let value = match instruction.aux10_bits() & 0x07 {
+        let value = match instruction.aux10_bits() {
             0 => Word::int(capability.base() as i32),
             1 => Word::int(capability.len() as i32),
             2 => Word::int(capability.permissions().bits() as i32),
@@ -779,7 +848,7 @@ impl Machine {
         &mut self,
         instruction: Instruction,
     ) -> Result<Option<(u32, Word)>, Fault> {
-        let capability = match instruction.aux10_bits() & 0x03 {
+        let capability = match instruction.aux10_bits() {
             0 => self.pcc,
             1 => self.hpc,
             _ => {
@@ -887,19 +956,17 @@ impl Machine {
         let header = self
             .read_memory(header_address)
             .ok_or_else(|| Fault::new(TAG_TRAP, pointer))?;
-        if header.tag() != Tag::Header || header.payload() & 0x0fff != 1 {
-            return Err(Fault::new(SEAL_TRAP, header));
+        let header_size = header.payload() >> 12;
+        let header_type = header.payload() & 0x0fff;
+        if header.tag() != Tag::Header || header_type != 1 || header_size < 2 {
+            return Err(Fault::new(TAG_TRAP, header));
         }
-        let code = self
-            .read_memory(pointer.payload())
-            .ok_or_else(|| Fault::new(TAG_TRAP, pointer))?;
-        let environment = self
-            .read_memory(
-                pointer.payload().checked_add(1).ok_or_else(|| {
-                    Fault::new(CAP_BOUND_TRAP, Word::int(pointer.payload() as i32))
-                })?,
-            )
-            .ok_or_else(|| Fault::new(TAG_TRAP, pointer))?;
+        let code = self.read_memory_value(pointer.payload(), pointer)?;
+        let environment_address = pointer
+            .payload()
+            .checked_add(1)
+            .ok_or_else(|| Fault::new(CAP_BOUND_TRAP, pointer))?;
+        let environment = self.read_memory_value(environment_address, pointer)?;
         if code.tag() != Tag::Code {
             return Err(Fault::new(TAG_TRAP, code));
         }
@@ -1060,14 +1127,31 @@ impl Machine {
         if offset >= MMIO_WORDS {
             return None;
         }
-        if offset == RNG {
-            self.rng_state = self
-                .rng_state
-                .wrapping_mul(1_664_525)
-                .wrapping_add(1_013_904_223);
-            return Some(Word::int(self.rng_state as i32));
+        match offset {
+            UART_RX => Some(Word::int(
+                self.uart_input.pop_front().unwrap_or_default() as i32
+            )),
+            UART_STAT => Some(Word::int((!self.uart_input.is_empty()) as i32)),
+            RNG => {
+                self.rng_state = self
+                    .rng_state
+                    .wrapping_mul(1_664_525)
+                    .wrapping_add(1_013_904_223);
+                Some(Word::int(self.rng_state as i32))
+            }
+            _ => Some(self.mmio_word(offset)),
         }
-        Some(self.mmio_word(offset))
+    }
+
+    fn read_memory_value(&mut self, address: u32, tval: Word) -> Result<Word, Fault> {
+        let value = self
+            .read_memory(address)
+            .ok_or_else(|| Fault::new(TAG_TRAP, tval))?;
+        if value.tag() == Tag::Poison {
+            Err(Fault::new(POISON_TRAP, value))
+        } else {
+            Ok(value)
+        }
     }
 
     fn write_memory(&mut self, address: u32, value: Word) -> bool {
@@ -1090,6 +1174,7 @@ impl Machine {
 
     fn mmio_word(&self, offset: usize) -> Word {
         match offset {
+            UART_STAT => Word::int((!self.uart_input.is_empty()) as i32),
             CYCLE_LO => Word::int(self.cycles as u32 as i32),
             CYCLE_HI => Word::int((self.cycles >> 32) as u32 as i32),
             RNG => Word::int(self.rng_state as i32),
@@ -1101,6 +1186,7 @@ impl Machine {
         self.tcause = cause;
         self.tpc = tpc;
         self.tval = tval;
+        self.mmio[LED] = Word::int(cause as i32);
         self.status = MachineStatus::Trapped { cause, tpc, tval };
     }
 

@@ -729,7 +729,11 @@ fn run_emu(
     let image = vibra_emu::parse_hex_program(&source)
         .with_context(|| format!("parse Vibra Machine image `{}`", program.display()))?;
     let mut machine = vibra_emu::Machine::boot(&image)?;
-    let report = machine.run(max_steps)?;
+    let report = if include_trace {
+        machine.run(max_steps)?
+    } else {
+        machine.run_quiet(max_steps)?
+    };
 
     match format {
         EmuFormatArg::Json => print_emu_json(&report, include_trace)?,

@@ -47,6 +47,7 @@ fn emu_traps_are_reported_and_return_a_nonzero_exit_status() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["status"], "trapped");
     assert_eq!(report["trap"]["name"], "BADOP");
+    assert!(report["traces"].as_array().unwrap().is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("BADOP"));
 }
 
