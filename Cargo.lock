@@ -3680,10 +3680,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "vibra-emu",
  "wasm-encoder 0.240.0",
  "wasmer",
  "wasmer-wasix",
  "zip",
+]
+
+[[package]]
+name = "vibra-emu"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
