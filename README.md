@@ -65,6 +65,45 @@ such as `@expr-syntax`. A bare symbol in those positions is rejected with
 `convert.format-atom` renders an atom back to its written form, sigil
 included.
 
+## Effects
+
+Every function declares which host effects its body may perform. The compiler
+infers what the body actually does and rejects any function that exceeds its
+declaration, so a signature is a complete statement of a function's reach.
+
+```vibra
+(defn load (p fs.path) str
+  (do (return (fs.read-to-string p)))
+  effects: (effects.fs-read))
+```
+
+An absent `effects:` attribute means pure. The declared row is a *ceiling*:
+declaring more than the body performs is allowed, and inference never fills the
+declaration in for you.
+
+An effect is constructed with `(effect @domain @action)` and identified
+**structurally** by that pair, so the same pair written in two modules denotes
+the same effect. `@std/effects.vibra` binds names for the 18 host effects
+(`effects.fs-read`, `effects.net-connect`, …), but the inline form works
+anywhere and needs no import. A library can declare its own with
+`(def query (effect @db @query))`.
+
+Host imports are ground truth: a `(wasm ...)` body must declare exactly the
+effects the ABI registry states for that import, so an effect cannot be
+laundered through an empty declaration. Interface methods carry rows too, and an
+implementation may not exceed its interface's ceiling.
+
+```sh
+vibra effects examples/fs-roundtrip.vibra
+```
+
+reports the program's whole effect surface, the per-function rows behind it, and
+the underlying host imports — see [schemas/effects.schema.json](schemas/effects.schema.json).
+
+Effects are static and fully erased: there is no runtime representation and no
+enforcement. Every host operation remains unconditionally available at runtime,
+so embedders must still sandbox untrusted Vibra source themselves.
+
 ## Projects
 
 `project.vibra` is an S-expression manifest and source files use the `.vibra`

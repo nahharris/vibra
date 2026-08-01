@@ -884,7 +884,28 @@ fn raw_exec_string(value: RuntimeValue) -> Result<String> {
 
 #[derive(serde::Serialize)]
 struct EffectsReport {
-    effects: Vec<EffectEntry>,
+    /// The program's whole effect surface: every effect reachable from the entry
+    /// point. This is the headline answer to "what can this program do?".
+    effects: Vec<EffectLabel>,
+    /// Per-function declared rows, for auditing which part of the program is
+    /// responsible for each effect.
+    functions: Vec<FunctionEffects>,
+    /// The reachable host-import surface. Previously the whole report; now the
+    /// low-level detail beneath the declared rows.
+    #[serde(rename = "host-imports")]
+    host_imports: Vec<EffectEntry>,
+}
+
+#[derive(serde::Serialize, PartialEq, Eq, PartialOrd, Ord)]
+struct EffectLabel {
+    domain: String,
+    action: String,
+}
+
+#[derive(serde::Serialize)]
+struct FunctionEffects {
+    source: String,
+    effects: Vec<EffectLabel>,
 }
 
 #[derive(serde::Serialize)]
@@ -895,6 +916,8 @@ struct EffectEntry {
     params: Vec<EffectParam>,
     #[serde(rename = "return")]
     result: String,
+    /// The effects this host import performs, per the ABI registry.
+    effects: Vec<EffectLabel>,
 }
 
 #[derive(serde::Serialize)]
@@ -917,6 +940,29 @@ fn print_effects(
         .filter(|(name, _)| reachable.contains(*name))
         .collect::<Vec<_>>();
     functions.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+    // The effect surface now comes from declarations rather than from re-walking the
+    // call graph for host imports. Declarations are checked against inference at
+    // lowering, so this is exact rather than an approximation, and it stays correct
+    // for a function that reaches the host only indirectly.
+    let label = |(domain, action): &(String, String)| EffectLabel {
+        domain: domain.clone(),
+        action: action.clone(),
+    };
+    let mut surface = std::collections::BTreeSet::new();
+    let mut per_function = Vec::new();
+    for (source, signature) in &functions {
+        for pair in &signature.effects.labels {
+            surface.insert(pair.clone());
+        }
+        if !signature.effects.labels.is_empty() {
+            per_function.push(FunctionEffects {
+                source: (*source).clone(),
+                effects: signature.effects.labels.iter().map(label).collect(),
+            });
+        }
+    }
+
     let mut effects = Vec::new();
     for (source, signature) in functions {
         let lower::FunctionBody::Wasm { import, .. } = &signature.body else {
@@ -937,9 +983,24 @@ fn print_effects(
             name: import.name.clone(),
             params,
             result: entry.result.as_str().into(),
+            effects: entry
+                .effects()
+                .iter()
+                .map(|(domain, action)| EffectLabel {
+                    domain: (*domain).to_string(),
+                    action: (*action).to_string(),
+                })
+                .collect(),
         });
     }
-    print_structured(&EffectsReport { effects }, format)
+    print_structured(
+        &EffectsReport {
+            effects: surface.iter().map(label).collect(),
+            functions: per_function,
+            host_imports: effects,
+        },
+        format,
+    )
 }
 
 fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTreeSet<String> {
