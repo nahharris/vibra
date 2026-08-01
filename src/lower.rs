@@ -5532,7 +5532,9 @@ fn lower_statement(
         )?;
         let actual = infer_expr_type(&value, constants, locals, type_aliases, enums)
             .context("E-SET-003: could not infer assigned value type")?;
-        if !type_compatible(writable_ty, &actual, type_aliases) {
+        if !type_compatible(writable_ty, &actual, type_aliases)
+            && !literal_widens_to(&value, writable_ty, type_aliases)
+        {
             bail!(
                 "E-SET-003: assignment to `{var}` expects {:?}, got {:?}",
                 writable_ty,
@@ -5564,7 +5566,9 @@ fn lower_statement(
         }
         let actual = infer_expr_type(&expr, constants, locals, type_aliases, enums)
             .context("could not infer type for `$return` expression")?;
-        if !type_compatible(&ctx.return_type, &actual, type_aliases) {
+        if !type_compatible(&ctx.return_type, &actual, type_aliases)
+            && !literal_widens_to(&expr, &ctx.return_type, type_aliases)
+        {
             if crosses_newtype_boundary(&ctx.return_type, &actual, type_aliases) {
                 bail!(
                     "E-NEWTYPE-001: implicit coercion between `$newtype` and its inner type is forbidden in `$return`; use `$cast` (expected {:?}, got {:?})",
@@ -5573,7 +5577,7 @@ fn lower_statement(
                 );
             }
             bail!(
-                "`$return` type mismatch: expected {:?}, got {:?}",
+                "E-TY-002: `return` type mismatch: expected {:?}, got {:?}",
                 ctx.return_type,
                 actual
             );
@@ -6422,7 +6426,9 @@ fn parse_call(
                 function.parameters[idx].name
             );
         };
-        if !type_compatible(&expected, &actual, type_aliases) {
+        if !type_compatible(&expected, &actual, type_aliases)
+            && !literal_widens_to(expr, &expected, type_aliases)
+        {
             if crosses_newtype_boundary(&expected, &actual, type_aliases) {
                 bail!(
                     "E-NEWTYPE-001: implicit coercion between `$newtype` and its inner type is forbidden in call `{call_key}` arg `{}`; use `$cast` (expected {:?}, got {:?})",
@@ -6432,7 +6438,7 @@ fn parse_call(
                 );
             }
             bail!(
-                "type mismatch in call `{call_key}` arg `{}`: expected {:?}, got {:?}",
+                "E-TY-001: type mismatch in call `{call_key}` arg `{}`: expected {:?}, got {:?}",
                 function.parameters[idx].name,
                 expected,
                 actual
@@ -7074,7 +7080,11 @@ fn parse_expr(
             ) {
                 bail!("E-CAP-001: opaque host handles are runtime-minted and cannot be created with `$cast`");
             }
-            if !valid_cast_path(&source, &target, type_aliases) {
+            // A numeric literal (or an array of them) has no width of its own, so it may
+            // take the newtype's inner width directly rather than needing a second cast.
+            let literal_reaches_inner = newtype_inner(&target, type_aliases)
+                .is_some_and(|inner| literal_widens_to(&from, inner, type_aliases));
+            if !valid_cast_path(&source, &target, type_aliases) && !literal_reaches_inner {
                 bail!(
                     "E-CAST-001: no valid cast path from {:?} to {:?}",
                     source,
@@ -7988,21 +7998,69 @@ fn enum_target_def<'a>(
         .map(|def| (enum_key.clone(), def))
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Whether an integer value is exactly representable at `ty`.
+fn int_literal_fits(value: i64, ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Int8 => i8::try_from(value).is_ok(),
+        TypeRef::Int16 => i16::try_from(value).is_ok(),
+        TypeRef::Int32 => i32::try_from(value).is_ok(),
+        TypeRef::Int64 => true,
+        TypeRef::UInt8 => u8::try_from(value).is_ok(),
+        TypeRef::UInt16 => u16::try_from(value).is_ok(),
+        TypeRef::UInt32 => u32::try_from(value).is_ok(),
+        TypeRef::UInt64 => u64::try_from(value).is_ok(),
+        _ => false,
+    }
+}
+
+/// Whether a *syntactic* numeric literal may be written at `expected`'s width.
+///
+/// `infer_expr_type` types every integer literal as `int64` and every float literal as
+/// `float64`, so without this a literal could never reach a narrower parameter. Unlike
+/// the blanket numeric-compatibility rule this replaces, it applies only to literals
+/// written in place, only within the same numeric family, and only when the value is
+/// exactly representable — so `(accepts-int8 300)` and passing an `int64` *local* to an
+/// `int32` parameter both stay errors, per DRAFT.md's "no implicit numeric widening or
+/// narrowing".
+fn literal_widens_to(
+    expr: &Expr,
+    expected: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    let expected = normalize_type_ref(expected, aliases);
+    match (expr, &expected) {
+        // An array literal carries no width of its own, so let it take the expected
+        // element width when every element is itself a literal that fits.
+        (Expr::Array(items), TypeRef::Array(element)) => items
+            .iter()
+            .all(|item| literal_widens_to(item, element, aliases)),
+        (Expr::Value(RuntimeValue::Int(value)), _) => int_literal_fits(*value, &expected),
+        (Expr::Value(RuntimeValue::Float(_)), TypeRef::Float64) => true,
+        // Rounding a float literal to `float32` is expected (`3.14` is not exactly
+        // representable), so only reject literals that overflow the width entirely.
+        (Expr::Value(RuntimeValue::Float(value)), TypeRef::Float32) => {
+            !value.is_finite() || (*value as f32).is_finite()
+        }
+        _ => false,
+    }
+}
+
+/// Validate a pattern against its target type and bind any locals it introduces.
+///
+/// This deliberately does *not* record enum-tag coverage or wildcard-ness. Both are
+/// properties of an arm's **top-level** pattern only: a `_` nested in an enum payload
+/// makes that payload irrefutable, not the arm, and a nested `enum.tag` pattern covers
+/// nothing at the outer match's level. Coverage and totality are recorded by the caller
+/// via `record_top_level_coverage` and `pattern_is_irrefutable`.
 fn validate_pattern(
     pattern: &Pattern,
     target_ty: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
     enums: &HashMap<String, EnumDef>,
     locals: &mut HashMap<String, TypeRef>,
-    covered_enum_tags: &mut HashSet<String>,
-    has_wildcard: &mut bool,
 ) -> Result<()> {
     match pattern {
-        Pattern::Wildcard => {
-            *has_wildcard = true;
-            Ok(())
-        }
+        Pattern::Wildcard => Ok(()),
         Pattern::Bind(name) => {
             locals.insert(name.clone(), target_ty.clone());
             Ok(())
@@ -8016,7 +8074,11 @@ fn validate_pattern(
                 enums,
             )
             .context("could not infer literal pattern type")?;
-            if type_compatible(target_ty, &lit_ty, aliases) {
+            // A literal pattern is written in place, so it takes the target's width for
+            // the same reason a literal argument does.
+            if type_compatible(target_ty, &lit_ty, aliases)
+                || literal_widens_to(&Expr::Value(value.clone()), target_ty, aliases)
+            {
                 Ok(())
             } else {
                 bail!("literal pattern type mismatch: target {target_ty:?}, pattern {lit_ty:?}")
@@ -8043,7 +8105,6 @@ fn validate_pattern(
                 .tags
                 .get(tag)
                 .with_context(|| format!("unknown enum tag `{tag}`"))?;
-            covered_enum_tags.insert(tag.clone());
             let mut subst = HashMap::new();
             for (p, a) in enum_def.type_params.iter().zip(type_args) {
                 subst.insert(p.clone(), a);
@@ -8053,15 +8114,7 @@ fn validate_pattern(
                 (true, None) => Ok(()),
                 (true, Some(_)) => bail!("enum pattern `{tag}` has payload for `$void` tag"),
                 (false, None) => bail!("enum pattern `{tag}` must include payload pattern"),
-                (false, Some(p)) => validate_pattern(
-                    p,
-                    &payload_ty,
-                    aliases,
-                    enums,
-                    locals,
-                    covered_enum_tags,
-                    has_wildcard,
-                ),
+                (false, Some(p)) => validate_pattern(p, &payload_ty, aliases, enums, locals),
             }
         }
         Pattern::Record(fields) => {
@@ -8073,15 +8126,7 @@ fn validate_pattern(
                 let field_ty = target_fields
                     .get(name)
                     .with_context(|| format!("record target has no field `{name}`"))?;
-                validate_pattern(
-                    pat,
-                    field_ty,
-                    aliases,
-                    enums,
-                    locals,
-                    covered_enum_tags,
-                    has_wildcard,
-                )?;
+                validate_pattern(pat, field_ty, aliases, enums, locals)?;
             }
             Ok(())
         }
@@ -8094,15 +8139,7 @@ fn validate_pattern(
                 bail!("$tuple pattern length mismatch");
             }
             for (pat, item_ty) in items.iter().zip(target_items.iter()) {
-                validate_pattern(
-                    pat,
-                    item_ty,
-                    aliases,
-                    enums,
-                    locals,
-                    covered_enum_tags,
-                    has_wildcard,
-                )?;
+                validate_pattern(pat, item_ty, aliases, enums, locals)?;
             }
             Ok(())
         }
@@ -8112,15 +8149,7 @@ fn validate_pattern(
                 bail!("$array pattern requires array target, got {target_ty:?}");
             };
             for pat in items {
-                validate_pattern(
-                    pat,
-                    &item_ty,
-                    aliases,
-                    enums,
-                    locals,
-                    covered_enum_tags,
-                    has_wildcard,
-                )?;
+                validate_pattern(pat, &item_ty, aliases, enums, locals)?;
             }
             Ok(())
         }
@@ -8130,24 +8159,8 @@ fn validate_pattern(
                 bail!("$map pattern requires map target, got {target_ty:?}");
             };
             for (kp, vp) in entries {
-                validate_pattern(
-                    kp,
-                    &key,
-                    aliases,
-                    enums,
-                    locals,
-                    covered_enum_tags,
-                    has_wildcard,
-                )?;
-                validate_pattern(
-                    vp,
-                    &value,
-                    aliases,
-                    enums,
-                    locals,
-                    covered_enum_tags,
-                    has_wildcard,
-                )?;
+                validate_pattern(kp, &key, aliases, enums, locals)?;
+                validate_pattern(vp, &value, aliases, enums, locals)?;
             }
             Ok(())
         }
@@ -8158,15 +8171,7 @@ fn validate_pattern(
             let inner_ty = newtype_inner(type_ref, aliases)
                 .cloned()
                 .context("$newtype pattern type is not a newtype")?;
-            validate_pattern(
-                inner,
-                &inner_ty,
-                aliases,
-                enums,
-                locals,
-                covered_enum_tags,
-                has_wildcard,
-            )
+            validate_pattern(inner, &inner_ty, aliases, enums, locals)
         }
         Pattern::Interface(iface) => {
             if !is_interface_bound(iface, aliases) {
@@ -8177,8 +8182,67 @@ fn validate_pattern(
     }
 }
 
-fn is_literal_singleton_pattern(pattern: &Pattern, _target_ty: &TypeRef) -> bool {
-    matches!(pattern, Pattern::Literal(_))
+/// Whether an arm's top-level pattern matches every value of its target type.
+///
+/// Only structural patterns qualify. `Array` and `Map` patterns are refutable on length
+/// and key presence, `Enum` on its tag, `Literal` on its value, and `Interface` on the
+/// dynamic type, so none of them make an arm total on their own.
+fn pattern_is_irrefutable(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Wildcard | Pattern::Bind(_) => true,
+        Pattern::Newtype { inner, .. } => pattern_is_irrefutable(inner),
+        Pattern::Tuple(items) => items.iter().all(pattern_is_irrefutable),
+        Pattern::Record(fields) => fields.values().all(pattern_is_irrefutable),
+        Pattern::Literal(_)
+        | Pattern::Enum { .. }
+        | Pattern::Array(_)
+        | Pattern::Map(_)
+        | Pattern::Interface(_) => false,
+    }
+}
+
+fn value_as_literal_type(value: &RuntimeValue) -> Option<LiteralType> {
+    Some(match value {
+        RuntimeValue::Atom(v) => LiteralType::Atom(v.clone()),
+        RuntimeValue::Bool(v) => LiteralType::Bool(*v),
+        RuntimeValue::Int(v) => LiteralType::Int(*v),
+        RuntimeValue::Float(v) => LiteralType::Float(*v),
+        RuntimeValue::Str(v) => LiteralType::Str(v.clone()),
+        _ => return None,
+    })
+}
+
+/// Whether a single literal arm covers its target type on its own.
+///
+/// That is only ever true when the target is itself a singleton literal type (an atom
+/// type such as `@ok`) and the pattern pins exactly that value. A literal arm over an
+/// open type like `int64` or `str` leaves every other value unmatched.
+fn pattern_exhausts_target(
+    pattern: &Pattern,
+    target_ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    let Pattern::Literal(value) = pattern else {
+        return false;
+    };
+    let TypeRef::Literal(target_lit) = normalize_type_ref(target_ty, aliases) else {
+        return false;
+    };
+    value_as_literal_type(value).is_some_and(|lit| lit == target_lit)
+}
+
+/// The `(enum, tag)` pair an arm's top-level pattern covers, if any.
+///
+/// Keyed by the module-stripped enum name so it lines up with `enum_target_def`, and
+/// scoped to the top level so a nested `result.err` inside an `result.ok` arm cannot
+/// spuriously mark the outer `err` tag as covered.
+fn top_level_enum_coverage(pattern: &Pattern) -> Option<(String, String)> {
+    match pattern {
+        Pattern::Enum { enum_key, tag, .. } => {
+            Some((strip_module_prefix(enum_key).to_string(), tag.clone()))
+        }
+        _ => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8241,9 +8305,11 @@ fn parse_match_statement(
             type_aliases,
             enums,
             &mut scoped_locals,
-            &mut covered_enum_tags,
-            &mut has_wildcard,
         )?;
+        if let Some(covered) = top_level_enum_coverage(&pattern) {
+            covered_enum_tags.insert(covered);
+        }
+        has_wildcard |= pattern_is_irrefutable(&pattern);
         let do_seq = do_v
             .as_sequence()
             .context("$match arm do must be sequence")?;
@@ -8266,13 +8332,18 @@ fn parse_match_statement(
 
     if !has_wildcard {
         if let Some((enum_key, enum_def)) = enum_target_def(&target_ty, enums) {
+            let base = strip_module_prefix(&enum_key).to_string();
             for tag in enum_def.tags.keys() {
-                if !covered_enum_tags.contains(tag) {
-                    bail!("$match for enum `{enum_key}` missing arm for tag `{tag}`");
+                if !covered_enum_tags.contains(&(base.clone(), tag.clone())) {
+                    bail!(
+                        "E-MATCH-001: `match` over enum `{enum_key}` is missing an arm for tag `{tag}`; add it or a `_` arm"
+                    );
                 }
             }
-        } else if arms.len() != 1 || !is_literal_singleton_pattern(&arms[0].pattern, &target_ty) {
-            bail!("$match over open-ended type `{target_ty:?}` requires a wildcard arm");
+        } else if arms.len() != 1
+            || !pattern_exhausts_target(&arms[0].pattern, &target_ty, type_aliases)
+        {
+            bail!("E-MATCH-002: `match` over open-ended type `{target_ty:?}` requires a `_` arm");
         }
     }
 

@@ -348,7 +348,6 @@ pub(crate) fn unify_types(
                     })
                 && unify_types(left_return, right_return, aliases, bindings)
         }
-        (left, right) if is_numeric_type(left) && is_numeric_type(right) => true,
         (TypeRef::Named(left), TypeRef::Named(right)) => bare_name(left) == bare_name(right),
         (TypeRef::Enum(left), TypeRef::Enum(right)) => left == right,
         _ => false,

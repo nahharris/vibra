@@ -6,8 +6,8 @@
   "unicode-units-and-search"
   (test.case
     "unicode-units-and-search"
-    (test.assert-eq-int (text.scalar-len "aé🙂") 3)
-    (test.assert-eq-int (text.byte-len "aé🙂") 7)
+    (test.assert-eq-int (convert (text.scalar-len "aé🙂") int64 0) 3)
+    (test.assert-eq-int (convert (text.byte-len "aé🙂") int64 0) 7)
     (let found (text.find "aé🙂" "🙂"))
     (match
       found
