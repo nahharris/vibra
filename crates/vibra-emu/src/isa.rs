@@ -740,6 +740,14 @@ impl Instruction {
         sign_extend(((self.c as u32) << 10) | self.imm10 as u32, 14)
     }
 
+    pub const fn imm14_bits(self) -> u16 {
+        ((self.c as u16) << 10) | self.imm10
+    }
+
+    pub const fn aux10_bits(self) -> u16 {
+        self.imm10
+    }
+
     pub const fn imm18(self) -> i32 {
         sign_extend(
             ((self.b as u32) << 14) | ((self.c as u32) << 10) | self.imm10 as u32,
