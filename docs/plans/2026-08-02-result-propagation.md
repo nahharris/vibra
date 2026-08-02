@@ -81,14 +81,46 @@ enclosing scopes and structured-concurrency cleanup); type mismatch; use in a
 `void`-returning function; `option` variant. One `tests/*.vib` case covering
 success and propagation.
 
-## Risks
+## Risks — investigated, and the stated one was wrong
 
-**Early return interacting with structured concurrency is the real hazard.**
-`try` inside a `task` or an open scope must run the same cleanup path as an
-explicit `return`. If it bypasses scope teardown, this form introduces resource
-leaks into the language's most safety-critical machinery. Test it explicitly
-against `src/async_runtime.rs` scope semantics; treat a missing test here as a
-blocking review comment.
+See `risk-findings/248-scope-teardown.md` and `risk-findings/248-typed-path.md`.
+
+**The scope-teardown hazard does not exist**, but only because the thing it
+would break is not connected. `src/async_runtime.rs` has a correct, tested
+teardown implementation whose `open_scope`/`close_scope` have **zero call sites
+outside that file and its own tests**; there is no `scope` surface form at all.
+`return` inside `(task ...)` is already a compile error (`E-TASK-002`,
+`src/lower.rs:2895`, `:5844`), and `spawn`'s value is an expression, so `return`
+cannot appear there. `try` can be built on the existing `ExecFlow::Return` /
+`Instruction::Return` mechanism with no concurrency work. **Do not write a test
+asserting `try` runs scope teardown — there is nothing to run.**
+
+**The enclosing-return-type blocker was also wrong.** It is available on both
+paths (`src/lower.rs:63`, `:2865`, `:2880`; `src/typed_body.rs:591`).
+
+**A real pre-existing bug surfaced instead, and this issue should fix it.**
+`body_semantics::validate_task_handles` (`src/body_semantics.rs:23-83`) has no
+`Return` arm — `Return` falls into the catch-all at `:73`, so `return` is not
+modelled as a scope exit and the live-handle set is only checked at end-of-body
+(`:78`). An early return past a live spawn handle compiles and runs clean;
+verified empirically. No test covers it. `try` multiplies the exposure, so fix
+it here: it is small and squarely in the blast radius.
+
+**One leak this issue should name but not own.** Host handles are closed only
+by explicit `fd_close` (`src/execute.rs:278`, `:2389`); no scope, function, or
+block boundary closes anything. Early return already leaks them today. `try`
+amplifies a pre-existing bug rather than introducing one — say so in the PR, so
+it does not read as a regression. Handle lifecycle is #255's subject.
+
+**Decide first: does `try` lower to `Statement::Return` or a new statement
+kind?** If `Return`, the exhaustive matches at `src/lower.rs:2895` and
+`src/body_semantics.rs:23` do most of the safety work for free. If a new kind,
+both must be extended or the task boundary silently opens. Also unsettled and
+worth pinning before implementation: `do` value-position semantics.
+
+**Path:** legacy, with partial rework accepted. Surface work (AST, parser,
+printer, macro, `surface_adapter`) is mandatory and fully reusable; only the
+desugaring is legacy-specific.
 
 ## Definition of done
 

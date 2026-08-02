@@ -23,13 +23,30 @@ LLMON supplies the general lesson: declared structure paid off only because a
 runtime acted on it. Representation without enforcement is decoration, and
 erased effects are exactly that.
 
-## The cost is lower than it looks
+## How much already exists — corrected
 
-`src/async_runtime.rs` already carries a per-scope `CapabilityGrant` set, and
-`open_scope_with_limits` already rejects a child requesting a grant its parent
-lacks — a monotone-narrowing authority lattice, implemented and tested. #213
-removed the source-language authority type, not the runtime. What is missing is
-a surface syntax and a propagation rule.
+An earlier version of this plan claimed the runtime substrate was complete and
+only surface syntax and a propagation rule were missing. Investigation before
+implementation showed that was too optimistic; the corrected picture:
+
+**Exists and is reusable.** `CapabilityGrant` (`src/async_runtime.rs:109`), its
+containment relation `is_within` (`:116-126`), the amplification error
+(`RuntimeError::CapabilityAmplification`, `:223`), and the narrowing check
+(`:384-393`), with unit tests.
+
+**Does not exist.** Any of it running in a real program. The root scope is
+seeded empty at `src/execute.rs:943`, every grant-carrying construction site is
+inside the `#[cfg(test)]` module beginning at `src/async_runtime.rs:1043`, and
+`open_scope` is never called from `src/execute.rs` at all. The narrowing check
+is unreachable in production.
+
+So this issue has three parts, not two: seed the root from the manifest, **wire
+scope lifecycle into real execution**, and add the operation-time check. The
+middle part was not previously accounted for and should be scoped explicitly.
+
+**#251 shares the wiring.** `ScopeLimits` inheritance sits in the same
+never-called path, so fuel and memory ceilings will be equally inert until this
+lands. Whichever issue goes first should do the wiring reusably.
 
 ## Design decisions
 
@@ -40,11 +57,26 @@ express this, so the check lives in Vibra's host boundary. Concretely: the
 runtime checks the grant at the operation, not only at scope entry — scope
 entry checks are an optimization, not the guarantee.
 
-**Grants are per effect root, not per operation.** The root inventory
-(`fs.read`, `net.connect`, `process.spawn`, …) is already the right
-granularity: coarse enough that a human embedder can read a program's authority
-at a glance, fine enough to be meaningful. Per-operation grants would produce
-authority lists as unreadable as the effect ceilings #249 exists to remove.
+**Two axes: effect-root domain, plus resource prefix.** An earlier version of
+this plan chose "per effect root, not per operation" and stopped there. The
+existing `CapabilityGrant` is a `{domain, resource_prefix}` pair whose
+`is_within` already implements hierarchical path containment, which is a better
+design than the one the plan proposed and costs nothing extra to adopt.
+
+Use **domain** at effect-root granularity (`fs.read`, `net.connect`,
+`process.spawn`) — coarse enough for an embedder to read at a glance, fine
+enough to be meaningful; per-operation grants would produce authority lists as
+unreadable as the ceilings #249 removes. Use **resource_prefix** to scope which
+resources within that domain are reachable.
+
+That second axis is what makes this a security feature rather than a label: the
+useful embedder guarantee is not "this program touches the filesystem" but
+"this program touches the filesystem only beneath this path."
+
+**Reconcile domain naming with the effect inventory.** Existing tests use
+`filesystem-read` and `network` (`src/async_runtime.rs:1163`, `:1177`); the
+accepted contract uses `fs.read` and `net.connect`. The contract names win —
+they are what authors write. Updating those tests is part of this work.
 
 **Attenuation yes, amplification never.** A scope may drop authority it holds.
 It may never acquire authority its parent lacks. This is the existing lattice;

@@ -71,13 +71,46 @@ the old one does not, and #254 depends on it being on the record.
 - `rg` assertions in the repository-policy test: no current-guidance reference
   to YAML shapes or `$` keys.
 
+## Feasibility measured — the test is practical, and it already found bugs
+
+See `risk-findings/256-doc-blocks.md`. All 10 Vibra-tagged blocks in
+`docs/decisions/*.md` were run through the real reader via `vibra fmt --check`.
+
+19 fenced blocks total (ebnf 7, vibra 9, text 2, lisp 1). **2 pass, 8 fail** —
+3 fragments, 1 manifest grammar, 1 pseudocode, and **3 genuine drift bugs in
+the accepted contract**:
+
+- `:163` — `visibility: private` should be `@private`
+- `:395` — `tags:` / `expect-error:` are missing their `@`-atoms
+- `:553` — `(macro …)` uses bare `expr-syntax`, which `surface.rs:3211` has a
+  test explicitly asserting is invalid
+
+That third one is the argument for this whole issue in miniature: the accepted
+contract demonstrates a form the compiler has a test proving it rejects.
+
+No intentionally-invalid blocks exist, so the plan's `vibra-invalid` fence tag
+is unnecessary. Needed convention: `vibra` / `vibra-expr` / `vibra-project` /
+`text`. Cost is 9 blocks touched, only 3 of which are real content fixes.
+
+## Two further drift findings to fold in
+
+Both surfaced while investigating other issues:
+
+- **`docs/decisions/s-expression-language.md:590-603`** specifies an
+  `OriginId`-keyed origin arena. The code has neither — it uses `Arc<Origin>`
+  chains (`surface.rs:55-102`). A plan written against the document's field
+  list will not compile.
+- **The README's typed-path readiness numbers are stale.** It claims 19/57 and
+  57/58; measured on this branch, `materialized-valid` is **6/22** and
+  body-valid is 22/71. Every stdlib-importing file now fails typed body
+  lowering on leading generic type arguments (`src/typed_body.rs:2599`).
+
 ## Risks
 
 The doc-block test is the load-bearing part and the part most likely to be cut
-under time pressure. Some blocks are fragments, not whole modules, and will not
-parse standalone. Mitigation: allow a fence tag marking a block as a fragment,
-and wrap fragments in a synthetic module before parsing — do not exempt them
-from checking, or the test decays to nothing.
+under time pressure. Fragments are the complication: wrap them in a synthetic
+module before parsing rather than exempting them, or the test decays to
+nothing.
 
 ## Definition of done
 

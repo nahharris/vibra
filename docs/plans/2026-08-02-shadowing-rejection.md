@@ -72,12 +72,36 @@ call-site name (must be accepted).
 
 One `tests/*.vib` case asserting the diagnostic through the language runner.
 
-## Risks
+## Risks — surveyed, with the exact trap located
 
-The sibling-scope case is the one to get right. Two `match` arms each binding
-`value`, or two sequential blocks each with `let x`, are legal and idiomatic;
-an implementation that tracks a flat set of seen names instead of a scope stack
-will reject them and make the language worse. That test is the acceptance gate.
+See `risk-findings/246-scope-survey.md`.
+
+**Scope infrastructure already exists; nothing new to build.** Clone-based
+lexical environments in `src/lower.rs` (`if`/`while`/`for`/match-arm clone
+`locals` at `:5542`, `:5608`, `:5678`, `:8852`), and `src/typed_body.rs`
+**already rejects shadowing** at `:612` and `:766`. The work is adding the
+guard at the four silent `locals.insert` sites in `lower.rs` (`:5680`, `:5882`,
+`:5907`, `:8616`).
+
+**The sibling-scope trap is real and now has an address.**
+`src/surface_adapter.rs:1958` `collect_binding_names` is an existing **flat
+seen-set** collector that looks reusable and is not — it would reject all 16
+legitimate sibling-reuse pairs and break two stdlib modules. Do not reuse it.
+The 16 pairs across 3 files are the acceptance-gate corpus:
+`stdlib/src/fs.vib` (`failure`, 9 pairs), `stdlib/src/process.vib` (`message`,
+6 pairs across four sibling match arms), and `tests/lang-iteration.vib:29-30`
+(two sequential `for number`).
+
+**Migration cost is one site, and it needs a decision rather than an edit.**
+`tests/lang-values.vib:43` is the test `match-arm-binding-does-not-leak`, which
+exists *to assert shadowing works*, passes today, and lints clean. Either
+delete it or invert it to an `expect-error:` case — a semantic call for the
+reviewer, not a mechanical fix. stdlib and examples: zero sites.
+
+**Macro hygiene is confirmed safe.** Binders are renamed
+`{name}--macro-{id}` (`typed_macro_expand.rs:1655`, `:2034`) and gated on
+origin-span identity rather than text, so the exemption falls out as the plan
+predicted.
 
 ## Definition of done
 

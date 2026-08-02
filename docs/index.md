@@ -129,6 +129,10 @@ tracking issue #257.
 | 5 | [Handle lifecycle spike](plans/2026-08-02-handle-lifecycle-spike.md) | #255 |
 | 6 | [Type-constrained decoding](plans/2026-08-02-decoding-service.md) | #254 |
 
+Pre-implementation investigations for those plans — verified findings with
+`file:line` evidence, several of which corrected the plans they belong to —
+live in [`plans/risk-findings/`](plans/risk-findings/).
+
 ### Research
 
 Literature distillations and background surveys live in

@@ -73,14 +73,30 @@ dispatch; `deffect` operations; private functions; macro-generated definitions
 (which must carry their expansion origin, not a fabricated source span); and
 determinism. One end-to-end CLI test asserting schema validity.
 
-## Risks
+## Risks — the macro risk was investigated and is not real
 
-Macro-generated definitions are the trap. They have no honest source text, and
-emitting the expansion as if it were authored source would poison a retrieval
-corpus with text no human or model ever wrote. Decide explicitly: either omit
-them, or include them flagged with their `OriginId` chain. Recommend flagging
-rather than omitting, since a consumer can filter but cannot recover what was
-dropped.
+The plan flagged macro-generated definitions as the trap, on the reasoning that
+they have no honest source text and would poison a retrieval corpus. Verified
+(`risk-findings/250-macro-definitions.md`): **`(macro` appears zero times in
+`.vib` files repo-wide**, and definition-generating macros are not merely
+absent but *unimplemented* — `typed_macro_expand.rs:197` explicitly refuses
+`@definition-syntax` and `@module-syntax`.
+
+**Simplify accordingly.** Drop the provenance subsystem the plan implied. Keep
+a few-line `generated: true` guard on the `Expansion` origin variants, so the
+field exists when definition macros eventually land and no retrieval corpus is
+silently poisoned in the meantime. Origin tracking already exists and is
+queryable (`Origin` enum, `surface.rs:55-102`, stamped by
+`annotate_generated_expr` at `:2331`, consumed via `typed_body.rs:46`
+`node_origins`).
+
+**Note for whoever writes the code:** `docs/decisions/s-expression-language.md:590-603`
+specifies an `OriginId`-keyed arena. **The code has neither** — it uses
+`Arc<Origin>` chains. A plan written against the document's field list will not
+compile. This is more #256 material.
+
+The remaining risk is unchanged and unglamorous: determinism. An index that
+churns produces spurious diffs and defeats caching.
 
 ## Definition of done
 

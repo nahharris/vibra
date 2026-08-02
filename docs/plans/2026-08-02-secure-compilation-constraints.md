@@ -72,13 +72,40 @@ Rust tests: ABI signature rejection for a reference-carrying entry;
 pass-ordering invariant; and a documentation test asserting no contract claims
 attack prevention.
 
-## Risks
+## The audit has been run — verdict: MIXED
 
-The audit may find an existing violation — most plausibly in the typed runtime
-plugin or static Wasm FFI surface, where dependency-provided modules interact
-with host memory. If so, resolve it as part of this issue rather than
-documenting a permanent exception, because a single grandfathered pointer-
-crossing makes every future isolation claim false.
+See `risk-findings/252-abi-audit.md`.
+
+**`vibra_v1` is already scalars-only, and more strictly than the plan assumed.**
+`str`, `bytes`, `array`, and `record` in `schemas/host-abi.json` are *not*
+pointers — they name host-side arena slot shapes. All 15 imports are i32-only
+(`src/wasm_backend.rs:173-222`), the guest module declares **no memory
+section**, and handles are opaque monotonic u64 indices into a host-owned
+`FileTable` (`src/lower.rs:122-126`, `src/execute.rs:138-149`). Phase 2 of this
+plan closes as already satisfied.
+
+**Violation 1 — static Wasm FFI (real, recommend a documented exception).**
+It passes `(pointer, length)` into a shared linear memory
+(`src/wasm_backend.rs:673-712`, `docs/reference/static-wasm-ffi.md:46-59`,
+`src/project.rs:857-873`). Mitigating factors: a fresh Store/Memory/Instance
+per call, and the pointer crosses host→foreign-module, not guest→host. The plan
+said to fix rather than grandfather any violation; that guidance was written
+without knowing the shape of this one. **Documenting it with its mitigations is
+the right call here** — the isolation claim can be stated precisely as covering
+the guest→host boundary, which is the boundary that carries untrusted code.
+
+**Violation 2 — cheap and genuinely dangerous. Fix in this issue.**
+`docs/reference/wasm-abi.md:32-37` declares `src/wasm_abi.rs`'s pointer/length
+layouts **normative**, yet that module is dead code (referenced only from
+`src/lib.rs:36` and two tests). A normative document describing a
+pointer-passing ABI that nothing implements is exactly the drift that makes a
+future isolation claim false.
+
+**Latent hole to tighten with the phase-3 test.** `A::Any => true`
+(`src/lower.rs:3649`) accepts `Mutable`/`Reference` (`Rc<RefCell>`). Not
+reachable from surface syntax today — auto-deref blocks it, probed and
+confirmed — but it is precisely what the ABI test should pin shut. Runtime
+plugins are clean (`src/plugin.rs:54-60`, `:93`, `:108-116`).
 
 ## Definition of done
 

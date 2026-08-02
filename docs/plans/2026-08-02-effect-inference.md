@@ -52,13 +52,42 @@ callers to the maximum. Effect sets as type-level values fix it and belong with
 #151. Recording the limitation prevents this issue from being reopened as a
 bug.
 
+## Pre-implementation findings (verified)
+
+See `risk-findings/249-typed-path.md`. Three corrections:
+
+**Good news — this issue is path-neutral and buildable today.**
+`src/effect_semantics.rs` is an IR-level pass that already runs on *both* the
+legacy and typed paths (`src/lower.rs:1984`, `src/typed_body.rs:381`), so
+unlike #247 and #248 there is no lowering-path bet to make and no cutover
+rework. **Interface dispatch needs zero new work** — it is statically collapsed
+to a concrete callee key before inference runs (`src/lower.rs:6314-6353`,
+`src/typed_body.rs:2680-2784`), and generic dispatch is rejected outright via
+`E-DISPATCH-001`. The plan's stated interface-dispatch risk does not exist.
+
+**The soundness argument this issue must replace.** The plan assumed a call
+graph exists because the effects report shows call edges. It does not: there is
+**no call graph and no fixpoint**. Callees contribute their *declared* rows, by
+deliberate design (`src/effect_semantics.rs:4-8`, `:165-178`) — which is sound
+precisely *because* every function declares. **Removing declarations from
+private functions destroys that argument**, so the call graph and fixpoint are
+not an implementation detail of this issue, they are its load-bearing core.
+Scope accordingly.
+
+**Two pieces of missing infrastructure.** There is no warnings sink on the
+effect path, so "over-declaration warns" needs one built. And `FunctionSig` has
+no visibility field — the legacy path infers visibility from the `-` name
+prefix — so the boundary/private gate differs between paths and needs
+deciding, not assuming.
+
 ## Phases
 
-1. **Inference pass** over the module call graph in `src/effect_semantics.rs`
-   (251 lines today — the machinery for call edges already exists in the
-   `vibra effects` report). Compute least fixed point; the graph is finite and
-   effects form a simple join semilattice, so termination is trivial, but
-   recursion must be handled by iterating to a fixpoint rather than recursing.
+1. **Build the call graph and fixpoint** in `src/effect_semantics.rs` (251
+   lines today). Effects form a join semilattice over a finite graph, so
+   termination is trivial, but recursion must iterate to a fixpoint rather than
+   recursing. Root subsumption is two separate changes: bare-root parsing at
+   `src/lower.rs:2046` and a subsumption predicate at
+   `src/effect_semantics.rs:63`.
 2. **Checking**: declared ⊇ inferred at every boundary, with the asymmetric
    severity above.
 3. **Root subsumption** in declaration parsing only.

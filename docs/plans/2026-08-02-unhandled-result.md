@@ -27,17 +27,35 @@ receives S-expression input through the temporary `src/surface_adapter.rs`
 bridge, while `src/typed_body.rs` (5.4k lines) is the intended future path with
 acknowledged lower coverage.
 
-**Decision: implement against the typed path, and gate this issue on the typed
-path being able to answer "what is the type of this expression in statement
-position" for the corpus.** Implementing in `lower.rs` means writing a new
-check into a module explicitly slated for deletion, and then writing it a
-second time. If the typed path cannot yet answer the question, that is the real
-blocker and should be surfaced as such rather than worked around — a temporary
-implementation in `lower.rs` would be the third pillar the adapter amendment
-explicitly warns against.
+**Investigated — see `risk-findings/247-typed-path.md`. The plan's proposed
+decision was wrong, and there is a way to avoid the bet entirely.**
 
-This constraint applies to #248 and #249 as well, and is the strongest argument
-for prioritizing adapter retirement.
+The typed path is **dead code from every CLI entry point**. All source
+compilation goes `load::load_legacy_yaml_program` → `lower::lower_program`
+(`src/main.rs:574`, `:586`, `:953`; `src/test_runner.rs:390`;
+`src/package.rs:73`, `:161`) via `surface_adapter` (`src/load.rs:275`, `:297`).
+`src/typed_program.rs:11-16` states outright that no CLI path calls it. Gating
+this issue on typed-path readiness would gate it indefinitely: measured
+`materialized-valid` is **6/22** on this branch, and the typed subset still
+rejects enums, generics, `match`, and casts outright
+(`src/typed_body.rs:580`, `:305`, `:920`, `:834`, `:1358`).
+
+*(Aside worth its own fix: the README claims 19/57 and 57/58. Those numbers are
+stale — #256 material.)*
+
+**Revised decision: implement as a shared `body_semantics` IR pass**, invoked
+from both `src/lower.rs:2883` and `src/typed_body.rs:378`. This sidesteps the
+dilemma — the check lives in neither lowering path, so retiring the legacy one
+costs no rework. `src/body_semantics.rs` already hosts exactly this kind of
+shared control-flow validation.
+
+**The type query is cheap.** Neither path retains per-node expression types —
+they are computed, compared, and discarded — but that does not matter here: at
+statement position the type is a single signature lookup
+(`src/lower.rs:5878`, `src/typed_body.rs:640`).
+
+So no blocker, no rework, and adapter retirement is *not* a prerequisite for
+this issue.
 
 ## Design decisions
 

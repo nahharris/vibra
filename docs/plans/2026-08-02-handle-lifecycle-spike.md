@@ -38,10 +38,38 @@ capturing types alone cannot, since they only express "may refer to") is worth
 carrying, but building the type theory to exploit it is a research project, not
 a roadmap item.
 
-**Take the cheap approximation: in-danger propagation.** Montenegro, Peña and
-Segura statically taint everything sharing structure with a destroyed value.
-This gives borrow-checker-like safety without linearity and without new type
-theory.
+**The spike has been run. Result: NO-GO on in-danger propagation.** See
+`risk-findings/255-handle-reachability.md`. The plan proposed Montenegro, Peña
+and Segura's in-danger propagation — statically tainting everything sharing
+structure with a destroyed value — on the hypothesis that Vibra's value
+semantics and unforgeable nominal endpoints would keep the sharing analysis
+small. **That hypothesis is inverted, on three counts:**
+
+1. **All seven aggregate positions admit handles**, verified by compiled probes
+   rather than inference. The compiler's own
+   `contains_host_backed_newtype` (`src/lower.rs:3683-3718`) enumerates 15 type
+   constructors — every aggregate in the language.
+2. **`HostHandle` is `Copy`.** Copies create independent, equal-authority
+   values with no reference to chase. That is *worse* for a sharing analysis
+   than reference semantics, not better, which is the opposite of what the plan
+   assumed.
+3. **The payoff is smaller than assumed.** Handle IDs are monotonic and never
+   recycled (`src/execute.rs:300-309`), so use-after-close is already a precise
+   typed runtime error and never a confused deputy. A write through a closed
+   record alias was confirmed to fail cleanly at runtime.
+
+The real blocker is **copyability plus the unrestricted `any` bound**, not the
+aggregate constructors. That is worth carrying forward: it means no
+sharing-based analysis gets cheaper until one of those two changes.
+
+**Adopt instead**, at a fraction of the cost:
+
+- **A local same-binding lint** — close followed by use of *the same binding*,
+  no aliasing, no interprocedural reasoning, no false positives.
+- **Promote the existing runtime guarantee into the contract.** Non-recycled
+  IDs already make use-after-close deterministic and precise;
+  `docs/decisions/effect-system.md:112` should say so, since an undocumented
+  guarantee is one a future change can silently remove.
 
 **Scope strictly to host-backed endpoints.** Not general ownership, borrowing,
 or lifetimes for ordinary values. Endpoints are unforgeable nominal newtypes
