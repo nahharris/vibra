@@ -815,19 +815,18 @@ fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
-        r#"(defn
-  foreign-sum
-  (left int32 right int32)
-  int32
-  (do (wasm "@math" "sum" left right))
-)
-(defn
-  foreign-assert
-  (value int32)
-  void
-  (do (wasm "@math" "assert_42" value))
-)
-(defn main () void (do (let answer (foreign-sum 20 22)) (foreign-assert answer)))
+        r#"(deffect ffi
+  (defn
+    foreign-sum
+    (left int32 right int32)
+    int32
+    (do (wasm "@math" "sum" left right)))
+  (defn
+    foreign-assert
+    (value int32)
+    void
+    (do (wasm "@math" "assert_42" value))))
+(defn main () void (do (let answer (ffi.foreign-sum 20 22)) (ffi.foreign-assert answer)) effects: (main.ffi))
 "#,
     )
     .unwrap();
@@ -961,23 +960,23 @@ fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
     ).unwrap();
     std::fs::write(
         project.join("src/main.vibra"),
-        r#"(defn
-  foreign-status
-  (text str)
-  int32
-  (do (wasm "@text-ffi" "utf8_status" text))
-)
-(defn
-  foreign-assert
-  (status int32)
-  void
-  (do (wasm "@text-ffi" "assert_89" status))
-)
+        r#"(deffect ffi
+  (defn
+    foreign-status
+    (text str)
+    int32
+    (do (wasm "@text-ffi" "utf8_status" text)))
+  (defn
+    foreign-assert
+    (status int32)
+    void
+    (do (wasm "@text-ffi" "assert_89" status))))
 (defn
   main
   ()
   void
-  (do (let status (foreign-status "Vï")) (foreign-assert status))
+  (do (let status (ffi.foreign-status "Vï")) (ffi.foreign-assert status))
+  effects: (main.ffi)
 )
 "#,
     )

@@ -130,7 +130,6 @@ pub(crate) fn load_surface_program_multi_root(
     }
     let embedded_files = expand_compile_time_data(&mut modules)?;
     validate_unique_symbols(&modules)?;
-    validate_native_effect_rows(&modules)?;
     validate_direct_import_aliases(&modules)?;
     let module_parts = modules
         .iter()
@@ -1241,128 +1240,6 @@ fn validate_unique_symbols(modules: &BTreeMap<PathBuf, SourceModule>) -> Result<
     Ok(())
 }
 
-/// Native modules use nominal `module.root` labels exclusively. Keep the
-/// structural `(effect @domain @action)` spelling available to legacy modules
-/// during the staged stdlib migration, but fail closed as soon as a module
-/// opts into `deffect` declarations.
-fn validate_native_effect_rows(modules: &BTreeMap<PathBuf, SourceModule>) -> Result<()> {
-    for module in modules.values() {
-        if !module
-            .forms()
-            .any(|form| matches!(form, TopLevel::Deffect(_)))
-        {
-            continue;
-        }
-        for form in module.forms() {
-            let offending = match form {
-                TopLevel::Definition(definition) => {
-                    type_contains_structural_effect(&definition.body)
-                        || annotations_contain_structural_effect(&definition.annotations)
-                }
-                TopLevel::Constant(constant) => {
-                    type_contains_structural_effect(&constant.ty)
-                        || annotations_contain_structural_effect(&constant.annotations)
-                }
-                TopLevel::Function(function) => function_contains_structural_effect(function),
-                TopLevel::Deffect(deffect) => deffect
-                    .operations
-                    .iter()
-                    .any(|operation| function_contains_structural_effect(&operation.function)),
-                TopLevel::Test(_)
-                | TopLevel::TestScenario(_)
-                | TopLevel::Import(_)
-                | TopLevel::Macro(_) => false,
-            };
-            if offending {
-                bail!(
-                    "E-EFFECT-008: structural `(effect @domain @action)` syntax is removed from native module {}",
-                    module.path.display()
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-fn function_contains_structural_effect(function: &ast::Function) -> bool {
-    function
-        .parameters
-        .iter()
-        .any(|parameter| type_contains_structural_effect(&parameter.ty))
-        || type_contains_structural_effect(&function.return_type)
-        || annotations_contain_structural_effect(&function.annotations)
-}
-
-fn annotations_contain_structural_effect(annotations: &[ast::Annotation]) -> bool {
-    annotations
-        .iter()
-        .any(|annotation| match &annotation.value {
-            AnnotationKind::Effects(row) => row.labels.iter().any(type_contains_structural_effect),
-            AnnotationKind::Where(parameters) => parameters
-                .iter()
-                .flat_map(|parameter| parameter.bounds.iter())
-                .any(type_contains_structural_effect),
-            AnnotationKind::Definitions(functions) => {
-                functions.iter().any(function_contains_structural_effect)
-            }
-            AnnotationKind::Implementation { interface, items } => {
-                type_contains_structural_effect(interface)
-                    || items.iter().any(|item| match item {
-                        ImplItem::Types(types) => types.iter().any(type_contains_structural_effect),
-                        ImplItem::Method {
-                            binding: MethodBinding::Function(function),
-                            ..
-                        } => function_contains_structural_effect(function),
-                        ImplItem::Method {
-                            binding: MethodBinding::Reference(_),
-                            ..
-                        } => false,
-                    })
-            }
-            AnnotationKind::Doc(_) => false,
-        })
-}
-
-fn type_contains_structural_effect(ty: &TypeExpr) -> bool {
-    match &ty.value {
-        TypeExprKind::Effect { .. } => true,
-        TypeExprKind::Application { arguments, .. }
-        | TypeExprKind::Tuple(arguments)
-        | TypeExprKind::Union(arguments)
-        | TypeExprKind::Intersect(arguments) => {
-            arguments.iter().any(type_contains_structural_effect)
-        }
-        TypeExprKind::Record(members)
-        | TypeExprKind::Enum(members)
-        | TypeExprKind::Interface(members) => members
-            .iter()
-            .any(|member| type_contains_structural_effect(&member.ty)),
-        TypeExprKind::Array(inner)
-        | TypeExprKind::Newtype(inner)
-        | TypeExprKind::Mutable(inner)
-        | TypeExprKind::Reference(inner)
-        | TypeExprKind::MutableReference(inner) => type_contains_structural_effect(inner),
-        TypeExprKind::Map(key, value) => {
-            type_contains_structural_effect(key) || type_contains_structural_effect(value)
-        }
-        TypeExprKind::Function {
-            parameters,
-            result,
-            effects,
-        } => {
-            parameters
-                .iter()
-                .any(|parameter| type_contains_structural_effect(&parameter.ty))
-                || type_contains_structural_effect(result)
-                || effects.labels.iter().any(type_contains_structural_effect)
-        }
-        TypeExprKind::Named(_)
-        | TypeExprKind::WasmValue(_)
-        | TypeExprKind::Handle(_)
-        | TypeExprKind::Literal(_) => false,
-    }
-}
-
 fn validate_direct_import_aliases(modules: &BTreeMap<PathBuf, SourceModule>) -> Result<()> {
     let known_import_aliases = modules
         .values()
@@ -1423,9 +1300,8 @@ fn validate_top_level_aliases(
                 visit_type(&parameter.ty, &mut validate_name)?;
             }
             visit_type(&function.return_type, &mut validate_name)?;
-            // A named `effects:` label is an ordinary cross-module reference and must
-            // obey the same direct-import rule (`E-MOD-004`) as any other type name.
-            // Inline `(effect @d @a)` labels name no alias and pass through.
+            // A nominal `effects:` label is an ordinary cross-module reference and
+            // must obey the same direct-import rule (`E-MOD-004`) as any other name.
             for annotation in &function.annotations {
                 if let AnnotationKind::Effects(row) = &annotation.value {
                     for label in &row.labels {
@@ -1546,8 +1422,7 @@ fn visit_type(ty: &TypeExpr, visitor: &mut impl FnMut(&str) -> Result<()>) -> Re
             Ok(())
         }
         TypeExprKind::WasmValue(domain) => visitor(&domain.value),
-        // Effect operands are atoms, so an effect names no module alias to validate.
-        TypeExprKind::Effect { .. } | TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => Ok(()),
+        TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => Ok(()),
     }
 }
 
@@ -1598,6 +1473,14 @@ fn validate_reference_alias(
     let Some((alias, _)) = reference.split_once('.') else {
         return Ok(());
     };
+    // Nominal effect roots are compiler-owned names, not module import aliases.
+    // They remain canonical when a source module happens to import another module
+    // under the same spelling (for example `stream.read` in `net`).
+    if let Some((domain, action)) = reference.split_once('.') {
+        if crate::intrinsics::is_known_root(domain, action) {
+            return Ok(());
+        }
+    }
     if direct.contains(alias)
         || local.contains(alias)
         || self_alias == Some(alias)

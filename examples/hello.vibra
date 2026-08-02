@@ -1,3 +1,9 @@
 (import io "../stdlib/src/io.vibra")
-(import effects "../stdlib/src/effects.vibra")
-(defn main () void (io.println "Hello, World!") effects: (effects.io-write))
+(import stream "../stdlib/src/stream.vibra")
+(defn
+  main
+  ()
+  void
+  (io.stdout.println "Hello, World!")
+  effects: (io.stdout stream.write)
+)

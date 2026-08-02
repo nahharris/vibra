@@ -7,15 +7,15 @@
   "info-returns-system-information"
   (test.case
     "info-returns-system-information"
-    (let info (sys.info))
+    (let info (sys.info.get))
     (let info-has-the-declared-type (accepts-info info))
     (test.assert info-has-the-declared-type)
-    (let args (sys.args))
+    (let args (sys.info.args))
     (let args-have-the-declared-type (accepts-args args))
     (test.assert args-have-the-declared-type)
-    (let temp-dir (sys.temp-dir))
+    (let temp-dir (sys.info.temp-dir))
     (test.assert-eq-str temp-dir temp-dir)
-    (let cwd (sys.current-dir))
+    (let cwd (sys.info.current-dir))
     (match
       cwd
       (result.result.ok _)

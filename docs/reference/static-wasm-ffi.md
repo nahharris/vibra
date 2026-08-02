@@ -13,18 +13,19 @@ the artifact is resolved inside the synced `dep/<alias>` tree. Absolute paths
 and traversal are rejected. The dependency alias is the stable module name:
 
 ```vibra
-(defn
-  foreign-sum
-  (left int32 right int32)
-  int32
-  (wasm "@math" "sum" left right)
-)
+(deffect ffi
+  (defn
+    foreign-sum
+    (left int32 right int32)
+    int32
+    (wasm "@math" "sum" left right)
+    effects: ()))
 ```
 
-The visible `wasm` form is the explicit unsafe boundary and may appear wherever
-its result type is valid. The wrapper owns conversion of integer status
-codes into typed Vibra `result` values; v1 performs no automatic foreign error
-translation.
+The visible `wasm` form is the explicit unsafe boundary and is restricted to
+operations inside a nominal `deffect`. The wrapper owns conversion of integer
+status codes into typed Vibra `result` values; v1 performs no automatic foreign
+error translation.
 
 ## ABI
 

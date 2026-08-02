@@ -1,8 +1,8 @@
 //! The versioned host ABI registry: the single source of truth for every host
-//! import a `$wasm` body may target.
+//! import a native `deffect` operation may target.
 //!
 //! Each entry declares the import's parameter shape. Lowering validates every
-//! `$wasm` body against this registry (`E-WASM-002`, `E-WASM-003`) and the
+//! raw `wasm` body against this registry (`E-WASM-002`, `E-WASM-003`) and the
 //! runtime dispatches strictly on `(module, name)`.
 //!
 //! The registry is exported as a machine-readable document in
@@ -117,7 +117,7 @@ const WRITE_HANDLE: ValueKind = ValueKind::WriteHandle;
 const PROCESS_HANDLE: ValueKind = ValueKind::ProcessHandle;
 const ANY_HANDLE: ValueKind = ValueKind::AnyHandle;
 
-/// The complete host ABI: every import a `$wasm` body may bind.
+/// The complete host ABI: every built-in import a native operation may bind.
 pub const HOST_ABI: &[HostImport] = &[
     // vibra_v1: standard streams and handle IO.
     entry("vibra_v1", "stdin_open", &[], ValueKind::ReadHandle),
@@ -360,24 +360,6 @@ pub const HOST_ABI: &[HostImport] = &[
         &[PATH],
         ValueKind::ResultReadHandle,
     ),
-    entry(
-        "vibra_v1",
-        "fs_read_to_string",
-        &[PATH],
-        ValueKind::ResultStr,
-    ),
-    entry(
-        "vibra_v1",
-        "fs_write_string_all",
-        &[PATH, STR],
-        ValueKind::ResultVoid,
-    ),
-    entry(
-        "vibra_v1",
-        "fs_append_string",
-        &[PATH, STR],
-        ValueKind::ResultVoid,
-    ),
     entry("vibra_v1", "fs_exists", &[PATH], ValueKind::Bool),
     entry(
         "vibra_v1",
@@ -387,13 +369,6 @@ pub const HOST_ABI: &[HostImport] = &[
     ),
     entry("vibra_v1", "fs_remove_file", &[PATH], ValueKind::ResultVoid),
     entry("vibra_v1", "fs_remove_dir", &[PATH], ValueKind::ResultVoid),
-    entry("vibra_v1", "fs_read_dir", &[PATH], ValueKind::ResultPaths),
-    entry(
-        "vibra_v1",
-        "fs_read_dir_entries",
-        &[PATH],
-        ValueKind::ResultAny,
-    ),
     entry("vibra_v1", "fs_metadata", &[PATH], ValueKind::ResultStr),
     entry(
         "vibra_v1",
@@ -407,7 +382,6 @@ pub const HOST_ABI: &[HostImport] = &[
         &[PATH, PATH],
         ValueKind::ResultVoid,
     ),
-    entry("vibra_v1", "fs_copy", &[PATH, PATH], ValueKind::ResultVoid),
     // vibra_v1: environment, network, process, clock, randomness, system.
     entry("vibra_v1", "env_get", &[STR], ValueKind::ResultStr),
     entry("vibra_v1", "env_set", &[STR, STR], ValueKind::ResultVoid),
@@ -478,12 +452,6 @@ pub const HOST_ABI: &[HostImport] = &[
         "vibra_v1",
         "net_udp_recv_from",
         &[UDP_SOCKET, U64],
-        ValueKind::ResultAny,
-    ),
-    entry(
-        "vibra_v1",
-        "process_run",
-        &[ValueKind::Record],
         ValueKind::ResultAny,
     ),
     entry(
@@ -592,12 +560,12 @@ const fn entry(
     }
 }
 
-/// One effect, as its structural `(domain, action)` identity.
+/// One nominal effect root, represented as `(module, root)`.
 pub type Effect = (&'static str, &'static str);
 
 /// The effects each host import performs.
 ///
-/// This is the ground truth a `(wasm ...)` body is checked against, so a user module
+/// This is the ground truth a `(wasm ...)` body is checked against, so a native operation
 /// cannot launder an effect by declaring `effects: ()` on a raw host import. The
 /// registry declares these in good faith: the compiler treats the pairs as opaque
 /// data and holds no opinion about what any particular effect means.
@@ -612,20 +580,15 @@ pub type Effect = (&'static str, &'static str);
 /// rather than `@clock @now`, `@sys @info` rather than `@system @info`.
 ///
 /// The split between `fs` and `io` is by *what* is addressed, not by direction:
-/// `fs.*` covers the filesystem namespace (opening, removing, renaming, metadata,
-/// whole-file convenience calls) while `io.*` covers stream reads and writes on an
-/// already-open handle, whichever kind it is.
+/// `fs.*` covers the filesystem namespace (opening, removing, renaming, and
+/// metadata) while `stream.*` covers reads, writes, and lifecycle operations on
+/// an already-open handle, whichever kind it is.
 const HOST_EFFECTS: &[(&str, &str, &[Effect])] = &[
     // Filesystem namespace.
     ("vibra_v1", "fs_open_read", &[("fs", "read")]),
-    ("vibra_v1", "fs_read_to_string", &[("fs", "read")]),
-    ("vibra_v1", "fs_read_dir", &[("fs", "read")]),
-    ("vibra_v1", "fs_read_dir_entries", &[("fs", "read")]),
     ("vibra_v1", "fs_open_write", &[("fs", "write")]),
     ("vibra_v1", "fs_open_write_options", &[("fs", "write")]),
     ("vibra_v1", "fs_open_append", &[("fs", "write")]),
-    ("vibra_v1", "fs_write_string_all", &[("fs", "write")]),
-    ("vibra_v1", "fs_append_string", &[("fs", "write")]),
     ("vibra_v1", "fs_create_dir_all", &[("fs", "write")]),
     ("vibra_v1", "fs_remove_file", &[("fs", "write")]),
     ("vibra_v1", "fs_remove_dir", &[("fs", "write")]),
@@ -635,47 +598,41 @@ const HOST_EFFECTS: &[(&str, &str, &[Effect])] = &[
         "fs_open_read_write",
         &[("fs", "read"), ("fs", "write")],
     ),
-    ("vibra_v1", "fs_copy", &[("fs", "read"), ("fs", "write")]),
     ("vibra_v1", "fs_metadata", &[("fs", "metadata")]),
     ("vibra_v1", "fs_exists", &[("fs", "metadata")]),
     ("vibra_v1", "fs_canonicalize", &[("fs", "metadata")]),
     // Stream reads and writes on an open handle of any kind.
-    ("vibra_v1", "fd_read", &[("io", "read")]),
-    ("vibra_v1", "fd_read_line", &[("io", "read")]),
-    ("vibra_v1", "fd_read_bytes", &[("io", "read")]),
-    ("vibra_v1", "fd_read_bytes_up_to", &[("io", "read")]),
-    ("vibra_v1", "fd_write", &[("io", "write")]),
-    ("vibra_v1", "fd_write_bytes", &[("io", "write")]),
-    ("vibra_v1", "fd_write_bytes_some", &[("io", "write")]),
-    ("vibra_v1", "fd_sync", &[("io", "write")]),
-    ("vibra_v1", "fd_close", &[("io", "write")]),
-    ("vibra_v1", "stdin_open", &[("io", "read")]),
-    ("vibra_v1", "stdout_open", &[("io", "write")]),
-    ("vibra_v1", "stderr_open", &[("io", "write")]),
+    ("vibra_v1", "fd_read", &[("stream", "read")]),
+    ("vibra_v1", "fd_read_line", &[("stream", "read")]),
+    ("vibra_v1", "fd_read_bytes", &[("stream", "read")]),
+    ("vibra_v1", "fd_read_bytes_up_to", &[("stream", "read")]),
+    ("vibra_v1", "fd_write", &[("stream", "write")]),
+    ("vibra_v1", "fd_write_bytes", &[("stream", "write")]),
+    ("vibra_v1", "fd_write_bytes_some", &[("stream", "write")]),
+    ("vibra_v1", "fd_sync", &[("stream", "manage")]),
+    ("vibra_v1", "fd_close", &[("stream", "manage")]),
+    ("vibra_v1", "stdin_open", &[("io", "stdin")]),
+    ("vibra_v1", "stdout_open", &[("io", "stdout")]),
+    ("vibra_v1", "stderr_open", &[("io", "stderr")]),
     // Network. `net_address_parse` is pure string work; `net_local_address` and
     // `net_set_deadline` only inspect or configure a socket already held.
     ("vibra_v1", "net_connect", &[("net", "connect")]),
     ("vibra_v1", "net_udp_connect", &[("net", "connect")]),
     ("vibra_v1", "net_resolve", &[("net", "connect")]),
-    ("vibra_v1", "net_listen", &[("net", "listen")]),
-    ("vibra_v1", "net_accept", &[("net", "listen")]),
-    ("vibra_v1", "net_udp_bind", &[("net", "listen")]),
-    ("vibra_v1", "net_udp_send_to", &[("net", "send")]),
-    ("vibra_v1", "net_shutdown", &[("net", "send")]),
-    ("vibra_v1", "net_udp_recv_from", &[("net", "receive")]),
-    // Processes. `process_run` both creates and awaits. Killing is its own effect
-    // rather than a flavour of waiting: waiting observes a child, killing terminates
-    // it, and a program may legitimately be allowed to do the former without the
-    // latter. The `process_child_std*` accessors only return handles, and reads or
+    ("vibra_v1", "net_listen", &[("net", "bind")]),
+    ("vibra_v1", "net_accept", &[("net", "bind")]),
+    ("vibra_v1", "net_udp_bind", &[("net", "bind")]),
+    ("vibra_v1", "net_udp_send_to", &[("stream", "write")]),
+    ("vibra_v1", "net_shutdown", &[("stream", "manage")]),
+    ("vibra_v1", "net_udp_recv_from", &[("stream", "read")]),
+    // Processes. Killing is its own effect rather than a flavour of waiting:
+    // waiting observes a child, killing terminates it, and a program may
+    // legitimately be allowed to do the former without the latter. The
+    // `process_child_std*` accessors only return handles, and reads or
     // writes through them are `io.*`.
     ("vibra_v1", "process_spawn", &[("process", "spawn")]),
-    (
-        "vibra_v1",
-        "process_run",
-        &[("process", "spawn"), ("process", "wait")],
-    ),
     ("vibra_v1", "process_wait", &[("process", "wait")]),
-    ("vibra_v1", "process_kill", &[("process", "kill")]),
+    ("vibra_v1", "process_kill", &[("process", "signal")]),
     // Environment.
     ("vibra_v1", "env_get", &[("env", "read")]),
     ("vibra_v1", "env_list", &[("env", "read")]),
@@ -762,7 +719,7 @@ pub fn schema_document() -> serde_json::Value {
         .collect();
     serde_json::json!({
         "$id": "https://vibra-lang.org/schemas/host-abi.json",
-        "description": "Versioned Vibra host ABI registry: every host import a `$wasm` body may bind",
+        "description": "Versioned Vibra host ABI registry: every built-in import a native operation may bind",
         "imports": imports,
     })
 }
@@ -816,9 +773,9 @@ mod tests {
             lookup("vibra_v1", "fs_open_read").unwrap().effects(),
             &[("fs", "read")]
         );
-        assert_eq!(
-            lookup("vibra_v1", "fs_copy").unwrap().effects(),
-            &[("fs", "read"), ("fs", "write")]
+        assert!(
+            lookup("vibra_v1", "fs_copy").is_none(),
+            "composite filesystem copy is implemented in Vibra"
         );
         for pure in [
             "path_join",
@@ -864,8 +821,7 @@ mod tests {
         let rename = lookup("vibra_v1", "fs_rename").unwrap();
         assert_eq!(rename.params, &[PATH, PATH]);
 
-        let copy = lookup("vibra_v1", "fs_copy").unwrap();
-        assert_eq!(copy.params, &[PATH, PATH]);
+        assert!(lookup("vibra_v1", "fs_copy").is_none());
 
         let monotonic = lookup("vibra_v1", "clock_monotonic_millis").unwrap();
         assert_eq!(monotonic.result, ValueKind::Instant);

@@ -6,7 +6,7 @@
   "get-reads-an-explicitly-granted-variable"
   (test.case
     "get-reads-an-explicitly-granted-variable"
-    (let value (env.get "PATH"))
+    (let value (env.read.get "PATH"))
     (match
       value
       (result.result.ok _)
@@ -14,7 +14,7 @@
       (result.result.err _)
       (do (test.fail "granted environment variable was not readable"))
     )
-    (let names (env.list))
+    (let names (env.read.list))
     (let names-have-the-declared-type (accepts-names names))
     (test.assert names-have-the-declared-type)
     profile: @env
@@ -25,8 +25,8 @@
   "set-and-remove-use-the-exact-write-grant"
   (test.case
     "set-and-remove-use-the-exact-write-grant"
-    (let set-result (env.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present"))
-    (let remove-result (env.remove "VIBRA_STDLIB_ENV_REMOVE_TEST"))
+    (let set-result (env.write.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present"))
+    (let remove-result (env.write.remove "VIBRA_STDLIB_ENV_REMOVE_TEST"))
     (match
       remove-result
       (result.result.ok)
@@ -34,7 +34,7 @@
       _
       (do (test.fail "environment removal returned an error"))
     )
-    (let after-remove (env.get "VIBRA_STDLIB_ENV_REMOVE_TEST"))
+    (let after-remove (env.read.get "VIBRA_STDLIB_ENV_REMOVE_TEST"))
     (match
       after-remove
       (result.result.err _)

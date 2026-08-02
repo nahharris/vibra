@@ -1,18 +1,18 @@
 (import io "../stdlib/src/io.vibra")
 (import result "../stdlib/src/result.vibra")
-(import effects "../stdlib/src/effects.vibra")
+(import stream "../stdlib/src/stream.vibra")
 (defn
   main
   ()
   void
-  (io.print "What is your name? ")
-  (let name-result (io.readln))
+  (io.stdout.print "What is your name? ")
+  (let name-result (io.stdin.readln))
   (match
     name-result
     (result.result.ok (bind name))
-    (do (io.println name))
+    (do (io.stdout.println name))
     (result.result.err (bind err))
-    (do (io.eprintln "failed to read stdin"))
+    (do (io.stderr.println "failed to read stdin"))
   )
-  effects: (effects.io-write effects.io-read)
+  effects: (io.stdout io.stdin io.stderr stream.write stream.read)
 )

@@ -367,7 +367,7 @@ fn rule_summary(code: &str) -> &'static str {
         "E-INTRINSIC-003" => "Unknown closed intrinsic",
         "E-INTRINSIC-004" => "Intrinsic argument arity mismatch",
         "E-INTRINSIC-005" => "Intrinsic argument type mismatch",
-        "E-EFFECT-008" => "Structural effect syntax is removed from native modules",
+        "E-EFFECT-008" => "Structural `(effect @domain @action)` syntax is removed",
         "E-WASM-008" => "Raw wasm is only valid in a deffect operation",
         "E-TY-001" => "Call argument type does not match the parameter type",
         "E-TY-002" => "Returned value type does not match the declared return type",

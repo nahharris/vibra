@@ -1,2 +1,11 @@
-(defn foreign-sum (left int32 right int32) int32 (wasm "@math" "sum" left right))
-(defn main () void (let answer (foreign-sum 20 22)))
+(deffect
+  ffi
+  (defn
+    foreign-sum
+    (left int32 right int32)
+    int32
+    (wasm "@math" "sum" left right)
+    effects: ()
+  )
+)
+(defn main () void (let answer (ffi.foreign-sum 20 22)) effects: (main.ffi))

@@ -259,6 +259,9 @@ pub(crate) fn unify_types(
         return true;
     }
     if let TypeRef::HostHandle(expected_access) = &expected {
+        if let TypeRef::HostHandle(actual_access) = &actual {
+            return host_access_widens(*actual_access, *expected_access);
+        }
         if let Some(inner) = newtype_inner(&actual, aliases) {
             if let TypeRef::HostHandle(actual_access) = inner {
                 return host_access_widens(*actual_access, *expected_access);
@@ -365,7 +368,14 @@ pub(crate) fn unify_types(
                 && left_effects == right_effects
         }
         (TypeRef::Named(left), TypeRef::Named(right)) => bare_name(left) == bare_name(right),
-        (TypeRef::Enum(left), TypeRef::Enum(right)) => left == right,
+        (TypeRef::Enum(left), TypeRef::Enum(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(name, ty)| {
+                    right
+                        .get(name)
+                        .is_some_and(|actual| unify_types(ty, actual, aliases, bindings))
+                })
+        }
         _ => false,
     }
 }
@@ -491,6 +501,7 @@ fn host_access_widens(
 ) -> bool {
     use crate::lower::HandleAccess;
     match (actual, expected) {
+        (_, HandleAccess::Any) => true,
         (
             HandleAccess::ReadWrite,
             HandleAccess::Read | HandleAccess::Write | HandleAccess::ReadWrite,

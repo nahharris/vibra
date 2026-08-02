@@ -27,8 +27,9 @@ definitions; calls are positional and labels configure enclosing forms.
 
 ```vibra
 (import io "../stdlib/src/io.vibra")
+(import stream "../stdlib/src/stream.vibra")
 
-(defn main () void (do (io.println "Hello, World!")))
+(defn main () void (do (io.stdout.println "Hello, World!")) effects: (io.stdout stream.write))
 ```
 
 Use `;` for reader comments. Persisted documentation belongs in a trailing
@@ -39,7 +40,8 @@ Use `;` for reader comments. Persisted documentation belongs in a trailing
   greet
   (name str)
   void
-  (do (io.println name))
+  (do (io.stdout.println name))
+  effects: (io.stdout stream.write)
   doc: "Write a name followed by a newline."
 )
 ```

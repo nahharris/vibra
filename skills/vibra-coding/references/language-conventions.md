@@ -42,7 +42,8 @@ Declare functions with explicit parameter and return types:
   greet
   (name str)
   void
-  (do (io.println name))
+  (do (io.stdout.println name))
+  effects: (io.stdout stream.write)
   doc: "Write a name followed by a newline."
 )
 ```

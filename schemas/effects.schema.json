@@ -2,15 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/effects-v3.schema.json",
   "title": "Vibra nominal effect surface",
-  "description": "Static nominal effect report. The v2 compatibility fields remain alongside the v3 surface split while consumers migrate.",
+  "description": "Static nominal effect report with explicit declared/performed surfaces, operation ownership, and primitive witnesses.",
   "type": "object",
-  "required": ["effects", "functions", "host-imports", "surface", "operations", "primitives"],
+  "required": ["surface", "functions", "operations", "primitives"],
   "properties": {
-    "effects": {
-      "description": "Compatibility alias for surface.declared.",
-      "type": "array",
-      "items": { "$ref": "#/$defs/effect" }
-    },
     "surface": {
       "type": "object",
       "required": ["declared", "performed"],
@@ -31,11 +26,6 @@
     "primitives": {
       "type": "array",
       "items": { "$ref": "#/$defs/primitive" }
-    },
-    "host-imports": {
-      "description": "Compatibility/detail view of primitive host transitions.",
-      "type": "array",
-      "items": { "$ref": "#/$defs/host-import" }
     }
   },
   "additionalProperties": false,
@@ -51,10 +41,9 @@
     },
     "function": {
       "type": "object",
-      "required": ["source", "effects", "declared", "performed", "call-edges", "primitive-witnesses"],
+      "required": ["source", "declared", "performed", "call-edges", "primitive-witnesses"],
       "properties": {
         "source": { "type": "string" },
-        "effects": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
         "declared": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
         "performed": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
         "call-edges": { "type": "array", "items": { "type": "string" } },
@@ -87,28 +76,6 @@
         "input-capabilities": { "type": "array", "items": { "type": "string" } },
         "result-capability": { "type": "string" },
         "required-roots": { "type": "array", "items": { "$ref": "#/$defs/effect" } }
-      },
-      "additionalProperties": false
-    },
-    "host-import": {
-      "type": "object",
-      "required": ["source", "module", "name", "params", "return", "effects", "intrinsic"],
-      "properties": {
-        "source": { "type": "string" },
-        "module": { "type": "string" },
-        "name": { "type": "string" },
-        "params": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["type"],
-            "properties": { "type": { "type": "string" } },
-            "additionalProperties": false
-          }
-        },
-        "return": { "type": "string" },
-        "effects": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
-        "intrinsic": { "type": "boolean" }
       },
       "additionalProperties": false
     }

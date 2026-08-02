@@ -709,21 +709,42 @@ fn validate_module_external_wasm(
     let module = crate::ast::lower_document_with_id(&document, document_id)
         .with_context(|| format!("validate typed source {}", path.display()))?;
     for form in &module.forms {
-        let crate::ast::TopLevel::Function(function) = form else {
-            continue;
-        };
-        if let Some((alias, import_name, params, results, requires_memory)) =
-            external_wasm_signature(function)?
-        {
-            validate_external_wasm_export(
-                project,
-                &function.name.value,
-                &alias,
-                &import_name,
-                &params,
-                &results,
-                requires_memory,
-            )?;
+        match form {
+            crate::ast::TopLevel::Function(function) => {
+                if let Some((alias, import_name, params, results, requires_memory)) =
+                    external_wasm_signature(function, &function.name.value)?
+                {
+                    validate_external_wasm_export(
+                        project,
+                        &function.name.value,
+                        &alias,
+                        &import_name,
+                        &params,
+                        &results,
+                        requires_memory,
+                    )?;
+                }
+            }
+            crate::ast::TopLevel::Deffect(deffect) => {
+                for operation in &deffect.operations {
+                    let symbol =
+                        format!("{}.{}", deffect.name.value, operation.function.name.value);
+                    if let Some((alias, import_name, params, results, requires_memory)) =
+                        external_wasm_signature(&operation.function, &symbol)?
+                    {
+                        validate_external_wasm_export(
+                            project,
+                            &symbol,
+                            &alias,
+                            &import_name,
+                            &params,
+                            &results,
+                            requires_memory,
+                        )?;
+                    }
+                }
+            }
+            _ => {}
         }
     }
     // Import recursion and path safety are validated by the normal import
@@ -747,6 +768,7 @@ fn validate_module_external_wasm(
 
 fn external_wasm_signature(
     function: &crate::ast::Function,
+    symbol: &str,
 ) -> Result<
     Option<(
         String,
@@ -756,7 +778,6 @@ fn external_wasm_signature(
         bool,
     )>,
 > {
-    let symbol = &function.name.value;
     if function.body.len() != 1 {
         return Ok(None);
     }
@@ -1397,7 +1418,7 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
     fs::create_dir_all(&src)?;
     fs::write(
         src.join("main.vibra"),
-        "(import io \"@std/io.vibra\")\n(import effects \"@std/effects.vibra\")\n(defn main () void (do (io.println \"Hello, World!\")) effects: (effects.io-write))\n",
+        "(import io \"@std/io.vibra\")\n(defn main () void (do (io.stdout.println \"Hello, World!\")) effects: (io.stdout stream.write))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
@@ -1426,7 +1447,7 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
     )?;
     fs::write(
         root.join("src").join(name).join("main.vibra"),
-        "(import io \"@std/io.vibra\")\n(import core \"@core/lib.vibra\")\n(import effects \"@std/effects.vibra\")\n(defn main () void (do (io.println core.message)) effects: (effects.io-write))\n",
+        "(import io \"@std/io.vibra\")\n(import core \"@core/lib.vibra\")\n(defn main () void (do (io.stdout.println core.message)) effects: (io.stdout stream.write))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
@@ -1737,7 +1758,7 @@ mod tests {
         temp
     }
 
-    const FFI_WRAPPER: &str = "(defn sum (left int32 right int32) int32\n  (do (wasm \"@math\" \"sum\" left right)))\n(defn main () void (do))\n";
+    const FFI_WRAPPER: &str = "(deffect ffi\n  (defn sum (left int32 right int32) int32\n    (do (wasm \"@math\" \"sum\" left right))))\n(defn main () void (do))\n";
 
     #[test]
     fn check_accepts_matching_static_wasm_export() {
@@ -1795,7 +1816,7 @@ mod tests {
 
     #[test]
     fn check_rejects_buffer_wrapper_without_ffi_memory_import() {
-        let wrapper = "(defn sum (text str) int32\n  (do (wasm \"@math\" \"sum\" text)))\n(defn main () void (do))\n";
+        let wrapper = "(deffect ffi\n  (defn sum (text str) int32\n    (do (wasm \"@math\" \"sum\" text))))\n(defn main () void (do))\n";
         let project = ffi_project(
             wrapper,
             Some(wasm_fixture(

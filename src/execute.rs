@@ -2764,34 +2764,6 @@ fn exec_vibra_v1(
                 },
             ))
         }
-        "fs_read_to_string" => {
-            let path = value_string(&args[0])?;
-            let p = PathBuf::from(&path);
-            Ok(fs_result(sig, || fs::read_to_string(p), RuntimeValue::Str))
-        }
-        "fs_write_string_all" => {
-            let path = value_string(&args[0])?;
-            let contents = value_string(&args[1])?;
-            let p = PathBuf::from(&path);
-            Ok(fs_result(
-                sig,
-                || fs::write(p, contents),
-                |_| RuntimeValue::Void,
-            ))
-        }
-        "fs_append_string" => {
-            let path = value_string(&args[0])?;
-            let contents = value_string(&args[1])?;
-            let p = PathBuf::from(&path);
-            Ok(fs_result(
-                sig,
-                || {
-                    let mut f = fs::OpenOptions::new().create(true).append(true).open(p)?;
-                    f.write_all(contents.as_bytes())
-                },
-                |_| RuntimeValue::Void,
-            ))
-        }
         "fs_exists" => {
             let path = value_string(&args[0])?;
             Ok(RuntimeValue::Bool(PathBuf::from(&path).exists()))
@@ -2823,59 +2795,6 @@ fn exec_vibra_v1(
                 |_| RuntimeValue::Void,
             ))
         }
-        "fs_read_dir" => {
-            let path = value_string(&args[0])?;
-            let p = PathBuf::from(&path);
-            Ok(fs_result(
-                sig,
-                || {
-                    let mut names = Vec::new();
-                    for entry in fs::read_dir(p)? {
-                        let entry = entry?;
-                        names.push(entry.file_name().to_string_lossy().to_string());
-                    }
-                    Ok(names)
-                },
-                |names| {
-                    RuntimeValue::Array(
-                        names.into_iter().map(RuntimeValue::Str).collect::<Vec<_>>(),
-                    )
-                },
-            ))
-        }
-        "fs_read_dir_entries" => {
-            let path = value_string(&args[0])?;
-            let logical_path = PathBuf::from(&path);
-            let p = logical_path.clone();
-            Ok(fs_result(
-                sig,
-                || {
-                    let mut entries = Vec::new();
-                    for entry in fs::read_dir(p)? {
-                        let entry = entry?;
-                        let metadata = entry.metadata()?;
-                        let name = entry.file_name();
-                        entries.push(RuntimeValue::Record(BTreeMap::from([
-                            (
-                                "path".to_string(),
-                                RuntimeValue::Str(logical_path.join(&name).display().to_string()),
-                            ),
-                            (
-                                "name".to_string(),
-                                RuntimeValue::Str(name.to_string_lossy().to_string()),
-                            ),
-                            ("is-dir".to_string(), RuntimeValue::Bool(metadata.is_dir())),
-                            (
-                                "size".to_string(),
-                                RuntimeValue::Int(metadata.len().try_into().unwrap_or(i64::MAX)),
-                            ),
-                        ])));
-                    }
-                    Ok(entries)
-                },
-                RuntimeValue::Array,
-            ))
-        }
         "fs_metadata" => {
             let path = value_string(&args[0])?;
             let p = PathBuf::from(&path);
@@ -2900,15 +2819,6 @@ fn exec_vibra_v1(
             Ok(fs_result(
                 sig,
                 || fs::rename(from, to),
-                |_| RuntimeValue::Void,
-            ))
-        }
-        "fs_copy" => {
-            let from = PathBuf::from(value_string(&args[0])?);
-            let to = PathBuf::from(value_string(&args[1])?);
-            Ok(fs_result(
-                sig,
-                || fs::copy(from, to),
                 |_| RuntimeValue::Void,
             ))
         }
@@ -3197,7 +3107,7 @@ fn exec_vibra_v1(
                 Err(error) => Ok(net_io_error(sig, error)),
             }
         }
-        "process_run" | "process_spawn" => {
+        "process_spawn" => {
             let RuntimeValue::Record(command) = untyped(&args[0]) else {
                 bail!("process command must be a record")
             };
@@ -3217,13 +3127,6 @@ fn exec_vibra_v1(
             let RuntimeValue::Enum { tag: stdio, .. } = untyped(field("stdio")?) else {
                 bail!("process stdio must be a policy enum")
             };
-            if name == "process_run" && stdio == "stream" {
-                return Ok(result_err(
-                    sig,
-                    "unsupported",
-                    Some("stream stdio requires process.spawn".to_string()),
-                ));
-            }
             let mut command = Command::new(&executable);
             for arg in argv {
                 command.arg(value_str(arg)?);
@@ -3262,15 +3165,7 @@ fn exec_vibra_v1(
                 }
                 _ => return Ok(result_err(sig, "invalid-input", None)),
             }
-            if name == "process_run" {
-                Ok(match command.output() {
-                    Ok(output) => result_ok(
-                        sig,
-                        process_output_value(output.status, output.stdout, output.stderr),
-                    ),
-                    Err(error) => process_io_error(sig, error),
-                })
-            } else if files.at_capacity() {
+            if files.at_capacity() {
                 Ok(result_err(sig, "resource-exhausted", None))
             } else {
                 Ok(match command.spawn() {

@@ -2,7 +2,7 @@
 
 Date: 2026-08-01
 Status: accepted implementation contract for issue #240 (parent issue #151)
-Compatibility: breaking migration from structural effect aliases and compound roots
+Migration: intentionally breaking; only nominal roots and `deffect` operations are supported
 
 ## Decision
 
@@ -96,11 +96,10 @@ operations.
 
 ## Reporting and diagnostics
 
-`vibra effects` v3 exposes `surface.declared` and `surface.performed`, per-
-function declared/performed rows, operation owner/additive rows, call edges,
-and primitive witnesses containing input/result capability shapes and required
-roots. The v2 `effects`, `functions.effects`, and `host-imports` fields remain
-as compatibility aliases during the migration.
+`vibra effects` exposes `surface.declared` and `surface.performed`, per-function
+declared/performed rows, operation owner/additive rows, call edges, and primitive
+witnesses containing input/result capability shapes and required roots. There are
+no legacy effect fields or structural aliases in the report.
 
 `E-EFFECT-001..007` retain their existing meanings where applicable. Native
 surface diagnostics additionally cover malformed/duplicate `deffect`

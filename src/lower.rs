@@ -113,6 +113,9 @@ pub enum HandleAccess {
     Read,
     Write,
     ReadWrite,
+    /// A trusted operation such as close may accept any host-backed stream
+    /// endpoint without requiring both read and write capabilities.
+    Any,
     Process,
 }
 
@@ -261,13 +264,6 @@ pub enum TypeRef {
     /// An affine handle to a structured child task producing `T`.
     /// This type has no source spelling and can only be created by `$spawn`.
     JoinHandle(Box<TypeRef>),
-    /// An effect label. Identity is *structural* -- the `(domain, action)` pair --
-    /// so `(effect @fs @read)` written in two modules denotes the same effect and
-    /// the name it is bound to is a convenience, not part of its identity.
-    Effect {
-        domain: String,
-        action: String,
-    },
     /// A type-parameter name in scope (declared in a `where:` annotation).
     Generic(String),
     /// A use of a generic type alias with explicit type arguments. `type_args`
@@ -363,10 +359,8 @@ pub struct FunctionSig {
 
 /// A declared effect set.
 ///
-/// Labels are stored as their structural `(domain, action)` identity rather than as
-/// the names they were spelled with, so two modules naming the same effect
-/// differently still produce the same row. The `BTreeSet` gives deduplication and a
-/// deterministic order for free.
+/// Labels are stored as canonical nominal `(module, root)` identities rather than
+/// source spellings. The `BTreeSet` gives deduplication and deterministic ordering.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EffectRow {
     pub labels: BTreeSet<(String, String)>,
@@ -388,7 +382,7 @@ impl EffectRow {
 
 /// Render a `(domain, action)` pair the way source spells it, for diagnostics.
 pub fn effect_label_display(label: &(String, String)) -> String {
-    format!("(effect @{} @{})", label.0, label.1)
+    format!("{}.{}", label.0, label.1)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1270,7 +1264,6 @@ const BUILTIN_TYPE_FORMS: &[&str] = &[
     "$literal",
     "$union",
     "$enum",
-    "$effect",
 ];
 
 fn is_builtin_type_form(form: &str) -> bool {
@@ -1566,21 +1559,6 @@ fn parse_type_constructor(
         return Ok(TypeRef::HostHandle(parse_handle_access(access)?));
     }
     match form {
-        "$effect" => {
-            let parts = v
-                .as_sequence()
-                .context("E-EFFECT-004: `effect` body must be a `[domain, action]` sequence")?;
-            let [domain, action] = parts.as_slice() else {
-                bail!("E-EFFECT-004: `effect` takes exactly a domain and an action atom");
-            };
-            let (Some(domain), Some(action)) = (domain.as_str(), action.as_str()) else {
-                bail!("E-EFFECT-004: `effect` domain and action must be atoms");
-            };
-            Ok(TypeRef::Effect {
-                domain: domain.to_string(),
-                action: action.to_string(),
-            })
-        }
         "$mut" => Ok(TypeRef::Mutable(Box::new(parse_type_ref(
             v,
             scope,
@@ -1742,9 +1720,6 @@ fn parse_type_constructor(
                 {
                     let parsed = parse_type_ref(label, scope, skeletons, warnings, self_allowed)?;
                     match parsed {
-                        TypeRef::Effect { domain, action } => {
-                            effects.insert((domain, action));
-                        }
                         TypeRef::Named(name) => {
                             let Some((domain, action)) = nominal_effect_name(&name) else {
                                 bail!("E-EFFECT-002: `fn-type` names unknown effect `{name}`");
@@ -1752,9 +1727,7 @@ fn parse_type_constructor(
                             effects.insert((domain.to_string(), action.to_string()));
                         }
                         _ => {
-                            bail!(
-                                "E-EFFECT-002: `fn-type` effects must be an effect root or inline `(effect @domain @action)`"
-                            );
+                            bail!("E-EFFECT-002: `fn-type` effects must be a nominal effect root");
                         }
                     }
                 }
@@ -1806,6 +1779,7 @@ fn parse_handle_access(access: &str) -> Result<HandleAccess> {
         "read" => Ok(HandleAccess::Read),
         "write" => Ok(HandleAccess::Write),
         "read-write" => Ok(HandleAccess::ReadWrite),
+        "any" => Ok(HandleAccess::Any),
         "process" => Ok(HandleAccess::Process),
         _ => bail!("E-CAP-004: unknown opaque handle type `$handle.{access}`"),
     }
@@ -1988,7 +1962,7 @@ fn join_module_prefix(parent: &str, child: &str) -> String {
 }
 
 /// Prefer `{alias}.{name}` when that key exists in `aliases`, so nested imports like
-/// `$fs.read-file` inside module `io` resolve to `io.fs.read-file` (and `a.io.fs.read-file`
+/// `$stream.read` inside module `io` resolves to `io.stream.read` (and `a.io.stream.read`
 /// when `io` is mounted under `a`). If the prefix misses, accept `name` when it is already
 /// a registered key (fully-qualified reference). Otherwise keep `name` unqualified.
 /// Check every function body against its declared effect row.
@@ -2027,12 +2001,7 @@ fn validate_declared_effects(
     Ok(())
 }
 
-/// Resolve a declaration's `=effects` labels to their structural identities.
-///
-/// Each label is either an inline `(effect @d @a)` -- which needs no resolution at
-/// all, and so works without importing the module that names it -- or a name, which
-/// goes through the same `qualify_type_name_key` path as any other type reference
-/// and must land on an effect rather than an ordinary type.
+/// Resolve a declaration's `=effects` labels to nominal root identities.
 fn resolve_effect_row(
     env: &DefEnvelope<'_>,
     alias: &str,
@@ -2046,27 +2015,23 @@ fn resolve_effect_row(
         let ty = parse_type_ref(value, &[], &empty_skeletons, warnings, false)
             .context("E-EFFECT-004: invalid `effects:` label")?;
         let resolved = match ty {
-            TypeRef::Effect { domain, action } => (domain, action),
             TypeRef::Named(name) => {
                 if let Some((domain, action)) = nominal_effect_name(&name) {
                     (domain.to_string(), action.to_string())
                 } else {
                     let key = qualify_type_name_key(alias, name.clone(), type_aliases);
-                    match type_aliases.get(&key).map(|alias| &alias.body) {
-                        Some(TypeRef::Effect { domain, action }) => {
-                            (domain.clone(), action.clone())
-                        }
+                    match type_aliases.get(&key) {
                         Some(_) => bail!(
                             "E-EFFECT-002: `{owner}` declares effect `{name}`, but `{key}` is a type, not an effect"
                         ),
                         None => bail!(
-                            "E-EFFECT-002: `{owner}` declares unknown effect `{name}`; no `(def {name} (effect @domain @action))` is visible"
+                            "E-EFFECT-002: `{owner}` declares unknown nominal effect `{name}`"
                         ),
                     }
                 }
             }
             other => bail!(
-                "E-EFFECT-002: `{owner}` declares `{other:?}` as an effect; expected an effect name or an inline `(effect @domain @action)`"
+                "E-EFFECT-002: `{owner}` declares `{other:?}` as an effect; expected a nominal root name"
             ),
         };
         labels.insert(resolved);
@@ -2074,12 +2039,22 @@ fn resolve_effect_row(
     Ok(EffectRow { labels, tail: None })
 }
 
-/// Native deffect roots are named `module.root` in effect ceilings. Keep this
-/// small allow-list at the legacy lowering seam while the typed effect index is
-/// migrated; ordinary type names still go through the declared alias table.
+/// Native deffect roots are named `module.root` in effect ceilings. Built-in
+/// roots are registered in the intrinsic inventory, while dependency-provided
+/// deffects may introduce additional nominal roots. Ordinary type names still
+/// go through the declared alias table.
 fn nominal_effect_name(name: &str) -> Option<(&str, &str)> {
     let (domain, action) = name.split_once('.')?;
-    if crate::intrinsics::is_known_root(domain, action) {
+    if crate::intrinsics::is_known_root(domain, action)
+        || !domain.is_empty()
+            && !action.is_empty()
+            && domain
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch == '-')
+            && action
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch == '-')
+    {
         Some((domain, action))
     } else {
         None
@@ -3470,7 +3445,17 @@ pub(crate) fn validate_wasm_bodies(
                     .iter()
                     .map(|(domain, action)| ((*domain).to_string(), (*action).to_string()))
                     .collect();
-            if registry != sig.effects.labels {
+            // A deffect operation contributes its nominal owner root even when
+            // the wrapped custom host import is pure. Registry effects describe
+            // only the primitive's ambient actions; compare those against the
+            // additive declaration while retaining the owner in the public row.
+            let mut declared = sig.effects.labels.clone();
+            if let Some(owner) = &sig.owner_effect {
+                if !registry.contains(owner) {
+                    declared.remove(owner);
+                }
+            }
+            if registry != declared {
                 let render = |labels: &BTreeSet<(String, String)>| {
                     if labels.is_empty() {
                         "no effects".to_string()
@@ -3487,7 +3472,7 @@ pub(crate) fn validate_wasm_bodies(
                     import.module,
                     import.name,
                     render(&registry),
-                    render(&sig.effects.labels),
+                    render(&declared),
                 );
             }
         }
@@ -3770,7 +3755,7 @@ pub(crate) fn host_result_type(kind: crate::host_abi::ValueKind) -> Result<TypeR
         K::ReadHandle => TypeRef::HostHandle(HandleAccess::Read),
         K::WriteHandle => TypeRef::HostHandle(HandleAccess::Write),
         K::ProcessHandle => TypeRef::HostHandle(HandleAccess::Process),
-        K::AnyHandle => TypeRef::HostHandle(HandleAccess::ReadWrite),
+        K::AnyHandle => TypeRef::HostHandle(HandleAccess::Any),
         K::Any | K::OptionAny | K::ResultAny | K::Array | K::StringMap | K::Record => {
             TypeRef::Named("$host-context".into())
         }
@@ -3967,7 +3952,7 @@ fn resolve_iface_alias<'a>(
         format!("E-IMPL-002: interface key `{iface_alias_str}` must start with `$`")
     })?;
     // Try `{module_alias}.{stripped}` first even when `stripped` contains `.` so
-    // `$fs.writable` inside module `io` resolves to `io.fs.writable`, not a stray global `fs.writable`.
+    // `$stream.writable` inside module `io` resolves to `io.stream.writable`, not a stray global path.
     let mut candidates: Vec<String> = Vec::new();
     if !module_alias.is_empty() {
         candidates.push(format!("{module_alias}.{stripped}"));
@@ -4414,7 +4399,7 @@ fn bind_impl_method(
         let excess: Vec<_> = declared_effects.labels.difference(allowed).collect();
         if let Some((domain, action)) = excess.first() {
             bail!(
-                "E-EFFECT-003: impl method `{method_name}` declares (effect @{domain} @{action}), which interface method `{iface_qualified}.{method_name}` does not permit; an implementation may not exceed the interface's declared effects"
+                "E-EFFECT-003: impl method `{method_name}` declares `{domain}.{action}`, which interface method `{iface_qualified}.{method_name}` does not permit; an implementation may not exceed the interface's declared effects"
             );
         }
     }
@@ -5999,7 +5984,19 @@ fn lower_statement(
             ..
         } = &mut expr
         {
-            if *intrinsic {
+            // Built-in intrinsics are represented as host calls after the
+            // surface adapter.  Pure intrinsics deliberately use the same
+            // representation as effectful deffect intrinsics, but carry
+            // `intrinsic: false` so they can be called from ordinary
+            // functions.  Their ABI result names (for example
+            // `option-path`) are only shape witnesses; the source
+            // declaration supplies the concrete generic type.  Apply the
+            // contextual result check/coercion to both forms, while leaving
+            // custom raw wasm calls subject to their explicit ABI type.
+            let builtin_host_call = *intrinsic
+                || ((import.module == "vibra_v1" || import.module == "vibra_test")
+                    && crate::intrinsics::lookup(&import.name).is_some());
+            if builtin_host_call {
                 let entry = crate::intrinsics::lookup(&import.name).with_context(|| {
                     format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name)
                 })?;
@@ -6011,7 +6008,8 @@ fn lower_statement(
                         return_type
                     );
                 }
-                if crate::intrinsics::requires_effect(&import.name)
+                if *intrinsic
+                    && crate::intrinsics::requires_effect(&import.name)
                     && !intrinsic_result_allows_nominal_endpoint(
                         &import.name,
                         &ctx.return_type,
@@ -6145,8 +6143,8 @@ fn lower_statement(
     }
 }
 
-/// Resolve a dotted interface path from source (`fs.writable`) using the
-/// current module scope (`io` → `io.fs.writable`), then fall back to the bare path.
+/// Resolve a dotted interface path from source (`stream.writable`) using the
+/// current module scope, then fall back to the bare path.
 ///
 /// `pub(crate)` so the typed S-expression body lowerer
 /// (`typed_body::lower_call`) can reuse the exact same scope-resolution rule
@@ -7435,8 +7433,11 @@ fn parse_expr(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             let entry = if intrinsic {
-                if module != "vibra_v1" {
-                    bail!("E-INTRINSIC-003: intrinsic module must be `vibra_v1`");
+                if module != crate::intrinsics::module_name(name) {
+                    bail!(
+                        "E-INTRINSIC-003: intrinsic `{name}` must target `{}`",
+                        crate::intrinsics::module_name(name)
+                    );
                 }
                 crate::intrinsics::lookup(name)
                     .with_context(|| format!("E-INTRINSIC-003: unknown intrinsic `{name}`"))?
@@ -8988,7 +8989,14 @@ fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: 
 /// Widened to `pub(crate)` so `typed_program.rs` can reuse the exact legacy
 /// wording for the kebab-case advisory instead of re-deriving it.
 pub(crate) fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {
-    if !name.split("::").all(is_kebab_case) {
+    // Canonical effect-operation symbols are qualified with `.` (for example
+    // `stream.read.string`).  Treat each namespace segment as a symbol so the
+    // required qualification does not produce a false lint warning.
+    if !name
+        .split("::")
+        .flat_map(|segment| segment.split('.'))
+        .all(is_kebab_case)
+    {
         warnings.push(format!(
             "non-kebab-case {context}: `{name}` (recommended: kebab-case)"
         ));
