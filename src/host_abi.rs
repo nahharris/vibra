@@ -744,12 +744,19 @@ pub fn schema_document() -> serde_json::Value {
                 .iter()
                 .map(|(domain, action)| serde_json::json!({ "domain": domain, "action": action }))
                 .collect();
+            let intrinsic_effects: Vec<serde_json::Value> = crate::intrinsics::effects_for(
+                import.name,
+            )
+            .iter()
+            .map(|(root, operation)| serde_json::json!({ "root": root, "operation": operation }))
+            .collect();
             serde_json::json!({
                 "module": import.module,
                 "name": import.name,
                 "params": params,
                 "return": import.result.as_str(),
                 "effects": effects,
+                "intrinsic-effects": intrinsic_effects,
             })
         })
         .collect();

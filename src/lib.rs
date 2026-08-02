@@ -10,6 +10,7 @@ pub mod emit;
 pub mod execute;
 pub mod frontend;
 pub mod host_abi;
+pub mod intrinsics;
 pub mod legacy_value;
 pub mod load;
 pub mod lower;

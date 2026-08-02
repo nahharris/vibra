@@ -408,6 +408,71 @@
       "summary": "Reserved effect syntax: operands beyond the domain and action are reserved for handler definitions, and effect-row tails are reserved for effect polymorphism"
     },
     {
+      "code": "E-DEFFECT-001",
+      "severity": "error",
+      "summary": "Malformed `deffect` declaration"
+    },
+    {
+      "code": "E-DEFFECT-002",
+      "severity": "error",
+      "summary": "A `deffect` body may contain only `defn` operations"
+    },
+    {
+      "code": "E-DEFFECT-003",
+      "severity": "error",
+      "summary": "A `deffect` declares the same operation more than once"
+    },
+    {
+      "code": "E-DEFFECT-004",
+      "severity": "error",
+      "summary": "A `deffect` root collides with another top-level symbol"
+    },
+    {
+      "code": "E-DEFFECT-005",
+      "severity": "error",
+      "summary": "Native deffect owner metadata is malformed"
+    },
+    {
+      "code": "E-INTRINSIC-001",
+      "severity": "error",
+      "summary": "Effectful closed intrinsic expressions are only valid inside a `deffect` operation"
+    },
+    {
+      "code": "E-INTRINSIC-002",
+      "severity": "error",
+      "summary": "An intrinsic requires an atom name"
+    },
+    {
+      "code": "E-INTRINSIC-003",
+      "severity": "error",
+      "summary": "The intrinsic is not present in the closed host registry"
+    },
+    {
+      "code": "E-INTRINSIC-004",
+      "severity": "error",
+      "summary": "Intrinsic argument count does not match the host registry"
+    },
+    {
+      "code": "E-INTRINSIC-005",
+      "severity": "error",
+      "summary": "Intrinsic argument type does not match the host registry"
+    },
+    {
+      "code": "E-EFFECT-008",
+      "severity": "error",
+      "summary": "Structural effect syntax is removed from native modules"
+    },
+    {
+      "code": "E-WASM-008",
+      "severity": "error",
+      "summary": "Raw `wasm` is restricted to deffect operations"
+    },
+    {
+      "code": "E-CAP-005",
+      "severity": "error",
+      "summary": "Host-backed endpoint types cannot be forged or cast"
+    },
+    {
       "code": "E-TY-002",
       "severity": "error",
       "summary": "Returned value type does not match the declared return type"

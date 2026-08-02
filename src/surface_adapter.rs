@@ -98,15 +98,36 @@ pub(crate) struct ResolvedSignatures {
 
 pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignatures> {
     let mut sigs = LocalSignatures::default();
+    let mut top_level_names = std::collections::BTreeSet::new();
     for form in &module.forms {
         match form {
+            TopLevel::Import(import) => {
+                if !top_level_names.insert(import.alias.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: duplicate top-level symbol `{}`",
+                        import.alias.value
+                    );
+                }
+            }
             TopLevel::Function(function) => {
+                if !top_level_names.insert(function.name.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: duplicate top-level symbol `{}`",
+                        function.name.value
+                    );
+                }
                 insert_call_signature(&mut sigs.calls, function.name.value.clone(), function);
                 if function.visibility == Visibility::Private {
                     sigs.private.insert(function.name.value.clone());
                 }
             }
             TopLevel::Definition(definition) => {
+                if !top_level_names.insert(definition.name.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: duplicate top-level symbol `{}`",
+                        definition.name.value
+                    );
+                }
                 if definition.visibility == Visibility::Private {
                     sigs.private.insert(definition.name.value.clone());
                 }
@@ -142,6 +163,29 @@ pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignature
                             );
                         }
                     }
+                }
+            }
+            TopLevel::Constant(constant) => {
+                if !top_level_names.insert(constant.name.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: duplicate top-level symbol `{}`",
+                        constant.name.value
+                    );
+                }
+            }
+            TopLevel::Deffect(deffect) => {
+                if !top_level_names.insert(deffect.name.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: deffect root `{}` collides with a top-level symbol",
+                        deffect.name.value
+                    );
+                }
+                for operation in &deffect.operations {
+                    insert_call_signature(
+                        &mut sigs.calls,
+                        format!("{}.{}", deffect.name.value, operation.function.name.value),
+                        &operation.function,
+                    );
                 }
             }
             _ => {}
@@ -320,6 +364,10 @@ fn handle_access_str(access: AstHandleAccess) -> &'static str {
     }
 }
 
+fn intrinsic_import_name(name: &str) -> String {
+    crate::intrinsics::import_name(name)
+}
+
 fn is_control_form(kind: &ExprKind) -> bool {
     matches!(
         kind,
@@ -383,16 +431,36 @@ struct Converter<'a> {
     /// names a current parameter must therefore be spelled `args.{name}`;
     /// everything else is spelled bare. See `local_name_ref`.
     current_params: Vec<String>,
+    module_alias: String,
+    intrinsic_owner: bool,
+    /// During the staged migration, legacy modules without a native deffect
+    /// remain readable. Once a module opts into native effects, raw wasm is
+    /// rejected everywhere except the deffect operation body.
+    native_module: bool,
 }
 
 /// Convert one typed module into the legacy top-level mapping `Value` shape
 /// `src/lower.rs::collect_module_defs` and peers consume.
 pub(crate) fn module_to_value(module: &Module, sig: &ResolvedSignatures) -> Result<Value> {
+    module_to_value_with_alias(module, sig, "")
+}
+
+pub(crate) fn module_to_value_with_alias(
+    module: &Module,
+    sig: &ResolvedSignatures,
+    module_alias: &str,
+) -> Result<Value> {
     let mut converter = Converter {
         sig,
         extra: Vec::new(),
         next_id: 0,
         current_params: Vec::new(),
+        module_alias: module_alias.to_string(),
+        intrinsic_owner: false,
+        native_module: module
+            .forms
+            .iter()
+            .any(|form| matches!(form, TopLevel::Deffect(_))),
     };
     let mut map = Mapping::new();
     for form in &module.forms {
@@ -412,6 +480,16 @@ pub(crate) fn module_to_value(module: &Module, sig: &ResolvedSignatures) -> Resu
                 let key = visible_key(&function.name.value, function.visibility);
                 let value = converter.function_envelope(function)?;
                 insert_unique(&mut map, key, value)?;
+            }
+            TopLevel::Deffect(deffect) => {
+                for operation in &deffect.operations {
+                    let mut function = operation.function.clone();
+                    function.name.value = format!("{}.{}", deffect.name.value, function.name.value);
+                    let key = visible_key(&function.name.value, function.visibility);
+                    let value = converter
+                        .function_envelope_with_owner(&function, Some(&deffect.name.value))?;
+                    insert_unique(&mut map, key, value)?;
+                }
             }
             TopLevel::Test(test) => {
                 let (key, value) = converter.test_value(test)?;
@@ -449,6 +527,9 @@ pub(crate) fn inline_expression_to_value(expression: &AstExpr) -> Result<Value> 
         extra: Vec::new(),
         next_id: 0,
         current_params: Vec::new(),
+        module_alias: String::new(),
+        intrinsic_owner: false,
+        native_module: false,
     };
     converter.expr_value(expression)
 }
@@ -1120,6 +1201,14 @@ impl<'a> Converter<'a> {
     // ---------------- Functions and bodies ----------------
 
     fn function_envelope(&mut self, function: &Function) -> Result<Value> {
+        self.function_envelope_with_owner(function, None)
+    }
+
+    fn function_envelope_with_owner(
+        &mut self,
+        function: &Function,
+        owner_root: Option<&str>,
+    ) -> Result<Value> {
         let params = &function.parameters;
         let mut map = Mapping::new();
         match params.len() {
@@ -1176,11 +1265,64 @@ impl<'a> Converter<'a> {
             }
         }
         let previous_params = std::mem::replace(&mut self.current_params, param_names);
+        let previous_intrinsic_owner = self.intrinsic_owner;
+        self.intrinsic_owner = owner_root.is_some();
         let body_result = self.body_to_do(&function.body);
         self.current_params = previous_params;
+        self.intrinsic_owner = previous_intrinsic_owner;
         map.insert(Value::String("do".into()), body_result?);
 
-        self.apply_annotations(&mut map, &function.annotations, &function.name.value)?;
+        let mut annotations = function.annotations.clone();
+        if let Some(root) = owner_root {
+            let span = function.name.span;
+            let owner_module = if self.module_alias.is_empty() {
+                "module"
+            } else {
+                self.module_alias.as_str()
+            };
+            let owner = TypeExpr {
+                value: TypeExprKind::Effect {
+                    domain: Spanned {
+                        value: owner_module.to_string(),
+                        span,
+                        origin: crate::ast::Origin::Source(span),
+                    },
+                    action: Spanned {
+                        value: root.to_string(),
+                        span,
+                        origin: crate::ast::Origin::Source(span),
+                    },
+                },
+                span,
+                origin: crate::ast::Origin::Source(span),
+            };
+            if let Some(annotation) = annotations
+                .iter_mut()
+                .find(|annotation| matches!(annotation.value, AnnotationKind::Effects(_)))
+            {
+                if let AnnotationKind::Effects(row) = &mut annotation.value {
+                    row.labels.insert(0, owner);
+                }
+            } else {
+                annotations.push(Spanned {
+                    value: AnnotationKind::Effects(EffectRow {
+                        labels: vec![owner],
+                        tail: None,
+                        span,
+                    }),
+                    span,
+                    origin: crate::ast::Origin::Source(span),
+                });
+            }
+            map.insert(
+                Value::String("=owner".into()),
+                Value::Sequence(vec![
+                    Value::String(owner_module.to_string()),
+                    Value::String(root.to_string()),
+                ]),
+            );
+        }
+        self.apply_annotations(&mut map, &annotations, &function.name.value)?;
         Ok(Value::Mapping(map))
     }
 
@@ -1202,6 +1344,9 @@ impl<'a> Converter<'a> {
                     .iter()
                     .all(|argument| !matches!(argument, WasmArgument::Expression(_)))
                 {
+                    if self.native_module && !self.intrinsic_owner {
+                        bail!("E-WASM-008: raw `wasm` is only valid inside a `deffect` operation");
+                    }
                     return Ok(Value::Sequence(vec![
                         self.wasm_statement_value(import, arguments)?
                     ]));
@@ -1507,7 +1652,46 @@ impl<'a> Converter<'a> {
             }
             ExprKind::Embed { path, format } => Ok(embed_value(path, format.value)),
             ExprKind::Template { path, bindings } => self.template_value(path, bindings),
+            ExprKind::Intrinsic { name, arguments } => {
+                if !self.intrinsic_owner && crate::intrinsics::requires_effect(&name.value) {
+                    bail!(
+                        "E-INTRINSIC-001: effectful intrinsic `@{}` is only valid inside a deffect operation",
+                        name.value
+                    );
+                }
+                if !crate::intrinsics::is_known(&name.value) {
+                    bail!("E-INTRINSIC-003: unknown intrinsic `@{}`", name.value);
+                }
+                let mut host = Mapping::new();
+                host.insert(
+                    Value::String("module".into()),
+                    Value::String("vibra_v1".into()),
+                );
+                host.insert(
+                    Value::String("name".into()),
+                    Value::String(intrinsic_import_name(&name.value)),
+                );
+                host.insert(
+                    Value::String("intrinsic".into()),
+                    Value::Bool(self.intrinsic_owner),
+                );
+                host.insert(
+                    Value::String("args".into()),
+                    Value::Sequence(
+                        arguments
+                            .iter()
+                            .map(|argument| self.expr_value(argument))
+                            .collect::<Result<Vec<_>>>()?,
+                    ),
+                );
+                Ok(single_dollar("host-call", Value::Mapping(host)))
+            }
             ExprKind::Wasm { import, arguments } => {
+                if self.native_module && !self.intrinsic_owner {
+                    bail!(
+                        "E-WASM-008: raw `wasm` is only valid inside a `deffect` operation"
+                    );
+                }
                 let mut host = Mapping::new();
                 host.insert(Value::String("module".into()), Value::String(import.module.value.clone()));
                 host.insert(Value::String("name".into()), Value::String(import.name.value.clone()));
@@ -1869,6 +2053,11 @@ fn collect_binding_names_expr(expr: &AstExpr, names: &mut Vec<String>) {
         ExprKind::Call { arguments, .. } => {
             for arg in arguments {
                 collect_binding_names_expr(arg.value(), names);
+            }
+        }
+        ExprKind::Intrinsic { arguments, .. } => {
+            for argument in arguments {
+                collect_binding_names_expr(argument, names);
             }
         }
         ExprKind::AnonymousFunction { body, .. } => {
@@ -2368,6 +2557,9 @@ pub(crate) fn test_discovery_value(test: &Test) -> Result<(String, Value)> {
         extra: Vec::new(),
         next_id: 0,
         current_params: Vec::new(),
+        module_alias: String::new(),
+        intrinsic_owner: false,
+        native_module: false,
     };
     converter.test_metadata_value(test, Value::Sequence(Vec::new()))
 }
@@ -2450,6 +2642,153 @@ mod tests {
             rendered.contains("$equal"),
             "expected bare `equal` to become `$equal`, got:\n{rendered}"
         );
+    }
+
+    #[test]
+    fn deffect_operation_implicitly_declares_its_owner_root() {
+        let module = module_from_source(
+            r#"(defn main () void (do (let value 1)))
+(deffect now
+  (defn unix-millis () uint64
+    (intrinsic @clock-now-unix-millis)
+    effects: ()))"#,
+        );
+        let signatures = collect_local_signatures(&module).expect("collect signatures");
+        let resolved = resolve_signatures("time", &signatures, &[]);
+        let value =
+            module_to_value_with_alias(&module, &resolved, "time").expect("deffect adapter");
+        let debug = format!("{value:?}");
+        assert!(
+            debug.contains("time"),
+            "owner root missing from effects: {debug}"
+        );
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = single_module_program(dir.path(), value);
+        crate::lower::lower_library(&program).expect("nominal owner effect should lower");
+    }
+
+    #[test]
+    fn deffect_operations_are_only_visible_through_their_root() {
+        let module = module_from_source(
+            r#"(defn file () int64 (return 1))
+(deffect read
+  (defn file () int64 (return 2)))"#,
+        );
+        let local = collect_local_signatures(&module).expect("collect signatures");
+        assert!(local.calls.contains_key("file"));
+        assert!(local.calls.contains_key("read.file"));
+        assert!(!local.calls.contains_key("file.file"));
+        let resolved = resolve_signatures("fs", &local, &[]);
+        assert!(resolved.calls.contains_key("fs.read.file"));
+        assert!(resolved.calls.contains_key("read.file"));
+    }
+
+    #[test]
+    fn deffect_effects_are_owner_plus_explicit_additive_roots() {
+        let module = module_from_source(
+            r#"(defn main () void (do (let value 1)))
+(deffect now
+  (defn unix-millis () uint64
+    (intrinsic @clock-now-unix-millis)
+    effects: (stream.read)))"#,
+        );
+        let signatures = collect_local_signatures(&module).expect("collect signatures");
+        let resolved = resolve_signatures("time", &signatures, &[]);
+        let value =
+            module_to_value_with_alias(&module, &resolved, "time").expect("deffect adapter");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = single_module_program(dir.path(), value);
+        let lowered = crate::lower::lower_program(&program).expect("lower nominal deffect");
+        let signature = lowered
+            .functions
+            .iter()
+            .find(|(key, _)| key.ends_with("now.unix-millis"))
+            .map(|(_, signature)| signature)
+            .expect("operation signature");
+        let expected = [
+            ("stream".to_string(), "read".to_string()),
+            ("time".to_string(), "now".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(signature.effects.labels, expected);
+    }
+
+    #[test]
+    fn validated_intrinsics_mint_host_backed_nominal_endpoints() {
+        let module = module_from_source(
+            r#"(def io.input (newtype (handle @read)))
+(defn main () void (do (let value 1)))
+(deffect stdin
+  (defn open () io.input
+    (intrinsic @stdin-open)
+    effects: ()))"#,
+        );
+        let signatures = collect_local_signatures(&module).expect("collect signatures");
+        let resolved = resolve_signatures("io", &signatures, &[]);
+        let value = module_to_value_with_alias(&module, &resolved, "io").expect("deffect adapter");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = single_module_program(dir.path(), value);
+        let lowered = crate::lower::lower_program(&program).expect("lower endpoint acquisition");
+        let operation = lowered
+            .functions
+            .iter()
+            .find(|(key, _)| key.ends_with("stdin.open"))
+            .map(|(_, signature)| signature)
+            .expect("operation signature");
+        assert!(matches!(
+            operation.return_type,
+            crate::lower::TypeRef::Named(_)
+        ));
+    }
+
+    #[test]
+    fn intrinsic_result_shape_cannot_be_laundered_by_a_return_annotation() {
+        let module = module_from_source(
+            r#"(deffect now
+  (defn unix-millis () str
+    (intrinsic @clock-now-unix-millis)
+    effects: ()))"#,
+        );
+        let signatures = collect_local_signatures(&module).expect("collect signatures");
+        let resolved = resolve_signatures("time", &signatures, &[]);
+        let value = module_to_value_with_alias(&module, &resolved, "time").expect("adapt");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = single_module_program(dir.path(), value);
+        let error = crate::lower::lower_library(&program).expect_err("wrong result type");
+        let message = format!("{error:#}");
+        assert!(message.contains("E-INTRINSIC-005"), "{message}");
+    }
+
+    #[test]
+    fn pure_intrinsics_are_available_to_ordinary_functions() {
+        let module = module_from_source(
+            r#"(defn scalar-len (value str) uint64
+  (return (intrinsic @str-scalar-len value)))"#,
+        );
+        let signatures = collect_local_signatures(&module).expect("collect signatures");
+        let resolved = resolve_signatures("text", &signatures, &[]);
+        let value = module_to_value_with_alias(&module, &resolved, "text").expect("adapt");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = single_module_program(dir.path(), value);
+        crate::lower::lower_library(&program).expect("pure intrinsic");
+    }
+
+    #[test]
+    fn native_modules_reject_raw_wasm_outside_deffect_operations() {
+        let module = module_from_source(
+            r#"(defn bad () uint64
+  (do (wasm "vibra_v1" "clock_now_unix_millis")))
+(deffect now
+  (defn unix-millis () uint64
+    (intrinsic @clock-now-unix-millis)
+    effects: ()))"#,
+        );
+        let signatures = collect_local_signatures(&module).expect("collect signatures");
+        let resolved = resolve_signatures("time", &signatures, &[]);
+        let error = module_to_value_with_alias(&module, &resolved, "time")
+            .expect_err("raw wasm outside native operation");
+        assert!(error.to_string().contains("E-WASM-008"));
     }
 
     // ---- generic function with `where:`, called with explicit type args ----

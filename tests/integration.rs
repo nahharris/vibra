@@ -23,6 +23,27 @@ fn lower_exec_value(source: &str) -> anyhow::Result<vibra::lower::RuntimeValue> 
 }
 
 #[test]
+fn native_stream_module_registers_shared_roots_and_operations() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vibra")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &entry,
+        format!(
+            "(import stream \"{}\")\n(defn main () void (do))\n",
+            path_str(&stream)
+        ),
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&loaded).unwrap();
+    assert!(lowered.functions.contains_key("stream.read.string"));
+    assert!(lowered.functions.contains_key("stream.write.bytes-some"));
+    assert!(lowered.functions.contains_key("stream.manage.close"));
+}
+
+#[test]
 fn primitive_operations_are_typed_and_evaluate() {
     assert_eq!(
         lower_exec_value("(add 20 22)").unwrap(),
@@ -2197,6 +2218,50 @@ fn effects_command_reports_typed_host_surface_deterministically() {
     assert!(json.contains("vibra_v1"), "{json}");
     assert!(json.contains("stdout_open"), "{json}");
     assert!(json.contains("write-handle"), "{json}");
+}
+
+#[test]
+fn effects_report_keeps_native_operation_owner_canonical_across_import_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    let resource = dir.path().join("time.vibra");
+    let entry = dir.path().join("entry.vibra");
+    std::fs::write(
+        &resource,
+        r#"(deffect now
+  (defn open () uint64
+    (intrinsic @clock-now-unix-millis)
+    effects: ()))
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &entry,
+        r#"(import t "./time.vibra")
+(defn main () void
+  (do (let value (t.now.open)))
+  effects: (time.now))
+"#,
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args(["effects", &path_str(&entry)])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let operation = report["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|operation| operation["source"] == "t.now.open")
+        .expect("native operation report");
+    assert_eq!(operation["owner"]["domain"], "time");
+    assert_eq!(operation["owner"]["action"], "now");
 }
 
 #[test]

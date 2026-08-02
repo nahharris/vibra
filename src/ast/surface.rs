@@ -219,6 +219,7 @@ pub enum TopLevel {
     Definition(Definition),
     Constant(Constant),
     Function(Function),
+    Deffect(Deffect),
     Macro(Macro),
     Test(TestCase),
     TestScenario(TestScenario),
@@ -267,6 +268,29 @@ pub struct Function {
     pub return_type: TypeExpr,
     pub body: Vec<Expr>,
     pub annotations: Vec<Annotation>,
+    pub span: Span,
+    pub origin: Origin,
+}
+
+/// A nominal effect root and its operations.
+///
+/// Operations deliberately retain the ordinary function AST as their body so
+/// the type checker and formatter can share the same expression machinery. The
+/// owner root is supplied by the containing [`Deffect`]; an operation's
+/// `effects:` annotation is additive rather than a replacement for that owner.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Deffect {
+    pub visibility: Visibility,
+    pub name: Name,
+    pub operations: Vec<EffectOperation>,
+    pub span: Span,
+    pub origin: Origin,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectOperation {
+    pub function: Function,
+    pub effects: EffectRow,
     pub span: Span,
     pub origin: Origin,
 }
@@ -525,6 +549,13 @@ pub enum ExprKind {
     Template {
         path: Spanned<String>,
         bindings: Vec<ExprField>,
+    },
+    /// A closed, compiler-known operation. Unlike `wasm`, the intrinsic name
+    /// is an atom and its argument/result types are checked against the
+    /// intrinsic registry rather than an arbitrary imported symbol.
+    Intrinsic {
+        name: Spanned<String>,
+        arguments: Vec<Expr>,
     },
     Wasm {
         import: WasmImport,
@@ -841,6 +872,7 @@ fn parse_top(node: &Node) -> Result<TopLevel, AstError> {
         "def" => parse_definition(node, args, Visibility::Public).map(TopLevel::Definition),
         "const" => parse_constant(node, args, Visibility::Public).map(TopLevel::Constant),
         "defn" => parse_function(node, args, Visibility::Public).map(TopLevel::Function),
+        "deffect" => parse_deffect(node, args, Visibility::Public).map(TopLevel::Deffect),
         "macro" => parse_macro(node, args, Visibility::Public).map(TopLevel::Macro),
         "test.scenario" => parse_test_scenario(node, args).map(TopLevel::TestScenario),
         _ => Err(AstError::new(
@@ -943,6 +975,79 @@ fn parse_function<'a>(
         return_type: parse_type(args[2])?,
         body: parse_owned_body(&args[3..attribute_start])?,
         annotations: parse_annotations(&annotation_attributes, AnnotationOwner::Function)?,
+        span: node.span,
+        origin: source_origin(node.span),
+    })
+}
+
+fn parse_deffect<'a>(
+    node: &Node,
+    args: impl AsRef<[&'a Node]>,
+    visibility: Visibility,
+) -> Result<Deffect, AstError> {
+    let args = args.as_ref();
+    if args.len() < 2 {
+        return Err(AstError::new(
+            "E-DEFFECT-001",
+            "`deffect` expects a root name and at least one operation",
+            node.span,
+        ));
+    }
+    let name = name(args[0])?;
+    let mut operations = Vec::with_capacity(args.len() - 1);
+    let mut seen = std::collections::BTreeSet::new();
+    for operation_node in &args[1..] {
+        let (head, operation_args) = headed(operation_node)?;
+        if head.value != "defn" {
+            return Err(AstError::new(
+                "E-DEFFECT-002",
+                "a `deffect` body may contain only `defn` operations",
+                head.span,
+            ));
+        }
+        let function = parse_function(operation_node, operation_args, Visibility::Public)?;
+        let mut function = function;
+        if function.body.len() == 1
+            && matches!(function.body[0].value, ExprKind::Intrinsic { .. })
+            && !matches!(&function.return_type.value, TypeExprKind::Named(name) if name == "void")
+        {
+            let intrinsic = function.body.remove(0);
+            function.body.push(Spanned {
+                value: ExprKind::Return(Some(Box::new(intrinsic))),
+                span: function.span,
+                origin: function.origin.clone(),
+            });
+        }
+        if !seen.insert(function.name.value.clone()) {
+            return Err(AstError::new(
+                "E-DEFFECT-003",
+                format!("duplicate deffect operation `{}`", function.name.value),
+                function.name.span,
+            ));
+        }
+        let effects = function
+            .annotations
+            .iter()
+            .find_map(|annotation| match &annotation.value {
+                AnnotationKind::Effects(effects) => Some(effects.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| EffectRow {
+                labels: Vec::new(),
+                tail: None,
+                span: function.span,
+            });
+        operations.push(EffectOperation {
+            span: function.span,
+            origin: function.origin.clone(),
+            function,
+            effects,
+        });
+    }
+    Ok(Deffect {
+        visibility,
+        name,
+        operations,
         span: node.span,
         origin: source_origin(node.span),
     })
@@ -1688,6 +1793,22 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
                         node.span,
                     )
                 })?,
+            }
+        }
+        "intrinsic" => {
+            if args.is_empty() {
+                return Err(AstError::new(
+                    "E-INTRINSIC-002",
+                    "`intrinsic` expects an atom name and zero or more arguments",
+                    node.span,
+                ));
+            }
+            ExprKind::Intrinsic {
+                name: open_atom(args[0], "intrinsic name")?,
+                arguments: args[1..]
+                    .iter()
+                    .map(|argument| parse_expr(argument))
+                    .collect::<Result<_, _>>()?,
             }
         }
         "wasm" => parse_wasm_expr(node, &args)?,
@@ -2861,6 +2982,36 @@ mod tests {
                 },
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn deffect_operations_are_parsed_as_nominal_effect_declarations() {
+        let parsed = module(
+            r#"(deffect read
+  (defn open (path path) (result reader fs-error)
+    (intrinsic @fs-open-read path)
+    effects: ())
+  (defn file (path path) (result str fs-error)
+    (return path)
+    effects: (stream.read stream.manage)))"#,
+        )
+        .unwrap();
+        let TopLevel::Deffect(deffect) = &parsed.forms[0] else {
+            panic!("expected deffect");
+        };
+        assert_eq!(deffect.name.value, "read");
+        assert_eq!(deffect.operations.len(), 2);
+        assert_eq!(deffect.operations[0].function.name.value, "open");
+        assert!(matches!(
+            deffect.operations[0].function.body.first().map(|body| &body.value),
+            Some(ExprKind::Return(Some(value)))
+                if matches!(&value.value, ExprKind::Intrinsic { name, arguments }
+                    if name.value == "fs-open-read" && arguments.len() == 1)
+        ));
+        assert!(matches!(
+            deffect.operations[1].effects.labels.first().map(|label| &label.value),
+            Some(TypeExprKind::Named(name)) if name == "stream.read"
         ));
     }
 

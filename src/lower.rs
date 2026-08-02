@@ -12,8 +12,9 @@ use crate::legacy_value::{Mapping, Value};
 use crate::load::{map_get_str, LoadedProgram};
 use crate::project;
 use crate::type_semantics::{
-    crosses_newtype_boundary, newtype_inner, normalize_type_ref, resolve_alias_type,
-    substitute_self, substitute_type, type_compatible, unify_types, valid_cast_path,
+    crosses_newtype_boundary, host_backed_newtype, newtype_inner, normalize_type_ref,
+    resolve_alias_type, substitute_self, substitute_type, type_compatible, unify_types,
+    valid_cast_path,
 };
 use anyhow::{bail, Context, Result};
 use std::cell::RefCell;
@@ -138,6 +139,10 @@ pub enum Expr {
         import: ImportTarget,
         args: Vec<Expr>,
         return_type: TypeRef,
+        /// Closed intrinsic calls may mint a host-backed nominal endpoint at
+        /// their enclosing deffect operation boundary. Ordinary wasm/host
+        /// calls leave this false and cannot forge such a type.
+        intrinsic: bool,
     },
     Primitive {
         op: PrimitiveOp,
@@ -306,7 +311,7 @@ pub struct FunctionTypeParameter {
 
 /// A registered top-level type-form definition. Generic aliases carry
 /// `type_params`; non-generic aliases have `type_params.is_empty()`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeAlias {
     pub alias: String,
     pub name: String,
@@ -336,6 +341,11 @@ pub enum FunctionBody {
 pub struct FunctionSig {
     pub alias: String,
     pub symbol: String,
+    /// Canonical owner root for a native deffect operation. This is carried
+    /// separately from `alias`: the latter is the import spelling at the
+    /// call site and may differ from the module that defined the operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_effect: Option<(String, String)>,
     /// Names from the symbol's `=where` annotation when generic; empty if non-generic.
     pub type_params: Vec<String>,
     /// Parallel to `type_params`. See `TypeAlias::type_param_bounds`.
@@ -594,6 +604,10 @@ pub struct LoweredProgram {
     pub main_effects: EffectRow,
     pub main_arg_bindings: Vec<(String, TypeRef)>,
     pub constants: HashMap<String, RuntimeValue>,
+    /// Type aliases retained for runtime tagging of validated intrinsic
+    /// results. Host-backed newtypes are nominal even though their Wasm ABI
+    /// representation is the same opaque handle value.
+    pub type_aliases: HashMap<String, TypeAlias>,
     pub functions: HashMap<String, FunctionSig>,
     pub impls: HashMap<ImplKey, ImplBody>,
     pub warnings: Vec<String>,
@@ -673,6 +687,10 @@ struct DefEnvelope<'a> {
     /// `=effects` annotation: the raw label list. Resolved to an `EffectRow` once
     /// all type aliases are known, so a label may name an effect declared later.
     effect_values: Option<&'a Vec<Value>>,
+    /// Internal canonical owner metadata emitted by the native surface
+    /// adapter. It is deliberately not part of the user-facing effect row;
+    /// import aliases must never rewrite this identity.
+    owner_effect: Option<(String, String)>,
     /// `=defs` annotation: a mapping of name -> function-definition envelope
     /// for inherent operations on the enclosing type.
     defs: Option<&'a Mapping>,
@@ -702,7 +720,7 @@ const INHERENT_FN_PRIMARY_ARG: &str = "self";
 /// Annotation keys we currently understand. Anything else with a `=` prefix
 /// is rejected with `E-ANNO-001`. Any sibling key that does not start with
 /// `$` or `=` is rejected with `E-ANNO-002` (legacy un-prefixed annotation).
-const KNOWN_ANNOTATIONS: &[&str] = &["=where", "=doc", "=defs", "=impl", "=effects"];
+const KNOWN_ANNOTATIONS: &[&str] = &["=where", "=doc", "=defs", "=impl", "=effects", "=owner"];
 
 fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<DefEnvelope<'a>> {
     let m = v.as_mapping().context("definition must be a mapping")?;
@@ -713,6 +731,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
     let mut type_param_bound_values: Vec<Vec<&'a Value>> = Vec::new();
     let mut doc: Option<String> = None;
     let mut effect_values: Option<&Vec<Value>> = None;
+    let mut owner_effect: Option<(String, String)> = None;
     let mut defs: Option<&'a Mapping> = None;
     let mut impls: Option<&'a Mapping> = None;
     let mut function_args: Option<&'a Value> = None;
@@ -780,6 +799,28 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
                 "E-EFFECT-004: `=effects` annotation must be a sequence of effect labels",
             )?;
             effect_values = Some(labels);
+        } else if ks == "=owner" {
+            let values = val
+                .as_sequence()
+                .context("E-DEFFECT-005: `=owner` must be a [module, root] sequence")?;
+            let [module, root] = values.as_slice() else {
+                bail!("E-DEFFECT-005: `=owner` must contain exactly [module, root]");
+            };
+            let module = module
+                .as_str()
+                .context("E-DEFFECT-005: `=owner` module must be a string")?;
+            let root = root
+                .as_str()
+                .context("E-DEFFECT-005: `=owner` root must be a string")?;
+            if module.is_empty() || root.is_empty() {
+                bail!("E-DEFFECT-005: `=owner` module and root must be non-empty");
+            }
+            if owner_effect
+                .replace((module.to_string(), root.to_string()))
+                .is_some()
+            {
+                bail!("E-DEFFECT-005: definition declares `=owner` more than once");
+            }
         } else if ks == "=doc" {
             let s = val.as_str().with_context(|| {
                 format!("E-DOC-001: `=doc` annotation must be a string scalar (got non-string for `{ks}`)")
@@ -950,6 +991,7 @@ fn parse_def_envelope<'a>(v: &'a Value, warnings: &mut Vec<String>) -> Result<De
         type_param_bound_values,
         doc,
         effect_values,
+        owner_effect,
         defs,
         impls,
         function_args,
@@ -1698,18 +1740,23 @@ fn parse_type_constructor(
                     .as_sequence()
                     .context("$fn-type `effects` must be a sequence")?
                 {
-                    let TypeRef::Effect { domain, action } =
-                        parse_type_ref(label, scope, skeletons, warnings, self_allowed)?
-                    else {
-                        // Type parsing runs before alias resolution, so a named
-                        // reference is still an unresolved `Named` here. Inline
-                        // construction needs no resolution and is always available,
-                        // so `fn-type` takes that spelling for now.
-                        bail!(
-                            "E-EFFECT-002: `fn-type` effects must be written inline as `(effect @domain @action)`; a named effect reference is not resolvable in this position"
-                        );
-                    };
-                    effects.insert((domain, action));
+                    let parsed = parse_type_ref(label, scope, skeletons, warnings, self_allowed)?;
+                    match parsed {
+                        TypeRef::Effect { domain, action } => {
+                            effects.insert((domain, action));
+                        }
+                        TypeRef::Named(name) => {
+                            let Some((domain, action)) = nominal_effect_name(&name) else {
+                                bail!("E-EFFECT-002: `fn-type` names unknown effect `{name}`");
+                            };
+                            effects.insert((domain.to_string(), action.to_string()));
+                        }
+                        _ => {
+                            bail!(
+                                "E-EFFECT-002: `fn-type` effects must be an effect root or inline `(effect @domain @action)`"
+                            );
+                        }
+                    }
                 }
             }
             Ok(TypeRef::FnType {
@@ -2001,17 +2048,21 @@ fn resolve_effect_row(
         let resolved = match ty {
             TypeRef::Effect { domain, action } => (domain, action),
             TypeRef::Named(name) => {
-                let key = qualify_type_name_key(alias, name.clone(), type_aliases);
-                match type_aliases.get(&key).map(|alias| &alias.body) {
-                    Some(TypeRef::Effect { domain, action }) => {
-                        (domain.clone(), action.clone())
+                if let Some((domain, action)) = nominal_effect_name(&name) {
+                    (domain.to_string(), action.to_string())
+                } else {
+                    let key = qualify_type_name_key(alias, name.clone(), type_aliases);
+                    match type_aliases.get(&key).map(|alias| &alias.body) {
+                        Some(TypeRef::Effect { domain, action }) => {
+                            (domain.clone(), action.clone())
+                        }
+                        Some(_) => bail!(
+                            "E-EFFECT-002: `{owner}` declares effect `{name}`, but `{key}` is a type, not an effect"
+                        ),
+                        None => bail!(
+                            "E-EFFECT-002: `{owner}` declares unknown effect `{name}`; no `(def {name} (effect @domain @action))` is visible"
+                        ),
                     }
-                    Some(_) => bail!(
-                        "E-EFFECT-002: `{owner}` declares effect `{name}`, but `{key}` is a type, not an effect"
-                    ),
-                    None => bail!(
-                        "E-EFFECT-002: `{owner}` declares unknown effect `{name}`; no `(def {name} (effect @domain @action))` is visible"
-                    ),
                 }
             }
             other => bail!(
@@ -2021,6 +2072,18 @@ fn resolve_effect_row(
         labels.insert(resolved);
     }
     Ok(EffectRow { labels, tail: None })
+}
+
+/// Native deffect roots are named `module.root` in effect ceilings. Keep this
+/// small allow-list at the legacy lowering seam while the typed effect index is
+/// migrated; ordinary type names still go through the declared alias table.
+fn nominal_effect_name(name: &str) -> Option<(&str, &str)> {
+    let (domain, action) = name.split_once('.')?;
+    if crate::intrinsics::is_known_root(domain, action) {
+        Some((domain, action))
+    } else {
+        None
+    }
 }
 
 fn qualify_type_name_key(
@@ -2262,6 +2325,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         main_effects,
         main_arg_bindings,
         constants,
+        type_aliases,
         functions: sigs,
         impls,
         warnings,
@@ -2451,6 +2515,7 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
                 main_arg_bindings,
                 main_effects: Default::default(),
                 constants: ctx.constants.clone(),
+                type_aliases: ctx.type_aliases.clone(),
                 functions: ctx.sigs.clone(),
                 impls: ctx.impls.clone(),
                 warnings: ctx.warnings.clone(),
@@ -2510,6 +2575,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
     let TestContext {
         sigs,
         constants,
+        type_aliases,
         impls,
         warnings,
         ..
@@ -2522,6 +2588,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
             main_arg_bindings,
             main_effects: Default::default(),
             constants,
+            type_aliases,
             functions: sigs,
             impls,
             warnings,
@@ -2714,6 +2781,7 @@ pub fn lower_exec_expr(
             main_arg_bindings: Vec::new(),
             main_effects: Default::default(),
             constants,
+            type_aliases,
             functions: sigs,
             impls,
             warnings,
@@ -3309,6 +3377,7 @@ fn try_register_function(
         FunctionSig {
             alias: alias.to_string(),
             symbol: name.to_string(),
+            owner_effect: env.owner_effect.clone(),
             type_params: env.type_params.clone(),
             type_param_bounds: resolved_bounds,
             parameters: parameters_from_parts(arg_names, arg_types, Vec::new()),
@@ -3423,6 +3492,11 @@ pub(crate) fn validate_wasm_bodies(
             }
         }
         if import.module.starts_with('@') {
+            if contains_host_backed_newtype(&sig.return_type, type_aliases) {
+                bail!(
+                    "E-CAP-005: raw `wasm` function `{key}` cannot return a host-backed endpoint"
+                );
+            }
             if wasm_args.len() != sig.parameters.len() {
                 bail!(
                     "E-WASM-007: `{key}` forwards {} values but declares {} parameters",
@@ -3479,6 +3553,11 @@ pub(crate) fn validate_wasm_bodies(
                 entry.result.as_str()
             );
         }
+        if sig.owner_effect.is_some()
+            && contains_host_backed_newtype(&sig.return_type, type_aliases)
+        {
+            bail!("E-CAP-005: raw `wasm` operation `{key}` cannot mint a host-backed endpoint");
+        }
         for (position, (spec, param)) in wasm_args.iter().zip(entry.params.iter()).enumerate() {
             let arg_type = match spec {
                 WasmArgSpec::Arg(name) => {
@@ -3530,6 +3609,18 @@ pub(crate) fn abi_value_type_matches(
         }
         _ => None,
     };
+    // ABI capability requirements are expressed in terms of generic host
+    // handles. A nominal endpoint may satisfy one of those requirements when
+    // its unforgeable inner handle has the required (or stronger) access.
+    let endpoint_access = || {
+        if let TypeRef::HostHandle(access) = resolved {
+            return Some(*access);
+        }
+        newtype_inner(ty, aliases).and_then(|inner| match inner {
+            TypeRef::HostHandle(access) => Some(*access),
+            _ => None,
+        })
+    };
     match kind {
         A::Void => matches!(resolved, TypeRef::Void),
         A::Bool => matches!(resolved, TypeRef::Bool),
@@ -3542,17 +3633,24 @@ pub(crate) fn abi_value_type_matches(
         A::Duration => named_ends("duration"),
         A::Instant => named_ends("instant"),
         A::NetAddress => named_ends("address"),
-        A::TcpStream => named_ends("tcp-stream"),
-        A::TcpListener => named_ends("tcp-listener"),
-        A::UdpSocket => named_ends("udp-socket"),
+        A::TcpStream => known_nominal_endpoint(ty, aliases, &["net.tcp-stream"]),
+        A::TcpListener => {
+            known_nominal_endpoint(ty, aliases, &["net.tcp-listener", "net.listener"])
+        }
+        A::UdpSocket => known_nominal_endpoint(ty, aliases, &["net.udp-socket"]),
         A::Float64 => matches!(resolved, TypeRef::Float64),
         A::Str => matches!(resolved, TypeRef::Str),
         A::Bytes => named_ends("bytes"),
         A::Path => named_ends("path"),
-        A::ReadHandle => matches!(resolved, TypeRef::HostHandle(HandleAccess::Read | HandleAccess::ReadWrite)),
-        A::WriteHandle => matches!(resolved, TypeRef::HostHandle(HandleAccess::Write | HandleAccess::ReadWrite)),
-        A::ProcessHandle => matches!(resolved, TypeRef::HostHandle(HandleAccess::Process)),
-        A::AnyHandle => matches!(resolved, TypeRef::HostHandle(_)),
+        A::ReadHandle => endpoint_access().is_some_and(|access| {
+            matches!(access, HandleAccess::Read | HandleAccess::ReadWrite)
+        }),
+        A::WriteHandle => endpoint_access().is_some_and(|access| {
+            matches!(access, HandleAccess::Write | HandleAccess::ReadWrite)
+        }),
+        A::ProcessHandle => endpoint_access()
+            .is_some_and(|access| matches!(access, HandleAccess::Process)),
+        A::AnyHandle => endpoint_access().is_some(),
         A::ResultVoid => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Void, t, aliases))),
         A::ResultStr => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
         A::ResultBytes => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Bytes, t, aliases))),
@@ -3570,6 +3668,93 @@ pub(crate) fn abi_value_type_matches(
         A::OptionAny => instantiated("option").is_some(),
         A::ResultAny => instantiated("result").is_some(),
     }
+}
+
+/// Validate the nominal specialization of a generic `ResultAny` intrinsic.
+/// Generic provider results are otherwise intentionally opaque, but allowing
+/// an arbitrary host-backed newtype there would let a declaration mint a
+/// socket/file/process endpoint unrelated to the acquiring operation.
+pub(crate) fn intrinsic_result_allows_nominal_endpoint(
+    intrinsic: &str,
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    let payload = match ty {
+        TypeRef::Instantiated { base, type_args }
+            if (base == "result" || base.ends_with(".result")) && !type_args.is_empty() =>
+        {
+            &type_args[0]
+        }
+        _ => ty,
+    };
+    let Some(endpoint_name) = host_endpoint_name(payload, aliases) else {
+        return !contains_host_backed_newtype(payload, aliases);
+    };
+    crate::intrinsics::endpoint_result_suffixes(intrinsic)
+        .iter()
+        .any(|allowed| endpoint_name == *allowed || endpoint_name.ends_with(&format!(".{allowed}")))
+}
+
+fn contains_host_backed_newtype(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> bool {
+    if host_backed_newtype(ty, aliases) {
+        return true;
+    }
+    match ty {
+        TypeRef::Instantiated { type_args, .. }
+        | TypeRef::Tuple(type_args)
+        | TypeRef::Union(type_args)
+        | TypeRef::Intersect(type_args) => type_args
+            .iter()
+            .any(|item| contains_host_backed_newtype(item, aliases)),
+        TypeRef::Array(inner) => contains_host_backed_newtype(inner, aliases),
+        TypeRef::Enum(tags) | TypeRef::Record(tags) | TypeRef::Interface(tags) => tags
+            .values()
+            .any(|item| contains_host_backed_newtype(item, aliases)),
+        TypeRef::Map { key, value } => {
+            contains_host_backed_newtype(key, aliases)
+                || contains_host_backed_newtype(value, aliases)
+        }
+        TypeRef::Mutable(inner)
+        | TypeRef::Reference { inner, .. }
+        | TypeRef::JoinHandle(inner)
+        | TypeRef::Newtype { inner, .. } => contains_host_backed_newtype(inner, aliases),
+        TypeRef::FnType {
+            parameters,
+            return_type,
+            ..
+        } => {
+            parameters
+                .iter()
+                .any(|parameter| contains_host_backed_newtype(&parameter.ty, aliases))
+                || contains_host_backed_newtype(return_type, aliases)
+        }
+        _ => false,
+    }
+}
+
+fn host_endpoint_name<'a>(
+    ty: &'a TypeRef,
+    aliases: &'a HashMap<String, TypeAlias>,
+) -> Option<&'a str> {
+    match ty {
+        TypeRef::Named(name) if host_backed_newtype(ty, aliases) => Some(name.as_str()),
+        TypeRef::Newtype { name, inner } if matches!(inner.as_ref(), TypeRef::HostHandle(_)) => {
+            Some(name.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn known_nominal_endpoint(
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+    allowed: &[&str],
+) -> bool {
+    host_endpoint_name(ty, aliases).is_some_and(|name| {
+        allowed
+            .iter()
+            .any(|expected| name == *expected || name.ends_with(&format!(".{expected}")))
+    })
 }
 
 pub(crate) fn host_result_type(kind: crate::host_abi::ValueKind) -> Result<TypeRef> {
@@ -3752,6 +3937,7 @@ fn register_one_inherent_function(
         FunctionSig {
             alias: sig_alias,
             symbol: sig_symbol,
+            owner_effect: env.owner_effect.clone(),
             type_params: all_type_params,
             type_param_bounds: full_bounds,
             parameters: parameters_from_parts(arg_names, arg_types, Vec::new()),
@@ -4238,6 +4424,7 @@ fn bind_impl_method(
         FunctionSig {
             alias: module_alias.to_string(),
             symbol: sig_symbol,
+            owner_effect: env.owner_effect.clone(),
             type_params: sig_type_params,
             type_param_bounds: sig_bounds,
             parameters: parameters_from_parts(arg_names, arg_types, Vec::new()),
@@ -5805,8 +5992,45 @@ fn lower_statement(
             home,
             warnings,
         )?;
-        if let Expr::HostCall { return_type, .. } = &mut expr {
-            if *return_type == TypeRef::Named("$host-context".into()) {
+        if let Expr::HostCall {
+            import,
+            return_type,
+            intrinsic,
+            ..
+        } = &mut expr
+        {
+            if *intrinsic {
+                let entry = crate::intrinsics::lookup(&import.name).with_context(|| {
+                    format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name)
+                })?;
+                if !abi_value_type_matches(entry.result, &ctx.return_type, type_aliases) {
+                    bail!(
+                        "E-INTRINSIC-005: intrinsic `{}` result requires `{}`, got {:?}",
+                        import.name,
+                        entry.result.as_str(),
+                        return_type
+                    );
+                }
+                if crate::intrinsics::requires_effect(&import.name)
+                    && !intrinsic_result_allows_nominal_endpoint(
+                        &import.name,
+                        &ctx.return_type,
+                        type_aliases,
+                    )
+                {
+                    bail!(
+                        "E-INTRINSIC-005: intrinsic `{}` cannot mint the declared nominal endpoint result",
+                        import.name
+                    );
+                }
+                // ResultAny/Any and nominal host endpoints deliberately carry
+                // their source-level result type at the enclosing declaration.
+                // Fixed ABI scalars remain fixed, so a wrong return annotation
+                // cannot be laundered by the intrinsic marker.
+                if !type_compatible(&ctx.return_type, return_type, type_aliases) {
+                    *return_type = ctx.return_type.clone();
+                }
+            } else if *return_type == TypeRef::Named("$host-context".into()) {
                 *return_type = ctx.return_type.clone();
             }
         }
@@ -7207,12 +7431,30 @@ fn parse_expr(
             let name = map_get_str(host, "name")
                 .and_then(Value::as_str)
                 .context("E-WASM-003: host call symbol must be a string")?;
-            let entry = crate::host_abi::lookup(module, name)
-                .with_context(|| format!("E-WASM-002: unknown host import `{module}.{name}`"))?;
+            let intrinsic = map_get_str(host, "intrinsic")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let entry = if intrinsic {
+                if module != "vibra_v1" {
+                    bail!("E-INTRINSIC-003: intrinsic module must be `vibra_v1`");
+                }
+                crate::intrinsics::lookup(name)
+                    .with_context(|| format!("E-INTRINSIC-003: unknown intrinsic `{name}`"))?
+            } else {
+                crate::host_abi::lookup(module, name)
+                    .with_context(|| format!("E-WASM-002: unknown host import `{module}.{name}`"))?
+            };
             let values = map_get_str(host, "args")
                 .and_then(Value::as_sequence)
                 .context("E-WASM-003: host call args must be a sequence")?;
             if values.len() != entry.params.len() {
+                if intrinsic {
+                    bail!(
+                        "E-INTRINSIC-004: intrinsic `{name}` expects {} arguments, got {}",
+                        entry.params.len(),
+                        values.len()
+                    );
+                }
                 bail!(
                     "E-WASM-003: host import `{module}.{name}` expects {} arguments, got {}",
                     entry.params.len(),
@@ -7239,6 +7481,9 @@ fn parse_expr(
                 let ty = infer_expr_type(arg, constants, locals, type_aliases, enums)
                     .context("E-WASM-003: cannot infer host-call argument type")?;
                 if !abi_value_type_matches(*kind, &ty, type_aliases) {
+                    if intrinsic {
+                        bail!("E-INTRINSIC-005: intrinsic `{name}` argument {index} requires `{}`, got {ty:?}", kind.as_str());
+                    }
                     bail!("E-WASM-003: host import `{module}.{name}` argument {index} requires `{}`, got {ty:?}", kind.as_str());
                 }
             }
@@ -7249,6 +7494,7 @@ fn parse_expr(
                 },
                 args,
                 return_type: host_result_type(entry.result)?,
+                intrinsic,
             });
         }
         if let Some(expr) = parse_primitive_expr(
@@ -7320,6 +7566,11 @@ fn parse_expr(
             let target = parse_type_ref(into_v, &[], &empty_skeletons, warnings, false)
                 .context("E-CAST-002: invalid `$cast.into` type")?;
             let target = qualify_named_type(home_module, target, type_aliases);
+            if host_backed_newtype(&source, type_aliases)
+                || host_backed_newtype(&target, type_aliases)
+            {
+                bail!("E-CAP-005: host-backed endpoint types cannot be forged or cast");
+            }
             if matches!(
                 resolve_alias_type(&target, type_aliases),
                 TypeRef::HostHandle(_)
@@ -8069,6 +8320,59 @@ mod atom_map_inference_tests {
                 value: Box::new(TypeRef::Int64),
             })
         );
+    }
+
+    #[test]
+    fn intrinsic_endpoint_results_are_provider_specific() {
+        let mut aliases = HashMap::new();
+        for name in [
+            "net.tcp-stream",
+            "evil.tcp-stream",
+            "fs.reader",
+            "evil.reader",
+        ] {
+            aliases.insert(
+                name.to_string(),
+                TypeAlias {
+                    alias: name.split('.').next().unwrap_or_default().to_string(),
+                    name: name.rsplit('.').next().unwrap_or_default().to_string(),
+                    type_params: Vec::new(),
+                    type_param_bounds: Vec::new(),
+                    body: TypeRef::Newtype {
+                        name: name.to_string(),
+                        inner: Box::new(TypeRef::HostHandle(HandleAccess::ReadWrite)),
+                    },
+                    doc: None,
+                },
+            );
+        }
+        let result = |endpoint: &str| TypeRef::Instantiated {
+            base: "result.result".into(),
+            type_args: vec![
+                TypeRef::Named(endpoint.into()),
+                TypeRef::Named("error".into()),
+            ],
+        };
+        assert!(intrinsic_result_allows_nominal_endpoint(
+            "net-connect",
+            &result("net.tcp-stream"),
+            &aliases,
+        ));
+        assert!(!intrinsic_result_allows_nominal_endpoint(
+            "net-connect",
+            &result("evil.tcp-stream"),
+            &aliases,
+        ));
+        assert!(intrinsic_result_allows_nominal_endpoint(
+            "fs-open-read",
+            &result("fs.reader"),
+            &aliases,
+        ));
+        assert!(!intrinsic_result_allows_nominal_endpoint(
+            "fs-open-read",
+            &result("evil.reader"),
+            &aliases,
+        ));
     }
 }
 

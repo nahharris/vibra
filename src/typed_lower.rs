@@ -8,8 +8,8 @@ use crate::ast::{
     Module, TestMeta, TopLevel, TypeExpr, TypeExprKind, Visibility,
 };
 use crate::lower::{
-    FunctionTypeParameter, HandleAccess, ImplBody, ImplKey, ImplMethodBinding, LiteralType,
-    Parameter, TypeAlias, TypeRef,
+    EffectRow, FunctionTypeParameter, HandleAccess, ImplBody, ImplKey, ImplMethodBinding,
+    LiteralType, Parameter, TypeAlias, TypeRef,
 };
 use crate::type_semantics;
 use anyhow::{bail, Context, Result};
@@ -36,6 +36,15 @@ pub struct TypedFunctionSignature {
     pub parameters: Vec<Parameter>,
     pub return_type: TypeRef,
     pub doc: Option<String>,
+    /// The complete declared ceiling for this function. For a deffect
+    /// operation this includes its implicit owner root plus the explicit
+    /// additive roots; ordinary functions only carry their annotation.
+    pub effects: EffectRow,
+    /// The nominal owner root for a deffect operation, if any. Keeping this
+    /// separate from `effects` lets tooling report owner versus additive
+    /// effects without reconstructing it from a set.
+    pub owner_effect: Option<(String, String)>,
+    pub additive_effects: EffectRow,
 }
 
 #[derive(Debug, Clone)]
@@ -110,9 +119,17 @@ fn lower_module(
     index: &mut TypedSignatureIndex,
 ) -> Result<()> {
     let module_identity = identity(&input);
+    let mut top_level_names = BTreeSet::new();
     for form in &input.module.forms {
         match form {
             TopLevel::Import(import) => {
+                if !top_level_names.insert(import.alias.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: duplicate top-level symbol `{}` in `{}`",
+                        import.alias.value,
+                        input.alias
+                    );
+                }
                 let key = (module_identity.clone(), import.alias.value.clone());
                 if index
                     .imports
@@ -127,9 +144,23 @@ fn lower_module(
                 }
             }
             TopLevel::Definition(definition) => {
+                if !top_level_names.insert(definition.name.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: duplicate top-level symbol `{}` in `{}`",
+                        definition.name.value,
+                        input.alias
+                    );
+                }
                 lower_definition(input.alias, definition, declared_aliases, index)?
             }
             TopLevel::Function(function) => {
+                if !top_level_names.insert(function.name.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: duplicate top-level symbol `{}` in `{}`",
+                        function.name.value,
+                        input.alias
+                    );
+                }
                 lower_function(input.alias, function, "", &[], &[], declared_aliases, index)?;
                 insert_visibility(
                     index,
@@ -137,7 +168,57 @@ fn lower_module(
                     function.visibility,
                 )?;
             }
+            TopLevel::Deffect(deffect) => {
+                if !top_level_names.insert(deffect.name.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: deffect root `{}` collides with a top-level symbol in `{}`",
+                        deffect.name.value,
+                        input.alias
+                    );
+                }
+                if index
+                    .visibility
+                    .contains_key(&qualify(input.alias, &deffect.name.value))
+                {
+                    bail!(
+                        "duplicate typed deffect root `{}`",
+                        qualify(input.alias, &deffect.name.value)
+                    );
+                }
+                for operation in &deffect.operations {
+                    let key = lower_function(
+                        input.alias,
+                        &operation.function,
+                        &deffect.name.value,
+                        &[],
+                        &[],
+                        declared_aliases,
+                        index,
+                    )?;
+                    let additive = lower_effect_row(
+                        &operation.function.annotations,
+                        input.alias,
+                        declared_aliases,
+                    )?;
+                    let owner = (input.alias.to_string(), deffect.name.value.clone());
+                    let signature = index
+                        .functions
+                        .get_mut(&key)
+                        .expect("deffect operation signature was just inserted");
+                    signature.owner_effect = Some(owner.clone());
+                    signature.additive_effects = additive.clone();
+                    signature.effects.labels.insert(owner);
+                    signature.effects.labels.extend(additive.labels);
+                }
+            }
             TopLevel::Constant(constant) => {
+                if !top_level_names.insert(constant.name.value.clone()) {
+                    bail!(
+                        "E-DEFFECT-004: duplicate top-level symbol `{}` in `{}`",
+                        constant.name.value,
+                        input.alias
+                    );
+                }
                 let annotations = annotations(
                     &constant.annotations,
                     &BTreeSet::new(),
@@ -338,6 +419,9 @@ fn lower_function(
             declared_aliases,
         )?,
         doc: annotations.doc,
+        effects: lower_effect_row(&function.annotations, module_alias, declared_aliases)?,
+        owner_effect: None,
+        additive_effects: EffectRow::default(),
     };
     if index.functions.insert(key.clone(), signature).is_some() {
         bail!("duplicate typed function signature `{key}`");
@@ -488,6 +572,51 @@ fn annotations<'a>(
         }
     }
     Ok(result)
+}
+
+/// Lower the surface `effects:` annotation for the staged typed index. Native
+/// roots are nominal dotted names (`module.root`); the inline constructor is
+/// retained for callers that still use structural spelling while the surface
+/// migrates. No dependency closure is inferred here: this is exactly the row
+/// written on the declaration.
+fn lower_effect_row(
+    annotations: &[Annotation],
+    _module_alias: &str,
+    _declared_aliases: &BTreeSet<String>,
+) -> Result<EffectRow> {
+    let Some(row) = annotations
+        .iter()
+        .find_map(|annotation| match &annotation.value {
+            AnnotationKind::Effects(row) => Some(row),
+            _ => None,
+        })
+    else {
+        return Ok(EffectRow::default());
+    };
+    let mut lowered = EffectRow::default();
+    for label in &row.labels {
+        let identity = match &label.value {
+            TypeExprKind::Effect { domain, action } => {
+                (domain.value.clone(), action.value.clone())
+            }
+            TypeExprKind::Named(name) => {
+                let Some((domain, action)) = name.split_once('.') else {
+                    bail!(
+                        "E-EFFECT-002: typed effect `{name}` must be a nominal `module.root` name"
+                    );
+                };
+                if !crate::intrinsics::is_known_root(domain, action) {
+                    bail!("E-EFFECT-002: malformed nominal effect `{name}`");
+                }
+                (domain.to_string(), action.to_string())
+            }
+            other => bail!(
+                "E-EFFECT-002: typed effect row entry must be a nominal root or inline effect, got {other:?}"
+            ),
+        };
+        lowered.labels.insert(identity);
+    }
+    Ok(lowered)
 }
 
 pub(crate) fn lower_type(
@@ -1622,6 +1751,36 @@ mod tests {
         assert_eq!(
             index.aliases["box"].type_param_bounds[0],
             vec![TypeRef::Interface(BTreeMap::new())]
+        );
+    }
+
+    #[test]
+    fn lowers_deffect_operations_with_owner_and_additive_effects() {
+        let source = module(
+            r#"(deffect now
+  (defn unix-millis () uint64
+    (return 1)
+    effects: (stream.read)))"#,
+            101,
+        );
+        let index = lower_typed_signatures([TypedModuleInput {
+            alias: "time",
+            module: &source,
+        }])
+        .unwrap();
+        let signature = &index.functions["time.now.unix-millis"];
+        assert_eq!(
+            signature.owner_effect,
+            Some(("time".to_string(), "now".to_string()))
+        );
+        assert_eq!(
+            signature.effects.labels,
+            [
+                ("stream".to_string(), "read".to_string()),
+                ("time".to_string(), "now".to_string())
+            ]
+            .into_iter()
+            .collect()
         );
     }
 }

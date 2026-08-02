@@ -186,6 +186,19 @@ fn index_top_level(form: &TopLevel, context: &DocContext<'_>, facts: &mut Vec<Se
             visit_annotations(&constant.annotations, context, facts);
         }
         TopLevel::Function(function) => index_function(function, context, facts),
+        TopLevel::Deffect(deffect) => {
+            push(
+                facts,
+                context,
+                deffect.name.span,
+                SemanticKind::Definition,
+                deffect.name.value.clone(),
+                Some(context.document.to_path_buf()),
+            );
+            for operation in &deffect.operations {
+                index_operation(&deffect.name.value, &operation.function, context, facts);
+            }
+        }
         TopLevel::Macro(macro_def) => {
             push(
                 facts,
@@ -242,6 +255,34 @@ fn index_function(
         function.name.span,
         SemanticKind::Definition,
         function.name.value.clone(),
+        Some(context.document.to_path_buf()),
+    );
+    for parameter in &function.parameters {
+        visit_type(&parameter.ty, context, facts);
+    }
+    visit_type(&function.return_type, context, facts);
+    for expr in &function.body {
+        visit_expr(expr, context, facts);
+    }
+    visit_annotations(&function.annotations, context, facts);
+}
+
+/// Index a deffect operation under its qualified root name. The source span
+/// still covers only the operation token (`file`), but the semantic symbol is
+/// `read.file`; there is intentionally no bare operation definition that
+/// could compete with a module-level `file` symbol.
+fn index_operation(
+    root: &str,
+    function: &ast::Function,
+    context: &DocContext<'_>,
+    facts: &mut Vec<SemanticFact>,
+) {
+    push(
+        facts,
+        context,
+        function.name.span,
+        SemanticKind::Definition,
+        format!("{root}.{}", function.name.value),
         Some(context.document.to_path_buf()),
     );
     for parameter in &function.parameters {
@@ -342,6 +383,11 @@ fn visit_expr(expr: &Expr, context: &DocContext<'_>, facts: &mut Vec<SemanticFac
             );
             for argument in arguments {
                 visit_expr(argument.value(), context, facts);
+            }
+        }
+        ExprKind::Intrinsic { arguments, .. } => {
+            for argument in arguments {
+                visit_expr(argument, context, facts);
             }
         }
         ExprKind::AnonymousFunction { body, .. } => visit_exprs(body, context, facts),

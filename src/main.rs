@@ -894,9 +894,17 @@ struct EffectsReport {
     /// low-level detail beneath the declared rows.
     #[serde(rename = "host-imports")]
     host_imports: Vec<EffectEntry>,
+    /// Version-three split between what declarations promise and what the
+    /// lowered bodies actually perform.
+    surface: EffectSurface,
+    /// Native deffect operations, with owner/additive rows kept separate from
+    /// the legacy function list for tooling that wants the nominal view.
+    operations: Vec<OperationEffects>,
+    /// Irreducible host transitions and their capability-shaped ABI boundary.
+    primitives: Vec<PrimitiveWitness>,
 }
 
-#[derive(serde::Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, serde::Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct EffectLabel {
     domain: String,
     action: String,
@@ -905,7 +913,33 @@ struct EffectLabel {
 #[derive(serde::Serialize)]
 struct FunctionEffects {
     source: String,
+    /// Kept as the v2 spelling for consumers that already read this field.
     effects: Vec<EffectLabel>,
+    declared: Vec<EffectLabel>,
+    performed: Vec<EffectLabel>,
+    #[serde(rename = "call-edges")]
+    call_edges: Vec<String>,
+    #[serde(rename = "primitive-witnesses")]
+    primitive_witnesses: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct EffectSurface {
+    declared: Vec<EffectLabel>,
+    performed: Vec<EffectLabel>,
+}
+
+#[derive(serde::Serialize)]
+struct OperationEffects {
+    source: String,
+    owner: EffectLabel,
+    additive: Vec<EffectLabel>,
+    declared: Vec<EffectLabel>,
+    performed: Vec<EffectLabel>,
+    #[serde(rename = "call-edges")]
+    call_edges: Vec<String>,
+    #[serde(rename = "primitive-witnesses")]
+    primitive_witnesses: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -918,12 +952,27 @@ struct EffectEntry {
     result: String,
     /// The effects this host import performs, per the ABI registry.
     effects: Vec<EffectLabel>,
+    intrinsic: bool,
 }
 
 #[derive(serde::Serialize)]
 struct EffectParam {
     #[serde(rename = "type")]
     value_type: String,
+}
+
+#[derive(serde::Serialize)]
+struct PrimitiveWitness {
+    source: String,
+    module: String,
+    name: String,
+    intrinsic: bool,
+    #[serde(rename = "input-capabilities")]
+    input_capabilities: Vec<String>,
+    #[serde(rename = "result-capability")]
+    result_capability: String,
+    #[serde(rename = "required-roots")]
+    required_roots: Vec<EffectLabel>,
 }
 
 fn print_effects(
@@ -949,58 +998,576 @@ fn print_effects(
         domain: domain.clone(),
         action: action.clone(),
     };
-    let mut surface = std::collections::BTreeSet::new();
+    let mut declared_surface = std::collections::BTreeSet::new();
+    let mut performed_surface = std::collections::BTreeSet::new();
     let mut per_function = Vec::new();
+    let mut operations = Vec::new();
+    let mut primitive_witnesses = Vec::new();
+    let mut host_entries = Vec::new();
+
     for (source, signature) in &functions {
-        for pair in &signature.effects.labels {
-            surface.insert(pair.clone());
-        }
-        if !signature.effects.labels.is_empty() {
-            per_function.push(FunctionEffects {
+        let inferred = vibra::effect_semantics::infer_function(signature, &lowered.functions);
+        let declared: Vec<_> = signature.effects.labels.iter().map(label).collect();
+        let performed: Vec<_> = inferred.labels().iter().map(label).collect();
+        declared_surface.extend(signature.effects.labels.iter().cloned());
+        performed_surface.extend(inferred.labels());
+
+        let mut call_edges = std::collections::BTreeSet::new();
+        let mut function_primitives = Vec::new();
+        collect_function_details(
+            source,
+            signature,
+            &mut call_edges,
+            &mut function_primitives,
+            &mut primitive_witnesses,
+            &mut host_entries,
+        )?;
+        let primitive_names = function_primitives.clone();
+        per_function.push(FunctionEffects {
+            source: (*source).clone(),
+            effects: declared.clone(),
+            declared: declared.clone(),
+            performed: performed.clone(),
+            call_edges: call_edges.into_iter().collect(),
+            primitive_witnesses: primitive_names,
+        });
+
+        // Native operation symbols are lowered as `root.operation` under
+        // their defining module. The owner row is explicit in the declared
+        // set; all remaining labels are additive and are reported verbatim.
+        if let Some(owner) = operation_owner(signature) {
+            let additive = signature
+                .effects
+                .labels
+                .iter()
+                .filter(|pair| **pair != owner)
+                .map(label)
+                .collect();
+            operations.push(OperationEffects {
                 source: (*source).clone(),
-                effects: signature.effects.labels.iter().map(label).collect(),
+                owner: label(&owner),
+                additive,
+                declared,
+                performed,
+                call_edges: per_function
+                    .last()
+                    .map(|function| function.call_edges.clone())
+                    .unwrap_or_default(),
+                primitive_witnesses: function_primitives,
             });
         }
     }
 
-    let mut effects = Vec::new();
-    for (source, signature) in functions {
-        let lower::FunctionBody::Wasm { import, .. } = &signature.body else {
-            continue;
-        };
-        let entry = vibra::host_abi::lookup(&import.module, &import.name)
-            .context("lowered host import is absent from the ABI registry")?;
-        let params = entry
+    // `main` is intentionally not registered in `functions`; include its
+    // declared/performed rows in v3's surface and in the same audit list.
+    let main_inferred =
+        vibra::effect_semantics::infer_statements(&lowered.statements, &lowered.functions);
+    declared_surface.extend(lowered.main_effects.labels.iter().cloned());
+    performed_surface.extend(main_inferred.labels());
+    let mut main_calls = std::collections::BTreeSet::new();
+    let mut main_primitives = Vec::new();
+    let main_signature = lower::FunctionSig {
+        alias: String::new(),
+        symbol: "main".into(),
+        owner_effect: None,
+        type_params: Vec::new(),
+        type_param_bounds: Vec::new(),
+        parameters: Vec::new(),
+        return_type: TypeRef::Void,
+        body: lower::FunctionBody::User {
+            statements: lowered.statements.clone(),
+        },
+        doc: None,
+        effects: lowered.main_effects.clone(),
+    };
+    collect_function_details(
+        "main",
+        &main_signature,
+        &mut main_calls,
+        &mut main_primitives,
+        &mut primitive_witnesses,
+        &mut host_entries,
+    )?;
+    per_function.push(FunctionEffects {
+        source: "main".into(),
+        effects: lowered.main_effects.labels.iter().map(label).collect(),
+        declared: lowered.main_effects.labels.iter().map(label).collect(),
+        performed: main_inferred.labels().iter().map(label).collect(),
+        call_edges: main_calls.into_iter().collect(),
+        primitive_witnesses: main_primitives,
+    });
+
+    primitive_witnesses.sort_by(|left, right| {
+        (&left.source, &left.module, &left.name, left.intrinsic).cmp(&(
+            &right.source,
+            &right.module,
+            &right.name,
+            right.intrinsic,
+        ))
+    });
+    host_entries.sort_by(|left, right| {
+        (&left.source, &left.module, &left.name, left.intrinsic).cmp(&(
+            &right.source,
+            &right.module,
+            &right.name,
+            right.intrinsic,
+        ))
+    });
+    host_entries.dedup_by(|left, right| {
+        left.source == right.source
+            && left.module == right.module
+            && left.name == right.name
+            && left.intrinsic == right.intrinsic
+    });
+    operations.sort_by(|left, right| left.source.cmp(&right.source));
+    print_structured(
+        &EffectsReport {
+            effects: declared_surface.iter().map(label).collect(),
+            functions: per_function,
+            host_imports: host_entries,
+            surface: EffectSurface {
+                declared: declared_surface.iter().map(label).collect(),
+                performed: performed_surface.iter().map(label).collect(),
+            },
+            operations,
+            primitives: primitive_witnesses,
+        },
+        format,
+    )
+}
+
+fn operation_owner(signature: &lower::FunctionSig) -> Option<(String, String)> {
+    if let Some(owner) = &signature.owner_effect {
+        return signature
+            .effects
+            .labels
+            .contains(owner)
+            .then_some(owner.clone());
+    }
+    let (root, operation) = signature.symbol.split_once('.')?;
+    if operation.is_empty() {
+        return None;
+    }
+    let owner = (signature.alias.clone(), root.to_string());
+    signature.effects.labels.contains(&owner).then_some(owner)
+}
+
+fn collect_function_details(
+    source: &str,
+    signature: &lower::FunctionSig,
+    call_edges: &mut std::collections::BTreeSet<String>,
+    primitive_names: &mut Vec<String>,
+    primitives: &mut Vec<PrimitiveWitness>,
+    host_entries: &mut Vec<EffectEntry>,
+) -> Result<()> {
+    match &signature.body {
+        lower::FunctionBody::Wasm { import, .. } => {
+            collect_primitive(
+                source,
+                import,
+                false,
+                primitive_names,
+                primitives,
+                host_entries,
+            )?;
+        }
+        lower::FunctionBody::User { statements } => collect_statements_details(
+            source,
+            statements,
+            call_edges,
+            primitive_names,
+            primitives,
+            host_entries,
+        )?,
+    }
+    Ok(())
+}
+
+fn collect_statements_details(
+    source: &str,
+    statements: &[lower::Statement],
+    call_edges: &mut std::collections::BTreeSet<String>,
+    primitive_names: &mut Vec<String>,
+    primitives: &mut Vec<PrimitiveWitness>,
+    host_entries: &mut Vec<EffectEntry>,
+) -> Result<()> {
+    use lower::{LetValue, Statement};
+    for statement in statements {
+        match statement {
+            Statement::Call(call) => {
+                call_edges.insert(call.callee_key.clone());
+                for argument in &call.args {
+                    collect_expr_details(
+                        source,
+                        argument,
+                        call_edges,
+                        primitive_names,
+                        primitives,
+                        host_entries,
+                    )?;
+                }
+            }
+            Statement::Let { value, .. } => match value {
+                LetValue::Call(call) => {
+                    call_edges.insert(call.callee_key.clone());
+                    for argument in &call.args {
+                        collect_expr_details(
+                            source,
+                            argument,
+                            call_edges,
+                            primitive_names,
+                            primitives,
+                            host_entries,
+                        )?;
+                    }
+                }
+                LetValue::Expr(expr) => collect_expr_details(
+                    source,
+                    expr,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?,
+            },
+            Statement::Set { value, .. } | Statement::Return(value) | Statement::Eval(value) => {
+                collect_expr_details(
+                    source,
+                    value,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?
+            }
+            Statement::Match { target, arms } => {
+                collect_expr_details(
+                    source,
+                    target,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+                for arm in arms {
+                    collect_statements_details(
+                        source,
+                        &arm.body,
+                        call_edges,
+                        primitive_names,
+                        primitives,
+                        host_entries,
+                    )?;
+                }
+            }
+            Statement::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_expr_details(
+                    source,
+                    cond,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+                collect_statements_details(
+                    source,
+                    then_body,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+                collect_statements_details(
+                    source,
+                    else_body,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+            Statement::While { cond, body } => {
+                collect_expr_details(
+                    source,
+                    cond,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+                collect_statements_details(
+                    source,
+                    body,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+            Statement::For {
+                source: value,
+                body,
+                ..
+            } => {
+                collect_expr_details(
+                    source,
+                    value,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+                collect_statements_details(
+                    source,
+                    body,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+            Statement::Task { body, .. } => collect_statements_details(
+                source,
+                body,
+                call_edges,
+                primitive_names,
+                primitives,
+                host_entries,
+            )?,
+            Statement::Spawn { value, .. } => collect_expr_details(
+                source,
+                value,
+                call_edges,
+                primitive_names,
+                primitives,
+                host_entries,
+            )?,
+            Statement::Join { .. } | Statement::Break | Statement::Continue => {}
+        }
+    }
+    Ok(())
+}
+
+fn collect_expr_details(
+    source: &str,
+    expr: &lower::Expr,
+    call_edges: &mut std::collections::BTreeSet<String>,
+    primitive_names: &mut Vec<String>,
+    primitives: &mut Vec<PrimitiveWitness>,
+    host_entries: &mut Vec<EffectEntry>,
+) -> Result<()> {
+    use lower::Expr;
+    match expr {
+        Expr::Call { call, .. } => {
+            call_edges.insert(call.callee_key.clone());
+            for argument in &call.args {
+                collect_expr_details(
+                    source,
+                    argument,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+        }
+        Expr::HostCall {
+            import,
+            args,
+            intrinsic,
+            ..
+        } => {
+            collect_primitive(
+                source,
+                import,
+                *intrinsic,
+                primitive_names,
+                primitives,
+                host_entries,
+            )?;
+            for argument in args {
+                collect_expr_details(
+                    source,
+                    argument,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+        }
+        Expr::Mutable(value) | Expr::Cast { from: value, .. } => collect_expr_details(
+            source,
+            value,
+            call_edges,
+            primitive_names,
+            primitives,
+            host_entries,
+        )?,
+        Expr::Reference { target, .. } => collect_expr_details(
+            source,
+            target,
+            call_edges,
+            primitive_names,
+            primitives,
+            host_entries,
+        )?,
+        Expr::Primitive { args, .. } | Expr::Tuple(args) | Expr::Array(args) => {
+            for argument in args {
+                collect_expr_details(
+                    source,
+                    argument,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+        }
+        Expr::EnumConstructor { payload, .. } => {
+            if let Some(payload) = payload {
+                collect_expr_details(
+                    source,
+                    payload,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+        }
+        Expr::Record(fields) => {
+            for value in fields.values() {
+                collect_expr_details(
+                    source,
+                    value,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+        }
+        Expr::Map(entries) => {
+            for (key, value) in entries {
+                collect_expr_details(
+                    source,
+                    key,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+                collect_expr_details(
+                    source,
+                    value,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+        }
+        Expr::Range { start, end, step } => {
+            for value in [start, end, step] {
+                collect_expr_details(
+                    source,
+                    value,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+        }
+        Expr::If {
+            cond,
+            then_e,
+            else_e,
+        } => {
+            for value in [cond, then_e, else_e] {
+                collect_expr_details(
+                    source,
+                    value,
+                    call_edges,
+                    primitive_names,
+                    primitives,
+                    host_entries,
+                )?;
+            }
+        }
+        Expr::Value(_) | Expr::VarRef(_) => {}
+    }
+    Ok(())
+}
+
+fn collect_primitive(
+    source: &str,
+    import: &lower::ImportTarget,
+    intrinsic: bool,
+    primitive_names: &mut Vec<String>,
+    primitives: &mut Vec<PrimitiveWitness>,
+    host_entries: &mut Vec<EffectEntry>,
+) -> Result<()> {
+    let entry = vibra::host_abi::lookup(&import.module, &import.name).with_context(|| {
+        format!(
+            "lowered host import is absent from the ABI registry: {}.{}",
+            import.module, import.name
+        )
+    })?;
+    let required: Vec<EffectLabel> = if intrinsic {
+        vibra::intrinsics::effects_for(&import.name)
+            .iter()
+            .map(|(domain, action)| EffectLabel {
+                domain: (*domain).to_string(),
+                action: (*action).to_string(),
+            })
+            .collect()
+    } else {
+        entry
+            .effects()
+            .iter()
+            .map(|(domain, action)| EffectLabel {
+                domain: (*domain).to_string(),
+                action: (*action).to_string(),
+            })
+            .collect()
+    };
+    let witness_name = format!("{}.{}", import.module, import.name);
+    primitive_names.push(witness_name.clone());
+    primitives.push(PrimitiveWitness {
+        source: source.to_string(),
+        module: import.module.clone(),
+        name: import.name.clone(),
+        intrinsic,
+        input_capabilities: entry
+            .params
+            .iter()
+            .map(|kind| kind.as_str().to_string())
+            .collect(),
+        result_capability: entry.result.as_str().to_string(),
+        required_roots: required.clone(),
+    });
+    host_entries.push(EffectEntry {
+        source: source.to_string(),
+        module: import.module.clone(),
+        name: import.name.clone(),
+        params: entry
             .params
             .iter()
             .map(|kind| EffectParam {
                 value_type: kind.as_str().into(),
             })
-            .collect();
-        effects.push(EffectEntry {
-            source: source.clone(),
-            module: import.module.clone(),
-            name: import.name.clone(),
-            params,
-            result: entry.result.as_str().into(),
-            effects: entry
-                .effects()
-                .iter()
-                .map(|(domain, action)| EffectLabel {
-                    domain: (*domain).to_string(),
-                    action: (*action).to_string(),
-                })
-                .collect(),
-        });
-    }
-    print_structured(
-        &EffectsReport {
-            effects: surface.iter().map(label).collect(),
-            functions: per_function,
-            host_imports: effects,
-        },
-        format,
-    )
+            .collect(),
+        result: entry.result.as_str().into(),
+        effects: required,
+        intrinsic,
+    });
+    Ok(())
 }
 
 fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTreeSet<String> {

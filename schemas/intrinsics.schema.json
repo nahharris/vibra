@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibra.dev/schemas/intrinsics.schema.json",
+  "title": "Vibra closed intrinsic registry",
+  "description": "The machine-readable shape of compiler-known pure operations and deffect transitions. Source names are kebab-case atoms and ABI names are versioned underscore symbols.",
+  "type": "object",
+  "required": ["version", "intrinsics"],
+  "properties": {
+    "version": { "const": "vibra_v1" },
+    "intrinsics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "module", "name", "roots"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$"
+          },
+          "module": { "const": "vibra_v1" },
+          "name": { "type": "string" },
+          "roots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["root", "operation"],
+              "properties": {
+                "root": { "type": "string" },
+                "operation": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

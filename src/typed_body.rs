@@ -16,13 +16,29 @@ use crate::lower::{
     LiteralType, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef,
     WasmArgSpec,
 };
-use crate::type_semantics::{substitute_type, type_compatible};
+use crate::type_semantics::{
+    host_backed_newtype, resolve_alias_type, substitute_type, type_compatible,
+};
 use crate::typed_lower::{
     lower_type, named_application, qualify, unqualify, TypedFunctionSignature, TypedModuleInput,
     TypedSignatureIndex,
 };
 use anyhow::{bail, Context, Result};
+use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
+
+thread_local! {
+    /// The staged typed body walker is reused for ordinary functions and
+    /// deffect operations. A small scoped flag keeps intrinsic placement a
+    /// property of the enclosing operation without threading another boolean
+    /// through every expression helper.
+    static IN_DEFFECT_OPERATION: Cell<bool> = const { Cell::new(false) };
+    /// A module opts into the native boundary by declaring at least one
+    /// `deffect`. Legacy modules remain readable during the staged stdlib
+    /// migration, but native modules cannot smuggle raw `wasm` around an
+    /// operation owner.
+    static IN_NATIVE_MODULE: Cell<bool> = const { Cell::new(false) };
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TypedBodyIndex {
@@ -70,6 +86,23 @@ pub fn lower_typed_bodies<'a>(
                     &declared_aliases,
                     &mut bodies,
                 )?,
+                TopLevel::Deffect(deffect) => {
+                    for operation in &deffect.operations {
+                        let key = qualify(
+                            input.alias,
+                            &format!("{}.{}", deffect.name.value, operation.function.name.value),
+                        );
+                        lower_function(
+                            input.alias,
+                            input.module,
+                            &operation.function,
+                            &key,
+                            signatures,
+                            &declared_aliases,
+                            &mut bodies,
+                        )?;
+                    }
+                }
                 TopLevel::Definition(definition) => {
                     let definition_key = qualify(input.alias, &definition.name.value);
                     // Only the `where:` parameter *names* are needed here
@@ -259,7 +292,7 @@ pub fn materialize_typed_functions(
         );
     }
     let constants = materialize_constants(signatures, bodies)?;
-    bodies
+    let materialized: HashMap<String, FunctionSig> = bodies
         .functions
         .iter()
         .map(|(key, body)| {
@@ -353,7 +386,21 @@ pub fn materialize_typed_functions(
             };
             Ok((key.clone(), materialize(signature, checked)))
         })
-        .collect()
+        .collect::<Result<_>>()?;
+    for (key, signature) in &materialized {
+        let inferred = crate::effect_semantics::infer_function(signature, &materialized);
+        if let Some(witness) = inferred.undeclared(&signature.effects).first() {
+            bail!(
+                "{}",
+                crate::effect_semantics::undeclared_effect_message(
+                    key,
+                    &signature.effects,
+                    witness
+                )
+            );
+        }
+    }
+    Ok(materialized)
 }
 
 /// Fully validate a single `$test` declaration's body, independent of
@@ -575,7 +622,7 @@ fn validate_statements(
                         let mut expr =
                             validate_expr(expr, locals, constants, signatures, context, origins)?;
                         if let Some(expected) = let_types.get(var) {
-                            apply_host_context(&mut expr, expected);
+                            apply_host_context(&mut expr, expected, &signatures.aliases)?;
                         } else if has_unresolved_host_context(&expr) {
                             bail!("host call bound to `{var}` requires an explicit type");
                         }
@@ -627,7 +674,7 @@ fn validate_statements(
                 };
                 let mut value =
                     validate_expr(value, locals, constants, signatures, context, origins)?;
-                apply_host_context(&mut value, writable);
+                apply_host_context(&mut value, writable, &signatures.aliases)?;
                 let actual = infer(&value, locals, constants, signatures, context)?;
                 if writable != &actual {
                     bail!(
@@ -645,15 +692,7 @@ fn validate_statements(
                 }
                 let mut expr =
                     validate_expr(expr, locals, constants, signatures, context, origins)?;
-                if let Expr::HostCall {
-                    return_type: host_return,
-                    ..
-                } = &mut expr
-                {
-                    if *host_return == TypeRef::Named("$host-context".into()) {
-                        *host_return = return_type.clone();
-                    }
-                }
+                apply_host_context(&mut expr, return_type, &signatures.aliases)?;
                 let actual = infer(&expr, locals, constants, signatures, context)?;
                 let atom_singleton_return = return_type == &TypeRef::Atom
                     && matches!(actual, TypeRef::Literal(LiteralType::Atom(_)));
@@ -933,7 +972,7 @@ fn validate_call(
             let expected = &parameter.ty;
             let mut argument =
                 validate_expr(argument, locals, constants, signatures, context, origins)?;
-            apply_host_context(&mut argument, expected);
+            apply_host_context(&mut argument, expected, &signatures.aliases)?;
             let actual = infer(&argument, locals, constants, signatures, context)?;
             if &actual != expected {
                 bail!(
@@ -969,12 +1008,52 @@ fn validate_call(
     })
 }
 
-fn apply_host_context(expr: &mut Expr, expected: &TypeRef) {
-    if let Expr::HostCall { return_type, .. } = expr {
-        if *return_type == TypeRef::Named("$host-context".into()) {
+fn apply_host_context(
+    expr: &mut Expr,
+    expected: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> Result<()> {
+    if let Expr::HostCall {
+        import,
+        return_type,
+        intrinsic,
+        ..
+    } = expr
+    {
+        if *intrinsic {
+            let entry = crate::intrinsics::lookup(&import.name)
+                .with_context(|| format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name))?;
+            if !crate::lower::abi_value_type_matches(entry.result, expected, aliases) {
+                bail!(
+                    "E-INTRINSIC-005: intrinsic `{}` result requires `{}`, got {:?}",
+                    import.name,
+                    entry.result.as_str(),
+                    expected
+                );
+            }
+            if crate::intrinsics::requires_effect(&import.name)
+                && !crate::lower::intrinsic_result_allows_nominal_endpoint(
+                    &import.name,
+                    expected,
+                    aliases,
+                )
+            {
+                bail!(
+                    "E-INTRINSIC-005: intrinsic `{}` cannot mint the declared nominal endpoint result",
+                    import.name
+                );
+            }
+            // Fixed ABI results remain statically fixed. Generic result
+            // envelopes and validated nominal endpoints are specialized to
+            // the enclosing source type only after the ABI shape check above.
+            if !type_compatible(expected, return_type, aliases) {
+                *return_type = expected.clone();
+            }
+        } else if *return_type == TypeRef::Named("$host-context".into()) {
             *return_type = expected.clone();
         }
     }
+    Ok(())
 }
 
 fn has_unresolved_host_context(expr: &Expr) -> bool {
@@ -1047,14 +1126,20 @@ fn validate_expr(
             import,
             args,
             return_type,
+            intrinsic,
         } => {
-            let entry =
+            let entry = if *intrinsic {
+                crate::intrinsics::lookup(&import.name).with_context(|| {
+                    format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name)
+                })?
+            } else {
                 crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
                     format!(
                         "E-WASM-002: unknown host import `{}.{}`",
                         import.module, import.name
                     )
-                })?;
+                })?
+            };
             let args = args
                 .iter()
                 .map(|arg| validate_expr(arg, locals, constants, signatures, context, origins))
@@ -1062,6 +1147,9 @@ fn validate_expr(
             for (index, (arg, kind)) in args.iter().zip(entry.params).enumerate() {
                 let ty = infer(arg, locals, constants, signatures, context)?;
                 if !crate::lower::abi_value_type_matches(*kind, &ty, &signatures.aliases) {
+                    if *intrinsic {
+                        bail!("E-INTRINSIC-005: intrinsic `{}` argument {index} requires `{}`, got {ty:?}", import.name, kind.as_str());
+                    }
                     bail!("E-WASM-003: host import `{}.{}` argument {index} requires `{}`, got {ty:?}", import.module, import.name, kind.as_str());
                 }
             }
@@ -1069,6 +1157,7 @@ fn validate_expr(
                 import: import.clone(),
                 args,
                 return_type: return_type.clone(),
+                intrinsic: *intrinsic,
             }
         }
         Expr::Record(fields) => Expr::Record(
@@ -1257,7 +1346,22 @@ fn validate_expr(
                 payload,
             }
         }
-        Expr::Cast { .. } => bail!("typed cast forms remain staged"),
+        Expr::Cast { from, target } => {
+            let from = validate_expr(from, locals, constants, signatures, context, origins)?;
+            let source_type = infer(&from, locals, constants, signatures, context)?;
+            let source_is_host = matches!(
+                resolve_alias_type(&source_type, &signatures.aliases),
+                TypeRef::HostHandle(_)
+            ) || host_backed_newtype(&source_type, &signatures.aliases);
+            let target_is_host = matches!(
+                resolve_alias_type(target, &signatures.aliases),
+                TypeRef::HostHandle(_)
+            ) || host_backed_newtype(target, &signatures.aliases);
+            if source_is_host || target_is_host {
+                bail!("E-CAP-005: host-backed endpoint types cannot be forged or cast");
+            }
+            bail!("typed cast forms remain staged")
+        }
         Expr::If {
             cond,
             then_e,
@@ -1350,14 +1454,14 @@ fn materialize(signature: &TypedFunctionSignature, body: FunctionBody) -> Functi
     FunctionSig {
         alias: signature.alias.clone(),
         symbol: signature.symbol.clone(),
+        owner_effect: signature.owner_effect.clone(),
         type_params: signature.type_params.clone(),
         type_param_bounds: signature.type_param_bounds.clone(),
         parameters: signature.parameters.clone(),
         return_type: signature.return_type.clone(),
         body,
         doc: signature.doc.clone(),
-        // The staged typed path does not carry effect rows; see `typed_lower`.
-        effects: Default::default(),
+        effects: signature.effects.clone(),
     }
 }
 
@@ -1370,11 +1474,23 @@ fn lower_function(
     declared_aliases: &BTreeSet<String>,
     bodies: &mut TypedBodyIndex,
 ) -> Result<()> {
+    let native_module = module
+        .forms
+        .iter()
+        .any(|form| matches!(form, TopLevel::Deffect(_)));
+    let operation_owner = signatures
+        .functions
+        .get(key)
+        .and_then(|signature| signature.owner_effect.as_ref())
+        .is_some();
     if let [AstExpr {
         value: ExprKind::Wasm { import, arguments },
         ..
     }] = function.body.as_slice()
     {
+        if native_module && !operation_owner {
+            bail!("E-WASM-008: raw `wasm` is only valid inside a `deffect` operation");
+        }
         if arguments
             .iter()
             .all(|argument| !matches!(argument, WasmArgument::Expression(_)))
@@ -1429,15 +1545,21 @@ fn lower_function(
         &generic_names,
         &mut local_types,
     );
-    let statements = lower_statements(
+    let allow_intrinsic = own_signature.owner_effect.is_some();
+    let previous_native_module = IN_NATIVE_MODULE.with(|scope| scope.replace(native_module));
+    let previous_intrinsic = IN_DEFFECT_OPERATION.with(|scope| scope.replace(allow_intrinsic));
+    let statements_result = lower_statements(
         module_alias,
         &function.body,
         signatures,
         declared_aliases,
         &generic_names,
         &local_types,
-    )
-    .with_context(|| format!("lowering typed function `{key}`"))?;
+    );
+    IN_DEFFECT_OPERATION.with(|scope| scope.set(previous_intrinsic));
+    IN_NATIVE_MODULE.with(|scope| scope.set(previous_native_module));
+    let statements =
+        statements_result.with_context(|| format!("lowering typed function `{key}`"))?;
     let mut let_types = HashMap::new();
     let mut lexical_bindings = BTreeSet::new();
     collect_body_metadata(
@@ -2157,6 +2279,38 @@ fn lower_expr(
         ExprKind::Embed { .. } | ExprKind::Template { .. } => {
             bail!("typed compile-time expression lowering is not active")
         }
+        ExprKind::Intrinsic { .. } => {
+            let ExprKind::Intrinsic { name, arguments } = &expression.value else {
+                unreachable!();
+            };
+            if !IN_DEFFECT_OPERATION.with(Cell::get)
+                && crate::intrinsics::requires_effect(&name.value)
+            {
+                bail!(
+                    "E-INTRINSIC-001: effectful intrinsic `@{}` is only valid inside a deffect operation",
+                    name.value
+                );
+            }
+            let entry = crate::intrinsics::lookup(&name.value)
+                .with_context(|| format!("E-INTRINSIC-003: unknown intrinsic `@{}`", name.value))?;
+            if arguments.len() != entry.params.len() {
+                bail!(
+                    "E-INTRINSIC-004: intrinsic `{}` expects {} arguments, got {}",
+                    name.value,
+                    entry.params.len(),
+                    arguments.len()
+                );
+            }
+            Expr::HostCall {
+                import: ImportTarget {
+                    module: "vibra_v1".into(),
+                    name: crate::intrinsics::import_name(&name.value),
+                },
+                args: arguments.iter().map(lower).collect::<Result<_>>()?,
+                return_type: crate::lower::host_result_type(entry.result)?,
+                intrinsic: true,
+            }
+        }
         // A `$wasm` form is a function *body kind*, not a general
         // expression: `lower_function` recognizes and lowers it only when
         // it is the function's sole body form. Reaching this generic
@@ -2165,6 +2319,9 @@ fn lower_expr(
         // has no legacy equivalent and stays rejected explicitly rather
         // than silently accepted.
         ExprKind::Wasm { import, arguments } => {
+            if IN_NATIVE_MODULE.with(Cell::get) && !IN_DEFFECT_OPERATION.with(Cell::get) {
+                bail!("E-WASM-008: raw `wasm` is only valid inside a `deffect` operation");
+            }
             let entry = crate::host_abi::lookup(&import.module.value, &import.name.value)
                 .with_context(|| format!("E-WASM-002: unknown host import `{}.{}`", import.module.value, import.name.value))?;
             if arguments.len() != entry.params.len() {
@@ -2180,6 +2337,7 @@ fn lower_expr(
                 import: ImportTarget { module: import.module.value.clone(), name: import.name.value.clone() },
                 args,
                 return_type: crate::lower::host_result_type(entry.result)?,
+                intrinsic: false,
             }
         }
         ExprKind::If {
@@ -3281,6 +3439,39 @@ mod tests {
     }
 
     #[test]
+    fn lowers_and_materializes_native_deffect_intrinsics() {
+        let source = module(
+            r#"(deffect now
+  (defn unix-millis () uint64
+    (intrinsic @clock-now-unix-millis)
+    effects: ()))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "time",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
+        let FunctionBody::User { statements } = &functions["time.now.unix-millis"].body else {
+            panic!("expected intrinsic operation to remain an executable user body");
+        };
+        assert!(matches!(
+            statements[0],
+            Statement::Return(Expr::HostCall {
+                intrinsic: true,
+                ..
+            })
+        ));
+        assert_eq!(
+            functions["time.now.unix-millis"].effects.labels,
+            [("time".to_string(), "now".to_string())]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[test]
     fn lowers_atom_literals_singleton_types_patterns_and_equality() {
         let source = module(
             r#"(defn status () atom (return @ok))
@@ -3343,6 +3534,7 @@ mod tests {
             statements: Vec::new(),
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions: HashMap::new(),
             impls: HashMap::new(),
             warnings: Vec::new(),
@@ -3453,6 +3645,7 @@ mod tests {
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
@@ -3536,6 +3729,7 @@ mod tests {
             statements,
             main_arg_bindings: Vec::new(),
             constants: HashMap::from([("answer".into(), RuntimeValue::Int(42))]),
+            type_aliases: HashMap::new(),
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
@@ -3590,6 +3784,7 @@ mod tests {
             statements,
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
@@ -3955,6 +4150,7 @@ mod tests {
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
@@ -4232,6 +4428,7 @@ mod tests {
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
@@ -4615,6 +4812,7 @@ mod tests {
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
@@ -4725,6 +4923,7 @@ mod tests {
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
@@ -4889,6 +5088,7 @@ mod tests {
             })],
             main_arg_bindings: Vec::new(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),

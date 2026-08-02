@@ -545,6 +545,7 @@ pub(crate) fn eval_expr(
             import,
             args,
             return_type,
+            intrinsic,
         } => {
             let values = args
                 .iter()
@@ -560,6 +561,7 @@ pub(crate) fn eval_expr(
             let signature = crate::lower::FunctionSig {
                 alias: String::new(),
                 symbol: import.name.clone(),
+                owner_effect: None,
                 type_params: Vec::new(),
                 type_param_bounds: Vec::new(),
                 parameters: Vec::new(),
@@ -572,10 +574,19 @@ pub(crate) fn eval_expr(
                 // property and never consulted at runtime.
                 effects: Default::default(),
             };
-            match entry.module {
+            let result = match entry.module {
                 "vibra_v1" => exec_vibra_v1(entry.name, &signature, &values, files, config),
                 "vibra_test" => exec_vibra_test(entry.name, &values),
                 other => bail!("unsupported host module `{other}`"),
+            }?;
+            if *intrinsic {
+                Ok(mint_validated_host_result(
+                    result,
+                    return_type,
+                    &program.type_aliases,
+                ))
+            } else {
+                Ok(result)
             }
         }
         Expr::Primitive {
@@ -1331,6 +1342,83 @@ fn strip_type_tag(value: RuntimeValue) -> RuntimeValue {
     }
 }
 
+fn mint_validated_host_result(
+    value: RuntimeValue,
+    expected: &TypeRef,
+    aliases: &HashMap<String, crate::lower::TypeAlias>,
+) -> RuntimeValue {
+    if let RuntimeValue::Typed { .. } = value {
+        return value;
+    }
+    match expected {
+        TypeRef::Named(name) => {
+            let Some(alias) = aliases.get(name) else {
+                return value;
+            };
+            match &alias.body {
+                TypeRef::Newtype { inner, .. }
+                    if matches!(inner.as_ref(), TypeRef::HostHandle(_)) =>
+                {
+                    RuntimeValue::Typed {
+                        type_ref: expected.clone(),
+                        value: Box::new(value),
+                    }
+                }
+                TypeRef::Enum(tags) => mint_validated_host_enum(value, tags, aliases),
+                body => mint_validated_host_result(value, body, aliases),
+            }
+        }
+        TypeRef::Instantiated { .. } => {
+            // Generic aliases such as `result.result[T, E]` normalize to an
+            // enum whose payload types contain the nominal endpoint. Keep the
+            // instantiation in the source type, but recurse through its
+            // normalized body to tag the validated endpoint payload.
+            let normalized = crate::type_semantics::normalize_type_ref(expected, aliases);
+            if normalized == expected.clone() {
+                value
+            } else {
+                mint_validated_host_result(value, &normalized, aliases)
+            }
+        }
+        TypeRef::Newtype { inner, .. } if matches!(inner.as_ref(), TypeRef::HostHandle(_)) => {
+            RuntimeValue::Typed {
+                type_ref: expected.clone(),
+                value: Box::new(value),
+            }
+        }
+        TypeRef::Enum(tags) => mint_validated_host_enum(value, tags, aliases),
+        _ => value,
+    }
+}
+
+fn mint_validated_host_enum(
+    value: RuntimeValue,
+    tags: &BTreeMap<String, TypeRef>,
+    aliases: &HashMap<String, crate::lower::TypeAlias>,
+) -> RuntimeValue {
+    let RuntimeValue::Enum {
+        enum_key,
+        tag,
+        payload,
+    } = value
+    else {
+        return value;
+    };
+    let payload = match (payload, tags.get(&tag)) {
+        (Some(payload), Some(payload_type)) => Some(Box::new(mint_validated_host_result(
+            *payload,
+            payload_type,
+            aliases,
+        ))),
+        (payload, _) => payload,
+    };
+    RuntimeValue::Enum {
+        enum_key,
+        tag,
+        payload,
+    }
+}
+
 fn runtime_value_eq(expected: &RuntimeValue, actual: &RuntimeValue) -> bool {
     expected == untyped(actual)
 }
@@ -1394,6 +1482,38 @@ mod iteration_tests {
             Ok(loaded) => format!("{:#}", crate::lower::lower_program(&loaded).unwrap_err()),
             Err(error) => format!("{error:#}"),
         }
+    }
+
+    #[test]
+    fn validated_intrinsic_result_is_the_only_host_endpoint_minting_path() {
+        let mut aliases = HashMap::new();
+        aliases.insert(
+            "fs.reader".into(),
+            crate::lower::TypeAlias {
+                alias: "fs".into(),
+                name: "reader".into(),
+                type_params: Vec::new(),
+                type_param_bounds: Vec::new(),
+                body: TypeRef::Newtype {
+                    name: "fs.reader".into(),
+                    inner: Box::new(TypeRef::HostHandle(HandleAccess::Read)),
+                },
+                doc: None,
+            },
+        );
+        let minted = mint_validated_host_result(
+            RuntimeValue::HostHandle(HostHandle {
+                id: 7,
+                access: HandleAccess::Read,
+            }),
+            &TypeRef::Named("fs.reader".into()),
+            &aliases,
+        );
+        assert!(matches!(
+            minted,
+            RuntimeValue::Typed { type_ref: TypeRef::Named(name), .. }
+                if name == "fs.reader"
+        ));
     }
 
     #[test]
@@ -1623,6 +1743,27 @@ fn result_err(
         },
         _ => "fs-error".to_string(),
     };
+    // Stream operations deliberately erase provider-specific acquisition
+    // errors into the shared `stream.error` envelope. Keep the lifecycle
+    // tags that the shared enum can represent and translate provider tags
+    // (`not-found`, `invalid-input`, network-specific failures, ...) to its
+    // payload-carrying `io` case.
+    let (error_tag, message) =
+        if fs_error_key == "stream.error" || fs_error_key.ends_with(".stream.error") {
+            let mapped = match error_tag {
+                "invalid-handle" | "resource-closed" | "end-of-stream" | "would-block"
+                | "timed-out" | "invalid-length" | "io" => error_tag,
+                _ => "io",
+            };
+            let message = if mapped == "io" {
+                message.or_else(|| Some(error_tag.to_string()))
+            } else {
+                message
+            };
+            (mapped, message)
+        } else {
+            (error_tag, message)
+        };
     let payload = message.map(RuntimeValue::Str).map(Box::new);
     RuntimeValue::Enum {
         enum_key: result_enum_key(sig),
