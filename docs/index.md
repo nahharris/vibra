@@ -111,6 +111,24 @@ than current contracts:
 - [Type-system and ADT foundation plan](plans/2026-05-05-type-system-adt-foundation.md)
 - [Vib source extension and call argument order](plans/2026-08-02-vib-extension-and-call-order.md)
 
+Research-grounded roadmap plans, in execution order. Rationale and sources are
+in [`research/01-design-directions.md`](research/01-design-directions.md);
+tracking issue #257.
+
+| Wave | Plan | Issue |
+| --- | --- | --- |
+| 0 | [Contract correction](plans/2026-08-02-contract-correction.md) | #256 |
+| 1 | [Reject symbol shadowing](plans/2026-08-02-shadowing-rejection.md) | #246 |
+| 1 | [Unhandled result and option](plans/2026-08-02-unhandled-result.md) | #247 |
+| 1 | [Result propagation](plans/2026-08-02-result-propagation.md) | #248 |
+| 2 | [Effect inference at boundaries](plans/2026-08-02-effect-inference.md) | #249 |
+| 2 | [Normalized retrieval index](plans/2026-08-02-retrieval-index.md) | #250 |
+| 2 | [Secure-compilation constraints](plans/2026-08-02-secure-compilation-constraints.md) | #252 |
+| 3 | [Bounded execution](plans/2026-08-02-execution-bounds.md) | #251 |
+| 4 | [Capability grants](plans/2026-08-02-capability-grants.md) | #253 |
+| 5 | [Handle lifecycle spike](plans/2026-08-02-handle-lifecycle-spike.md) | #255 |
+| 6 | [Type-constrained decoding](plans/2026-08-02-decoding-service.md) | #254 |
+
 ### Research
 
 Literature distillations and background surveys live in
