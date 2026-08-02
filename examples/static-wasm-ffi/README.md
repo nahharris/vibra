@@ -7,7 +7,7 @@ has the wrapper's `(i32, i32) -> i32` signature before execution. Run embeds
 the validated bytes in the compiled program, instantiates the module, and calls
 `sum(20, 22)` through the typed wrapper. The complete ABI and safety contract is
 in
-[`docs/static-wasm-ffi.md`](../../docs/static-wasm-ffi.md).
+[`docs/reference/static-wasm-ffi.md`](../../docs/reference/static-wasm-ffi.md).
 
 For caller-owned string and byte buffers, the foreign artifact imports
 `vibra_ffi.memory` and declares two `i32` parameters for each `$str` or direct

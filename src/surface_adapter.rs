@@ -7,7 +7,7 @@
 //! supported interface. It is slated for deletion once the typed frontend
 //! (`typed_lower`/`typed_body`/`typed_program`) replaces `src/lower.rs`'s
 //! `Value`-based reading layer entirely. See the amendment in
-//! `docs/superpowers/specs/2026-07-25-s-expression-language-design.md` for
+//! `docs/decisions/s-expression-language.md` for
 //! the contract exception this file relies on.
 //!
 //! `src/lower.rs`'s call sites key every non-primary argument by the

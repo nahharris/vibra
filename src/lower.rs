@@ -6856,7 +6856,7 @@ pub(crate) fn primitive_integer(ty: &TypeRef) -> bool {
 /// `primitive_op` above); the typed S-expression surface drops the sigil, so
 /// heads are spelled bare, e.g. `(add 1 1)`. This table is otherwise the same
 /// name -> (op, arity) mapping. See the resolution-rule amendment in
-/// `docs/superpowers/specs/2026-07-25-s-expression-language-design.md` for
+/// `docs/decisions/s-expression-language.md` for
 /// how an unqualified call head is disambiguated from a user function of the
 /// same name.
 pub(crate) fn typed_primitive_op(name: &str) -> Option<(PrimitiveOp, usize)> {
@@ -8266,7 +8266,7 @@ fn int_literal_fits(value: i64, ty: &TypeRef) -> bool {
 /// the blanket numeric-compatibility rule this replaces, it applies only to literals
 /// written in place, only within the same numeric family, and only when the value is
 /// exactly representable — so `(accepts-int8 300)` and passing an `int64` *local* to an
-/// `int32` parameter both stay errors, per DRAFT.md's "no implicit numeric widening or
+/// `int32` parameter both stay errors, per the language contract's "no implicit numeric widening or
 /// narrowing".
 fn literal_widens_to(
     expr: &Expr,

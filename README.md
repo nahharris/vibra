@@ -3,12 +3,14 @@
 Vibra is a vibe-coding-first, statically typed functional language with an
 S-expression surface that compiles to WebAssembly.
 
-- **Language contract:** [S-expression language design](docs/superpowers/specs/2026-07-25-s-expression-language-design.md)
-- **Historical record:** [DRAFT.md](DRAFT.md) documents the retired YAML surface.
-- **Project layout:** [docs/project-layout.md](docs/project-layout.md)
+- **Language contract:** [S-expression language design](docs/decisions/s-expression-language.md)
+- **Historical record:** [retired YAML draft](docs/archive/yaml-surface-draft.md)
+- **Documentation index:** [docs/index.md](docs/index.md)
+- **Project layout:** [docs/reference/project-layout.md](docs/reference/project-layout.md)
 - **Schemas and tooling contracts:** [schemas/](schemas/)
 - **Examples:** [examples/](examples/)
-- [Container images](docs/containers.md)
+- **Agent skills:** [skills/](skills/) and [usage notes](docs/reference/agent-skills.md)
+- [Container images](docs/reference/containers.md)
 
 ## Quick start
 
