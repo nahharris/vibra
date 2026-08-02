@@ -65,7 +65,7 @@ numeric meaning in APIs that explicitly define it.
 
 Symbols are case-sensitive and must be kebab-case except `_`, which is reserved
 for wildcard patterns. A leading `-` has no visibility meaning. Dotted symbols
-are ordinary qualified names such as `io.println` and `option.some`; dots are
+are ordinary qualified names such as `io.stdout.println` and `option.some`; dots are
 not member-access syntax. `/` is reserved for compiler-defined names and must
 not appear in user definitions. `true`, `false`, and `unit` cannot be defined
 as symbols.
@@ -119,7 +119,7 @@ Every non-special executable list is a call:
 (ready)
 (echo-bool true)
 (second false true)
-(io.println "Hello, World!")
+(io.stdout.println "Hello, World!")
 ```
 
 Nullary invocation is `(ready)` and the function value is `ready`. Calls are
@@ -159,9 +159,9 @@ be wrapped. `main` remains the program entrypoint.
 ```vibra
 (import io "../stdlib/src/io.vibra")
 
-(defn write-prefix (text str) void (do (io.print text)) visibility: private)
+(defn write-prefix (text str) void (do (io.stdout.print text)) visibility: private)
 
-(defn main () void (do (write-prefix "Hello") (io.println ", World!")))
+(defn main () void (do (write-prefix "Hello") (io.stdout.println ", World!")))
 ```
 
 Constants are `(def name Type expression ...)`, not untyped top-level
@@ -555,7 +555,7 @@ or definition positions:
   )
 )
 
-(unless ready (io.println "not ready"))
+(unless ready (io.stdout.println "not ready"))
 ```
 
 `quote` requires an explicit result category. `unquote` inserts exactly one

@@ -5,7 +5,7 @@
   "print-statement-runs"
   (test.case
     "print-statement-runs"
-    (let r (io.print "stdout from vibra test"))
+    (let r (io.stdout.print "stdout from vibra test"))
     (match
       r
       (result.result.ok)
@@ -20,7 +20,7 @@
   "println-returns-ok"
   (test.case
     "println-returns-ok"
-    (let r (io.println "line from vibra test"))
+    (let r (io.stdout.println "line from vibra test"))
     (match
       r
       (result.result.ok)
@@ -35,7 +35,7 @@
   "eprintln-statement-runs"
   (test.case
     "eprintln-statement-runs"
-    (let r (io.eprintln "stderr from vibra test"))
+    (let r (io.stderr.println "stderr from vibra test"))
     (match
       r
       (result.result.ok)

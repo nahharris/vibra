@@ -1997,7 +1997,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_plan_contains_only_reachable_host_calls() {
+    fn embedded_plan_keeps_built_in_host_calls_as_intrinsic_expressions() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let loaded = crate::load::load_program(&root.join("examples/hello.vibra")).unwrap();
         let program = crate::lower::lower_program(&loaded).unwrap();
@@ -2005,25 +2005,18 @@ mod tests {
         let module = wasmer::Module::new(&Store::default(), &compiled.wasm).unwrap();
         let bytes = module.custom_sections("vibra.plan.v1").next().unwrap();
         let plan: WasmPlan = serde_json::from_slice(&bytes).unwrap();
-        let called: BTreeSet<_> = plan
-            .calls
-            .iter()
-            .map(|call| call.callee_key.clone())
-            .collect();
-        let embedded: BTreeSet<_> = plan.host_functions.keys().cloned().collect();
-        assert_eq!(embedded, called);
-        let high_level_imports: Vec<_> = plan
-            .host_functions
-            .values()
-            .filter_map(|sig| match &sig.body {
-                FunctionBody::Wasm { import, .. } => Some(import),
-                FunctionBody::User { .. } => None,
-            })
-            .collect();
-        assert!(!high_level_imports.is_empty());
-        assert!(high_level_imports
-            .iter()
-            .all(|import| import.module == ABI_MODULE));
+        assert!(
+            plan.host_functions.is_empty(),
+            "built-in stream operations use closed intrinsics rather than high-level wasm wrappers"
+        );
+        assert!(plan.expressions.iter().any(|expr| matches!(
+            expr,
+            Expr::HostCall {
+                intrinsic: true,
+                import,
+                ..
+            } if import.module == ABI_MODULE
+        )));
     }
 
     #[test]

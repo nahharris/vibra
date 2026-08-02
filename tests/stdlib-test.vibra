@@ -16,7 +16,7 @@
   "seeded-random-and-fake-clock"
   (test.case
     "seeded-random-and-fake-clock"
-    (let value (random.bytes 8))
+    (let value (random.generate.bytes 8))
     (let raw (cast value (array uint8)))
     (match
       raw
@@ -25,7 +25,7 @@
       _
       (do (test.fail "seeded random sequence changed"))
     )
-    (let wall (time.now-unix-millis))
+    (let wall (time.now.unix-millis))
     (match
       wall
       1000
@@ -33,9 +33,9 @@
       _
       (do (test.fail "fake wall clock did not use fixture"))
     )
-    (let before (time.monotonic-now))
-    (time.sleep (time.milliseconds 7))
-    (let after (time.monotonic-now))
+    (let before (time.now.monotonic-millis))
+    (time.sleep.for (time.milliseconds 7))
+    (let after (time.now.monotonic-millis))
     (let before-raw (cast before uint64))
     (let after-raw (cast after uint64))
     (match

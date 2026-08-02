@@ -390,7 +390,7 @@
     {
       "code": "E-EFFECT-002",
       "severity": "error",
-      "summary": "A name in `effects:` does not resolve to an effect declared with `(def <name> (effect @domain @action))`"
+      "summary": "A name in `effects:` does not resolve to a nominal `module.root` effect"
     },
     {
       "code": "E-EFFECT-006",
@@ -400,12 +400,12 @@
     {
       "code": "E-EFFECT-004",
       "severity": "error",
-      "summary": "Malformed effect: `(effect ...)` takes exactly a domain and an action atom"
+      "summary": "Malformed effect row: each entry must be a nominal `module.root` name"
     },
     {
       "code": "E-EFFECT-007",
       "severity": "error",
-      "summary": "Reserved effect syntax: operands beyond the domain and action are reserved for handler definitions, and effect-row tails are reserved for effect polymorphism"
+      "summary": "Reserved effect-row extension syntax is not accepted"
     },
     {
       "code": "E-DEFFECT-001",
@@ -460,7 +460,7 @@
     {
       "code": "E-EFFECT-008",
       "severity": "error",
-      "summary": "Structural effect syntax is removed from native modules"
+      "summary": "Structural `(effect @domain @action)` syntax is removed"
     },
     {
       "code": "E-WASM-008",

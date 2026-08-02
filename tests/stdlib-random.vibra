@@ -4,7 +4,7 @@
   "bytes-uses-the-random-source"
   (test.case
     "bytes-uses-the-random-source"
-    (let value (random.bytes 8))
+    (let value (random.generate.bytes 8))
     (let raw (cast value (array uint8)))
     (match
       raw

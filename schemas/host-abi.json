@@ -1,11 +1,11 @@
 {
   "$id": "https://vibra-lang.org/schemas/host-abi.json",
-  "description": "Versioned Vibra host ABI registry: every host import a `$wasm` body may bind",
+  "description": "Versioned Vibra host ABI registry: every built-in import a native operation may bind",
   "imports": [
     {
       "effects": [
         {
-          "action": "read",
+          "action": "stdin",
           "domain": "io"
         }
       ],
@@ -23,7 +23,7 @@
     {
       "effects": [
         {
-          "action": "write",
+          "action": "stdout",
           "domain": "io"
         }
       ],
@@ -41,7 +41,7 @@
     {
       "effects": [
         {
-          "action": "write",
+          "action": "stderr",
           "domain": "io"
         }
       ],
@@ -60,7 +60,7 @@
       "effects": [
         {
           "action": "read",
-          "domain": "io"
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -83,7 +83,7 @@
       "effects": [
         {
           "action": "read",
-          "domain": "io"
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -106,7 +106,7 @@
       "effects": [
         {
           "action": "read",
-          "domain": "io"
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -129,7 +129,7 @@
       "effects": [
         {
           "action": "read",
-          "domain": "io"
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -156,7 +156,7 @@
       "effects": [
         {
           "action": "write",
-          "domain": "io"
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -183,7 +183,7 @@
       "effects": [
         {
           "action": "write",
-          "domain": "io"
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -210,7 +210,7 @@
       "effects": [
         {
           "action": "write",
-          "domain": "io"
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -236,8 +236,8 @@
     {
       "effects": [
         {
-          "action": "write",
-          "domain": "io"
+          "action": "manage",
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -259,8 +259,8 @@
     {
       "effects": [
         {
-          "action": "write",
-          "domain": "io"
+          "action": "manage",
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -1187,68 +1187,6 @@
     {
       "effects": [
         {
-          "action": "read",
-          "domain": "fs"
-        }
-      ],
-      "intrinsic-effects": [],
-      "module": "vibra_v1",
-      "name": "fs_read_to_string",
-      "params": [
-        {
-          "kind": "value",
-          "type": "path"
-        }
-      ],
-      "return": "result-str"
-    },
-    {
-      "effects": [
-        {
-          "action": "write",
-          "domain": "fs"
-        }
-      ],
-      "intrinsic-effects": [],
-      "module": "vibra_v1",
-      "name": "fs_write_string_all",
-      "params": [
-        {
-          "kind": "value",
-          "type": "path"
-        },
-        {
-          "kind": "value",
-          "type": "str"
-        }
-      ],
-      "return": "result-void"
-    },
-    {
-      "effects": [
-        {
-          "action": "write",
-          "domain": "fs"
-        }
-      ],
-      "intrinsic-effects": [],
-      "module": "vibra_v1",
-      "name": "fs_append_string",
-      "params": [
-        {
-          "kind": "value",
-          "type": "path"
-        },
-        {
-          "kind": "value",
-          "type": "str"
-        }
-      ],
-      "return": "result-void"
-    },
-    {
-      "effects": [
-        {
           "action": "metadata",
           "domain": "fs"
         }
@@ -1341,52 +1279,6 @@
     {
       "effects": [
         {
-          "action": "read",
-          "domain": "fs"
-        }
-      ],
-      "intrinsic-effects": [
-        {
-          "operation": "read",
-          "root": "fs"
-        }
-      ],
-      "module": "vibra_v1",
-      "name": "fs_read_dir",
-      "params": [
-        {
-          "kind": "value",
-          "type": "path"
-        }
-      ],
-      "return": "result-paths"
-    },
-    {
-      "effects": [
-        {
-          "action": "read",
-          "domain": "fs"
-        }
-      ],
-      "intrinsic-effects": [
-        {
-          "operation": "read",
-          "root": "fs"
-        }
-      ],
-      "module": "vibra_v1",
-      "name": "fs_read_dir_entries",
-      "params": [
-        {
-          "kind": "value",
-          "type": "path"
-        }
-      ],
-      "return": "result-any"
-    },
-    {
-      "effects": [
-        {
           "action": "metadata",
           "domain": "fs"
         }
@@ -1445,32 +1337,6 @@
       ],
       "module": "vibra_v1",
       "name": "fs_rename",
-      "params": [
-        {
-          "kind": "value",
-          "type": "path"
-        },
-        {
-          "kind": "value",
-          "type": "path"
-        }
-      ],
-      "return": "result-void"
-    },
-    {
-      "effects": [
-        {
-          "action": "read",
-          "domain": "fs"
-        },
-        {
-          "action": "write",
-          "domain": "fs"
-        }
-      ],
-      "intrinsic-effects": [],
-      "module": "vibra_v1",
-      "name": "fs_copy",
       "params": [
         {
           "kind": "value",
@@ -1636,7 +1502,7 @@
     {
       "effects": [
         {
-          "action": "listen",
+          "action": "bind",
           "domain": "net"
         }
       ],
@@ -1659,7 +1525,7 @@
     {
       "effects": [
         {
-          "action": "listen",
+          "action": "bind",
           "domain": "net"
         }
       ],
@@ -1722,8 +1588,8 @@
     {
       "effects": [
         {
-          "action": "send",
-          "domain": "net"
+          "action": "manage",
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -1749,7 +1615,7 @@
     {
       "effects": [
         {
-          "action": "listen",
+          "action": "bind",
           "domain": "net"
         }
       ],
@@ -1799,8 +1665,8 @@
     {
       "effects": [
         {
-          "action": "send",
-          "domain": "net"
+          "action": "write",
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -1830,8 +1696,8 @@
     {
       "effects": [
         {
-          "action": "receive",
-          "domain": "net"
+          "action": "read",
+          "domain": "stream"
         }
       ],
       "intrinsic-effects": [
@@ -1850,28 +1716,6 @@
         {
           "kind": "value",
           "type": "uint64"
-        }
-      ],
-      "return": "result-any"
-    },
-    {
-      "effects": [
-        {
-          "action": "spawn",
-          "domain": "process"
-        },
-        {
-          "action": "wait",
-          "domain": "process"
-        }
-      ],
-      "intrinsic-effects": [],
-      "module": "vibra_v1",
-      "name": "process_run",
-      "params": [
-        {
-          "kind": "value",
-          "type": "record"
         }
       ],
       "return": "result-any"
@@ -1925,7 +1769,7 @@
     {
       "effects": [
         {
-          "action": "kill",
+          "action": "signal",
           "domain": "process"
         }
       ],

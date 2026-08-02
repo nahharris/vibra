@@ -594,18 +594,6 @@ fn visit_type(ty: &TypeExpr, context: &DocContext<'_>, facts: &mut Vec<SemanticF
             name.clone(),
             None,
         ),
-        TypeExprKind::Effect { domain, action } => {
-            for atom in [domain, action] {
-                push(
-                    facts,
-                    context,
-                    atom.span,
-                    SemanticKind::Atom,
-                    atom.value.clone(),
-                    None,
-                );
-            }
-        }
         TypeExprKind::Handle(_) | TypeExprKind::Literal(_) => {}
     }
 }

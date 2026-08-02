@@ -33,11 +33,6 @@ thread_local! {
     /// property of the enclosing operation without threading another boolean
     /// through every expression helper.
     static IN_DEFFECT_OPERATION: Cell<bool> = const { Cell::new(false) };
-    /// A module opts into the native boundary by declaring at least one
-    /// `deffect`. Legacy modules remain readable during the staged stdlib
-    /// migration, but native modules cannot smuggle raw `wasm` around an
-    /// operation owner.
-    static IN_NATIVE_MODULE: Cell<bool> = const { Cell::new(false) };
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1474,10 +1469,6 @@ fn lower_function(
     declared_aliases: &BTreeSet<String>,
     bodies: &mut TypedBodyIndex,
 ) -> Result<()> {
-    let native_module = module
-        .forms
-        .iter()
-        .any(|form| matches!(form, TopLevel::Deffect(_)));
     let operation_owner = signatures
         .functions
         .get(key)
@@ -1488,7 +1479,7 @@ fn lower_function(
         ..
     }] = function.body.as_slice()
     {
-        if native_module && !operation_owner {
+        if !operation_owner {
             bail!("E-WASM-008: raw `wasm` is only valid inside a `deffect` operation");
         }
         if arguments
@@ -1546,7 +1537,6 @@ fn lower_function(
         &mut local_types,
     );
     let allow_intrinsic = own_signature.owner_effect.is_some();
-    let previous_native_module = IN_NATIVE_MODULE.with(|scope| scope.replace(native_module));
     let previous_intrinsic = IN_DEFFECT_OPERATION.with(|scope| scope.replace(allow_intrinsic));
     let statements_result = lower_statements(
         module_alias,
@@ -1557,7 +1547,6 @@ fn lower_function(
         &local_types,
     );
     IN_DEFFECT_OPERATION.with(|scope| scope.set(previous_intrinsic));
-    IN_NATIVE_MODULE.with(|scope| scope.set(previous_native_module));
     let statements =
         statements_result.with_context(|| format!("lowering typed function `{key}`"))?;
     let mut let_types = HashMap::new();
@@ -2303,7 +2292,7 @@ fn lower_expr(
             }
             Expr::HostCall {
                 import: ImportTarget {
-                    module: "vibra_v1".into(),
+                    module: entry.module.to_string(),
                     name: crate::intrinsics::import_name(&name.value),
                 },
                 args: arguments.iter().map(lower).collect::<Result<_>>()?,
@@ -2319,7 +2308,7 @@ fn lower_expr(
         // has no legacy equivalent and stays rejected explicitly rather
         // than silently accepted.
         ExprKind::Wasm { import, arguments } => {
-            if IN_NATIVE_MODULE.with(Cell::get) && !IN_DEFFECT_OPERATION.with(Cell::get) {
+            if !IN_DEFFECT_OPERATION.with(Cell::get) {
                 bail!("E-WASM-008: raw `wasm` is only valid inside a `deffect` operation");
             }
             let entry = crate::host_abi::lookup(&import.module.value, &import.name.value)
@@ -2651,7 +2640,7 @@ fn resolve_ordinary_call_target(
 /// mapping payload, the typed surface's calls are positional, so the
 /// dispatch subject is the call's first positional argument -- matching
 /// every dispatch call in the corpus, where the subject is always written
-/// first (`$fs.writable.write-string: $out` with `$out` as the call's
+/// first (`$stream.writable.string: $out` with `$out` as the call's
 /// primary/first value).
 fn resolve_interface_call_target(
     module_alias: &str,
@@ -4879,12 +4868,12 @@ mod tests {
     #[test]
     fn wasm_import_body_lowers_with_correct_signature_and_executes_in_both_backends() {
         let source = module(
-            r#"(defn
-  scalar-len
-  (value str)
-  uint64
-  (do (wasm "vibra_v1" "str_scalar_len" value))
-)"#,
+            r#"(deffect host
+  (defn
+    scalar-len
+    (value str)
+    uint64
+    (do (wasm "vibra_v1" "str_scalar_len" value))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4896,18 +4885,18 @@ mod tests {
         // The staged IR is a `FunctionBody::Wasm`, not a statement sequence,
         // and it recorded no node origins (there is no `Statement`/`Expr`
         // walk for a wasm-only body -- see `lower_function`).
-        let FunctionBody::Wasm { import, wasm_args } = &bodies.functions["scalar-len"] else {
+        let FunctionBody::Wasm { import, wasm_args } = &bodies.functions["host.scalar-len"] else {
             panic!("expected a wasm import body");
         };
         assert_eq!(import.module, "vibra_v1");
         assert_eq!(import.name, "str_scalar_len");
         assert_eq!(wasm_args.len(), 1);
         assert!(matches!(&wasm_args[0], WasmArgSpec::Arg(name) if name == "value"));
-        assert!(bodies.node_origins["scalar-len"].is_empty());
+        assert!(bodies.node_origins["host.scalar-len"].is_empty());
 
         let functions = materialize_typed_functions(&signatures, &bodies).unwrap();
         assert!(matches!(
-            &functions["scalar-len"].body,
+            &functions["host.scalar-len"].body,
             FunctionBody::Wasm { import, .. }
                 if import.module == "vibra_v1" && import.name == "str_scalar_len"
         ));
@@ -4915,7 +4904,7 @@ mod tests {
         let program = LoweredProgram {
             main_effects: Default::default(),
             statements: vec![Statement::Call(Call {
-                callee_key: "scalar-len".into(),
+                callee_key: "host.scalar-len".into(),
                 type_args: Vec::new(),
                 args: vec![Expr::Value(RuntimeValue::Str("hi".into()))],
                 source_args: Vec::new(),
@@ -4936,15 +4925,15 @@ mod tests {
     #[test]
     fn wasm_import_argument_type_mismatch_is_rejected() {
         // `str_scalar_len` requires a `str` in position 0; `bool` must be
-        // rejected the same way the legacy `$wasm` path rejects it
+        // rejected the same way the raw wasm validation path rejects it
         // (`E-WASM-003`), not silently coerced or accepted.
         let source = module(
-            r#"(defn
-  bad
-  (value bool)
-  uint64
-  (do (wasm "vibra_v1" "str_scalar_len" value))
-)"#,
+            r#"(deffect host
+  (defn
+    bad
+    (value bool)
+    uint64
+    (do (wasm "vibra_v1" "str_scalar_len" value))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4966,12 +4955,12 @@ mod tests {
         // accepted on the strength of syntactic well-formedness alone; a
         // `$wasm` body crosses a trust boundary out to host functions.
         let source = module(
-            r#"(defn
-  bad
-  ()
-  void
-  (do (wasm "not-a-real-host-module" "whatever"))
-)"#,
+            r#"(deffect host
+  (defn
+    bad
+    ()
+    void
+    (do (wasm "not-a-real-host-module" "whatever"))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -4989,15 +4978,14 @@ mod tests {
     #[test]
     fn wasm_import_is_a_general_expression() {
         let source = module(
-            r#"(defn
-  bad
-  (flag bool)
-  void
-  (do
-    (wasm "vibra_test" "assert" flag)
-    (wasm "vibra_test" "assert" flag)
-  )
-)"#,
+            r#"(deffect host
+  (defn
+    bad
+    (flag bool)
+    void
+    (do
+      (wasm "vibra_test" "assert" flag)
+      (wasm "vibra_test" "assert" flag))))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -5005,7 +4993,7 @@ mod tests {
         }];
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
         let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
-        let FunctionBody::User { statements } = &bodies.functions["bad"] else {
+        let FunctionBody::User { statements } = &bodies.functions["host.bad"] else {
             panic!("expected user body");
         };
         assert_eq!(statements.len(), 2);
@@ -5100,7 +5088,7 @@ mod tests {
 
     #[test]
     fn qualified_call_resembling_interface_dispatch_resolves_as_an_ordinary_function() {
-        // Same shape as the real stdlib gap (`fs.writable.write-string`:
+        // Same shape as a qualified stream dispatch (`stream.writable.string`:
         // alias, then a dotted path that *looks* like `iface.method`), but
         // `pipe` is a record with an inherent method, not an interface. The
         // self-export rung must resolve it as the ordinary function it is;
@@ -5135,7 +5123,7 @@ mod tests {
     /// record types (`square`, `circle`) bound to distinct functions -- so a
     /// resolution bug that always picks "the" impl (there being more than
     /// one registered `ImplKey` for the same interface, exactly like the
-    /// real `writable` interface's three implementors in `stdlib/src/fs.vibra`)
+    /// shared stream interface's implementors in the stdlib)
     /// would be caught by asserting *which* one was chosen.
     const SHAPE_FIXTURE: &str = r#"(def shape (interface (area (fn-type (self self) int64))))
 (defn square-area (value square) int64 (do (return 4)))

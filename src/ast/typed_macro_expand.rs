@@ -2187,10 +2187,7 @@ fn qualify_generated_type_names(
                 definition_symbols,
             );
         }
-        // An effect's operands are atoms, not references, so there is nothing to
-        // qualify against the caller's alias.
-        TypeExprKind::Effect { .. }
-        | TypeExprKind::WasmValue(_)
+        TypeExprKind::WasmValue(_)
         | TypeExprKind::Handle(_)
         | TypeExprKind::Named(_)
         | TypeExprKind::Literal(_) => {}
@@ -2543,10 +2540,6 @@ fn annotate_generated_type(
         }
         TypeExprKind::Handle(access) => {
             annotate_generated_origin(&mut access.origin, definition, call, state)?;
-        }
-        TypeExprKind::Effect { domain, action } => {
-            annotate_generated_origin(&mut domain.origin, definition, call, state)?;
-            annotate_generated_origin(&mut action.origin, definition, call, state)?;
         }
         TypeExprKind::Named(_) | TypeExprKind::Literal(_) => {}
     }

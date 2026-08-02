@@ -575,10 +575,8 @@ fn annotations<'a>(
 }
 
 /// Lower the surface `effects:` annotation for the staged typed index. Native
-/// roots are nominal dotted names (`module.root`); the inline constructor is
-/// retained for callers that still use structural spelling while the surface
-/// migrates. No dependency closure is inferred here: this is exactly the row
-/// written on the declaration.
+/// roots are nominal dotted names (`module.root`). No dependency closure is
+/// inferred here: this is exactly the row written on the declaration.
 fn lower_effect_row(
     annotations: &[Annotation],
     _module_alias: &str,
@@ -596,23 +594,17 @@ fn lower_effect_row(
     let mut lowered = EffectRow::default();
     for label in &row.labels {
         let identity = match &label.value {
-            TypeExprKind::Effect { domain, action } => {
-                (domain.value.clone(), action.value.clone())
-            }
             TypeExprKind::Named(name) => {
                 let Some((domain, action)) = name.split_once('.') else {
                     bail!(
                         "E-EFFECT-002: typed effect `{name}` must be a nominal `module.root` name"
                     );
                 };
-                if !crate::intrinsics::is_known_root(domain, action) {
-                    bail!("E-EFFECT-002: malformed nominal effect `{name}`");
-                }
                 (domain.to_string(), action.to_string())
             }
-            other => bail!(
-                "E-EFFECT-002: typed effect row entry must be a nominal root or inline effect, got {other:?}"
-            ),
+            other => {
+                bail!("E-EFFECT-002: typed effect row entry must be a nominal root, got {other:?}")
+            }
         };
         lowered.labels.insert(identity);
     }
@@ -631,10 +623,6 @@ pub(crate) fn lower_type(
             TypeRef::Literal(LiteralType::Atom(name.clone()))
         }
         TypeExprKind::Literal(_) => bail!("only atom literals are valid singleton types"),
-        TypeExprKind::Effect { domain, action } => TypeRef::Effect {
-            domain: domain.value.clone(),
-            action: action.value.clone(),
-        },
         TypeExprKind::Named(name) if name == "any" => TypeRef::Interface(BTreeMap::new()),
         TypeExprKind::Named(name) if name == "atom" => TypeRef::Atom,
         TypeExprKind::Named(name) if generics.contains(name) => TypeRef::Generic(name.clone()),
@@ -703,9 +691,14 @@ pub(crate) fn lower_type(
                 .labels
                 .iter()
                 .map(|label| match lower(label)? {
-                    TypeRef::Effect { domain, action } => Ok((domain, action)),
+                    TypeRef::Named(name) => {
+                        let Some((domain, action)) = name.split_once('.') else {
+                            bail!("E-EFFECT-002: `fn-type` effects entry must be a nominal root")
+                        };
+                        Ok((domain.to_string(), action.to_string()))
+                    }
                     other => {
-                        bail!("E-EFFECT-002: `fn-type` effects entry is not an effect: {other:?}")
+                        bail!("E-EFFECT-002: `fn-type` effects entry is not a nominal root: {other:?}")
                     }
                 })
                 .collect::<Result<_>>()?,
@@ -759,6 +752,7 @@ pub(crate) fn lower_type(
             crate::ast::HandleAccess::Read => HandleAccess::Read,
             crate::ast::HandleAccess::Write => HandleAccess::Write,
             crate::ast::HandleAccess::ReadWrite => HandleAccess::ReadWrite,
+            crate::ast::HandleAccess::Any => HandleAccess::Any,
             crate::ast::HandleAccess::Process => HandleAccess::Process,
         }),
         TypeExprKind::WasmValue(name) => match name.value.as_str() {

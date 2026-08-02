@@ -19,8 +19,8 @@ use std::collections::{BTreeSet, HashMap};
 
 /// An effect a body performs, together with the call that introduced it.
 ///
-/// The witness is the whole point: "this function performs `(effect @fs @write)`" is
-/// far less useful for repair than naming the call that did it.
+/// The witness is the whole point: naming the nominal root and the call that
+/// introduced it makes an effect failure actionable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectWitness {
     pub label: (String, String),

@@ -446,13 +446,6 @@ pub enum TypeExprKind {
     MutableReference(Box<TypeExpr>),
     Intersect(Vec<TypeExpr>),
     Handle(Spanned<HandleAccess>),
-    /// An effect label, identified structurally by its `(domain, action)` atom pair
-    /// rather than by the name it is bound to. `(effect @fs @read)` written in two
-    /// modules denotes the same effect.
-    Effect {
-        domain: Name,
-        action: Name,
-    },
     WasmValue(Name),
 }
 
@@ -461,6 +454,7 @@ pub enum HandleAccess {
     Read,
     Write,
     ReadWrite,
+    Any,
     Process,
 }
 
@@ -703,11 +697,7 @@ pub enum AnnotationKind {
 
 /// The complete set of effects a function's body may perform.
 ///
-/// Each label is an ordinary [`TypeExpr`]: either a name bound to an effect
-/// (`fs.read`) or an inline `(effect @fs @read)` construction. Representing them as
-/// type expressions rather than a bespoke node means alias validation, macro
-/// qualification, the semantic index, and the legacy adapter all handle them with
-/// the machinery they already have for types.
+/// Each label is a nominal root name such as `fs.read`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectRow {
     pub labels: Vec<TypeExpr>,
@@ -1476,20 +1466,11 @@ fn parse_type(node: &Node) -> Result<TypeExpr, AstError> {
             TypeExprKind::Handle(parse_handle_access(args[0])?)
         }
         "effect" => {
-            // Operands beyond the domain and action are reserved for handler
-            // definitions; reject them by name so the reservation is visible.
-            if args.len() > 2 {
-                return Err(AstError::new(
-                    "E-EFFECT-007",
-                    "`effect` takes exactly a domain and an action atom; additional operands are reserved for handler definitions",
-                    args[2].span,
-                ));
-            }
-            exact_arity("effect", &args, 2, node.span)?;
-            TypeExprKind::Effect {
-                domain: open_atom(args[0], "effect domain")?,
-                action: open_atom(args[1], "effect action")?,
-            }
+            return Err(AstError::new(
+                "E-EFFECT-008",
+                "structural `(effect @domain @action)` syntax was removed; use a nominal root name such as `fs.read`",
+                head.span,
+            ));
         }
         "wasm" => {
             exact_arity("wasm type", &args, 1, node.span)?;
@@ -1554,12 +1535,13 @@ fn parse_handle_access(node: &Node) -> Result<Spanned<HandleAccess>, AstError> {
     let word = contextual_atom(
         node,
         "handle access",
-        &["read", "write", "read-write", "process"],
+        &["read", "write", "read-write", "any", "process"],
     )?;
     let access = match word.value.as_str() {
         "read" => HandleAccess::Read,
         "write" => HandleAccess::Write,
         "read-write" => HandleAccess::ReadWrite,
+        "any" => HandleAccess::Any,
         _ => HandleAccess::Process,
     };
     Ok(Spanned::source(access, node.span))
@@ -2149,21 +2131,17 @@ fn parse_annotations(
     Ok(annotations)
 }
 
-/// `effects: (fs.read (effect @fs @write))` -- a flat list whose elements are each
-/// either a name bound to an effect or an inline construction. An empty list is
-/// legal and means the same as omitting the attribute.
+/// `effects: (fs.read stream.write)` is a flat list of nominal root names.
+/// An empty list is legal and means the same as omitting the attribute.
 fn parse_effects_value(node: &Node) -> Result<EffectRow, AstError> {
     let labels = semantic_nodes(list(node)?)
         .map(parse_type)
         .collect::<Result<Vec<_>, _>>()?;
     for label in &labels {
-        if !matches!(
-            label.value,
-            TypeExprKind::Named(_) | TypeExprKind::Effect { .. }
-        ) {
+        if !matches!(label.value, TypeExprKind::Named(_)) {
             return Err(AstError::new(
                 "E-EFFECT-004",
-                "each `effects:` element must be an effect name or an inline `(effect @domain @action)`",
+                "each `effects:` element must be a nominal root name such as `fs.read`",
                 label.span,
             ));
         }

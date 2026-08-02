@@ -7,25 +7,25 @@
 
 use crate::host_abi::HostImport;
 
+pub fn module_name(name: &str) -> &'static str {
+    if name.starts_with("test-") {
+        "vibra_test"
+    } else {
+        "vibra_v1"
+    }
+}
+
 pub fn import_name(name: &str) -> String {
-    name.replace('-', "_")
+    if let Some(name) = name.strip_prefix("test-") {
+        name.to_string()
+    } else {
+        name.replace('-', "_")
+    }
 }
 
 pub fn lookup(name: &str) -> Option<&'static HostImport> {
     let import = import_name(name);
-    if matches!(
-        import.as_str(),
-        "fs_read_to_string"
-            | "fs_write_string_all"
-            | "fs_append_string"
-            | "fs_read_dir"
-            | "fs_read_dir_entries"
-            | "fs_copy"
-            | "process_run"
-    ) {
-        return None;
-    }
-    crate::host_abi::lookup("vibra_v1", &import)
+    crate::host_abi::lookup(module_name(name), &import)
 }
 
 pub fn is_known(name: &str) -> bool {
@@ -34,10 +34,10 @@ pub fn is_known(name: &str) -> bool {
 
 pub type Effect = (&'static str, &'static str);
 
-/// The native root inventory. Unlike the legacy structural effect aliases,
-/// native effect names are not arbitrary user-defined type aliases: they are
-/// the compiler/stdlib contract. Keeping the inventory next to the intrinsic
-/// registry lets both lowering paths reject misspelled roots consistently.
+/// The native root inventory. Effect names are not arbitrary user-defined type
+/// aliases: they are the compiler/stdlib contract. Keeping the inventory next
+/// to the intrinsic registry lets both lowering paths reject misspelled roots
+/// consistently.
 const ROOTS: &[(&str, &[&str])] = &[
     ("stream", &["read", "write", "manage"]),
     ("fs", &["read", "write", "metadata"]),
@@ -56,9 +56,8 @@ pub fn is_known_root(domain: &str, action: &str) -> bool {
         .any(|(known_domain, actions)| *known_domain == domain && actions.contains(&action))
 }
 
-/// Native effect roots for intrinsic transitions. This table is intentionally
-/// separate from the legacy raw-wasm registry: the latter remains stable while
-/// the deffect/stream surface migrates to its nominal root names.
+/// Native effect roots for intrinsic transitions. This table uses the same
+/// nominal root vocabulary exposed by the stdlib and effect report.
 pub fn effects_for(name: &str) -> &'static [Effect] {
     intrinsic_effects_for_import(&import_name(name))
 }
@@ -98,7 +97,7 @@ pub fn endpoint_result_suffixes(name: &str) -> &'static [&'static str] {
 
 fn intrinsic_effects_for_import(name: &str) -> &'static [Effect] {
     match name {
-        "fs_open_read" | "fs_read_dir" | "fs_read_dir_entries" => &[("fs", "read")],
+        "fs_open_read" => &[("fs", "read")],
         "fs_open_write"
         | "fs_open_write_options"
         | "fs_open_append"
@@ -148,6 +147,9 @@ mod tests {
     fn intrinsic_names_are_closed_and_kebab_mapped() {
         let entry = lookup("clock-now-unix-millis").expect("clock intrinsic");
         assert_eq!(entry.name, "clock_now_unix_millis");
+        let test = lookup("test-assert").expect("test intrinsic");
+        assert_eq!(test.module, "vibra_test");
+        assert_eq!(test.name, "assert");
         assert!(lookup("not-a-host-transition").is_none());
         assert!(lookup("fs-read-to-string").is_none());
         assert!(lookup("fs-read-dir").is_none());

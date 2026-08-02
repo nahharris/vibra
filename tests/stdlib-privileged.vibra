@@ -8,10 +8,10 @@
   "privileged-stdlib-operations-return-their-declared-shapes"
   (test.case
     "privileged-stdlib-operations-return-their-declared-shapes"
-    (let now (time.now-unix-millis))
+    (let now (time.now.unix-millis))
     (let is-millis (accepts-unix-millis now))
     (test.assert is-millis)
-    (let bytes (random.bytes 1))
+    (let bytes (random.generate.bytes 1))
     (let raw-bytes (cast bytes (array uint8)))
     (match
       raw-bytes
@@ -20,7 +20,7 @@
       _
       (do (test.fail "random bytes returned the wrong length"))
     )
-    (let info (sys.info))
+    (let info (sys.info.get))
     (let is-info (accepts-system-info info))
     (test.assert is-info)
     profile: @system

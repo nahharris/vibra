@@ -360,6 +360,7 @@ fn handle_access_str(access: AstHandleAccess) -> &'static str {
         AstHandleAccess::Read => "read",
         AstHandleAccess::Write => "write",
         AstHandleAccess::ReadWrite => "read-write",
+        AstHandleAccess::Any => "any",
         AstHandleAccess::Process => "process",
     }
 }
@@ -433,10 +434,6 @@ struct Converter<'a> {
     current_params: Vec<String>,
     module_alias: String,
     intrinsic_owner: bool,
-    /// During the staged migration, legacy modules without a native deffect
-    /// remain readable. Once a module opts into native effects, raw wasm is
-    /// rejected everywhere except the deffect operation body.
-    native_module: bool,
 }
 
 /// Convert one typed module into the legacy top-level mapping `Value` shape
@@ -457,10 +454,6 @@ pub(crate) fn module_to_value_with_alias(
         current_params: Vec::new(),
         module_alias: module_alias.to_string(),
         intrinsic_owner: false,
-        native_module: module
-            .forms
-            .iter()
-            .any(|form| matches!(form, TopLevel::Deffect(_))),
     };
     let mut map = Mapping::new();
     for form in &module.forms {
@@ -529,7 +522,6 @@ pub(crate) fn inline_expression_to_value(expression: &AstExpr) -> Result<Value> 
         current_params: Vec::new(),
         module_alias: String::new(),
         intrinsic_owner: false,
-        native_module: false,
     };
     converter.expr_value(expression)
 }
@@ -727,13 +719,6 @@ impl<'a> Converter<'a> {
                 let head = format!("handle.{}", handle_access_str(access.value));
                 Ok(single_dollar(&head, Value::Null))
             }
-            TypeExprKind::Effect { domain, action } => Ok(single_dollar(
-                "effect",
-                Value::Sequence(vec![
-                    Value::String(domain.value.clone()),
-                    Value::String(action.value.clone()),
-                ]),
-            )),
             TypeExprKind::WasmValue(name) => bail!(
                 "E-ADAPT-008: `(wasm {})` host ABI value type has no legacy `Value` shape",
                 name.value
@@ -1281,18 +1266,7 @@ impl<'a> Converter<'a> {
                 self.module_alias.as_str()
             };
             let owner = TypeExpr {
-                value: TypeExprKind::Effect {
-                    domain: Spanned {
-                        value: owner_module.to_string(),
-                        span,
-                        origin: crate::ast::Origin::Source(span),
-                    },
-                    action: Spanned {
-                        value: root.to_string(),
-                        span,
-                        origin: crate::ast::Origin::Source(span),
-                    },
-                },
+                value: TypeExprKind::Named(format!("{owner_module}.{root}")),
                 span,
                 origin: crate::ast::Origin::Source(span),
             };
@@ -1344,13 +1318,19 @@ impl<'a> Converter<'a> {
                     .iter()
                     .all(|argument| !matches!(argument, WasmArgument::Expression(_)))
                 {
-                    if self.native_module && !self.intrinsic_owner {
+                    if !self.intrinsic_owner {
                         bail!("E-WASM-008: raw `wasm` is only valid inside a `deffect` operation");
                     }
                     return Ok(Value::Sequence(vec![
                         self.wasm_statement_value(import, arguments)?
                     ]));
                 }
+            }
+            if matches!(body[0].value, ExprKind::Intrinsic { .. }) {
+                return Ok(Value::Sequence(vec![single_dollar(
+                    "return",
+                    self.expr_value(&body[0])?,
+                )]));
             }
         }
         let mut seq = Vec::new();
@@ -1665,7 +1645,7 @@ impl<'a> Converter<'a> {
                 let mut host = Mapping::new();
                 host.insert(
                     Value::String("module".into()),
-                    Value::String("vibra_v1".into()),
+                    Value::String(crate::intrinsics::module_name(&name.value).into()),
                 );
                 host.insert(
                     Value::String("name".into()),
@@ -1687,7 +1667,7 @@ impl<'a> Converter<'a> {
                 Ok(single_dollar("host-call", Value::Mapping(host)))
             }
             ExprKind::Wasm { import, arguments } => {
-                if self.native_module && !self.intrinsic_owner {
+                if !self.intrinsic_owner {
                     bail!(
                         "E-WASM-008: raw `wasm` is only valid inside a `deffect` operation"
                     );
@@ -1739,7 +1719,7 @@ impl<'a> Converter<'a> {
 
     // ---------------- Calls ----------------
 
-    /// Whether `callee` (e.g. `fs.writable.write-string`) names a method of
+    /// Whether `callee` (e.g. `stream.writable.string`) names a method of
     /// a known `$interface` type reachable from this module's resolved
     /// signature index -- i.e. whether legacy's
     /// `reject_iface_nested_call_bundle` will apply its sibling-key shape
@@ -2559,7 +2539,6 @@ pub(crate) fn test_discovery_value(test: &Test) -> Result<(String, Value)> {
         current_params: Vec::new(),
         module_alias: String::new(),
         intrinsic_owner: false,
-        native_module: false,
     };
     converter.test_metadata_value(test, Value::Sequence(Vec::new()))
 }
@@ -2775,7 +2754,7 @@ mod tests {
     }
 
     #[test]
-    fn native_modules_reject_raw_wasm_outside_deffect_operations() {
+    fn modules_reject_raw_wasm_outside_deffect_operations() {
         let module = module_from_source(
             r#"(defn bad () uint64
   (do (wasm "vibra_v1" "clock_now_unix_millis")))
