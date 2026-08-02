@@ -69,38 +69,37 @@ included.
 
 ## Effects
 
-Every function declares which host effects its body may perform. The compiler
-infers what the body actually does and rejects any function that exceeds its
-declaration, so a signature is a complete statement of a function's reach.
+Native effects are nominal roots declared with `deffect`. An operation owns its
+root implicitly; `effects:` lists only additive roots. Calls use the exact
+declared union—there is no compound-root or dependency-closure mechanism.
 
 ```vibra
-(defn load (p fs.path) str
-  (do (return (fs.read-to-string p)))
-  effects: (effects.fs-read))
+(deffect read
+  (defn open (path path) (result reader fs-error)
+    (intrinsic @fs-open-read path)
+    effects: ()))
 ```
 
-An absent `effects:` attribute means pure. The declared row is a *ceiling*:
-declaring more than the body performs is allowed, and inference never fills the
-declaration in for you.
+`read.open` is the operation name; a module-level `file` remains `file`, not
+`read.file`. Host-backed endpoints are nominal `(newtype (handle @read))`
+values minted only by validated intrinsics. They may widen to a weaker generic
+stream capability, never be forged or cast, and retain their provider-specific
+identity.
 
-An effect is constructed with `(effect @domain @action)` and identified
-**structurally** by that pair, so the same pair written in two modules denotes
-the same effect. `@std/effects.vibra` binds names for the 18 host effects
-(`effects.fs-read`, `effects.net-connect`, …), but the inline form works
-anywhere and needs no import. A library can declare its own with
-`(def query (effect @db @query))`.
-
-Host imports are ground truth: a `(wasm ...)` body must declare exactly the
-effects the ABI registry states for that import, so an effect cannot be
-laundered through an empty declaration. Interface methods carry rows too, and an
-implementation may not exceed its interface's ceiling.
+Ordinary functions and interface methods still declare a complete effect
+ceiling. The compiler checks the body against it and reports both declared and
+performed rows. `intrinsic` names are closed compiler-known operations: pure
+value operations may be used directly, while effectful transitions are owned
+by a `deffect`. Raw `wasm` is reserved for custom/dependency Wasm owned by an
+effect operation.
 
 ```sh
 vibra effects examples/fs-roundtrip.vibra
 ```
 
-reports the program's whole effect surface, the per-function rows behind it, and
-the underlying host imports — see [schemas/effects.schema.json](schemas/effects.schema.json).
+reports declared/performed surfaces, per-function and per-operation rows, call
+edges, and primitive capability witnesses — see
+[schemas/effects.schema.json](schemas/effects.schema.json).
 
 Effects are static and fully erased: there is no runtime representation and no
 enforcement. Every host operation remains unconditionally available at runtime,

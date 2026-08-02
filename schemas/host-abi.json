@@ -9,6 +9,12 @@
           "domain": "io"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "stdin",
+          "root": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "stdin_open",
       "params": [],
@@ -19,6 +25,12 @@
         {
           "action": "write",
           "domain": "io"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "stdout",
+          "root": "io"
         }
       ],
       "module": "vibra_v1",
@@ -33,6 +45,12 @@
           "domain": "io"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "stderr",
+          "root": "io"
+        }
+      ],
       "module": "vibra_v1",
       "name": "stderr_open",
       "params": [],
@@ -43,6 +61,12 @@
         {
           "action": "read",
           "domain": "io"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "stream"
         }
       ],
       "module": "vibra_v1",
@@ -62,6 +86,12 @@
           "domain": "io"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_read_bytes",
       "params": [
@@ -79,6 +109,12 @@
           "domain": "io"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_read_line",
       "params": [
@@ -94,6 +130,12 @@
         {
           "action": "read",
           "domain": "io"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "stream"
         }
       ],
       "module": "vibra_v1",
@@ -117,6 +159,12 @@
           "domain": "io"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_write",
       "params": [
@@ -136,6 +184,12 @@
         {
           "action": "write",
           "domain": "io"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "stream"
         }
       ],
       "module": "vibra_v1",
@@ -159,6 +213,12 @@
           "domain": "io"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_write_bytes_some",
       "params": [
@@ -180,6 +240,12 @@
           "domain": "io"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "manage",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_sync",
       "params": [
@@ -197,6 +263,12 @@
           "domain": "io"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "manage",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fd_close",
       "params": [
@@ -209,6 +281,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "path_new",
       "params": [
@@ -221,6 +294,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "path_join",
       "params": [
@@ -237,6 +311,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "path_parent",
       "params": [
@@ -249,6 +324,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "path_extension",
       "params": [
@@ -261,6 +337,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "path_file_name",
       "params": [
@@ -273,6 +350,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "path_components",
       "params": [
@@ -285,6 +363,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "bytes_len",
       "params": [
@@ -297,6 +376,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "bytes_slice",
       "params": [
@@ -317,6 +397,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "bytes_from_str",
       "params": [
@@ -329,6 +410,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "bytes_get",
       "params": [
@@ -345,6 +427,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "bytes_concat",
       "params": [
@@ -361,6 +444,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "bytes_find",
       "params": [
@@ -377,6 +461,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "bytes_from_array",
       "params": [
@@ -389,6 +474,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "bytes_decode_utf8",
       "params": [
@@ -401,6 +487,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_scalar_len",
       "params": [
@@ -413,6 +500,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_byte_len",
       "params": [
@@ -425,6 +513,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_is_empty",
       "params": [
@@ -437,6 +526,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_contains",
       "params": [
@@ -453,6 +543,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_starts_with",
       "params": [
@@ -469,6 +560,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_ends_with",
       "params": [
@@ -485,6 +577,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_find",
       "params": [
@@ -501,6 +594,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_scalar_at",
       "params": [
@@ -517,6 +611,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_split",
       "params": [
@@ -533,6 +628,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_trim",
       "params": [
@@ -545,6 +641,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_replace",
       "params": [
@@ -565,6 +662,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_join",
       "params": [
@@ -581,6 +679,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_lowercase",
       "params": [
@@ -593,6 +692,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "str_uppercase",
       "params": [
@@ -605,6 +705,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "parse_int64",
       "params": [
@@ -617,6 +718,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "parse_uint64",
       "params": [
@@ -629,6 +731,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "parse_float64",
       "params": [
@@ -641,6 +744,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "parse_bool",
       "params": [
@@ -653,6 +757,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "format_int64",
       "params": [
@@ -665,6 +770,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "format_uint64",
       "params": [
@@ -677,6 +783,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "format_float64",
       "params": [
@@ -689,6 +796,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "format_bool",
       "params": [
@@ -701,6 +809,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "format_atom",
       "params": [
@@ -713,6 +822,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "array_len",
       "params": [
@@ -725,6 +835,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "array_get",
       "params": [
@@ -741,6 +852,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "array_set",
       "params": [
@@ -761,6 +873,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "array_slice",
       "params": [
@@ -781,6 +894,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "array_append",
       "params": [
@@ -797,6 +911,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "array_insert",
       "params": [
@@ -817,6 +932,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "array_remove",
       "params": [
@@ -833,6 +949,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "array_contains",
       "params": [
@@ -849,6 +966,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "map_len",
       "params": [
@@ -861,6 +979,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "map_get",
       "params": [
@@ -877,6 +996,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "map_insert",
       "params": [
@@ -897,6 +1017,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "map_remove",
       "params": [
@@ -913,6 +1034,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "map_contains_key",
       "params": [
@@ -934,6 +1056,12 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_read",
       "params": [
@@ -951,6 +1079,12 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_write",
       "params": [
@@ -966,6 +1100,12 @@
         {
           "action": "write",
           "domain": "fs"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "fs"
         }
       ],
       "module": "vibra_v1",
@@ -997,6 +1137,12 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_append",
       "params": [
@@ -1018,6 +1164,16 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "fs"
+        },
+        {
+          "operation": "read",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_open_read_write",
       "params": [
@@ -1035,6 +1191,7 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "fs_read_to_string",
       "params": [
@@ -1052,6 +1209,7 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "fs_write_string_all",
       "params": [
@@ -1073,6 +1231,7 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "fs_append_string",
       "params": [
@@ -1094,6 +1253,12 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "metadata",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_exists",
       "params": [
@@ -1109,6 +1274,12 @@
         {
           "action": "write",
           "domain": "fs"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "fs"
         }
       ],
       "module": "vibra_v1",
@@ -1128,6 +1299,12 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_remove_file",
       "params": [
@@ -1143,6 +1320,12 @@
         {
           "action": "write",
           "domain": "fs"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "fs"
         }
       ],
       "module": "vibra_v1",
@@ -1162,6 +1345,12 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_read_dir",
       "params": [
@@ -1177,6 +1366,12 @@
         {
           "action": "read",
           "domain": "fs"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "fs"
         }
       ],
       "module": "vibra_v1",
@@ -1196,6 +1391,12 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "metadata",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_metadata",
       "params": [
@@ -1213,6 +1414,12 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "metadata",
+          "root": "fs"
+        }
+      ],
       "module": "vibra_v1",
       "name": "fs_canonicalize",
       "params": [
@@ -1228,6 +1435,12 @@
         {
           "action": "write",
           "domain": "fs"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "fs"
         }
       ],
       "module": "vibra_v1",
@@ -1255,6 +1468,7 @@
           "domain": "fs"
         }
       ],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "fs_copy",
       "params": [
@@ -1276,6 +1490,12 @@
           "domain": "env"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "env"
+        }
+      ],
       "module": "vibra_v1",
       "name": "env_get",
       "params": [
@@ -1291,6 +1511,12 @@
         {
           "action": "write",
           "domain": "env"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "env"
         }
       ],
       "module": "vibra_v1",
@@ -1314,6 +1540,12 @@
           "domain": "env"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "env"
+        }
+      ],
       "module": "vibra_v1",
       "name": "env_remove",
       "params": [
@@ -1331,6 +1563,12 @@
           "domain": "env"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "env"
+        }
+      ],
       "module": "vibra_v1",
       "name": "env_list",
       "params": [],
@@ -1338,6 +1576,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "net_address_parse",
       "params": [
@@ -1353,6 +1592,12 @@
         {
           "action": "connect",
           "domain": "net"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "connect",
+          "root": "net"
         }
       ],
       "module": "vibra_v1",
@@ -1372,6 +1617,12 @@
           "domain": "net"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "connect",
+          "root": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_connect",
       "params": [
@@ -1387,6 +1638,12 @@
         {
           "action": "listen",
           "domain": "net"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "bind",
+          "root": "net"
         }
       ],
       "module": "vibra_v1",
@@ -1406,6 +1663,12 @@
           "domain": "net"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "bind",
+          "root": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_accept",
       "params": [
@@ -1418,6 +1681,12 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [
+        {
+          "operation": "manage",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_local_address",
       "params": [
@@ -1430,6 +1699,12 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [
+        {
+          "operation": "manage",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_set_deadline",
       "params": [
@@ -1449,6 +1724,12 @@
         {
           "action": "send",
           "domain": "net"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "manage",
+          "root": "stream"
         }
       ],
       "module": "vibra_v1",
@@ -1472,6 +1753,12 @@
           "domain": "net"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "bind",
+          "root": "net"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_udp_bind",
       "params": [
@@ -1487,6 +1774,12 @@
         {
           "action": "connect",
           "domain": "net"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "connect",
+          "root": "net"
         }
       ],
       "module": "vibra_v1",
@@ -1508,6 +1801,12 @@
         {
           "action": "send",
           "domain": "net"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "write",
+          "root": "stream"
         }
       ],
       "module": "vibra_v1",
@@ -1535,6 +1834,12 @@
           "domain": "net"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "read",
+          "root": "stream"
+        }
+      ],
       "module": "vibra_v1",
       "name": "net_udp_recv_from",
       "params": [
@@ -1560,6 +1865,7 @@
           "domain": "process"
         }
       ],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "process_run",
       "params": [
@@ -1575,6 +1881,12 @@
         {
           "action": "spawn",
           "domain": "process"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "spawn",
+          "root": "process"
         }
       ],
       "module": "vibra_v1",
@@ -1594,6 +1906,12 @@
           "domain": "process"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "wait",
+          "root": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_wait",
       "params": [
@@ -1611,6 +1929,12 @@
           "domain": "process"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "signal",
+          "root": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_kill",
       "params": [
@@ -1623,6 +1947,12 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [
+        {
+          "operation": "spawn",
+          "root": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_child_stdin",
       "params": [
@@ -1635,6 +1965,12 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [
+        {
+          "operation": "spawn",
+          "root": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_child_stdout",
       "params": [
@@ -1647,6 +1983,12 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [
+        {
+          "operation": "spawn",
+          "root": "process"
+        }
+      ],
       "module": "vibra_v1",
       "name": "process_child_stderr",
       "params": [
@@ -1664,6 +2006,12 @@
           "domain": "time"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "now",
+          "root": "time"
+        }
+      ],
       "module": "vibra_v1",
       "name": "clock_now_unix_millis",
       "params": [],
@@ -1676,6 +2024,12 @@
           "domain": "time"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "now",
+          "root": "time"
+        }
+      ],
       "module": "vibra_v1",
       "name": "clock_monotonic_millis",
       "params": [],
@@ -1683,6 +2037,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "clock_duration_from_millis",
       "params": [
@@ -1695,6 +2050,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "clock_duration_add",
       "params": [
@@ -1711,6 +2067,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_v1",
       "name": "clock_duration_between",
       "params": [
@@ -1732,6 +2089,12 @@
           "domain": "time"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "sleep",
+          "root": "time"
+        }
+      ],
       "module": "vibra_v1",
       "name": "clock_sleep_millis",
       "params": [
@@ -1747,6 +2110,12 @@
         {
           "action": "generate",
           "domain": "random"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "generate",
+          "root": "random"
         }
       ],
       "module": "vibra_v1",
@@ -1766,6 +2135,12 @@
           "domain": "sys"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "info",
+          "root": "sys"
+        }
+      ],
       "module": "vibra_v1",
       "name": "system_info",
       "params": [],
@@ -1776,6 +2151,12 @@
         {
           "action": "info",
           "domain": "sys"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "info",
+          "root": "sys"
         }
       ],
       "module": "vibra_v1",
@@ -1790,6 +2171,12 @@
           "domain": "sys"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "info",
+          "root": "sys"
+        }
+      ],
       "module": "vibra_v1",
       "name": "system_current_dir",
       "params": [],
@@ -1800,6 +2187,12 @@
         {
           "action": "info",
           "domain": "sys"
+        }
+      ],
+      "intrinsic-effects": [
+        {
+          "operation": "info",
+          "root": "sys"
         }
       ],
       "module": "vibra_v1",
@@ -1814,6 +2207,12 @@
           "domain": "sys"
         }
       ],
+      "intrinsic-effects": [
+        {
+          "operation": "info",
+          "root": "sys"
+        }
+      ],
       "module": "vibra_v1",
       "name": "system_temp_dir",
       "params": [],
@@ -1821,6 +2220,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_test",
       "name": "assert",
       "params": [
@@ -1833,6 +2233,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_test",
       "name": "fail",
       "params": [
@@ -1845,6 +2246,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_test",
       "name": "assert-eq-bool",
       "params": [
@@ -1861,6 +2263,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_test",
       "name": "assert-eq-int",
       "params": [
@@ -1877,6 +2280,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_test",
       "name": "assert-eq-float",
       "params": [
@@ -1893,6 +2297,7 @@
     },
     {
       "effects": [],
+      "intrinsic-effects": [],
       "module": "vibra_test",
       "name": "assert-eq-str",
       "params": [

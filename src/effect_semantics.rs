@@ -91,6 +91,12 @@ pub fn undeclared_effect_message(
 /// The effects a function's own body performs, ignoring its declaration.
 pub fn infer_function(sig: &FunctionSig, sigs: &HashMap<String, FunctionSig>) -> InferredEffects {
     let mut found = InferredEffects::default();
+    if let Some(owner) = &sig.owner_effect {
+        // A deffect operation performs its owner even when its implementation
+        // is composed entirely from pure values or other calls. The owner is
+        // not inferred transitively; it is the operation's nominal boundary.
+        found.record(owner.clone(), "deffect owner");
+    }
     match &sig.body {
         // A host-import body has no statements at all; the registry is its effect set.
         FunctionBody::Wasm { import, .. } => {
@@ -179,9 +185,19 @@ pub fn infer_expr(expr: &Expr, sigs: &HashMap<String, FunctionSig>) -> InferredE
     match expr {
         // Inline host imports inside a larger body, distinct from a wasm-only
         // function body.
-        Expr::HostCall { import, args, .. } => {
+        Expr::HostCall {
+            import,
+            args,
+            intrinsic,
+            ..
+        } => {
             let source = format!("{}.{}", import.module, import.name);
-            for (domain, action) in host_abi::effects_for(&import.module, &import.name) {
+            let effects = if *intrinsic {
+                crate::intrinsics::effects_for(&import.name)
+            } else {
+                host_abi::effects_for(&import.module, &import.name)
+            };
+            for (domain, action) in effects {
                 found.record(((*domain).to_string(), (*action).to_string()), &source);
             }
             for arg in args {

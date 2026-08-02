@@ -95,8 +95,9 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
     Ok(LoweredProgram {
         statements,
         main_arg_bindings,
-        main_effects: Default::default(),
+        main_effects: main_sig.effects.clone(),
         constants,
+        type_aliases: signatures.aliases.clone(),
         functions,
         impls,
         warnings,
@@ -183,6 +184,7 @@ fn lower_typed_test_case(
             main_arg_bindings,
             main_effects: Default::default(),
             constants: ctx.constants.clone(),
+            type_aliases: ctx.signatures.aliases.clone(),
             functions: ctx.functions.clone(),
             impls: ctx.signatures.impls.clone(),
             warnings: Vec::new(),

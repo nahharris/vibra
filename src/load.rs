@@ -295,7 +295,7 @@ fn convert_surface_program(surface: &SurfaceProgram) -> Result<HashMap<PathBuf, 
             imports.push((alias.clone(), sig.clone()));
         }
         let resolved = surface_adapter::resolve_signatures(&own_stem, own_local, &imports);
-        let value = surface_adapter::module_to_value(module, &resolved)
+        let value = surface_adapter::module_to_value_with_alias(module, &resolved, &own_stem)
             .with_context(|| format!("adapt {} to the legacy compiler shape", path.display()))?;
         modules.insert(path.clone(), value);
     }

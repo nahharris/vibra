@@ -258,6 +258,13 @@ pub(crate) fn unify_types(
     if expected == actual {
         return true;
     }
+    if let TypeRef::HostHandle(expected_access) = &expected {
+        if let Some(inner) = newtype_inner(&actual, aliases) {
+            if let TypeRef::HostHandle(actual_access) = inner {
+                return host_access_widens(*actual_access, *expected_access);
+            }
+        }
+    }
     if let TypeRef::Generic(name) = &expected {
         if let Some(bound) = bindings.get(name).cloned() {
             return unify_types(&bound, &actual, aliases, bindings);
@@ -458,12 +465,41 @@ pub(crate) fn valid_cast_path(
     target: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
-    if matches!(resolve_alias_type(target, aliases), TypeRef::HostHandle(_)) {
+    if matches!(resolve_alias_type(target, aliases), TypeRef::HostHandle(_))
+        || host_backed_newtype(source, aliases)
+        || host_backed_newtype(target, aliases)
+    {
         return false;
     }
     newtype_inner(target, aliases).is_some_and(|inner| type_compatible(inner, source, aliases))
         || newtype_inner(source, aliases)
             .is_some_and(|inner| type_compatible(target, inner, aliases))
+}
+
+pub(crate) fn host_backed_newtype(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> bool {
+    newtype_inner(ty, aliases)
+        .is_some_and(|inner| matches!(resolve_alias_type(inner, aliases), TypeRef::HostHandle(_)))
+}
+
+/// A nominal endpoint may be passed to a trusted generic stream operation only
+/// when its capability is at least as strong as the operation's requirement.
+/// The relation is intentionally directional: read-write widens to read/write,
+/// never the reverse, and unrelated process handles never widen.
+fn host_access_widens(
+    actual: crate::lower::HandleAccess,
+    expected: crate::lower::HandleAccess,
+) -> bool {
+    use crate::lower::HandleAccess;
+    match (actual, expected) {
+        (
+            HandleAccess::ReadWrite,
+            HandleAccess::Read | HandleAccess::Write | HandleAccess::ReadWrite,
+        )
+        | (HandleAccess::Read, HandleAccess::Read)
+        | (HandleAccess::Write, HandleAccess::Write)
+        | (HandleAccess::Process, HandleAccess::Process) => true,
+        _ => false,
+    }
 }
 
 pub(crate) fn resolve_alias_type<'a>(
@@ -594,5 +630,48 @@ mod tests {
             normalize_type_ref(&instantiated_ty, &aliases),
             instantiated_ty
         );
+    }
+
+    #[test]
+    fn host_backed_endpoints_widen_only_to_weaker_stream_capabilities() {
+        let mut aliases = HashMap::new();
+        let endpoint = TypeRef::Newtype {
+            name: "fs.reader".into(),
+            inner: Box::new(TypeRef::HostHandle(crate::lower::HandleAccess::Read)),
+        };
+        aliases.insert(
+            "fs.reader".into(),
+            TypeAlias {
+                alias: "fs".into(),
+                name: "reader".into(),
+                type_params: Vec::new(),
+                type_param_bounds: Vec::new(),
+                body: endpoint.clone(),
+                doc: None,
+            },
+        );
+        assert!(unify_types(
+            &TypeRef::HostHandle(crate::lower::HandleAccess::Read),
+            &endpoint,
+            &aliases,
+            &mut HashMap::new()
+        ));
+        assert!(unify_types(
+            &TypeRef::HostHandle(crate::lower::HandleAccess::Read),
+            &TypeRef::Named("fs.reader".into()),
+            &aliases,
+            &mut HashMap::new()
+        ));
+        assert!(!unify_types(
+            &TypeRef::HostHandle(crate::lower::HandleAccess::Write),
+            &endpoint,
+            &aliases,
+            &mut HashMap::new()
+        ));
+        assert!(!valid_cast_path(
+            &TypeRef::HostHandle(crate::lower::HandleAccess::Read),
+            &endpoint,
+            &aliases
+        ));
     }
 }

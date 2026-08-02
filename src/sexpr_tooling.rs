@@ -163,6 +163,12 @@ fn lint_module_names(
                 lint_annotations(path, source, &value.annotations, diagnostics);
             }
             TopLevel::Function(value) => lint_function(path, source, value, diagnostics),
+            TopLevel::Deffect(value) => {
+                lint_name(path, source, &value.name, "deffect root", diagnostics);
+                for operation in &value.operations {
+                    lint_function(path, source, &operation.function, diagnostics);
+                }
+            }
             TopLevel::Macro(value) => {
                 lint_name(path, source, &value.name, "macro", diagnostics);
                 for parameter in &value.parameters {
@@ -377,6 +383,9 @@ fn lint_expr(path: &Path, source: &str, expr: &Expr, diagnostics: &mut Vec<Diagn
             for argument in arguments {
                 lint_expr(path, source, argument.value(), diagnostics);
             }
+        }
+        ExprKind::Intrinsic { arguments, .. } => {
+            lint_exprs(path, source, arguments, diagnostics);
         }
         ExprKind::AnonymousFunction {
             parameters,

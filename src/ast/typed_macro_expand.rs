@@ -237,6 +237,7 @@ fn top_level_symbol(form: &TopLevel) -> Option<&str> {
         TopLevel::Definition(value) => Some(&value.name.value),
         TopLevel::Constant(value) => Some(&value.name.value),
         TopLevel::Function(value) => Some(&value.name.value),
+        TopLevel::Deffect(value) => Some(&value.name.value),
         TopLevel::Macro(value) => Some(&value.name.value),
         TopLevel::Test(value) => Some(&value.name.value),
         TopLevel::TestScenario(_) => None,
@@ -316,6 +317,12 @@ fn expand_top_level(
         TopLevel::Function(mut function) => {
             expand_function(&mut function, macros, state, depth)?;
             TopLevel::Function(function)
+        }
+        TopLevel::Deffect(mut deffect) => {
+            for operation in &mut deffect.operations {
+                expand_function(&mut operation.function, macros, state, depth)?;
+            }
+            TopLevel::Deffect(deffect)
         }
         TopLevel::Test(mut test) => {
             test.body = expand_exprs(test.body, macros, state, depth)?;
@@ -2421,6 +2428,11 @@ fn annotate_generated_expr(
             for binding in bindings {
                 annotate_generated_name(&mut binding.name, definition, call, state)?;
                 annotate_generated_expr(&mut binding.value, definition, call, state)?;
+            }
+        }
+        ExprKind::Intrinsic { arguments, .. } => {
+            for argument in arguments {
+                annotate_generated_expr(argument, definition, call, state)?;
             }
         }
         ExprKind::Wasm { import, arguments } => {

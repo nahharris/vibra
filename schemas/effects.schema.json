@@ -1,71 +1,114 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vibra.dev/schemas/effects-v2.schema.json",
-  "title": "Vibra static effect surface",
-  "description": "The effect surface of a program, derived from declared effect rows rather than from a call-graph walk. Declarations are checked against inference during lowering, so `effects` is exact rather than an approximation. Breaking change from effects.schema.json, whose single `effects` array is now `host-imports`.",
+  "$id": "https://vibra.dev/schemas/effects-v3.schema.json",
+  "title": "Vibra nominal effect surface",
+  "description": "Static nominal effect report. The v2 compatibility fields remain alongside the v3 surface split while consumers migrate.",
   "type": "object",
-  "required": ["effects", "functions", "host-imports"],
+  "required": ["effects", "functions", "host-imports", "surface", "operations", "primitives"],
   "properties": {
     "effects": {
-      "description": "Every effect reachable from the entry point: what this program can do.",
+      "description": "Compatibility alias for surface.declared.",
       "type": "array",
       "items": { "$ref": "#/$defs/effect" }
     },
+    "surface": {
+      "type": "object",
+      "required": ["declared", "performed"],
+      "properties": {
+        "declared": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "performed": { "type": "array", "items": { "$ref": "#/$defs/effect" } }
+      },
+      "additionalProperties": false
+    },
     "functions": {
-      "description": "Per-function declared rows, for auditing which part of the program is responsible for each effect. Functions declaring no effects are omitted.",
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["source", "effects"],
-        "properties": {
-          "source": { "type": "string" },
-          "effects": {
-            "type": "array",
-            "items": { "$ref": "#/$defs/effect" }
-          }
-        },
-        "additionalProperties": false
-      }
+      "items": { "$ref": "#/$defs/function" }
+    },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operation" }
+    },
+    "primitives": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/primitive" }
     },
     "host-imports": {
-      "description": "The reachable host-import surface beneath the declared rows.",
+      "description": "Compatibility/detail view of primitive host transitions.",
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["source", "module", "name", "params", "return", "effects"],
-        "properties": {
-          "source": { "type": "string" },
-          "module": { "enum": ["vibra_v1", "vibra_test"] },
-          "name": { "type": "string" },
-          "params": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["type"],
-              "properties": { "type": { "type": "string" } },
-              "additionalProperties": false
-            }
-          },
-          "return": { "type": "string" },
-          "effects": {
-            "description": "The effects the ABI registry declares for this import.",
-            "type": "array",
-            "items": { "$ref": "#/$defs/effect" }
-          }
-        },
-        "additionalProperties": false
-      }
+      "items": { "$ref": "#/$defs/host-import" }
     }
   },
   "additionalProperties": false,
   "$defs": {
     "effect": {
-      "description": "An effect label, identified structurally by its domain and action rather than by any name bound to it.",
       "type": "object",
       "required": ["domain", "action"],
       "properties": {
         "domain": { "type": "string" },
         "action": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "function": {
+      "type": "object",
+      "required": ["source", "effects", "declared", "performed", "call-edges", "primitive-witnesses"],
+      "properties": {
+        "source": { "type": "string" },
+        "effects": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "declared": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "performed": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "call-edges": { "type": "array", "items": { "type": "string" } },
+        "primitive-witnesses": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "type": "object",
+      "required": ["source", "owner", "additive", "declared", "performed", "call-edges", "primitive-witnesses"],
+      "properties": {
+        "source": { "type": "string" },
+        "owner": { "$ref": "#/$defs/effect" },
+        "additive": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "declared": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "performed": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "call-edges": { "type": "array", "items": { "type": "string" } },
+        "primitive-witnesses": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "primitive": {
+      "type": "object",
+      "required": ["source", "module", "name", "intrinsic", "input-capabilities", "result-capability", "required-roots"],
+      "properties": {
+        "source": { "type": "string" },
+        "module": { "type": "string" },
+        "name": { "type": "string" },
+        "intrinsic": { "type": "boolean" },
+        "input-capabilities": { "type": "array", "items": { "type": "string" } },
+        "result-capability": { "type": "string" },
+        "required-roots": { "type": "array", "items": { "$ref": "#/$defs/effect" } }
+      },
+      "additionalProperties": false
+    },
+    "host-import": {
+      "type": "object",
+      "required": ["source", "module", "name", "params", "return", "effects", "intrinsic"],
+      "properties": {
+        "source": { "type": "string" },
+        "module": { "type": "string" },
+        "name": { "type": "string" },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": { "type": { "type": "string" } },
+            "additionalProperties": false
+          }
+        },
+        "return": { "type": "string" },
+        "effects": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "intrinsic": { "type": "boolean" }
       },
       "additionalProperties": false
     }

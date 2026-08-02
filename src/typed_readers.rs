@@ -365,7 +365,7 @@ fn collect_module_docs(
                         docs,
                     );
                 }
-                TopLevel::Test(_) | TopLevel::TestScenario(_) => {}
+                TopLevel::Deffect(_) | TopLevel::Test(_) | TopLevel::TestScenario(_) => {}
             }
         }
     }

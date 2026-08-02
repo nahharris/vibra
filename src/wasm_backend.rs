@@ -114,6 +114,7 @@ struct WasmPlan {
     calls: Vec<Call>,
     patterns: Vec<Pattern>,
     main_arg_bindings: Vec<(String, TypeRef)>,
+    type_aliases: BTreeMap<String, crate::lower::TypeAlias>,
     host_functions: BTreeMap<String, crate::lower::FunctionSig>,
     impl_keys: Vec<crate::lower::ImplKey>,
     foreign_modules: BTreeMap<String, Vec<u8>>,
@@ -301,6 +302,7 @@ impl HostExecution {
             main_effects: Default::default(),
             main_arg_bindings: plan.main_arg_bindings.clone(),
             constants: HashMap::new(),
+            type_aliases: plan.type_aliases.clone().into_iter().collect(),
             functions,
             impls,
             warnings: vec![],
@@ -423,12 +425,14 @@ impl HostExecution {
             Expr::HostCall {
                 import,
                 return_type,
+                intrinsic,
                 ..
             } => crate::execute::eval_expr(
                 &Expr::HostCall {
                     import,
                     args: values.into_iter().map(Expr::Value).collect(),
                     return_type,
+                    intrinsic,
                 },
                 &HashMap::new(),
                 &self.program,
@@ -1022,6 +1026,11 @@ impl<'a> Compiler<'a> {
             program,
             plan: WasmPlan {
                 main_arg_bindings: program.main_arg_bindings.clone(),
+                type_aliases: program
+                    .type_aliases
+                    .iter()
+                    .map(|(name, alias)| (name.clone(), alias.clone()))
+                    .collect(),
                 host_functions,
                 impl_keys,
                 foreign_modules: program.foreign_modules.clone(),
@@ -1863,6 +1872,7 @@ mod tests {
             main_arg_bindings: vec![],
             main_effects: Default::default(),
             constants: HashMap::new(),
+            type_aliases: HashMap::new(),
             functions: HashMap::new(),
             impls: HashMap::new(),
             warnings: vec![],
