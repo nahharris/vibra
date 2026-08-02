@@ -348,3 +348,55 @@ corrected:
   that the corpus does not use.
 - Neither document records that `CapabilityGrant` machinery survives in the
   async runtime.
+
+## References
+
+All sources below are paraphrased throughout this document and in
+[`notes/`](notes/); no verbatim passage exceeds ten words. Findings are
+attributed to their authors at the point of use.
+
+### Language design and code generation
+
+1. Al Mazrouei. *Anka: A Domain-Specific Language for Reliable LLM Code
+   Generation.* University of Wisconsin–Madison, arXiv preprint, 2025.
+2. Hind, Shbita, Wu, Ahmed, DeLuca, Fulton, Cox, Gutfreund. *LLMON: An
+   LLM-native Markup Language to Leverage Structure and Semantics at the LLM
+   Interface.* IBM Research, arXiv preprint, 2026.
+3. Mohammadi. *Pel: A Programming Language for Orchestrating AI Agents.*
+   Carnegie Mellon University, preprint, June 2025.
+4. Trooskens, Karlsberg, Sharma, De Brouwer, Van Puyvelde, Young, Thickstun,
+   Alterovitz, De Brouwer. *Compiled AI: Deterministic Code Generation for
+   LLM-Based Workflow Automation.* XY.AI / Stanford / Cornell / Harvard, arXiv
+   preprint, 2026.
+5. Mündler, He, Wang, Sen, Song, Vechev. *Type-Constrained Code Generation with
+   Language Models.* ETH Zurich / UC Berkeley, PLDI 2025.
+
+### Verification, retrieval, and repair
+
+6. Erfan, Chowdhury, Ryan, Rahman. *From Natural Language to Verified Code:
+   Toward AI-Assisted Problem-to-Code Generation with Dafny-Based Formal
+   Verification.* arXiv preprint, April 2026.
+7. Chen, Imani, Ahmed. *ProjAgent: Procedural Similarity Retrieval for
+   Repository-Level Code Generation.* UC Irvine, arXiv preprint, July 2026.
+8. Venuta, Tosoni, Ferragina. *Recall Before Rerank: Benchmarking Deep Learning
+   Models for Large-Scale Code-to-Code Retrieval.* Sant'Anna Pisa, arXiv
+   preprint, June 2026.
+9. Sriram, Pradhan, Saha. *Tool-Guided Retrieval-Augmented Repair for Securing
+   LLM-Generated C Code.* Penn State, work-in-progress preprint, July 2026.
+10. Jia, Liu, He, Deng, Bao, Rompf. *Typestate via Revocable Capabilities.*
+    Purdue University / Augusta University, arXiv:2510.08889, October 2025.
+
+### Secure compilation and runtimes
+
+11. Thibault, Blanco, Lee, et al. *SECOMP: Formally Secure Compilation of
+    Compartmentalized C Programs.* ACM CCS 2024.
+12. Kruse, Backes, Patrignani. *Secure Composition of Robust and Optimising
+    Compilers.* arXiv preprint, 2024.
+13. Chen, Chugh, Swamy. *Type-Preserving Compilation for End-to-End
+    Verification of Security Enforcement.* PLDI 2010.
+14. Monniaux. *Memory Simulations, Security and Optimization in a Verified
+    Compiler.* arXiv preprint, 2023.
+15. Zhang, Gülmez, Nyman, Tan. *SandCell: Sandboxing Rust Beyond Unsafe Code.*
+    arXiv preprint, 2026.
+16. Montenegro, Peña, Segura. *A Type System for Safe Memory Management and Its
+    Proof of Correctness.* PPDP 2008.
