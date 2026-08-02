@@ -111,6 +111,17 @@ than current contracts:
 - [Type-system and ADT foundation plan](plans/2026-05-05-type-system-adt-foundation.md)
 - [Vib source extension and call argument order](plans/2026-08-02-vib-extension-and-call-order.md)
 
+### Research
+
+Literature distillations and background surveys live in
+[`research/`](research/). They inform design work but are not contracts:
+
+- [Current-state assessment](research/00-current-state.md)
+- [Design directions from the literature](research/01-design-directions.md)
+- [Code-generation DSL design](research/notes/code-dsl-design.md)
+- [Verification, retrieval, and repair](research/notes/verification-retrieval-repair.md)
+- [Secure compilation and sandboxed runtimes](research/notes/secure-compilation-runtime.md)
+
 ## Update protocol
 
 When a change affects the language, standard library, compiler CLI, runtime,
