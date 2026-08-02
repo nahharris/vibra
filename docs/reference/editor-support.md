@@ -2,7 +2,7 @@
 
 `vibra lsp` is a standard input/output language server. It provides diagnostics,
 completion, hover documentation, definitions, references, and whole-document
-formatting. Start the editor from a directory containing `project.vibra`, or
+formatting. Start the editor from a directory containing `project.vib`, or
 open that directory as the workspace root.
 
 ## Visual Studio Code
@@ -40,7 +40,7 @@ in `init.lua` (adjust `root_markers` if your workspace uses another marker):
 vim.lsp.config.vibra = {
   cmd = { "vibra", "lsp" },
   filetypes = { "vibra" },
-  root_markers = { "project.vibra", ".git" },
+  root_markers = { "project.vib", ".git" },
 }
 vim.lsp.enable("vibra")
 

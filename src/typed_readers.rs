@@ -488,7 +488,7 @@ fn resolve_import(
 ) -> Result<PathBuf> {
     let path = if import.starts_with('@') {
         project_context::resolve_project_import(
-            project.context("@ import requires a project.vibra")?,
+            project.context("@ import requires a project.vib")?,
             import,
         )?
     } else {

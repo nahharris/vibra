@@ -52,7 +52,7 @@ fn compilation_flags_flow_from_initialization_and_configuration_changes() {
     let main_path = workspace.path().join("main.vib");
     let main = "(defn main () void (do (enabled)))\n";
     std::fs::write(
-        workspace.path().join("project.vibra"),
+        workspace.path().join("project.vib"),
         "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \".\" entry: \"main.vib\"))\n",
     )
     .unwrap();
@@ -244,7 +244,7 @@ fn navigation_uses_unsaved_s_expression_buffers() {
     let live_main = "(import helper \"helper.vib\")\n(defn main () void (do (helper.live)))\n";
     let disk_helper = "(defn old () void (do unit))\n";
     let live_helper = "(defn live () void (do unit))\n";
-    std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
+    std::fs::write(workspace.path().join("project.vib"), manifest).unwrap();
     std::fs::write(&main_path, disk_main).unwrap();
     std::fs::write(&helper_path, disk_helper).unwrap();
     let main_uri = path_uri(&main_path);
@@ -276,7 +276,7 @@ fn atom_literals_hover_complete_and_list_references_but_have_no_definition() {
     let main_path = workspace.path().join("main.vib");
     let manifest = "(project (package \"atoms\" \"0.1.0\") (target app kind: @bin root: \".\" entry: \"main.vib\"))\n";
     let main = "(defn classify (value atom) bool (do (match value @ok (do (return true)) _ (do (return false)))))\n(defn main () void (do (classify @ok)))\n";
-    std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
+    std::fs::write(workspace.path().join("project.vib"), manifest).unwrap();
     std::fs::write(&main_path, main).unwrap();
     let main_uri = path_uri(&main_path);
     let arm = main.lines().next().unwrap().find("@ok").unwrap();
@@ -332,7 +332,7 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     let main = "(import helper \"helper.vib\")\n(defn main () void (do (helper.run)))\n";
     let valid = "(defn run () void (do (let value 1)))\n";
     let broken = "(defn run () void (do (missing) (let value 1)))\n";
-    std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
+    std::fs::write(workspace.path().join("project.vib"), manifest).unwrap();
     std::fs::write(workspace.path().join("main.vib"), main).unwrap();
     std::fs::write(workspace.path().join("helper.vib"), valid).unwrap();
     let uri = |path: &std::path::Path| {
@@ -449,8 +449,8 @@ fn semantic_navigation_resolves_project_at_imports() {
     let library="greet:\n  $function: $void\n  =doc: Dependency greeting\n  return: $void\n  do:\n    - $let:\n        value: 1\n";
     let main_path = workspace.path().join("main.vib");
     let library_path = dependency.join("src/greet.vib");
-    std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
-    std::fs::write(dependency.join("project.vibra"), dependency_manifest).unwrap();
+    std::fs::write(workspace.path().join("project.vib"), manifest).unwrap();
+    std::fs::write(dependency.join("project.vib"), dependency_manifest).unwrap();
     std::fs::write(&main_path, main).unwrap();
     std::fs::write(&library_path, library).unwrap();
     let root_uri = path_uri(workspace.path());

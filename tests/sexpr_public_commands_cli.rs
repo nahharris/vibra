@@ -14,7 +14,7 @@ fn public_commands_accept_a_typed_sexpression_project() {
     std::fs::create_dir_all(root.path().join("src/app")).unwrap();
     std::fs::create_dir_all(root.path().join("tests")).unwrap();
     std::fs::write(
-        root.path().join("project.vibra"),
+        root.path().join("project.vib"),
         "(project\n  (package \"typed-cli\" \"0.1.0\")\n  (target app kind: @bin root: \"src/app\" entry: \"main.vib\"))\n",
     )
     .unwrap();

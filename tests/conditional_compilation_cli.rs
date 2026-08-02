@@ -12,7 +12,7 @@ fn path(path: &Path) -> String {
 fn write_project(root: &Path) -> PathBuf {
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(
-        root.join("project.vibra"),
+        root.join("project.vib"),
         "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \"src\" entry: \"main.vib\"))\n",
     )
     .unwrap();
@@ -70,7 +70,7 @@ fn check_and_effects_compile_only_the_selected_parts() {
     std::fs::create_dir(root.path().join("src")).unwrap();
     let entry = root.path().join("src/main.vib");
     std::fs::write(
-        root.path().join("project.vibra"),
+        root.path().join("project.vib"),
         "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \"src\" entry: \"main.vib\"))\n",
     )
     .unwrap();

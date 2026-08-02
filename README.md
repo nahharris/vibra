@@ -119,8 +119,9 @@ so embedders must still sandbox untrusted Vibra source themselves.
 
 ## Projects
 
-`project.vibra` is an S-expression manifest and source files use the `.vib`
-extension. Lockfiles and compiler-owned package metadata are canonical JSON.
+`project.vib` is a Vibra source file whose `(project ...)` root describes the
+project; all source files use the `.vib` extension. Lockfiles and
+compiler-owned package metadata are canonical JSON.
 
 ```vibra
 (project

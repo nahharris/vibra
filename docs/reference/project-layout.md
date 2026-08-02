@@ -1,7 +1,8 @@
 # Vibra project layout
 
-`project.vibra` is the canonical project manifest. It uses a dedicated typed
-S-expression grammar and is metadata, not a source module.
+`project.vib` is the canonical project source file. It uses the same Vibra
+S-expression syntax as modules, with a `(project ...)` root interpreted by
+project commands; the filename does not use a separate manifest extension.
 
 ```vibra
 (project
@@ -28,7 +29,7 @@ Target names and dependency names share one namespace. A name can be used once.
 
 ```text
 hello/
-  project.vibra
+  project.vib
   dep/
     std/
   src/
@@ -77,7 +78,7 @@ Imports beginning with `@` resolve through project namespaces:
 (import core "@core/lib.vib")
 ```
 
-`@name/path` resolves `name` as either a target name or dependency name. Target imports resolve under the target `root`. Dependencies with a `project.vibra` resolve under their matching (or only) library target root; unmanifested path dependencies retain root-relative behavior. Git dependencies live under `dep/<name>` after `vibra sync`.
+`@name/path` resolves `name` as either a target name or dependency name. Target imports resolve under the target `root`. Dependencies with a `project.vib` resolve under their matching (or only) library target root; unmanifested path dependencies retain root-relative behavior. Git dependencies live under `dep/<name>` after `vibra sync`.
 
 ## Dependencies
 

@@ -4855,7 +4855,7 @@ fn vibra_test_runs_top_level_test_declarations_without_main() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
   (target app kind: @bin root: "tests" entry: "basic.vib")
@@ -4894,7 +4894,7 @@ fn vibra_test_reports_assertion_failures() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
   (target app kind: @bin root: "tests" entry: "fails.vib")
@@ -4935,7 +4935,7 @@ fn vibra_test_typed_equality_helpers_report_expected_and_actual_values() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
   (target app kind: @bin root: "tests" entry: "fails.vib")
@@ -4976,7 +4976,7 @@ fn vibra_test_writes_json_report_file() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
   (target app kind: @bin root: "tests" entry: "basic.vib")
@@ -5037,7 +5037,7 @@ fn module_part_test_file_shares_base_module_definitions() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
   (target app kind: @bin root: "tests" entry: "math.vib")
@@ -5063,7 +5063,7 @@ fn module_part_test_file_shares_base_module_definitions() {
 fn copy_stdlib(dest: &Path) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
     std::fs::create_dir_all(dest.join("src")).unwrap();
-    std::fs::copy(root.join("project.vibra"), dest.join("project.vibra")).unwrap();
+    std::fs::copy(root.join("project.vib"), dest.join("project.vib")).unwrap();
     for entry in std::fs::read_dir(root.join("src")).unwrap() {
         let entry = entry.unwrap();
         std::fs::copy(entry.path(), dest.join("src").join(entry.file_name())).unwrap();

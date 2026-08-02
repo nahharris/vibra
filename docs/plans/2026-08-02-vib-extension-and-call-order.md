@@ -4,7 +4,7 @@
 
 **Goal:** Make `.vib` the only Vibra source-module extension and canonicalize calls so labelled arguments precede variadic positional arguments while keeping parsing tolerant.
 
-**Architecture:** Keep `project.vibra` as the project manifest because it is metadata, not a source module. Update the typed frontend, test discovery, tooling discovery, generated fixtures, source imports, and tracked source filenames to use `.vib`. Use the existing AST call representation to identify fixed positional, labelled, and variadic arguments for formatter normalization, while the AST parser continues preserving source order; add a style diagnostic for noncanonical call order.
+**Architecture:** Use `project.vib` for the project source file as well as all other Vibra source files; its `(project ...)` root is interpreted by project commands and there is no separate manifest extension. Update the typed frontend, test discovery, tooling discovery, generated fixtures, source imports, and tracked source filenames to use `.vib`. Use the existing AST call representation to identify fixed positional, labelled, and variadic arguments for formatter normalization, while the AST parser continues preserving source order; add a style diagnostic for noncanonical call order.
 
 **Tech Stack:** Rust compiler and tooling, native S-expression parser/printer, Vibra source modules, Rust unit/integration tests, Vibra-language tests, JSON linter-code registry.
 
@@ -80,12 +80,13 @@ Expected: FAIL because the current discovery accepts `.vibra`, the formatter pre
 
 **Files:**
 - Modify: `src/frontend.rs`, `src/load.rs`, `src/test_runner.rs`, `src/tooling.rs`, `src/mcp.rs`, and all Rust fixture strings that refer to source modules.
-- Rename: every tracked source/test/example file ending in `.vibra` to `.vib`; leave `project.vibra` manifests and `project.lock.vibra` legacy lock names unchanged.
+- Rename: every tracked source/test/example file ending in `.vibra`, including
+  project files, to `.vib`; leave `project.lock.vibra` as the legacy lock name.
 - Modify: source imports and manifest `entry:` values in `examples/`, `tests/`, and the `stdlib` submodule.
 
 - [x] **Step 1: Update the extension constants and path checks**
 
-Use `.vib` in `frontend::module_self_alias`, `frontend::module_part_paths`, `frontend::canonical_module_path`, `test_runner::is_vibra_file`, `test_runner::is_conditional_module_part`, `tooling::is_vibra_file`, and the MCP source-extension filter. Update the inline synthetic entry in `load.rs` to `__vibra_exec__.vib` and keep `project.vibra` handling separate.
+Use `.vib` in `frontend::module_self_alias`, `frontend::module_part_paths`, `frontend::canonical_module_path`, `test_runner::is_vibra_file`, `test_runner::is_conditional_module_part`, `tooling::is_vibra_file`, and the MCP source-extension filter. Update the inline synthetic entry in `load.rs` to `__vibra_exec__.vib`; project commands consume the `(project ...)` root from `project.vib`.
 
 - [x] **Step 2: Rename source files and update all source/import/entry references**
 
@@ -138,7 +139,9 @@ Expected: parser tolerance remains green, the formatter produces canonical order
 
 - [x] **Step 1: Replace current source-extension examples with `.vib`**
 
-Keep `project.vibra` explicitly documented as the manifest filename and use `.vib` for source modules, conditional parts, imports, editor associations, and package entry patterns.
+Document `project.vib` as the project source file and use `.vib` for source
+modules, conditional parts, imports, editor associations, and package entry
+patterns.
 
 - [x] **Step 2: Document the non-error call-order rule**
 
@@ -167,7 +170,7 @@ Expected: both exit successfully with zero failures; record any pre-existing fai
 
 - [x] **Step 3: Verify no runnable `.vibra` source remains**
 
-Run: `rg -n --hidden --glob '!target/**' --glob '!.git/**' '\.vibra' src tests examples stdlib schemas README.md docs/reference docs/decisions skills` and inspect each remaining match. Remaining matches must be manifest names, legacy lock names, or explicitly historical/archive text—not source module paths accepted by the loader.
+Run: `rg -n --hidden --glob '!target/**' --glob '!.git/**' '\.vibra' src tests examples stdlib schemas README.md docs/reference docs/decisions skills` and inspect each remaining match. Remaining matches must be the explicit legacy-extension regression, legacy lock names, or historical/archive text—not source or project paths accepted by the loader.
 
 - [x] **Step 4: Review the final diff and integrate the changes**
 

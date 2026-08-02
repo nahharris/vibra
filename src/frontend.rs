@@ -1202,7 +1202,7 @@ fn resolved_module_imports(
         let resolved = if import.path.value.starts_with('@') {
             let project = project.with_context(|| {
                 format!(
-                    "{}: @ import `{}` requires project.vibra",
+                    "{}: @ import `{}` requires project.vib",
                     module.path.display(),
                     import.path.value
                 )

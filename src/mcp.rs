@@ -546,7 +546,7 @@ impl Server {
             let path = if import.path.value.starts_with('@') {
                 let project = project.as_ref().ok_or_else(|| {
                     operation_error(anyhow::anyhow!(
-                        "{}: @ import `{}` requires project.vibra",
+                        "{}: @ import `{}` requires project.vib",
                         module.path.display(),
                         import.path.value
                     ))

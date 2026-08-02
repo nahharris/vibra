@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-pub const MANIFEST_FILE: &str = "project.vibra";
+pub const MANIFEST_FILE: &str = "project.vib";
 pub const LOCK_FILE: &str = "vibra.lock.json";
 pub const LEGACY_LOCK_FILE: &str = "project.lock.vibra";
 pub const STDLIB_GIT: &str = "https://github.com/nahharris/vibra-stdlib.git";
@@ -215,7 +215,7 @@ pub fn load_project(path: &Path) -> Result<LoadedProject> {
 
 fn parse_manifest(source: &str) -> Result<ProjectManifest> {
     if source.trim_start().starts_with("manifest-version:") {
-        bail!("E-PROJECT-001: legacy YAML project manifests are unsupported; rewrite `project.vibra` as `(project ...)`");
+        bail!("E-PROJECT-001: legacy YAML project manifests are unsupported; rewrite `project.vib` as `(project ...)`");
     }
     let document =
         crate::syntax::parse(source).map_err(|error| anyhow::anyhow!("E-PROJECT-001: {error}"))?;
@@ -511,6 +511,9 @@ fn resolve_manifest_path(path: &Path) -> Result<PathBuf> {
     } else {
         path.to_path_buf()
     };
+    if candidate.file_name().and_then(|name| name.to_str()) != Some(MANIFEST_FILE) {
+        bail!("project manifest must be named `{MANIFEST_FILE}`");
+    }
     if !candidate.exists() {
         bail!("project manifest `{}` does not exist", candidate.display());
     }
@@ -1558,6 +1561,22 @@ fn resolve_project_path(root: &Path, path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_manifest_uses_vib_filename_without_legacy_bridge() {
+        assert_eq!(MANIFEST_FILE, "project.vib");
+        let temp = tempfile::tempdir().unwrap();
+        let source = "(project (package \"sample\" \"0.1.0\"))\n";
+        fs::write(temp.path().join("project.vib"), source).unwrap();
+
+        let loaded = load_project(temp.path()).unwrap();
+        assert_eq!(loaded.manifest_path.file_name().unwrap(), "project.vib");
+
+        let legacy = temp.path().join("project.vibra");
+        fs::write(&legacy, source).unwrap();
+        let error = load_project(&legacy).err().unwrap().to_string();
+        assert!(error.contains("project.vib"), "{error}");
+    }
 
     #[test]
     fn project_sources_reject_the_legacy_yaml_extension() {

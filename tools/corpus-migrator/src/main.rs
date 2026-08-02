@@ -37,7 +37,7 @@ struct Report {
     /// staged: this bucket only covers the syntactic rewrite, not
     /// compileability.
     conversion_failures: BTreeMap<String, usize>,
-    /// `project.vibra` package manifests use their own top-level grammar
+    /// `project.vib` package manifests use their own top-level grammar
     /// (`(project ...)`, parsed by `project_context.rs`), not the module
     /// grammar `ast::lower_document` expects. They are excluded from the
     /// module-lowering tiers below rather than counted as surface failures:
@@ -372,11 +372,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// `project.vibra` is the fixed manifest file name recognized by
+/// `project.vib` is the fixed manifest file name recognized by
 /// `project_context::PROJECT_MANIFEST`. It is a package descriptor, not a
 /// language module, and uses a different top-level grammar.
 fn is_project_manifest(path: &Path) -> bool {
-    path.file_name().and_then(|name| name.to_str()) == Some("project.vibra")
+    path.file_name().and_then(|name| name.to_str()) == Some("project.vib")
 }
 
 /// Parse and lower a single S-expression source into a typed surface AST
@@ -396,7 +396,7 @@ fn surface_module(source: &str, path: &Path) -> Result<Module> {
 /// `stdlib/src/fs.vib` imports `./error.vib` twice, as `error` and
 /// `error-lib`), so edges are deduplicated on `(alias, path)`, not on `path`
 /// alone. `@`-prefixed project imports are skipped: this standalone tool has
-/// no `project.vibra` resolution, matching the same limitation the migrator
+/// no `project.vib` resolution, matching the same limitation the migrator
 /// already accepts for named-call signature discovery.
 fn build_typed_graph(
     entry: &Path,

@@ -121,7 +121,7 @@ pub fn run_fmt(options: FmtOptions) -> Result<bool> {
 /// delegates to `sexpr_tooling::staged_format_sexpr`, the reader-typed,
 /// serde-free canonical printer, rather than the legacy YAML-subset path.
 pub fn format_source(path: &Path, source: &str) -> Result<String> {
-    if path.file_name().and_then(|name| name.to_str()) == Some("project.vibra") {
+    if path.file_name().and_then(|name| name.to_str()) == Some(crate::project::MANIFEST_FILE) {
         let document = crate::syntax::parse(source)?;
         return Ok(crate::syntax::print(&document));
     }
@@ -152,7 +152,7 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
     for path in &files {
         let source =
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        if path.file_name().and_then(|name| name.to_str()) == Some("project.vibra") {
+        if path.file_name().and_then(|name| name.to_str()) == Some(crate::project::MANIFEST_FILE) {
             continue;
         }
         let suppressions = Suppressions::parse(&source);

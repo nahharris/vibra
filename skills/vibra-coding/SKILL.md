@@ -10,7 +10,7 @@ language.
 
 ## Workflow
 
-1. Read `project.vibra` and identify the target root before editing.
+1. Read `project.vib` and identify the target root before editing.
 2. Read [references/language-conventions.md](references/language-conventions.md)
    for source, module, test, and documentation conventions.
 3. Prefer existing standard-library modules and nearby source patterns.
@@ -27,7 +27,8 @@ language.
 
 ## Guardrails
 
-- Treat `project.vibra` as metadata, not a source module.
+- Treat `project.vib` as Vibra source with a `(project ...)` root; project
+  commands interpret that root as the project description.
 - Use structural `=comment`, `=doc`, and `=lint` annotations. Never add YAML
   `#` comments.
 - Do not edit `dep/`; it is vendored, read-only dependency source.

@@ -51,7 +51,7 @@ enum Command {
     },
     /// Clone/fetch pinned git dependencies into dep/.
     Sync {
-        /// Project directory or project.vibra path.
+        /// Project directory or project.vib path.
         path: Option<PathBuf>,
         /// Output format.
         #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
@@ -59,7 +59,7 @@ enum Command {
     },
     /// Build a deterministic executable `.vapp` archive.
     Build {
-        /// Project directory or project.vibra path.
+        /// Project directory or project.vib path.
         path: Option<PathBuf>,
         /// Bin target name (required when the project has multiple bins).
         #[arg(long = "bin")]
@@ -81,7 +81,7 @@ enum Command {
     },
     /// Validate a Vibra project manifest, dependencies, targets, and imports.
     Check {
-        /// Project directory or project.vibra path.
+        /// Project directory or project.vib path.
         path: Option<PathBuf>,
         /// Output format.
         #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
@@ -106,7 +106,7 @@ enum Command {
     },
     /// Show `=doc` documentation for modules and symbols.
     Docs {
-        /// Entry module, project directory, or project.vibra. Defaults to the current project.
+        /// Entry module, project directory, or project.vib. Defaults to the current project.
         path: Option<PathBuf>,
         /// Qualified symbol such as `main` or `io.stdout.println`. Omit to browse documented symbols.
         symbol: Option<String>,

@@ -245,7 +245,7 @@ fn inline_import_roots(entry: &Path, root: &Value) -> Result<Vec<PathBuf>> {
         let resolved = if import.starts_with('@') {
             let project = project.as_ref().with_context(|| {
                 format!(
-                    "{}: @ import `{import}` requires a project.vibra",
+                    "{}: @ import `{import}` requires a project.vib",
                     entry.display()
                 )
             })?;

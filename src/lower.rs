@@ -1938,7 +1938,7 @@ fn resolve_import_path(
     let raw = if import.starts_with('@') {
         let project = entry_project.with_context(|| {
             format!(
-                "{}: @ import `{import}` requires a project.vibra",
+                "{}: @ import `{import}` requires a project.vib",
                 module_path.display()
             )
         })?;

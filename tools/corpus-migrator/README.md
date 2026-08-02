@@ -23,7 +23,7 @@ number:
    compiles it.
 
 Each deeper tier only runs on the files that passed the tier above it, so the
-three counts form a funnel, not three independent samples. `project.vibra`
+three counts form a funnel, not three independent samples. `project.vib`
 package manifests are excluded from all three tiers: they use their own
 top-level grammar (`(project ...)`, read by `project_context.rs`), not the
 module grammar `ast::lower_document` expects, so running them through it would

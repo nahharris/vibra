@@ -84,7 +84,7 @@ fn docs_reads_package_docs_and_requires_a_target_when_ambiguous() {
     std::fs::create_dir_all(dir.path().join("src/one")).unwrap();
     std::fs::create_dir_all(dir.path().join("src/two")).unwrap();
     std::fs::write(
-        dir.path().join("project.vibra"),
+        dir.path().join("project.vib"),
         r#"(project
   (package "docs-sample" "0.1.0" doc: "Package-level documentation.")
   (target one kind: @lib root: "src/one" entry: "lib.vib")
@@ -150,7 +150,7 @@ fn project_init_bin_template_creates_valid_project() {
     assert_eq!(init_report["path"], "hello");
 
     let project = dir.path().join("hello");
-    let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
+    let manifest = std::fs::read_to_string(project.join("project.vib")).unwrap();
     let main = std::fs::read_to_string(project.join("src/hello/main.vib")).unwrap();
     assert!(manifest.starts_with("(project"));
     assert!(main.contains("@std/io.vib"));
@@ -359,7 +359,7 @@ fn project_check_rejects_invalid_manifest_shapes() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "bad" "0.1.0")
   (target dup kind: @lib root: "src/a" entry: "main.vib")
@@ -391,7 +391,7 @@ fn project_check_rejects_abbreviated_git_revisions() {
     std::fs::create_dir_all(project.join("src/app")).unwrap();
     std::fs::write(project.join("src/app/main.vib"), "main: 1\n").unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "short-rev" "0.1.0")
   (target app kind: @bin root: "src/app" entry: "main.vib")
@@ -432,7 +432,7 @@ fn project_check_resolves_local_dependency_without_copying_it() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         format!(
             r#"(project
   (package "app" "0.1.0")
@@ -477,7 +477,7 @@ fn project_check_resolves_dependency_library_source_root() {
     std::fs::create_dir_all(dep.join("src")).unwrap();
     std::fs::write(dep.join("src/util.vib"), "(const answer int64 42)\n").unwrap();
     std::fs::write(
-        dep.join("project.vibra"),
+        dep.join("project.vib"),
         r#"(project
   (package "packaged-utils" "0.1.0")
   (target packaged-utils kind: @lib root: "src" entry: "util.vib"))
@@ -493,7 +493,7 @@ fn project_check_resolves_dependency_library_source_root() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         format!(
             r#"(project
   (package "app" "0.1.0")
@@ -568,7 +568,7 @@ fn project_sync_clones_git_dependency_at_pinned_rev_from_relative_project_path()
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         format!(
             r#"(project
   (package "app" "0.1.0")
@@ -664,7 +664,7 @@ fn project_sync_vendors_nested_diamond_dependencies_package_locally() {
     std::fs::create_dir_all(project.join("src/app")).unwrap();
     std::fs::write(project.join("src/app/main.vib"), "(const main int64 1)\n").unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         format!(
             r#"(project
   (package "diamond-app" "0.1.0")
@@ -712,7 +712,7 @@ fn create_git_package(path: &Path, name: &str, dependencies: &str) -> String {
     std::fs::create_dir_all(path.join("src")).unwrap();
     std::fs::write(path.join("src/lib.vib"), "(const answer int64 42)\n").unwrap();
     std::fs::write(
-        path.join("project.vibra"),
+        path.join("project.vib"),
         format!(
             "(project\n  (package {name:?} \"0.1.0\")\n  (target {name} kind: @lib root: \"src\" entry: \"lib.vib\")\n{dependencies})\n"
         ),
@@ -806,7 +806,7 @@ fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
     std::fs::create_dir_all(project.join("foreign")).unwrap();
     std::fs::write(project.join("foreign/math.wasm"), scalar_ffi_module(0)).unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         "(project\n  (package \"ffi-app\" \"0.1.0\")\n  (target ffi-app kind: @bin root: \"src\" entry: \"main.vib\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
     ).unwrap();
     std::fs::write(
@@ -951,7 +951,7 @@ fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
     std::fs::create_dir_all(project.join("foreign")).unwrap();
     std::fs::write(project.join("foreign/text.wasm"), buffer_ffi_module()).unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         "(project\n  (package \"ffi-buffer-app\" \"0.1.0\")\n  (target ffi-buffer-app kind: @bin root: \"src\" entry: \"main.vib\")\n  (dependency text-ffi path: \"foreign\" wasm: \"text.wasm\"))\n",
     ).unwrap();
     std::fs::write(
@@ -1027,7 +1027,7 @@ fn runtime_plugin_load_is_capability_gated_typed_and_deterministic() {
     .unwrap();
     std::fs::write(project.join("plugins/math.wasm"), scalar_ffi_module(0)).unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         "(project\n  (package \"plugin-host\" \"0.1.0\")\n  (target plugin-host kind: @bin root: \"src\" entry: \"main.vib\")\n  (plugin-interface arithmetic\n    (function sum params: (int32 int32) result: int32)))\n",
     ).unwrap();
     let plugin = project.join("plugins/math.wasm");
@@ -1059,9 +1059,9 @@ fn runtime_plugin_load_is_capability_gated_typed_and_deterministic() {
     assert_eq!(report["report-version"], 1);
     assert_eq!(report["sha256"].as_str().unwrap().len(), 64);
 
-    let manifest = std::fs::read_to_string(project.join("project.vibra")).unwrap();
+    let manifest = std::fs::read_to_string(project.join("project.vib")).unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         manifest.replace("(int32 int32)", "(int64 int64)"),
     )
     .unwrap();

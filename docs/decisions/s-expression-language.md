@@ -412,10 +412,11 @@ Metadata is unordered and must follow the body.
 `.vib` is the only source extension. `.vib.yaml` and conditional
 `.vib.<flag>.yaml` files are not recognized.
 
-`project.vibra` becomes an S-expression manifest using a required `(project
-...)` root. It uses the same lexer and scalar rules as source, but a separate
-manifest grammar. Repeated children replace mappings and sequences. This is not
-an executable module.
+`project.vib` is a Vibra source file with a required `(project ...)` root. It
+uses the same lexer and scalar rules as every other `.vib` file; project
+commands interpret that root as the project description. Repeated children
+replace mappings and sequences. The filename has no separate manifest
+extension.
 
 ```vibra
 (project
@@ -696,7 +697,7 @@ PR, because there is intentionally no dual-syntax supported state.
 4. **Language corpus.** Mechanically migrate stdlib, language tests, examples,
    fixtures, templates, macros, and generated source. Add semantic parity and
    macro-origin tests.
-5. **Projects and packages.** Migrate `project.vibra`, introduce canonical JSON
+5. **Projects and packages.** Migrate `project.vib`, introduce canonical JSON
    locks and package metadata, and update dependency, publish, and sync flows.
 6. **LSP and rewrites.** Move LSP reads to the compiler snapshot, expose origin
    diagnostics and `expansionAt`, then add the typed rename/fix planner, CLI
@@ -728,7 +729,7 @@ part of the supported compiler.
 - Parser and diagnostic tests verify exact half-open byte spans, including
   Unicode and recovery after malformed forms.
 - `vibra fmt --write` is idempotent across the full source corpus.
-- `project.vibra` is S-expression based; locks and package/release metadata are
+- `project.vib` is S-expression based; locks and package/release metadata are
   canonical JSON; legacy YAML inputs produce targeted failures.
 - No compiler command advertises or accepts YAML output. JSON, human, raw, and
   SARIF behavior is covered where applicable.
