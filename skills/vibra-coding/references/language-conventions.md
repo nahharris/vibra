@@ -12,18 +12,18 @@
 
 ## Modules and imports
 
-A `.vibra` file is a sequence of UTF-8 S-expression forms. Import a sibling
+A `.vib` file is a sequence of UTF-8 S-expression forms. Import a sibling
 relative to the importing file:
 
 ```vibra
-(import model "./model.vibra")
+(import model "./model.vib")
 ```
 
 Use a manifest target or dependency alias for cross-root imports:
 
 ```vibra
-(import io "@std/io.vibra")
-(import core "@core/lib.vibra")
+(import io "@std/io.vib")
+(import core "@core/lib.vib")
 ```
 
 Keep import aliases kebab-case and use the alias to qualify imported symbols.
@@ -56,11 +56,11 @@ means pure. See the effect-system contract for the complete rule.
 
 ## Tests
 
-Put project tests under `tests/`. A test module imports `@std/test.vibra` and
+Put project tests under `tests/`. A test module imports `@std/test.vib` and
 may contain multiple scenarios without a `main` function:
 
 ```vibra
-(import test "@std/test.vibra")
+(import test "@std/test.vib")
 
 (test.scenario "greeting"
   (test.case "is stable"
@@ -73,6 +73,6 @@ select tests; they do not grant host access. Tests using `workspace: @temp` or
 real host state belong in an explicitly non-core profile with the required
 runner options.
 
-Files named `foo.<flag>.vibra` are conditional parts of `foo.vibra` when the
+Files named `foo.<flag>.vib` are conditional parts of `foo.vib` when the
 base file exists. `vibra test` enables the `test` flag, so colocated tests may
-live in `foo.test.vibra`.
+live in `foo.test.vib`.

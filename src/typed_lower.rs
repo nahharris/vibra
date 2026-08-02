@@ -1315,7 +1315,7 @@ mod tests {
     #[test]
     fn lowers_identity_bearing_modules_and_direct_applications_without_yaml() {
         let entry = module(
-            r#"(import model "./model.vibra")
+            r#"(import model "./model.vib")
 (def option (union t void) where: (t any))
 (defn unwrap (input (option int64)) int64 (do (return 0)) doc: "Typed signature.")"#,
             1,
@@ -1355,7 +1355,7 @@ mod tests {
                 },
                 "model".into(),
             )],
-            "./model.vibra"
+            "./model.vib"
         );
     }
 
@@ -1710,7 +1710,7 @@ mod tests {
             18,
         );
         let consumer = module(
-            r#"(import lib "./lib.vibra")
+            r#"(import lib "./lib.vib")
 (def display (interface (show (fn-type (self self) str))))
 (def item (record)
   impls: ((impl display methods: ((method show lib.item.show)))))"#,

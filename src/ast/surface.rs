@@ -2655,7 +2655,7 @@ mod tests {
     #[test]
     fn lowers_complete_module_surface_with_source_origins() {
         let source = r#"
-(import io "./io.vibra")
+(import io "./io.vib")
 (def option (enum (some t) (none void)) where: (t any) doc: "Optional.")
 (const limit int64 10 visibility: @private)
 (defn
@@ -3354,12 +3354,12 @@ mod tests {
     #[test]
     fn path_document_ids_are_separator_normalized() {
         assert_eq!(
-            DocumentId::from_path(Path::new("src\\main.vibra")),
-            DocumentId::from_path(Path::new("src/main.vibra"))
+            DocumentId::from_path(Path::new("src\\main.vib")),
+            DocumentId::from_path(Path::new("src/main.vib"))
         );
         assert_ne!(
-            DocumentId::from_path(Path::new("src/main.vibra")),
-            DocumentId::from_path(Path::new("src/other.vibra"))
+            DocumentId::from_path(Path::new("src/main.vib")),
+            DocumentId::from_path(Path::new("src/other.vib"))
         );
     }
 }

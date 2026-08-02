@@ -3,7 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const p = path.join(__dirname, "..", "stdlib", "fs.vibra");
+const p = path.join(__dirname, "..", "stdlib", "fs.vib");
 let s = fs.readFileSync(p, "utf8");
 
 function sub(re, repl) {

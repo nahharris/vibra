@@ -34,7 +34,7 @@ usable.
 
 ## Sources and method
 
-Vibra evidence was taken from `docs/archive/yaml-surface-draft.md`, `README.md`, `stdlib/src/*.vibra`, the
+Vibra evidence was taken from `docs/archive/yaml-surface-draft.md`, `README.md`, `stdlib/src/*.vib`, the
 `vibra_v1` host implementation in `src/`, and the Rust and Vibra test suites.
 The comparison baseline uses official documentation:
 
@@ -206,7 +206,7 @@ recursive deletion deserve explicit threat-model review and narrow grants.
    only after real I/O workloads validate the model.
 
 Each behavior change must follow the repository policy: focused Rust tests for
-compiler/runtime work, matching flat `tests/stdlib-<module>.vibra` coverage for
+compiler/runtime work, matching flat `tests/stdlib-<module>.vib` coverage for
 stdlib work, both full test suites, formatting/linting, documentation updates,
 and schema changes for machine-readable contracts.
 

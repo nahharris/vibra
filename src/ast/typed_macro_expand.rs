@@ -573,6 +573,33 @@ fn bind_macro_call_arguments(
         .parameters
         .len()
         .saturating_sub(usize::from(variadic));
+    let mut reserved_fixed = vec![false; fixed_count];
+    for argument in arguments {
+        let CallArgument::Labelled { label, .. } = argument else {
+            continue;
+        };
+        let Some(index) = definition.parameters[..fixed_count]
+            .iter()
+            .position(|parameter| parameter.name.value == label.value)
+        else {
+            return Err(MacroExpansionError::at(
+                "E-MACRO-001",
+                format!(
+                    "macro `{}` has no parameter named `{}`",
+                    definition.name.value, label.value
+                ),
+                call_origin,
+            ));
+        };
+        if reserved_fixed[index] {
+            return Err(MacroExpansionError::at(
+                "E-MACRO-001",
+                format!("macro parameter `{}` is bound more than once", label.value),
+                call_origin,
+            ));
+        }
+        reserved_fixed[index] = true;
+    }
     let mut fixed = vec![None; fixed_count];
     let mut tail = Vec::new();
     let mut next = 0;
@@ -601,7 +628,7 @@ fn bind_macro_call_arguments(
                 }
             }
             CallArgument::Positional(value) => {
-                while next < fixed_count && fixed[next].is_some() {
+                while next < fixed_count && (fixed[next].is_some() || reserved_fixed[next]) {
                     next += 1;
                 }
                 if next < fixed_count {
@@ -2902,8 +2929,8 @@ mod tests {
 
     #[test]
     fn imported_macros_never_qualify_closed_semantic_type_tokens() {
-        let helper_path = PathBuf::from("helper.vibra");
-        let caller_path = PathBuf::from("main.vibra");
+        let helper_path = PathBuf::from("helper.vib");
+        let caller_path = PathBuf::from("main.vib");
         let helper = module(
             r#"
 (def i32 int64)
@@ -2917,7 +2944,7 @@ mod tests {
             41,
         );
         let caller = module(
-            r#"(import helper "helper.vibra")
+            r#"(import helper "helper.vib")
 (def host (helper.host-types int64))
 "#,
             42,
@@ -3044,6 +3071,22 @@ mod tests {
         assert!(matches!(
             function.body[0].value,
             ExprKind::Literal(super::super::Literal::Int(1))
+        ));
+    }
+
+    #[test]
+    fn labelled_macro_arguments_after_variadic_values_bind_by_name() {
+        let source = r#"
+(macro select (left @expr-syntax right @expr-syntax rest... @expr-syntax) @expr-syntax
+  (unquote left))
+(defn main () int64 (select 1 2 3 left: 4))"#;
+        let expanded = expand_typed_macros(module(source, 33)).unwrap();
+        let TopLevel::Function(function) = &expanded.forms[0] else {
+            panic!("expected function");
+        };
+        assert!(matches!(
+            function.body[0].value,
+            ExprKind::Literal(super::super::Literal::Int(4))
         ));
     }
 

@@ -471,10 +471,10 @@ fn discover_tests(
     let mut seen_modules = HashSet::new();
     for file in files {
         if is_conditional_module_part(&file)? {
-            // `name.flag.vibra` is a conditional part of `name.vibra`, not a
+            // `name.flag.vib` is a conditional part of `name.vib`, not a
             // standalone module: `load::load_entry_module_for_test_discovery`
             // would load it as its own base module (never merged with
-            // `name.vibra`'s definitions), duplicating whatever tests the
+            // `name.vib`'s definitions), duplicating whatever tests the
             // base module's own scan already discovers with correctly merged
             // signatures, and -- worse -- recording this part file itself as
             // the `TestPlanItem` entry, which later makes `run_single_test`
@@ -590,7 +590,7 @@ fn collect_vibra_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 
 fn is_vibra_file(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    s.ends_with(".vibra")
+    s.ends_with(".vib")
 }
 
 #[cfg(test)]
@@ -600,13 +600,14 @@ mod discovery_tests {
 
     #[test]
     fn only_discovers_sexpression_vibra_tests() {
-        assert!(is_vibra_file(Path::new("case.vibra")));
-        assert!(!is_vibra_file(Path::new("case.vibra.yaml")));
+        assert!(is_vibra_file(Path::new("case.vib")));
+        assert!(!is_vibra_file(Path::new("case.vibra")));
+        assert!(!is_vibra_file(Path::new("case.vib.yaml")));
     }
 }
 
-/// Mirrors `frontend::module_part_paths`'s naming convention: `name.flag.vibra`
-/// is a conditional part of `name.vibra` whenever that base file exists
+/// Mirrors `frontend::module_part_paths`'s naming convention: `name.flag.vib`
+/// is a conditional part of `name.vib` whenever that base file exists
 /// alongside it. Test discovery must never treat such a part file as its own
 /// standalone module -- see the call site in `discover_tests`.
 fn is_conditional_module_part(path: &Path) -> Result<bool> {
@@ -616,7 +617,7 @@ fn is_conditional_module_part(path: &Path) -> Result<bool> {
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return Ok(false);
     };
-    let Some(stem) = file_name.strip_suffix(".vibra") else {
+    let Some(stem) = file_name.strip_suffix(".vib") else {
         return Ok(false);
     };
     let Some(base) = stem.split('.').next() else {
@@ -625,7 +626,7 @@ fn is_conditional_module_part(path: &Path) -> Result<bool> {
     if base == stem {
         return Ok(false);
     }
-    Ok(parent.join(format!("{base}.vibra")).is_file())
+    Ok(parent.join(format!("{base}.vib")).is_file())
 }
 
 fn run_one_child(

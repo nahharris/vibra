@@ -47,13 +47,13 @@ fn write_project(root: &Path) {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::create_dir_all(root.join("tests")).unwrap();
     std::fs::write(
-        root.join("project.vibra"),
-        "(project\n  (package \"mcp-fixture\" \"0.1.0\")\n  (target app kind: @bin root: \"src\" entry: \"main.vibra\"))\n",
+        root.join("project.vib"),
+        "(project\n  (package \"mcp-fixture\" \"0.1.0\")\n  (target app kind: @bin root: \"src\" entry: \"main.vib\"))\n",
     )
     .unwrap();
-    std::fs::write(root.join("src/main.vibra"), "(defn main () void (do))\n").unwrap();
+    std::fs::write(root.join("src/main.vib"), "(defn main () void (do))\n").unwrap();
     std::fs::write(
-        root.join("tests/basic.vibra"),
+        root.join("tests/basic.vib"),
         "(test.scenario \"works\" (test.case \"works\" (do) profile: @core))\n",
     )
     .unwrap();
@@ -85,7 +85,7 @@ fn project_and_test_introspection_are_structured_and_non_executing() {
     );
     assert_eq!(
         responses[1]["result"]["structuredContent"]["tests"][0]["path"],
-        "tests/basic.vibra"
+        "tests/basic.vib"
     );
 }
 
@@ -97,7 +97,7 @@ fn cli_tools_are_fixed_json_commands_and_escape_is_rejected() {
         workspace.path(),
         &[],
         &[
-            call(1, "vibra.lint", json!({"paths": ["src/main.vibra"]})),
+            call(1, "vibra.lint", json!({"paths": ["src/main.vib"]})),
             call(2, "vibra.check", json!({"path": ".."})),
         ],
     );
@@ -117,19 +117,19 @@ fn transitive_imports_cannot_read_outside_the_workspace() {
     std::fs::create_dir_all(&workspace).unwrap();
     write_project(&workspace);
     std::fs::write(
-        parent.path().join("secret.vibra"),
+        parent.path().join("secret.vib"),
         "secret: {$literal: hidden}\n",
     )
     .unwrap();
     std::fs::write(
-        workspace.join("src/main.vibra"),
-        "(import secret \"../../secret.vibra\")\n(defn main () void (do))\n",
+        workspace.join("src/main.vib"),
+        "(import secret \"../../secret.vib\")\n(defn main () void (do))\n",
     )
     .unwrap();
     let responses = run_mcp(
         &workspace,
         &[],
-        &[call(1, "vibra.lint", json!({"paths": ["src/main.vibra"]}))],
+        &[call(1, "vibra.lint", json!({"paths": ["src/main.vib"]}))],
     );
     assert_eq!(responses[0]["result"]["isError"], true);
     assert_eq!(
@@ -144,18 +144,18 @@ fn s_expression_imports_reject_absolute_paths_and_allow_project_imports() {
     let workspace = parent.path().join("project");
     std::fs::create_dir_all(&workspace).unwrap();
     write_project(&workspace);
-    let secret = parent.path().join("secret.vibra");
+    let secret = parent.path().join("secret.vib");
     std::fs::write(&secret, "(const secret str \"hidden\")\n").unwrap();
     let absolute = secret.to_string_lossy().replace('\\', "\\\\");
     std::fs::write(
-        workspace.join("src/main.vibra"),
+        workspace.join("src/main.vib"),
         format!("(import secret \"{absolute}\")\n(defn main () void (do))\n"),
     )
     .unwrap();
     let responses = run_mcp(
         &workspace,
         &[],
-        &[call(1, "vibra.lint", json!({"paths": ["src/main.vibra"]}))],
+        &[call(1, "vibra.lint", json!({"paths": ["src/main.vib"]}))],
     );
     assert_eq!(responses[0]["result"]["isError"], true);
     assert_eq!(
@@ -163,24 +163,16 @@ fn s_expression_imports_reject_absolute_paths_and_allow_project_imports() {
         "path-outside-workspace"
     );
 
+    std::fs::write(workspace.join("src/main.vib"), "(defn main () void (do))\n").unwrap();
     std::fs::write(
-        workspace.join("src/main.vibra"),
-        "(defn main () void (do))\n",
-    )
-    .unwrap();
-    std::fs::write(
-        workspace.join("src/feature.vibra"),
-        "(import app \"@app/main.vibra\")\n(defn feature () void (do))\n",
+        workspace.join("src/feature.vib"),
+        "(import app \"@app/main.vib\")\n(defn feature () void (do))\n",
     )
     .unwrap();
     let responses = run_mcp(
         &workspace,
         &[],
-        &[call(
-            2,
-            "vibra.lint",
-            json!({"paths": ["src/feature.vibra"]}),
-        )],
+        &[call(2, "vibra.lint", json!({"paths": ["src/feature.vib"]}))],
     );
     assert_eq!(responses[0]["result"]["isError"], false);
 }
@@ -196,7 +188,7 @@ fn write_and_test_gates_are_explicit() {
             call(
                 1,
                 "vibra.fmt",
-                json!({"paths": ["src/main.vibra"], "write": true}),
+                json!({"paths": ["src/main.vib"], "write": true}),
             ),
             call(2, "vibra.test", json!({})),
         ],

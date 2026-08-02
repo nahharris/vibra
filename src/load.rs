@@ -1,4 +1,4 @@
-//! Load `.vibra` modules and resolve imports relative to each file or project namespace.
+//! Load `.vib` modules and resolve imports relative to each file or project namespace.
 //!
 //! Source parsing goes through the S-expression frontend
 //! (`crate::frontend::load_surface_program`), which produces a typed
@@ -11,8 +11,8 @@
 //! `docs/decisions/s-expression-language.md`.
 //!
 //! There is no second source parser and no content-based dialect selection:
-//! `.vibra` source is always read as S-expression, and
-//! `frontend::canonical_module_path` rejects `.vibra.yaml` and any other
+//! `.vib` source is always read as S-expression, and
+//! `frontend::canonical_module_path` rejects `.vib.yaml` and any other
 //! extension outright (`E-SYN-012`) before this module ever sees it.
 
 use crate::ast;
@@ -38,9 +38,9 @@ pub struct LoadedProgram {
 
 /// Compiler flags that select conditional module parts.
 ///
-/// A file named `name.flag.vibra` contributes to `name.vibra` only when
+/// A file named `name.flag.vib` contributes to `name.vib` only when
 /// `flag` is enabled. Multiple suffix segments are conjunctive, so
-/// `name.unix.debug.vibra` requires both `unix` and `debug`.
+/// `name.unix.debug.vib` requires both `unix` and `debug`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CompilationFlags {
     enabled: BTreeSet<String>,
@@ -105,7 +105,7 @@ pub fn load_program_with_flags(entry: &Path, flags: &CompilationFlags) -> Result
     load_legacy_yaml_program(entry, flags)
 }
 
-/// Load and adapt a real `.vibra` entry module (and its transitive imports)
+/// Load and adapt a real `.vib` entry module (and its transitive imports)
 /// into the legacy `Value` shape `src/lower.rs` consumes.
 ///
 /// The name is a historical artifact of `LoadedProgram`'s original map-based
@@ -196,7 +196,7 @@ pub fn parse_inline_exec_expression(source: &str) -> Result<Value> {
 
 /// `vibra exec`'s inline program seam. `root` is a synthetic in-memory module
 /// (its `$import` entries built from `--import alias=path` flags), not a real
-/// `.vibra` file, so it needs no S-expression parsing of its own -- it is
+/// `.vib` file, so it needs no S-expression parsing of its own -- it is
 /// inserted into the result verbatim. Its imports, however, are real files
 /// and go through the same typed S-expression frontend as every other
 /// module.
@@ -204,7 +204,7 @@ pub fn parse_inline_exec_expression(source: &str) -> Result<Value> {
 pub fn load_legacy_yaml_inline_program(base_dir: &Path, root: Value) -> Result<LoadedProgram> {
     let base_dir = std::fs::canonicalize(base_dir)
         .with_context(|| format!("resolve inline base directory {}", base_dir.display()))?;
-    let entry = base_dir.join("__vibra_exec__.vibra");
+    let entry = base_dir.join("__vibra_exec__.vib");
     let flags = CompilationFlags::default();
     let roots = inline_import_roots(&entry, &root)?;
     let surface = frontend::load_surface_program_multi_root(&roots, &flags)?;
@@ -222,7 +222,7 @@ pub fn load_legacy_yaml_inline_program(base_dir: &Path, root: Value) -> Result<L
 }
 
 /// Resolve every `$import` in the synthetic inline root to a real, canonical
-/// `.vibra` path, exactly as a real module's imports would resolve (relative
+/// `.vib` path, exactly as a real module's imports would resolve (relative
 /// paths against the synthetic entry's directory, `@name/path` against the
 /// project namespace if `base_dir` sits inside one).
 fn inline_import_roots(entry: &Path, root: &Value) -> Result<Vec<PathBuf>> {
@@ -245,7 +245,7 @@ fn inline_import_roots(entry: &Path, root: &Value) -> Result<Vec<PathBuf>> {
         let resolved = if import.starts_with('@') {
             let project = project.as_ref().with_context(|| {
                 format!(
-                    "{}: @ import `{import}` requires a project.vibra",
+                    "{}: @ import `{import}` requires a project.vib",
                     entry.display()
                 )
             })?;
@@ -303,7 +303,7 @@ fn convert_surface_program(surface: &SurfaceProgram) -> Result<HashMap<PathBuf, 
 }
 
 /// Merge a module's physical parts (base file plus any selected
-/// `name.flag.vibra` conditional parts) into one typed [`ast::Module`], the
+/// `name.flag.vib` conditional parts) into one typed [`ast::Module`], the
 /// unit [`crate::surface_adapter`] converts. Duplicate top-level symbols
 /// across parts are already rejected by [`frontend::load_surface_program`]
 /// (`E-MOD-002`) before this ever runs.

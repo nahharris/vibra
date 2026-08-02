@@ -25,9 +25,13 @@ module visibility, generics, nominal implementations, tests, and WebAssembly
 runtime behavior. It changes their spelling and removes syntax that exists only
 to fit semantic nodes into YAML mappings.
 
-Calls accept positional and labelled arguments. Labels and positional arguments
-may interleave, and unlabelled values fill the next unbound parameter. Generic
-type arguments use the reserved final `types:` call attribute.
+Calls accept fixed positional, labelled, and variadic arguments. The reader
+accepts mixed source order, and unlabelled values fill the next unbound fixed
+parameter, so a misplaced label remains parseable and semantically checkable.
+Canonical formatting emits fixed positional arguments first, labelled arguments
+second, and variadic values last. `W-STYLE-002` reports a labelled argument
+that follows a variadic value as a warning; it is not a hard parse or type error.
+Generic type arguments use the reserved final `types:` call attribute.
 
 ## Reader contract
 
@@ -157,7 +161,7 @@ accepts exactly one `def`, `const`, `fn`, or `macro`; imports and tests cannot
 be wrapped. `main` remains the program entrypoint.
 
 ```vibra
-(import io "../stdlib/src/io.vibra")
+(import io "../stdlib/src/io.vib")
 
 (defn write-prefix (text str) void (do (io.stdout.print text)) visibility: private)
 
@@ -405,18 +409,19 @@ Metadata is unordered and must follow the body.
 
 ## Source files, manifests, locks, and packages
 
-`.vibra` is the only source extension. `.vibra.yaml` and conditional
-`.vibra.<flag>.yaml` files are not recognized.
+`.vib` is the only source extension. `.vib.yaml` and conditional
+`.vib.<flag>.yaml` files are not recognized.
 
-`project.vibra` becomes an S-expression manifest using a required `(project
-...)` root. It uses the same lexer and scalar rules as source, but a separate
-manifest grammar. Repeated children replace mappings and sequences. This is not
-an executable module.
+`project.vib` is a Vibra source file with a required `(project ...)` root. It
+uses the same lexer and scalar rules as every other `.vib` file; project
+commands interpret that root as the project description. Repeated children
+replace mappings and sequences. The filename has no separate manifest
+extension.
 
 ```vibra
 (project
   (package "example" "0.1.0")
-  (target app kind: bin root: "src" entry: "main.vibra")
+  (target app kind: bin root: "src" entry: "main.vib")
   (dependency std path: "../stdlib"))
 ```
 
@@ -661,7 +666,7 @@ The existing generic code framework is removed:
 - delete generic `Form`, `Pattern`, `Query`, key/index `Path`, `Edit`,
   `ChangeSet`, mapping insert/upsert/rename, sequence splice, copy, and move
   APIs from `src/code`;
-- delete `stdlib/src/code.vibra`, all `vibra_code` host imports, and runtime
+- delete `stdlib/src/code.vib`, all `vibra_code` host imports, and runtime
   handles for documents, nodes, queries, edits, workspaces, and syntax wrappers;
 - delete `code-form.schema.json`, `code-path.schema.json`,
   `code-query.schema.json`, and `code-change-set.schema.json`;
@@ -692,20 +697,20 @@ PR, because there is intentionally no dual-syntax supported state.
 4. **Language corpus.** Mechanically migrate stdlib, language tests, examples,
    fixtures, templates, macros, and generated source. Add semantic parity and
    macro-origin tests.
-5. **Projects and packages.** Migrate `project.vibra`, introduce canonical JSON
+5. **Projects and packages.** Migrate `project.vib`, introduce canonical JSON
    locks and package metadata, and update dependency, publish, and sync flows.
 6. **LSP and rewrites.** Move LSP reads to the compiler snapshot, expose origin
    diagnostics and `expansionAt`, then add the typed rename/fix planner, CLI
    rename preview/write, and LSP rename.
 7. **Generic editor removal.** Delete the `vibra code` command, generic
-   `src/code` query/edit machinery, `stdlib/src/code.vibra`, `vibra_code` host
+   `src/code` query/edit machinery, `stdlib/src/code.vib`, `vibra_code` host
    ABI, editor schemas, YAML pipeline tests, and editor documentation. Add no
    arbitrary MCP write replacement.
 8. **Output and embedding.** Make JSON/human/raw/SARIF exhaustive, remove YAML
    report paths, isolate YAML to the external `embed` data decoder, and update
    container/distribution scripts.
 9. **Removal and documentation.** Delete the YAML source validator/parser/
-   formatter, `.vibra.yaml` discovery, YAML dependencies that are no longer
+   formatter, `.vib.yaml` discovery, YAML dependencies that are no longer
    used, legacy diagnostics, DRAFT YAML design, README examples, and
    compatibility tests.
 
@@ -715,16 +720,16 @@ part of the supported compiler.
 
 ## Acceptance criteria
 
-- Every `.vibra` source, stdlib module, test, example, and template uses the
+- Every `.vib` source, stdlib module, test, example, and template uses the
   grammar in this document.
-- The parser rejects YAML source and `.vibra.yaml` discovery is absent.
+- The parser rejects YAML source and `.vib.yaml` discovery is absent.
 - Positional and labelled calls, `types:`, atoms, strings, escapes, comments,
   definitions, visibility, types, expressions, patterns, attributes, and tests
   have focused positive and negative parser tests.
 - Parser and diagnostic tests verify exact half-open byte spans, including
   Unicode and recovery after malformed forms.
 - `vibra fmt --write` is idempotent across the full source corpus.
-- `project.vibra` is S-expression based; locks and package/release metadata are
+- `project.vib` is S-expression based; locks and package/release metadata are
   canonical JSON; legacy YAML inputs produce targeted failures.
 - No compiler command advertises or accepts YAML output. JSON, human, raw, and
   SARIF behavior is covered where applicable.
@@ -740,13 +745,13 @@ part of the supported compiler.
   atomic rollback, retypecheck failure, generated-only target rejection, and
   cross-module semantic rename.
 - `vibra code`, generic structural patterns and edits, runtime code handles,
-  `stdlib/src/code.vibra`, its host ABI, and the four generic code schemas are
+  `stdlib/src/code.vib`, its host ABI, and the four generic code schemas are
   absent. No MCP tool provides arbitrary source writes.
 - LSP formatting, hover, definition, references, completion, rename, code
   actions, origin-aware diagnostics, and `vibra/expansionAt` use the shared
   compiler CST/AST service.
 - `rg` finds no user-facing claim that Vibra source or CLI output is YAML-first,
-  no `.vibra.yaml` support, and no `E-YAML-*` diagnostic.
+  no `.vib.yaml` support, and no `E-YAML-*` diagnostic.
 - `yaml-edit` is absent from production dependencies. A YAML data library may
   remain solely behind the external `embed` decoder; production uses elsewhere
   fail this criterion.

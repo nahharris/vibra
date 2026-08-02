@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/project-manifest.schema.json",
   "title": "Vibra project manifest source",
-  "description": "The textual project.vibra contract. The compiler applies the dedicated `(project ...)` S-expression grammar; this schema provides a coarse transport-level check only.",
+  "description": "The textual project.vib contract. The compiler applies the dedicated `(project ...)` S-expression grammar; this schema provides a coarse transport-level check only.",
   "type": "string",
   "pattern": "^\\s*\\(project(?:\\s|\\()"
 }

@@ -502,7 +502,7 @@ impl Server {
                 self.validate_manifest_paths(&path)?;
             }
             if path.file_name().and_then(|name| name.to_str()) == Some(project::MANIFEST_FILE)
-                || path.extension().and_then(|extension| extension.to_str()) != Some("vibra")
+                || path.extension().and_then(|extension| extension.to_str()) != Some("vib")
             {
                 continue;
             }
@@ -546,7 +546,7 @@ impl Server {
             let path = if import.path.value.starts_with('@') {
                 let project = project.as_ref().ok_or_else(|| {
                     operation_error(anyhow::anyhow!(
-                        "{}: @ import `{}` requires project.vibra",
+                        "{}: @ import `{}` requires project.vib",
                         module.path.display(),
                         import.path.value
                     ))

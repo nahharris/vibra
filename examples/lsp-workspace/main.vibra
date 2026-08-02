@@ -1,2 +1,0 @@
-(import greeting "@greeting/greet.vibra")
-(defn main () void (greeting.greet))

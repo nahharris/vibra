@@ -1,0 +1,81 @@
+(import test "../stdlib/src/test.vib")
+(defn truthy () bool (return true))
+(defn echo-int (subject int64) int64 (return subject))
+(test.scenario "many-1" (test.case "many-1" (test.assert true) profile: @core))
+(test.scenario
+  "many-2"
+  (test.case "many-2" (let flag true) (test.assert flag) profile: @core)
+)
+(test.scenario
+  "many-3"
+  (test.case "many-3" (let v (truthy)) (test.assert v) profile: @core)
+)
+(test.scenario
+  "many-4"
+  (test.case
+    "many-4"
+    (let n (echo-int 4))
+    (match n 4 (do (test.assert true)) _ (do (test.fail "expected 4")))
+    profile: @core
+  )
+)
+(test.scenario
+  "many-5"
+  (test.case
+    "many-5"
+    (let n (echo-int 5))
+    (match n 5 (do (test.assert true)) _ (do (test.fail "expected 5")))
+    profile: @core
+  )
+)
+(test.scenario
+  "many-6"
+  (test.case
+    "many-6"
+    (let s "shared-context")
+    (match
+      s
+      "shared-context"
+      (do (test.assert true))
+      _
+      (do (test.fail "expected shared-context"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "many-7"
+  (test.case
+    "many-7"
+    (let x 2.5)
+    (match x 2.5 (do (test.assert true)) _ (do (test.fail "expected 2.5")))
+    profile: @core
+  )
+)
+(test.scenario
+  "many-8"
+  (test.case "many-8" (let v (truthy)) (test.assert v) profile: @core)
+)
+(test.scenario "many-9" (test.case "many-9" (test.assert true) profile: @core))
+(test.scenario
+  "many-10"
+  (test.case
+    "many-10"
+    (let n (echo-int 10))
+    (match n 10 (do (test.assert true)) _ (do (test.fail "expected 10")))
+    profile: @core
+  )
+)
+(test.scenario
+  "many-11"
+  (test.case "many-11" (let flag true) (test.assert flag) profile: @core)
+)
+(test.scenario
+  "many-12"
+  (test.case
+    "many-12"
+    (let n (echo-int 12))
+    (match n 12 (do (test.assert true)) _ (do (test.fail "expected 12")))
+    profile: @core
+  )
+)

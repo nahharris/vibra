@@ -1462,7 +1462,7 @@ mod iteration_tests {
 
     fn lower(source: &str) -> (tempfile::TempDir, LoweredProgram) {
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(&entry, source).unwrap();
         let loaded = crate::load::load_program(&entry).unwrap();
         let lowered = crate::lower::lower_program(&loaded).unwrap();
@@ -1476,7 +1476,7 @@ mod iteration_tests {
     /// zero operands structurally. Return whichever stage actually failed.
     fn lower_error(source: &str) -> String {
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(&entry, source).unwrap();
         match crate::load::load_program(&entry) {
             Ok(loaded) => format!("{:#}", crate::lower::lower_program(&loaded).unwrap_err()),
@@ -3436,7 +3436,7 @@ mod source_task_tests {
     #[test]
     fn source_spawn_join_uses_scheduler_and_consumes_handles() {
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(
             &entry,
             r#"(defn
@@ -3493,17 +3493,17 @@ mod collection_tests {
     fn collection_operations_execute_in_interpreter() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let collections = root
-            .join("stdlib/src/collections.vibra")
+            .join("stdlib/src/collections.vib")
             .display()
             .to_string()
             .replace('\\', "/");
         let test = root
-            .join("stdlib/src/test.vibra")
+            .join("stdlib/src/test.vib")
             .display()
             .to_string()
             .replace('\\', "/");
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(
             &entry,
             format!(
@@ -3535,13 +3535,13 @@ mod text_conversion_tests {
     fn lower(body: &str) -> LoweredProgram {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let import = |name: &str| {
-            root.join(format!("stdlib/src/{name}.vibra"))
+            root.join(format!("stdlib/src/{name}.vib"))
                 .display()
                 .to_string()
                 .replace('\\', "/")
         };
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(
             &entry,
             format!(

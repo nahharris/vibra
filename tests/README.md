@@ -1,6 +1,6 @@
 # Vibra language test suite
 
-The `.vibra` files in this directory exercise the language and standard library:
+The `.vib` files in this directory exercise the language and standard library:
 
 ```sh
 cargo run -- test
@@ -15,7 +15,7 @@ case executes independently; scenarios only provide grouping. Case metadata is
 not inherited.
 
 ```vibra
-(import test "../stdlib/src/test.vibra")
+(import test "../stdlib/src/test.vib")
 
 (test.scenario "arithmetic"
   (test.case "adds integers"
@@ -62,10 +62,10 @@ uses `--allow-test-workspace`. Otherwise the case is skipped.
 
 ## Conventions
 
-- Keep test files directly under `tests/` so `../stdlib/src/<module>.vibra`
+- Keep test files directly under `tests/` so `../stdlib/src/<module>.vib`
   imports resolve consistently.
 - Use kebab-case symbols, scenario names, case names, profiles, and tags.
-- `lang-*.vibra` covers language behavior; `stdlib-*.vibra` covers standard
+- `lang-*.vib` covers language behavior; `stdlib-*.vib` covers standard
   library modules.
 - Bare `vibra test` selects the `core` profile. Put non-hermetic host tests in
   explicit profiles such as `env`, `net`, `process`, `random`, or `system`.

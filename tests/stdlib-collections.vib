@@ -1,0 +1,87 @@
+(import test "../stdlib/src/test.vib")
+(import collections "../stdlib/src/collections.vib")
+(import option "../stdlib/src/option.vib")
+(import result "../stdlib/src/result.vib")
+(test.scenario
+  "array-generic-get"
+  (test.case
+    "array-generic-get"
+    (let found (collections.array-get str (array "alpha" "beta") 1))
+    (match
+      found
+      (option.option.some "beta")
+      (do (test.assert true))
+      (option.option.some (bind wrong))
+      (do (test.fail "wrong value"))
+      (option.option.none)
+      (do (test.fail "expected value"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "array-copy-on-write-and-bounds"
+  (test.case
+    "array-copy-on-write-and-bounds"
+    (let original (array 1 2))
+    (let changed (collections.array-set int64 original 0 9))
+    (match
+      changed
+      (result.result.ok (array 9 2))
+      (do
+        (match
+          original
+          (array 1 2)
+          (test.assert true)
+          _
+          (test.fail "original was aliased")
+        )
+      )
+      (result.result.err (bind error))
+      (do (test.fail "unexpected set error"))
+    )
+    (let missing (collections.array-remove int64 original 2))
+    (match
+      missing
+      (result.result.ok (bind value))
+      (do (test.fail "expected bounds error"))
+      (result.result.err
+        (collections.collection-error.out-of-bounds (record (index 2) (len 2)))
+      )
+      (do (test.assert true))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "map-upsert-is-deterministic"
+  (test.case
+    "map-upsert-is-deterministic"
+    (let words (map ("alpha" 1) ("beta" 2)))
+    (let updated (collections.map-insert int64 words "alpha" 3))
+    (match
+      updated
+      (result.result.ok (map ("alpha" 3) ("beta" 2)))
+      (do (test.assert true))
+      (result.result.err (bind error))
+      (do (test.fail "unexpected map error"))
+    )
+    (let absent (collections.map-get int64 words "gamma"))
+    (match
+      absent
+      (option.option.none)
+      (do (test.assert true))
+      (option.option.some (bind value))
+      (do (test.fail "expected none"))
+    )
+    (let removed (collections.map-remove int64 words "alpha"))
+    (match
+      removed
+      (option.option.some (map ("beta" 2)))
+      (do (test.assert true))
+      _
+      (do (test.fail "wrong map removal"))
+    )
+    profile: @core
+  )
+)

@@ -3,6 +3,7 @@
 //! These APIs do not change the current CLI defaults. They provide a typed,
 //! serde-free path for editor and CLI cutover work.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::ast::{
@@ -16,9 +17,12 @@ use crate::syntax::{self, Atom, Document, LineIndex, Node, NodeKind};
 
 /// Parse and type-check S-expression source before canonical printing.
 pub fn staged_format_sexpr(path: &Path, source: &str) -> Result<String, Diagnostic> {
-    let document = syntax::parse(source).map_err(|error| syntax_diagnostic(path, source, error))?;
-    ast::lower_document_with_id(&document, ast::DocumentId::from_path(path))
+    let mut document =
+        syntax::parse(source).map_err(|error| syntax_diagnostic(path, source, error))?;
+    let module = ast::lower_document_with_id(&document, ast::DocumentId::from_path(path))
         .map_err(|error| ast_diagnostic(path, source, error))?;
+    let signatures = local_call_signatures(&module);
+    normalize_call_order(&mut document, &signatures);
     Ok(syntax::print(&document))
 }
 
@@ -44,9 +48,11 @@ pub fn staged_lint_sexpr(path: &Path, source: &str) -> Vec<Diagnostic> {
         Ok(module) => module,
         Err(error) => return vec![ast_diagnostic(path, source, error)],
     };
+    let signatures = local_call_signatures(&module);
     let mut diagnostics = Vec::new();
     lint_module_names(path, source, &module, &mut diagnostics);
     lint_labels(path, source, &document, &mut diagnostics);
+    lint_call_argument_order(path, source, &document, &signatures, &mut diagnostics);
     diagnostics.sort_by_key(|diagnostic| {
         (
             diagnostic.span.start.offset.unwrap_or_default(),
@@ -54,6 +60,364 @@ pub fn staged_lint_sexpr(path: &Path, source: &str) -> Vec<Diagnostic> {
         )
     });
     diagnostics
+}
+
+#[derive(Debug, Clone)]
+struct CallSignature {
+    parameter_names: Vec<String>,
+    fixed_count: usize,
+    variadic: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallArgumentKind {
+    Fixed,
+    Labelled,
+    Variadic,
+}
+
+#[derive(Debug, Clone)]
+enum CallArgumentNodes {
+    Positional(Node),
+    Labelled { label: Node, value: Node },
+}
+
+fn local_call_signatures(module: &Module) -> BTreeMap<String, CallSignature> {
+    fn signature(function: &ast::Function) -> CallSignature {
+        let variadic = function
+            .parameters
+            .last()
+            .is_some_and(|parameter| parameter.variadic);
+        CallSignature {
+            parameter_names: function
+                .parameters
+                .iter()
+                .map(|parameter| parameter.name.value.clone())
+                .collect(),
+            fixed_count: function
+                .parameters
+                .len()
+                .saturating_sub(usize::from(variadic)),
+            variadic,
+        }
+    }
+
+    fn insert(
+        signatures: &mut BTreeMap<String, CallSignature>,
+        name: String,
+        function: &ast::Function,
+    ) {
+        signatures.insert(name, signature(function));
+    }
+
+    let mut signatures = BTreeMap::new();
+    for form in &module.forms {
+        match form {
+            TopLevel::Function(function) => {
+                insert(&mut signatures, function.name.value.clone(), function);
+            }
+            TopLevel::Deffect(deffect) => {
+                for operation in &deffect.operations {
+                    insert(
+                        &mut signatures,
+                        format!("{}.{}", deffect.name.value, operation.function.name.value),
+                        &operation.function,
+                    );
+                }
+            }
+            TopLevel::Definition(definition) => {
+                for annotation in &definition.annotations {
+                    if let AnnotationKind::Definitions(functions) = &annotation.value {
+                        for function in functions {
+                            insert(
+                                &mut signatures,
+                                format!("{}.{}", definition.name.value, function.name.value),
+                                function,
+                            );
+                        }
+                    }
+                }
+            }
+            TopLevel::Macro(_)
+            | TopLevel::Import(_)
+            | TopLevel::Constant(_)
+            | TopLevel::Test(_)
+            | TopLevel::TestScenario(_) => {}
+        }
+    }
+    signatures
+}
+
+fn normalize_call_order(document: &mut Document, signatures: &BTreeMap<String, CallSignature>) {
+    for node in &mut document.nodes {
+        normalize_call_node(node, signatures);
+    }
+}
+
+fn normalize_call_node(node: &mut Node, signatures: &BTreeMap<String, CallSignature>) {
+    let NodeKind::List(children) = &mut node.kind else {
+        return;
+    };
+    for child in children.iter_mut() {
+        normalize_call_node(child, signatures);
+    }
+    let Some(head) = children.first().and_then(symbol) else {
+        return;
+    };
+    if is_structural_form_head(head) {
+        return;
+    }
+    let signature = signatures.get(head);
+    normalize_call_list(children, signature);
+}
+
+fn normalize_call_list(children: &mut Vec<Node>, signature: Option<&CallSignature>) {
+    let Some((arguments, trailing)) = parse_call_argument_nodes(children) else {
+        return;
+    };
+    if !arguments
+        .iter()
+        .any(|argument| matches!(argument, CallArgumentNodes::Labelled { .. }))
+    {
+        return;
+    }
+    let kinds = classify_call_arguments(&arguments, signature);
+    let mut fixed = Vec::new();
+    let mut labelled = Vec::new();
+    let mut variadic = Vec::new();
+    for (argument, kind) in arguments.into_iter().zip(kinds) {
+        match kind {
+            CallArgumentKind::Fixed => fixed.push(argument),
+            CallArgumentKind::Labelled => labelled.push(argument),
+            CallArgumentKind::Variadic => variadic.push(argument),
+        }
+    }
+
+    let mut normalized = Vec::with_capacity(children.len());
+    normalized.push(children[0].clone());
+    for argument in fixed.into_iter().chain(labelled).chain(variadic) {
+        match argument {
+            CallArgumentNodes::Positional(value) => normalized.push(value),
+            CallArgumentNodes::Labelled { label, value } => {
+                normalized.push(label);
+                normalized.push(value);
+            }
+        }
+    }
+    normalized.extend(trailing);
+    *children = normalized;
+}
+
+fn parse_call_argument_nodes(children: &[Node]) -> Option<(Vec<CallArgumentNodes>, Vec<Node>)> {
+    if children.len() < 2
+        || children[1..]
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Comment(_)))
+    {
+        return None;
+    }
+    let mut argument_end = children.len();
+    let trailing = if argument_end >= 3 && is_label(&children[argument_end - 2], "types") {
+        argument_end -= 2;
+        children[argument_end..].to_vec()
+    } else {
+        Vec::new()
+    };
+    let mut arguments = Vec::new();
+    let mut index = 1;
+    while index < argument_end {
+        if matches!(children[index].kind, NodeKind::Atom(Atom::Label(_))) {
+            let value = children.get(index + 1)?.clone();
+            arguments.push(CallArgumentNodes::Labelled {
+                label: children[index].clone(),
+                value,
+            });
+            index += 2;
+        } else {
+            arguments.push(CallArgumentNodes::Positional(children[index].clone()));
+            index += 1;
+        }
+    }
+    Some((arguments, trailing))
+}
+
+fn classify_call_arguments(
+    arguments: &[CallArgumentNodes],
+    signature: Option<&CallSignature>,
+) -> Vec<CallArgumentKind> {
+    let Some(signature) = signature else {
+        let mut saw_label = false;
+        return arguments
+            .iter()
+            .map(|argument| match argument {
+                CallArgumentNodes::Labelled { .. } => {
+                    saw_label = true;
+                    CallArgumentKind::Labelled
+                }
+                CallArgumentNodes::Positional(_) if saw_label => CallArgumentKind::Variadic,
+                CallArgumentNodes::Positional(_) => CallArgumentKind::Fixed,
+            })
+            .collect();
+    };
+
+    let mut reserved = vec![false; signature.fixed_count];
+    for argument in arguments {
+        if let CallArgumentNodes::Labelled { label, .. } = argument {
+            if let Some(name) = label_name(label) {
+                if let Some(index) = signature.parameter_names[..signature.fixed_count]
+                    .iter()
+                    .position(|parameter| parameter == name)
+                {
+                    reserved[index] = true;
+                }
+            }
+        }
+    }
+
+    let mut next_fixed = 0;
+    arguments
+        .iter()
+        .map(|argument| match argument {
+            CallArgumentNodes::Labelled { .. } => CallArgumentKind::Labelled,
+            CallArgumentNodes::Positional(_) => {
+                while next_fixed < signature.fixed_count && reserved[next_fixed] {
+                    next_fixed += 1;
+                }
+                if next_fixed < signature.fixed_count {
+                    next_fixed += 1;
+                    CallArgumentKind::Fixed
+                } else if signature.variadic {
+                    CallArgumentKind::Variadic
+                } else {
+                    CallArgumentKind::Fixed
+                }
+            }
+        })
+        .collect()
+}
+
+fn lint_call_argument_order(
+    path: &Path,
+    source: &str,
+    document: &Document,
+    signatures: &BTreeMap<String, CallSignature>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    fn walk(
+        path: &Path,
+        source: &str,
+        node: &Node,
+        signatures: &BTreeMap<String, CallSignature>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        let NodeKind::List(children) = &node.kind else {
+            return;
+        };
+        for child in children {
+            walk(path, source, child, signatures, diagnostics);
+        }
+        let Some(head) = children.first().and_then(symbol) else {
+            return;
+        };
+        if is_structural_form_head(head) {
+            return;
+        }
+        let Some((arguments, _)) = parse_call_argument_nodes(children) else {
+            return;
+        };
+        let kinds = classify_call_arguments(&arguments, signatures.get(head));
+        let mut saw_variadic = false;
+        for (argument, kind) in arguments.iter().zip(kinds) {
+            match (argument, kind) {
+                (CallArgumentNodes::Labelled { label, .. }, CallArgumentKind::Labelled)
+                    if saw_variadic =>
+                {
+                    let Some(name) = label_name(label) else {
+                        continue;
+                    };
+                    diagnostics.push(diagnostic(
+                        path,
+                        source,
+                        "W-STYLE-002",
+                        format!(
+                            "labelled arguments should precede variadic arguments; move `{name}:` before the variadic values"
+                        ),
+                        Severity::Warning,
+                        Category::Style,
+                        label.span,
+                        None,
+                    ));
+                }
+                (_, CallArgumentKind::Variadic) => saw_variadic = true,
+                _ => {}
+            }
+        }
+    }
+
+    for node in &document.nodes {
+        walk(path, source, node, signatures, diagnostics);
+    }
+}
+
+fn label_name(node: &Node) -> Option<&str> {
+    match &node.kind {
+        NodeKind::Atom(Atom::Label(value)) => Some(value),
+        _ => None,
+    }
+}
+
+fn symbol(node: &Node) -> Option<&str> {
+    match &node.kind {
+        NodeKind::Atom(Atom::Symbol(value)) => Some(value),
+        _ => None,
+    }
+}
+
+fn is_label(node: &Node, expected: &str) -> bool {
+    label_name(node) == Some(expected)
+}
+
+fn is_structural_form_head(head: &str) -> bool {
+    matches!(
+        head,
+        "def"
+            | "defn"
+            | "deffect"
+            | "dependency"
+            | "do"
+            | "embed"
+            | "enum"
+            | "fn-type"
+            | "for"
+            | "if"
+            | "import"
+            | "interface"
+            | "join"
+            | "let"
+            | "let-as"
+            | "map"
+            | "macro"
+            | "match"
+            | "newtype"
+            | "package"
+            | "plugin-interface"
+            | "project"
+            | "range"
+            | "record"
+            | "ref"
+            | "return"
+            | "set"
+            | "spawn"
+            | "task"
+            | "template"
+            | "test"
+            | "test.case"
+            | "test.scenario"
+            | "tuple"
+            | "types"
+            | "wasm"
+            | "while"
+    )
 }
 
 fn syntax_diagnostic(path: &Path, source: &str, error: syntax::SyntaxError) -> Diagnostic {
@@ -683,8 +1047,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parser_tolerates_labels_after_variadic_arguments() {
+        let source = "(defn caller () void (do (target 1 2 3 label-1: 4 label-2: 5)))\n";
+        assert!(staged_sexpr_diagnostics(Path::new("call.vib"), source).is_empty());
+    }
+
+    #[test]
+    fn formatter_moves_labelled_arguments_before_variadic_arguments() {
+        let source = "(defn target (first int64 second int64 label-1 int64 label-2 int64 rest... int64) void (do unit))\n\
+(defn caller () void (do (target 1 2 3 label-1: 4 label-2: 5)))\n";
+        let formatted = staged_format_sexpr(Path::new("call.vib"), source).unwrap();
+        assert!(formatted.contains("(target 1 2 label-1: 4 label-2: 5 3)"));
+        assert_eq!(
+            formatted,
+            staged_format_sexpr(Path::new("call.vib"), &formatted).unwrap()
+        );
+    }
+
+    #[test]
+    fn linter_warns_when_labelled_argument_follows_variadic_argument() {
+        let source =
+            "(defn target (first int64 second int64 label-1 int64 rest... int64) void (do unit))\n\
+(defn caller () void (do (target 1 2 3 label-1: 4)))\n";
+        let diagnostics = staged_lint_sexpr(Path::new("call.vib"), source);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "W-STYLE-002" && diagnostic.message.contains("labelled arguments")
+        }));
+    }
+
+    #[test]
     fn formatting_is_typed_idempotent_and_preserves_comments_and_labels() {
-        let path = Path::new("src/main.vibra");
+        let path = Path::new("src/main.vib");
         let source = "; lead\n(defn hello-world (name str) str\n(do ; body\n(return name)) doc: \"Greets\")\n";
         let once = staged_format_sexpr(path, source).unwrap();
         let twice = staged_format_sexpr(path, &once).unwrap();
@@ -697,7 +1090,7 @@ mod tests {
     #[test]
     fn unicode_byte_spans_map_to_zero_based_lsp_columns() {
         let source = "; λ\n(defn valid () void (do unit))\n)\n";
-        let diagnostics = staged_sexpr_diagnostics(Path::new("unicode.vibra"), source);
+        let diagnostics = staged_sexpr_diagnostics(Path::new("unicode.vib"), source);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E-SYN-005");
         assert_eq!(diagnostics[0].span.start.line, 2);
@@ -711,7 +1104,7 @@ mod tests {
     #[test]
     fn ast_errors_use_precise_unicode_ranges() {
         let source = "; λ\n(defn bad () void (do unit) mystery: true)\n";
-        let diagnostics = staged_sexpr_diagnostics(Path::new("unicode.vibra"), source);
+        let diagnostics = staged_sexpr_diagnostics(Path::new("unicode.vib"), source);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E-SYN-011");
         assert_eq!(diagnostics[0].span.start.line, 1);
@@ -725,7 +1118,7 @@ mod tests {
     #[test]
     fn diagnostic_columns_use_utf16_code_units() {
         let source = "(defn valid () void (do unit) doc: \"😀\" mystery: true)\n";
-        let diagnostics = staged_sexpr_diagnostics(Path::new("emoji.vibra"), source);
+        let diagnostics = staged_sexpr_diagnostics(Path::new("emoji.vib"), source);
         assert_eq!(diagnostics.len(), 1);
         let offset = source.find("mystery:").unwrap();
         assert_eq!(diagnostics[0].span.start.offset, Some(offset));
@@ -743,7 +1136,7 @@ mod tests {
     fn typed_lint_visits_nested_names() {
         let source =
             "(defn Bad_Name (BadArg int64) int64 (do (let Local_Value BadArg) Local_Value))\n";
-        let diagnostics = staged_lint_sexpr(Path::new("lint.vibra"), source);
+        let diagnostics = staged_lint_sexpr(Path::new("lint.vib"), source);
         assert!(diagnostics
             .iter()
             .any(|value| value.message.contains("Bad_Name")));
@@ -759,7 +1152,7 @@ mod tests {
     #[test]
     fn typed_lint_visits_mutable_reference_inner_types() {
         let source = "(defn borrow (value (mut-ref Bad_Type)) void (do unit))\n";
-        let diagnostics = staged_lint_sexpr(Path::new("lint.vibra"), source);
+        let diagnostics = staged_lint_sexpr(Path::new("lint.vib"), source);
         assert!(diagnostics
             .iter()
             .any(|value| value.message.contains("Bad_Type")));
@@ -767,11 +1160,9 @@ mod tests {
 
     #[test]
     fn formatter_rejects_typed_invalid_source() {
-        let error = staged_format_sexpr(
-            Path::new("bad.vibra"),
-            "(defn bad () void (do unit) nope: 1)",
-        )
-        .unwrap_err();
+        let error =
+            staged_format_sexpr(Path::new("bad.vib"), "(defn bad () void (do unit) nope: 1)")
+                .unwrap_err();
         assert_eq!(error.code, "E-SYN-011");
     }
 
@@ -779,6 +1170,6 @@ mod tests {
     fn expect_error_codes_are_not_kebab_linted() {
         let source = "(test.scenario \"fails\" (test.case \"fails\" unit\n\
                       expect-error: (@compile E-OP-002 \"overflow\")))\n";
-        assert!(staged_lint_sexpr(Path::new("test.vibra"), source).is_empty());
+        assert!(staged_lint_sexpr(Path::new("test.vib"), source).is_empty());
     }
 }

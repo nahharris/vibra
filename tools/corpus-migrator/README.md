@@ -1,7 +1,7 @@
 # Vibra corpus migrator
 
 One-time, developer-only migration utility for issue #150. It recursively scans
-the repository's `.vibra` corpus (including initialized standard-library
+the repository's `.vib` corpus (including initialized standard-library
 submodules, fixtures, templates, macros, and generated-source inputs), emits
 schema-aware S-expression forms in memory, and validates the result at three
 increasingly strict, honestly-labeled depths instead of a single conflated
@@ -23,7 +23,7 @@ number:
    compiles it.
 
 Each deeper tier only runs on the files that passed the tier above it, so the
-three counts form a funnel, not three independent samples. `project.vibra`
+three counts form a funnel, not three independent samples. `project.vib`
 package manifests are excluded from all three tiers: they use their own
 top-level grammar (`(project ...)`, read by `project_context.rs`), not the
 module grammar `ast::lower_document` expects, so running them through it would

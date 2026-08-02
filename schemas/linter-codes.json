@@ -253,6 +253,11 @@
       "summary": "Symbol-like key is not kebab-case"
     },
     {
+      "code": "W-STYLE-002",
+      "severity": "warning",
+      "summary": "Labelled arguments must precede variadic arguments"
+    },
+    {
       "code": "E-WASM-001",
       "severity": "error",
       "summary": "$wasm encoding does not match active compiler WASM mode"

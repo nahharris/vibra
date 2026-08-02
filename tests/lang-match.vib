@@ -1,0 +1,80 @@
+(import test "../stdlib/src/test.vib")
+(test.scenario
+  "literal-int-arm"
+  (test.case
+    "literal-int-arm"
+    (let n 3)
+    (match
+      n
+      1
+      (do (test.fail "matched 1"))
+      3
+      (do (test.assert true))
+      _
+      (do (test.fail "fell through to wildcard"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "literal-string-arm"
+  (test.case
+    "literal-string-arm"
+    (let s "b")
+    (match
+      s
+      "a"
+      (do (test.fail "matched a"))
+      "b"
+      (do (test.assert true))
+      _
+      (do (test.fail "fell through"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "bool-arm"
+  (test.case
+    "bool-arm"
+    (let flag false)
+    (match
+      flag
+      true
+      (do (test.fail "matched true"))
+      false
+      (do (test.assert true))
+      _
+      (do (test.fail "fell through bool match"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "wildcard-catch-all"
+  (test.case
+    "wildcard-catch-all"
+    (let n 99)
+    (match n 0 (do (test.fail "matched 0")) _ (do (test.assert true)))
+    profile: @core
+  )
+)
+(test.scenario
+  "bind-captures-value"
+  (test.case
+    "bind-captures-value"
+    (let n 8)
+    (match
+      n
+      7
+      (do (test.fail "matched 7"))
+      (bind captured)
+      (do
+        (match captured 8 (test.assert true) _ (test.fail "wrong captured value"))
+      )
+      _
+      (do (test.fail "fell through to wildcard"))
+    )
+    profile: @core
+  )
+)

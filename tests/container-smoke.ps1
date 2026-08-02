@@ -136,7 +136,7 @@ try {
     Invoke-Docker @('run', '--rm', $Image, '--help')
     Invoke-Docker @('run', '--rm', '--mount', $mount, '-w', $workspace, $Image, 'init', 'smoke')
     Invoke-Docker @('run', '--rm', '--mount', $mount, '-w', $project, $Image, 'check')
-    Invoke-Docker @('run', '--rm', '--mount', $mount, '-w', $project, $Image, 'run', 'src/smoke/main.vibra')
+    Invoke-Docker @('run', '--rm', '--mount', $mount, '-w', $project, $Image, 'run', 'src/smoke/main.vib')
 
     if ($Dev) {
         if ($Platform -eq 'linux') {

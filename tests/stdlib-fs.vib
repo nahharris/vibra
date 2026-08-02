@@ -1,0 +1,45 @@
+(import test "../stdlib/src/test.vib")
+(import fs "../stdlib/src/fs.vib")
+(import option "../stdlib/src/option.vib")
+(import result "../stdlib/src/result.vib")
+(test.scenario
+  "path-new-wraps-a-string"
+  (test.case
+    "path-new-wraps-a-string"
+    (let path (fs.path.new "contract.txt"))
+    (let raw (cast path str))
+    (match
+      raw
+      "contract.txt"
+      (do (test.assert true))
+      _
+      (do (test.fail "path constructor changed the source string"))
+    )
+    profile: @core
+    tags: (@stdlib @filesystem)
+  )
+)
+(test.scenario
+  "path-name-and-components-are-structural"
+  (test.case
+    "path-name-and-components-are-structural"
+    (let base (fs.path.new "alpha"))
+    (let path (fs.path.join base "beta.txt"))
+    (match
+      (fs.path.file-name path)
+      (option.option.some "beta.txt")
+      (do (test.assert true))
+      _
+      (do (test.fail "file name was not the final component"))
+    )
+    (match
+      (fs.path.components path)
+      (result.result.ok (array "alpha" "beta.txt"))
+      (do (test.assert true))
+      _
+      (do (test.fail "path components were not platform-neutral"))
+    )
+    profile: @core
+    tags: (@stdlib @filesystem)
+  )
+)

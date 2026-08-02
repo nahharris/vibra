@@ -18,12 +18,12 @@ try {
     Vibra @('init', 'smoke')
     Push-Location (Join-Path $temp 'smoke')
     Vibra @('check')
-    Vibra @('run', 'src/smoke/main.vibra')
+    Vibra @('run', 'src/smoke/main.vib')
     Vibra @('build', '.', '--output', 'smoke.vapp')
     Vibra @('package', 'verify', 'smoke.vapp')
     Vibra @('run', 'smoke.vapp')
     Pop-Location
-    Add-Content -LiteralPath (Join-Path $relocated 'stdlib/src/io.vibra') -Value "`ntampered: true"
+    Add-Content -LiteralPath (Join-Path $relocated 'stdlib/src/io.vib') -Value "`ntampered: true"
     & $exe init damaged 2>&1 | Out-String -OutVariable damagedError | Out-Null
     if ($LASTEXITCODE -eq 0 -or $damagedError -notmatch 'E-DIST-004') { throw 'Tampered stdlib did not fail with E-DIST-004.' }
     Remove-Item -LiteralPath (Join-Path $relocated 'release.json')

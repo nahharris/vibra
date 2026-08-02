@@ -79,7 +79,7 @@ pub(crate) struct LocalSignatures {
 
 /// A module's fully resolved signature view: its own bare names, its own
 /// names again qualified by its file stem (for self-qualified references,
-/// e.g. `option.vibra` calling `option.empty`), and each import's local
+/// e.g. `option.vib` calling `option.empty`), and each import's local
 /// names qualified by the alias that module declared for it. Mirrors the
 /// role `SurfaceProgram.imports` (`src/frontend.rs`) plays for the on-disk
 /// typed frontend, built here instead from in-memory ASTs since the
@@ -1058,8 +1058,8 @@ impl<'a> Converter<'a> {
         // reinterpret them relative to the wrong import graph: a real bug
         // this fixed (an `E-IMPL-005` mismatch on `fs.fs-error`'s `context`
         // method, whose declared return type `(option.option error-lib
-        // .context)` uses `fs.vibra`'s own aliases and was being replaced by
-        // `error.vibra`'s differently-qualified, differently-aliased
+        // .context)` uses `fs.vib`'s own aliases and was being replaced by
+        // `error.vib`'s differently-qualified, differently-aliased
         // declaration of the same member).
         //
         // An inline method's own parameters/return type are already
@@ -2566,7 +2566,7 @@ mod tests {
     }
 
     fn single_module_program(dir: &Path, value: Value) -> LoadedProgram {
-        let entry = touch(&dir.join("entry.vibra"));
+        let entry = touch(&dir.join("entry.vib"));
         let mut modules = HashMap::new();
         modules.insert(entry.clone(), value);
         LoadedProgram {
@@ -2823,7 +2823,7 @@ mod tests {
 
         let entry_module = module_from_source(
             r#"
-(import util "./util.vibra")
+(import util "./util.vib")
 (defn compute (x int64) int64 (do (return (util.double x))))
 "#,
         );
@@ -2836,8 +2836,8 @@ mod tests {
         let entry_value = module_to_value(&entry_module, &entry_resolved).unwrap();
 
         let dir = tempfile::tempdir().unwrap();
-        let util_path = touch(&dir.path().join("util.vibra"));
-        let entry_path = touch(&dir.path().join("entry.vibra"));
+        let util_path = touch(&dir.path().join("util.vib"));
+        let entry_path = touch(&dir.path().join("entry.vib"));
         let mut modules = HashMap::new();
         modules.insert(util_path, util_value);
         modules.insert(entry_path.clone(), entry_value);
@@ -2854,7 +2854,7 @@ mod tests {
 
     #[test]
     fn import_value_shape_matches_legacy_envelope() {
-        let module = module_from_source(r#"(import io "./io.vibra")"#);
+        let module = module_from_source(r#"(import io "./io.vib")"#);
         let signatures = collect_local_signatures(&module).unwrap();
         let resolved = resolve_signatures("entry", &signatures, &[]);
         let value = module_to_value(&module, &resolved).unwrap();
@@ -2863,7 +2863,7 @@ mod tests {
         let io_map = io_def.as_mapping().unwrap();
         assert_eq!(
             io_map.get(&Value::String("$import".into())),
-            Some(&Value::String("./io.vibra".into()))
+            Some(&Value::String("./io.vib".into()))
         );
     }
 

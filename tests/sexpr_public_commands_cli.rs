@@ -14,28 +14,28 @@ fn public_commands_accept_a_typed_sexpression_project() {
     std::fs::create_dir_all(root.path().join("src/app")).unwrap();
     std::fs::create_dir_all(root.path().join("tests")).unwrap();
     std::fs::write(
-        root.path().join("project.vibra"),
-        "(project\n  (package \"typed-cli\" \"0.1.0\")\n  (target app kind: @bin root: \"src/app\" entry: \"main.vibra\"))\n",
+        root.path().join("project.vib"),
+        "(project\n  (package \"typed-cli\" \"0.1.0\")\n  (target app kind: @bin root: \"src/app\" entry: \"main.vib\"))\n",
     )
     .unwrap();
     std::fs::write(
-        root.path().join("src/app/main.vibra"),
+        root.path().join("src/app/main.vib"),
         "(defn main () void (do) doc: \"Typed command entry.\")\n",
     )
     .unwrap();
     std::fs::write(
-        root.path().join("tests/typed.vibra"),
+        root.path().join("tests/typed.vib"),
         "(test.scenario \"typed-command\" (test.case \"typed-command\" (do) profile: @core))\n",
     )
     .unwrap();
 
     for command in [
-        ["run", "src/app/main.vibra"],
-        ["lint", "src/app/main.vibra"],
+        ["run", "src/app/main.vib"],
+        ["lint", "src/app/main.vib"],
         ["test", "."],
-        ["docs", "src/app/main.vibra"],
-        ["expand", "src/app/main.vibra"],
-        ["effects", "src/app/main.vibra"],
+        ["docs", "src/app/main.vib"],
+        ["expand", "src/app/main.vib"],
+        ["effects", "src/app/main.vib"],
     ] {
         let output = vibra_cmd()
             .current_dir(root.path())

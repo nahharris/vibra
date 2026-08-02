@@ -1,13 +1,14 @@
 # Vibra project layout
 
-`project.vibra` is the canonical project manifest. It uses a dedicated typed
-S-expression grammar and is metadata, not a source module.
+`project.vib` is the canonical project source file. It uses the same Vibra
+S-expression syntax as modules, with a `(project ...)` root interpreted by
+project commands; the filename does not use a separate manifest extension.
 
 ```vibra
 (project
   (package "hello" "0.1.0")
-  (target core kind: @lib root: "src/core" entry: "lib.vibra")
-  (target hello kind: @bin root: "src/hello" entry: "main.vibra")
+  (target core kind: @lib root: "src/core" entry: "lib.vib")
+  (target hello kind: @bin root: "src/hello" entry: "main.vib")
   (dependency std
     git: "https://github.com/nahharris/vibra-stdlib.git"
     rev: "6b9fa5838e4f4122ff141e13a5ef737e99955dad")
@@ -28,24 +29,24 @@ Target names and dependency names share one namespace. A name can be used once.
 
 ```text
 hello/
-  project.vibra
+  project.vib
   dep/
     std/
   src/
     hello/
-      main.vibra
+      main.vib
 ```
 
-`vibra init hello --template lib` creates `src/hello/lib.vibra`. `vibra init hello --template workspace` creates `src/core/lib.vibra` and `src/hello/main.vibra`.
+`vibra init hello --template lib` creates `src/hello/lib.vib`. `vibra init hello --template workspace` creates `src/core/lib.vib` and `src/hello/main.vib`.
 
 ## Tests
 
 Project tests live under `tests/` by convention. `vibra test` recursively
-discovers `.vibra` files there and runs each `test.case` declaration.
+discovers `.vib` files there and runs each `test.case` declaration.
 Test files may contain several tests and do not need a `main` function.
 
 ```vibra
-(import test "@std/test.vibra")
+(import test "@std/test.vib")
 
 (test.scenario "files"
   (test.case "opens file" (test.assert true)))
@@ -55,9 +56,9 @@ Use `--filter`, `--jobs`, `--timeout-ms`, `--fail-fast`, and
 `--report json --report-file <path>` to control runner behavior. Permission
 flags are the same as `vibra run` and apply to each test case.
 
-Files named `foo.<flag>.vibra` are conditional module parts for `foo.vibra`
-when the base file exists. For example, `math.test.vibra` shares the same
-module scope as `math.vibra` and is included by `vibra test`, which enables the
+Files named `foo.<flag>.vib` are conditional module parts for `foo.vib`
+when the base file exists. For example, `math.test.vib` shares the same
+module scope as `math.vib` and is included by `vibra test`, which enables the
 `test` compilation flag. Normal compiler runs use no flags by default. See
 [conditional-compilation.md](conditional-compilation.md) for multi-flag and
 tooling semantics.
@@ -67,17 +68,17 @@ tooling semantics.
 Relative imports keep file-relative behavior:
 
 ```vibra
-(import model "./model.vibra")
+(import model "./model.vib")
 ```
 
 Imports beginning with `@` resolve through project namespaces:
 
 ```vibra
-(import io "@std/io.vibra")
-(import core "@core/lib.vibra")
+(import io "@std/io.vib")
+(import core "@core/lib.vib")
 ```
 
-`@name/path` resolves `name` as either a target name or dependency name. Target imports resolve under the target `root`. Dependencies with a `project.vibra` resolve under their matching (or only) library target root; unmanifested path dependencies retain root-relative behavior. Git dependencies live under `dep/<name>` after `vibra sync`.
+`@name/path` resolves `name` as either a target name or dependency name. Target imports resolve under the target `root`. Dependencies with a `project.vib` resolve under their matching (or only) library target root; unmanifested path dependencies retain root-relative behavior. Git dependencies live under `dep/<name>` after `vibra sync`.
 
 ## Dependencies
 

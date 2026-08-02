@@ -1,0 +1,29 @@
+(import test "../stdlib/src/test.vib")
+(import time "../stdlib/src/time.vib")
+(import random "../stdlib/src/random.vib")
+(import sys "../stdlib/src/sys.vib")
+(defn accepts-unix-millis (value uint64) bool (return true))
+(defn accepts-system-info (value sys.info-record) bool (return true))
+(test.scenario
+  "privileged-stdlib-operations-return-their-declared-shapes"
+  (test.case
+    "privileged-stdlib-operations-return-their-declared-shapes"
+    (let now (time.now.unix-millis))
+    (let is-millis (accepts-unix-millis now))
+    (test.assert is-millis)
+    (let bytes (random.generate.bytes 1))
+    (let raw-bytes (cast bytes (array uint8)))
+    (match
+      raw-bytes
+      (array _)
+      (do (test.assert true))
+      _
+      (do (test.fail "random bytes returned the wrong length"))
+    )
+    (let info (sys.info.get))
+    (let is-info (accepts-system-info info))
+    (test.assert is-info)
+    profile: @system
+    tags: (@stdlib)
+  )
+)

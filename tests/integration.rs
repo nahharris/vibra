@@ -10,7 +10,7 @@ fn path_str(path: &Path) -> String {
 
 fn lower_exec_value(source: &str) -> anyhow::Result<vibra::lower::RuntimeValue> {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(&entry, "(const placeholder bool true)\n").unwrap();
     let loaded = vibra::load::load_program(&entry).unwrap();
     let expression = vibra::load::parse_inline_exec_expression(source)?;
@@ -25,9 +25,9 @@ fn lower_exec_value(source: &str) -> anyhow::Result<vibra::lower::RuntimeValue> 
 #[test]
 fn native_stream_module_registers_shared_roots_and_operations() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vibra")).unwrap();
+    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -46,7 +46,7 @@ fn native_stream_module_registers_shared_roots_and_operations() {
 #[test]
 fn structural_effect_syntax_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         "(defn main () void (do) effects: ((effect @fs @read)))\n",
@@ -63,7 +63,7 @@ fn structural_effect_syntax_is_rejected() {
 #[test]
 fn raw_wasm_requires_a_nominal_deffect_operation() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         "(defn main () uint64 (wasm \"vibra_v1\" \"clock_now_unix_millis\"))\n",
@@ -152,10 +152,10 @@ fn primitive_integer_failures_have_stable_diagnostics() {
 fn collection_operations_execute_through_wasm_backend() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let collections =
-        path_str(&std::fs::canonicalize(root.join("stdlib/src/collections.vibra")).unwrap());
-    let test = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap());
+        path_str(&std::fs::canonicalize(root.join("stdlib/src/collections.vib")).unwrap());
+    let test = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap());
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -183,7 +183,7 @@ fn collection_operations_execute_through_wasm_backend() {
 #[test]
 fn match_arms_use_case_key() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn main () void (do (match 0 0 (do) _ (do))))
@@ -205,7 +205,7 @@ fn legacy_pattern_match_arm_key_is_rejected() {
     // is rejected structurally, by the reader, not by this legacy semantic
     // check.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn main () void (do (match 0 (pattern 0 (do)))))
@@ -227,9 +227,9 @@ fn legacy_pattern_match_arm_key_is_rejected() {
 #[test]
 fn generic_alias_instantiation_prefers_current_module_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let io = std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/src/io.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -249,7 +249,7 @@ fn generic_alias_instantiation_prefers_current_module_scope() {
 #[test]
 fn mut_ref_and_set_forms_lower() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn
@@ -288,7 +288,7 @@ fn mut_ref_and_set_forms_lower() {
 #[test]
 fn structured_task_lowers_and_rejects_mutable_reference_captures() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn
@@ -327,7 +327,7 @@ fn structured_task_lowers_and_rejects_mutable_reference_captures() {
 #[test]
 fn host_calls_are_general_nested_expressions_in_both_backends() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(deffect host
@@ -348,7 +348,7 @@ fn host_calls_are_general_nested_expressions_in_both_backends() {
 #[test]
 fn spawned_task_handles_are_typed_affine_and_scheduler_backed() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn
@@ -393,7 +393,7 @@ fn spawned_task_handles_are_typed_affine_and_scheduler_backed() {
 #[test]
 fn set_rejects_immutable_binding() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn main () void (do (let count 0) (set count 1)))
@@ -409,7 +409,7 @@ fn set_rejects_immutable_binding() {
 #[test]
 fn set_rejects_read_only_reference() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn
@@ -430,7 +430,7 @@ fn set_rejects_read_only_reference() {
 #[test]
 fn mutable_and_reference_type_wrappers_parse() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn take-mut (value (mut int64)) int64 (do (return value)))
@@ -477,7 +477,7 @@ fn wasm_abi_aggregate_layout_is_aligned() {
 #[test]
 fn nested_function_grants_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     // `grants:` is legacy pre-policy-redesign syntax with no S-expression
     // form at all (the known `fn` attributes are `doc:`, `where:`, `defs:`,
     // `impls:`); the reader itself rejects it as an unknown declaration
@@ -506,7 +506,7 @@ fn implicit_subject_function_is_rejected_with_e_one_001() {
     // an explicit, named, positional list. Referencing an undeclared name
     // is rejected instead, by ordinary reference resolution.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         "(defn identity () str (do (return subject)))\n(defn main () void (do))\n",
@@ -527,7 +527,7 @@ fn void_function_with_sibling_args_is_rejected_with_e_one_001() {
     // that the grammar does not already make unwritable, so this now
     // asserts the grammar's single spelling still lowers cleanly.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         "(defn identity (value str) str (do (return value)))\n(defn main () void (do))\n",
@@ -546,7 +546,7 @@ fn labeled_primary_is_only_available_through_args_namespace() {
     // declared name, which is what this now asserts positively instead of
     // asserting the removed `args.` namespace requirement negatively.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         "(defn identity (value str) str (do (return value)))\n(defn main () void (do))\n",
@@ -562,7 +562,7 @@ fn grant_names_must_be_kebab_case() {
     // See the comment on `nested_function_grants_are_rejected` above:
     // `grants:` is unknown syntax now, rejected by the reader.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(&entry, "(defn main () void (do) grants: (fs_read))\n").unwrap();
 
     let prog = vibra::load::load_program(&entry);
@@ -576,10 +576,10 @@ fn grant_names_must_be_kebab_case() {
 #[test]
 fn import_cycle_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let a = dir.path().join("a.vibra");
-    let b = dir.path().join("b.vibra");
-    std::fs::write(&a, "(import io \"./b.vibra\")\n").unwrap();
-    std::fs::write(&b, "(import io \"./a.vibra\")\n").unwrap();
+    let a = dir.path().join("a.vib");
+    let b = dir.path().join("b.vib");
+    std::fs::write(&a, "(import io \"./b.vib\")\n").unwrap();
+    std::fs::write(&b, "(import io \"./a.vib\")\n").unwrap();
     let err = vibra::load::load_program(&a).unwrap_err();
     let s = err.to_string();
     assert!(
@@ -591,7 +591,7 @@ fn import_cycle_is_rejected() {
 #[test]
 fn private_module_symbol_is_reachable_locally() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn main-helper () void (do (return)) visibility: @private)
@@ -616,8 +616,8 @@ fn private_import_alias_is_usable_locally() {
     // the surviving half of the original intent: an import alias is usable
     // locally, regardless of the removed privacy marker.
     let dir = tempfile::tempdir().unwrap();
-    let helper = dir.path().join("helper.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let helper = dir.path().join("helper.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &helper,
         r#"(defn noop () void (do (let ok true)))
@@ -641,8 +641,8 @@ fn private_import_alias_is_usable_locally() {
 #[test]
 fn imported_module_private_helper_works_internally() {
     let dir = tempfile::tempdir().unwrap();
-    let lib = dir.path().join("lib.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let lib = dir.path().join("lib.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &lib,
         r#"(defn priv () void (do (return)) visibility: @private)
@@ -667,8 +667,8 @@ fn imported_module_private_helper_works_internally() {
 #[test]
 fn importer_cannot_reference_private_symbol_on_imported_module() {
     let dir = tempfile::tempdir().unwrap();
-    let lib = dir.path().join("lib.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let lib = dir.path().join("lib.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &lib,
         r#"(defn priv () void (do (return)) visibility: @private)
@@ -696,8 +696,8 @@ fn importer_cannot_reference_private_symbol_on_imported_module() {
 #[test]
 fn importer_cannot_reference_private_type_on_imported_module() {
     let dir = tempfile::tempdir().unwrap();
-    let lib = dir.path().join("lib.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let lib = dir.path().join("lib.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &lib,
         r#"(def priv-t (record (x int32)) visibility: @private)
@@ -727,8 +727,8 @@ fn importer_cannot_reference_private_type_on_imported_module() {
 #[test]
 fn importer_cannot_use_private_enum_constructor_on_imported_module() {
     let dir = tempfile::tempdir().unwrap();
-    let lib = dir.path().join("lib.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let lib = dir.path().join("lib.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &lib,
         r#"(def priv-e (enum (a void)) visibility: @private)
@@ -756,7 +756,7 @@ fn importer_cannot_use_private_enum_constructor_on_imported_module() {
 #[test]
 fn hello_example_compiles_and_runs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let p = root.join("examples/hello.vibra");
+    let p = root.join("examples/hello.vib");
     let prog = vibra::load::load_program(&p).unwrap();
     let lowered = vibra::lower::lower_program(&prog).unwrap();
     vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default()).unwrap();
@@ -765,11 +765,10 @@ fn hello_example_compiles_and_runs() {
 #[test]
 fn enum_match_lowers_with_new_syntax() {
     let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("model.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let model = dir.path().join("model.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &model,
@@ -818,7 +817,7 @@ fn legacy_mapping_match_arms_are_rejected() {
     // flat `pattern expression` pairs, so a malformed arm (here, `when`
     // used as an expression) is rejected by typed-surface lowering directly.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &entry,
@@ -855,7 +854,7 @@ fn structured_match_form_is_rejected_with_e_one_007() {
     // now asserts the canonical form lowers cleanly rather than asserting
     // an unwritable alternative is rejected.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &entry,
@@ -881,10 +880,9 @@ fn structured_match_form_is_rejected_with_e_one_007() {
 #[test]
 fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
+    let entry = dir.path().join("entry.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
 
     std::fs::write(
         &entry,
@@ -918,10 +916,9 @@ fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
 #[test]
 fn if_branch_let_does_not_leak_into_other_branch_or_after() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
+    let entry = dir.path().join("entry.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
 
     std::fs::write(
         &entry,
@@ -945,10 +942,9 @@ fn if_branch_let_does_not_leak_into_other_branch_or_after() {
 #[test]
 fn if_merges_locals_when_both_branches_bind_same_name_with_same_type() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
+    let entry = dir.path().join("entry.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
 
     std::fs::write(
         &entry,
@@ -975,10 +971,9 @@ fn if_merges_locals_when_both_branches_bind_same_name_with_same_type() {
 #[test]
 fn while_body_let_does_not_leak_after_loop() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
+    let entry = dir.path().join("entry.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
 
     std::fs::write(
         &entry,
@@ -1002,10 +997,9 @@ fn while_body_let_does_not_leak_after_loop() {
 #[test]
 fn record_tuple_array_and_map_patterns_bind_values() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
+    let entry = dir.path().join("entry.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
 
     std::fs::write(
         &entry,
@@ -1056,7 +1050,7 @@ fn record_tuple_array_and_map_patterns_bind_values() {
 #[test]
 fn nested_wildcard_does_not_satisfy_enum_exhaustiveness() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def signal (enum (go int64) (stop void)))
@@ -1079,7 +1073,7 @@ fn nested_wildcard_does_not_satisfy_enum_exhaustiveness() {
 #[test]
 fn nested_enum_tag_does_not_cover_same_named_outer_tag() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def inner (enum (yes void) (no void)))
@@ -1104,7 +1098,7 @@ fn nested_enum_tag_does_not_cover_same_named_outer_tag() {
 #[test]
 fn single_literal_arm_does_not_exhaust_open_type() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn classify (n int64) int64 (do (match n 3 (do (return 1)))))
@@ -1125,7 +1119,7 @@ fn single_literal_arm_does_not_exhaust_open_type() {
 #[test]
 fn sole_bind_arm_is_total() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn echo (s str) str (do (match s (bind captured) (do (return captured)))))
@@ -1141,7 +1135,7 @@ fn sole_bind_arm_is_total() {
 #[test]
 fn newtype_and_nominal_interface_patterns_match_runtime_type_tags() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     // This test's first `$match` needs `(interface Type _)`. Legacy's own
     // `Pattern::Interface(TypeRef)` (src/lower.rs) carries only a type, with
@@ -1191,8 +1185,8 @@ fn newtype_and_nominal_interface_patterns_match_runtime_type_tags() {
 #[test]
 fn rejects_legacy_variants_union_syntax() {
     let dir = tempfile::tempdir().unwrap();
-    let bad = dir.path().join("bad.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let bad = dir.path().join("bad.vib");
+    let entry = dir.path().join("entry.vib");
 
     // The legacy `$union: {variants: {...}}` alternative to the canonical
     // `$union: [...]` list has no S-expression form: `union` is always
@@ -1225,11 +1219,10 @@ fn rejects_legacy_variants_union_syntax() {
 #[test]
 fn warns_for_non_kebab_case_symbols() {
     let dir = tempfile::tempdir().unwrap();
-    let mod_file = dir.path().join("symbols.vibra");
-    let entry = dir.path().join("entry.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
+    let mod_file = dir.path().join("symbols.vib");
+    let entry = dir.path().join("entry.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
 
     std::fs::write(
         &mod_file,
@@ -1266,11 +1259,10 @@ fn warns_for_non_kebab_case_symbols() {
 #[test]
 fn supports_void_enum_constructor_without_payload() {
     let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("model.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let model = dir.path().join("model.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &model,
@@ -1318,8 +1310,8 @@ fn supports_void_enum_constructor_without_payload() {
 #[test]
 fn rejects_removed_int_float_aliases() {
     let dir = tempfile::tempdir().unwrap();
-    let bad = dir.path().join("bad.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let bad = dir.path().join("bad.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &bad,
@@ -1364,8 +1356,8 @@ fn rejects_removed_int_float_aliases() {
 #[test]
 fn numeric_literals_are_compatible_with_explicit_numeric_types() {
     let dir = tempfile::tempdir().unwrap();
-    let mod_file = dir.path().join("numeric.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let mod_file = dir.path().join("numeric.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &mod_file,
@@ -1430,7 +1422,7 @@ fn report_effects(lowered: &vibra::lower::LoweredProgram) -> String {
 #[test]
 fn impl_method_may_not_exceed_the_interface_effect_ceiling() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def lister (interface (all (fn-type (self self) (array str)))))
@@ -1456,7 +1448,7 @@ fn impl_method_may_not_exceed_the_interface_effect_ceiling() {
 #[test]
 fn interface_effect_ceiling_admits_a_matching_impl() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def lister (interface (all (fn-type (self self) (array str) effects: (env.read)))))
@@ -1485,7 +1477,7 @@ fn interface_effect_ceiling_admits_a_matching_impl() {
 #[test]
 fn inline_impl_method_effects_reach_the_forwarding_shim() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def lister (interface (all (fn-type (self self) (array str)))))
@@ -1509,7 +1501,7 @@ fn inline_impl_method_effects_reach_the_forwarding_shim() {
 #[test]
 fn wasm_body_effects_come_from_the_registry_not_the_declaration() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn now () (array str) (wasm "vibra_v1" "env_list"))
@@ -1531,7 +1523,7 @@ fn wasm_body_effects_come_from_the_registry_not_the_declaration() {
 #[test]
 fn declared_effects_are_a_ceiling() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn exact () void (do (let ok true)) effects: (env.read))
@@ -1554,7 +1546,7 @@ fn declared_effects_are_a_ceiling() {
 #[test]
 fn effects_propagate_to_callers_through_declarations() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn leaf () void (do (let ok true)) effects: (env.read))
@@ -1579,7 +1571,7 @@ fn effects_propagate_to_callers_through_declarations() {
 #[test]
 fn task_effects_belong_to_the_enclosing_function() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn leaf () void (do (let ok true)) effects: (env.read))
@@ -1602,7 +1594,7 @@ fn task_effects_belong_to_the_enclosing_function() {
 #[test]
 fn effects_attribute_accepts_nominal_labels() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn named () void (do (let ok true)) effects: (fs.read))
@@ -1638,9 +1630,9 @@ fn effects_attribute_accepts_nominal_labels() {
 #[test]
 fn nominal_roots_are_canonical_and_alias_independent() {
     let dir = tempfile::tempdir().unwrap();
-    let first = dir.path().join("first.vibra");
-    let second = dir.path().join("second.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let first = dir.path().join("first.vib");
+    let second = dir.path().join("second.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(&first, "(defn read () void (do (let ok true)))\n").unwrap();
     std::fs::write(&second, "(defn fetch () void (do (let ok true)))\n").unwrap();
@@ -1671,7 +1663,7 @@ fn nominal_roots_are_canonical_and_alias_independent() {
 #[test]
 fn nominal_root_needs_no_import() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn touches-fs () void (do (let ok true)) effects: (fs.read))
@@ -1695,7 +1687,7 @@ fn effects_is_rejected_on_non_function_declarations() {
         ),
     ] {
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(
             &entry,
             format!("{source}(defn main () void (do (let ok true)))\n"),
@@ -1714,7 +1706,7 @@ fn effects_is_rejected_on_non_function_declarations() {
 fn unknown_or_non_effect_names_are_rejected() {
     for (label, extra) in [("missing", ""), ("thing", "(def thing (newtype str))\n")] {
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(
             &entry,
             format!(
@@ -1740,9 +1732,9 @@ fn unknown_or_non_effect_names_are_rejected() {
 #[test]
 fn named_effect_reference_obeys_the_declared_alias_rule() {
     let dir = tempfile::tempdir().unwrap();
-    let inner = dir.path().join("inner.vibra");
-    let middle = dir.path().join("middle.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let inner = dir.path().join("inner.vib");
+    let middle = dir.path().join("middle.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &inner,
@@ -1781,7 +1773,7 @@ fn named_effect_reference_obeys_the_declared_alias_rule() {
 #[test]
 fn effect_declaration_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(deffect read
@@ -1802,7 +1794,7 @@ fn effect_declaration_lowers() {
 #[test]
 fn effect_binding_collides_with_a_type_of_the_same_name() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(deffect read (defn open () void (do (let ok true)) effects: ()))
@@ -1825,7 +1817,7 @@ fn effect_binding_collides_with_a_type_of_the_same_name() {
 fn bare_type_aliases_are_unsupported_for_effects_and_newtypes_alike() {
     for body in ["(newtype int64)"] {
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(
             &entry,
             format!(
@@ -1850,7 +1842,7 @@ fn bare_type_aliases_are_unsupported_for_effects_and_newtypes_alike() {
 #[test]
 fn effect_operands_must_be_atoms() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def read (effect fs read))
@@ -1869,7 +1861,7 @@ fn effect_operands_must_be_atoms() {
 #[test]
 fn effect_requires_exactly_a_domain_and_an_action() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def read (effect @fs))
@@ -1890,7 +1882,7 @@ fn effect_requires_exactly_a_domain_and_an_action() {
 #[test]
 fn effect_extra_operands_are_reserved_for_handlers() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def read (effect @fs @read @extra))
@@ -1912,7 +1904,7 @@ fn effect_extra_operands_are_reserved_for_handlers() {
 #[test]
 fn int64_local_does_not_narrow_to_int32_parameter() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn accepts-int32 (input int32) void (do (let ok true)))
@@ -1933,7 +1925,7 @@ fn int64_local_does_not_narrow_to_int32_parameter() {
 #[test]
 fn out_of_range_int_literal_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn accepts-int8 (input int8) void (do (let ok true)))
@@ -1954,7 +1946,7 @@ fn out_of_range_int_literal_is_rejected() {
 #[test]
 fn uint64_value_does_not_implicitly_become_int64() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn produce () uint64 (do (return 7)))
@@ -1977,7 +1969,7 @@ fn uint64_value_does_not_implicitly_become_int64() {
 #[test]
 fn array_literal_casts_into_narrower_element_newtype() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def octets (newtype (array uint8)))
@@ -1994,7 +1986,7 @@ fn array_literal_casts_into_narrower_element_newtype() {
 #[test]
 fn newtype_decl_lowers_and_requires_explicit_cast() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def meter (newtype int64))
@@ -2027,7 +2019,7 @@ fn cast_rejects_legacy_nested_payload_shape() {
     // ..., 2, ...)` in `src/ast/surface.rs`). A malformed arity is therefore
     // now a reader-level `E-SYN` error, not the legacy semantic check.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def meter (newtype int64))
@@ -2047,7 +2039,7 @@ fn cast_rejects_legacy_nested_payload_shape() {
 #[test]
 fn cast_rejects_identity_conversion() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn main () void (do (let v (cast 7 int64))))
@@ -2066,7 +2058,7 @@ fn cast_rejects_identity_conversion() {
 #[test]
 fn newtype_does_not_accept_inner_type_implicitly() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def meter (newtype int64))
@@ -2094,7 +2086,7 @@ fn newtype_does_not_accept_inner_type_implicitly() {
 #[test]
 fn cast_rejects_cross_newtype_conversion() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def meter (newtype int64))
@@ -2128,10 +2120,10 @@ fn cast_rejects_cross_newtype_conversion() {
 #[test]
 fn fs_writable_interface_rejects_read_file() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vib")).unwrap();
+    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -2161,7 +2153,7 @@ fn fs_writable_interface_rejects_read_file() {
 #[test]
 fn wasm_abi_rejects_wrong_value_parameter_type() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(deffect host
@@ -2186,7 +2178,7 @@ fn wasm_abi_rejects_wrong_value_parameter_type() {
 #[test]
 fn wasm_abi_rejects_wrong_return_type() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(deffect host
@@ -2211,7 +2203,7 @@ fn wasm_abi_rejects_wrong_return_type() {
 #[test]
 fn opaque_host_handle_cannot_be_cast_from_integer() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def read-file (handle @read))
@@ -2227,7 +2219,7 @@ fn opaque_host_handle_cannot_be_cast_from_integer() {
 #[test]
 fn effects_command_reports_typed_host_surface_deterministically() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let hello = root.join("examples/hello.vibra");
+    let hello = root.join("examples/hello.vib");
     let first = vibra_cmd()
         .args(["effects", &path_str(&hello)])
         .output()
@@ -2252,8 +2244,8 @@ fn effects_command_reports_typed_host_surface_deterministically() {
 #[test]
 fn effects_report_keeps_native_operation_owner_canonical_across_import_aliases() {
     let dir = tempfile::tempdir().unwrap();
-    let resource = dir.path().join("time.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let resource = dir.path().join("time.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &resource,
         r#"(deffect now
@@ -2265,7 +2257,7 @@ fn effects_report_keeps_native_operation_owner_canonical_across_import_aliases()
     .unwrap();
     std::fs::write(
         &entry,
-        r#"(import t "./time.vibra")
+        r#"(import t "./time.vib")
 (defn main () void
   (do (let value (t.now.open)))
   effects: (time.now))
@@ -2300,7 +2292,7 @@ fn legacy_function_grants_are_rejected_after_policy_redesign() {
     // (E-SYN-011) rather than reaching the legacy migration diagnostic
     // (E-SEC-001) this test originally exercised.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(&entry, "(defn main () void (do) grants: (fs-read))\n").unwrap();
 
     let prog = vibra::load::load_program(&entry);
@@ -2317,11 +2309,11 @@ fn legacy_function_grants_are_rejected_after_policy_redesign() {
 #[test]
 fn fs_open_read_reads_a_file_without_any_authority_argument() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data.txt");
     std::fs::write(&data, "secret").unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -2349,10 +2341,10 @@ fn fs_open_read_reads_a_file_without_any_authority_argument() {
 #[test]
 fn duplicate_nested_imports_are_idempotent() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let io = std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap();
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/src/io.vib")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &entry,
@@ -2381,13 +2373,13 @@ fn duplicate_nested_imports_are_idempotent() {
 #[test]
 fn nested_import_same_alias_is_scoped_to_parent() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let io = std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/src/io.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let leaf_a = dir.path().join("leaf-a.vibra");
-    let leaf_b = dir.path().join("leaf-b.vibra");
-    let mod_a = dir.path().join("a.vibra");
-    let mod_b = dir.path().join("b.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let leaf_a = dir.path().join("leaf-a.vib");
+    let leaf_b = dir.path().join("leaf-b.vib");
+    let mod_a = dir.path().join("a.vib");
+    let mod_b = dir.path().join("b.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &leaf_a,
@@ -2467,9 +2459,9 @@ fn nested_import_same_alias_is_scoped_to_parent() {
 #[test]
 fn imported_module_cannot_use_entry_import_alias_transitively() {
     let dir = tempfile::tempdir().unwrap();
-    let leaf = dir.path().join("leaf.vibra");
-    let helper = dir.path().join("helper.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let leaf = dir.path().join("leaf.vib");
+    let helper = dir.path().join("helper.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &leaf,
@@ -2506,9 +2498,9 @@ fn imported_module_cannot_use_entry_import_alias_transitively() {
 #[test]
 fn imported_module_direct_import_alias_is_usable() {
     let dir = tempfile::tempdir().unwrap();
-    let leaf = dir.path().join("leaf.vibra");
-    let helper = dir.path().join("helper.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let leaf = dir.path().join("leaf.vib");
+    let helper = dir.path().join("helper.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &leaf,
@@ -2544,9 +2536,9 @@ fn imported_module_direct_import_alias_is_usable() {
 #[test]
 fn imported_module_cannot_use_transitive_type_or_enum_alias() {
     let dir = tempfile::tempdir().unwrap();
-    let types = dir.path().join("types.vibra");
-    let helper = dir.path().join("helper.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let types = dir.path().join("types.vib");
+    let helper = dir.path().join("helper.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &types,
@@ -2583,7 +2575,7 @@ fn imported_module_cannot_use_transitive_type_or_enum_alias() {
 #[test]
 fn doc_annotation_mentioning_import_alias_does_not_require_direct_import() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &entry,
@@ -2600,7 +2592,7 @@ fn doc_annotation_mentioning_import_alias_does_not_require_direct_import() {
 #[test]
 fn same_module_qualified_local_symbol_is_allowed() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &entry,
@@ -2618,11 +2610,10 @@ fn same_module_qualified_local_symbol_is_allowed() {
 #[test]
 fn tagged_option_rejects_raw_payload_and_null_coercions() {
     let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("model.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let model = dir.path().join("model.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &model,
@@ -2656,7 +2647,7 @@ fn tagged_option_rejects_raw_payload_and_null_coercions() {
 #[test]
 fn legacy_option_sugar_is_rejected_with_stable_code() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     // Legacy hardcoded a top-level `$option: T` definition body as a removed
     // type-sugar form (`env.form_key == "$option"`, `src/lower.rs`) --
     // independent of whether an `option` type was otherwise declared. The
@@ -2690,7 +2681,7 @@ fn legacy_option_sugar_is_rejected_with_stable_code() {
 #[test]
 fn legacy_option_sugar_with_mapped_inner_type_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     // See the comment on `legacy_option_sugar_is_rejected_with_stable_code`:
     // legacy's `$option: T` check (`parse_type_ref`, `src/lower.rs`) applies
     // wherever a type is parsed, nested positions included, but the adapter
@@ -2718,7 +2709,7 @@ fn legacy_option_sugar_with_mapped_inner_type_is_rejected() {
 #[test]
 fn direct_void_union_is_rejected_with_stable_code() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def legacy (union void str))
@@ -2738,7 +2729,7 @@ fn direct_void_union_is_rejected_with_stable_code() {
 #[test]
 fn generic_alias_named_option_remains_valid() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def option (enum (some t) (none void)) where: (t any))
@@ -2755,11 +2746,10 @@ fn generic_alias_named_option_remains_valid() {
 #[test]
 fn result_where_ok_and_err_type_params() {
     let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("model.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let model = dir.path().join("model.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &model,
@@ -2815,13 +2805,12 @@ fn result_where_ok_and_err_type_params() {
 #[test]
 fn where_only_generic_names_no_unscoped_uppercase_fallback() {
     let dir = tempfile::tempdir().unwrap();
-    let bad = dir.path().join("bad.vibra");
-    let good = dir.path().join("good.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry_bad = dir.path().join("entry_bad.vibra");
-    let entry_good = dir.path().join("entry_good.vibra");
+    let bad = dir.path().join("bad.vib");
+    let good = dir.path().join("good.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry_bad = dir.path().join("entry_bad.vib");
+    let entry_good = dir.path().join("entry_good.vib");
 
     std::fs::write(
         &bad,
@@ -2877,10 +2866,9 @@ fn where_only_generic_names_no_unscoped_uppercase_fallback() {
 #[test]
 fn zero_arg_call_accepts_null_payload() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &entry,
@@ -2904,10 +2892,9 @@ fn zero_arg_call_accepts_null_payload() {
 #[test]
 fn zero_arg_call_rejects_void_payload_literal() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
 
     // Legacy accepted only a literal `null` payload for a zero-arg call and
     // separately rejected any other literal, including `$void`
@@ -2943,10 +2930,9 @@ fn zero_arg_call_rejects_void_payload_literal() {
 #[test]
 fn generic_user_fn_identity_returns_value() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -2966,10 +2952,9 @@ fn generic_user_fn_identity_returns_value() {
 #[test]
 fn generic_call_requires_explicit_type_args() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -2995,10 +2980,9 @@ fn generic_call_requires_explicit_type_args() {
 #[test]
 fn generic_call_rejects_unknown_keys() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     // An extra unrecognized `q:` key alongside a generic call's payload and
     // type argument has no positional equivalent to even attempt: a generic
     // call's leading positional arguments are exactly its declared type
@@ -3033,7 +3017,7 @@ fn generic_call_rejects_unknown_keys() {
 #[test]
 fn bool_literals_are_compatible_with_bool_args() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn accepts-bool (x bool) void (do (let ok true)))
@@ -3053,7 +3037,7 @@ fn bool_literals_are_compatible_with_bool_args() {
 #[test]
 fn bool_literal_is_rejected_for_non_bool_arg() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn accepts-int (x int64) void (do (let ok true)))
@@ -3073,7 +3057,7 @@ fn bool_literal_is_rejected_for_non_bool_arg() {
 #[test]
 fn non_generic_multi_arg_call_rejects_unknown_key() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     // A multi-arg call's extra unrecognized `typo:` key has no positional
     // equivalent: positional calls are arity-checked against the callee's
     // parameter list as a property of the call form itself, so an extra
@@ -3110,7 +3094,7 @@ fn non_generic_multi_arg_call_rejects_unknown_key() {
 #[test]
 fn non_generic_single_arg_named_call_rejects_unknown_key() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     // See the comment on `non_generic_multi_arg_call_rejects_unknown_key`:
     // an extra call operand is now an ordinary positional arity mismatch.
     std::fs::write(
@@ -3142,7 +3126,7 @@ fn non_generic_single_arg_named_call_rejects_unknown_key() {
 #[test]
 fn single_arg_constructor_shorthand_still_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def maybe (enum (some str) (none void)))
@@ -3163,10 +3147,9 @@ fn single_arg_constructor_shorthand_still_lowers() {
 #[test]
 fn generic_call_value_arg_must_unify_with_substituted_type() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3185,10 +3168,9 @@ fn generic_call_value_arg_must_unify_with_substituted_type() {
 #[test]
 fn user_fn_non_void_return_requires_return_statement() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3211,11 +3193,10 @@ fn user_fn_non_void_return_requires_return_statement() {
 #[test]
 fn user_fn_imported_with_user_body_runs() {
     let dir = tempfile::tempdir().unwrap();
-    let helper = dir.path().join("helper.vibra");
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let helper = dir.path().join("helper.vib");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &helper,
         r#"(defn echo-int (input int64) int64 (do (return input)))
@@ -3242,8 +3223,8 @@ fn user_fn_imported_with_user_body_runs() {
 #[test]
 fn generic_stdlib_wasm_wrapper_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let lib = dir.path().join("lib.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let lib = dir.path().join("lib.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &lib,
         r#"(defn flush-generic (value t) void (do (let ok true)) where: (t any))
@@ -3271,10 +3252,9 @@ fn generic_stdlib_wasm_wrapper_lowers() {
 #[test]
 fn where_with_non_interface_bound_is_rejected_with_e_where_002() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3294,10 +3274,9 @@ fn where_with_non_interface_bound_is_rejected_with_e_where_002() {
 #[test]
 fn self_type_is_allowed_inside_interface_body() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3321,10 +3300,9 @@ fn self_type_is_allowed_inside_interface_body() {
 #[test]
 fn self_type_is_rejected_in_top_level_record_field() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3347,10 +3325,9 @@ fn self_type_is_rejected_in_top_level_record_field() {
 #[test]
 fn self_type_is_rejected_in_free_standing_function_signature() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3375,10 +3352,9 @@ fn self_type_is_allowed_in_nested_interface_inside_record() {
     // Even when wrapped in a `$record` (which itself forbids `$self`), an
     // inner `$interface` body re-opens the `$self` binding scope.
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3402,10 +3378,9 @@ fn self_type_is_allowed_in_nested_interface_inside_record() {
 #[test]
 fn legacy_unprefixed_where_is_rejected_with_e_anno_002() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     // Legacy distinguished an unprefixed `where:` annotation key (rejected,
     // migration-hinted toward `=where`) from the canonical `=where:` spelling
     // ("=doc", "=where", "=defs", "=impl" | trailing "doc:", "where:",
@@ -3431,10 +3406,9 @@ fn legacy_unprefixed_where_is_rejected_with_e_anno_002() {
 #[test]
 fn legacy_unprefixed_doc_is_rejected_with_e_anno_002() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     // See the comment on `legacy_unprefixed_where_is_rejected_with_e_anno_002`:
     // the unprefixed-vs-`=`-prefixed distinction no longer exists. This
     // fixture also originally pinned a `$literal` type, which likewise has
@@ -3460,10 +3434,9 @@ fn legacy_unprefixed_doc_is_rejected_with_e_anno_002() {
 #[test]
 fn unknown_annotation_key_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     // An unrecognized `bogus:` function attribute has no S-expression
     // equivalent to even reach lowering: the known `fn` attributes are
     // `doc:`, `where:`, `defs:`, `impls:` (spec), and the reader itself
@@ -3493,10 +3466,9 @@ fn unknown_annotation_key_is_rejected() {
 #[test]
 fn doc_string_lowers_on_function_and_type_decls() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     // The original `greeting` type pinned `$literal: "hi"`, which has no
     // S-expression form at all (see the comment on
     // `legacy_unprefixed_doc_is_rejected_with_e_anno_002`); substituted a
@@ -3548,12 +3520,11 @@ fn where_key_order_defines_positional_type_param_order() {
     // shows both orderings lower with the call's own literal positional
     // order preserved.
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let mod_ab = dir.path().join("ab.vibra");
-    let mod_ba = dir.path().join("ba.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let mod_ab = dir.path().join("ab.vib");
+    let mod_ba = dir.path().join("ba.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &mod_ab,
@@ -3625,11 +3596,10 @@ fn where_key_order_defines_positional_type_param_order() {
 #[test]
 fn record_type_alias_lowers_and_is_usable_in_signature() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
-    // io.vibra defines ciovec as a non-generic $record. Function takes $io.ciovec
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
+    // io.vib defines ciovec as a non-generic $record. Function takes $io.ciovec
     // by bare reference (no instantiation) since it's non-generic.
     std::fs::write(
         &entry,
@@ -3657,10 +3627,9 @@ fn record_type_alias_lowers_and_is_usable_in_signature() {
 #[test]
 fn tuple_type_alias_with_where_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3685,10 +3654,9 @@ fn tuple_type_alias_with_where_lowers() {
 #[test]
 fn map_type_alias_with_where_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3713,10 +3681,9 @@ fn map_type_alias_with_where_lowers() {
 #[test]
 fn interface_type_alias_with_where_lowers() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3740,10 +3707,9 @@ fn interface_type_alias_with_where_lowers() {
 #[test]
 fn bare_generic_alias_in_signature_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -3764,10 +3730,9 @@ fn bare_generic_alias_in_signature_is_rejected() {
 #[test]
 fn instantiation_arity_mismatch_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     // Legacy caught a partially-instantiated generic alias (one of two type
     // arguments supplied) during lowering (E-GEN-002). The new grammar's
     // generic type application has no partial-application spelling at all
@@ -3802,10 +3767,9 @@ fn instantiation_arity_mismatch_is_rejected() {
 #[test]
 fn instantiated_record_field_type_mismatch_is_caught() {
     let dir = tempfile::tempdir().unwrap();
-    let io =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vibra"))
-            .unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
+        .unwrap();
+    let entry = dir.path().join("entry.vib");
     // Pass a $str where the function expects an int through an instantiated
     // generic record alias.
     std::fs::write(
@@ -3832,7 +3796,7 @@ fn instantiated_record_field_type_mismatch_is_caught() {
 #[test]
 fn forall_keyword_is_no_longer_recognised() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def id (forall t))
@@ -3851,8 +3815,8 @@ fn forall_keyword_is_no_longer_recognised() {
 #[test]
 fn list_and_dict_keywords_are_no_longer_recognised() {
     let dir = tempfile::tempdir().unwrap();
-    let entry_list = dir.path().join("list.vibra");
-    let entry_dict = dir.path().join("dict.vibra");
+    let entry_list = dir.path().join("list.vib");
+    let entry_dict = dir.path().join("dict.vib");
     std::fs::write(
         &entry_list,
         r#"(def my-list (list int64))
@@ -3891,8 +3855,8 @@ fn list_and_dict_keywords_are_no_longer_recognised() {
 #[test]
 fn defs_inherent_op_on_non_generic_type_registers_with_self_substituted() {
     let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("model.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let model = dir.path().join("model.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &model,
@@ -3941,8 +3905,8 @@ fn defs_inherent_op_on_non_generic_type_registers_with_self_substituted() {
 #[test]
 fn defs_inherent_op_on_generic_type_substitutes_self_with_instantiation() {
     let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("res.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let model = dir.path().join("res.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &model,
@@ -3989,7 +3953,7 @@ fn defs_inherent_op_on_generic_type_substitutes_self_with_instantiation() {
 #[test]
 fn defs_on_a_function_definition_is_rejected_with_e_defs_001() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(defn main () void (do) defs: ((defn nope () void (do))))
@@ -4009,8 +3973,8 @@ fn defs_on_a_function_definition_is_rejected_with_e_defs_001() {
 #[test]
 fn defs_entry_that_is_not_a_function_is_rejected_with_e_defs_001() {
     let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("model.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let model = dir.path().join("model.vib");
+    let entry = dir.path().join("entry.vib");
     // Legacy caught a non-`$function` `=defs` entry during lowering
     // (E-DEFS-001). The new grammar's `defs:` attribute is grammatically
     // `(function*)` -- each entry's reader parser requires an `fn` head
@@ -4056,7 +4020,7 @@ fn defs_entry_that_is_not_a_function_is_rejected_with_e_defs_001() {
 #[test]
 fn where_with_interface_bound_is_satisfied_at_call_site() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4087,7 +4051,7 @@ fn where_with_interface_bound_is_satisfied_at_call_site() {
 #[test]
 fn where_bound_violation_at_call_site_is_rejected_with_e_bound_001() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4130,7 +4094,7 @@ fn let_expr_nested_generic_bound_violations_are_rejected_with_e_bound_001() {
 
     for (case, expr) in cases {
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(&entry, program_with_let_expr(expr)).unwrap();
 
         let prog = vibra::load::load_program(&entry).unwrap();
@@ -4168,7 +4132,7 @@ fn call_argument_nested_generic_bound_violations_are_rejected_with_e_bound_001()
 
     for (case, statement) in cases {
         let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.vibra");
+        let entry = dir.path().join("entry.vib");
         std::fs::write(&entry, program_with_main_statement(statement)).unwrap();
 
         let prog = vibra::load::load_program(&entry).unwrap();
@@ -4189,7 +4153,7 @@ fn call_argument_nested_generic_bound_violations_are_rejected_with_e_bound_001()
 #[test]
 fn where_bound_violation_at_type_position_is_rejected_with_e_bound_001() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4212,7 +4176,7 @@ fn where_bound_violation_at_type_position_is_rejected_with_e_bound_001() {
 #[test]
 fn where_bound_intersect_requires_both_interfaces() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4247,7 +4211,7 @@ fn where_bound_intersect_requires_both_interfaces() {
 #[test]
 fn where_bound_chain_requires_caller_to_declare_bound() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4281,7 +4245,7 @@ fn where_bound_chain_requires_caller_to_declare_bound() {
 #[test]
 fn iface_qualified_call_dispatches_to_impl_method() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4314,7 +4278,7 @@ fn iface_qualified_call_dispatches_to_impl_method() {
 #[test]
 fn iface_qualified_call_without_self_arg_is_rejected_with_e_call_iface_noself() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def from-iface (interface (from (fn-type (arg-0 int64) void))))
@@ -4342,7 +4306,7 @@ fn iface_qualified_call_without_self_arg_is_rejected_with_e_call_iface_noself() 
 #[test]
 fn iface_qualified_call_unimplemented_type_is_rejected_with_e_bound_001() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4364,7 +4328,7 @@ fn iface_qualified_call_unimplemented_type_is_rejected_with_e_bound_001() {
 #[test]
 fn iface_qualified_call_on_generic_value_is_rejected_with_e_dispatch_001() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4397,7 +4361,7 @@ fn iface_qualified_call_on_generic_value_is_rejected_with_e_dispatch_001() {
 #[test]
 fn impl_basic_interface_lowers_and_registers_method() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4449,7 +4413,7 @@ fn impl_basic_interface_lowers_and_registers_method() {
 #[test]
 fn impl_method_as_ref_to_existing_defs_op_works() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4485,7 +4449,7 @@ fn impl_method_as_ref_to_existing_defs_op_works() {
 #[test]
 fn impl_on_a_function_definition_is_rejected_with_e_impl_001() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     // A reachable interface is needed for the adapter to resolve `fmt`'s
     // signature at all (it builds the impl's forwarding shim from the
     // interface's declared member type); an unresolvable interface would
@@ -4513,7 +4477,7 @@ fn impl_on_a_function_definition_is_rejected_with_e_impl_001() {
 #[test]
 fn impl_unknown_interface_alias_is_rejected_with_e_impl_002() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def box (record (value int64))
@@ -4542,7 +4506,7 @@ fn impl_unknown_interface_alias_is_rejected_with_e_impl_002() {
 #[test]
 fn impl_missing_method_is_rejected_with_e_impl_003() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str)) (debug (fn-type (self self) str))))
@@ -4570,7 +4534,7 @@ fn impl_missing_method_is_rejected_with_e_impl_003() {
 #[test]
 fn impl_extra_key_in_impl_is_rejected_with_e_impl_004() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     // The legacy `=impl: {$display: {fmt: {...}, bonus-stuff: 1}}` shape put
     // the interface's method map and any extraneous key at the same mapping
     // level, letting a stray key like `bonus-stuff:` sit beside a real
@@ -4609,7 +4573,7 @@ fn impl_extra_key_in_impl_is_rejected_with_e_impl_004() {
 #[test]
 fn impl_method_signature_mismatch_is_rejected_with_e_impl_005() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4635,7 +4599,7 @@ fn impl_method_signature_mismatch_is_rejected_with_e_impl_005() {
 #[test]
 fn impl_method_return_type_can_be_covariant() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) (union int64 str)))))
@@ -4656,7 +4620,7 @@ fn impl_method_return_type_can_be_covariant() {
 #[test]
 fn impl_method_argument_types_remain_invariant() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (value (union int64 str)) str))))
@@ -4682,7 +4646,7 @@ fn impl_method_argument_types_remain_invariant() {
 #[test]
 fn impl_method_return_type_cannot_be_wider_than_interface() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
@@ -4713,7 +4677,7 @@ fn impl_method_return_type_cannot_be_wider_than_interface() {
 #[test]
 fn impl_with_parametric_interface_binds_iface_type_arg() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def from-iface (interface (from (fn-type (arg-0 t) int64))) where: (t any))
@@ -4771,7 +4735,7 @@ fn impl_with_parametric_interface_binds_iface_type_arg() {
 #[test]
 fn into_interface_registers_target_type_param() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(def into-iface (interface (into (fn-type (self self) t))) where: (t any))
@@ -4804,7 +4768,7 @@ fn into_interface_registers_target_type_param() {
 #[test]
 fn impl_unknown_ref_target_is_rejected_with_e_impl_006() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     // The adapter itself resolves a `(method name qualified-symbol)`
     // reference's target signature (`Converter::impl_method_value`,
     // `MethodBinding::Reference`), so an unknown ref target now fails
@@ -4839,8 +4803,8 @@ fn impl_unknown_ref_target_is_rejected_with_e_impl_006() {
 #[test]
 fn defs_inherent_op_cannot_shadow_enclosing_type_param() {
     let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("model.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let model = dir.path().join("model.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &model,
         r#"(def holder (record (value t))
@@ -4877,8 +4841,8 @@ fn vibra_test_runs_top_level_test_declarations_without_main() {
     let tests_dir = project.join("tests");
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
-        tests_dir.join("basic.vibra"),
-        r#"(import test "@std/test.vibra")
+        tests_dir.join("basic.vib"),
+        r#"(import test "@std/test.vib")
 (test.scenario
   "passes"
   (test.case "passes" (do (test.assert true)) profile: @core)
@@ -4891,10 +4855,10 @@ fn vibra_test_runs_top_level_test_declarations_without_main() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: @bin root: "tests" entry: "basic.vibra")
+  (target app kind: @bin root: "tests" entry: "basic.vib")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -4923,17 +4887,17 @@ fn vibra_test_reports_assertion_failures() {
     let tests_dir = project.join("tests");
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
-        tests_dir.join("fails.vibra"),
-        r#"(import test "@std/test.vibra")
+        tests_dir.join("fails.vib"),
+        r#"(import test "@std/test.vib")
 (test.scenario "fails" (test.case "fails" (do (test.assert false)) profile: @core))
 "#,
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: @bin root: "tests" entry: "fails.vibra")
+  (target app kind: @bin root: "tests" entry: "fails.vib")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -4961,8 +4925,8 @@ fn vibra_test_typed_equality_helpers_report_expected_and_actual_values() {
     let tests_dir = project.join("tests");
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
-        tests_dir.join("fails.vibra"),
-        r#"(import test "@std/test.vibra")
+        tests_dir.join("fails.vib"),
+        r#"(import test "@std/test.vib")
 (test.scenario
   "fails"
   (test.case "fails" (do (test.assert-eq-int 1 2)) profile: @core)
@@ -4971,10 +4935,10 @@ fn vibra_test_typed_equality_helpers_report_expected_and_actual_values() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: @bin root: "tests" entry: "fails.vibra")
+  (target app kind: @bin root: "tests" entry: "fails.vib")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -5002,8 +4966,8 @@ fn vibra_test_writes_json_report_file() {
     let report = dir.path().join("report.json");
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
-        tests_dir.join("basic.vibra"),
-        r#"(import test "@std/test.vibra")
+        tests_dir.join("basic.vib"),
+        r#"(import test "@std/test.vib")
 (test.scenario
   "passes"
   (test.case "passes" (do (test.assert true)) profile: @core)
@@ -5012,10 +4976,10 @@ fn vibra_test_writes_json_report_file() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: @bin root: "tests" entry: "basic.vibra")
+  (target app kind: @bin root: "tests" entry: "basic.vib")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -5053,14 +5017,14 @@ fn module_part_test_file_shares_base_module_definitions() {
     let tests_dir = project.join("tests");
     std::fs::create_dir_all(&tests_dir).unwrap();
     std::fs::write(
-        tests_dir.join("math.vibra"),
+        tests_dir.join("math.vib"),
         r#"(defn is-ready () bool (do (return true)))
 "#,
     )
     .unwrap();
     std::fs::write(
-        tests_dir.join("math.test.vibra"),
-        r#"(import test "@std/test.vibra")
+        tests_dir.join("math.test.vib"),
+        r#"(import test "@std/test.vib")
 (test.scenario
   "uses-base-function"
   (test.case
@@ -5073,10 +5037,10 @@ fn module_part_test_file_shares_base_module_definitions() {
     )
     .unwrap();
     std::fs::write(
-        project.join("project.vibra"),
+        project.join("project.vib"),
         r#"(project
   (package "app" "0.1.0")
-  (target app kind: @bin root: "tests" entry: "math.vibra")
+  (target app kind: @bin root: "tests" entry: "math.vib")
   (dependency std path: "dep/std"))
 "#,
     )
@@ -5099,7 +5063,7 @@ fn module_part_test_file_shares_base_module_definitions() {
 fn copy_stdlib(dest: &Path) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
     std::fs::create_dir_all(dest.join("src")).unwrap();
-    std::fs::copy(root.join("project.vibra"), dest.join("project.vibra")).unwrap();
+    std::fs::copy(root.join("project.vib"), dest.join("project.vib")).unwrap();
     for entry in std::fs::read_dir(root.join("src")).unwrap() {
         let entry = entry.unwrap();
         std::fs::copy(entry.path(), dest.join("src").join(entry.file_name())).unwrap();
@@ -5178,7 +5142,7 @@ fn vibra_exec_help_documents_expr_flag() {
 #[test]
 fn vibra_exec_parses_and_lowers_sexpression() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(&entry, "(const placeholder bool true)\n").unwrap();
     let loaded = vibra::load::load_program(&entry).unwrap();
     let expression = vibra::load::parse_inline_exec_expression("(add 20 22)").unwrap();
@@ -5202,7 +5166,7 @@ fn vibra_code_command_is_removed() {
 #[test]
 fn procedural_macro_quote_and_unquote_expand_before_lowering() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(macro
@@ -5223,7 +5187,7 @@ fn procedural_macro_quote_and_unquote_expand_before_lowering() {
 #[test]
 fn vibra_expand_shows_hygienic_bindings_and_explicit_capture() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(macro
@@ -5269,7 +5233,7 @@ fn vibra_expand_shows_hygienic_bindings_and_explicit_capture() {
 #[test]
 fn recursive_macro_expansion_reports_the_depth_limit_and_origin() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(macro
@@ -5308,8 +5272,8 @@ fn recursive_macro_expansion_reports_the_depth_limit_and_origin() {
 #[test]
 fn imported_macro_quotes_resolve_names_in_definition_context() {
     let dir = tempfile::tempdir().unwrap();
-    let macros = dir.path().join("macros.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let macros = dir.path().join("macros.vib");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &macros,
         r#"(defn helper () void (do (let value 1)))
@@ -5324,7 +5288,7 @@ fn imported_macro_quotes_resolve_names_in_definition_context() {
     .unwrap();
     std::fs::write(
         &entry,
-        r#"(import m "./macros.vibra")
+        r#"(import m "./macros.vib")
 (defn main () void (do (m.call-helper ignored)))
 "#,
     )
@@ -5339,7 +5303,7 @@ fn imported_macro_quotes_resolve_names_in_definition_context() {
 #[test]
 fn vibra_fmt_defaults_to_json_check_mode_and_write_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("messy.vibra");
+    let source = dir.path().join("messy.vib");
     let original = "(defn  main () void\n(do unit))\n";
     std::fs::write(&source, original).unwrap();
 
@@ -5387,7 +5351,7 @@ fn vibra_fmt_rejects_yaml_comments() {
     // is now rejected as an invalid symbol rather than as "comments are
     // forbidden."
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("commented.vibra");
+    let source = dir.path().join("commented.vib");
     let original = "# important intent\n(defn main () void (do unit))\n";
     std::fs::write(&source, original).unwrap();
 
@@ -5410,7 +5374,7 @@ fn vibra_fmt_rejects_yaml_comments() {
 #[test]
 fn vibra_fmt_json_output_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("ok.vibra");
+    let source = dir.path().join("ok.vib");
     std::fs::write(&source, "(defn main () void unit)\n").unwrap();
 
     let output = vibra_cmd()
@@ -5430,7 +5394,7 @@ fn vibra_fmt_json_output_is_explicit() {
 #[test]
 fn vibra_lint_defaults_to_json_and_reports_kebab_case_locations() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("style.vibra");
+    let source = dir.path().join("style.vib");
     std::fs::write(&source, "(defn BadName () void (do unit))\n").unwrap();
 
     let output = vibra_cmd()
@@ -5460,13 +5424,13 @@ fn vibra_lint_suppression_and_deny_warnings_are_respected() {
     // S-expression surface (see the "Definition attributes" section of
     // docs/decisions/s-expression-language.md:
     // "Lint suppression moves to CLI or project configuration so source
-    // semantics do not contain diagnostic policy"). No `.vibra` source can
+    // semantics do not contain diagnostic policy"). No `.vib` source can
     // even parse with a bare `=lint:` line -- `=` is not a valid symbol
     // start (see `src/syntax/lexer.rs`) -- so this test now exercises the
     // CLI-level warning suppression (`--severity error`) that replaced it,
     // alongside the still-live `--deny-warnings` gate.
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("style.vibra");
+    let source = dir.path().join("style.vib");
     std::fs::write(
         &source,
         "(defn BadName () void (do unit))\n(defn OtherBad () void (do unit))\n",
@@ -5532,7 +5496,7 @@ fn root_lint_annotation_suppresses_the_whole_file() {
     // `--deny-warnings` ever sees them, so a file with nothing but
     // non-kebab-case warnings still passes.
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("style.vibra");
+    let source = dir.path().join("style.vib");
     std::fs::write(
         &source,
         "(defn BadName () void (do unit))\n(defn OtherBad () void (do unit))\n",
@@ -5562,7 +5526,7 @@ fn root_lint_annotation_suppresses_the_whole_file() {
 #[test]
 fn vibra_lint_json_and_sarif_outputs_are_explicit() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("style.vibra");
+    let source = dir.path().join("style.vib");
     std::fs::write(&source, "(defn BadName () void (do unit))\n").unwrap();
 
     let json = vibra_cmd()
@@ -5618,8 +5582,8 @@ fn vibra_lint_json_and_sarif_outputs_are_explicit() {
 #[test]
 fn vibra_lint_reports_parse_and_compile_errors_as_structured_json() {
     let dir = tempfile::tempdir().unwrap();
-    let bad_syntax = dir.path().join("bad-syntax.vibra");
-    let bad_compile = dir.path().join("bad-compile.vibra");
+    let bad_syntax = dir.path().join("bad-syntax.vib");
+    let bad_compile = dir.path().join("bad-compile.vib");
     // Unclosed list: a reader-level error, not a YAML one -- source is
     // always S-expression (see `src/load.rs` module docs).
     std::fs::write(&bad_syntax, "(fn broken (\n").unwrap();
@@ -5646,7 +5610,7 @@ fn vibra_lint_reports_parse_and_compile_errors_as_structured_json() {
 
 #[test]
 fn vibra_lint_rejects_yaml_anchors_and_aliases() {
-    // `.vibra` source is always read as S-expression (see `src/load.rs`
+    // `.vib` source is always read as S-expression (see `src/load.rs`
     // module docs), so YAML anchor/alias syntax (`&x` / `*x`) is no longer a
     // dialect-specific rule of its own -- it is simply not a valid symbol
     // (`&`/`*` are not valid leading symbol characters; see
@@ -5654,7 +5618,7 @@ fn vibra_lint_rejects_yaml_anchors_and_aliases() {
     // anchor/alias syntax still gets a clear reader-level rejection instead
     // of being silently misinterpreted.
     let dir = tempfile::tempdir().unwrap();
-    let anchored = dir.path().join("anchored.vibra");
+    let anchored = dir.path().join("anchored.vib");
     std::fs::write(&anchored, "a: &x 1\nb: *x\n").unwrap();
 
     let output = vibra_cmd()
@@ -5677,9 +5641,9 @@ fn vibra_lint_rejects_yaml_anchors_and_aliases() {
 #[test]
 fn vibra_lint_reports_hidden_transitive_import_alias() {
     let dir = tempfile::tempdir().unwrap();
-    let leaf = dir.path().join("leaf.vibra");
-    let helper = dir.path().join("helper.vibra");
-    let entry = dir.path().join("entry.vibra");
+    let leaf = dir.path().join("leaf.vib");
+    let helper = dir.path().join("helper.vib");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &leaf,
@@ -5726,7 +5690,7 @@ fn vibra_lint_compile_checks_library_files_without_main() {
     // about -- that a library file with no `main` still gets compile-
     // checked and its error surfaced through `vibra lint`.
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("library.vibra");
+    let source = dir.path().join("library.vib");
     std::fs::write(&source, "(def legacy (option str))\n").unwrap();
 
     let output = vibra_cmd()
@@ -5746,7 +5710,7 @@ fn vibra_lint_compile_checks_library_files_without_main() {
 #[test]
 fn vibra_lint_percent_encodes_file_uris() {
     let dir = tempfile::tempdir().unwrap();
-    let source = dir.path().join("bad#name%25.vibra");
+    let source = dir.path().join("bad#name%25.vib");
     std::fs::write(&source, "(defn BadName () void (do unit))\n").unwrap();
 
     let output = vibra_cmd()
@@ -5759,7 +5723,7 @@ fn vibra_lint_percent_encodes_file_uris() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("bad%23name%2525.vibra"), "stdout: {stdout}");
+    assert!(stdout.contains("bad%23name%2525.vib"), "stdout: {stdout}");
 }
 
 // ===== Issue #50: shared test context + single-named-test lowering =====
@@ -5767,7 +5731,7 @@ fn vibra_lint_percent_encodes_file_uris() {
 #[test]
 fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     std::fs::write(
         &entry,
@@ -5848,7 +5812,7 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
 #[test]
 fn test_discovery_exposes_canonical_selection_metadata() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         r#"(test.scenario
@@ -5895,7 +5859,7 @@ fn test_discovery_exposes_canonical_selection_metadata() {
 #[test]
 fn test_discovery_rejects_invalid_selection_metadata() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     // Duplicate tags have no reader-level check (`parse_test_meta`'s "tags"
     // arm just collects names), and a whitespace-only skip reason passes
@@ -5965,7 +5929,7 @@ fn deterministic_test_fixtures_are_recorded_in_machine_readable_reports() {
         false
     );
 
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/stdlib-test.vibra");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/stdlib-test.vib");
     let output = vibra_cmd()
         .args([
             "test",
@@ -5993,7 +5957,7 @@ fn deterministic_test_fixtures_are_recorded_in_machine_readable_reports() {
 
 #[test]
 fn benchmark_mode_emits_stable_machine_readable_statistics() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/stdlib-test.vibra");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/stdlib-test.vib");
     let output = vibra_cmd()
         .args([
             "test",
@@ -6051,7 +6015,7 @@ fn benchmark_mode_emits_stable_machine_readable_statistics() {
 #[test]
 fn test_discovery_trims_skip_reason_and_closes_profile_diagnostic() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         "(test.scenario \"skipped\" (test.case \"skipped\" (do) skip: \"  pending fixture  \"))\n",
@@ -6089,7 +6053,7 @@ fn test_discovery_rejects_malformed_expected_error_metadata() {
     // "duplicate key" to write anymore; every malformed shape below is a
     // reader-level rejection instead of legacy's E-TEST-001.
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     for source in [
         "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: compile))\n",
         "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@compile)))\n",
@@ -6115,10 +6079,10 @@ fn test_discovery_rejects_malformed_expected_error_metadata() {
 #[test]
 fn vibra_test_matches_structured_expected_errors() {
     let dir = tempfile::tempdir().unwrap();
-    let compile_entry = dir.path().join("compile-error.vibra");
-    let runtime_entry = dir.path().join("runtime-error.vibra");
+    let compile_entry = dir.path().join("compile-error.vib");
+    let runtime_entry = dir.path().join("runtime-error.vib");
     let test_lib =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/test.vibra"))
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/test.vib"))
             .unwrap();
     // `$option: T` sugar has no S-expression form at all (see the comment
     // on `legacy_option_sugar_is_rejected_with_stable_code`) and reaching
@@ -6178,14 +6142,14 @@ fn vibra_test_matches_structured_expected_errors() {
 #[test]
 fn vibra_test_matches_load_error_before_imports_are_recursively_loaded() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("load-error.vibra");
-    let imported = dir.path().join("cycle.vibra");
+    let entry = dir.path().join("load-error.vib");
+    let imported = dir.path().join("cycle.vib");
     std::fs::write(
         &entry,
-        "(import cycle \"cycle.vibra\")\n(test.scenario \"load-error\" (test.case \"load-error\" (do) expect-error: (@load E-MOD-003)))\n",
+        "(import cycle \"cycle.vib\")\n(test.scenario \"load-error\" (test.case \"load-error\" (do) expect-error: (@load E-MOD-003)))\n",
     )
     .unwrap();
-    std::fs::write(&imported, "(import entry \"load-error.vibra\")\n").unwrap();
+    std::fs::write(&imported, "(import entry \"load-error.vib\")\n").unwrap();
 
     let output = vibra_cmd()
         .args(["test", &path_str(&entry), "--format", "human"])
@@ -6207,7 +6171,7 @@ fn vibra_test_matches_load_error_before_imports_are_recursively_loaded() {
 #[test]
 fn vibra_test_reports_expected_error_mismatches_from_the_parent() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("expected-error-mismatch.vibra");
+    let entry = dir.path().join("expected-error-mismatch.vib");
     std::fs::write(
         &entry,
         "(test.scenario \"passes\" (test.case \"passes\" (do) expect-error: (@compile E-OPTION-001)))\n",
@@ -6227,11 +6191,11 @@ fn vibra_test_reports_expected_error_mismatches_from_the_parent() {
 fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
     let dir = tempfile::tempdir().unwrap();
     let test_lib =
-        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/test.vibra"))
+        std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/test.vib"))
             .unwrap();
     let cases = [
         (
-            "wrong-phase.vibra",
+            "wrong-phase.vib",
             format!(
                 "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" (test.assert false) expect-error: (@compile E-OPTION-001)))\n",
                 path_str(&test_lib)
@@ -6239,12 +6203,12 @@ fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
             "expected compile error, but test failed during runtime",
         ),
         (
-            "wrong-code.vibra",
+            "wrong-code.vib",
             "(def legacy (union void str))\n(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@compile E-CALL-001)))\n".to_string(),
             "expected compile error code `E-CALL-001`, got `E-OPTION-001`",
         ),
         (
-            "wrong-message.vibra",
+            "wrong-message.vib",
             format!(
                 "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" (test.assert false) expect-error: (@runtime \"expected different runtime error\")))\n",
                 path_str(&test_lib)
@@ -6268,7 +6232,7 @@ fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
 #[test]
 fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("selection.vibra");
+    let entry = dir.path().join("selection.vib");
     let report = dir.path().join("report.json");
     std::fs::write(
         &entry,
@@ -6332,7 +6296,7 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
 #[test]
 fn vibra_test_deny_skips_fails_after_reporting_selected_skip() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("skip.vibra");
+    let entry = dir.path().join("skip.vib");
     std::fs::write(
         &entry,
         "(test.scenario \"skipped\" (test.case \"skipped\" (do) skip: \"pending\"))\n",
@@ -6355,7 +6319,7 @@ fn vibra_test_deny_skips_fails_after_reporting_selected_skip() {
 #[test]
 fn vibra_test_caps_command_timeout_with_test_metadata() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("timeout.vibra");
+    let entry = dir.path().join("timeout.vib");
     std::fs::write(
         &entry,
         "(test.scenario \"slow\" (test.case \"slow\" (while true (do)) timeout-ms: 1))\n",
@@ -6380,7 +6344,7 @@ fn vibra_test_caps_command_timeout_with_test_metadata() {
 #[test]
 fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("workspace.vibra");
+    let entry = dir.path().join("workspace.vib");
     std::fs::write(&entry, "(test.scenario \"needs-workspace\" (test.case \"needs-workspace\" (do) workspace: @temp))\n").unwrap();
 
     let skipped = vibra_cmd()
@@ -6419,7 +6383,7 @@ fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
 #[test]
 fn vibra_test_workspace_metadata_rejects_unknown_values() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("workspace-invalid.vibra");
+    let entry = dir.path().join("workspace-invalid.vib");
     // The reader itself now requires `workspace:`'s value to be exactly the
     // atom `@temp` (`parse_test_meta`, src/ast/surface.rs), so an unknown
     // value is an E-ATOM-002 rejection, not legacy's lowering-time
@@ -6444,7 +6408,7 @@ fn vibra_test_workspace_metadata_rejects_unknown_values() {
 #[test]
 fn vibra_test_deny_warnings_fails_and_emits_warnings_in_json_report() {
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("warnings.vibra");
+    let entry = dir.path().join("warnings.vib");
     let report = dir.path().join("report.json");
     std::fs::write(
         &entry,
@@ -6491,10 +6455,10 @@ fn vibra_test_deny_warnings_fails_and_emits_warnings_in_json_report() {
 #[test]
 fn vibra_test_temp_workspace_runs_fs_operations_relative_to_the_temp_cwd() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap());
-    let test_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap());
+    let fs_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/fs.vib")).unwrap());
+    let test_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap());
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("workspace-modes.vibra");
+    let entry = dir.path().join("workspace-modes.vib");
     std::fs::write(
         &entry,
         format!(
@@ -6518,7 +6482,7 @@ fn vibra_test_temp_workspace_runs_fs_operations_relative_to_the_temp_cwd() {
     workspace: @temp))
 "#,
             result_lib =
-                path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap()),
+                path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap()),
         ),
     )
     .unwrap();
@@ -6544,9 +6508,9 @@ fn vibra_test_temp_workspace_runs_fs_operations_relative_to_the_temp_cwd() {
 #[test]
 fn vibra_test_drains_large_child_output_without_timing_out() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let io_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap());
+    let io_lib = path_str(&std::fs::canonicalize(root.join("stdlib/src/io.vib")).unwrap());
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("large-output.vibra");
+    let entry = dir.path().join("large-output.vib");
     let report = dir.path().join("large-output-report.json");
     let payload = "x".repeat(128 * 1024);
     std::fs::write(
@@ -6579,14 +6543,14 @@ fn vibra_test_drains_large_child_output_without_timing_out() {
     assert!(std::fs::read_to_string(report).unwrap().contains(&payload));
 }
 
-/// Write an entry module that imports the canonical `stdlib/src/test.vibra` and
+/// Write an entry module that imports the canonical `stdlib/src/test.vib` and
 /// contains `count` passing `$test` declarations plus a shared helper function
 /// every test can call. Returns the temp dir (keep it alive) and entry path.
 fn issue50_many_tests_entry(count: usize) -> (tempfile::TempDir, std::path::PathBuf) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let test_lib = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let test_lib = std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
 
     let mut src = format!(
         "(import test \"{lib}\")\n(defn the-answer () int64 (do (return 42)))\n",
@@ -6656,9 +6620,9 @@ fn issue50_named_test_matches_lower_tests() {
 #[test]
 fn issue50_failing_test_still_reported() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let test_lib = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let test_lib = std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -6716,14 +6680,14 @@ impl std::io::Write for BrokenPipeWriter {
 #[test]
 fn guest_stdout_write_failure_yields_matchable_fs_error_io() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
-    let io = std::fs::canonicalize(root.join("stdlib/src/io.vibra")).unwrap();
-    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vibra")).unwrap();
-    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vib")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap();
+    let io = std::fs::canonicalize(root.join("stdlib/src/io.vib")).unwrap();
+    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vib")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap();
 
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -6816,7 +6780,7 @@ fn checked_alloc_len_accepts_in_bounds_length() {
     assert_eq!(vibra::execute::checked_alloc_len(8, &config).unwrap(), 8);
 }
 
-// NOTE: `read-raw` and `random.bytes` are not reachable from surface `.vibra`
+// NOTE: `read-raw` and `random.bytes` are not reachable from surface `.vib`
 // in the current codebase: their handlers gate on the legacy `=grants` grant
 // token, which can only be seeded by a `main` grants block — and `main` grants
 // blocks were removed in favor of `$policy` (see
@@ -6838,11 +6802,11 @@ fn random_bytes_os_rng_is_not_all_zero() {
 #[test]
 fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
-    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vib")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap();
+    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     let a = dir.path().join("a.txt");
     let b = dir.path().join("b.txt");
     let c = dir.path().join("c.txt");
@@ -6946,12 +6910,12 @@ fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
 #[test]
 fn closed_file_aliases_return_stable_typed_lifecycle_errors() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
-    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vibra")).unwrap();
-    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vib")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap();
+    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vib")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     let target = dir.path().join("closed.txt");
     std::fs::write(
         &entry,
@@ -7014,12 +6978,12 @@ fn injected_clock_and_environment_are_deterministic_and_isolated() {
     use std::sync::{Arc, Mutex};
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let env_mod = std::fs::canonicalize(root.join("stdlib/src/env.vibra")).unwrap();
-    let time_mod = std::fs::canonicalize(root.join("stdlib/src/time.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
-    let test = std::fs::canonicalize(root.join("stdlib/src/test.vibra")).unwrap();
+    let env_mod = std::fs::canonicalize(root.join("stdlib/src/env.vib")).unwrap();
+    let time_mod = std::fs::canonicalize(root.join("stdlib/src/time.vib")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap();
+    let test = std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let entry = dir.path().join("entry.vibra");
+    let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
         format!(
@@ -7090,9 +7054,9 @@ fn injected_clock_and_environment_are_deterministic_and_isolated() {
 #[test]
 fn forged_stdin_read_file_handle_requires_allow_stdin() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vibra")).unwrap();
-    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vibra")).unwrap();
-    let result = std::fs::canonicalize(root.join("stdlib/src/result.vibra")).unwrap();
+    let fs = std::fs::canonicalize(root.join("stdlib/src/fs.vib")).unwrap();
+    let stream = std::fs::canonicalize(root.join("stdlib/src/stream.vib")).unwrap();
+    let result = std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap();
     let output = vibra_cmd()
         .args([
             "exec",
@@ -7133,7 +7097,7 @@ fn compile_time_embed_supports_text_binary_and_structured_formats() {
         "<root><name>xml</name><count>5</count></root>",
     )
     .unwrap();
-    let entry = dir.path().join("main.vibra");
+    let entry = dir.path().join("main.vib");
     std::fs::write(
         &entry,
         r#"(defn
@@ -7182,7 +7146,7 @@ fn compile_time_embed_rejects_yaml_as_a_data_format() {
     // lowering-time E-EMBED-001.
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("data.yaml"), "name: yaml\n").unwrap();
-    let entry = dir.path().join("main.vibra");
+    let entry = dir.path().join("main.vib");
     std::fs::write(
         &entry,
         "(defn main () void (do (let value (embed \"data.yaml\"))))\n",
@@ -7199,7 +7163,7 @@ fn compile_time_embed_rejects_escape_and_fingerprints_raw_content() {
     let package = outer.path().join("package");
     std::fs::create_dir(&package).unwrap();
     std::fs::write(outer.path().join("secret.txt"), "secret").unwrap();
-    let entry = package.join("main.vibra");
+    let entry = package.join("main.vib");
     std::fs::write(
         &entry,
         "(defn main () void (do (let value (embed \"../secret.txt\"))))\n",
@@ -7232,7 +7196,7 @@ fn compile_time_template_renders_nested_values_and_logicless_sections() {
         "{{title}}\r\n{{#people}}- {{name}} ({{meta.role}}){{#active}} active{{/active}}\r\n{{/people}}{{^people}}nobody\r\n{{/people}}{{! ignored }}",
     )
     .unwrap();
-    let entry = dir.path().join("main.vibra");
+    let entry = dir.path().join("main.vib");
     std::fs::write(
         &entry,
         r#"(defn
@@ -7282,7 +7246,7 @@ fn compile_time_template_is_strict_sandboxed_and_fingerprinted() {
     let package = outer.path().join("package");
     std::fs::create_dir(&package).unwrap();
     std::fs::write(outer.path().join("secret.txt"), "{{secret}}").unwrap();
-    let entry = package.join("main.vibra");
+    let entry = package.join("main.vib");
     let program = |path: &str, with_body: &str| {
         format!(
             "(defn main () void (do (let rendered (template \"{path}\" with: (record {with_body})))))\n"

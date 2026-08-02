@@ -1378,7 +1378,7 @@ fn collect_module_skeletons(
         }
         if env.form_key == "$option" {
             bail!(
-                "E-OPTION-001: `$option: T` was removed; import `stdlib/src/option.vibra` and instantiate its tagged enum alias"
+                "E-OPTION-001: `$option: T` was removed; import `stdlib/src/option.vib` and instantiate its tagged enum alias"
             );
         }
         if !is_builtin_type_form(&env.form_key) {
@@ -1421,7 +1421,7 @@ fn parse_type_ref(
             && !map_get_str(m, "$option").is_some_and(is_type_argument_map)
         {
             bail!(
-                "E-OPTION-001: `$option: T` was removed; import `stdlib/src/option.vibra` and instantiate its tagged enum alias"
+                "E-OPTION-001: `$option: T` was removed; import `stdlib/src/option.vib` and instantiate its tagged enum alias"
             );
         }
         if m.len() == 1 {
@@ -1938,7 +1938,7 @@ fn resolve_import_path(
     let raw = if import.starts_with('@') {
         let project = entry_project.with_context(|| {
             format!(
-                "{}: @ import `{import}` requires a project.vibra",
+                "{}: @ import `{import}` requires a project.vib",
                 module_path.display()
             )
         })?;

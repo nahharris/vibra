@@ -1,0 +1,64 @@
+(import test "../stdlib/src/test.vib")
+(import bytes "../stdlib/src/bytes.vib")
+(import option "../stdlib/src/option.vib")
+(import result "../stdlib/src/result.vib")
+(test.scenario
+  "utf8-round-trip-and-byte-lookup"
+  (test.case
+    "utf8-round-trip-and-byte-lookup"
+    (let encoded (bytes.bytes.from-str "aé"))
+    (test.assert-eq-int (convert (bytes.bytes.len encoded) int64 0) 3)
+    (let byte (bytes.bytes.get encoded 1))
+    (match
+      byte
+      (option.option.some 195)
+      (do (test.assert true))
+      _
+      (do (test.fail "byte lookup failed"))
+    )
+    (let decoded (bytes.bytes.decode-utf8 encoded))
+    (match
+      decoded
+      (result.result.ok "aé")
+      (do (test.assert true))
+      _
+      (do (test.fail "UTF-8 round trip failed"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "concat-search-and-invalid-utf8"
+  (test.case
+    "concat-search-and-invalid-utf8"
+    (let left (bytes.bytes.from-str "abc"))
+    (let right (bytes.bytes.from-str "dé"))
+    (let joined (bytes.bytes.concat left right))
+    (match
+      joined
+      (result.result.ok (bind combined))
+      (do
+        (let found (bytes.bytes.find combined right))
+        (match
+          found
+          (option.option.some 3)
+          (test.assert true)
+          _
+          (test.fail "byte search failed")
+        )
+      )
+      _
+      (do (test.fail "byte concat failed"))
+    )
+    (let raw (cast (array 255) bytes.bytes))
+    (let invalid (bytes.bytes.decode-utf8 raw))
+    (match
+      invalid
+      (result.result.err (bytes.bytes-error.invalid-utf8))
+      (do (test.assert true))
+      _
+      (do (test.fail "malformed UTF-8 was not rejected"))
+    )
+    profile: @core
+  )
+)

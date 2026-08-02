@@ -2,7 +2,7 @@
 title: Vibra Documentation Index
 category: index
 status: current
-updated: 2026-08-01
+updated: 2026-08-02
 ---
 
 # Vibra documentation
@@ -109,6 +109,7 @@ than current contracts:
 
 - [Plan directory guide](plans/README.md)
 - [Type-system and ADT foundation plan](plans/2026-05-05-type-system-adt-foundation.md)
+- [Vib source extension and call argument order](plans/2026-08-02-vib-extension-and-call-order.md)
 
 ## Update protocol
 

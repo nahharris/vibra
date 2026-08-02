@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::syntax::{self, Atom, Node, NodeKind};
 
-pub const PROJECT_MANIFEST: &str = "project.vibra";
+pub const PROJECT_MANIFEST: &str = "project.vib";
 
 #[derive(Debug, Clone)]
 pub struct ProjectImportContext {

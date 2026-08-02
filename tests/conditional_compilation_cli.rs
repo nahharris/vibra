@@ -12,14 +12,14 @@ fn path(path: &Path) -> String {
 fn write_project(root: &Path) -> PathBuf {
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(
-        root.join("project.vibra"),
-        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \"src\" entry: \"main.vibra\"))\n",
+        root.join("project.vib"),
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \"src\" entry: \"main.vib\"))\n",
     )
     .unwrap();
-    let entry = root.join("src/main.vibra");
+    let entry = root.join("src/main.vib");
     std::fs::write(&entry, "(defn main () void (do (let value 1)))\n").unwrap();
     std::fs::write(
-        root.join("src/main.release.vibra"),
+        root.join("src/main.release.vib"),
         "(defn enabled () void (do (let value 1)) doc: \"Enabled only in release mode\")\n",
     )
     .unwrap();
@@ -32,7 +32,7 @@ fn run_expand_and_docs_receive_repeatable_compilation_flags() {
     let entry = write_project(root.path());
 
     let run = vibra_cmd()
-        .args(["run", &path(&entry), "--flag", "release"])
+        .args(["run", &path(&entry), "--ctx", "release"])
         .output()
         .unwrap();
     assert!(
@@ -45,9 +45,9 @@ fn run_expand_and_docs_receive_repeatable_compilation_flags() {
         .args([
             "expand",
             &path(&entry),
-            "--flag",
+            "--ctx",
             "platform-x",
-            "--flag",
+            "--ctx",
             "release",
         ])
         .output()
@@ -57,7 +57,7 @@ fn run_expand_and_docs_receive_repeatable_compilation_flags() {
     assert!(expanded.get("enabled").is_some(), "{expanded}");
 
     let docs = vibra_cmd()
-        .args(["docs", &path(&entry), "enabled", "--flag", "release"])
+        .args(["docs", &path(&entry), "enabled", "--ctx", "release"])
         .output()
         .unwrap();
     assert!(docs.status.success());
@@ -68,16 +68,16 @@ fn run_expand_and_docs_receive_repeatable_compilation_flags() {
 fn check_and_effects_compile_only_the_selected_parts() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("src")).unwrap();
-    let entry = root.path().join("src/main.vibra");
+    let entry = root.path().join("src/main.vib");
     std::fs::write(
-        root.path().join("project.vibra"),
-        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \"src\" entry: \"main.vibra\"))\n",
+        root.path().join("project.vib"),
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \"src\" entry: \"main.vib\"))\n",
     )
     .unwrap();
     std::fs::write(&entry, "(defn main () void (do (let value 1)))\n").unwrap();
     std::fs::write(
-        root.path().join("src/main.broken.vibra"),
-        "(import missing \"absent.vibra\")\n",
+        root.path().join("src/main.broken.vib"),
+        "(import missing \"absent.vib\")\n",
     )
     .unwrap();
 
@@ -87,11 +87,11 @@ fn check_and_effects_compile_only_the_selected_parts() {
         .unwrap()
         .success());
     let checked = vibra_cmd()
-        .args(["check", &path(root.path()), "--flag", "broken"])
+        .args(["check", &path(root.path()), "--ctx", "broken"])
         .output()
         .unwrap();
     assert!(!checked.status.success());
-    assert!(String::from_utf8_lossy(&checked.stderr).contains("absent.vibra"));
+    assert!(String::from_utf8_lossy(&checked.stderr).contains("absent.vib"));
 
     assert!(vibra_cmd()
         .args(["effects", &path(&entry)])
@@ -99,11 +99,11 @@ fn check_and_effects_compile_only_the_selected_parts() {
         .unwrap()
         .success());
     let effects = vibra_cmd()
-        .args(["effects", &path(&entry), "--flag", "broken"])
+        .args(["effects", &path(&entry), "--ctx", "broken"])
         .output()
         .unwrap();
     assert!(!effects.status.success());
-    assert!(String::from_utf8_lossy(&effects.stderr).contains("absent.vibra"));
+    assert!(String::from_utf8_lossy(&effects.stderr).contains("absent.vib"));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn package_metadata_and_bytes_identify_flags_and_selected_sources() {
             &path(root.path()),
             "--output",
             &path(&release),
-            "--flag",
+            "--ctx",
             "release",
         ])
         .output()
@@ -157,7 +157,7 @@ fn package_metadata_and_bytes_identify_flags_and_selected_sources() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|source| source == "source/src/main.release.vibra"));
+        .any(|source| source == "source/src/main.release.vib"));
 
     let run = vibra_cmd().args(["run", &path(&release)]).output().unwrap();
     assert!(
@@ -172,17 +172,30 @@ fn malformed_flags_and_conditional_suffixes_have_stable_diagnostics() {
     let root = tempfile::tempdir().unwrap();
     let entry = write_project(root.path());
     let invalid = vibra_cmd()
-        .args(["expand", &path(&entry), "--flag", "Bad..flag"])
+        .args(["expand", &path(&entry), "--ctx", "Bad..flag"])
         .output()
         .unwrap();
     assert!(!invalid.status.success());
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("E-FLAG-001"));
 
-    std::fs::write(root.path().join("src/main..debug.vibra"), "extra: 1\n").unwrap();
+    std::fs::write(root.path().join("src/main..debug.vib"), "extra: 1\n").unwrap();
     let malformed = vibra_cmd()
         .args(["expand", &path(&entry)])
         .output()
         .unwrap();
     assert!(!malformed.status.success());
     assert!(String::from_utf8_lossy(&malformed.stderr).contains("E-FLAG-002"));
+}
+
+#[test]
+fn legacy_flag_option_is_rejected() {
+    let root = tempfile::tempdir().unwrap();
+    let entry = write_project(root.path());
+    let legacy = vibra_cmd()
+        .args(["expand", &path(&entry), "--flag", "release"])
+        .output()
+        .unwrap();
+
+    assert!(!legacy.status.success());
+    assert!(String::from_utf8_lossy(&legacy.stderr).contains("--flag"));
 }

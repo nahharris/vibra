@@ -79,7 +79,7 @@ Published dependencies cannot contain path dependencies.
 Import the dependency through its manifest alias:
 
 ```vibra
-(import math "@math/lib.vibra")
+(import math "@math/lib.vib")
 ```
 
 ## End-to-end binary example
