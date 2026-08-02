@@ -71,7 +71,7 @@ pub fn load_surface_program(entry: &Path, flags: &CompilationFlags) -> Result<Su
 ///
 /// `vibra exec`'s inline program is the motivating caller: its "entry" is a
 /// synthetic in-memory root assembled from `--import` flags, not a real
-/// `.vibra` file, so there is no single file to canonicalize as
+/// `.vib` file, so there is no single file to canonicalize as
 /// [`SurfaceProgram::entry`] -- the caller fills that field in separately.
 /// `entry` on the returned program is arbitrarily the first root (or the
 /// current directory if `roots` is empty) and carries no meaning for that
@@ -1496,7 +1496,7 @@ fn validate_reference_alias(
 }
 
 /// A module's own bare name for self-qualified references (e.g.
-/// `option.vibra` calling `option.empty`). Shared with
+/// `option.vib` calling `option.empty`). Shared with
 /// `crate::load::convert_surface_program`, which needs the exact same
 /// derivation when it resolves a module's own signatures under its self
 /// alias for `crate::surface_adapter::resolve_signatures`.
@@ -1504,7 +1504,7 @@ pub(crate) fn module_self_alias(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_str()?;
     Some(
         file_name
-            .strip_suffix(".vibra")
+            .strip_suffix(".vib")
             .unwrap_or(file_name)
             .split('.')
             .next()
@@ -1534,9 +1534,9 @@ fn module_part_paths(module_path: &Path, flags: &CompilationFlags) -> Result<Vec
     let Some(file_name) = module_path.file_name().and_then(|name| name.to_str()) else {
         return Ok(paths);
     };
-    let Some(base) = file_name.strip_suffix(".vibra") else {
+    let Some(base) = file_name.strip_suffix(".vib") else {
         bail!(
-            "E-SYN-012: S-expression source must use the `.vibra` extension: {}",
+            "E-SYN-012: S-expression source must use the `.vib` extension: {}",
             module_path.display()
         );
     };
@@ -1549,7 +1549,7 @@ fn module_part_paths(module_path: &Path, flags: &CompilationFlags) -> Result<Vec
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let Some(stem) = file_name.strip_suffix(".vibra") else {
+        let Some(stem) = file_name.strip_suffix(".vib") else {
             continue;
         };
         let Some(suffix) = stem.strip_prefix(&prefix) else {
@@ -1573,12 +1573,12 @@ fn canonical_module_path(path: &Path) -> Result<PathBuf> {
         .file_name()
         .and_then(|name| name.to_str())
         .with_context(|| format!("{} has no UTF-8 file name", path.display()))?;
-    if file_name.ends_with(".vibra.yaml") {
-        bail!("E-SYN-012: `.vibra.yaml` is not supported by the S-expression frontend");
+    if file_name.ends_with(".vib.yaml") {
+        bail!("E-SYN-012: `.vib.yaml` is not supported by the S-expression frontend");
     }
-    if !file_name.ends_with(".vibra") {
+    if !file_name.ends_with(".vib") {
         bail!(
-            "E-SYN-012: S-expression source must use the `.vibra` extension: {}",
+            "E-SYN-012: S-expression source must use the `.vib` extension: {}",
             path.display()
         );
     }
@@ -1594,23 +1594,34 @@ mod tests {
     }
 
     #[test]
-    fn loads_import_graph_and_merges_selected_parts_deterministically() {
+    fn rejects_legacy_vibra_source_extension() {
         let temp = tempfile::tempdir().unwrap();
         let entry = temp.path().join("main.vibra");
+        write(&entry, "(defn main () void (do unit))\n");
+        let error = load_surface_program(&entry, &CompilationFlags::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`.vib` extension"), "{error}");
+    }
+
+    #[test]
+    fn loads_import_graph_and_merges_selected_parts_deterministically() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import helper \"helper.vibra\")\n(defn main () void (do (helper.run)))\n",
+            "(import helper \"helper.vib\")\n(defn main () void (do (helper.run)))\n",
         );
         write(
-            &temp.path().join("main.test.vibra"),
+            &temp.path().join("main.test.vib"),
             "(test.scenario \"main-runs\" (test.case \"main-runs\" unit))\n",
         );
         write(
-            &temp.path().join("main.unix.vibra"),
+            &temp.path().join("main.unix.vib"),
             "(const platform str \"unix\")\n",
         );
         write(
-            &temp.path().join("helper.vibra"),
+            &temp.path().join("helper.vib"),
             "(defn run () void (do unit))\n",
         );
         let program = load_surface_program(&entry, &CompilationFlags::new(["test"])).unwrap();
@@ -1618,8 +1629,8 @@ mod tests {
         let entry_module = &program.modules[&program.entry];
         assert_eq!(entry_module.parts.len(), 2);
         assert_eq!(entry_module.forms().count(), 3);
-        assert!(entry_module.parts[0].path.ends_with("main.test.vibra"));
-        assert!(entry_module.parts[1].path.ends_with("main.vibra"));
+        assert!(entry_module.parts[0].path.ends_with("main.test.vib"));
+        assert!(entry_module.parts[1].path.ends_with("main.vib"));
         assert_ne!(
             entry_module.parts[0].module.document_id,
             entry_module.parts[1].module.document_id
@@ -1637,10 +1648,10 @@ mod tests {
     #[test]
     fn duplicate_symbols_across_parts_are_rejected() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(&entry, "(const answer int64 1)\n");
         write(
-            &temp.path().join("main.test.vibra"),
+            &temp.path().join("main.test.vib"),
             "(const answer int64 2)\n",
         );
         let error = load_surface_program(&entry, &CompilationFlags::new(["test"]))
@@ -1653,9 +1664,9 @@ mod tests {
     #[test]
     fn cycles_have_a_stable_error() {
         let temp = tempfile::tempdir().unwrap();
-        let a = temp.path().join("a.vibra");
-        write(&a, "(import b \"b.vibra\")\n");
-        write(&temp.path().join("b.vibra"), "(import a \"a.vibra\")\n");
+        let a = temp.path().join("a.vib");
+        write(&a, "(import b \"b.vib\")\n");
+        write(&temp.path().join("b.vib"), "(import a \"a.vib\")\n");
         let error = load_surface_program(&a, &CompilationFlags::default())
             .unwrap_err()
             .to_string();
@@ -1665,7 +1676,7 @@ mod tests {
     #[test]
     fn expands_typed_compile_time_data_with_origins_and_fingerprints() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(const text str (embed \"message.txt\"))\n\
@@ -1758,7 +1769,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let package = root.path().join("package");
         fs::create_dir(&package).unwrap();
-        let entry = package.join("main.vibra");
+        let entry = package.join("main.vib");
         write(&entry, "(const secret str (embed \"../secret.txt\"))\n");
         write(&root.path().join("secret.txt"), "secret");
         let error = load_surface_program(&entry, &CompilationFlags::default())
@@ -1770,7 +1781,7 @@ mod tests {
     #[test]
     fn typed_compile_time_data_rejects_unsupported_inputs_explicitly() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(&temp.path().join("data.unknown"), "value");
         write(&entry, "(const value dynamic (embed \"data.unknown\"))\n");
         let error = load_surface_program(&entry, &CompilationFlags::default())
@@ -1793,7 +1804,7 @@ mod tests {
     #[test]
     fn typed_json_integers_preserve_signed_boundaries_without_float_coercion() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         let data = temp.path().join("data.json");
         write(&entry, "(const value dynamic (embed \"data.json\"))\n");
         write(&data, "[-9223372036854775808,9223372036854775807]");
@@ -1839,7 +1850,7 @@ mod tests {
     #[test]
     fn typed_compile_time_inputs_are_bounded_before_expansion() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         let oversized = vec![b'x'; MAX_EMBED_SOURCE_BYTES + 1];
 
         write(&entry, "(const value str (embed \"large.txt\"))\n");
@@ -1863,7 +1874,7 @@ mod tests {
     #[test]
     fn template_rendering_normalizes_crlf_but_fingerprints_raw_bytes() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         let template = temp.path().join("message.mustache");
         write(
             &entry,
@@ -1909,20 +1920,20 @@ mod tests {
     #[test]
     fn expands_local_cross_part_and_imported_macros_before_validation() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import helpers \"helpers.vibra\")\n\
+            "(import helpers \"helpers.vib\")\n\
              (defn main (caller int64) int64\n\
                (do (local caller) (helpers.use-helper caller)))\n",
         );
         write(
-            &temp.path().join("main.test.vibra"),
+            &temp.path().join("main.test.vib"),
             "(macro local (value @expr-syntax) @expr-syntax\n\
                (do (quote @expr-syntax (unquote value))))\n",
         );
         write(
-            &temp.path().join("helpers.vibra"),
+            &temp.path().join("helpers.vib"),
             "(defn helper (value int64) int64 (do value))\n\
              (macro use-helper (value @expr-syntax) @expr-syntax\n\
                (do (quote @expr-syntax (helper (unquote value)))))\n",
@@ -1948,14 +1959,14 @@ mod tests {
     #[test]
     fn imported_private_macros_are_rejected() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import helpers \"helpers.vibra\")\n\
+            "(import helpers \"helpers.vib\")\n\
              (defn main () void (do (helpers.secret unit)))\n",
         );
         write(
-            &temp.path().join("helpers.vibra"),
+            &temp.path().join("helpers.vib"),
             "(macro secret (value @expr-syntax) @expr-syntax\n\
                (do (unquote value)) visibility: @private)\n",
         );
@@ -1969,10 +1980,10 @@ mod tests {
     #[test]
     fn entry_discovery_selects_test_parts_without_import_loading() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
-        write(&entry, "(import missing \"missing.vibra\")\n");
+        let entry = temp.path().join("main.vib");
+        write(&entry, "(import missing \"missing.vib\")\n");
         write(
-            &temp.path().join("main.test.vibra"),
+            &temp.path().join("main.test.vib"),
             "(test.scenario \"selected\" (test.case \"selected\" unit))\n",
         );
         let (_, module) = load_surface_entry_for_test_discovery(&entry).unwrap();
@@ -1985,17 +1996,17 @@ mod tests {
     #[test]
     fn rejects_transitive_import_alias_references() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import middle \"middle.vibra\")\n(defn main () void (do (leaf.run)))\n",
+            "(import middle \"middle.vib\")\n(defn main () void (do (leaf.run)))\n",
         );
         write(
-            &temp.path().join("middle.vibra"),
-            "(import leaf \"leaf.vibra\")\n(defn run () void (do (leaf.run)))\n",
+            &temp.path().join("middle.vib"),
+            "(import leaf \"leaf.vib\")\n(defn run () void (do (leaf.run)))\n",
         );
         write(
-            &temp.path().join("leaf.vibra"),
+            &temp.path().join("leaf.vib"),
             "(defn run () void (do unit))\n",
         );
 

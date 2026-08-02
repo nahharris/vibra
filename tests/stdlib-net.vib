@@ -1,0 +1,27 @@
+(import test "../stdlib/src/test.vib")
+(import net "../stdlib/src/net.vib")
+(import result "../stdlib/src/result.vib")
+(test.scenario
+  "address-parsing-is-typed"
+  (test.case
+    "address-parsing-is-typed"
+    (let valid (net.parse-address "127.0.0.1:8080"))
+    (match
+      valid
+      (result.result.ok _)
+      (do (test.assert true))
+      _
+      (do (test.fail "valid socket address was rejected"))
+    )
+    (let invalid (net.parse-address "not-an-address"))
+    (match
+      invalid
+      (result.result.err (net.net-error.invalid-address _))
+      (do (test.assert true))
+      _
+      (do (test.fail "invalid socket address was accepted"))
+    )
+    profile: @core
+    tags: (@stdlib @network)
+  )
+)

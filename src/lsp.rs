@@ -140,7 +140,7 @@ impl Server {
             }
             "textDocument/formatting" => {
                 let (uri, source) = self.source(params)?;
-                let path = uri_path(&uri).unwrap_or_else(|| PathBuf::from("document.vibra"));
+                let path = uri_path(&uri).unwrap_or_else(|| PathBuf::from("document.vib"));
                 let formatted = crate::tooling::format_source(&path, &source)?;
                 if formatted == source {
                     return Ok(json!([]));
@@ -204,7 +204,7 @@ impl Server {
         let mut reports = BTreeMap::new();
         let mut syntax_error = false;
         for (open_uri, source) in &self.documents {
-            let open_path = uri_path(open_uri).unwrap_or_else(|| PathBuf::from("document.vibra"));
+            let open_path = uri_path(open_uri).unwrap_or_else(|| PathBuf::from("document.vib"));
             let diagnostics = crate::tooling::diagnostics_for_source(&open_path, source);
             syntax_error |= diagnostics
                 .iter()
@@ -698,7 +698,7 @@ fn discover_workspace_sources(
                 ) {
                     pending.push(path);
                 }
-            } else if path.extension().and_then(|v| v.to_str()) == Some("vibra")
+            } else if path.extension().and_then(|v| v.to_str()) == Some("vib")
                 && path.file_name().and_then(|v| v.to_str()) != Some(crate::project::MANIFEST_FILE)
             {
                 output.insert(

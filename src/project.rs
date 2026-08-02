@@ -127,7 +127,7 @@ pub fn init_project(path: &Path, template: InitTemplate) -> Result<()> {
         .context("copy stdlib into dep/std")?;
     fs::write(
         path.join("dep/std").join(MANIFEST_FILE),
-        "(project\n  (package \"std\" \"0.1.0\")\n  (target std kind: @lib root: \"src\" entry: \"lib.vibra\"))\n",
+        "(project\n  (package \"std\" \"0.1.0\")\n  (target std kind: @lib root: \"src\" entry: \"lib.vib\"))\n",
     )?;
 
     let name = path
@@ -691,7 +691,7 @@ fn validate_external_wasm_imports(project: &LoadedProject) -> Result<()> {
 /// Statically validates external `wasm` FFI wrapper signatures against the
 /// declared dependency's actual `.wasm` export, ahead of and independent of
 /// the real compile pipeline (`crate::load`/`crate::lower`) -- so it reads
-/// `.vibra` S-expression source itself, the same way `crate::frontend` does,
+/// `.vib` S-expression source itself, the same way `crate::frontend` does,
 /// rather than reusing a `LoadedProgram`.
 fn validate_module_external_wasm(
     project: &LoadedProject,
@@ -1185,7 +1185,7 @@ pub(crate) fn canonical_file_bytes(path: &Path) -> Result<Vec<u8>> {
     let bytes = fs::read(path)?;
     let text = matches!(
         path.extension().and_then(|extension| extension.to_str()),
-        Some("vibra" | "yaml" | "yml" | "json" | "toml" | "md" | "txt")
+        Some("vib" | "vibra" | "yaml" | "yml" | "json" | "toml" | "md" | "txt")
     );
     if !text || !bytes.contains(&b'\r') {
         return Ok(bytes);
@@ -1345,7 +1345,7 @@ fn locate_stdlib_package() -> Result<PathBuf> {
         if let Some(parent) = exe.parent() {
             for ancestor in parent.ancestors() {
                 let candidate = ancestor.join("stdlib");
-                if candidate.join("src/io.vibra").exists() {
+                if candidate.join("src/io.vib").exists() {
                     let release = ancestor.join("release.json");
                     if release.exists() {
                         validate_distributed_stdlib(&candidate, &release)?;
@@ -1359,7 +1359,7 @@ fn locate_stdlib_package() -> Result<PathBuf> {
     }
 
     let candidate = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
-    if cfg!(debug_assertions) && candidate.join("src/io.vibra").exists() {
+    if cfg!(debug_assertions) && candidate.join("src/io.vib").exists() {
         return Ok(candidate);
     }
     bail!("E-DIST-001: cannot locate the bundled stdlib; expected `stdlib/` beside the toolchain `bin/` directory");
@@ -1417,12 +1417,12 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
     let src = root.join("src").join(name);
     fs::create_dir_all(&src)?;
     fs::write(
-        src.join("main.vibra"),
-        "(import io \"@std/io.vibra\")\n(defn main () void (do (io.stdout.println \"Hello, World!\")) effects: (io.stdout stream.write))\n",
+        src.join("main.vib"),
+        "(import io \"@std/io.vib\")\n(defn main () void (do (io.stdout.println \"Hello, World!\")) effects: (io.stdout stream.write))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
-        manifest_text(name, &[("bin", name, &format!("src/{name}"), "main.vibra")]),
+        manifest_text(name, &[("bin", name, &format!("src/{name}"), "main.vib")]),
     )?;
     Ok(())
 }
@@ -1430,10 +1430,10 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
 fn write_lib_template(root: &Path, name: &str) -> Result<()> {
     let src = root.join("src").join(name);
     fs::create_dir_all(&src)?;
-    fs::write(src.join("lib.vibra"), "(const answer int64 42)\n")?;
+    fs::write(src.join("lib.vib"), "(const answer int64 42)\n")?;
     fs::write(
         root.join(MANIFEST_FILE),
-        manifest_text(name, &[("lib", name, &format!("src/{name}"), "lib.vibra")]),
+        manifest_text(name, &[("lib", name, &format!("src/{name}"), "lib.vib")]),
     )?;
     Ok(())
 }
@@ -1442,20 +1442,20 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
     fs::create_dir_all(root.join("src/core"))?;
     fs::create_dir_all(root.join("src").join(name))?;
     fs::write(
-        root.join("src/core/lib.vibra"),
+        root.join("src/core/lib.vib"),
         "(const message str \"Hello from core\")\n",
     )?;
     fs::write(
-        root.join("src").join(name).join("main.vibra"),
-        "(import io \"@std/io.vibra\")\n(import core \"@core/lib.vibra\")\n(defn main () void (do (io.stdout.println core.message)) effects: (io.stdout stream.write))\n",
+        root.join("src").join(name).join("main.vib"),
+        "(import io \"@std/io.vib\")\n(import core \"@core/lib.vib\")\n(defn main () void (do (io.stdout.println core.message)) effects: (io.stdout stream.write))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
         manifest_text(
             name,
             &[
-                ("lib", "core", "src/core", "lib.vibra"),
-                ("bin", name, &format!("src/{name}"), "main.vibra"),
+                ("lib", "core", "src/core", "lib.vib"),
+                ("bin", name, &format!("src/{name}"), "main.vib"),
             ],
         ),
     )?;
@@ -1540,10 +1540,10 @@ fn validate_relative_source_path(path: &Path, context: &str) -> Result<()> {
 
 fn validate_vibra_extension(path: &Path) -> Result<()> {
     let s = path.to_string_lossy();
-    if s.ends_with(".vibra") {
+    if s.ends_with(".vib") {
         Ok(())
     } else {
-        bail!("source `{}` must end in .vibra", path.display());
+        bail!("source `{}` must end in .vib", path.display());
     }
 }
 
@@ -1561,9 +1561,9 @@ mod tests {
 
     #[test]
     fn project_sources_reject_the_legacy_yaml_extension() {
-        validate_vibra_extension(Path::new("src/main.vibra")).unwrap();
-        let error = validate_vibra_extension(Path::new("src/main.vibra.yaml")).unwrap_err();
-        assert!(error.to_string().contains("must end in .vibra"));
+        validate_vibra_extension(Path::new("src/main.vib")).unwrap();
+        let error = validate_vibra_extension(Path::new("src/main.vib.yaml")).unwrap_err();
+        assert!(error.to_string().contains("must end in .vib"));
     }
 
     #[test]
@@ -1571,8 +1571,8 @@ mod tests {
         let manifest = parse_manifest(
             r#"(project
   (package "sample" "0.1.0" doc: "Sample package.")
-  (target core kind: @lib root: "src/core" entry: "lib.vibra")
-  (target app kind: @bin root: "src/app" entry: "main.vibra")
+  (target core kind: @lib root: "src/core" entry: "lib.vib")
+  (target app kind: @bin root: "src/app" entry: "main.vib")
   (dependency local path: "../local")
   (dependency remote git: "https://example.invalid/remote.git" rev: "0123456789abcdef0123456789abcdef01234567" wasm: "remote.wasm")
   (plugin-interface arithmetic
@@ -1582,7 +1582,7 @@ mod tests {
         assert_eq!(manifest.package.name, "sample");
         assert_eq!(manifest.package.doc.as_deref(), Some("Sample package."));
         assert_eq!(manifest.targets.libs[0].root, Path::new("src/core"));
-        assert_eq!(manifest.targets.bins[0].entry, Path::new("main.vibra"));
+        assert_eq!(manifest.targets.bins[0].entry, Path::new("main.vib"));
         assert_eq!(
             manifest.dependencies["remote"].wasm.as_deref(),
             Some(Path::new("remote.wasm"))
@@ -1597,9 +1597,9 @@ mod tests {
 
         for invalid in [
             "(project (package \"x\" \"1\") (target app kind: @bin root: \"src\"))",
-            "(project (package \"x\" \"1\") (target app kind: @bin kind: @lib root: \"src\" entry: \"main.vibra\"))",
-            "(project (package \"x\" \"1\") (target app kind: @bin root: \"src\" entry: \"main.vibra\" extra: true))",
-            "(project (package name: \"x\" \"1\") (target app kind: @bin root: \"src\" entry: \"main.vibra\"))",
+            "(project (package \"x\" \"1\") (target app kind: @bin kind: @lib root: \"src\" entry: \"main.vib\"))",
+            "(project (package \"x\" \"1\") (target app kind: @bin root: \"src\" entry: \"main.vib\" extra: true))",
+            "(project (package name: \"x\" \"1\") (target app kind: @bin root: \"src\" entry: \"main.vib\"))",
         ] {
             assert!(parse_manifest(invalid).is_err(), "{invalid}");
         }
@@ -1669,13 +1669,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let stdlib = temp.path().join("stdlib");
         fs::create_dir(&stdlib).unwrap();
-        fs::write(stdlib.join("io.vibra"), "io: true\n").unwrap();
+        fs::write(stdlib.join("io.vib"), "io: true\n").unwrap();
         let digest = hash_release_stdlib(&stdlib).unwrap();
         let release = temp.path().join("release.json");
         fs::write(&release, format!("{{\"format-version\":1,\"stdlib-git\":\"{STDLIB_GIT}\",\"stdlib-rev\":\"{STDLIB_REV}\",\"stdlib-sha256\":\"{digest}\"}}\n")).unwrap();
         validate_distributed_stdlib(&stdlib, &release).unwrap();
 
-        fs::write(stdlib.join("io.vibra"), "tampered: true\n").unwrap();
+        fs::write(stdlib.join("io.vib"), "tampered: true\n").unwrap();
         assert!(validate_distributed_stdlib(&stdlib, &release)
             .unwrap_err()
             .to_string()
@@ -1691,9 +1691,9 @@ mod tests {
     fn source_hashes_ignore_checkout_line_endings_but_preserve_binary_bytes() {
         let unix = tempfile::tempdir().unwrap();
         let windows = tempfile::tempdir().unwrap();
-        fs::write(unix.path().join("module.vibra"), b"value: one\nnext: two\n").unwrap();
+        fs::write(unix.path().join("module.vib"), b"value: one\nnext: two\n").unwrap();
         fs::write(
-            windows.path().join("module.vibra"),
+            windows.path().join("module.vib"),
             b"value: one\r\nnext: two\r\n",
         )
         .unwrap();
@@ -1701,8 +1701,8 @@ mod tests {
         fs::write(windows.path().join("payload.bin"), b"a\r\nb").unwrap();
 
         assert_eq!(
-            canonical_file_bytes(&unix.path().join("module.vibra")).unwrap(),
-            canonical_file_bytes(&windows.path().join("module.vibra")).unwrap()
+            canonical_file_bytes(&unix.path().join("module.vib")).unwrap(),
+            canonical_file_bytes(&windows.path().join("module.vib")).unwrap()
         );
         assert_eq!(
             canonical_file_bytes(&windows.path().join("payload.bin")).unwrap(),
@@ -1747,13 +1747,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();
         fs::create_dir_all(temp.path().join("foreign")).unwrap();
-        fs::write(temp.path().join("src/main.vibra"), wrapper).unwrap();
+        fs::write(temp.path().join("src/main.vib"), wrapper).unwrap();
         if let Some(bytes) = artifact {
             fs::write(temp.path().join("foreign/math.wasm"), bytes).unwrap();
         }
         fs::write(
             temp.path().join(MANIFEST_FILE),
-            "(project\n  (package \"ffi-test\" \"0.1.0\")\n  (target ffi-test kind: @bin root: \"src\" entry: \"main.vibra\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
+            "(project\n  (package \"ffi-test\" \"0.1.0\")\n  (target ffi-test kind: @bin root: \"src\" entry: \"main.vib\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
         ).unwrap();
         temp
     }

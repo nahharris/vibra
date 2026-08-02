@@ -1,6 +1,6 @@
 ---
 name: vibra-coding
-description: Write, review, and refactor statically typed Vibra source, modules, tests, and documentation. Use for `.vibra` files, Vibra language features, imports, `$test` cases, `=doc` annotations, or idiomatic Vibra API design.
+description: Write, review, and refactor statically typed Vibra source, modules, tests, and documentation. Use for `.vib` files, Vibra language features, imports, `$test` cases, `=doc` annotations, or idiomatic Vibra API design.
 ---
 
 # Vibra coding

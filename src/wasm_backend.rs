@@ -1956,7 +1956,7 @@ mod tests {
     #[test]
     fn interpreter_and_wasm_match_representative_pure_output() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let loaded = crate::load::load_program(&root.join("examples/hello.vibra")).unwrap();
+        let loaded = crate::load::load_program(&root.join("examples/hello.vib")).unwrap();
         let program = crate::lower::lower_program(&loaded).unwrap();
         let interpreted = SharedWriter::default();
         let wasm = SharedWriter::default();
@@ -1981,7 +1981,7 @@ mod tests {
     #[test]
     fn emitted_wasm_executes_after_lowered_program_is_dropped() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let loaded = crate::load::load_program(&root.join("examples/hello.vibra")).unwrap();
+        let loaded = crate::load::load_program(&root.join("examples/hello.vib")).unwrap();
         let program = crate::lower::lower_program(&loaded).unwrap();
         let wasm = emit_program_wasm(&program);
         drop(program);
@@ -1999,7 +1999,7 @@ mod tests {
     #[test]
     fn embedded_plan_keeps_built_in_host_calls_as_intrinsic_expressions() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let loaded = crate::load::load_program(&root.join("examples/hello.vibra")).unwrap();
+        let loaded = crate::load::load_program(&root.join("examples/hello.vib")).unwrap();
         let program = crate::lower::lower_program(&loaded).unwrap();
         let compiled = compile_program(&program);
         let module = wasmer::Module::new(&Store::default(), &compiled.wasm).unwrap();
@@ -2022,7 +2022,7 @@ mod tests {
     #[test]
     fn compiler_monomorphizes_reachable_generics_and_drops_unreachable_functions() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("entry.vibra");
+        let entry = temp.path().join("entry.vib");
         std::fs::write(
             &entry,
             r#"(defn identity (value t) t (do (return value)) where: (t any))

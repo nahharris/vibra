@@ -49,16 +49,16 @@ fn lifecycle_and_capabilities_use_lsp_framing() {
 #[test]
 fn compilation_flags_flow_from_initialization_and_configuration_changes() {
     let workspace = tempfile::tempdir().unwrap();
-    let main_path = workspace.path().join("main.vibra");
+    let main_path = workspace.path().join("main.vib");
     let main = "(defn main () void (do (enabled)))\n";
     std::fs::write(
         workspace.path().join("project.vibra"),
-        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \".\" entry: \"main.vibra\"))\n",
+        "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \".\" entry: \"main.vib\"))\n",
     )
     .unwrap();
     std::fs::write(&main_path, main).unwrap();
     std::fs::write(
-        workspace.path().join("main.release.vibra"),
+        workspace.path().join("main.release.vib"),
         "(defn enabled () void (do (let value 1)))\n",
     )
     .unwrap();
@@ -114,7 +114,7 @@ fn open_document_publishes_diagnostics_and_semantic_requests_work() {
         "file:///{}",
         workspace
             .path()
-            .join("main.vibra")
+            .join("main.vib")
             .to_string_lossy()
             .replace('\\', "/")
     );
@@ -158,9 +158,9 @@ fn open_document_publishes_diagnostics_and_semantic_requests_work() {
 fn workspace_navigation_resolves_imported_package_symbols_and_open_overlays() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(workspace.path().join("packages")).unwrap();
-    let main_path = workspace.path().join("main.vibra");
-    let util_path = workspace.path().join("packages/util.vibra");
-    let main = "util:\n  $import: packages/util.vibra\nmain:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: $util.greet\n";
+    let main_path = workspace.path().join("main.vib");
+    let util_path = workspace.path().join("packages/util.vib");
+    let main = "util:\n  $import: packages/util.vib\nmain:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: $util.greet\n";
     let util_disk = "greet:\n  $function: null\n  =doc: Old docs\n  args: {}\n  return: string\n  do:\n    - $return: hello\n";
     let util_overlay = util_disk.replace("Old docs", "Workspace greeting");
     std::fs::write(&main_path, main).unwrap();
@@ -210,7 +210,7 @@ fn workspace_navigation_resolves_imported_package_symbols_and_open_overlays() {
 #[test]
 fn formatting_returns_a_whole_document_edit() {
     let workspace = tempfile::tempdir().unwrap();
-    let uri = path_uri(&workspace.path().join("main.vibra"));
+    let uri = path_uri(&workspace.path().join("main.vib"));
     let root_uri = path_uri(workspace.path());
     // Canonical output always uses LF, so CRLF input guarantees an edit on
     // every host without relying on emitter choices around printer style.
@@ -237,11 +237,11 @@ fn formatting_returns_a_whole_document_edit() {
 #[test]
 fn navigation_uses_unsaved_s_expression_buffers() {
     let workspace = tempfile::tempdir().unwrap();
-    let main_path = workspace.path().join("main.vibra");
-    let helper_path = workspace.path().join("helper.vibra");
-    let manifest = "(project (package \"overlay-nav\" \"0.1.0\") (target app kind: @bin root: \".\" entry: \"main.vibra\"))\n";
-    let disk_main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.old)))\n";
-    let live_main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.live)))\n";
+    let main_path = workspace.path().join("main.vib");
+    let helper_path = workspace.path().join("helper.vib");
+    let manifest = "(project (package \"overlay-nav\" \"0.1.0\") (target app kind: @bin root: \".\" entry: \"main.vib\"))\n";
+    let disk_main = "(import helper \"helper.vib\")\n(defn main () void (do (helper.old)))\n";
+    let live_main = "(import helper \"helper.vib\")\n(defn main () void (do (helper.live)))\n";
     let disk_helper = "(defn old () void (do unit))\n";
     let live_helper = "(defn live () void (do unit))\n";
     std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
@@ -273,8 +273,8 @@ fn navigation_uses_unsaved_s_expression_buffers() {
 #[test]
 fn atom_literals_hover_complete_and_list_references_but_have_no_definition() {
     let workspace = tempfile::tempdir().unwrap();
-    let main_path = workspace.path().join("main.vibra");
-    let manifest = "(project (package \"atoms\" \"0.1.0\") (target app kind: @bin root: \".\" entry: \"main.vibra\"))\n";
+    let main_path = workspace.path().join("main.vib");
+    let manifest = "(project (package \"atoms\" \"0.1.0\") (target app kind: @bin root: \".\" entry: \"main.vib\"))\n";
     let main = "(defn classify (value atom) bool (do (match value @ok (do (return true)) _ (do (return false)))))\n(defn main () void (do (classify @ok)))\n";
     std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
     std::fs::write(&main_path, main).unwrap();
@@ -328,13 +328,13 @@ fn path_uri(path: &std::path::Path) -> String {
 #[test]
 fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     let workspace = tempfile::tempdir().unwrap();
-    let manifest = "(project\n  (package \"overlay-test\" \"0.1.0\")\n  (target app kind: @bin root: \".\" entry: \"main.vibra\"))\n";
-    let main = "(import helper \"helper.vibra\")\n(defn main () void (do (helper.run)))\n";
+    let manifest = "(project\n  (package \"overlay-test\" \"0.1.0\")\n  (target app kind: @bin root: \".\" entry: \"main.vib\"))\n";
+    let main = "(import helper \"helper.vib\")\n(defn main () void (do (helper.run)))\n";
     let valid = "(defn run () void (do (let value 1)))\n";
     let broken = "(defn run () void (do (missing) (let value 1)))\n";
     std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
-    std::fs::write(workspace.path().join("main.vibra"), main).unwrap();
-    std::fs::write(workspace.path().join("helper.vibra"), valid).unwrap();
+    std::fs::write(workspace.path().join("main.vib"), main).unwrap();
+    std::fs::write(workspace.path().join("helper.vib"), valid).unwrap();
     let uri = |path: &std::path::Path| {
         let value = path.to_string_lossy().replace('\\', "/");
         if value.starts_with('/') {
@@ -344,8 +344,8 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
         }
     };
     let root_uri = uri(workspace.path());
-    let main_uri = uri(&workspace.path().join("main.vibra"));
-    let helper_uri = uri(&workspace.path().join("helper.vibra"));
+    let main_uri = uri(&workspace.path().join("main.vib"));
+    let helper_uri = uri(&workspace.path().join("helper.vib"));
     let mut input = Vec::new();
     for value in [
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
@@ -385,7 +385,7 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
             .is_empty());
     }
     assert_eq!(
-        std::fs::read_to_string(workspace.path().join("helper.vibra")).unwrap(),
+        std::fs::read_to_string(workspace.path().join("helper.vib")).unwrap(),
         valid
     );
 }
@@ -395,13 +395,13 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
 fn semantic_navigation_resolves_transitive_import_aliases() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(workspace.path().join("pkg")).unwrap();
-    let main="mid:\n  $import: pkg/mid.vibra\nmain:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: $mid.leaf.greet\n";
-    let mid = "leaf:\n  $import: leaf.vibra\n";
+    let main="mid:\n  $import: pkg/mid.vib\nmain:\n  $function: null\n  args: {}\n  return: string\n  do:\n    - $return: $mid.leaf.greet\n";
+    let mid = "leaf:\n  $import: leaf.vib\n";
     let leaf="greet:\n  $function: null\n  =doc: Transitive greeting\n  args: {}\n  return: string\n  do:\n    - $return: hello\n";
-    let main_path = workspace.path().join("main.vibra");
-    let leaf_path = workspace.path().join("pkg/leaf.vibra");
+    let main_path = workspace.path().join("main.vib");
+    let leaf_path = workspace.path().join("pkg/leaf.vib");
     std::fs::write(&main_path, main).unwrap();
-    std::fs::write(workspace.path().join("pkg/mid.vibra"), mid).unwrap();
+    std::fs::write(workspace.path().join("pkg/mid.vib"), mid).unwrap();
     std::fs::write(&leaf_path, leaf).unwrap();
     let uri = |path: &std::path::Path| {
         let value = path.to_string_lossy().replace('\\', "/");
@@ -442,13 +442,13 @@ fn semantic_navigation_resolves_project_at_imports() {
     let workspace = tempfile::tempdir().unwrap();
     let dependency = workspace.path().join("packages/util");
     std::fs::create_dir_all(dependency.join("src")).unwrap();
-    let manifest="(project\n  (package \"app\" \"0.1.0\")\n  (target app kind: @bin root: \".\" entry: \"main.vibra\")\n  (dependency util path: \"packages/util\"))\n";
+    let manifest="(project\n  (package \"app\" \"0.1.0\")\n  (target app kind: @bin root: \".\" entry: \"main.vib\")\n  (dependency util path: \"packages/util\"))\n";
     let dependency_manifest =
-        "(project\n  (package \"util\" \"0.1.0\")\n  (target util kind: @lib root: \"src\" entry: \"greet.vibra\"))\n";
-    let main="util:\n  $import: '@util/greet.vibra'\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $util.greet: null\n";
+        "(project\n  (package \"util\" \"0.1.0\")\n  (target util kind: @lib root: \"src\" entry: \"greet.vib\"))\n";
+    let main="util:\n  $import: '@util/greet.vib'\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $util.greet: null\n";
     let library="greet:\n  $function: $void\n  =doc: Dependency greeting\n  return: $void\n  do:\n    - $let:\n        value: 1\n";
-    let main_path = workspace.path().join("main.vibra");
-    let library_path = dependency.join("src/greet.vibra");
+    let main_path = workspace.path().join("main.vib");
+    let library_path = dependency.join("src/greet.vib");
     std::fs::write(workspace.path().join("project.vibra"), manifest).unwrap();
     std::fs::write(dependency.join("project.vibra"), dependency_manifest).unwrap();
     std::fs::write(&main_path, main).unwrap();
@@ -476,8 +476,8 @@ fn semantic_navigation_resolves_project_at_imports() {
 #[test]
 fn checked_in_multi_package_sample_supports_core_editor_features() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lsp-workspace");
-    let main_path = root.join("main.vibra");
-    let library_path = root.join("packages/greeting/src/greet.vibra");
+    let main_path = root.join("main.vib");
+    let library_path = root.join("packages/greeting/src/greet.vib");
     let main = std::fs::read_to_string(&main_path).unwrap();
     let library = std::fs::read_to_string(&library_path).unwrap();
     let root_uri = path_uri(&root);
@@ -526,15 +526,15 @@ fn medium_workspace_semantic_request_meets_performance_contract() {
     let document_count = 250;
     for index in 0..document_count {
         std::fs::write(
-            workspace.path().join(format!("module-{index}.vibra")),
+            workspace.path().join(format!("module-{index}.vib")),
             format!(
                 "function-{index}:\n  $function: $void\n  =doc: Medium workspace symbol {index}\n  return: $void\n  do:\n    - $let:\n        value: {index}\n"
             ),
         )
         .unwrap();
     }
-    let main_path = workspace.path().join("main.vibra");
-    let main = "module:\n  $import: module-249.vibra\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $module.function-249: null\n";
+    let main_path = workspace.path().join("main.vib");
+    let main = "module:\n  $import: module-249.vib\nmain:\n  $function: $void\n  return: $void\n  do:\n    - $module.function-249: null\n";
     std::fs::write(&main_path, main).unwrap();
     let mut input = Vec::new();
     for value in [

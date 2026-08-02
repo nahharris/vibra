@@ -15,19 +15,29 @@ S-expression surface that compiles to WebAssembly.
 ## Quick start
 
 ```sh
-cargo run -- run examples/hello.vibra
-cargo run -- check examples/hello.vibra
+cargo run -- run examples/hello.vib
+cargo run -- check examples/hello.vib
 cargo run -- fmt
 cargo run -- lint --deny-warnings
 cargo run -- test
 ```
 
+Conditional compilation values are supplied with repeatable `--ctx` options:
+
+```sh
+vibra run examples/hello.vib --ctx release
+vibra build . --output build/app.vapp --ctx release
+```
+
 Vibra source uses UTF-8 S-expressions. A module contains imports and
-definitions; calls are positional and labels configure enclosing forms.
+definitions; calls support fixed positional, labelled, and variadic arguments.
+The parser accepts mixed argument order, while formatting emits fixed
+positional arguments, then labelled arguments, then variadic arguments. The
+lint rule `W-STYLE-002` reports a noncanonical order without making it an error.
 
 ```vibra
-(import io "../stdlib/src/io.vibra")
-(import stream "../stdlib/src/stream.vibra")
+(import io "../stdlib/src/io.vib")
+(import stream "../stdlib/src/stream.vib")
 
 (defn main () void (do (io.stdout.println "Hello, World!")) effects: (io.stdout stream.write))
 ```
@@ -96,7 +106,7 @@ by a `deffect`. Raw `wasm` is reserved for custom/dependency Wasm owned by an
 effect operation.
 
 ```sh
-vibra effects examples/fs-roundtrip.vibra
+vibra effects examples/fs-roundtrip.vib
 ```
 
 reports declared/performed surfaces, per-function and per-operation rows, call
@@ -109,13 +119,13 @@ so embedders must still sandbox untrusted Vibra source themselves.
 
 ## Projects
 
-`project.vibra` is an S-expression manifest and source files use the `.vibra`
+`project.vibra` is an S-expression manifest and source files use the `.vib`
 extension. Lockfiles and compiler-owned package metadata are canonical JSON.
 
 ```vibra
 (project
   (package "hello" "0.1.0")
-  (target hello kind: @bin root: "src" entry: "main.vibra")
+  (target hello kind: @bin root: "src" entry: "main.vib")
   (dependency std path: "../stdlib"))
 ```
 
@@ -125,7 +135,7 @@ Tests are first-class declarations. A bare `vibra test` selects the capability
 free `core` profile.
 
 ```vibra
-(import test "@std/test.vibra")
+(import test "@std/test.vib")
 
 (test.scenario "truth"
   (test.case "is true"

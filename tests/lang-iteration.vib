@@ -1,0 +1,112 @@
+(import test "../stdlib/src/test.vib")
+(test.scenario
+  "range-reduction-and-loop-control"
+  (test.case
+    "range-reduction-and-loop-control"
+    (let sum (mut 0))
+    (for
+      number
+      (range 0 10 1)
+      (if (equal number 2) (do (continue)) (do))
+      (if (equal number 5) (do (break)) (do))
+      (set sum (add sum number))
+    )
+    (match
+      sum
+      8
+      (do (test.assert true))
+      _
+      (do (test.fail "range reduction or loop control failed"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "descending-range-and-empty-sources"
+  (test.case
+    "descending-range-and-empty-sources"
+    (let count (mut 0))
+    (for number (range 3 -1 -1) (set count (add count 1)))
+    (for number (range 0 0 1) (test.fail "empty range traversed"))
+    (for scalar "" (test.fail "empty string traversed"))
+    (match
+      count
+      4
+      (do (test.assert true))
+      _
+      (do (test.fail "descending range failed"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "map-order-and-string-scalars"
+  (test.case
+    "map-order-and-string-scalars"
+    (let position (mut 0))
+    (for
+      entry
+      (map ("first" 10) ("second" 20))
+      (match
+        entry
+        (tuple "first" 10)
+        (do
+          (match
+            position
+            0
+            (test.assert true)
+            _
+            (test.fail "map insertion order changed")
+          )
+        )
+        _
+        (do)
+      )
+      (set position (add position 1))
+    )
+    (let scalars (mut 0))
+    (for scalar "aé🙂" (set scalars (add scalars 1)))
+    (match
+      scalars
+      3
+      (do (test.assert true))
+      _
+      (do (test.fail "strings must traverse Unicode scalar values"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "nested-traversal-and-copy-source"
+  (test.case
+    "nested-traversal-and-copy-source"
+    (let source (array 1 2))
+    (let visits (mut 0))
+    (for outer source (for inner source (set visits (add visits 1))))
+    (match
+      visits
+      4
+      (do (test.assert true))
+      _
+      (do (test.fail "nested traversal failed"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "source-is-snapshotted-before-traversal"
+  (test.case
+    "source-is-snapshotted-before-traversal"
+    (let source (mut (array 1 2)))
+    (let visits (mut 0))
+    (for item source (set source (array 9)) (set visits (add visits 1)))
+    (match
+      visits
+      2
+      (do (test.assert true))
+      _
+      (do (test.fail "mutation changed traversal snapshot"))
+    )
+    profile: @core
+  )
+)

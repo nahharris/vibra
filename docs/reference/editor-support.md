@@ -21,11 +21,11 @@ workspace setting:
 }
 ```
 
-Associate `*.vibra` with the `vibra` language if the client does not do so
+Associate `*.vib` with the `vibra` language if the client does not do so
 automatically:
 
 ```json
-{ "files.associations": { "*.vibra": "vibra" } }
+{ "files.associations": { "*.vib": "vibra" } }
 ```
 
 The executable must be on VS Code's `PATH`. Alternatively, replace `vibra`
@@ -45,7 +45,7 @@ vim.lsp.config.vibra = {
 vim.lsp.enable("vibra")
 
 vim.api.nvim_create_autocmd("BufWritePre", {
-  pattern = "*.vibra",
+  pattern = "*.vib",
   callback = function() vim.lsp.buf.format({ async = false }) end,
 })
 ```
@@ -56,7 +56,7 @@ plugin has registered the filetype.
 ## Multiple packages and workspace folders
 
 Open the common directory that contains the application manifest and its local
-packages. Vibra discovers every `.vibra` source below that root and resolves
+packages. Vibra discovers every `.vib` source below that root and resolves
 manifest `@package/path` imports. The checked-in
 [`examples/lsp-workspace`](../../examples/lsp-workspace) fixture demonstrates this
 layout. In an editor with multiple workspace folders, start one `vibra lsp`

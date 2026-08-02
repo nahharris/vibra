@@ -158,7 +158,7 @@ Port from the legacy path rather than reimplementing, and reuse
 
 ### Step 4 — corpus
 
-All 62 `.vibra` corpus files are S-expressions. The migrator in
+All 62 `.vib` corpus files are S-expressions. The migrator in
 `tools/corpus-migrator` remains dry-run by default and supports an explicit
 `--write` opt-in; it rewrites only successfully converted and
 surface-validated files. `stdlib` is a submodule, so the completed corpus
@@ -187,7 +187,7 @@ sigil, so `$add` emits as bare `(add ...)`, matching the contract and #177.
 
 `src/load.rs` reads source only through the typed frontend and adapts its
 surface AST for the internal lowering bridge. The legacy YAML editor model,
-`yaml-edit` dependency, `yaml_subset`, and `.vibra.yaml` discovery have been
+`yaml-edit` dependency, `yaml_subset`, and `.vib.yaml` discovery have been
 removed. `src/sexpr_semantic.rs` provides the editor semantic index.
 
 ## Acceptance gate scoreboard
@@ -197,7 +197,7 @@ Measured against current `main`:
 | Gate | Current | Target |
 |------|---------|--------|
 | `E-YAML-*` diagnostics | removed | 0 |
-| `.vibra.yaml` discovery | rejected by typed frontend | none |
+| `.vib.yaml` discovery | rejected by typed frontend | none |
 | `serde_yaml` in `src/` | absent | absent |
 | internal compatibility value bridge | typed AST -> data-only map | temporary |
 | `yaml-edit` production dependency | absent | absent |

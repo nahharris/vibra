@@ -306,6 +306,7 @@ fn sarif_level(severity: Severity) -> &'static str {
 fn rule_summary(code: &str) -> &'static str {
     match code {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
+        "W-STYLE-002" => "Labelled arguments must precede variadic arguments",
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-YAML-002" => "YAML comments are forbidden",
         "E-COMMENT-001" => "`=comment` must be a string scalar",
@@ -624,7 +625,7 @@ fn has_glob_meta(s: &str) -> bool {
 
 fn is_vibra_file(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    s.ends_with(".vibra")
+    s.ends_with(".vib")
 }
 
 #[cfg(test)]
@@ -634,14 +635,15 @@ mod discovery_tests {
 
     #[test]
     fn only_discovers_sexpression_vibra_sources() {
-        assert!(is_vibra_file(Path::new("main.vibra")));
-        assert!(!is_vibra_file(Path::new("main.vibra.yaml")));
+        assert!(is_vibra_file(Path::new("main.vib")));
+        assert!(!is_vibra_file(Path::new("main.vibra")));
+        assert!(!is_vibra_file(Path::new("main.vib.yaml")));
     }
 
     #[test]
     fn editor_diagnostics_use_sexpression_surface() {
         assert!(
-            diagnostics_for_source(Path::new("main.vibra"), "(const good-name int64 1)\n",)
+            diagnostics_for_source(Path::new("main.vib"), "(const good-name int64 1)\n",)
                 .is_empty()
         );
     }

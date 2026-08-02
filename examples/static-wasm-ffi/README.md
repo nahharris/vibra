@@ -1,7 +1,7 @@
 # Static wasm FFI fixture
 
 Compile `foreign/math.wat` to `foreign/math.wasm` with a standard WAT tool,
-then run `vibra check .` followed by `vibra run src/main.vibra`. The check
+then run `vibra check .` followed by `vibra run src/main.vib`. The check
 resolves `@math`, opens the declared static artifact, and verifies that `sum`
 has the wrapper's `(i32, i32) -> i32` signature before execution. Run embeds
 the validated bytes in the compiled program, instantiates the module, and calls

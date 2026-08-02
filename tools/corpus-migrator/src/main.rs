@@ -237,7 +237,7 @@ fn main() -> Result<()> {
     //
     // The entry module is mounted under an alias derived from its file stem
     // rather than under the empty alias. A module refers to its own exports
-    // through its module name — `option.vibra` calls `option.empty` — and with
+    // through its module name — `option.vib` calls `option.empty` — and with
     // an empty alias `qualify("", name)` is a no-op, so those self-qualified
     // references resolve against neither the qualified nor the bare key. The
     // legacy path has the same requirement: its self-export resolution is
@@ -393,7 +393,7 @@ fn surface_module(source: &str, path: &Path) -> Result<Module> {
 /// each relatively-imported module is added under the exact alias its
 /// importer declared for it. The same physical file can legitimately appear
 /// more than once under different aliases (the corpus does this, e.g.
-/// `stdlib/src/fs.vibra` imports `./error.vibra` twice, as `error` and
+/// `stdlib/src/fs.vib` imports `./error.vib` twice, as `error` and
 /// `error-lib`), so edges are deduplicated on `(alias, path)`, not on `path`
 /// alone. `@`-prefixed project imports are skipped: this standalone tool has
 /// no `project.vibra` resolution, matching the same limitation the migrator
@@ -458,7 +458,7 @@ fn collect(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
             if !is_excluded_dir(&path) {
                 collect(&path, files)?;
             }
-        } else if path.extension().and_then(|v| v.to_str()) == Some("vibra") {
+        } else if path.extension().and_then(|v| v.to_str()) == Some("vib") {
             files.push(path);
         }
     }
@@ -1783,7 +1783,7 @@ mod tests {
         let output = migrate(
             r#"
 test:
-  $import: ../stdlib/src/test.vibra
+  $import: ../stdlib/src/test.vib
 answer:
   $function:
     value: $int64
@@ -1799,7 +1799,7 @@ works:
 "#,
         )
         .unwrap();
-        assert!(output.contains("(import test \"../stdlib/src/test.vibra\")"));
+        assert!(output.contains("(import test \"../stdlib/src/test.vib\")"));
         assert!(output.contains("(fn answer ((value int64)) array"));
         // `$args.value` is the removed legacy parameter envelope (spec line
         // 110; migration table `| $args.x | x |`) -- it converts to the bare
@@ -1993,8 +1993,8 @@ main:
     #[test]
     fn qualified_calls_use_scanned_relative_import_signatures() {
         let temp = tempfile::tempdir().unwrap();
-        let library = temp.path().join("lib.vibra");
-        let main = temp.path().join("main.vibra");
+        let library = temp.path().join("lib.vib");
+        let main = temp.path().join("main.vib");
         fs::write(
             &library,
             r#"
@@ -2011,7 +2011,7 @@ combine:
         .unwrap();
         let source = r#"
 lib:
-  $import: ./lib.vibra
+  $import: ./lib.vib
 main:
   $function: $void
   return: $int64
@@ -2120,20 +2120,20 @@ demo:
     fn scan_covers_repository_source_kinds_and_excludes_work_areas() {
         let temp = tempfile::tempdir().unwrap();
         let included = [
-            "tests/case.vibra",
-            "examples/demo.vibra",
-            "stdlib/src/core.vibra",
-            "fixtures/input.vibra",
-            "templates/app.vibra",
-            "macros/expanded.vibra",
-            "generated/source.vibra",
-            "dep/package/lib.vibra",
+            "tests/case.vib",
+            "examples/demo.vib",
+            "stdlib/src/core.vib",
+            "fixtures/input.vib",
+            "templates/app.vib",
+            "macros/expanded.vib",
+            "generated/source.vib",
+            "dep/package/lib.vib",
         ];
         let excluded = [
-            "target/debug/build.vibra",
-            ".git/objects/fake.vibra",
-            ".worktrees/other/test.vibra",
-            "worktrees/other/test.vibra",
+            "target/debug/build.vib",
+            ".git/objects/fake.vib",
+            ".worktrees/other/test.vib",
+            "worktrees/other/test.vib",
         ];
         for relative in included.iter().chain(excluded.iter()) {
             let path = temp.path().join(relative);

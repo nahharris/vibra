@@ -28,7 +28,7 @@ cargo test
 
 ### 2. Vibra-language suite (`vibra test`)
 
-Tests written **in Vibra itself**, under `tests/*.vibra`, exercising language
+Tests written **in Vibra itself**, under `tests/*.vib`, exercising language
 features and the standard library through the built-in runner. See
 [`tests/README.md`](tests/README.md) for conventions (flat layout, typed
 assertions, and profiles).
@@ -49,10 +49,10 @@ tests. Tests that require `workspace: temp` also need
 
 - Changing the **compiler/runtime** (`src/`): add/adjust a focused Rust test
   under `tests/` and re-run `cargo test`.
-- Changing the **language surface or `stdlib/`**: add/adjust a `tests/*.vibra`
+- Changing the **language surface or `stdlib/`**: add/adjust a `tests/*.vib`
   case and re-run `vibra test`. New stdlib modules should get a matching
-  `stdlib-<module>.vibra` test file.
-- New `core` `.vibra` tests must pass under a bare `vibra test`. Tests that
+  `stdlib-<module>.vib` test file.
+- New `core` `.vib` tests must pass under a bare `vibra test`. Tests that
   touch real, non-hermetic host state (network, processes, real environment
   variables) belong in their own file under a non-`core` profile.
 
@@ -84,6 +84,6 @@ tests. Tests that require `workspace: temp` also need
 ## Conventions
 
 - Symbols and test names are kebab-case (non-kebab symbols emit lint warnings).
-- Keep `tests/*.vibra` files flat in `tests/` so `../stdlib/<name>.vibra` imports
+- Keep `tests/*.vib` files flat in `tests/` so `../stdlib/<name>.vib` imports
   resolve consistently.
-- Run `vibra fmt` and `vibra lint` on `.vibra` changes where applicable.
+- Run `vibra fmt` and `vibra lint` on `.vib` changes where applicable.

@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn indexes_definitions_for_every_top_level_form() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(def widget (record (name str)))\n\
@@ -659,23 +659,23 @@ mod tests {
     #[test]
     fn indexes_imports_with_resolved_targets() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
-        write(&entry, "(import helper \"helper.vibra\")\n");
+        let entry = temp.path().join("main.vib");
+        write(&entry, "(import helper \"helper.vib\")\n");
         write(
-            &temp.path().join("helper.vibra"),
+            &temp.path().join("helper.vib"),
             "(defn run () void (do unit))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let imports = index.query(Some(SemanticKind::Import), Some("helper"));
         assert_eq!(imports.len(), 1);
-        let helper = fs::canonicalize(temp.path().join("helper.vibra")).unwrap();
+        let helper = fs::canonicalize(temp.path().join("helper.vib")).unwrap();
         assert_eq!(imports[0].target_document, Some(helper));
     }
 
     #[test]
     fn indexes_references_and_calls_in_function_bodies() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(defn helper () int64 (do 1))\n\
@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn spans_are_exact_half_open_byte_ranges_including_unicode() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         // Symbols are ASCII-only per the reader grammar, but comments and
         // string literals are not: `λ` (2 UTF-8 bytes) and `😀` (4 UTF-8
         // bytes) both precede the indexed call, so a byte-vs-codepoint
@@ -720,10 +720,10 @@ mod tests {
     #[test]
     fn facts_from_different_documents_with_identical_offsets_do_not_collide() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
-        let helper_a = temp.path().join("a.vibra");
-        let helper_b = temp.path().join("b.vibra");
-        // Both `a.vibra` and `b.vibra` place a function named `same-shape`
+        let entry = temp.path().join("main.vib");
+        let helper_a = temp.path().join("a.vib");
+        let helper_b = temp.path().join("b.vib");
+        // Both `a.vib` and `b.vib` place a function named `same-shape`
         // at the identical byte offset (0). If facts were keyed only by
         // span, these two definitions would be indistinguishable. Keying by
         // `(document_id, span)` — the whole point of PR #161's
@@ -732,7 +732,7 @@ mod tests {
         write(&helper_b, "(defn same-shape () int64 (do 2))\n");
         write(
             &entry,
-            "(import a \"a.vibra\")\n(import b \"b.vibra\")\n(defn main () int64 (do (a.same-shape)))\n",
+            "(import a \"a.vib\")\n(import b \"b.vib\")\n(defn main () int64 (do (a.same-shape)))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let definitions = index.query(Some(SemanticKind::Definition), Some("same-shape"));
@@ -758,14 +758,14 @@ mod tests {
     #[test]
     fn queries_the_lsp_relies_on_return_expected_shapes() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import util \"util.vibra\")\n\
+            "(import util \"util.vib\")\n\
              (defn main () str (do (util.greet)))\n",
         );
         write(
-            &temp.path().join("util.vibra"),
+            &temp.path().join("util.vib"),
             "(defn greet () str (do \"hi\"))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
@@ -775,7 +775,7 @@ mod tests {
         let util = index.query(Some(SemanticKind::Import), Some("util"));
         assert_eq!(util.len(), 1);
         assert_eq!(util[0].document, fs::canonicalize(&entry).unwrap());
-        let util_target = fs::canonicalize(temp.path().join("util.vibra")).unwrap();
+        let util_target = fs::canonicalize(temp.path().join("util.vib")).unwrap();
         assert_eq!(util[0].target_document, Some(util_target));
 
         // `visible_symbols`/`visible_imports` enumerate every import in a
@@ -791,25 +791,25 @@ mod tests {
     #[test]
     fn qualified_calls_resolve_target_document_through_the_import_alias() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import util \"util.vibra\")\n(defn main () str (do (util.greet)))\n",
+            "(import util \"util.vib\")\n(defn main () str (do (util.greet)))\n",
         );
         write(
-            &temp.path().join("util.vibra"),
+            &temp.path().join("util.vib"),
             "(defn greet () str (do \"hi\"))\n",
         );
         let index = SemanticIndex::build(&entry, &CompilationFlags::default()).unwrap();
         let calls = index.query(Some(SemanticKind::Call), Some("util.greet"));
-        let util_target = fs::canonicalize(temp.path().join("util.vibra")).unwrap();
+        let util_target = fs::canonicalize(temp.path().join("util.vib")).unwrap();
         assert_eq!(calls[0].target_document, Some(util_target));
     }
 
     #[test]
     fn unqualified_references_leave_target_document_unresolved() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(defn helper () int64 (do 1))\n(defn main () int64 (do (helper)))\n",

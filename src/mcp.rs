@@ -502,7 +502,7 @@ impl Server {
                 self.validate_manifest_paths(&path)?;
             }
             if path.file_name().and_then(|name| name.to_str()) == Some(project::MANIFEST_FILE)
-                || path.extension().and_then(|extension| extension.to_str()) != Some("vibra")
+                || path.extension().and_then(|extension| extension.to_str()) != Some("vib")
             {
                 continue;
             }

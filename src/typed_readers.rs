@@ -529,18 +529,18 @@ mod tests {
     #[test]
     fn docs_follow_imports_and_physical_parts_without_yaml() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import helper \"helper.vibra\")\n\
+            "(import helper \"helper.vib\")\n\
              (defn main () void (do unit) doc: \"Entry docs\")\n",
         );
         write(
-            &temp.path().join("main.test.vibra"),
+            &temp.path().join("main.test.vib"),
             "(const fixture int64 1 doc: \"Fixture docs\")\n",
         );
         write(
-            &temp.path().join("helper.vibra"),
+            &temp.path().join("helper.vib"),
             "(def box (record (value int64))\n\
              doc: \"Box docs\"\n\
              defs: ((defn get (input self) int64 (do (return 0)) doc: \"Getter docs\"))\n\
@@ -568,9 +568,9 @@ mod tests {
             .find(|doc| doc.symbol == "fixture")
             .unwrap()
             .source_part
-            .ends_with("main.test.vibra"));
+            .ends_with("main.test.vib"));
         let box_docs = docs.iter().find(|doc| doc.symbol == "helper.box").unwrap();
-        assert!(box_docs.module.ends_with("helper.vibra"));
+        assert!(box_docs.module.ends_with("helper.vib"));
         assert_eq!(box_docs.kind, "record");
         assert_eq!(
             box_docs.source.document,
@@ -581,14 +581,14 @@ mod tests {
     #[test]
     fn tests_preserve_all_label_metadata_across_entry_parts() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import helper \"helper.vibra\")\n\
+            "(import helper \"helper.vib\")\n\
              (test.scenario \"base\" (test.case \"base\" unit tags: (@fast)))\n",
         );
         write(
-            &temp.path().join("main.test.vibra"),
+            &temp.path().join("main.test.vib"),
             "(test.scenario \"measured\" (test.case \"measured\" unit\n\
              tags: (@slow @arithmetic)\n\
              expect-error: (@compile E-OP-002 \"overflow\")\n\
@@ -596,7 +596,7 @@ mod tests {
              workspace: @temp))\n",
         );
         write(
-            &temp.path().join("helper.vibra"),
+            &temp.path().join("helper.vib"),
             "(test.scenario \"imported\" (test.case \"imported\" unit))\n",
         );
         let program =
@@ -630,7 +630,7 @@ mod tests {
             })
         );
         assert_eq!(measured.workspace.as_deref(), Some("temp"));
-        assert!(measured.source_part.ends_with("main.test.vibra"));
+        assert!(measured.source_part.ends_with("main.test.vib"));
         assert_eq!(
             measured.source.document,
             DocumentId::from_path(&measured.source_part)

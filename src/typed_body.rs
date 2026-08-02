@@ -2500,6 +2500,39 @@ fn bind_call_arguments<'a>(
         .parameters
         .len()
         .saturating_sub(usize::from(variadic));
+    let mut reserved_fixed = vec![false; fixed_count];
+    for argument in arguments {
+        let CallArgument::Labelled { label, .. } = argument else {
+            continue;
+        };
+        let Some(index) = signature.parameters[..fixed_count]
+            .iter()
+            .position(|parameter| parameter.name == label.value)
+        else {
+            if variadic
+                && signature
+                    .parameters
+                    .last()
+                    .is_some_and(|parameter| parameter.name == label.value)
+            {
+                bail!(
+                    "typed call `{callee}` variadic parameter `{}` is positional-only",
+                    label.value
+                );
+            }
+            bail!(
+                "typed call `{callee}` has no parameter named `{}`",
+                label.value
+            );
+        };
+        if reserved_fixed[index] {
+            bail!(
+                "typed call `{callee}` binds parameter `{}` more than once",
+                label.value
+            );
+        }
+        reserved_fixed[index] = true;
+    }
     let mut fixed = vec![None; fixed_count];
     let mut tail = Vec::new();
     let mut source = Vec::with_capacity(arguments.len());
@@ -2543,7 +2576,9 @@ fn bind_call_arguments<'a>(
                 }
             }
             CallArgument::Positional(value) => {
-                while next_fixed < fixed_count && fixed[next_fixed].is_some() {
+                while next_fixed < fixed_count
+                    && (fixed[next_fixed].is_some() || reserved_fixed[next_fixed])
+                {
                     next_fixed += 1;
                 }
                 if next_fixed < fixed_count {
@@ -3866,7 +3901,7 @@ mod tests {
 (const secret int64 7 visibility: @private)"#,
         );
         let entry = module(
-            r#"(import lib "./lib.vibra")
+            r#"(import lib "./lib.vib")
 (defn
   use-public
   (value int64)
@@ -3890,7 +3925,7 @@ mod tests {
 
         for reference in ["(lib.hidden value)", "lib.secret"] {
             let entry = module(&format!(
-                "(import lib \"./lib.vibra\")\n(defn bad (value int64) int64 (do (return {reference})))"
+                "(import lib \"./lib.vib\")\n(defn bad (value int64) int64 (do (return {reference})))"
             ));
             let inputs = [
                 TypedModuleInput {
@@ -4247,7 +4282,7 @@ mod tests {
         // unresolved callee.
         let library = module("(defn echo (value int64) int64 (do (return value)))");
         let entry = module(
-            r#"(import lib "./lib.vibra")
+            r#"(import lib "./lib.vib")
 (defn bad (value int64) int64 (do (return (lib.add value 1))))"#,
         );
         let inputs = [
@@ -4572,7 +4607,7 @@ mod tests {
     #[test]
     fn enum_constructor_prefix_match_falls_through_to_a_real_qualified_function() {
         // Mirrors the exact stdlib shape that motivated this fallthrough:
-        // `option.vibra` is compiled under its own import alias (`option`,
+        // `option.vib` is compiled under its own import alias (`option`,
         // matching how importers refer to it), declares an enum named
         // `option` (tags `some`/`none`), and separately declares an
         // ordinary function named `empty`. Its own code then calls that
@@ -5135,7 +5170,7 @@ mod tests {
 
     #[test]
     fn interface_method_dispatch_resolves_via_function_parameter() {
-        // Mirrors `stdlib/src/env.vibra:88` (`$error.error.kind: $args.input`):
+        // Mirrors `stdlib/src/env.vib:88` (`$error.error.kind: $args.input`):
         // the dispatch subject is a direct reference to the enclosing
         // function's own parameter, so its type is known from the function's
         // signature alone, no `$let`/match tracking required.
@@ -5162,7 +5197,7 @@ mod tests {
 
     #[test]
     fn interface_method_dispatch_resolves_via_let_bound_call_result() {
-        // Mirrors `stdlib/src/io.vibra` (`print`/`eprint`: `$out`/`$err` are
+        // Mirrors `stdlib/src/io.vib` (`print`/`eprint`: `$out`/`$err` are
         // `$let`-bound to a direct call, `io.stdout`/`io.stderr`, with no
         // explicit type annotation): the dispatch subject's type comes from
         // the declared return type of the function it was let-bound from.
@@ -5195,7 +5230,7 @@ mod tests {
 
     #[test]
     fn interface_method_dispatch_resolves_via_match_bind_on_generic_enum() {
-        // Mirrors `examples/fs-roundtrip.vibra` (the hardest of the corpus
+        // Mirrors `examples/fs-roundtrip.vib` (the hardest of the corpus
         // shapes): the dispatch subject is bound by a match arm over a
         // *generic* enum instantiated with the implementing type
         // (`(box t e)` instantiated as `(box square int64)`), so resolving
@@ -5328,6 +5363,47 @@ mod tests {
                 crate::lower::CallArgumentTarget::Fixed(0),
                 crate::lower::CallArgumentTarget::Variadic,
                 crate::lower::CallArgumentTarget::Variadic
+            ]
+        ));
+    }
+
+    #[test]
+    fn labelled_arguments_after_variadic_values_remain_valid_calls() {
+        let source = module(
+            r#"(defn target (first int64 second int64 label-1 int64 rest... int64) int64
+  (return label-1))
+(defn caller () int64
+  (return (target 1 2 3 label-1: 4)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["caller"] else {
+            panic!("expected user body");
+        };
+        let Statement::Return(Expr::Call { call, .. }) = &statements[0] else {
+            panic!("expected returned call");
+        };
+        assert!(matches!(call.args[0], Expr::Value(RuntimeValue::Int(1))));
+        assert!(matches!(call.args[1], Expr::Value(RuntimeValue::Int(2))));
+        assert!(matches!(call.args[2], Expr::Value(RuntimeValue::Int(4))));
+        let Expr::Array(tail) = &call.args[3] else {
+            panic!("expected one array operand for variadic tail");
+        };
+        assert!(matches!(
+            tail.as_slice(),
+            [Expr::Value(RuntimeValue::Int(3))]
+        ));
+        assert!(matches!(
+            call.argument_targets.as_slice(),
+            [
+                crate::lower::CallArgumentTarget::Fixed(0),
+                crate::lower::CallArgumentTarget::Fixed(1),
+                crate::lower::CallArgumentTarget::Variadic,
+                crate::lower::CallArgumentTarget::Fixed(2)
             ]
         ));
     }

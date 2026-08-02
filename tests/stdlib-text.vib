@@ -1,0 +1,95 @@
+(import test "../stdlib/src/test.vib")
+(import text "../stdlib/src/text.vib")
+(import option "../stdlib/src/option.vib")
+(import result "../stdlib/src/result.vib")
+(test.scenario
+  "unicode-units-and-search"
+  (test.case
+    "unicode-units-and-search"
+    (test.assert-eq-int (convert (text.scalar-len "aé🙂") int64 0) 3)
+    (test.assert-eq-int (convert (text.byte-len "aé🙂") int64 0) 7)
+    (let found (text.find "aé🙂" "🙂"))
+    (match
+      found
+      (option.option.some 2)
+      (do (test.assert true))
+      _
+      (do (test.fail "find did not return a scalar offset"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "queries-and-empty-input"
+  (test.case
+    "queries-and-empty-input"
+    (test.assert (text.is-empty ""))
+    (test.assert (text.contains "alphabet" "pha"))
+    (test.assert (text.starts-with "alphabet" "alpha"))
+    (test.assert (text.ends-with "alphabet" "bet"))
+    (let missing (text.scalar-at "aé" 2))
+    (match
+      missing
+      (option.option.none)
+      (do (test.assert true))
+      _
+      (do (test.fail "scalar-at must be bounds safe"))
+    )
+    profile: @core
+  )
+)
+(test.scenario
+  "split-trim-replace-join-and-case"
+  (test.case
+    "split-trim-replace-join-and-case"
+    (let split (text.split "a,,b," ","))
+    (match
+      split
+      (result.result.ok (array "a" "" "b" ""))
+      (do (test.assert true))
+      _
+      (do (test.fail "split did not preserve empty fields"))
+    )
+    (let joined (text.join (array "a" "b" "c") "-"))
+    (match
+      joined
+      (result.result.ok "a-b-c")
+      (do (test.assert true))
+      _
+      (do (test.fail "join failed"))
+    )
+    (let replaced (text.replace "aéa" "a" "zz"))
+    (match
+      replaced
+      (result.result.ok "zzézz")
+      (do (test.assert true))
+      _
+      (do (test.fail "replace failed"))
+    )
+    (let invalid (text.replace "abc" "" "x"))
+    (match
+      invalid
+      (result.result.err (text.text-error.empty-pattern))
+      (do (test.assert true))
+      _
+      (do (test.fail "empty replacement pattern was not typed"))
+    )
+    (let trimmed (text.trim "  hé  "))
+    (match
+      trimmed
+      (result.result.ok "hé")
+      (do (test.assert true))
+      _
+      (do (test.fail "trim failed"))
+    )
+    (let upper (text.uppercase "Straße"))
+    (match
+      upper
+      (result.result.ok "STRASSE")
+      (do (test.assert true))
+      _
+      (do (test.fail "Unicode uppercase failed"))
+    )
+    profile: @core
+  )
+)

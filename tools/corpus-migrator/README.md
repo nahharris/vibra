@@ -1,7 +1,7 @@
 # Vibra corpus migrator
 
 One-time, developer-only migration utility for issue #150. It recursively scans
-the repository's `.vibra` corpus (including initialized standard-library
+the repository's `.vib` corpus (including initialized standard-library
 submodules, fixtures, templates, macros, and generated-source inputs), emits
 schema-aware S-expression forms in memory, and validates the result at three
 increasingly strict, honestly-labeled depths instead of a single conflated

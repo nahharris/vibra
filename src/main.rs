@@ -35,7 +35,7 @@ enum Command {
     /// Start the Language Server Protocol server over stdin/stdout.
     Lsp {
         /// Enable a conditional-compilation flag (repeatable).
-        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        #[arg(long = "ctx", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
     /// Create a new Vibra project.
@@ -71,7 +71,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
         format: StatusFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
-        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        #[arg(long = "ctx", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
     /// Inspect or verify a `.vapp` archive.
@@ -87,7 +87,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = StatusFormatArg::Json)]
         format: StatusFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
-        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        #[arg(long = "ctx", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
     /// Validate and instantiate a typed local runtime plugin.
@@ -117,7 +117,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = DocsFormatArg::Plain)]
         format: DocsFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
-        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        #[arg(long = "ctx", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
     /// Check or rewrite canonical Vibra/YAML formatting.
@@ -151,9 +151,9 @@ enum Command {
         #[arg(long = "deny-warnings")]
         deny_warnings: bool,
     },
-    /// Parse, compile (MVP), and run a `.vibra` module via embedded Wasmer.
+    /// Parse, compile (MVP), and run a `.vib` module via embedded Wasmer.
     Run {
-        /// Entry module path (e.g. examples/hello.vibra).
+        /// Entry module path (e.g. examples/hello.vib).
         path: PathBuf,
         /// Preopen a host directory for WASI mapping.
         #[arg(long = "preopen")]
@@ -162,7 +162,7 @@ enum Command {
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
         /// Enable a conditional-compilation flag (repeatable).
-        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        #[arg(long = "ctx", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
     /// Print the statically referenced host effect surface as JSON.
@@ -173,7 +173,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = StructuredFormatArg::Json)]
         format: StructuredFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
-        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        #[arg(long = "ctx", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
     /// Expand compile-time macros and print canonical Vibra source.
@@ -184,7 +184,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = StructuredFormatArg::Json)]
         format: StructuredFormatArg,
         /// Enable a conditional-compilation flag (repeatable).
-        #[arg(long = "flag", value_parser = parse_compilation_flag)]
+        #[arg(long = "ctx", value_parser = parse_compilation_flag)]
         flag: Vec<String>,
     },
     /// Evaluate one inline Vibra expression for tooling workflows.
@@ -213,7 +213,7 @@ enum Command {
     },
     /// Discover and run `$test` declarations.
     Test {
-        /// Project directory, tests directory, or single `.vibra` test file.
+        /// Project directory, tests directory, or single `.vib` test file.
         path: Option<PathBuf>,
         /// Run only tests whose name or path contains this substring.
         #[arg(long)]
@@ -750,7 +750,7 @@ fn insert_exec_binding(
 
 fn exec_root(imports: Vec<String>) -> Result<Mapping> {
     let mut root = Mapping::new();
-    let code = project::locate_stdlib_source()?.join("code.vibra");
+    let code = project::locate_stdlib_source()?.join("code.vib");
     insert_import(&mut root, "code", &path_str(&code))?;
     for raw in imports {
         let (alias, path) = split_name_value(&raw, "--import")?;

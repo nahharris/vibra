@@ -1,8 +1,8 @@
-"""One-off: migrate stdlib/src/fs.vibra nested $function to labeled form."""
+"""One-off: migrate stdlib/src/fs.vib nested $function to labeled form."""
 import pathlib
 import re
 
-p = pathlib.Path(__file__).resolve().parent.parent / "stdlib" / "fs.vibra"
+p = pathlib.Path(__file__).resolve().parent.parent / "stdlib" / "fs.vib"
 text = p.read_text(encoding="utf-8")
 
 def sub(pat, repl, s, flags=0):

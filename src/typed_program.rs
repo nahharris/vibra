@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn assembles_complete_lowered_program_from_typed_frontend() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(const greeting str \"hi\")\n\
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn const_eval_reuses_legacy_literal_only_rule_via_materialize_constants() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(const answer int64 42)\n(defn main () void (do unit))\n",
@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn bad_main_return_type_is_rejected() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(&entry, "(defn main () int64 (do (return 1)))\n");
         let program = load(&entry);
         let error = format!("{:#}", lower_typed_program(&program).unwrap_err());
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn missing_main_is_rejected() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(&entry, "(defn helper () void (do unit))\n");
         let program = load(&entry);
         let error = format!("{:#}", lower_typed_program(&program).unwrap_err());
@@ -487,7 +487,7 @@ mod tests {
     #[test]
     fn discovers_typed_tests_with_profile_and_tags() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(defn main () void (do unit))\n\
@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn lowers_and_runs_a_named_typed_test_in_both_backends() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(defn main () void (do unit))\n\
@@ -536,7 +536,7 @@ mod tests {
     #[test]
     fn executes_assembled_program_in_interpreter_and_wasm_backend() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
             "(defn triple (value int64) int64 (do (return (multiply value 3))))\n\
@@ -551,14 +551,14 @@ mod tests {
     #[test]
     fn resolves_relative_imports_under_their_declared_alias() {
         let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.vibra");
+        let entry = temp.path().join("main.vib");
         write(
             &entry,
-            "(import helper \"helper.vibra\")\n\
+            "(import helper \"helper.vib\")\n\
              (defn main () void (do (let doubled (helper.double 5))))\n",
         );
         write(
-            &temp.path().join("helper.vibra"),
+            &temp.path().join("helper.vib"),
             "(defn double (value int64) int64 (do (return (add value value))))\n",
         );
         let program = load(&entry);
