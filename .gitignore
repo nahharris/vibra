@@ -1,4 +1,5 @@
 /target
+/crates/vibra-emu/target/
 .worktrees/
 /.agents/
 /tmp/
