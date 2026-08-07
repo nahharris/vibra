@@ -43,6 +43,7 @@ or update documentation as the compiler evolves.
 | Machine-readable interfaces | [`schemas/`](../schemas/) | Tooling contract |
 | Standard library API | [`stdlib/README.md`](../stdlib/README.md), `stdlib/src/`, and matching tests | Current implementation |
 | Test conventions | [`tests/README.md`](../tests/README.md) | Current reference |
+| Type-constrained decoding design | [`plans/2026-08-02-decoding-service.md`](plans/2026-08-02-decoding-service.md) | Proposed design; prototype gated on typed frontend parity |
 | Roadmaps, migration reports, and gap analyses | [`status/`](status/) | Non-normative snapshots |
 | Superseded designs and handoffs | [`archive/`](archive/) | Historical only |
 
@@ -132,7 +133,7 @@ tracking issue #257.
 | 3 | [Bounded execution](plans/2026-08-02-execution-bounds.md) | #251 |
 | 4 | [Capability grants](plans/2026-08-02-capability-grants.md) | #253 |
 | 5 | [Handle lifecycle spike](plans/2026-08-02-handle-lifecycle-spike.md) | #255 |
-| 6 | [Type-constrained decoding](plans/2026-08-02-decoding-service.md) | #254 |
+| 6 | [Type-constrained decoding design](plans/2026-08-02-decoding-service.md) | #254 |
 
 Pre-implementation investigations for those plans — verified findings with
 `file:line` evidence, several of which corrected the plans they belong to —
