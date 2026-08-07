@@ -20,6 +20,7 @@ pub mod package;
 pub mod plugin;
 pub mod project;
 pub mod project_context;
+pub mod retrieval_index;
 pub mod runtime;
 pub mod sexpr_semantic;
 pub mod sexpr_tooling;
