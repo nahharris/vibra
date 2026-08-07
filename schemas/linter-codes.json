@@ -260,7 +260,7 @@
     {
       "code": "W-EFFECT-001",
       "severity": "warning",
-      "summary": "Function declaration over-declares effects its body does not perform"
+      "summary": "Declaration includes nominal effects not inferred from its body; extra declarations warn while roots may subsume leaves"
     },
     {
       "code": "E-WASM-001",
@@ -385,12 +385,12 @@
     {
       "code": "E-EFFECT-001",
       "severity": "error",
-      "summary": "A function body performs an effect its `effects:` attribute does not declare; the declared row is a ceiling the body may not exceed"
+      "summary": "A body performs a nominal effect not covered by its declared row; a declared root subsumes its leaf effects"
     },
     {
       "code": "E-EFFECT-005",
       "severity": "error",
-      "summary": "A `(wasm ...)` body must declare exactly the effects the host ABI registry states for that import, so a host import cannot be laundered through an empty declaration"
+      "summary": "A `(wasm ...)` body must declare a row covering the host ABI registry effects; additional nominal declarations are over-declaration warnings"
     },
     {
       "code": "E-EFFECT-003",

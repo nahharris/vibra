@@ -189,6 +189,8 @@ fn main_signature(program: &lower::LoweredProgram) -> FunctionSig {
     FunctionSig {
         alias: String::new(),
         symbol: "main".into(),
+        visibility: lower::FunctionVisibility::Public,
+        interface_method: false,
         owner_effect: None,
         type_params: Vec::new(),
         type_param_bounds: Vec::new(),
@@ -834,6 +836,8 @@ mod tests {
         let signature = FunctionSig {
             alias: String::new(),
             symbol: key.to_string(),
+            visibility: lower::FunctionVisibility::Public,
+            interface_method: false,
             owner_effect: None,
             type_params: Vec::new(),
             type_param_bounds: Vec::new(),

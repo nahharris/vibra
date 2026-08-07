@@ -1675,6 +1675,29 @@ fn under_declared_exported_effects_remain_errors() {
 }
 
 #[test]
+fn under_declared_legacy_main_effects_remain_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn main () void (do (host.read)) effects: ())
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        error.contains("E-EFFECT-001") && error.contains("`main`"),
+        "expected an explicitly under-declared legacy main to fail, got: {error}"
+    );
+}
+
+#[test]
 fn declared_effect_roots_subsume_only_at_the_declaration_boundary() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
@@ -1685,7 +1708,7 @@ fn declared_effect_roots_subsume_only_at_the_declaration_boundary() {
     (do (let ignored (intrinsic @fs-metadata (intrinsic @path-new "x"))))
     effects: (fs.metadata)))
 (defn api () void (do (host.read)) effects: (fs entry.host))
-(defn main () void (do (api)) effects: (fs))
+(defn main () void (do (api)) effects: (fs entry.host))
 "#,
     )
     .unwrap();

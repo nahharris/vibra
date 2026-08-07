@@ -2337,7 +2337,9 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
     validate_wasm_bodies(&sigs, &type_aliases)?;
     let main_effects = resolve_effect_row(&main_env, "", &type_aliases, "main", &mut warnings)?;
+    let declared_main_effects = main_env.effect_values.is_some().then_some(&main_effects);
     validate_declared_effects(&sigs, &mut warnings)?;
+    crate::effect_semantics::validate_entry_effects(&statements, declared_main_effects, &sigs)?;
 
     let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
     Ok(LoweredProgram {
