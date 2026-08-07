@@ -88,32 +88,12 @@ fn assert_schema_valid(index: &Value) {
     let schema: Value =
         serde_json::from_str(&std::fs::read_to_string(schema_path).unwrap()).unwrap();
     assert_eq!(schema["$id"], "https://vibra.dev/schemas/index.schema.json");
-    assert_eq!(schema["additionalProperties"], false);
-    assert_eq!(schema["properties"]["records"]["type"], "array");
-
-    let required = schema["$defs"]["record"]["required"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|value| value.as_str().unwrap())
-        .collect::<BTreeSet<_>>();
-    let record_properties = schema["$defs"]["record"]["properties"].as_object().unwrap();
-    let records = index["records"].as_array().unwrap();
-    assert!(!records.is_empty());
-    for record in records {
-        let object = record.as_object().unwrap();
-        for name in &required {
-            assert!(object.contains_key(*name), "record is missing `{name}`");
-        }
-        assert!(object
-            .keys()
-            .all(|name| record_properties.contains_key(name)));
-        assert!(object["signature"].is_object());
-        assert!(object["effects"].is_object());
-        assert!(object["call-edges"].is_array());
-        assert!(object["error-types"].is_array());
-        assert!(object["source"].is_string());
-    }
+    jsonschema::meta::validate(&schema).expect("index schema must be a valid JSON Schema");
+    let validator =
+        jsonschema::validator_for(&schema).expect("index schema must compile for validation");
+    validator
+        .validate(index)
+        .unwrap_or_else(|error| panic!("index output failed JSON Schema validation: {error}"));
 }
 
 #[test]
