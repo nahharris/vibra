@@ -233,6 +233,7 @@ impl ScopeValidator {
             | ExprKind::Mutable(value)
             | ExprKind::ReferenceOf(value)
             | ExprKind::Return(Some(value))
+            | ExprKind::Try(value)
             | ExprKind::Convert { value, .. }
             | ExprKind::Cast { value, .. } => self.visit_expr(value),
             ExprKind::Return(None)

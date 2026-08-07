@@ -489,6 +489,7 @@ fn collect_expr_facts(expr: &Expr, facts: &mut FunctionFacts) {
         }
         Expr::Call { call, .. } => collect_call_facts(call, facts),
         Expr::Mutable(inner) | Expr::Cast { from: inner, .. } => collect_expr_facts(inner, facts),
+        Expr::Try { inner, .. } => collect_expr_facts(inner, facts),
         Expr::Reference { target, .. } => collect_expr_facts(target, facts),
         Expr::Primitive { args, .. } | Expr::Tuple(args) | Expr::Array(args) => {
             for arg in args {

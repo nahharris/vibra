@@ -1594,6 +1594,7 @@ impl<'a> Converter<'a> {
                 m.insert(Value::String("or".into()), literal_value(&fallback.value));
                 Ok(Value::Mapping(m))
             }
+            ExprKind::Try(value) => Ok(single_dollar("try", self.expr_value(value)?)),
             ExprKind::Cast { value, into } => {
                 let mut m = Mapping::new();
                 m.insert(Value::String("$cast".into()), self.expr_value(value)?);

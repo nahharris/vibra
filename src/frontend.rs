@@ -490,7 +490,8 @@ fn expand_expr(
         ExprKind::Let { value, .. }
         | ExprKind::Set { value, .. }
         | ExprKind::Mutable(value)
-        | ExprKind::ReferenceOf(value) => expand_expr(value, module_path, package_root, embedded)?,
+        | ExprKind::ReferenceOf(value)
+        | ExprKind::Try(value) => expand_expr(value, module_path, package_root, embedded)?,
         ExprKind::Return(value) => {
             if let Some(value) = value {
                 expand_expr(value, module_path, package_root, embedded)?;
@@ -1168,7 +1169,8 @@ fn visit_expr(expr: &Expr, visitor: &mut impl FnMut(&Expr) -> Result<()>) -> Res
         ExprKind::Let { value, .. }
         | ExprKind::Set { value, .. }
         | ExprKind::Mutable(value)
-        | ExprKind::ReferenceOf(value) => visit_expr(value, visitor),
+        | ExprKind::ReferenceOf(value)
+        | ExprKind::Try(value) => visit_expr(value, visitor),
         ExprKind::Return(value) => value
             .as_deref()
             .map_or(Ok(()), |value| visit_expr(value, visitor)),

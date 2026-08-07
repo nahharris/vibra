@@ -814,6 +814,9 @@ fn lint_lifecycle_expr(
                 state = lint_lifecycle_expr(path, source, value, state, scopes, diagnostics);
             }
         }
+        ExprKind::Try(value) => {
+            state = lint_lifecycle_expr(path, source, value, state, scopes, diagnostics);
+        }
         ExprKind::If {
             condition,
             then_body,
@@ -1230,6 +1233,7 @@ fn lint_expr(path: &Path, source: &str, expr: &Expr, diagnostics: &mut Vec<Diagn
                 lint_expr(path, source, value, diagnostics);
             }
         }
+        ExprKind::Try(value) => lint_expr(path, source, value, diagnostics),
         ExprKind::If {
             condition,
             then_body,
