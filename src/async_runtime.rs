@@ -126,6 +126,86 @@ impl CapabilityGrant {
     }
 }
 
+/// Capability state shared by execution backends.
+///
+/// The scheduler owns the immutable root authority and validates every child
+/// scope against its parent. The active-scope stack is deliberately kept
+/// outside the scheduler so interpreter and Wasm adapters can use the same
+/// lifecycle without introducing resource-budget policy here.
+#[derive(Debug)]
+pub struct CapabilityRuntime {
+    scheduler: Scheduler,
+    scopes: Vec<ScopeId>,
+}
+
+impl CapabilityRuntime {
+    pub fn new(grants: impl IntoIterator<Item = CapabilityGrant>) -> Self {
+        let scheduler = Scheduler::new(grants);
+        let root = scheduler.root();
+        Self {
+            scheduler,
+            scopes: vec![root],
+        }
+    }
+
+    pub fn current_scope(&self) -> ScopeId {
+        *self
+            .scopes
+            .last()
+            .expect("capability runtime always has a root")
+    }
+
+    /// Enter a scope whose effect roots are a subset of the current scope.
+    /// Every resource prefix held for a requested root is preserved.
+    pub fn enter_effect_scope(
+        &mut self,
+        domains: &BTreeSet<String>,
+    ) -> Result<ScopeId, RuntimeError> {
+        let grants = self
+            .scheduler
+            .grants_for_domains(self.current_scope(), domains)?;
+        self.enter_grant_scope(grants)
+    }
+
+    /// Enter a scope with explicit grants. Scheduler validation prevents
+    /// amplification at this boundary, including at spawn boundaries.
+    pub fn enter_grant_scope(
+        &mut self,
+        grants: impl IntoIterator<Item = CapabilityGrant>,
+    ) -> Result<ScopeId, RuntimeError> {
+        let parent = self.current_scope();
+        let scope = self.scheduler.open_scope(parent, grants, None)?;
+        self.scopes.push(scope);
+        Ok(scope)
+    }
+
+    pub fn leave_scope(&mut self) -> Result<(), RuntimeError> {
+        if self.scopes.len() == 1 {
+            return Err(RuntimeError::ScopeClosed);
+        }
+        let scope = self.current_scope();
+        self.scheduler.close_scope(scope)?;
+        self.scopes.pop();
+        Ok(())
+    }
+
+    /// Operation-time check. This remains mandatory even when a matching
+    /// effect scope was entered, because host operations are the security
+    /// boundary and scopes can be bypassed by alternate execution paths.
+    pub fn check_capability(&self, required: &CapabilityGrant) -> Result<(), RuntimeError> {
+        self.scheduler
+            .check_capability(self.current_scope(), required)
+    }
+
+    pub fn check_domain(&self, domain: &str) -> Result<(), RuntimeError> {
+        self.scheduler.check_domain(self.current_scope(), domain)
+    }
+
+    pub fn scheduler(&self) -> &Scheduler {
+        &self.scheduler
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CancelReason {
@@ -221,6 +301,7 @@ pub enum RuntimeError {
     UnknownScope,
     ScopeClosed,
     CapabilityAmplification(CapabilityGrant),
+    CapabilityDenied(CapabilityGrant),
     DeadlineExceedsParent,
     UnknownTask,
     AlreadyJoined,
@@ -353,6 +434,73 @@ impl Scheduler {
             .get(&scope)
             .map(|scope| scope.parent)
             .ok_or(RuntimeError::UnknownScope)
+    }
+
+    /// Re-check a concrete host-operation requirement against the grants held
+    /// by the active scope. This is intentionally separate from scope entry:
+    /// operation boundaries remain the security guarantee even when a caller
+    /// has already passed a scope-entry fast path.
+    pub fn check_capability(
+        &self,
+        scope: ScopeId,
+        required: &CapabilityGrant,
+    ) -> Result<(), RuntimeError> {
+        let owner = self.scopes.get(&scope).ok_or(RuntimeError::UnknownScope)?;
+        if owner.closed || owner.cancelled.is_some() {
+            return Err(RuntimeError::ScopeClosed);
+        }
+        if owner
+            .grants
+            .iter()
+            .any(|allowed| required.is_within(allowed))
+        {
+            Ok(())
+        } else {
+            Err(RuntimeError::CapabilityDenied(required.clone()))
+        }
+    }
+
+    pub fn check_domain(&self, scope: ScopeId, domain: &str) -> Result<(), RuntimeError> {
+        let owner = self.scopes.get(&scope).ok_or(RuntimeError::UnknownScope)?;
+        if owner.closed || owner.cancelled.is_some() {
+            return Err(RuntimeError::ScopeClosed);
+        }
+        if owner.grants.iter().any(|allowed| allowed.domain == domain) {
+            Ok(())
+        } else {
+            Err(RuntimeError::CapabilityDenied(CapabilityGrant {
+                domain: domain.to_string(),
+                resource_prefix: String::new(),
+            }))
+        }
+    }
+
+    fn grants_for_domains(
+        &self,
+        scope: ScopeId,
+        domains: &BTreeSet<String>,
+    ) -> Result<Vec<CapabilityGrant>, RuntimeError> {
+        let owner = self.scopes.get(&scope).ok_or(RuntimeError::UnknownScope)?;
+        if owner.closed || owner.cancelled.is_some() {
+            return Err(RuntimeError::ScopeClosed);
+        }
+        let mut grants = Vec::new();
+        for domain in domains {
+            let matching: Vec<_> = owner
+                .grants
+                .iter()
+                .filter(|grant| grant.domain == *domain)
+                .cloned()
+                .collect();
+            if matching.is_empty() {
+                return Err(RuntimeError::CapabilityDenied(CapabilityGrant {
+                    domain: domain.clone(),
+                    resource_prefix: String::new(),
+                }));
+            }
+            grants.extend(matching);
+        }
+        Ok(grants)
     }
 
     pub fn open_scope(
@@ -1160,21 +1308,69 @@ mod tests {
 
     #[test]
     fn capabilities_can_only_be_attenuated() {
-        let mut scheduler = Scheduler::new([grant("filesystem-read", "/safe")]);
+        let mut scheduler = Scheduler::new([grant("fs.read", "/safe")]);
         let root = scheduler.root();
         assert!(scheduler
-            .open_scope(root, [grant("filesystem-read", "/safe/cache")], None)
+            .open_scope(root, [grant("fs.read", "/safe/cache")], None)
             .is_ok());
         assert_eq!(
-            scheduler.open_scope(root, [grant("filesystem-read", "/")], None),
-            Err(RuntimeError::CapabilityAmplification(grant(
-                "filesystem-read",
-                "/"
-            )))
+            scheduler.open_scope(root, [grant("fs.read", "/")], None),
+            Err(RuntimeError::CapabilityAmplification(grant("fs.read", "/")))
         );
         assert_eq!(
-            scheduler.open_scope(root, [grant("network", "")], None),
-            Err(RuntimeError::CapabilityAmplification(grant("network", "")))
+            scheduler.open_scope(root, [grant("net.connect", "")], None),
+            Err(RuntimeError::CapabilityAmplification(grant(
+                "net.connect",
+                ""
+            )))
+        );
+    }
+
+    #[test]
+    fn operation_boundary_rechecks_grants() {
+        let scheduler = Scheduler::new([grant("fs.read", "/safe")]);
+        let root = scheduler.root();
+
+        assert_eq!(
+            scheduler.check_capability(root, &grant("fs.read", "/safe/data.txt")),
+            Ok(())
+        );
+        assert_eq!(
+            scheduler.check_capability(root, &grant("fs.read", "/outside")),
+            Err(RuntimeError::CapabilityDenied(grant("fs.read", "/outside")))
+        );
+    }
+
+    #[test]
+    fn active_capability_scope_attenuates_domains() {
+        let mut authority = CapabilityRuntime::new([
+            grant("fs.read", "/safe"),
+            grant("net.connect", "example.com:443"),
+        ]);
+        authority
+            .enter_effect_scope(&BTreeSet::from(["fs.read".to_string()]))
+            .unwrap();
+
+        assert_eq!(
+            authority.check_capability(&grant("fs.read", "/safe/file")),
+            Ok(())
+        );
+        assert_eq!(
+            authority.check_capability(&grant("net.connect", "example.com:443")),
+            Err(RuntimeError::CapabilityDenied(grant(
+                "net.connect",
+                "example.com:443"
+            )))
+        );
+        authority.leave_scope().unwrap();
+    }
+
+    #[test]
+    fn spawn_boundary_rejects_amplification() {
+        let mut authority = CapabilityRuntime::new([grant("fs.read", "/safe")]);
+        assert_eq!(
+            authority.enter_grant_scope([grant("fs.read", "/")]),
+            Err(RuntimeError::CapabilityAmplification(grant("fs.read", "/")))
         );
     }
 

@@ -1,5 +1,6 @@
 //! Build [`WasiEnvBuilder`](wasmer_wasix::WasiEnvBuilder): stdio inheritance, argv, preopened dirs.
 
+use crate::async_runtime::CapabilityGrant;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wasmer_wasix::{WasiEnv, WasiEnvBuilder, WasiStateCreationError};
@@ -30,6 +31,10 @@ pub struct RunConfig {
     /// unlimited. Opening past this cap yields a matchable `too-many-open-files`
     /// filesystem error instead of exhausting OS file descriptors.
     pub max_open_files: usize,
+    /// Program-level host authority. `Some` is an explicit authority policy,
+    /// including `Some(vec![])` for a fail-closed manifest; `None` is retained
+    /// for direct module/embedding calls that have no project manifest.
+    pub capability_grants: Option<Vec<CapabilityGrant>>,
 }
 
 impl Default for RunConfig {
@@ -43,6 +48,7 @@ impl Default for RunConfig {
             injected_random: None,
             max_alloc_len: 64 * 1024 * 1024,
             max_open_files: 1024,
+            capability_grants: None,
         }
     }
 }

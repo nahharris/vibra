@@ -122,9 +122,11 @@ measure rejection precision (how accurately candidates can be eliminated by
 the verifier), not top-k ranking; see
 [schemas/index.schema.json](schemas/index.schema.json).
 
-Effects are static and fully erased: there is no runtime representation and no
-enforcement. Every host operation remains unconditionally available at runtime,
-so embedders must still sandbox untrusted Vibra source themselves.
+Effects remain statically checked, then lower into attenuated runtime scope
+requirements. A project's optional `project.vib` `(authority ...)` grants seed
+the root authority; omission is fail-closed for project execution. Host
+operations re-check their canonical effect grant and resource prefix at the
+operation boundary. Direct module embedding may configure grants explicitly.
 
 ## Projects
 
@@ -136,7 +138,10 @@ compiler-owned package metadata are canonical JSON.
 (project
   (package "hello" "0.1.0")
   (target hello kind: @bin root: "src" entry: "main.vib")
-  (dependency std path: "../stdlib"))
+  (dependency std path: "../stdlib")
+  (authority
+    (grant fs.read "/safe"))
+)
 ```
 
 ## Tests

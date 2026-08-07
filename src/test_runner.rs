@@ -658,6 +658,12 @@ fn run_one_child(
         (Some(_), false) => bail!("workspace test was scheduled without workspace access"),
         (None, _) => config.clone(),
     };
+    if child_config.capability_grants.is_none() {
+        child_config.capability_grants = project::capability_grants_for_file(&item.path)?;
+    }
+    if item.profile == "capability" && child_config.capability_grants.is_none() {
+        child_config.capability_grants = Some(vec![]);
+    }
     if let Some(seed) = item.random_seed {
         child_config.injected_random =
             Some(Arc::new(Mutex::new(runtime::InjectedRandom::new(seed))));
@@ -903,6 +909,10 @@ fn append_run_config_args(cmd: &mut Command, config: &runtime::RunConfig) {
     }
     cmd.arg("--max-open-files")
         .arg(config.max_open_files.to_string());
+    if let Some(grants) = &config.capability_grants {
+        cmd.arg("--capability-grants-json")
+            .arg(serde_json::to_string(grants).expect("capability grants are serializable"));
+    }
 }
 
 fn print_human_report(report: &TestReport) {

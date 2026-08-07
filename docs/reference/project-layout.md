@@ -7,6 +7,9 @@ project commands; the filename does not use a separate manifest extension.
 ```vibra
 (project
   (package "hello" "0.1.0")
+  (authority
+    (grant fs.read "/safe")
+    (grant net.connect "example.com:443"))
   (target core kind: @lib root: "src/core" entry: "lib.vib")
   (target hello kind: @bin root: "src/hello" entry: "main.vib")
   (dependency std
@@ -18,6 +21,9 @@ project commands; the filename does not use a separate manifest extension.
 ## Fields
 
 - `(package <name> <version>)` declares package identity.
+- `(authority (grant <domain>.<action> [resource-prefix]) ...)` declares
+  project root capability grants. Omitting it denies all effectful host
+  operations during project execution.
 - `(target <name> kind: <@bin|@lib> root: <root> entry: <entry>)` declares a source target.
 - `(dependency <alias> ...)` declares a local, Git, or static Wasm dependency.
 

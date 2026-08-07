@@ -81,14 +81,14 @@ Vibra should prefer:
 
 Host interaction must be visible and mechanically auditable. The `wasm` form
 binds only to the closed, versioned host ABI and is checked against its complete
-typed signature. Today Vibra does not enforce program-level host authority:
-every host operation (filesystem, network, process, clock, random, environment,
-stdin) is unconditionally available at runtime. The `CapabilityGrant`
-machinery still exists in `src/async_runtime.rs`, but it is not wired into
-normal program execution; effect-derived grants and runtime enforcement are
-planned in [issue #253](https://github.com/nahharris/vibra/issues/253). Until
-that work lands, embedders must not run untrusted Vibra source without their
-own sandboxing.
+typed signature. Project execution reads root authority from `project.vib`;
+the optional `(authority ...)` form contains canonical `<domain>.<action>`
+grants and optional resource prefixes. Omitting authority is fail-closed for
+project execution. Declared effect ceilings and private inferred rows become
+attenuated runtime scope requirements, and every concrete host operation
+re-checks the matching grant at the operation boundary. Direct module
+embedding may leave grants unset for compatibility, while an explicit empty
+grant set denies all effectful host operations.
 
 ## Explicit Intent
 

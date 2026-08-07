@@ -1,13 +1,16 @@
 //! Execute lowered Vibra programs with stdlib io/fs support.
 
-use crate::async_runtime::{JoinHandle as RuntimeJoinHandle, Scheduler, TaskOutcome};
+use crate::async_runtime::{
+    CapabilityGrant, CapabilityRuntime, JoinHandle as RuntimeJoinHandle, RuntimeError, Scheduler,
+    TaskOutcome,
+};
 use crate::lower::{
     Call, Expr, FunctionBody, HandleAccess, HostHandle, LetValue, LiteralType, LoweredExec,
     LoweredProgram, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeRef, WasmArgSpec,
 };
 use crate::runtime::RunConfig;
 use anyhow::{bail, Context, Result};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
@@ -23,18 +26,25 @@ pub fn run_lowered(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
 
 #[cfg(test)]
 pub(crate) fn run_lowered_interpreted(program: &LoweredProgram, config: &RunConfig) -> Result<()> {
-    reset_source_tasks();
+    reset_source_tasks(config.capability_grants.as_deref());
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     let mut files = FileTable::new(config.max_open_files);
-    for stmt in &program.statements {
-        if !matches!(
-            exec_statement(stmt, program, &mut env, &mut files, config)?,
-            ExecFlow::Next
-        ) {
-            bail!("unexpected `$return` at top level");
+    files.configure_authority(config.capability_grants.as_deref());
+    files.enter_effect_scope(&main_effect_domains(program))?;
+    let result = (|| {
+        for stmt in &program.statements {
+            if !matches!(
+                exec_statement(stmt, program, &mut env, &mut files, config)?,
+                ExecFlow::Next
+            ) {
+                bail!("unexpected `$return` at top level");
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })();
+    let leave = files.leave_effect_scope();
+    result?;
+    leave
 }
 
 /// Run a lowered program with injected guest stdout/stderr sinks.
@@ -59,19 +69,27 @@ pub(crate) fn run_lowered_interpreted_with_io(
     stdout: Box<dyn Write>,
     stderr: Box<dyn Write>,
 ) -> Result<()> {
+    reset_source_tasks(config.capability_grants.as_deref());
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     let mut files = FileTable::new(config.max_open_files);
     files.stdout_sink = Some(stdout);
     files.stderr_sink = Some(stderr);
-    for stmt in &program.statements {
-        if !matches!(
-            exec_statement(stmt, program, &mut env, &mut files, config)?,
-            ExecFlow::Next
-        ) {
-            bail!("unexpected `$return` at top level");
+    files.configure_authority(config.capability_grants.as_deref());
+    files.enter_effect_scope(&main_effect_domains(program))?;
+    let result = (|| {
+        for stmt in &program.statements {
+            if !matches!(
+                exec_statement(stmt, program, &mut env, &mut files, config)?,
+                ExecFlow::Next
+            ) {
+                bail!("unexpected `$return` at top level");
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })();
+    let leave = files.leave_effect_scope();
+    result?;
+    leave
 }
 
 pub fn eval_lowered_exec(
@@ -81,6 +99,7 @@ pub fn eval_lowered_exec(
 ) -> Result<RuntimeValue> {
     let env = bindings.clone();
     let mut files = FileTable::new(config.max_open_files);
+    files.configure_authority(config.capability_grants.as_deref());
     eval_expr(&exec.expr, &env, &exec.program, &mut files, config)
 }
 
@@ -146,6 +165,9 @@ pub(crate) struct FileTable {
     /// Maximum number of live, user-opened file handles. `0` means unlimited.
     /// The reserved stdio entries (ids 0/1/2) are never counted against it.
     limit: usize,
+    /// None means a direct module invocation without a project authority
+    /// policy. Some is explicit, including an empty fail-closed authority.
+    capability_runtime: Option<CapabilityRuntime>,
 }
 
 impl FileTable {
@@ -162,6 +184,7 @@ impl FileTable {
             stdout_sink: None,
             stderr_sink: None,
             limit,
+            capability_runtime: None,
         }
     }
 
@@ -170,6 +193,56 @@ impl FileTable {
         table.stdout_sink = Some(stdout);
         table.stderr_sink = Some(stderr);
         table
+    }
+
+    pub(crate) fn configure_authority(&mut self, grants: Option<&[CapabilityGrant]>) {
+        self.capability_runtime =
+            grants.map(|grants| CapabilityRuntime::new(grants.iter().cloned()));
+    }
+
+    pub(crate) fn enter_effect_scope(&mut self, domains: &BTreeSet<String>) -> Result<()> {
+        let Some(runtime) = &mut self.capability_runtime else {
+            return Ok(());
+        };
+        runtime
+            .enter_effect_scope(domains)
+            .map(|_| ())
+            .map_err(capability_runtime_error)
+    }
+
+    pub(crate) fn leave_effect_scope(&mut self) -> Result<()> {
+        let Some(runtime) = &mut self.capability_runtime else {
+            return Ok(());
+        };
+        runtime.leave_scope().map_err(capability_runtime_error)
+    }
+
+    /// Check every effect performed by one concrete host operation. This is
+    /// intentionally called at the operation boundary, even after a scope
+    /// entry check, so alternate lowering paths cannot bypass authority.
+    pub(crate) fn check_host_operation(&self, name: &str, args: &[RuntimeValue]) -> Result<()> {
+        let Some(runtime) = &self.capability_runtime else {
+            return Ok(());
+        };
+        let prefixes = operation_resource_prefixes(name, args)?;
+        for (domain, action) in crate::host_abi::effects_for("vibra_v1", name) {
+            let domain = format!("{domain}.{action}");
+            if prefixes.is_empty() {
+                runtime
+                    .check_domain(&domain)
+                    .map_err(capability_runtime_error)?;
+            } else {
+                for prefix in &prefixes {
+                    runtime
+                        .check_capability(&CapabilityGrant {
+                            domain: domain.clone(),
+                            resource_prefix: prefix.clone(),
+                        })
+                        .map_err(capability_runtime_error)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Count of live owned host resources, excluding borrowed standard streams.
@@ -486,6 +559,100 @@ impl HandleLifecycleError {
             Self::Closed => "resource-closed",
             Self::Invalid => "invalid-handle",
         }
+    }
+}
+
+fn capability_runtime_error(error: RuntimeError) -> anyhow::Error {
+    anyhow::anyhow!("E-CAPABILITY-001: {error:?}")
+}
+
+fn operation_resource_prefixes(name: &str, args: &[RuntimeValue]) -> Result<Vec<String>> {
+    let indices: &[usize] = match name {
+        "fs_open_read"
+        | "fs_open_write"
+        | "fs_open_write_options"
+        | "fs_open_append"
+        | "fs_open_read_write"
+        | "fs_exists"
+        | "fs_create_dir_all"
+        | "fs_remove_file"
+        | "fs_remove_dir"
+        | "fs_metadata"
+        | "fs_canonicalize" => &[0],
+        "fs_rename" => &[0, 1],
+        "env_get" | "env_set" | "env_remove" | "net_resolve" | "net_connect" | "net_listen"
+        | "net_udp_bind" => &[0],
+        "net_udp_connect" => &[1],
+        "net_udp_send_to" => &[2],
+        _ => &[],
+    };
+    if !indices.is_empty() {
+        return indices
+            .iter()
+            .map(|index| {
+                args.get(*index)
+                    .with_context(|| format!("host operation {name} is missing resource arg"))
+                    .and_then(value_string)
+            })
+            .collect();
+    }
+    if name == "process_spawn" {
+        let RuntimeValue::Record(command) = untyped(
+            args.first()
+                .with_context(|| "process_spawn is missing its command record")?,
+        ) else {
+            bail!("process_spawn command must be a record");
+        };
+        return Ok(vec![value_string(
+            command
+                .get("executable")
+                .with_context(|| "process_spawn command is missing executable")?,
+        )?]);
+    }
+    Ok(Vec::new())
+}
+
+pub(crate) fn main_effect_domains(program: &LoweredProgram) -> BTreeSet<String> {
+    let inferred =
+        crate::effect_semantics::infer_statements(&program.statements, &program.functions);
+    crate::effect_semantics::required_effect_domains(&program.main_effects, &inferred)
+}
+
+pub(crate) fn function_effect_domains(
+    sig: &crate::lower::FunctionSig,
+    program: &LoweredProgram,
+) -> BTreeSet<String> {
+    crate::effect_semantics::required_function_domains(sig, &program.functions)
+}
+
+pub(crate) fn statements_effect_domains(
+    statements: &[Statement],
+    program: &LoweredProgram,
+) -> BTreeSet<String> {
+    let inferred = crate::effect_semantics::infer_statements(statements, &program.functions);
+    crate::effect_semantics::required_effect_domains(&Default::default(), &inferred)
+}
+
+pub(crate) fn expression_effect_domains(
+    expression: &Expr,
+    program: &LoweredProgram,
+) -> BTreeSet<String> {
+    let inferred = crate::effect_semantics::infer_expr(expression, &program.functions);
+    crate::effect_semantics::required_effect_domains(&Default::default(), &inferred)
+}
+
+fn with_effect_scope<T>(
+    files: &mut FileTable,
+    domains: &BTreeSet<String>,
+    operation: impl FnOnce(&mut FileTable) -> Result<T>,
+) -> Result<T> {
+    files.enter_effect_scope(domains)?;
+    let result = operation(files);
+    let leave = files.leave_effect_scope();
+    match (result, leave) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
     }
 }
 
@@ -940,9 +1107,9 @@ struct SourceTaskRuntime {
 }
 
 impl SourceTaskRuntime {
-    fn new() -> Self {
+    fn new_with_grants(grants: impl IntoIterator<Item = CapabilityGrant>) -> Self {
         Self {
-            scheduler: Scheduler::new([]),
+            scheduler: Scheduler::new(grants),
             next_handle: 1,
             handles: HashMap::new(),
             results: HashMap::new(),
@@ -980,12 +1147,16 @@ impl SourceTaskRuntime {
 }
 
 thread_local! {
-    static SOURCE_TASKS: RefCell<SourceTaskRuntime> = RefCell::new(SourceTaskRuntime::new());
+    static SOURCE_TASKS: RefCell<SourceTaskRuntime> =
+        RefCell::new(SourceTaskRuntime::new_with_grants(std::iter::empty()));
 }
 
 #[allow(dead_code)]
-fn reset_source_tasks() {
-    SOURCE_TASKS.with(|tasks| *tasks.borrow_mut() = SourceTaskRuntime::new());
+fn reset_source_tasks(grants: Option<&[CapabilityGrant]>) {
+    SOURCE_TASKS.with(|tasks| {
+        *tasks.borrow_mut() =
+            SourceTaskRuntime::new_with_grants(grants.into_iter().flatten().cloned())
+    });
 }
 
 fn exec_statement(
@@ -1087,7 +1258,11 @@ fn exec_statement(
                     .with_context(|| format!("E-TASK-001: missing captured value `{name}`"))?;
                 child.insert(name.clone(), value.clone());
             }
-            match run_block(body, program, &mut child, files, config)? {
+            let flow =
+                with_effect_scope(files, &statements_effect_domains(body, program), |files| {
+                    run_block(body, program, &mut child, files, config)
+                })?;
+            match flow {
                 ExecFlow::Next => Ok(ExecFlow::Next),
                 ExecFlow::Return(_) | ExecFlow::Break | ExecFlow::Continue => {
                     bail!("E-TASK-002: task control escaped its structured boundary")
@@ -1107,7 +1282,10 @@ fn exec_statement(
                     .with_context(|| format!("E-TASK-001: missing captured value `{name}`"))?;
                 child.insert(name.clone(), value.clone());
             }
-            let result = eval_expr(value, &child, program, files, config)?;
+            let result =
+                with_effect_scope(files, &expression_effect_domains(value, program), |files| {
+                    eval_expr(value, &child, program, files, config)
+                })?;
             let id = SOURCE_TASKS.with(|tasks| tasks.borrow_mut().spawn(result))?;
             env.insert(handle.clone(), RuntimeValue::JoinHandle(id));
             Ok(ExecFlow::Next)
@@ -1897,67 +2075,75 @@ pub(crate) fn exec_call(
 
     match &sig.body {
         FunctionBody::User { statements } => {
-            let mut fn_env: HashMap<String, RuntimeValue> = HashMap::new();
-            for (idx, parameter) in sig.parameters.iter().enumerate() {
-                let val = evaluated_args[idx].clone();
-                fn_env.insert(format!("args.{}", parameter.name), val);
-            }
-            match run_block(statements, program, &mut fn_env, files, config)? {
-                ExecFlow::Return(value) => return Ok(value),
-                ExecFlow::Next => {}
-                ExecFlow::Break | ExecFlow::Continue => bail!("loop control escaped its loop"),
-            }
-            if sig.return_type != TypeRef::Void {
-                bail!(
-                    "function `{}` finished without a value (expected non-void return)",
-                    sig.symbol
-                );
-            }
-            Ok(RuntimeValue::Void)
+            let domains = function_effect_domains(sig, program);
+            with_effect_scope(files, &domains, |files| {
+                let mut fn_env: HashMap<String, RuntimeValue> = HashMap::new();
+                for (idx, parameter) in sig.parameters.iter().enumerate() {
+                    let val = evaluated_args[idx].clone();
+                    fn_env.insert(format!("args.{}", parameter.name), val);
+                }
+                match run_block(statements, program, &mut fn_env, files, config)? {
+                    ExecFlow::Return(value) => return Ok(value),
+                    ExecFlow::Next => {}
+                    ExecFlow::Break | ExecFlow::Continue => {
+                        bail!("loop control escaped its loop")
+                    }
+                }
+                if sig.return_type != TypeRef::Void {
+                    bail!(
+                        "function `{}` finished without a value (expected non-void return)",
+                        sig.symbol
+                    );
+                }
+                Ok(RuntimeValue::Void)
+            })
         }
         FunctionBody::Wasm { import, wasm_args } => {
-            let entry =
-                crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
-                    format!(
-                        "E-WASM-002: `{}` targets unknown host import `{}.{}`",
-                        sig.symbol, import.module, import.name
-                    )
-                })?;
-            if wasm_args.len() != entry.params.len() {
-                bail!(
-                    "E-WASM-003: `{}` passes {} args to host import `{}.{}` which takes {}",
-                    sig.symbol,
-                    wasm_args.len(),
-                    import.module,
-                    import.name,
-                    entry.params.len()
-                );
-            }
-            // Evaluate the declared `$wasm.args` forwarding specs in the
-            // import's parameter order. The specs -- never the wrapper's
-            // symbol name -- are the binding between wrapper and host import.
-            let mut host_args = Vec::with_capacity(wasm_args.len());
-            for spec in wasm_args {
-                host_args.push(match spec {
-                    WasmArgSpec::Arg(name) => {
-                        let idx = sig
-                            .parameters
-                            .iter()
-                            .position(|parameter| parameter.name == *name)
-                            .with_context(|| {
-                                format!("`{}` forwards unknown argument `$args.{name}`", sig.symbol)
-                            })?;
-                        evaluated_args[idx].clone()
-                    }
-                    WasmArgSpec::ConstInt(value) => RuntimeValue::Int(*value),
-                    WasmArgSpec::ConstStr(value) => RuntimeValue::Str(value.clone()),
-                });
-            }
-            match entry.module {
-                "vibra_v1" => exec_vibra_v1(entry.name, sig, &host_args, files, config),
-                "vibra_test" => exec_vibra_test(entry.name, &host_args),
-                other => bail!("unsupported host module `{other}`"),
-            }
+            let domains = function_effect_domains(sig, program);
+            with_effect_scope(files, &domains, |files| {
+                let entry =
+                    crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
+                        format!(
+                            "E-WASM-002: `{}` targets unknown host import `{}.{}`",
+                            sig.symbol, import.module, import.name
+                        )
+                    })?;
+                if wasm_args.len() != entry.params.len() {
+                    bail!(
+                        "E-WASM-003: `{}` passes {} args to host import `{}.{}` which takes {}",
+                        sig.symbol,
+                        wasm_args.len(),
+                        import.module,
+                        import.name,
+                        entry.params.len()
+                    );
+                }
+                let mut host_args = Vec::with_capacity(wasm_args.len());
+                for spec in wasm_args {
+                    host_args.push(match spec {
+                        WasmArgSpec::Arg(name) => {
+                            let idx = sig
+                                .parameters
+                                .iter()
+                                .position(|parameter| parameter.name == *name)
+                                .with_context(|| {
+                                    format!(
+                                        "`{}` forwards unknown argument `$args.{name}`",
+                                        sig.symbol
+                                    )
+                                })?;
+                            evaluated_args[idx].clone()
+                        }
+                        WasmArgSpec::ConstInt(value) => RuntimeValue::Int(*value),
+                        WasmArgSpec::ConstStr(value) => RuntimeValue::Str(value.clone()),
+                    });
+                }
+                match entry.module {
+                    "vibra_v1" => exec_vibra_v1(entry.name, sig, &host_args, files, config),
+                    "vibra_test" => exec_vibra_test(entry.name, &host_args),
+                    other => bail!("unsupported host module `{other}`"),
+                }
+            })
         }
     }
 }
@@ -2018,6 +2204,7 @@ fn exec_vibra_v1(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
+    files.check_host_operation(name, args)?;
     let checked_handle = |value: &RuntimeValue, files: &FileTable| {
         let handle = value_handle(value)?;
         Ok::<_, anyhow::Error>((handle, files.lifecycle_error(handle)))
@@ -3427,6 +3614,82 @@ fn exec_vibra_test(name: &str, args: &[RuntimeValue]) -> Result<RuntimeValue> {
             }
         }
         other => bail!("unsupported vibra_test import `{other}`"),
+    }
+}
+
+#[cfg(test)]
+mod capability_operation_tests {
+    use super::*;
+    use crate::async_runtime::CapabilityGrant;
+
+    fn grant(domain: &str, resource_prefix: &str) -> CapabilityGrant {
+        CapabilityGrant {
+            domain: domain.to_string(),
+            resource_prefix: resource_prefix.to_string(),
+        }
+    }
+
+    fn synthetic_signature(return_type: TypeRef) -> crate::lower::FunctionSig {
+        crate::lower::FunctionSig {
+            alias: String::new(),
+            symbol: "capability-test".into(),
+            visibility: crate::lower::FunctionVisibility::Public,
+            interface_method: false,
+            owner_effect: None,
+            type_params: Vec::new(),
+            type_param_bounds: Vec::new(),
+            parameters: Vec::new(),
+            return_type,
+            body: FunctionBody::User {
+                statements: Vec::new(),
+            },
+            doc: None,
+            effects: Default::default(),
+        }
+    }
+
+    #[test]
+    fn operation_boundary_preserves_resource_prefix_axis() {
+        let mut files = FileTable::new(0);
+        files.configure_authority(Some(&[grant("fs.metadata", "/safe")]));
+
+        assert!(files
+            .check_host_operation("fs_exists", &[RuntimeValue::Str("/safe/file".into())])
+            .is_ok());
+        assert!(files
+            .check_host_operation("fs_exists", &[RuntimeValue::Str("/outside".into())])
+            .is_err());
+    }
+
+    #[test]
+    fn omitted_authority_is_fail_closed_when_configured_empty() {
+        let mut files = FileTable::new(0);
+        files.configure_authority(Some(&[]));
+
+        let error = files
+            .check_host_operation("clock_now_unix_millis", &[])
+            .unwrap_err();
+        assert!(error.to_string().contains("E-CAPABILITY-001"));
+    }
+
+    #[test]
+    fn denied_operation_is_rejected_before_filesystem_side_effect() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("must-not-be-created");
+        let mut files = FileTable::new(0);
+        files.configure_authority(Some(&[grant("fs.write", "/safe")]));
+
+        let error = exec_vibra_v1(
+            "fs_create_dir_all",
+            &synthetic_signature(TypeRef::Void),
+            &[RuntimeValue::Str(target.to_string_lossy().into_owned())],
+            &mut files,
+            &RunConfig::default(),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("E-CAPABILITY-001"));
+        assert!(!target.exists());
     }
 }
 
