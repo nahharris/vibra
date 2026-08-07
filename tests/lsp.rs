@@ -59,7 +59,7 @@ fn compilation_flags_flow_from_initialization_and_configuration_changes() {
     std::fs::write(&main_path, main).unwrap();
     std::fs::write(
         workspace.path().join("main.release.vib"),
-        "(defn enabled () void (do (let value 1)))\n",
+        "(defn enabled () void (do (let _ 1)))\n",
     )
     .unwrap();
     let root_uri = path_uri(workspace.path());

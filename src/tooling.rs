@@ -330,6 +330,8 @@ fn rule_summary(code: &str) -> &'static str {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
         "W-STYLE-002" => "Labelled arguments must precede variadic arguments",
         "W-EFFECT-001" => "Declaration includes nominal effects not inferred from its body",
+        "W-RESULT-001" => "Result or option value is unhandled in statement position",
+        "W-BIND-001" => "Binding is never read",
         "E-SCOPE-001" => "Lexical binding shadows an enclosing binding",
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-YAML-002" => "YAML comments are forbidden",
@@ -422,7 +424,7 @@ pub fn compile_diagnostics_with_flags(
 ) -> Vec<Diagnostic> {
     let result = load::load_legacy_yaml_program(path, flags).and_then(|program| {
         let Some(entry) = program.modules.get(&program.entry) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         if contains_noncanonical_option(entry) {
             anyhow::bail!(
@@ -430,15 +432,18 @@ pub fn compile_diagnostics_with_flags(
             );
         }
         let Some(map) = entry.as_mapping() else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         if !map.contains_key(&crate::legacy_value::Value::String("main".to_string())) {
-            return Ok(());
+            return Ok(Vec::new());
         }
-        lower::lower_program(&program).map(|_| ())
+        lower::lower_program(&program).map(|lowered| lowered.warnings)
     });
     match result {
-        Ok(()) => Vec::new(),
+        Ok(warnings) => warnings
+            .into_iter()
+            .filter_map(|warning| lowered_warning_diagnostic(path, warning))
+            .collect(),
         Err(err) => {
             if let Some(error) = err.downcast_ref::<crate::frontend::ScopeValidationError>() {
                 return vec![scope_diagnostic(error, path)];
@@ -456,6 +461,22 @@ pub fn compile_diagnostics_with_flags(
             }]
         }
     }
+}
+
+fn lowered_warning_diagnostic(path: &Path, message: String) -> Option<Diagnostic> {
+    let code = extract_diagnostic_code(&message)?;
+    if !matches!(code, "W-RESULT-001" | "W-BIND-001") {
+        return None;
+    }
+    Some(Diagnostic {
+        code: code.to_string(),
+        message,
+        severity: Severity::Warning,
+        span: point_span(path, 0, 0),
+        related: None,
+        fix: None,
+        category: Category::Compile,
+    })
 }
 
 fn contains_noncanonical_option(value: &crate::legacy_value::Value) -> bool {
@@ -563,6 +584,8 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-EFFECT-008",
         "E-WASM-008",
         "E-SCOPE-001",
+        "W-RESULT-001",
+        "W-BIND-001",
     ];
     KNOWN_CODES
         .iter()

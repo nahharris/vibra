@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 
 use crate::ast::{self, AnnotationKind, Test, TopLevel};
-use crate::body_semantics::validate_task_handles;
+use crate::body_semantics::{validate_task_handles, validate_unhandled_body};
 use crate::frontend::SurfaceProgram;
 use crate::lower::{
     self, ExpectedTestError, FunctionBody, FunctionSig, ImplBody, ImplKey, LoweredProgram,
@@ -220,6 +220,14 @@ fn lower_typed_test_case(
         &ctx.constants,
         test,
     )?;
+    let mut warnings = ctx.warnings.clone();
+    validate_unhandled_body(
+        &statements,
+        &[],
+        &ctx.functions,
+        &ctx.signatures.aliases,
+        &mut warnings,
+    );
     validate_task_handles(&statements)
         .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in test `{name}`"))?;
     Ok(LoweredTestCase {
@@ -232,7 +240,7 @@ fn lower_typed_test_case(
             type_aliases: ctx.signatures.aliases.clone(),
             functions: ctx.functions.clone(),
             impls: ctx.signatures.impls.clone(),
-            warnings: ctx.warnings.clone(),
+            warnings,
             foreign_modules: BTreeMap::new(),
         },
     })

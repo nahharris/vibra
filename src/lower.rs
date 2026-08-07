@@ -2317,6 +2317,12 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
             None,
         )?);
     }
+    crate::body_semantics::validate_unhandled_values(
+        &statements,
+        &sigs,
+        &type_aliases,
+        &mut warnings,
+    );
     crate::body_semantics::validate_task_handles(&statements)
         .context("E-TASK-003: invalid task-handle lifetime in `main`")?;
 
@@ -2483,6 +2489,13 @@ fn lower_single_test_body(
             None,
         )?);
     }
+    crate::body_semantics::validate_unhandled_body(
+        &statements,
+        &[],
+        &ctx.sigs,
+        &ctx.type_aliases,
+        &mut ctx.warnings,
+    );
     crate::body_semantics::validate_task_handles(&statements)
         .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in test `{name}`"))?;
     validate_all_where_bounds(&ctx.type_aliases, &ctx.sigs, &ctx.enums)?;
@@ -9200,6 +9213,12 @@ fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: 
 /// Widened to `pub(crate)` so `typed_program.rs` can reuse the exact legacy
 /// wording for the kebab-case advisory instead of re-deriving it.
 pub(crate) fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {
+    // `_` is the explicit source-level discard spelling, not a user-facing
+    // symbol.  It must not produce a style warning when used for intentional
+    // result/option or pattern-value disposal.
+    if name == "_" {
+        return;
+    }
     // Canonical effect-operation symbols are qualified with `.` (for example
     // `stream.read.string`).  Treat each namespace segment as a symbol so the
     // required qualification does not produce a false lint warning.
