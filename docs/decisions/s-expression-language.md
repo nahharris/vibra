@@ -368,6 +368,16 @@ the explicit conversion frequency is `0/2` among its propagation sites. This
 single example does not establish a corpus-wide conversion rate; it records
 only the observable cost of this migration.
 
+### Unhandled result and option values
+
+The stdlib `result` and `option` types are fallible values. A value of either
+type in non-final statement position must be handled with `match` or retained
+by `let`/`let-as`; otherwise the compiler emits `W-RESULT-001`. The final
+expression of a `do` and a `return` operand are consumed as block/function
+values and are exempt. Intentional disposal uses the existing wildcard binder,
+for example `(let _ (stream.write.string out text))`. A named `let` or match
+`(bind name)` that is never read emits the distinct `W-BIND-001`; a read on any
+match arm counts as a read.
 Dropping the `$` sigil makes a primitive name syntactically indistinguishable
 from a user function of the same name, which the legacy `$`-prefixed table
 never had to resolve. The adopted rule: an unqualified call head matching one

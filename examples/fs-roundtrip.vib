@@ -26,6 +26,5 @@
       (do (let _ (io.stdout.println text)))
       (result.result.err _)
       (do (let _ (io.stderr.println "failed to complete file roundtrip")))
-    )
   )
 )

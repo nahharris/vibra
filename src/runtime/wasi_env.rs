@@ -1,6 +1,6 @@
 //! Build [`WasiEnvBuilder`](wasmer_wasix::WasiEnvBuilder): stdio inheritance, argv, preopened dirs.
 
-use crate::async_runtime::CapabilityGrant;
+use crate::async_runtime::{CapabilityGrant, ScopeLimits};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wasmer_wasix::{WasiEnv, WasiEnvBuilder, WasiStateCreationError};
@@ -35,6 +35,9 @@ pub struct RunConfig {
     /// including `Some(vec![])` for a fail-closed manifest; `None` is retained
     /// for direct module/embedding calls that have no project manifest.
     pub capability_grants: Option<Vec<CapabilityGrant>>,
+    /// Coarse execution budgets. Capability authority remains independent
+    /// from these limits.
+    pub scope_limits: ScopeLimits,
 }
 
 impl Default for RunConfig {
@@ -49,6 +52,7 @@ impl Default for RunConfig {
             max_alloc_len: 64 * 1024 * 1024,
             max_open_files: 1024,
             capability_grants: None,
+            scope_limits: ScopeLimits::default(),
         }
     }
 }

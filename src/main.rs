@@ -589,6 +589,9 @@ fn run_cli() -> Result<()> {
                 package::run(&path, &config)?;
             } else {
                 config.capability_grants = project::capability_grants_for_file(&path)?;
+                if let Some(limits) = project::execution_limits_for_file(&path)? {
+                    config.scope_limits = limits;
+                }
                 let program = load::load_legacy_yaml_program(&path, &compilation_flags(flag)?)?;
                 let lowered = lower::lower_program(&program)?;
                 for warning in &lowered.warnings {
@@ -721,6 +724,9 @@ fn run_cli() -> Result<()> {
                 config.capability_grants = project::capability_grants_for_file(&path)?;
             } else {
                 config.capability_grants = Some(vec![]);
+            }
+            if let Some(limits) = project::execution_limits_for_file(&path)? {
+                config.scope_limits = limits;
             }
             let outcome = test_runner::run_single_test(&path, &name, &config);
             let json = serde_json::to_string(&outcome)?;

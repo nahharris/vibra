@@ -1,12 +1,27 @@
 ---
 title: Plan — Bounded execution
 category: plans
-status: proposed
-updated: 2026-08-02
+status: blocked
+updated: 2026-08-07
 issue: 251
 ---
 
 # Plan: fuel, memory ceiling, and arena reclamation (#251)
+
+## Implementation status (2026-08-07)
+
+The safe execution-bounds subset is implemented on the issue branch: monotone
+fuel/memory limits, deterministic fuel hooks, abort cleanup, project-manifest
+limits, and logical high-water memory accounting. The plan remains blocked on
+arena reclamation. The existing escape investigation proves that the requested
+scope-tied region cannot be introduced soundly with the current pipeline: no
+source-level scope construct exists, returned/joined/captured values cross the
+candidate boundary, mutable/reference cells can alias outward, and arena
+handles are untagged. No escape-safety approximation was added. Completing
+reclamation requires generation-tagged handles plus a dedicated escape/
+ownership analysis covering function frames, task captures, `Rc` cells,
+bindings, and host handles; see
+[`risk-findings/251-escape-analysis.md`](risk-findings/251-escape-analysis.md).
 
 **Wave 3.** Independent of the language-surface work; can start any time, but
 sequenced here because Tier 1 surface changes deliver value sooner.

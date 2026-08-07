@@ -11,7 +11,7 @@
       found
       (option.option.some "beta")
       (do (test.assert true))
-      (option.option.some (bind wrong))
+      (option.option.some _)
       (do (test.fail "wrong value"))
       (option.option.none)
       (do (test.fail "expected value"))
@@ -37,13 +37,13 @@
           (test.fail "original was aliased")
         )
       )
-      (result.result.err (bind error))
+      (result.result.err _)
       (do (test.fail "unexpected set error"))
     )
     (let missing (collections.array-remove int64 original 2))
     (match
       missing
-      (result.result.ok (bind value))
+      (result.result.ok _)
       (do (test.fail "expected bounds error"))
       (result.result.err
         (collections.collection-error.out-of-bounds (record (index 2) (len 2)))
@@ -63,7 +63,7 @@
       updated
       (result.result.ok (map ("alpha" 3) ("beta" 2)))
       (do (test.assert true))
-      (result.result.err (bind error))
+      (result.result.err _)
       (do (test.fail "unexpected map error"))
     )
     (let absent (collections.map-get int64 words "gamma"))
@@ -71,7 +71,7 @@
       absent
       (option.option.none)
       (do (test.assert true))
-      (option.option.some (bind value))
+      (option.option.some _)
       (do (test.fail "expected none"))
     )
     (let removed (collections.map-remove int64 words "alpha"))

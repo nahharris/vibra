@@ -1412,7 +1412,13 @@ fn lint_name(
     role: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if is_kebab_qualified(&name.value) {
+    if (name.value == "_"
+        && matches!(
+            role,
+            "binding" | "loop binding" | "pattern binding" | "task binding"
+        ))
+        || is_kebab_qualified(&name.value)
+    {
         return;
     }
     diagnostics.push(diagnostic(
