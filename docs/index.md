@@ -36,6 +36,7 @@ or update documentation as the compiler evolves.
 | Design principles and language trade-offs | [`decisions/philosophy.md`](decisions/philosophy.md) | Current decision contract |
 | Language syntax and typing | [`decisions/s-expression-language.md`](decisions/s-expression-language.md) | Accepted contract |
 | Static effects | [`decisions/effect-system.md`](decisions/effect-system.md) | Accepted contract |
+| Secure compilation boundary | [`decisions/secure-compilation.md`](decisions/secure-compilation.md) | Accepted contract |
 | Normalized retrieval index | [`schemas/index.schema.json`](../schemas/index.schema.json) and [`README.md`](../README.md) | Current tooling contract |
 | Project manifests, imports, and dependency workflow | [`reference/project-layout.md`](reference/project-layout.md) | Current reference |
 | WebAssembly and host boundary | [`reference/wasm-abi.md`](reference/wasm-abi.md) and [`reference/static-wasm-ffi.md`](reference/static-wasm-ffi.md) | Current reference |
@@ -79,6 +80,7 @@ well-written: its status line must say that it is accepted, and implementation
 and tests must be kept aligned with it.
 
 - [Vibra philosophy](decisions/philosophy.md)
+- [Secure compilation boundary](decisions/secure-compilation.md)
 
 ### Status
 
@@ -110,6 +112,7 @@ Implementation plans live in [`plans/`](plans/) and are execution aids rather
 than current contracts:
 
 - [Plan directory guide](plans/README.md)
+- [Secure compilation constraints plan](plans/2026-08-07-issue-252-secure-compilation.md)
 - [Type-system and ADT foundation plan](plans/2026-05-05-type-system-adt-foundation.md)
 - [Vib source extension and call argument order](plans/2026-08-02-vib-extension-and-call-order.md)
 

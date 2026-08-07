@@ -3,6 +3,7 @@
 pub mod ast;
 pub mod async_runtime;
 pub(crate) mod body_semantics;
+pub mod compilation_pipeline;
 pub mod diagnostics;
 pub mod docs;
 pub mod effect_semantics;
@@ -34,5 +35,4 @@ pub mod typed_body;
 pub mod typed_lower;
 pub mod typed_program;
 pub mod typed_readers;
-pub mod wasm_abi;
 pub mod wasm_backend;

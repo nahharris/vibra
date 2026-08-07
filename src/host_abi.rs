@@ -96,6 +96,50 @@ impl ValueKind {
             Self::Record => "record",
         }
     }
+
+    /// All v1 registry shapes are carried through the guest boundary as a
+    /// host-owned arena index (or have no value for `void`). This exhaustive
+    /// match makes adding a future pointer/reference shape require an explicit
+    /// audit decision before it can be accepted by the registry test.
+    pub const fn is_opaque_arena_index_shape(self) -> bool {
+        match self {
+            Self::Void
+            | Self::Bool
+            | Self::Atom
+            | Self::Int64
+            | Self::UInt64
+            | Self::Duration
+            | Self::Instant
+            | Self::NetAddress
+            | Self::TcpStream
+            | Self::TcpListener
+            | Self::UdpSocket
+            | Self::Float64
+            | Self::Str
+            | Self::Bytes
+            | Self::Path
+            | Self::ReadHandle
+            | Self::WriteHandle
+            | Self::ProcessHandle
+            | Self::AnyHandle
+            | Self::ResultVoid
+            | Self::ResultStr
+            | Self::ResultBytes
+            | Self::ResultReadHandle
+            | Self::ResultWriteHandle
+            | Self::ResultProcessHandle
+            | Self::ResultPaths
+            | Self::ResultPath
+            | Self::OptionPath
+            | Self::OptionStr
+            | Self::OptionAny
+            | Self::ResultAny
+            | Self::Any
+            | Self::Array
+            | Self::StringMap
+            | Self::Record => true,
+        }
+    }
 }
 
 const BOOL: ValueKind = ValueKind::Bool;
@@ -840,6 +884,27 @@ mod tests {
 
         let accept = lookup("vibra_v1", "net_accept").unwrap();
         assert_eq!(accept.params, &[TCP_LISTENER]);
+    }
+
+    #[test]
+    fn vibra_v1_registry_has_only_opaque_arena_index_shapes() {
+        for import in HOST_ABI.iter().filter(|import| import.module == "vibra_v1") {
+            assert!(
+                import
+                    .params
+                    .iter()
+                    .all(|kind| kind.is_opaque_arena_index_shape()),
+                "{}.{:?} contains a non-index parameter shape",
+                import.module,
+                import.name
+            );
+            assert!(
+                import.result.is_opaque_arena_index_shape(),
+                "{}.{} contains a non-index result shape",
+                import.module,
+                import.name
+            );
+        }
     }
 
     #[test]

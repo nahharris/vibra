@@ -3637,6 +3637,13 @@ pub(crate) fn abi_value_type_matches(
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
     use crate::host_abi::ValueKind as A;
+    // `vibra_v1` values are represented by host-owned arena indices, but an
+    // index must never smuggle a shared cell, reference, or function value
+    // across the compartment boundary. Check the complete source shape so
+    // aliases and aggregate payloads cannot bypass the direct-type cases.
+    if contains_reference_like_boundary_type(ty, aliases) {
+        return false;
+    }
     let resolved = match ty {
         TypeRef::Named(name) => aliases.get(name).map(|alias| &alias.body).unwrap_or(ty),
         _ => ty,
@@ -3702,12 +3709,41 @@ pub(crate) fn abi_value_type_matches(
         A::ResultPath => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
         A::OptionPath => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
         A::OptionStr => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
-        A::Any => true,
+        A::Any => !contains_reference_like_boundary_type(ty, aliases),
         A::Array => matches!(resolved, TypeRef::Array(_)),
         A::StringMap => matches!(resolved, TypeRef::Map { key, .. } if abi_value_type_matches(A::Str, key, aliases)),
         A::Record => matches!(resolved, TypeRef::Record(_)),
         A::OptionAny => instantiated("option").is_some(),
         A::ResultAny => instantiated("result").is_some(),
+    }
+}
+
+fn contains_reference_like_boundary_type(
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    let normalized = normalize_type_ref(ty, aliases);
+    match normalized {
+        TypeRef::Mutable(_) | TypeRef::Reference { .. } | TypeRef::FnType { .. } => true,
+        TypeRef::Array(inner) | TypeRef::JoinHandle(inner) | TypeRef::Newtype { inner, .. } => {
+            contains_reference_like_boundary_type(&inner, aliases)
+        }
+        TypeRef::Record(fields) | TypeRef::Enum(fields) | TypeRef::Interface(fields) => fields
+            .values()
+            .any(|field| contains_reference_like_boundary_type(field, aliases)),
+        TypeRef::Tuple(items)
+        | TypeRef::Union(items)
+        | TypeRef::Intersect(items)
+        | TypeRef::Instantiated {
+            type_args: items, ..
+        } => items
+            .iter()
+            .any(|item| contains_reference_like_boundary_type(item, aliases)),
+        TypeRef::Map { key, value } => {
+            contains_reference_like_boundary_type(&key, aliases)
+                || contains_reference_like_boundary_type(&value, aliases)
+        }
+        _ => false,
     }
 }
 

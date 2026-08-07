@@ -122,3 +122,17 @@ fn parse_project(source: &str) -> Result<(), String> {
         .map(|_| ())
         .map_err(|error| error.to_string())
 }
+
+#[test]
+fn secure_compilation_contract_separates_semantics_from_attack_prevention() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("docs/decisions/secure-compilation.md");
+    let source = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    assert!(source.contains("semantic preservation"), "{path:?}");
+    assert!(source.contains("attack prevention"), "{path:?}");
+    assert!(
+        source.contains("does not claim") || source.contains("not claim"),
+        "the contract must disclaim attack-prevention claims: {path:?}"
+    );
+}
