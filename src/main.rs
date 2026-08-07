@@ -8,7 +8,8 @@ use std::time::Duration;
 use vibra::legacy_value::{Mapping, Value};
 use vibra::lower::{RuntimeValue, TypeRef};
 use vibra::{
-    docs, execute, load, lower, lsp, mcp, package, plugin, project, runtime, test_runner, tooling,
+    docs, execute, load, lower, lsp, mcp, package, plugin, project, retrieval_index, runtime,
+    test_runner, tooling,
 };
 
 #[derive(Parser)]
@@ -167,6 +168,17 @@ enum Command {
     },
     /// Print the statically referenced host effect surface as JSON.
     Effects {
+        /// Entry module path.
+        path: PathBuf,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = StructuredFormatArg::Json)]
+        format: StructuredFormatArg,
+        /// Enable a conditional-compilation flag (repeatable).
+        #[arg(long = "ctx", value_parser = parse_compilation_flag)]
+        flag: Vec<String>,
+    },
+    /// Emit a deterministic, normalized function-level retrieval index.
+    Index {
         /// Entry module path.
         path: PathBuf,
         /// Output format.
@@ -581,6 +593,14 @@ fn run_cli() -> Result<()> {
         }
         Command::Effects { path, format, flag } => {
             print_effects(&path, format, &compilation_flags(flag)?)?
+        }
+        Command::Index {
+            path,
+            format: _,
+            flag,
+        } => {
+            let index = retrieval_index::build(&path, &compilation_flags(flag)?)?;
+            print!("{}", retrieval_index::canonical_json(&index)?);
         }
         Command::Expand { path, format, flag } => {
             let loaded = load::load_legacy_yaml_program(&path, &compilation_flags(flag)?)?;

@@ -36,6 +36,7 @@ or update documentation as the compiler evolves.
 | Design principles and language trade-offs | [`decisions/philosophy.md`](decisions/philosophy.md) | Current decision contract |
 | Language syntax and typing | [`decisions/s-expression-language.md`](decisions/s-expression-language.md) | Accepted contract |
 | Static effects | [`decisions/effect-system.md`](decisions/effect-system.md) | Accepted contract |
+| Normalized retrieval index | [`schemas/index.schema.json`](../schemas/index.schema.json) and [`README.md`](../README.md) | Current tooling contract |
 | Project manifests, imports, and dependency workflow | [`reference/project-layout.md`](reference/project-layout.md) | Current reference |
 | WebAssembly and host boundary | [`reference/wasm-abi.md`](reference/wasm-abi.md) and [`reference/static-wasm-ffi.md`](reference/static-wasm-ffi.md) | Current reference |
 | Machine-readable interfaces | [`schemas/`](../schemas/) | Tooling contract |
