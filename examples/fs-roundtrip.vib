@@ -1,36 +1,31 @@
 (import io "../stdlib/src/io.vib")
 (import fs "../stdlib/src/fs.vib")
 (import result "../stdlib/src/result.vib")
-(import stream "../stdlib/src/stream.vib")
+
+(defn
+  roundtrip
+  (path fs.path)
+  (result.result str fs.fs-error)
+  (do
+    (try (fs.write.file path "from vibra fs"))
+    (let text (try (fs.read.file path)))
+    (return (result.result.ok text))
+  )
+)
+
 (defn
   main
   ()
   void
-  (let path (fs.path.new "tmp/hello.txt"))
-  (let opened-write (fs.write.open path))
-  (match
-    opened-write
-    (result.result.ok (bind out))
-    (do (stream.write.string out "from vibra fs") (stream.manage.close out))
-    (result.result.err (bind write-err))
-    (do (io.stderr.println "failed to open file for writing"))
-  )
-  (let opened-read (fs.read.open path))
-  (match
-    opened-read
-    (result.result.ok (bind input))
-    (do
-      (let text-result (stream.read.string input))
-      (match
-        text-result
-        (result.result.ok (bind text))
-        (io.stdout.println text)
-        (result.result.err (bind read-err))
-        (io.stderr.println "failed to read file")
-      )
-      (stream.manage.close input)
+  (do
+    (let path (fs.path.new "tmp/hello.txt"))
+    (let outcome (roundtrip path))
+    (match
+      outcome
+      (result.result.ok (bind text))
+      (do (let _ (io.stdout.println text)))
+      (result.result.err _)
+      (do (let _ (io.stderr.println "failed to complete file roundtrip")))
     )
-    (result.result.err (bind open-err))
-    (do (io.stderr.println "failed to open file for reading"))
   )
 )

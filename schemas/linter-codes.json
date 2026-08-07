@@ -398,6 +398,26 @@
       "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
     },
     {
+      "code": "E-TRY-001",
+      "severity": "error",
+      "summary": "Malformed `try` form or `try` operand is not a `result` or `option` value"
+    },
+    {
+      "code": "E-TRY-002",
+      "severity": "error",
+      "summary": "`try` is outside a function returning the same `result` or `option` kind"
+    },
+    {
+      "code": "E-TRY-003",
+      "severity": "error",
+      "summary": "Propagated result error type does not exactly match the enclosing function error type"
+    },
+    {
+      "code": "E-TRY-004",
+      "severity": "error",
+      "summary": "`try` cannot propagate across a structured task or spawned computation boundary"
+    },
+    {
       "code": "E-EFFECT-001",
       "severity": "error",
       "summary": "A body performs a nominal effect not covered by its declared row; a declared root subsumes its leaf effects"
