@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
-use crate::ast::{Test, TopLevel};
+use crate::ast::{AnnotationKind, Test, TopLevel};
 use crate::body_semantics::validate_task_handles;
 use crate::frontend::SurfaceProgram;
 use crate::lower::{
@@ -76,6 +76,23 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
         bail!("`main` must be an ordinary function body, not a wasm import");
     };
     let statements = statements.clone();
+    let main_effects = main_sig.effects.clone();
+    let main_effects_declared = program
+        .modules
+        .get(&program.entry)
+        .is_some_and(|module| {
+            module.forms().any(|form| {
+                matches!(
+                    form,
+                    TopLevel::Function(function)
+                        if function.name.value == "main"
+                            && function
+                                .annotations
+                                .iter()
+                                .any(|annotation| matches!(annotation.value, AnnotationKind::Effects(_)))
+                )
+            })
+        });
 
     let mut main_arg_bindings: Vec<(String, TypeRef)> = Vec::new();
     for parameter in &main_sig.parameters {
@@ -88,6 +105,11 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
     }
     validate_task_handles(&statements)
         .context("E-TASK-003: invalid task-handle lifetime in `main`")?;
+    crate::effect_semantics::validate_entry_effects(
+        &statements,
+        main_effects_declared.then_some(&main_effects),
+        &functions,
+    )?;
 
     let test_names = discover_typed_test_names(program).unwrap_or_default();
     warnings.extend(collect_typed_warnings(
@@ -102,7 +124,7 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
     Ok(LoweredProgram {
         statements,
         main_arg_bindings,
-        main_effects: main_sig.effects.clone(),
+        main_effects,
         constants,
         type_aliases: signatures.aliases.clone(),
         functions,
@@ -471,6 +493,24 @@ mod tests {
         assert!(inferred
             .labels()
             .contains(&("module".into(), "host".into())));
+    }
+
+    #[test]
+    fn typed_main_rejects_an_explicit_under_declared_effect_row() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vib");
+        write(
+            &entry,
+            "(deffect host\n\
+               (defn read () void (do (intrinsic @env-list)) effects: (env.read)))\n\
+             (defn main () void (do (host.read)) effects: ())\n",
+        );
+        let program = load(&entry);
+        let error = format!("{:#}", lower_typed_program(&program).unwrap_err());
+        assert!(
+            error.contains("E-EFFECT-001") && error.contains("`main`"),
+            "expected an explicitly under-declared typed main to fail, got: {error}"
+        );
     }
 
     #[test]

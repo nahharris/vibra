@@ -48,8 +48,9 @@ fn write_fixture() -> tempfile::TempDir {
   ))
 (deffect clock
   (defn now () int64 (do (return 1)) effects: ()))
+(defn -touches-clock () void (do (let tick (clock.now))))
 (defn render (value box) str (do (let text (display.show value)) (return text)))
-(defn main () void (do (let value (box.boxed 1)) (let rendered (render value))))
+(defn main () void (do (let value (box.boxed 1)) (let rendered (render value)) (-touches-clock)))
 "#,
     )
     .unwrap();
@@ -137,6 +138,7 @@ fn index_records_semantics_private_functions_and_normalized_source() {
     for name in [
         "main",
         "render",
+        "touches-clock",
         "clock.now",
         "helper.identity",
         "helper.hidden",
@@ -171,7 +173,34 @@ fn index_records_semantics_private_functions_and_normalized_source() {
         .as_array()
         .unwrap()
         .is_empty());
-    assert!(operation["effects"]["inferred"].is_null());
+    assert_eq!(
+        operation["effects"]["inferred"],
+        serde_json::json!(["main.clock"])
+    );
+
+    let helper = records
+        .iter()
+        .find(|record| record["qualified-name"] == "touches-clock")
+        .unwrap();
+    assert_eq!(helper["effects"]["declared"], serde_json::json!([]));
+    assert_eq!(
+        helper["effects"]["inferred"],
+        serde_json::json!(["main.clock"])
+    );
+    assert_eq!(
+        helper["effects"]["performed"],
+        serde_json::json!(["main.clock"])
+    );
+
+    let main = records
+        .iter()
+        .find(|record| record["qualified-name"] == "main")
+        .unwrap();
+    assert_eq!(main["effects"]["declared"], serde_json::json!([]));
+    assert_eq!(
+        main["effects"]["inferred"],
+        serde_json::json!(["main.clock"])
+    );
 
     let render = records
         .iter()

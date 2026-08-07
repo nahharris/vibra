@@ -240,7 +240,7 @@ pub fn validate_declared_effects(
     Ok(())
 }
 
-/// Validate an explicitly declared legacy entry row against the entry body.
+/// Validate an explicitly declared entry row against the entry body.
 /// An omitted `main` annotation keeps the program-entry inference behavior;
 /// when a row is written, it is a ceiling and uses the same root subsumption
 /// relation as every other declaration boundary.
