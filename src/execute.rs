@@ -276,6 +276,10 @@ impl FileTable {
         Ok(())
     }
 
+    pub(crate) fn reserve_value(&mut self, value: &RuntimeValue) -> Result<()> {
+        self.reserve_memory(accounted_runtime_value_bytes(value))
+    }
+
     /// Check every effect performed by one concrete host operation. This is
     /// intentionally called at the operation boundary, even after a scope
     /// entry check, so alternate lowering paths cannot bypass authority.
@@ -606,6 +610,89 @@ impl Drop for FileTable {
     }
 }
 
+/// Account the logical host-arena representation of a value. This is a
+/// deterministic high-water metric, not a claim about allocator bytes: the
+/// arena is still instance-owned and unreclaimed until escape analysis lands.
+pub(crate) fn accounted_runtime_value_bytes(value: &RuntimeValue) -> usize {
+    let mut seen_cells = BTreeSet::new();
+    accounted_runtime_value_bytes_inner(value, &mut seen_cells)
+}
+
+fn accounted_runtime_value_bytes_inner(
+    value: &RuntimeValue,
+    seen_cells: &mut BTreeSet<usize>,
+) -> usize {
+    let base = std::mem::size_of::<RuntimeValue>();
+    match value {
+        RuntimeValue::Atom(text) | RuntimeValue::Str(text) => base.saturating_add(text.len()),
+        RuntimeValue::Array(values) | RuntimeValue::Tuple(values) => values.iter().fold(
+            base.saturating_add(values.len().saturating_mul(base)),
+            |total, value| {
+                total.saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
+            },
+        ),
+        RuntimeValue::Record(fields) => fields.iter().fold(
+            base.saturating_add(
+                fields
+                    .len()
+                    .saturating_mul(std::mem::size_of::<(String, RuntimeValue)>()),
+            ),
+            |total, (name, value)| {
+                total
+                    .saturating_add(name.len())
+                    .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
+            },
+        ),
+        RuntimeValue::Map(entries) => entries.iter().fold(
+            base.saturating_add(
+                entries
+                    .len()
+                    .saturating_mul(std::mem::size_of::<(RuntimeValue, RuntimeValue)>()),
+            ),
+            |total, (key, value)| {
+                total
+                    .saturating_add(accounted_runtime_value_bytes_inner(key, seen_cells))
+                    .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
+            },
+        ),
+        RuntimeValue::Typed { value, .. } => base
+            .saturating_add(std::mem::size_of::<RuntimeValue>())
+            .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells)),
+        RuntimeValue::Enum {
+            enum_key,
+            tag,
+            payload,
+        } => base
+            .saturating_add(enum_key.len())
+            .saturating_add(tag.len())
+            .saturating_add(
+                payload
+                    .as_deref()
+                    .map(|value| accounted_runtime_value_bytes_inner(value, seen_cells))
+                    .unwrap_or(0),
+            ),
+        RuntimeValue::Mutable(cell) | RuntimeValue::Reference { cell, .. } => {
+            let pointer = Rc::as_ptr(cell) as usize;
+            if !seen_cells.insert(pointer) {
+                base
+            } else {
+                base.saturating_add(std::mem::size_of::<RefCell<RuntimeValue>>())
+                    .saturating_add(match cell.try_borrow() {
+                        Ok(value) => accounted_runtime_value_bytes_inner(&value, seen_cells),
+                        Err(_) => usize::MAX,
+                    })
+            }
+        }
+        RuntimeValue::Bool(_)
+        | RuntimeValue::Int(_)
+        | RuntimeValue::Float(_)
+        | RuntimeValue::Range { .. }
+        | RuntimeValue::HostHandle(_)
+        | RuntimeValue::JoinHandle(_)
+        | RuntimeValue::Void => base,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HandleLifecycleError {
     Closed,
@@ -726,12 +813,36 @@ pub(crate) fn eval_expr(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
+    eval_expr_with_accounting(expr, env, program, files, config, true)
+}
+
+pub(crate) fn eval_expr_unaccounted(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<RuntimeValue> {
+    eval_expr_with_accounting(expr, env, program, files, config, false)
+}
+
+fn eval_expr_with_accounting(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+    account_allocations: bool,
+) -> Result<RuntimeValue> {
     match expr {
-        Expr::Value(v) => Ok(v.clone()),
-        Expr::VarRef(v) => env
-            .get(v)
-            .map(read_place_value)
-            .with_context(|| format!("unknown variable `${v}`")),
+        Expr::Value(v) => account_allocated_value(files, v.clone(), account_allocations),
+        Expr::VarRef(v) => {
+            let value = env
+                .get(v)
+                .map(read_place_value)
+                .with_context(|| format!("unknown variable `${v}`"))?;
+            account_allocated_value(files, value, account_allocations)
+        }
         Expr::Mutable(inner) => {
             if let Expr::VarRef(name) = inner.as_ref() {
                 if let Some(existing) = env.get(name) {
@@ -740,13 +851,24 @@ pub(crate) fn eval_expr(
                         | RuntimeValue::Reference {
                             cell,
                             mutable: true,
-                        } => return Ok(RuntimeValue::Mutable(cell.clone())),
+                        } => {
+                            return account_allocated_value(
+                                files,
+                                RuntimeValue::Mutable(cell.clone()),
+                                account_allocations,
+                            )
+                        }
                         _ => {}
                     }
                 }
             }
-            let value = eval_expr(inner, env, program, files, config)?;
-            Ok(RuntimeValue::Mutable(Rc::new(RefCell::new(value))))
+            let value =
+                eval_expr_with_accounting(inner, env, program, files, config, account_allocations)?;
+            account_allocated_value(
+                files,
+                RuntimeValue::Mutable(Rc::new(RefCell::new(value))),
+                account_allocations,
+            )
         }
         Expr::Reference { target, mutable } => {
             let cell = if let Expr::VarRef(name) = target.as_ref() {
@@ -760,17 +882,30 @@ pub(crate) fn eval_expr(
                     value => Rc::new(RefCell::new(value.clone())),
                 }
             } else {
-                match eval_expr(target, env, program, files, config)? {
+                match eval_expr_with_accounting(
+                    target,
+                    env,
+                    program,
+                    files,
+                    config,
+                    account_allocations,
+                )? {
                     RuntimeValue::Mutable(cell) | RuntimeValue::Reference { cell, .. } => cell,
                     value => Rc::new(RefCell::new(value)),
                 }
             };
-            Ok(RuntimeValue::Reference {
-                cell,
-                mutable: *mutable,
-            })
+            account_allocated_value(
+                files,
+                RuntimeValue::Reference {
+                    cell,
+                    mutable: *mutable,
+                },
+                account_allocations,
+            )
         }
-        Expr::Call { call, .. } => exec_call(call, program, env, files, config),
+        Expr::Call { call, .. } => {
+            exec_call_inner(call, program, env, files, config, true, account_allocations)
+        }
         Expr::HostCall {
             import,
             args,
@@ -779,7 +914,9 @@ pub(crate) fn eval_expr(
         } => {
             let values = args
                 .iter()
-                .map(|arg| eval_expr(arg, env, program, files, config))
+                .map(|arg| {
+                    eval_expr_with_accounting(arg, env, program, files, config, account_allocations)
+                })
                 .collect::<Result<Vec<_>>>()?;
             let entry =
                 crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
@@ -811,15 +948,12 @@ pub(crate) fn eval_expr(
                 "vibra_test" => exec_vibra_test(entry.name, &values),
                 other => bail!("unsupported host module `{other}`"),
             }?;
-            if *intrinsic {
-                Ok(mint_validated_host_result(
-                    result,
-                    return_type,
-                    &program.type_aliases,
-                ))
+            let result = if *intrinsic {
+                mint_validated_host_result(result, return_type, &program.type_aliases)
             } else {
-                Ok(result)
-            }
+                result
+            };
+            account_allocated_value(files, result, account_allocations)
         }
         Expr::Primitive {
             op,
@@ -829,14 +963,25 @@ pub(crate) fn eval_expr(
         } => {
             let values = args
                 .iter()
-                .map(|arg| eval_expr(arg, env, program, files, config))
+                .map(|arg| {
+                    eval_expr_with_accounting(arg, env, program, files, config, account_allocations)
+                })
                 .collect::<Result<Vec<_>>>()?;
-            eval_primitive(*op, operand_type, return_type, &values)
+            let value = eval_primitive(*op, operand_type, return_type, &values)?;
+            account_allocated_value(files, value, account_allocations)
         }
-        Expr::Cast { from, target } => Ok(RuntimeValue::Typed {
-            type_ref: target.clone(),
-            value: Box::new(eval_expr(from, env, program, files, config)?),
-        }),
+        Expr::Cast { from, target } => {
+            let value =
+                eval_expr_with_accounting(from, env, program, files, config, account_allocations)?;
+            account_allocated_value(
+                files,
+                RuntimeValue::Typed {
+                    type_ref: target.clone(),
+                    value: Box::new(value),
+                },
+                account_allocations,
+            )
+        }
         Expr::EnumConstructor {
             enum_key,
             tag,
@@ -844,35 +989,91 @@ pub(crate) fn eval_expr(
         } => {
             let payload_value = payload
                 .as_ref()
-                .map(|p| eval_expr(p, env, program, files, config))
+                .map(|p| {
+                    eval_expr_with_accounting(p, env, program, files, config, account_allocations)
+                })
                 .transpose()?
                 .map(Box::new);
-            Ok(RuntimeValue::Enum {
-                enum_key: enum_key.clone(),
-                tag: tag.clone(),
-                payload: payload_value,
-            })
+            account_allocated_value(
+                files,
+                RuntimeValue::Enum {
+                    enum_key: enum_key.clone(),
+                    tag: tag.clone(),
+                    payload: payload_value,
+                },
+                account_allocations,
+            )
         }
-        Expr::Record(fields) => fields
-            .iter()
-            .map(|(name, expr)| Ok((name.clone(), eval_expr(expr, env, program, files, config)?)))
-            .collect::<Result<std::collections::BTreeMap<_, _>>>()
-            .map(RuntimeValue::Record),
-        Expr::Tuple(items) => items
-            .iter()
-            .map(|expr| eval_expr(expr, env, program, files, config))
-            .collect::<Result<Vec<_>>>()
-            .map(RuntimeValue::Tuple),
-        Expr::Array(items) => items
-            .iter()
-            .map(|expr| eval_expr(expr, env, program, files, config))
-            .collect::<Result<Vec<_>>>()
-            .map(RuntimeValue::Array),
+        Expr::Record(fields) => {
+            let fields = fields
+                .iter()
+                .map(|(name, expr)| {
+                    Ok((
+                        name.clone(),
+                        eval_expr_with_accounting(
+                            expr,
+                            env,
+                            program,
+                            files,
+                            config,
+                            account_allocations,
+                        )?,
+                    ))
+                })
+                .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
+            account_allocated_value(files, RuntimeValue::Record(fields), account_allocations)
+        }
+        Expr::Tuple(items) => {
+            let items = items
+                .iter()
+                .map(|expr| {
+                    eval_expr_with_accounting(
+                        expr,
+                        env,
+                        program,
+                        files,
+                        config,
+                        account_allocations,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            account_allocated_value(files, RuntimeValue::Tuple(items), account_allocations)
+        }
+        Expr::Array(items) => {
+            let items = items
+                .iter()
+                .map(|expr| {
+                    eval_expr_with_accounting(
+                        expr,
+                        env,
+                        program,
+                        files,
+                        config,
+                        account_allocations,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            account_allocated_value(files, RuntimeValue::Array(items), account_allocations)
+        }
         Expr::Map(items) => {
             let mut values: Vec<(RuntimeValue, RuntimeValue)> = Vec::with_capacity(items.len());
             for (key, value) in items {
-                let key = eval_expr(key, env, program, files, config)?;
-                let value = eval_expr(value, env, program, files, config)?;
+                let key = eval_expr_with_accounting(
+                    key,
+                    env,
+                    program,
+                    files,
+                    config,
+                    account_allocations,
+                )?;
+                let value = eval_expr_with_accounting(
+                    value,
+                    env,
+                    program,
+                    files,
+                    config,
+                    account_allocations,
+                )?;
                 // Map literals have the same deterministic upsert rule as the
                 // public API: the first key fixes order and the last value wins.
                 if let Some((_, current)) = values
@@ -884,27 +1085,80 @@ pub(crate) fn eval_expr(
                     values.push((key, value));
                 }
             }
-            Ok(RuntimeValue::Map(values))
+            account_allocated_value(files, RuntimeValue::Map(values), account_allocations)
         }
         Expr::Range { start, end, step } => {
-            let start = value_i64(&eval_expr(start, env, program, files, config)?)?;
-            let end = value_i64(&eval_expr(end, env, program, files, config)?)?;
-            let step = value_i64(&eval_expr(step, env, program, files, config)?)?;
+            let start = value_i64(&eval_expr_with_accounting(
+                start,
+                env,
+                program,
+                files,
+                config,
+                account_allocations,
+            )?)?;
+            let end = value_i64(&eval_expr_with_accounting(
+                end,
+                env,
+                program,
+                files,
+                config,
+                account_allocations,
+            )?)?;
+            let step = value_i64(&eval_expr_with_accounting(
+                step,
+                env,
+                program,
+                files,
+                config,
+                account_allocations,
+            )?)?;
             if step == 0 {
                 bail!("E-ITER-002: `$range.step` must not be zero");
             }
-            Ok(RuntimeValue::Range { start, end, step })
+            account_allocated_value(
+                files,
+                RuntimeValue::Range { start, end, step },
+                account_allocations,
+            )
         }
         Expr::If {
             cond,
             then_e,
             else_e,
-        } => match eval_expr(cond, env, program, files, config)? {
-            RuntimeValue::Bool(true) => eval_expr(then_e, env, program, files, config),
-            RuntimeValue::Bool(false) => eval_expr(else_e, env, program, files, config),
-            other => bail!("`$if` condition must be `$bool`, got {other:?}"),
-        },
+        } => {
+            match eval_expr_with_accounting(cond, env, program, files, config, account_allocations)?
+            {
+                RuntimeValue::Bool(true) => eval_expr_with_accounting(
+                    then_e,
+                    env,
+                    program,
+                    files,
+                    config,
+                    account_allocations,
+                ),
+                RuntimeValue::Bool(false) => eval_expr_with_accounting(
+                    else_e,
+                    env,
+                    program,
+                    files,
+                    config,
+                    account_allocations,
+                ),
+                other => bail!("`$if` condition must be `$bool`, got {other:?}"),
+            }
+        }
     }
+}
+
+fn account_allocated_value(
+    files: &mut FileTable,
+    value: RuntimeValue,
+    account_allocations: bool,
+) -> Result<RuntimeValue> {
+    if account_allocations {
+        files.reserve_value(&value)?;
+    }
+    Ok(value)
 }
 
 fn primitive_inner(value: &RuntimeValue) -> &RuntimeValue {
@@ -1250,6 +1504,7 @@ fn exec_statement(
         }
         Statement::Set { var, value } => {
             let next = eval_expr(value, env, program, files, config)?;
+            files.reserve_value(&next)?;
             let target = env
                 .get(var)
                 .with_context(|| format!("E-SET-002: unknown `$set` target `{var}`"))?;
@@ -1267,9 +1522,15 @@ fn exec_statement(
         }
         Statement::Match { target, arms } => {
             let value = eval_expr(target, env, program, files, config)?;
+            let existing_names = env.keys().cloned().collect::<BTreeSet<_>>();
             for arm in arms {
                 let mut scoped = env.clone();
                 if pattern_matches(&arm.pattern, &value, program, &mut scoped)? {
+                    for (name, value) in &scoped {
+                        if !existing_names.contains(name) {
+                            files.reserve_value(value)?;
+                        }
+                    }
                     return run_block(&arm.body, program, &mut scoped, files, config);
                 }
             }
@@ -1305,6 +1566,7 @@ fn exec_statement(
             let source = eval_expr(source, env, program, files, config)?;
             let items = iteration_items(source, config.max_alloc_len)?;
             for item in items {
+                files.reserve_value(&item)?;
                 let mut scoped = env.clone();
                 scoped.insert(var.clone(), item);
                 match run_block(body, program, &mut scoped, files, config)? {
@@ -1904,7 +2166,7 @@ mod iteration_tests {
     }
 
     #[test]
-    fn memory_exhaustion_is_reported_by_the_wasm_arena_boundary() {
+    fn memory_exhaustion_is_reported_by_both_interpreter_and_wasm_value_boundaries() {
         let (_dir, program) = lower("(defn main () void (do (let value (array 1 2 3))))\n");
         let config = RunConfig {
             scope_limits: ScopeLimits {
@@ -1913,6 +2175,8 @@ mod iteration_tests {
             },
             ..RunConfig::default()
         };
+        let interpreted = run_lowered_interpreted(&program, &config).unwrap_err();
+        assert!(format!("{interpreted:#}").contains("MemoryExhausted"));
         let wasm = run_lowered(&program, &config).unwrap_err();
         assert!(format!("{wasm:#}").contains("MemoryExhausted"));
     }
@@ -2244,7 +2508,7 @@ pub(crate) fn exec_call(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
-    exec_call_inner(call, program, env, files, config, true)
+    exec_call_inner(call, program, env, files, config, true, true)
 }
 
 /// Execute a call whose boundary was emitted by the Wasm backend.
@@ -2259,7 +2523,7 @@ pub(crate) fn exec_call_from_wasm(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
-    exec_call_inner(call, program, env, files, config, false)
+    exec_call_inner(call, program, env, files, config, false, false)
 }
 
 fn exec_call_inner(
@@ -2269,12 +2533,14 @@ fn exec_call_inner(
     files: &mut FileTable,
     config: &RunConfig,
     charge_fuel: bool,
+    account_allocations: bool,
 ) -> Result<RuntimeValue> {
     let sig = program
         .functions
         .get(&call.callee_key)
         .with_context(|| format!("missing function `{}`", call.callee_key))?;
-    let evaluated_args = evaluate_call_arguments(call, env, program, files, config)?;
+    let evaluated_args =
+        evaluate_call_arguments(call, env, program, files, config, account_allocations)?;
 
     match &sig.body {
         FunctionBody::User { statements } => {
@@ -2347,11 +2613,12 @@ fn exec_call_inner(
                         WasmArgSpec::ConstStr(value) => RuntimeValue::Str(value.clone()),
                     });
                 }
-                match entry.module {
+                let result = match entry.module {
                     "vibra_v1" => exec_vibra_v1(entry.name, sig, &host_args, files, config),
                     "vibra_test" => exec_vibra_test(entry.name, &host_args),
                     other => bail!("unsupported host module `{other}`"),
-                }
+                }?;
+                account_allocated_value(files, result, account_allocations)
             })
         }
     }
@@ -2363,12 +2630,22 @@ fn evaluate_call_arguments(
     program: &LoweredProgram,
     files: &mut FileTable,
     config: &RunConfig,
+    account_allocations: bool,
 ) -> Result<Vec<RuntimeValue>> {
     if call.source_args.is_empty() {
         return call
             .args
             .iter()
-            .map(|argument| eval_expr(argument, env, program, files, config))
+            .map(|argument| {
+                eval_expr_with_accounting(
+                    argument,
+                    env,
+                    program,
+                    files,
+                    config,
+                    account_allocations,
+                )
+            })
             .collect();
     }
     let fixed_count = call
@@ -2387,7 +2664,8 @@ fn evaluate_call_arguments(
     let mut fixed = vec![None; fixed_count];
     let mut variadic = Vec::new();
     for (argument, target) in call.source_args.iter().zip(&call.argument_targets) {
-        let value = eval_expr(argument, env, program, files, config)?;
+        let value =
+            eval_expr_with_accounting(argument, env, program, files, config, account_allocations)?;
         match target {
             crate::lower::CallArgumentTarget::Fixed(index) => fixed[*index] = Some(value),
             crate::lower::CallArgumentTarget::Variadic => variadic.push(value),
@@ -2401,7 +2679,11 @@ fn evaluate_call_arguments(
         })
         .collect::<Result<Vec<_>>>()?;
     if has_variadic {
-        result.push(RuntimeValue::Array(variadic));
+        result.push(account_allocated_value(
+            files,
+            RuntimeValue::Array(variadic),
+            account_allocations,
+        )?);
     }
     Ok(result)
 }

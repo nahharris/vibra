@@ -314,8 +314,7 @@ impl HostExecution {
     }
 
     fn alloc(&mut self, value: RuntimeValue) -> Result<i32> {
-        self.files
-            .reserve_memory(accounted_runtime_value_bytes(&value))?;
+        self.files.reserve_value(&value)?;
         self.arena.push(value);
         i32::try_from(self.arena.len()).context("guest value arena is too large for wasm32")
     }
@@ -414,7 +413,7 @@ impl HostExecution {
                 return_type,
                 intrinsic,
                 ..
-            } => crate::execute::eval_expr(
+            } => crate::execute::eval_expr_unaccounted(
                 &Expr::HostCall {
                     import,
                     args: values.into_iter().map(Expr::Value).collect(),
@@ -506,8 +505,7 @@ impl HostExecution {
     }
     fn set(&mut self, target: i32, value: i32) -> Result<()> {
         let next = self.get(value)?.clone();
-        self.files
-            .reserve_memory(accounted_runtime_value_bytes(&next))?;
+        self.files.reserve_value(&next)?;
         match self.get(target)? {
             RuntimeValue::Mutable(cell)
             | RuntimeValue::Reference {
@@ -604,89 +602,6 @@ impl HostExecution {
         }
         .context("E-ITER-005: traversal index out of bounds")?;
         self.alloc(item)
-    }
-}
-
-/// Account the logical host-arena representation of a value. This is a
-/// deterministic high-water metric, not a claim about allocator bytes: the
-/// arena is still instance-owned and unreclaimed until escape analysis lands.
-fn accounted_runtime_value_bytes(value: &RuntimeValue) -> usize {
-    let mut seen_cells = BTreeSet::new();
-    accounted_runtime_value_bytes_inner(value, &mut seen_cells)
-}
-
-fn accounted_runtime_value_bytes_inner(
-    value: &RuntimeValue,
-    seen_cells: &mut BTreeSet<usize>,
-) -> usize {
-    let base = std::mem::size_of::<RuntimeValue>();
-    match value {
-        RuntimeValue::Atom(text) | RuntimeValue::Str(text) => base.saturating_add(text.len()),
-        RuntimeValue::Array(values) | RuntimeValue::Tuple(values) => values.iter().fold(
-            base.saturating_add(values.len().saturating_mul(base)),
-            |total, value| {
-                total.saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
-            },
-        ),
-        RuntimeValue::Record(fields) => fields.iter().fold(
-            base.saturating_add(
-                fields
-                    .len()
-                    .saturating_mul(std::mem::size_of::<(String, RuntimeValue)>()),
-            ),
-            |total, (name, value)| {
-                total
-                    .saturating_add(name.len())
-                    .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
-            },
-        ),
-        RuntimeValue::Map(entries) => entries.iter().fold(
-            base.saturating_add(
-                entries
-                    .len()
-                    .saturating_mul(std::mem::size_of::<(RuntimeValue, RuntimeValue)>()),
-            ),
-            |total, (key, value)| {
-                total
-                    .saturating_add(accounted_runtime_value_bytes_inner(key, seen_cells))
-                    .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
-            },
-        ),
-        RuntimeValue::Typed { value, .. } => base
-            .saturating_add(std::mem::size_of::<RuntimeValue>())
-            .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells)),
-        RuntimeValue::Enum {
-            enum_key,
-            tag,
-            payload,
-        } => base
-            .saturating_add(enum_key.len())
-            .saturating_add(tag.len())
-            .saturating_add(
-                payload
-                    .as_deref()
-                    .map(|value| accounted_runtime_value_bytes_inner(value, seen_cells))
-                    .unwrap_or(0),
-            ),
-        RuntimeValue::Mutable(cell) | RuntimeValue::Reference { cell, .. } => {
-            let pointer = Rc::as_ptr(cell) as usize;
-            if !seen_cells.insert(pointer) {
-                base
-            } else {
-                base.saturating_add(std::mem::size_of::<RefCell<RuntimeValue>>())
-                    .saturating_add(match cell.try_borrow() {
-                        Ok(value) => accounted_runtime_value_bytes_inner(&value, seen_cells),
-                        Err(_) => usize::MAX,
-                    })
-            }
-        }
-        RuntimeValue::Bool(_)
-        | RuntimeValue::Int(_)
-        | RuntimeValue::Float(_)
-        | RuntimeValue::Range { .. }
-        | RuntimeValue::HostHandle(_)
-        | RuntimeValue::JoinHandle(_)
-        | RuntimeValue::Void => base,
     }
 }
 
@@ -2018,6 +1933,7 @@ fn deterministic_program_fingerprint(program: &LoweredProgram) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execute::accounted_runtime_value_bytes;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]

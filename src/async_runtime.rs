@@ -575,7 +575,7 @@ impl Scheduler {
     ) -> Result<ScopeId, RuntimeError> {
         let requested: BTreeSet<_> = grants.into_iter().collect();
         let parent_scope = self.scopes.get(&parent).ok_or(RuntimeError::UnknownScope)?;
-        if parent_scope.closed {
+        if parent_scope.closed || parent_scope.cancelled.is_some() {
             return Err(RuntimeError::ScopeClosed);
         }
         if !limits.is_within(parent_scope.limits) {
@@ -1886,5 +1886,20 @@ mod tests {
                 && event.scope == fuel_scope
                 && event.reason == Some(CancelReason::FuelExhausted)
         }));
+    }
+
+    #[test]
+    fn cancelled_parent_rejects_new_child_scope_admission() {
+        let mut scheduler = Scheduler::new([]);
+        let parent = scheduler
+            .open_scope(scheduler.root(), [], Some(10))
+            .unwrap();
+
+        scheduler.advance_to(10);
+
+        assert_eq!(
+            scheduler.open_scope(parent, [], None),
+            Err(RuntimeError::ScopeClosed)
+        );
     }
 }
