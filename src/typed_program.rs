@@ -57,8 +57,10 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
         .context("typed signature lowering")?;
     let bodies = typed_body::lower_typed_bodies(inputs.iter().copied(), &signatures)
         .context("typed body lowering")?;
-    let functions = typed_body::materialize_typed_functions(&signatures, &bodies)
-        .context("materializing typed functions")?;
+    let mut warnings = Vec::new();
+    let functions =
+        typed_body::materialize_typed_functions_with_warnings(&signatures, &bodies, &mut warnings)
+            .context("materializing typed functions")?;
     let constants = typed_body::materialize_constants(&signatures, &bodies)
         .context("materializing typed constants")?;
     let impls: HashMap<ImplKey, ImplBody> = signatures.impls.clone();
@@ -88,7 +90,12 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
         .context("E-TASK-003: invalid task-handle lifetime in `main`")?;
 
     let test_names = discover_typed_test_names(program).unwrap_or_default();
-    let warnings = collect_typed_warnings(&order, &functions, &constants, &test_names);
+    warnings.extend(collect_typed_warnings(
+        &order,
+        &functions,
+        &constants,
+        &test_names,
+    ));
 
     let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
 
@@ -114,6 +121,7 @@ struct TypedTestContext {
     functions: HashMap<String, FunctionSig>,
     constants: HashMap<String, RuntimeValue>,
     declared_aliases: BTreeSet<String>,
+    warnings: Vec<String>,
 }
 
 fn build_typed_test_context(program: &SurfaceProgram) -> Result<TypedTestContext> {
@@ -123,8 +131,10 @@ fn build_typed_test_context(program: &SurfaceProgram) -> Result<TypedTestContext
         .context("typed signature lowering")?;
     let bodies = typed_body::lower_typed_bodies(inputs.iter().copied(), &signatures)
         .context("typed body lowering")?;
-    let functions = typed_body::materialize_typed_functions(&signatures, &bodies)
-        .context("materializing typed functions")?;
+    let mut warnings = Vec::new();
+    let functions =
+        typed_body::materialize_typed_functions_with_warnings(&signatures, &bodies, &mut warnings)
+            .context("materializing typed functions")?;
     let constants = typed_body::materialize_constants(&signatures, &bodies)
         .context("materializing typed constants")?;
     let declared_aliases = signatures.aliases.keys().cloned().collect();
@@ -133,6 +143,7 @@ fn build_typed_test_context(program: &SurfaceProgram) -> Result<TypedTestContext
         functions,
         constants,
         declared_aliases,
+        warnings,
     })
 }
 
@@ -187,7 +198,7 @@ fn lower_typed_test_case(
             type_aliases: ctx.signatures.aliases.clone(),
             functions: ctx.functions.clone(),
             impls: ctx.signatures.impls.clone(),
-            warnings: Vec::new(),
+            warnings: ctx.warnings.clone(),
             foreign_modules: BTreeMap::new(),
         },
     })
@@ -440,6 +451,26 @@ mod tests {
         );
         assert_eq!(lowered.statements.len(), 2);
         assert!(matches!(lowered.statements[0], Statement::Let { .. }));
+    }
+
+    #[test]
+    fn typed_main_infers_effects_without_a_declaration_ceiling() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vib");
+        write(
+            &entry,
+            "(deffect host\n\
+               (defn read () void (do (intrinsic @env-list)) effects: (env.read)))\n\
+             (defn main () void (do (host.read)))\n",
+        );
+        let program = load(&entry);
+        let lowered = lower_typed_program(&program).unwrap();
+        let inferred =
+            crate::effect_semantics::infer_statements(&lowered.statements, &lowered.functions);
+        assert!(inferred.labels().contains(&("env".into(), "read".into())));
+        assert!(inferred
+            .labels()
+            .contains(&("module".into(), "host".into())));
     }
 
     #[test]

@@ -258,6 +258,11 @@
       "summary": "Labelled arguments must precede variadic arguments"
     },
     {
+      "code": "W-EFFECT-001",
+      "severity": "warning",
+      "summary": "Function declaration over-declares effects its body does not perform"
+    },
+    {
       "code": "E-WASM-001",
       "severity": "error",
       "summary": "$wasm encoding does not match active compiler WASM mode"

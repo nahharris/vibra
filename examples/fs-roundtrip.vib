@@ -33,5 +33,4 @@
     (result.result.err (bind open-err))
     (do (io.stderr.println "failed to open file for reading"))
   )
-  effects: (fs.read fs.write io.stdout io.stderr stream.read stream.write stream.manage)
 )

@@ -307,6 +307,7 @@ fn rule_summary(code: &str) -> &'static str {
     match code {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
         "W-STYLE-002" => "Labelled arguments must precede variadic arguments",
+        "W-EFFECT-001" => "Function declaration over-declares effects",
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-YAML-002" => "YAML comments are forbidden",
         "E-COMMENT-001" => "`=comment` must be a string scalar",

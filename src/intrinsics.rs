@@ -51,9 +51,9 @@ const ROOTS: &[(&str, &[&str])] = &[
 ];
 
 pub fn is_known_root(domain: &str, action: &str) -> bool {
-    ROOTS
-        .iter()
-        .any(|(known_domain, actions)| *known_domain == domain && actions.contains(&action))
+    ROOTS.iter().any(|(known_domain, actions)| {
+        *known_domain == domain && (action.is_empty() || actions.contains(&action))
+    })
 }
 
 /// Native effect roots for intrinsic transitions. This table uses the same
