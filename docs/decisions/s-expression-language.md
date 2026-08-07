@@ -111,6 +111,21 @@ A bare symbol in expression position is a lexical, module, imported, or
 compiler-provided value reference. Function arguments are ordinary lexical
 names; `$args.name` is removed.
 
+### Lexical names and scoping
+
+Lexical shadowing is a hard compiler error, not a suppressible style lint.
+Every `let` or `let-as` binder, function parameter, match `(bind name)`, and
+`for` binder must have a name that is not already visible in an enclosing
+lexical scope. The compiler reports `E-SCOPE-001` with the shadowing binder as
+the primary span and the original binding as related information. Names in
+separate sibling scopes may be reused.
+
+Module names and import aliases are not part of this rule. `_` is a wildcard
+and is exempt, so repeated `_` binders remain legal. Scope validation runs on
+the resolved, post-expansion surface; hygienic macro binders therefore use
+their compiler-resolved identities rather than being compared by raw source
+text.
+
 Every non-special executable list is a call:
 
 ```vibra-expr

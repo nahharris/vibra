@@ -81,6 +81,7 @@ well-written: its status line must say that it is accepted, and implementation
 and tests must be kept aligned with it.
 
 - [Vibra philosophy](decisions/philosophy.md)
+- [S-expression language contract](decisions/s-expression-language.md)
 - [Secure compilation boundary](decisions/secure-compilation.md)
 
 ### Status

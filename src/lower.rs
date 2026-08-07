@@ -5870,7 +5870,7 @@ fn parse_for_statement(
         .context("`$for.do` must be a block sequence")?;
     let baseline = locals.clone();
     let mut body_locals = baseline.clone();
-    body_locals.insert(var.clone(), item_ty);
+    insert_lexical_local(&mut body_locals, &var, item_ty)?;
     let _guard = LoopNestingGuard::enter();
     let mut body = Vec::with_capacity(steps.len());
     for step in steps {
@@ -6072,7 +6072,7 @@ fn lower_statement(
             if ret_ty == TypeRef::Void {
                 bail!("cannot bind void return in $let");
             }
-            locals.insert(var.clone(), ret_ty);
+            insert_lexical_local(locals, &var, ret_ty)?;
             Ok(Statement::Let {
                 var,
                 value: LetValue::Call(call),
@@ -6097,7 +6097,7 @@ fn lower_statement(
             if expr_ty == TypeRef::Void {
                 bail!("cannot bind void expression in $let");
             }
-            locals.insert(var.clone(), expr_ty);
+            insert_lexical_local(locals, &var, expr_ty)?;
             Ok(Statement::Let {
                 var,
                 value: LetValue::Expr(expr),
@@ -8809,6 +8809,23 @@ fn literal_widens_to(
 /// makes that payload irrefutable, not the arm, and a nested `enum.tag` pattern covers
 /// nothing at the outer match's level. Coverage and totality are recorded by the caller
 /// via `record_top_level_coverage` and `pattern_is_irrefutable`.
+fn insert_lexical_local(
+    locals: &mut HashMap<String, TypeRef>,
+    name: &str,
+    ty: TypeRef,
+) -> Result<()> {
+    if name == "_" {
+        return Ok(());
+    }
+    if locals.contains_key(name) {
+        bail!(
+            "E-SCOPE-001: binding `{name}` shadows an enclosing lexical binding; choose a different name"
+        );
+    }
+    locals.insert(name.to_string(), ty);
+    Ok(())
+}
+
 fn validate_pattern(
     pattern: &Pattern,
     target_ty: &TypeRef,
@@ -8818,10 +8835,7 @@ fn validate_pattern(
 ) -> Result<()> {
     match pattern {
         Pattern::Wildcard => Ok(()),
-        Pattern::Bind(name) => {
-            locals.insert(name.clone(), target_ty.clone());
-            Ok(())
-        }
+        Pattern::Bind(name) => insert_lexical_local(locals, name, target_ty.clone()),
         Pattern::Literal(value) => {
             let lit_ty = infer_expr_type(
                 &Expr::Value(value.clone()),
