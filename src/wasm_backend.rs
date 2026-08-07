@@ -798,11 +798,19 @@ fn range_len(start: i64, end: i64, step: i64) -> Result<usize> {
 }
 
 fn compile_program(program: &LoweredProgram) -> CompiledProgram {
-    assert!(crate::compilation_pipeline::hardening_passes_are_last(
-        crate::compilation_pipeline::COMPILATION_PASSES
-    ));
-    let mut compiler = Compiler::new(program);
-    compiler.compile()
+    let mut pipeline = crate::compilation_pipeline::CompilationPipeline::new();
+    let mut compiler = pipeline.run(
+        crate::compilation_pipeline::CompilationPass::Reachability,
+        || Compiler::new(program),
+    );
+    let compiled = pipeline.run(
+        crate::compilation_pipeline::CompilationPass::WasmEmission,
+        || compiler.compile(),
+    );
+    pipeline.run(
+        crate::compilation_pipeline::CompilationPass::Hardening,
+        || compiled,
+    )
 }
 
 struct Compiler<'a> {
@@ -1931,15 +1939,20 @@ mod tests {
 
     #[test]
     fn hardening_passes_are_terminal() {
-        use crate::compilation_pipeline::{
-            hardening_passes_are_last, CompilationPass, COMPILATION_PASSES,
-        };
+        use crate::compilation_pipeline::{CompilationPass, CompilationPipeline};
 
-        assert!(hardening_passes_are_last(COMPILATION_PASSES));
-        assert!(!hardening_passes_are_last(&[
-            CompilationPass::Hardening,
-            CompilationPass::WasmEmission,
-        ]));
+        let mut pipeline = CompilationPipeline::new();
+        pipeline.run(CompilationPass::Reachability, || {});
+        pipeline.run(CompilationPass::WasmEmission, || {});
+        pipeline.run(CompilationPass::Hardening, || {});
+        assert_eq!(
+            pipeline.passes(),
+            &[
+                CompilationPass::Reachability,
+                CompilationPass::WasmEmission,
+                CompilationPass::Hardening,
+            ]
+        );
     }
 
     #[test]

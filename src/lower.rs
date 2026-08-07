@@ -3636,12 +3636,36 @@ pub(crate) fn abi_value_type_matches(
     ty: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
+    abi_value_type_matches_with_policy(kind, ty, aliases, true)
+}
+
+/// Intrinsic wrappers are the typed generic standard-library surface. Their
+/// `Any` slots are checked for reference-like aliases, while an unresolved
+/// type parameter is validated when the wrapper is specialized by its caller.
+pub(crate) fn abi_intrinsic_value_type_matches(
+    kind: crate::host_abi::ValueKind,
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    abi_value_type_matches_with_policy(kind, ty, aliases, false)
+}
+
+fn abi_value_type_matches_with_policy(
+    kind: crate::host_abi::ValueKind,
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+    reject_unresolved_generics: bool,
+) -> bool {
     use crate::host_abi::ValueKind as A;
     // `vibra_v1` values are represented by host-owned arena indices, but an
     // index must never smuggle a shared cell, reference, or function value
     // across the compartment boundary. Check the complete source shape so
     // aliases and aggregate payloads cannot bypass the direct-type cases.
-    if contains_reference_like_boundary_type(ty, aliases) {
+    if contains_reference_like_boundary_type(ty, aliases)
+        || reject_unresolved_generics
+            && matches!(kind, A::Any | A::OptionAny | A::ResultAny)
+            && contains_unresolved_generic_type(ty, aliases)
+    {
         return false;
     }
     let resolved = match ty {
@@ -3699,19 +3723,19 @@ pub(crate) fn abi_value_type_matches(
         A::ProcessHandle => endpoint_access()
             .is_some_and(|access| matches!(access, HandleAccess::Process)),
         A::AnyHandle => endpoint_access().is_some(),
-        A::ResultVoid => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Void, t, aliases))),
-        A::ResultStr => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
-        A::ResultBytes => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Bytes, t, aliases))),
-        A::ResultReadHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::ReadHandle, t, aliases))),
-        A::ResultWriteHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::WriteHandle, t, aliases))),
-        A::ResultProcessHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::ProcessHandle, t, aliases))),
-        A::ResultPaths => instantiated("result").is_some_and(|args| matches!(args.first(), Some(TypeRef::Array(inner)) if abi_value_type_matches(A::Path, inner, aliases))),
-        A::ResultPath => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
-        A::OptionPath => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
-        A::OptionStr => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
+        A::ResultVoid => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Void, t, aliases, reject_unresolved_generics))),
+        A::ResultStr => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Str, t, aliases, reject_unresolved_generics))),
+        A::ResultBytes => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Bytes, t, aliases, reject_unresolved_generics))),
+        A::ResultReadHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::ReadHandle, t, aliases, reject_unresolved_generics))),
+        A::ResultWriteHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::WriteHandle, t, aliases, reject_unresolved_generics))),
+        A::ResultProcessHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::ProcessHandle, t, aliases, reject_unresolved_generics))),
+        A::ResultPaths => instantiated("result").is_some_and(|args| matches!(args.first(), Some(TypeRef::Array(inner)) if abi_value_type_matches_with_policy(A::Path, inner, aliases, reject_unresolved_generics))),
+        A::ResultPath => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Path, t, aliases, reject_unresolved_generics))),
+        A::OptionPath => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Path, t, aliases, reject_unresolved_generics))),
+        A::OptionStr => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Str, t, aliases, reject_unresolved_generics))),
         A::Any => !contains_reference_like_boundary_type(ty, aliases),
         A::Array => matches!(resolved, TypeRef::Array(_)),
-        A::StringMap => matches!(resolved, TypeRef::Map { key, .. } if abi_value_type_matches(A::Str, key, aliases)),
+        A::StringMap => matches!(resolved, TypeRef::Map { key, .. } if abi_value_type_matches_with_policy(A::Str, key, aliases, reject_unresolved_generics)),
         A::Record => matches!(resolved, TypeRef::Record(_)),
         A::OptionAny => instantiated("option").is_some(),
         A::ResultAny => instantiated("result").is_some(),
@@ -3722,29 +3746,97 @@ fn contains_reference_like_boundary_type(
     ty: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
-    let normalized = normalize_type_ref(ty, aliases);
-    match normalized {
-        TypeRef::Mutable(_) | TypeRef::Reference { .. } | TypeRef::FnType { .. } => true,
-        TypeRef::Array(inner) | TypeRef::JoinHandle(inner) | TypeRef::Newtype { inner, .. } => {
-            contains_reference_like_boundary_type(&inner, aliases)
+    contains_boundary_hazard(ty, aliases, BoundaryHazard::ReferenceLike)
+}
+
+fn contains_unresolved_generic_type(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> bool {
+    contains_boundary_hazard(ty, aliases, BoundaryHazard::UnresolvedGeneric)
+}
+
+#[derive(Clone, Copy)]
+enum BoundaryHazard {
+    ReferenceLike,
+    UnresolvedGeneric,
+}
+
+fn contains_boundary_hazard(
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+    hazard: BoundaryHazard,
+) -> bool {
+    fn visit(
+        ty: &TypeRef,
+        aliases: &HashMap<String, TypeAlias>,
+        visiting: &mut HashSet<String>,
+        hazard: BoundaryHazard,
+    ) -> bool {
+        match ty {
+            TypeRef::Mutable(_) | TypeRef::Reference { .. } | TypeRef::FnType { .. } => {
+                matches!(hazard, BoundaryHazard::ReferenceLike)
+            }
+            // A generic has no concrete representation for an opaque `any`
+            // argument slot. Generic aggregate result shapes remain valid so
+            // collection wrappers such as `option<t>` can be checked against
+            // their contextual source type.
+            TypeRef::Generic(_) | TypeRef::SelfType => {
+                matches!(hazard, BoundaryHazard::UnresolvedGeneric)
+            }
+            TypeRef::Named(name) => {
+                let Some(alias) = aliases.get(name) else {
+                    // Built-in nominal ABI shapes (for example `path` and
+                    // `duration`) are intentionally not aliases in every
+                    // lowering context, so an unknown nominal name remains
+                    // subject to the specific ValueKind matcher below.
+                    return false;
+                };
+                if !alias.type_params.is_empty() || !visiting.insert(name.clone()) {
+                    return true;
+                }
+                let result = visit(&alias.body, aliases, visiting, hazard);
+                visiting.remove(name);
+                result
+            }
+            TypeRef::Instantiated { base, type_args } => {
+                if type_args
+                    .iter()
+                    .any(|arg| visit(arg, aliases, visiting, hazard))
+                {
+                    return true;
+                }
+                let Some(alias) = aliases.get(base) else {
+                    return false;
+                };
+                if alias.type_params.len() != type_args.len() || !visiting.insert(base.clone()) {
+                    return true;
+                }
+                let substitutions = alias
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(type_args.iter().cloned())
+                    .collect();
+                let expanded = substitute_type(&alias.body, &substitutions);
+                let result = visit(&expanded, aliases, visiting, hazard);
+                visiting.remove(base);
+                result
+            }
+            TypeRef::Array(inner) | TypeRef::JoinHandle(inner) | TypeRef::Newtype { inner, .. } => {
+                visit(inner, aliases, visiting, hazard)
+            }
+            TypeRef::Record(fields) | TypeRef::Enum(fields) | TypeRef::Interface(fields) => fields
+                .values()
+                .any(|field| visit(field, aliases, visiting, hazard)),
+            TypeRef::Tuple(items) | TypeRef::Union(items) | TypeRef::Intersect(items) => items
+                .iter()
+                .any(|item| visit(item, aliases, visiting, hazard)),
+            TypeRef::Map { key, value } => {
+                visit(key, aliases, visiting, hazard) || visit(value, aliases, visiting, hazard)
+            }
+            _ => false,
         }
-        TypeRef::Record(fields) | TypeRef::Enum(fields) | TypeRef::Interface(fields) => fields
-            .values()
-            .any(|field| contains_reference_like_boundary_type(field, aliases)),
-        TypeRef::Tuple(items)
-        | TypeRef::Union(items)
-        | TypeRef::Intersect(items)
-        | TypeRef::Instantiated {
-            type_args: items, ..
-        } => items
-            .iter()
-            .any(|item| contains_reference_like_boundary_type(item, aliases)),
-        TypeRef::Map { key, value } => {
-            contains_reference_like_boundary_type(&key, aliases)
-                || contains_reference_like_boundary_type(&value, aliases)
-        }
-        _ => false,
     }
+
+    visit(ty, aliases, &mut HashSet::new(), hazard)
 }
 
 /// Validate the nominal specialization of a generic `ResultAny` intrinsic.
@@ -6101,7 +6193,12 @@ fn lower_statement(
                 let entry = crate::intrinsics::lookup(&import.name).with_context(|| {
                     format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name)
                 })?;
-                if !abi_value_type_matches(entry.result, &ctx.return_type, type_aliases) {
+                let result_matches = if builtin_host_call {
+                    abi_intrinsic_value_type_matches(entry.result, &ctx.return_type, type_aliases)
+                } else {
+                    abi_value_type_matches(entry.result, &ctx.return_type, type_aliases)
+                };
+                if !result_matches {
                     bail!(
                         "E-INTRINSIC-005: intrinsic `{}` result requires `{}`, got {:?}",
                         import.name,
@@ -7546,6 +7643,9 @@ fn parse_expr(
                 crate::host_abi::lookup(module, name)
                     .with_context(|| format!("E-WASM-002: unknown host import `{module}.{name}`"))?
             };
+            let builtin_host_call = intrinsic
+                || ((module == "vibra_v1" || module == "vibra_test")
+                    && crate::intrinsics::lookup(name).is_some());
             let values = map_get_str(host, "args")
                 .and_then(Value::as_sequence)
                 .context("E-WASM-003: host call args must be a sequence")?;
@@ -7582,7 +7682,12 @@ fn parse_expr(
             for (index, (arg, kind)) in args.iter().zip(entry.params).enumerate() {
                 let ty = infer_expr_type(arg, constants, locals, type_aliases, enums)
                     .context("E-WASM-003: cannot infer host-call argument type")?;
-                if !abi_value_type_matches(*kind, &ty, type_aliases) {
+                let argument_matches = if builtin_host_call {
+                    abi_intrinsic_value_type_matches(*kind, &ty, type_aliases)
+                } else {
+                    abi_value_type_matches(*kind, &ty, type_aliases)
+                };
+                if !argument_matches {
                     if intrinsic {
                         bail!("E-INTRINSIC-005: intrinsic `{name}` argument {index} requires `{}`, got {ty:?}", kind.as_str());
                     }
@@ -9204,5 +9309,121 @@ mod enum_resolution_tests {
             resolve_call_site_type_argument(TypeRef::Named("t".to_string()), &locals),
             TypeRef::Generic("t".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod abi_boundary_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn alias(name: &str, body: TypeRef) -> TypeAlias {
+        TypeAlias {
+            alias: String::new(),
+            name: name.into(),
+            type_params: Vec::new(),
+            type_param_bounds: Vec::new(),
+            body,
+            doc: None,
+        }
+    }
+
+    #[test]
+    fn abi_any_rejects_reference_like_values_through_named_newtypes() {
+        let aliases = HashMap::from([
+            (
+                "ref-box".into(),
+                alias(
+                    "ref-box",
+                    TypeRef::Newtype {
+                        name: "ref-box".into(),
+                        inner: Box::new(TypeRef::Reference {
+                            inner: Box::new(TypeRef::Int64),
+                            mutable: false,
+                        }),
+                    },
+                ),
+            ),
+            (
+                "mutable-box".into(),
+                alias(
+                    "mutable-box",
+                    TypeRef::Newtype {
+                        name: "mutable-box".into(),
+                        inner: Box::new(TypeRef::Mutable(Box::new(TypeRef::Int64))),
+                    },
+                ),
+            ),
+            (
+                "function-box".into(),
+                alias(
+                    "function-box",
+                    TypeRef::Newtype {
+                        name: "function-box".into(),
+                        inner: Box::new(TypeRef::FnType {
+                            parameters: Vec::new(),
+                            return_type: Box::new(TypeRef::Void),
+                            effects: Default::default(),
+                        }),
+                    },
+                ),
+            ),
+        ]);
+
+        for name in ["ref-box", "mutable-box", "function-box"] {
+            assert!(
+                !abi_value_type_matches(
+                    crate::host_abi::ValueKind::Any,
+                    &TypeRef::Named(name.into()),
+                    &aliases,
+                ),
+                "named newtype `{name}` must not cross an `any` ABI slot"
+            );
+        }
+    }
+
+    #[test]
+    fn abi_any_rejects_unresolved_generics_and_generic_newtype_specializations() {
+        let aliases = HashMap::from([(
+            "box".into(),
+            TypeAlias {
+                alias: String::new(),
+                name: "box".into(),
+                type_params: vec!["t".into()],
+                type_param_bounds: vec![Vec::new()],
+                body: TypeRef::Newtype {
+                    name: "box".into(),
+                    inner: Box::new(TypeRef::Generic("t".into())),
+                },
+                doc: None,
+            },
+        )]);
+        let wrapped_reference = TypeRef::Instantiated {
+            base: "box".into(),
+            type_args: vec![TypeRef::Reference {
+                inner: Box::new(TypeRef::Int64),
+                mutable: false,
+            }],
+        };
+        let wrapped_generic = TypeRef::Instantiated {
+            base: "box".into(),
+            type_args: vec![TypeRef::Generic("t".into())],
+        };
+
+        assert!(!abi_value_type_matches(
+            crate::host_abi::ValueKind::Any,
+            &TypeRef::Generic("t".into()),
+            &aliases,
+        ));
+        assert!(!abi_value_type_matches(
+            crate::host_abi::ValueKind::Any,
+            &wrapped_reference,
+            &aliases,
+        ));
+        assert!(!abi_value_type_matches(
+            crate::host_abi::ValueKind::Any,
+            &wrapped_generic,
+            &aliases,
+        ));
     }
 }

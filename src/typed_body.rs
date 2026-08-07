@@ -1047,7 +1047,7 @@ fn apply_host_context(
         if *intrinsic {
             let entry = crate::intrinsics::lookup(&import.name)
                 .with_context(|| format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name))?;
-            if !crate::lower::abi_value_type_matches(entry.result, expected, aliases) {
+            if !crate::lower::abi_intrinsic_value_type_matches(entry.result, expected, aliases) {
                 bail!(
                     "E-INTRINSIC-005: intrinsic `{}` result requires `{}`, got {:?}",
                     import.name,
@@ -1168,9 +1168,17 @@ fn validate_expr(
                 .iter()
                 .map(|arg| validate_expr(arg, locals, constants, signatures, context, origins))
                 .collect::<Result<Vec<_>>>()?;
+            let builtin_host_call = *intrinsic
+                || ((import.module == "vibra_v1" || import.module == "vibra_test")
+                    && crate::intrinsics::lookup(&import.name).is_some());
             for (index, (arg, kind)) in args.iter().zip(entry.params).enumerate() {
                 let ty = infer(arg, locals, constants, signatures, context)?;
-                if !crate::lower::abi_value_type_matches(*kind, &ty, &signatures.aliases) {
+                let argument_matches = if builtin_host_call {
+                    crate::lower::abi_intrinsic_value_type_matches(*kind, &ty, &signatures.aliases)
+                } else {
+                    crate::lower::abi_value_type_matches(*kind, &ty, &signatures.aliases)
+                };
+                if !argument_matches {
                     if *intrinsic {
                         bail!("E-INTRINSIC-005: intrinsic `{}` argument {index} requires `{}`, got {ty:?}", import.name, kind.as_str());
                     }
