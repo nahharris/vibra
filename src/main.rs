@@ -296,6 +296,11 @@ enum Command {
         injected_clock_monotonic_millis: Option<u64>,
         #[arg(long = "max-open-files", default_value_t = 1024)]
         max_open_files: usize,
+        /// Serialized capability grants forwarded from the parent test runner.
+        #[arg(long = "capability-grants-json", hide = true)]
+        capability_grants_json: Option<String>,
+        #[arg(long = "deny-capabilities", hide = true)]
+        deny_capabilities: bool,
     },
 }
 
@@ -574,7 +579,7 @@ fn run_cli() -> Result<()> {
             max_open_files,
             flag,
         } => {
-            let config = run_config(preopen, max_open_files);
+            let mut config = run_config(preopen, max_open_files);
             if path.extension().and_then(|value| value.to_str()) == Some("vapp") {
                 if !flag.is_empty() {
                     bail!(
@@ -583,6 +588,7 @@ fn run_cli() -> Result<()> {
                 }
                 package::run(&path, &config)?;
             } else {
+                config.capability_grants = project::capability_grants_for_file(&path)?;
                 let program = load::load_legacy_yaml_program(&path, &compilation_flags(flag)?)?;
                 let lowered = lower::lower_program(&program)?;
                 for warning in &lowered.warnings {
@@ -685,6 +691,8 @@ fn run_cli() -> Result<()> {
             injected_clock_unix_millis,
             injected_clock_monotonic_millis,
             max_open_files,
+            capability_grants_json,
+            deny_capabilities,
         } => {
             let mut config = run_config(preopen, max_open_files);
             if let Some(state) = injected_random_state {
@@ -703,6 +711,16 @@ fn run_cli() -> Result<()> {
                 }
                 (None, None) => {}
                 _ => anyhow::bail!("injected test clock requires both wall and monotonic values"),
+            }
+            if let Some(serialized) = capability_grants_json {
+                config.capability_grants = Some(
+                    serde_json::from_str(&serialized)
+                        .context("E-CAPABILITY-002: invalid forwarded capability grants")?,
+                );
+            } else if !deny_capabilities {
+                config.capability_grants = project::capability_grants_for_file(&path)?;
+            } else {
+                config.capability_grants = Some(vec![]);
             }
             let outcome = test_runner::run_single_test(&path, &name, &config);
             let json = serde_json::to_string(&outcome)?;

@@ -56,6 +56,37 @@ pub fn is_known_root(domain: &str, action: &str) -> bool {
     })
 }
 
+/// Whether a manifest or effect declaration uses a canonical leaf root.
+///
+/// Built-in roots are kept in `ROOTS`, while `deffect` declarations may add
+/// dependency- or application-owned roots such as `main.ffi`. Those roots
+/// still use the same lowercase kebab-case spelling and participate in the
+/// same runtime grant domain checks.
+pub fn is_valid_effect_root(domain: &str, action: &str) -> bool {
+    if is_known_root(domain, action) {
+        return true;
+    }
+    !domain.is_empty()
+        && !action.is_empty()
+        && domain
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+        && action
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+}
+
+/// The accepted action names for one canonical effect root. This is used when
+/// a declaration-side bare root such as `fs` is lowered to concrete runtime
+/// grant requirements; manifest grants themselves remain leaf names such as
+/// `fs.read`.
+pub fn actions_for_root(domain: &str) -> &'static [&'static str] {
+    ROOTS
+        .iter()
+        .find(|(known_domain, _)| *known_domain == domain)
+        .map_or(&[], |(_, actions)| *actions)
+}
+
 /// Native effect roots for intrinsic transitions. This table uses the same
 /// nominal root vocabulary exposed by the stdlib and effect report.
 pub fn effects_for(name: &str) -> &'static [Effect] {

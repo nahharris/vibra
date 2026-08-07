@@ -117,6 +117,7 @@ than current contracts:
 - [Secure compilation constraints plan](plans/2026-08-07-issue-252-secure-compilation.md)
 - [Type-system and ADT foundation plan](plans/2026-05-05-type-system-adt-foundation.md)
 - [Vib source extension and call argument order](plans/2026-08-02-vib-extension-and-call-order.md)
+- [Capability grants implementation plan](plans/2026-08-07-capability-grants-implementation.md)
 
 Research-grounded roadmap plans, in execution order. Rationale and sources are
 in [`research/01-design-directions.md`](research/01-design-directions.md);

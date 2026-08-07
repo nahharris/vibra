@@ -2089,16 +2089,7 @@ fn nominal_effect_name(name: &str) -> Option<(&str, &str)> {
         return crate::intrinsics::is_known_root(name, "").then_some((name, ""));
     }
     let (domain, action) = name.split_once('.')?;
-    if crate::intrinsics::is_known_root(domain, action)
-        || !domain.is_empty()
-            && !action.is_empty()
-            && domain
-                .chars()
-                .all(|ch| ch.is_ascii_lowercase() || ch == '-')
-            && action
-                .chars()
-                .all(|ch| ch.is_ascii_lowercase() || ch == '-')
-    {
+    if crate::intrinsics::is_valid_effect_root(domain, action) {
         Some((domain, action))
     } else {
         None

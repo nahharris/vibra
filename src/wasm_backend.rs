@@ -39,7 +39,9 @@ const HOST_STATUS: u32 = 11;
 const HOST_NO_MATCH: u32 = 12;
 const HOST_ITER_LEN: u32 = 13;
 const HOST_ITER_GET: u32 = 14;
-const HOST_FUNCTIONS: u32 = 15;
+const HOST_SCOPE_ENTER: u32 = 15;
+const HOST_SCOPE_EXIT: u32 = 16;
+const HOST_FUNCTIONS: u32 = 17;
 
 const ABI_IMPORTS: &[&str] = &[
     "seed",
@@ -57,6 +59,8 @@ const ABI_IMPORTS: &[&str] = &[
     "no_match",
     "iter_len",
     "iter_get",
+    "scope_enter",
+    "scope_exit",
 ];
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct WasmPlan {
@@ -69,6 +73,8 @@ struct WasmPlan {
     host_functions: BTreeMap<String, crate::lower::FunctionSig>,
     impl_keys: Vec<crate::lower::ImplKey>,
     foreign_modules: BTreeMap<String, Vec<u8>>,
+    #[serde(default)]
+    scope_requirements: Vec<Vec<String>>,
 }
 
 struct CompiledProgram {
@@ -163,6 +169,9 @@ fn run_wasm_inner(
     let iter_get = HostFunction::new_typed(&mut store, |handle: i32, index: i32| {
         host_value(|host| host.iter_get(handle, index))
     });
+    let scope_enter =
+        HostFunction::new_typed(&mut store, |id: i32| host_unit(|host| host.enter_scope(id)));
+    let scope_exit = HostFunction::new_typed(&mut store, || host_unit(|host| host.leave_scope()));
     let imports = imports! { ABI_MODULE => {
         "seed" => seed, "value_const" => value_const, "value_read" => value_read,
         "frame_begin" => frame_begin, "frame_push" => frame_push, "value_construct" => construct,
@@ -170,6 +179,7 @@ fn run_wasm_inner(
         "pattern_match" => pattern_match, "pattern_binding" => pattern_binding,
         "status" => status, "no_match" => no_match,
         "iter_len" => iter_len, "iter_get" => iter_get,
+        "scope_enter" => scope_enter, "scope_exit" => scope_exit,
     }};
     let instance =
         Instance::new(&mut store, &module, &imports).context("instantiate Vibra Wasm")?;
@@ -249,7 +259,6 @@ impl HostExecution {
             .collect();
         let program = LoweredProgram {
             statements: vec![],
-            // Effects are erased before codegen; the backend never consults them.
             main_effects: Default::default(),
             main_arg_bindings: plan.main_arg_bindings.clone(),
             constants: HashMap::new(),
@@ -260,12 +269,13 @@ impl HostExecution {
             foreign_modules: plan.foreign_modules.clone(),
         };
         let seed_env = HashMap::new();
-        let files = match io {
+        let mut files = match io {
             Some((stdout, stderr)) => {
                 crate::execute::FileTable::with_io(config.max_open_files, stdout, stderr)
             }
             None => crate::execute::FileTable::new(config.max_open_files),
         };
+        files.configure_authority(config.capability_grants.as_deref());
         Ok(Self {
             files,
             program,
@@ -277,6 +287,23 @@ impl HostExecution {
             bindings: Vec::new(),
             error: None,
         })
+    }
+
+    fn enter_scope(&mut self, id: i32) -> Result<()> {
+        let id = usize::try_from(id).context("negative capability scope id")?;
+        let domains = self
+            .plan
+            .scope_requirements
+            .get(id)
+            .context("invalid capability scope id")?
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        self.files.enter_effect_scope(&domains)
+    }
+
+    fn leave_scope(&mut self) -> Result<()> {
+        self.files.leave_effect_scope()
     }
 
     fn alloc(&mut self, value: RuntimeValue) -> i32 {
@@ -1042,6 +1069,8 @@ impl<'a> Compiler<'a> {
             ("no_match", 1),
             ("iter_len", 0),
             ("iter_get", 4),
+            ("scope_enter", 2),
+            ("scope_exit", 1),
         ] {
             imports.import(ABI_MODULE, name, EntityType::Function(ty));
         }
@@ -1097,8 +1126,12 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|parameter| format!("args.{}", parameter.name))
             .collect();
-        let mut context = FunctionCompiler::new(self, args, vec![], statements, false);
+        let scope_domains = crate::execute::function_effect_domains(sig, self.program);
+        let scope_id = self.scope_id(scope_domains);
+        let mut context = FunctionCompiler::new(self, args, vec![], statements, false, scope_id);
+        context.emit_scope_enter();
         context.emit_statements(statements);
+        context.emit_scope_exit();
         context.emit_const_value(RuntimeValue::Void);
         context.function.instruction(&Instruction::End);
         context.function
@@ -1112,7 +1145,10 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|(name, _)| name.clone())
             .collect();
-        let mut context = FunctionCompiler::new(self, vec![], seeds.clone(), &statements, true);
+        let scope_domains = crate::execute::main_effect_domains(self.program);
+        let scope_id = self.scope_id(scope_domains);
+        let mut context =
+            FunctionCompiler::new(self, vec![], seeds.clone(), &statements, true, scope_id);
         for name in seeds {
             let seed = context.compiler.seed_id(name.clone());
             let local = context.locals[&name];
@@ -1122,7 +1158,9 @@ impl<'a> Compiler<'a> {
             context.function.instruction(&Instruction::Call(HOST_SEED));
             context.function.instruction(&Instruction::LocalSet(local));
         }
+        context.emit_scope_enter();
         context.emit_statements(&statements);
+        context.emit_scope_exit();
         context
             .function
             .instruction(&Instruction::Call(HOST_STATUS));
@@ -1150,6 +1188,23 @@ impl<'a> Compiler<'a> {
         self.plan.patterns.push(pattern);
         (self.plan.patterns.len() - 1) as u32
     }
+
+    fn scope_id(&mut self, domains: BTreeSet<String>) -> Option<u32> {
+        if domains.is_empty() {
+            return None;
+        }
+        let domains = domains.into_iter().collect::<Vec<_>>();
+        if let Some(index) = self
+            .plan
+            .scope_requirements
+            .iter()
+            .position(|existing| existing == &domains)
+        {
+            return Some(index as u32);
+        }
+        self.plan.scope_requirements.push(domains);
+        Some((self.plan.scope_requirements.len() - 1) as u32)
+    }
 }
 
 struct FunctionCompiler<'a, 'b> {
@@ -1159,6 +1214,7 @@ struct FunctionCompiler<'a, 'b> {
     match_temp: u32,
     next_shadow: u32,
     is_main: bool,
+    scope_id: Option<u32>,
     for_temps: Vec<(u32, u32)>,
     for_depth: usize,
     control_depth: u32,
@@ -1174,6 +1230,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         declared: Vec<String>,
         statements: &[Statement],
         is_main: bool,
+        scope_id: Option<u32>,
     ) -> Self {
         let mut names = Vec::new();
         collect_locals(statements, &mut names);
@@ -1222,6 +1279,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             match_temp,
             next_shadow,
             is_main,
+            scope_id,
             for_temps,
             for_depth: 0,
             control_depth: 0,
@@ -1236,6 +1294,30 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             self.emit_statement(statement);
         }
     }
+
+    fn emit_scope_enter(&mut self) {
+        self.emit_scope_enter_id(self.scope_id);
+    }
+
+    fn emit_scope_enter_id(&mut self, scope_id: Option<u32>) {
+        if let Some(id) = scope_id {
+            self.function.instruction(&Instruction::I32Const(id as i32));
+            self.function
+                .instruction(&Instruction::Call(HOST_SCOPE_ENTER));
+        }
+    }
+
+    fn emit_scope_exit(&mut self) {
+        self.emit_scope_exit_id(self.scope_id);
+    }
+
+    fn emit_scope_exit_id(&mut self, scope_id: Option<u32>) {
+        if scope_id.is_some() {
+            self.function
+                .instruction(&Instruction::Call(HOST_SCOPE_EXIT));
+        }
+    }
+
     fn emit_statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Call(call) => {
@@ -1258,6 +1340,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             }
             Statement::Return(expr) => {
                 self.emit_expr(expr);
+                self.emit_scope_exit();
                 if self.is_main {
                     self.function.instruction(&Instruction::Drop);
                     self.function.instruction(&Instruction::Call(HOST_STATUS));
@@ -1355,12 +1438,24 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.control_depth -= 2;
                 self.for_depth -= 1;
             }
-            Statement::Task { body, .. } => self.emit_statements(body),
+            Statement::Task { body, .. } => {
+                let domains =
+                    crate::execute::statements_effect_domains(body, self.compiler.program);
+                let scope_id = self.compiler.scope_id(domains);
+                self.emit_scope_enter_id(scope_id);
+                self.emit_statements(body);
+                self.emit_scope_exit_id(scope_id);
+            }
             Statement::Spawn { handle, value, .. } => {
                 // The deterministic Wasm executor runs the child computation
                 // to its first (currently terminal) result, then retains that
                 // value in the opaque handle local until `$join`.
+                let domains =
+                    crate::execute::expression_effect_domains(value, self.compiler.program);
+                let scope_id = self.compiler.scope_id(domains);
+                self.emit_scope_enter_id(scope_id);
                 self.emit_expr(value);
+                self.emit_scope_exit_id(scope_id);
                 self.function
                     .instruction(&Instruction::LocalSet(self.locals[handle]));
             }
@@ -1879,6 +1974,32 @@ mod tests {
     #[test]
     fn emitted_program_executes_through_vibra_v1() {
         run_lowered(&empty_program(), &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn wasm_host_operation_requires_manifest_grant_before_execution() {
+        let mut program = empty_program();
+        program.statements.push(Statement::Eval(Expr::HostCall {
+            import: crate::lower::ImportTarget {
+                module: ABI_MODULE.into(),
+                name: "clock_now_unix_millis".into(),
+            },
+            args: vec![],
+            return_type: TypeRef::UInt64,
+            intrinsic: true,
+        }));
+
+        let mut denied = RunConfig::default();
+        denied.capability_grants = Some(vec![]);
+        let error = run_lowered(&program, &denied).unwrap_err();
+        assert!(error.to_string().contains("E-CAPABILITY-001"), "{error:#}");
+
+        let mut allowed = RunConfig::default();
+        allowed.capability_grants = Some(vec![crate::async_runtime::CapabilityGrant {
+            domain: "time.now".into(),
+            resource_prefix: String::new(),
+        }]);
+        run_lowered(&program, &allowed).unwrap();
     }
     #[test]
     fn emitted_program_uses_fine_grained_versioned_host_imports() {

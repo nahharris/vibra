@@ -1,5 +1,6 @@
 //! Project manifest, scaffold, dependency sync, and import validation.
 
+use crate::async_runtime::CapabilityGrant;
 use anyhow::{bail, Context, Result};
 use git2::{build::CheckoutBuilder, Oid, Repository};
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,15 @@ pub struct ProjectManifest {
     pub dependencies: HashMap<String, Dependency>,
     #[serde(default, rename = "plugin-interfaces")]
     pub plugin_interfaces: BTreeMap<String, PluginInterface>,
+    /// Program authority declared by the project. `None` distinguishes a
+    /// legacy/direct module invocation from an explicit empty authority set.
+    #[serde(default)]
+    pub authority: Option<ProjectAuthority>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ProjectAuthority {
+    pub grants: Vec<CapabilityGrant>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,6 +245,7 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
     let mut targets = Targets::default();
     let mut dependencies = HashMap::new();
     let mut plugin_interfaces = BTreeMap::new();
+    let mut authority = None;
     for child in forms(&root[1..]) {
         let form = list(child, "project child")?;
         match symbol(form.first(), "project child")? {
@@ -353,6 +364,12 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
                 }
                 plugin_interfaces.insert(name, PluginInterface { functions });
             }
+            "authority" => {
+                if authority.is_some() {
+                    bail!("E-PROJECT-001: duplicate `(authority ...)` form");
+                }
+                authority = Some(parse_authority(&form[1..])?);
+            }
             other => bail!("E-PROJECT-001: unknown project form `{other}`"),
         }
     }
@@ -363,7 +380,49 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
         targets,
         dependencies,
         plugin_interfaces,
+        authority,
     })
+}
+
+fn parse_authority(nodes: &[crate::syntax::Node]) -> Result<ProjectAuthority> {
+    let mut grants = Vec::new();
+    for node in forms(nodes) {
+        let form = list(node, "authority grant")?;
+        if form.len() < 2 || symbol(form.first(), "authority grant")? != "grant" {
+            bail!(
+                "E-PROJECT-001: authority children must be `(grant <effect-root> [<resource-prefix>])`"
+            );
+        }
+        if form.len() > 3 {
+            bail!("E-PROJECT-001: authority grants accept one resource prefix");
+        }
+        let domain = scalar_text(&form[1], "grant effect root")?;
+        let (domain_name, action) = domain.split_once('.').ok_or_else(|| {
+            anyhow::anyhow!(
+                "E-PROJECT-001: grant effect root `{domain}` must use canonical `<domain>.<action>` spelling"
+            )
+        })?;
+        if !crate::intrinsics::is_valid_effect_root(domain_name, action) {
+            bail!("E-PROJECT-001: unknown grant effect root `{domain}`");
+        }
+        let resource_prefix = form
+            .get(2)
+            .map(|node| string(node, "grant resource prefix").map(str::to_owned))
+            .transpose()?
+            .unwrap_or_default();
+        let grant = CapabilityGrant {
+            domain,
+            resource_prefix,
+        };
+        if grants.contains(&grant) {
+            bail!(
+                "E-PROJECT-001: duplicate authority grant `{}`",
+                grant.domain
+            );
+        }
+        grants.push(grant);
+    }
+    Ok(ProjectAuthority { grants })
 }
 
 fn forms(nodes: &[crate::syntax::Node]) -> impl Iterator<Item = &crate::syntax::Node> {
@@ -460,6 +519,20 @@ pub fn find_project_for_file(path: &Path) -> Result<Option<LoadedProject>> {
             return Ok(None);
         }
     }
+}
+
+/// Resolve the program authority that applies to an entry file. A project
+/// manifest without an authority form intentionally returns `Some(vec![])` so
+/// execution fails closed; a file outside any project returns `None` for
+/// direct-module compatibility.
+pub fn capability_grants_for_file(path: &Path) -> Result<Option<Vec<CapabilityGrant>>> {
+    Ok(find_project_for_file(path)?.map(|project| {
+        project
+            .manifest
+            .authority
+            .map(|authority| authority.grants)
+            .unwrap_or_default()
+    }))
 }
 
 /// Resolve and read every statically declared wasm library for the project
@@ -1482,7 +1555,9 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
 }
 
 fn manifest_text(name: &str, targets: &[(&str, &str, &str, &str)]) -> String {
-    let mut text = format!("(project\n  (package \"{name}\" \"0.1.0\")\n");
+    let mut text = format!(
+        "(project\n  (package \"{name}\" \"0.1.0\")\n  (authority\n    (grant io.stdout)\n    (grant stream.write))\n"
+    );
     for (kind, target_name, root, entry) in targets {
         text.push_str(&format!(
             "  (target {target_name} kind: @{kind} root: \"{root}\" entry: \"{entry}\")\n"
@@ -1638,6 +1713,75 @@ mod tests {
         ] {
             assert!(parse_manifest(invalid).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn manifest_authority_is_typed_and_optional() {
+        let manifest = parse_manifest(
+            r#"(project
+  (package "sample" "0.1.0")
+  (authority
+    (grant fs.read "/safe")
+    (grant net.connect "example.com:443")))"#,
+        )
+        .unwrap();
+        let authority = manifest
+            .authority
+            .as_ref()
+            .expect("authority declaration should be retained");
+        assert_eq!(
+            authority.grants,
+            [
+                crate::async_runtime::CapabilityGrant {
+                    domain: "fs.read".into(),
+                    resource_prefix: "/safe".into(),
+                },
+                crate::async_runtime::CapabilityGrant {
+                    domain: "net.connect".into(),
+                    resource_prefix: "example.com:443".into(),
+                },
+            ]
+        );
+
+        let without_authority = parse_manifest("(project (package \"sample\" \"0.1.0\"))").unwrap();
+        assert!(without_authority.authority.is_none());
+    }
+
+    #[test]
+    fn capability_grants_follow_the_containing_project_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let source_dir = temp.path().join("src");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(
+            temp.path().join(MANIFEST_FILE),
+            r#"(project
+  (package "sample" "0.1.0")
+  (authority (grant time.now)))
+"#,
+        )
+        .unwrap();
+        let entry = source_dir.join("main.vib");
+        fs::write(&entry, "(defn main () void (do))\n").unwrap();
+
+        assert_eq!(
+            capability_grants_for_file(&entry).unwrap(),
+            Some(vec![CapabilityGrant {
+                domain: "time.now".into(),
+                resource_prefix: String::new(),
+            }])
+        );
+
+        fs::write(
+            temp.path().join(MANIFEST_FILE),
+            "(project (package \"sample\" \"0.1.0\"))\n",
+        )
+        .unwrap();
+        assert_eq!(capability_grants_for_file(&entry).unwrap(), Some(vec![]));
+
+        let direct = tempfile::tempdir().unwrap();
+        let direct_entry = direct.path().join("main.vib");
+        fs::write(&direct_entry, "(defn main () void (do))\n").unwrap();
+        assert_eq!(capability_grants_for_file(&direct_entry).unwrap(), None);
     }
 
     #[test]

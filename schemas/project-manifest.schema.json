@@ -2,7 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vibra.dev/schemas/project-manifest.schema.json",
   "title": "Vibra project manifest source",
-  "description": "The textual project.vib contract. The compiler applies the dedicated `(project ...)` S-expression grammar; this schema provides a coarse transport-level check only.",
+  "description": "The textual project.vib contract. The compiler applies the dedicated `(project ...)` S-expression grammar; this schema provides a coarse transport-level check only. The optional `(authority (grant <domain>.<action> [resource-prefix]) ...)` form declares runtime capability grants; omission is fail-closed for project execution.",
   "type": "string",
-  "pattern": "^\\s*\\(project(?:\\s|\\()"
+  "pattern": "^\\s*\\(project(?:\\s|\\()",
+  "examples": [
+    "(project\\n  (package \\"hello\\" \\"0.1.0\\")\\n  (authority\\n    (grant fs.read \\"/safe\\")\\n    (grant net.connect \\"example.com:443\\")))"
+  ]
 }

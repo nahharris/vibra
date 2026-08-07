@@ -53,11 +53,14 @@ Vibra symbols are rejected before instantiation.
 
 ## Host authority
 
-Every host operation (filesystem, network, process, clock, random,
-environment, stdin) is unconditionally available to guest code -- there is no
-capability, policy, or `--allow-*` authorization layer. Resource handles
-remain opaque and host-owned; filesystem handles and allocation limits remain
-host-owned regardless.
+Project Wasm execution seeds root authority from the optional
+`project.vib` `(authority ...)` form. Each grant uses a canonical
+`<domain>.<action>` effect root and may constrain a resource prefix.
+Omitting authority grants no host effect for project execution. Lowered
+function and task effect rows enter attenuated scopes, while every concrete
+host operation re-checks its grant and resource prefix at the host boundary.
+The ABI scope imports are an implementation detail of this lowering; direct
+embedding can provide `RunConfig.capability_grants` explicitly.
 
 ## Resource lifecycle and limits
 

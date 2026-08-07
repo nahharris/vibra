@@ -298,6 +298,52 @@ pub fn infer_statements(
     infer_facts_with_result(facts, &result)
 }
 
+/// Lower a function's declared ceiling, together with its inferred performed
+/// row, into the canonical leaf names consumed by runtime capability grants.
+/// Private functions contribute their inferred row; declared boundaries also
+/// retain deliberately over-broad declarations as requirements.
+pub fn required_effect_domains(
+    declared: &EffectRow,
+    inferred: &InferredEffects,
+) -> BTreeSet<String> {
+    let mut domains = inferred
+        .labels()
+        .into_iter()
+        .map(|(domain, action)| format!("{domain}.{action}"))
+        .collect::<BTreeSet<_>>();
+    for (domain, action) in &declared.labels {
+        if action.is_empty() {
+            let found = inferred
+                .labels()
+                .into_iter()
+                .filter(|(candidate, _)| candidate == domain)
+                .map(|(candidate, action)| format!("{candidate}.{action}"))
+                .collect::<Vec<_>>();
+            if found.is_empty() {
+                domains.extend(
+                    crate::intrinsics::actions_for_root(domain)
+                        .iter()
+                        .map(|action| format!("{domain}.{action}")),
+                );
+            } else {
+                domains.extend(found);
+            }
+        } else {
+            domains.insert(format!("{domain}.{action}"));
+        }
+    }
+    domains
+}
+
+/// Runtime requirement for a registered function, using the same fixed-point
+/// inference that validates #249 declaration boundaries.
+pub fn required_function_domains(
+    sig: &FunctionSig,
+    sigs: &HashMap<String, FunctionSig>,
+) -> BTreeSet<String> {
+    required_effect_domains(&sig.effects, &infer_function(sig, sigs))
+}
+
 /// Preserve the expression-level inference API for tooling callers that do
 /// not own a complete function body. Registered callees still contribute their
 /// fixed-point rows.
@@ -401,8 +447,8 @@ fn collect_statement_facts(statement: &Statement, facts: &mut FunctionFacts) {
             collect_expr_facts(source, facts);
             collect_statements_facts_into(body, facts);
         }
-        // A task's effects belong to its parent: there is no runtime isolation,
-        // so spawning work that touches the network still means this function does.
+        // A task's effects belong to its parent authority, while the runtime
+        // may attenuate the child scope at the spawn boundary.
         Statement::Task { body, .. } => collect_statements_facts_into(body, facts),
         Statement::Spawn { value, .. } => collect_expr_facts(value, facts),
         Statement::Join { .. } | Statement::Break | Statement::Continue => {}

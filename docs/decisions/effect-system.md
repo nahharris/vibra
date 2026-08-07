@@ -44,10 +44,14 @@ other top-level name, and operation names are unique within their root.
 Roots are resolved by the canonical defining module and root name, never by an
 import alias.
 
-Effects are static and erased. They describe observable host actions and the
-ambient authority a function can reach; they do not sandbox an embedder.
-Implementations must remain below the interface method's ceiling, even when
-their concrete performed rows differ from another implementation.
+Effects remain static for checking and decoding, but they are no longer erased:
+the lowered declared ceiling (or a private function's inferred row) becomes a
+runtime capability-scope requirement. The project manifest supplies the root
+authority, and every concrete host operation re-checks its canonical
+domain.action grant plus resource prefix. Scope entry is a fast path;
+operation-time checking is the security guarantee. Implementations must remain
+below the interface method's ceiling, even when their concrete performed rows
+differ from another implementation.
 
 ## Native boundary
 
@@ -128,10 +132,34 @@ surface diagnostics additionally cover malformed/duplicate `deffect`
 declarations, intrinsic placement/registry/arity/type failures, and attempts
 to forge or cast host-backed endpoint types.
 
+## Capability attenuation
+
+A project may declare its root authority in project.vib:
+
+```vibra-project
+(project
+  (package "authority-example" "0.1.0")
+  (authority
+    (grant fs.read "/safe")
+    (grant net.connect "example.com:443")))
+```
+
+The manifest is the authority source for project execution. Omitting
+authority is fail-closed and grants no host effect. A child function or task
+may receive only the parent's matching grants, with resource prefixes
+preserved; amplification is rejected. Direct embedding of a module may leave
+RunConfig.capability_grants unset for compatibility, while a configured
+empty grant list is explicitly denied.
+
+Operation checks scan the active scope's grant set for each registered
+effect, O(G x E) per host operation for G grants and E effects. This contract
+records the cost; a future benchmark should measure boundary frequency and
+the effect of grant-set indexing.
+
 ## Non-goals
 
-Effects are not handlers, parameterized rows, effect-polymorphic function
-types, or runtime permissions. A generic combinator therefore keeps a fixed
-declared ceiling; effect sets as type-level values belong with #151. Host
-handles remain copyable for this migration; affine ownership and borrowing are
-a follow-up design.
+Effects are not handlers, parameterized rows, or effect-polymorphic function
+types. A generic combinator therefore keeps a fixed declared ceiling; effect
+sets as type-level values belong with #151. Host handles remain copyable for
+this migration; affine ownership and borrowing are a follow-up design. #253's
+runtime grants enforce host authority but do not add #251's resource budgets.
