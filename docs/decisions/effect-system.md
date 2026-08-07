@@ -164,6 +164,6 @@ sets as type-level values belong with #151. Host handles remain copyable for
 this migration: copying a handle copies its authority-bearing ID without
 duplicating the underlying resource. IDs are monotonic within an instance and
 are never recycled. Use-after-close and double-close therefore produce
-deterministic typed `fs-error.resource-closed` errors and can never alias a
+deterministic typed `stream.error.resource-closed` errors and can never alias a
 later resource. Affine ownership and borrowing remain a follow-up design. #253's
 runtime grants enforce host authority but do not add #251's resource budgets.
