@@ -8,7 +8,9 @@ use crate::ast::{
     MethodBinding, Module, Origin, Pattern as AstPattern, PatternKind, SourceLocation, TopLevel,
     Visibility, WasmArgument,
 };
-use crate::body_semantics::{validate_function_body, validate_task_handles};
+use crate::body_semantics::{
+    validate_function_body, validate_task_handles, validate_unhandled_values,
+};
 use crate::lower::{
     conversion_fallback_fits, infer_expr_type, nominal_type_key_for_module_scope,
     primitive_integer, primitive_numeric, resolve_iface_key_for_scope, typed_primitive_op, Call,
@@ -421,6 +423,16 @@ pub fn materialize_typed_functions_with_warnings(
             ))
         })
         .collect::<Result<_>>()?;
+    let mut body_diagnostics = Vec::new();
+    validate_unhandled_values(
+        &[],
+        &materialized,
+        &signatures.aliases,
+        &HashMap::new(),
+        None,
+        warnings,
+        &mut body_diagnostics,
+    );
     crate::effect_semantics::validate_declared_effects(&materialized, warnings)?;
     Ok(materialized)
 }
@@ -3795,6 +3807,7 @@ mod tests {
             functions: HashMap::new(),
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         assert!(crate::execute::pattern_matches(
@@ -3906,6 +3919,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -3990,6 +4004,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -4045,6 +4060,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -4411,6 +4427,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -4689,6 +4706,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -5073,6 +5091,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -5184,6 +5203,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -5348,6 +5368,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
