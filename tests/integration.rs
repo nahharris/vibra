@@ -5959,6 +5959,51 @@ fn vibra_lint_json_and_sarif_outputs_are_explicit() {
 }
 
 #[test]
+fn vibra_lint_sarif_preserves_scope_related_locations_and_rule_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("scope.vib");
+    std::fs::write(
+        &source,
+        "(defn main () void (do (let outer true) (if true (do (let outer false)) (do))))\n",
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "compile",
+            "--format",
+            "sarif",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "shadowing must fail compile lint");
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let result = &report["runs"][0]["results"][0];
+    assert_eq!(result["ruleId"], "E-SCOPE-001");
+    assert_eq!(result["relatedLocations"][0]["id"], 0);
+    assert_eq!(
+        result["relatedLocations"][0]["message"]["text"],
+        "original binding is here"
+    );
+    assert!(result["relatedLocations"][0]["physicalLocation"].is_object());
+
+    let rule = &report["runs"][0]["tool"]["driver"]["rules"][0];
+    assert_eq!(rule["id"], "E-SCOPE-001");
+    assert_eq!(
+        rule["shortDescription"]["text"],
+        "Lexical binding shadows an enclosing binding"
+    );
+    assert_eq!(
+        rule["fullDescription"]["text"],
+        "Lexical binding shadows an enclosing binding"
+    );
+}
+
+#[test]
 fn vibra_lint_reports_parse_and_compile_errors_as_structured_json() {
     let dir = tempfile::tempdir().unwrap();
     let bad_syntax = dir.path().join("bad-syntax.vib");
