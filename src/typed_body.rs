@@ -638,7 +638,8 @@ fn validate_statements(
                 &statement_origin,
             )?),
             Statement::Let { var, value } => {
-                if locals.contains_key(var) {
+                let is_wildcard = var == "_";
+                if !is_wildcard && locals.contains_key(var) {
                     bail!("typed local `{var}` is already bound in `{context}`");
                 }
                 let (value, ty) = match value {
@@ -678,7 +679,9 @@ fn validate_statements(
                         );
                     }
                 }
-                locals.insert(var.clone(), ty);
+                if !is_wildcard {
+                    locals.insert(var.clone(), ty);
+                }
                 Statement::Let {
                     var: var.clone(),
                     value,
@@ -792,11 +795,13 @@ fn validate_statements(
                     other => bail!("typed for source must be array or range, got {other:?}"),
                 };
                 let mut nested = locals.clone();
-                if nested.contains_key(var) {
+                if var != "_" && nested.contains_key(var) {
                     origins.select(&statement_origin);
                     bail!("typed for binding `{var}` shadows an existing local");
                 }
-                nested.insert(var.clone(), item);
+                if var != "_" {
+                    nested.insert(var.clone(), item);
+                }
                 let body = validate_statements(
                     body,
                     &mut nested,
@@ -1047,7 +1052,7 @@ fn apply_host_context(
         if *intrinsic {
             let entry = crate::intrinsics::lookup(&import.name)
                 .with_context(|| format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name))?;
-            if !crate::lower::abi_value_type_matches(entry.result, expected, aliases) {
+            if !crate::lower::abi_intrinsic_value_type_matches(entry.result, expected, aliases) {
                 bail!(
                     "E-INTRINSIC-005: intrinsic `{}` result requires `{}`, got {:?}",
                     import.name,
@@ -1168,9 +1173,17 @@ fn validate_expr(
                 .iter()
                 .map(|arg| validate_expr(arg, locals, constants, signatures, context, origins))
                 .collect::<Result<Vec<_>>>()?;
+            let builtin_host_call = *intrinsic
+                || ((import.module == "vibra_v1" || import.module == "vibra_test")
+                    && crate::intrinsics::lookup(&import.name).is_some());
             for (index, (arg, kind)) in args.iter().zip(entry.params).enumerate() {
                 let ty = infer(arg, locals, constants, signatures, context)?;
-                if !crate::lower::abi_value_type_matches(*kind, &ty, &signatures.aliases) {
+                let argument_matches = if builtin_host_call {
+                    crate::lower::abi_intrinsic_value_type_matches(*kind, &ty, &signatures.aliases)
+                } else {
+                    crate::lower::abi_value_type_matches(*kind, &ty, &signatures.aliases)
+                };
+                if !argument_matches {
                     if *intrinsic {
                         bail!("E-INTRINSIC-005: intrinsic `{}` argument {index} requires `{}`, got {ty:?}", import.name, kind.as_str());
                     }
@@ -1647,6 +1660,49 @@ fn runtime_name(name: &str, context: &str, signatures: &TypedSignatureIndex) -> 
     }
 }
 
+#[derive(Debug, Default)]
+struct TypedBindingScopes {
+    scopes: Vec<BTreeSet<String>>,
+}
+
+impl TypedBindingScopes {
+    fn new() -> Self {
+        Self {
+            scopes: vec![BTreeSet::new()],
+        }
+    }
+
+    fn push(&mut self) {
+        self.scopes.push(BTreeSet::new());
+    }
+
+    fn pop(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn bind(&mut self, name: &str) -> Result<()> {
+        if name == "_" {
+            return Ok(());
+        }
+        if self.scopes.last().is_some_and(|scope| scope.contains(name)) {
+            bail!("typed lexical binding `{name}` is reused in the same scope");
+        }
+        if self
+            .scopes
+            .iter()
+            .take(self.scopes.len().saturating_sub(1))
+            .any(|scope| scope.contains(name))
+        {
+            bail!("typed lexical binding `{name}` shadows an enclosing local");
+        }
+        self.scopes
+            .last_mut()
+            .expect("typed binding scopes always have a root")
+            .insert(name.to_string());
+        Ok(())
+    }
+}
+
 fn collect_body_metadata(
     expressions: &[AstExpr],
     module_alias: &str,
@@ -1655,58 +1711,99 @@ fn collect_body_metadata(
     let_types: &mut HashMap<String, TypeRef>,
     bindings: &mut BTreeSet<String>,
 ) -> Result<()> {
+    let mut scopes = TypedBindingScopes::new();
+    collect_body_metadata_in_scope(
+        expressions,
+        module_alias,
+        declared_aliases,
+        generics,
+        let_types,
+        bindings,
+        &mut scopes,
+    )
+}
+
+fn collect_body_metadata_in_scope(
+    expressions: &[AstExpr],
+    module_alias: &str,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+    let_types: &mut HashMap<String, TypeRef>,
+    bindings: &mut BTreeSet<String>,
+    scopes: &mut TypedBindingScopes,
+) -> Result<()> {
     for expression in expressions {
         match &expression.value {
-            ExprKind::Do(body) | ExprKind::While { body, .. } | ExprKind::Task { body, .. } => {
-                collect_body_metadata(
+            ExprKind::Do(body) => collect_body_metadata_in_scope(
+                body,
+                module_alias,
+                declared_aliases,
+                generics,
+                let_types,
+                bindings,
+                scopes,
+            )?,
+            ExprKind::While { body, .. } | ExprKind::Task { body, .. } => {
+                scopes.push();
+                let result = collect_body_metadata_in_scope(
                     body,
                     module_alias,
                     declared_aliases,
                     generics,
                     let_types,
                     bindings,
-                )?
+                    scopes,
+                );
+                scopes.pop();
+                result?;
             }
             ExprKind::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_body_metadata(
+                collect_scoped_body_metadata(
                     then_body,
                     module_alias,
                     declared_aliases,
                     generics,
                     let_types,
                     bindings,
+                    scopes,
                 )?;
-                collect_body_metadata(
+                collect_scoped_body_metadata(
                     else_body,
                     module_alias,
                     declared_aliases,
                     generics,
                     let_types,
                     bindings,
+                    scopes,
                 )?;
             }
             ExprKind::Match { cases, .. } => {
                 for case in cases {
-                    collect_body_metadata(
-                        &case.body,
-                        module_alias,
-                        declared_aliases,
-                        generics,
-                        let_types,
-                        bindings,
-                    )?;
+                    scopes.push();
+                    let result = collect_pattern_metadata(&case.pattern, scopes, bindings)
+                        .and_then(|()| {
+                            collect_body_metadata_in_scope(
+                                &case.body,
+                                module_alias,
+                                declared_aliases,
+                                generics,
+                                let_types,
+                                bindings,
+                                scopes,
+                            )
+                        });
+                    scopes.pop();
+                    result?;
                 }
             }
             ExprKind::Let { name, ty, .. } => {
-                if !bindings.insert(name.value.clone()) {
-                    bail!(
-                        "typed lexical binding `{}` is reused; body materialization requires globally unique local names",
-                        name.value
-                    );
+                scopes.bind(&name.value)?;
+                if name.value != "_" {
+                    bindings.insert(name.value.clone());
                 }
                 if let Some(ty) = ty {
                     let ty = lower_type(ty, generics, module_alias, declared_aliases)?;
@@ -1717,34 +1814,94 @@ fn collect_body_metadata(
             | ExprKind::Mutable(value)
             | ExprKind::ReferenceOf(value)
             | ExprKind::Cast { value, .. }
-            | ExprKind::Convert { value, .. } => collect_body_metadata(
+            | ExprKind::Convert { value, .. } => collect_body_metadata_in_scope(
                 std::slice::from_ref(value.as_ref()),
                 module_alias,
                 declared_aliases,
                 generics,
                 let_types,
                 bindings,
+                scopes,
             )?,
             ExprKind::For { binding, body, .. } => {
-                if !bindings.insert(binding.value.clone()) {
-                    bail!(
-                        "typed lexical binding `{}` is reused; body materialization requires globally unique local names",
-                        binding.value
-                    );
-                }
-                collect_body_metadata(
-                    body,
-                    module_alias,
-                    declared_aliases,
-                    generics,
-                    let_types,
-                    bindings,
-                )?;
+                scopes.push();
+                let result = (|| {
+                    scopes.bind(&binding.value)?;
+                    if binding.value != "_" {
+                        bindings.insert(binding.value.clone());
+                    }
+                    collect_body_metadata_in_scope(
+                        body,
+                        module_alias,
+                        declared_aliases,
+                        generics,
+                        let_types,
+                        bindings,
+                        scopes,
+                    )
+                })();
+                scopes.pop();
+                result?;
             }
             _ => {}
         }
     }
     Ok(())
+}
+
+fn collect_scoped_body_metadata(
+    expressions: &[AstExpr],
+    module_alias: &str,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+    let_types: &mut HashMap<String, TypeRef>,
+    bindings: &mut BTreeSet<String>,
+    scopes: &mut TypedBindingScopes,
+) -> Result<()> {
+    scopes.push();
+    let result = collect_body_metadata_in_scope(
+        expressions,
+        module_alias,
+        declared_aliases,
+        generics,
+        let_types,
+        bindings,
+        scopes,
+    );
+    scopes.pop();
+    result
+}
+
+fn collect_pattern_metadata(
+    pattern: &AstPattern,
+    scopes: &mut TypedBindingScopes,
+    bindings: &mut BTreeSet<String>,
+) -> Result<()> {
+    match &pattern.value {
+        PatternKind::Bind(name) => {
+            scopes.bind(&name.value)?;
+            if name.value != "_" {
+                bindings.insert(name.value.clone());
+            }
+            Ok(())
+        }
+        PatternKind::Constructor { arguments, .. }
+        | PatternKind::Tuple(arguments)
+        | PatternKind::Array(arguments) => arguments
+            .iter()
+            .try_for_each(|pattern| collect_pattern_metadata(pattern, scopes, bindings)),
+        PatternKind::Record(fields) => fields
+            .iter()
+            .try_for_each(|field| collect_pattern_metadata(&field.pattern, scopes, bindings)),
+        PatternKind::Map(entries) => entries.iter().try_for_each(|(key, value)| {
+            collect_pattern_metadata(key, scopes, bindings)?;
+            collect_pattern_metadata(value, scopes, bindings)
+        }),
+        PatternKind::Newtype { pattern, .. } | PatternKind::Interface { pattern, .. } => {
+            collect_pattern_metadata(pattern, scopes, bindings)
+        }
+        PatternKind::Literal(_) | PatternKind::Wildcard => Ok(()),
+    }
 }
 
 struct OriginCursor<'a> {
@@ -3495,6 +3652,46 @@ mod tests {
         assert_eq!(
             bodies.function_origin("copy").unwrap().document,
             DocumentId::from_raw(20)
+        );
+    }
+
+    #[test]
+    fn typed_body_scope_allows_sibling_reuse_and_repeated_wildcards() {
+        let source = module(
+            r#"(defn main () void
+  (do
+    (if true (do (let value true)) (do (let value false)))
+    (let _ true)
+    (let _ false)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures)
+            .expect("sibling typed bindings and repeated wildcards are legal");
+        materialize_typed_identity_functions(&signatures, &bodies)
+            .expect("legal typed scopes should materialize");
+    }
+
+    #[test]
+    fn typed_body_scope_still_rejects_nested_shadowing() {
+        let source = module(
+            r#"(defn main (value bool) void
+  (do
+    (if true (do (let value false)) (do))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = materialize_typed_identity_functions(&signatures, &bodies).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("typed local `value` is already bound"),
+            "nested shadowing must remain rejected: {error:#}"
         );
     }
 

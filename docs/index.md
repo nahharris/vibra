@@ -36,12 +36,14 @@ or update documentation as the compiler evolves.
 | Design principles and language trade-offs | [`decisions/philosophy.md`](decisions/philosophy.md) | Current decision contract |
 | Language syntax and typing | [`decisions/s-expression-language.md`](decisions/s-expression-language.md) | Accepted contract |
 | Static effects | [`decisions/effect-system.md`](decisions/effect-system.md) | Accepted contract |
+| Secure compilation boundary | [`decisions/secure-compilation.md`](decisions/secure-compilation.md) | Accepted contract |
 | Normalized retrieval index | [`schemas/index.schema.json`](../schemas/index.schema.json) and [`README.md`](../README.md) | Current tooling contract |
 | Project manifests, imports, and dependency workflow | [`reference/project-layout.md`](reference/project-layout.md) | Current reference |
 | WebAssembly and host boundary | [`reference/wasm-abi.md`](reference/wasm-abi.md) and [`reference/static-wasm-ffi.md`](reference/static-wasm-ffi.md) | Current reference |
 | Machine-readable interfaces | [`schemas/`](../schemas/) | Tooling contract |
 | Standard library API | [`stdlib/README.md`](../stdlib/README.md), `stdlib/src/`, and matching tests | Current implementation |
 | Test conventions | [`tests/README.md`](../tests/README.md) | Current reference |
+| Type-constrained decoding design | [`plans/2026-08-02-decoding-service.md`](plans/2026-08-02-decoding-service.md) | Proposed design; prototype gated on typed frontend parity |
 | Roadmaps, migration reports, and gap analyses | [`status/`](status/) | Non-normative snapshots |
 | Superseded designs and handoffs | [`archive/`](archive/) | Historical only |
 
@@ -79,6 +81,8 @@ well-written: its status line must say that it is accepted, and implementation
 and tests must be kept aligned with it.
 
 - [Vibra philosophy](decisions/philosophy.md)
+- [S-expression language contract](decisions/s-expression-language.md)
+- [Secure compilation boundary](decisions/secure-compilation.md)
 
 ### Status
 
@@ -110,6 +114,7 @@ Implementation plans live in [`plans/`](plans/) and are execution aids rather
 than current contracts:
 
 - [Plan directory guide](plans/README.md)
+- [Secure compilation constraints plan](plans/2026-08-07-issue-252-secure-compilation.md)
 - [Type-system and ADT foundation plan](plans/2026-05-05-type-system-adt-foundation.md)
 - [Vib source extension and call argument order](plans/2026-08-02-vib-extension-and-call-order.md)
 - [Capability grants implementation plan](plans/2026-08-07-capability-grants-implementation.md)
@@ -130,7 +135,7 @@ tracking issue #257.
 | 3 | [Bounded execution](plans/2026-08-02-execution-bounds.md) | #251 |
 | 4 | [Capability grants](plans/2026-08-02-capability-grants.md) | #253 |
 | 5 | [Handle lifecycle spike](plans/2026-08-02-handle-lifecycle-spike.md) | #255 |
-| 6 | [Type-constrained decoding](plans/2026-08-02-decoding-service.md) | #254 |
+| 6 | [Type-constrained decoding design](plans/2026-08-02-decoding-service.md) | #254 |
 
 Pre-implementation investigations for those plans — verified findings with
 `file:line` evidence, several of which corrected the plans they belong to —

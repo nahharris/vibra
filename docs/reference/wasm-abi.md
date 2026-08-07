@@ -23,18 +23,18 @@ fingerprint of the complete lowered input.
 
 ## Values and memory
 
-Guest locals and parameters are direct `i32` arena addresses. Address zero is
-invalid; the host owns the arena and returns nonzero opaque handles. This is the
-v1 representation for dynamic values, mutable cells, and references. The guest
-cannot forge a valid handle or widen it by integer arithmetic because every
-handle is checked before use.
+Guest locals and parameters are direct `i32` arena indices. Index zero is
+invalid; the host owns the arena and returns nonzero opaque indices. This is
+the v1 representation for dynamic values and host-backed handles. The guest
+module has no linear-memory section, and every index is bounds-checked by the
+host before it is resolved.
 
-Within values, the stable layouts in [`src/wasm_abi.rs`](../../src/wasm_abi.rs)
-remain normative: scalars are direct, strings/buffers use 32-bit
-pointer/length descriptors, aggregate fields are aligned, enums use a tag plus
-aligned payload, and mutable/reference values use arena addresses. A future
-external static-Wasm ABI may expose those layouts directly without changing the
-guest compiler's opaque-handle safety boundary.
+The registry names `str`, `bytes`, `array`, `record`, and related shapes as
+host-arena value kinds. They are not guest pointer/length descriptors. Mutable
+cells, references, function values, shared references, and pointers are
+rejected by lowering at the `vibra_v1` boundary, including when nested in an
+aggregate or alias. Static dependency FFI has a separate caller-owned memory
+contract; see [`static-wasm-ffi.md`](static-wasm-ffi.md).
 
 ## Imports
 
@@ -48,8 +48,8 @@ and runtime primitives:
 - status/non-exhaustive-match reporting.
 
 The removed `vibra_v1.run_program` envelope is rejected. Imports must be in the
-exact v1 registry; arbitrary Preview 1 imports and unknown Vibra symbols are
-rejected before instantiation.
+exact v1 registry; all WASI imports, including Preview 1 names, and unknown
+Vibra symbols are rejected before instantiation.
 
 ## Host authority
 

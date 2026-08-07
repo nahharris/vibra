@@ -253,6 +253,7 @@ fn sarif_report(report: &LintReport) -> serde_json::Value {
             json!({
                 "id": diagnostic.code,
                 "shortDescription": { "text": rule_summary(&diagnostic.code) },
+                "fullDescription": { "text": rule_summary(&diagnostic.code) },
             })
         });
     }
@@ -260,22 +261,31 @@ fn sarif_report(report: &LintReport) -> serde_json::Value {
         .diagnostics
         .iter()
         .map(|diagnostic| {
-            json!({
+            let mut result = json!({
                 "ruleId": diagnostic.code,
                 "level": sarif_level(diagnostic.severity),
                 "message": { "text": diagnostic.message },
                 "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": { "uri": diagnostic.span.uri },
-                        "region": {
-                            "startLine": diagnostic.span.start.line + 1,
-                            "startColumn": diagnostic.span.start.column + 1,
-                            "endLine": diagnostic.span.end.line + 1,
-                            "endColumn": diagnostic.span.end.column + 1,
-                        }
-                    }
+                    "physicalLocation": sarif_physical_location(&diagnostic.span)
                 }]
-            })
+            });
+            if let Some(related) = &diagnostic.related {
+                let related_locations: Vec<_> = related
+                    .iter()
+                    .enumerate()
+                    .map(|(id, related)| {
+                        json!({
+                            "id": id,
+                            "message": { "text": related.message },
+                            "physicalLocation": sarif_physical_location(&related.span),
+                        })
+                    })
+                    .collect();
+                if !related_locations.is_empty() {
+                    result["relatedLocations"] = serde_json::Value::Array(related_locations);
+                }
+            }
+            result
         })
         .collect();
 
@@ -294,6 +304,18 @@ fn sarif_report(report: &LintReport) -> serde_json::Value {
     })
 }
 
+fn sarif_physical_location(span: &Span) -> serde_json::Value {
+    json!({
+        "artifactLocation": { "uri": span.uri },
+        "region": {
+            "startLine": span.start.line + 1,
+            "startColumn": span.start.column + 1,
+            "endLine": span.end.line + 1,
+            "endColumn": span.end.column + 1,
+        }
+    })
+}
+
 fn sarif_level(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "error",
@@ -308,6 +330,7 @@ fn rule_summary(code: &str) -> &'static str {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
         "W-STYLE-002" => "Labelled arguments must precede variadic arguments",
         "W-EFFECT-001" => "Declaration includes nominal effects not inferred from its body",
+        "E-SCOPE-001" => "Lexical binding shadows an enclosing binding",
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-YAML-002" => "YAML comments are forbidden",
         "E-COMMENT-001" => "`=comment` must be a string scalar",
@@ -417,6 +440,9 @@ pub fn compile_diagnostics_with_flags(
     match result {
         Ok(()) => Vec::new(),
         Err(err) => {
+            if let Some(error) = err.downcast_ref::<crate::frontend::ScopeValidationError>() {
+                return vec![scope_diagnostic(error, path)];
+            }
             let message = format!("{err:#}");
             let code = extract_diagnostic_code(&message).unwrap_or("E-COMPILE-001");
             vec![Diagnostic {
@@ -536,11 +562,43 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-INTRINSIC-005",
         "E-EFFECT-008",
         "E-WASM-008",
+        "E-SCOPE-001",
     ];
     KNOWN_CODES
         .iter()
         .copied()
         .find(|code| message.contains(code))
+}
+
+fn scope_diagnostic(
+    error: &crate::frontend::ScopeValidationError,
+    fallback_path: &Path,
+) -> Diagnostic {
+    let primary = error.primary_location();
+    let primary_path = error.path_for(primary).unwrap_or(fallback_path);
+    let primary_source = fs::read_to_string(primary_path).unwrap_or_default();
+    let related = error
+        .error
+        .related
+        .iter()
+        .map(|(message, location)| {
+            let path = error.path_for(*location).unwrap_or(fallback_path);
+            let source = fs::read_to_string(path).unwrap_or_default();
+            RelatedDiagnostic {
+                message: message.clone(),
+                span: crate::sexpr_tooling::tooling_span(path, &source, location.span),
+            }
+        })
+        .collect();
+    Diagnostic {
+        code: error.error.code.to_string(),
+        message: error.error.to_string(),
+        severity: Severity::Error,
+        span: crate::sexpr_tooling::tooling_span(primary_path, &primary_source, primary.span),
+        related: Some(related),
+        fix: None,
+        category: Category::Compile,
+    }
 }
 
 fn point_span(path: &Path, line: usize, column: usize) -> Span {
