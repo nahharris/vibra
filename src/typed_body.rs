@@ -1411,6 +1411,15 @@ fn validate_expr(
             }
             bail!("typed cast forms remain staged")
         }
+        Expr::Try { inner, .. } => {
+            let inner = validate_expr(inner, locals, constants, signatures, context, origins)?;
+            let actual = infer(&inner, locals, constants, signatures, context)?;
+            let kind = validate_typed_try(&actual, signatures, context)?;
+            Expr::Try {
+                inner: Box::new(inner),
+                kind,
+            }
+        }
         Expr::If {
             cond,
             then_e,
@@ -1464,6 +1473,58 @@ fn infer(
         &enums,
     )
     .with_context(|| format!("cannot infer typed expression in `{context}`"))
+}
+
+/// Validate the typed-path contract for `(try expr)` and return the canonical
+/// propagation metadata for the operand. The enclosing function signature is
+/// already indexed by `context`; keeping this check here means both ordinary
+/// calls and local bindings receive the same exact-match diagnostics.
+fn validate_typed_try(
+    operand_type: &TypeRef,
+    signatures: &TypedSignatureIndex,
+    context: &str,
+) -> Result<crate::lower::TryKind> {
+    let enums = typed_enum_defs(signatures);
+    let operand_kind = crate::lower::try_kind_for_type(operand_type, &enums).ok_or_else(|| {
+        anyhow::anyhow!(
+            "E-TRY-001: typed `(try ...)` operand must be a `result` or `option`, got {operand_type:?}"
+        )
+    })?;
+    let signature = signatures.functions.get(context).with_context(|| {
+        format!("E-TRY-002: typed `(try ...)` has no enclosing signature for `{context}`")
+    })?;
+    let enclosing_kind = crate::lower::try_kind_for_type(&signature.return_type, &enums)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "E-TRY-002: typed `(try ...)` requires an enclosing `result` or `option` return type, got {:?}",
+                signature.return_type
+            )
+        })?;
+    match (&operand_kind, &enclosing_kind) {
+        (
+            crate::lower::TryKind::Result { error_type, .. },
+            crate::lower::TryKind::Result {
+                error_type: enclosing_error,
+                ..
+            },
+        ) if error_type == enclosing_error => Ok(operand_kind),
+        (
+            crate::lower::TryKind::Result { error_type, .. },
+            crate::lower::TryKind::Result {
+                error_type: enclosing_error,
+                ..
+            },
+        ) => bail!(
+            "E-TRY-003: typed propagated error type must exactly match the enclosing function error type (got {error_type:?}, expected {enclosing_error:?})"
+        ),
+        (
+            crate::lower::TryKind::Option { .. },
+            crate::lower::TryKind::Option { .. },
+        ) => Ok(operand_kind),
+        _ => bail!(
+            "E-TRY-002: typed `(try ...)` operand and enclosing return must use the same result/option kind"
+        ),
+    }
 }
 
 /// Build a legacy-shaped `EnumDef` registry from the typed alias table, so
@@ -2468,6 +2529,34 @@ fn lower_expr(
                 // annotation.
                 operand_type: TypeRef::Void,
                 return_type: target,
+            }
+        }
+        ExprKind::Try(inner) => {
+            let inner = lower(inner)?;
+            let inner_type = infer_expr_type(
+                &inner,
+                &HashMap::new(),
+                local_types,
+                &signatures.aliases,
+                &typed_enum_defs(signatures),
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "E-TRY-001: could not infer the typed `(try ...)` operand type"
+                )
+            })?;
+            let kind = crate::lower::try_kind_for_type(
+                &inner_type,
+                &typed_enum_defs(signatures),
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "E-TRY-001: typed `(try ...)` operand must be a `result` or `option`, got {inner_type:?}"
+                )
+            })?;
+            Expr::Try {
+                inner: Box::new(inner),
+                kind,
             }
         }
         ExprKind::Embed { .. } | ExprKind::Template { .. } => {
@@ -5030,6 +5119,118 @@ mod tests {
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
         let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
         assert!(error.contains("single value"), "{error}");
+    }
+
+    // ---- Expr::Try ----
+
+    fn fallible_module() -> Module {
+        module(
+            r#"(def result (enum (err e) (ok t)) where: (t any e any))
+(def option (enum (some t) (none void)) where: (t any))
+(defn result-ok (input (result int64 atom)) (result int64 atom) (do (return input)))
+(defn result-wrong-error (input (result int64 atom)) (result int64 str) (do (return input)))
+(defn option-ok (input (option int64)) (option int64) (do (return input)))
+(defn result-in-void (input (result int64 atom)) void (do (return)))
+(defn primitive (input int64) int64 (do (return input)))"#,
+        )
+    }
+
+    #[test]
+    fn typed_try_lowers_result_operands_to_propagation_ir() {
+        let source = module(
+            r#"(def result (enum (err e) (ok t)) where: (t any e any))
+(defn propagate (input (result int64 atom)) (result int64 atom)
+  (do (let value (try input)) (return input)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["propagate"] else {
+            panic!("expected user body");
+        };
+        let Statement::Let {
+            value: LetValue::Expr(Expr::Try { kind, .. }),
+            ..
+        } = &statements[0]
+        else {
+            panic!("expected a typed try expression in the let binding");
+        };
+        assert!(matches!(
+            kind,
+            crate::lower::TryKind::Result {
+                enum_key,
+                value_type: TypeRef::Int64,
+                error_type: TypeRef::Atom,
+            } if enum_key == "result"
+        ));
+    }
+
+    #[test]
+    fn typed_try_rejects_a_non_result_or_option_operand_at_lowering() {
+        let source =
+            module("(defn bad (input int64) int64 (do (let value (try input)) (return input)))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("E-TRY-001"), "{error}");
+    }
+
+    #[test]
+    fn typed_try_checks_enclosing_result_option_and_exact_error_types() {
+        let source = fallible_module();
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let result_operand = signatures.functions["result-ok"].parameters[0].ty.clone();
+        let option_operand = signatures.functions["option-ok"].parameters[0].ty.clone();
+
+        assert!(matches!(
+            validate_typed_try(&result_operand, &signatures, "result-ok").unwrap(),
+            crate::lower::TryKind::Result {
+                value_type: TypeRef::Int64,
+                error_type: TypeRef::Atom,
+                ..
+            }
+        ));
+        assert!(matches!(
+            validate_typed_try(&option_operand, &signatures, "option-ok").unwrap(),
+            crate::lower::TryKind::Option {
+                value_type: TypeRef::Int64,
+                ..
+            }
+        ));
+
+        let mismatch = format!(
+            "{:#}",
+            validate_typed_try(&result_operand, &signatures, "result-wrong-error").unwrap_err()
+        );
+        assert!(mismatch.contains("E-TRY-003"), "{mismatch}");
+
+        let wrong_kind = format!(
+            "{:#}",
+            validate_typed_try(&result_operand, &signatures, "option-ok").unwrap_err()
+        );
+        assert!(wrong_kind.contains("E-TRY-002"), "{wrong_kind}");
+
+        let void_return = format!(
+            "{:#}",
+            validate_typed_try(&result_operand, &signatures, "result-in-void").unwrap_err()
+        );
+        assert!(void_return.contains("E-TRY-002"), "{void_return}");
+
+        let non_fallible = format!(
+            "{:#}",
+            validate_typed_try(&TypeRef::Int64, &signatures, "result-ok").unwrap_err()
+        );
+        assert!(non_fallible.contains("E-TRY-001"), "{non_fallible}");
     }
 
     // ---- Statement::Spawn / Statement::Join ----

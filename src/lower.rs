@@ -157,6 +157,10 @@ pub enum Expr {
         from: Box<Expr>,
         target: TypeRef,
     },
+    Try {
+        inner: Box<Expr>,
+        kind: TryKind,
+    },
     EnumConstructor {
         enum_key: String,
         tag: String,
@@ -176,6 +180,27 @@ pub enum Expr {
         then_e: Box<Expr>,
         else_e: Box<Expr>,
     },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum TryKind {
+    Result {
+        enum_key: String,
+        value_type: TypeRef,
+        error_type: TypeRef,
+    },
+    Option {
+        enum_key: String,
+        value_type: TypeRef,
+    },
+}
+
+impl TryKind {
+    fn value_type(&self) -> &TypeRef {
+        match self {
+            Self::Result { value_type, .. } | Self::Option { value_type, .. } => value_type,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -5212,6 +5237,16 @@ fn check_expr_call_bounds(
             referrer_owner,
             context,
         )?,
+        Expr::Try { inner, .. } => check_expr_call_bounds(
+            inner,
+            sigs,
+            type_aliases,
+            impls,
+            enclosing_params,
+            enclosing_bounds,
+            referrer_owner,
+            context,
+        )?,
         Expr::Record(fields) => {
             for value in fields.values() {
                 check_expr_call_bounds(
@@ -5933,6 +5968,280 @@ fn lower_statement(
     warnings: &mut Vec<String>,
     fn_ctx: Option<&UserFnContext>,
 ) -> Result<Statement> {
+    let statement = lower_statement_inner(
+        step,
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        locals,
+        warnings,
+        fn_ctx,
+    )?;
+    validate_try_in_statement(&statement, fn_ctx, enums)?;
+    Ok(statement)
+}
+
+fn validate_try_kind(
+    kind: &TryKind,
+    fn_ctx: Option<&UserFnContext>,
+    enums: &HashMap<String, EnumDef>,
+) -> Result<()> {
+    let context = fn_ctx.ok_or_else(|| {
+        anyhow::anyhow!(
+            "E-TRY-002: `(try ...)` is only valid inside a function returning `result` or `option`"
+        )
+    })?;
+    let enclosing = try_kind_for_type(&context.return_type, enums).ok_or_else(|| {
+        anyhow::anyhow!(
+            "E-TRY-002: `(try ...)` requires an enclosing `result` or `option` return type, got {:?}",
+            context.return_type
+        )
+    })?;
+    match (kind, enclosing) {
+        (
+            TryKind::Result { error_type, .. },
+            TryKind::Result {
+                error_type: enclosing_error,
+                ..
+            },
+        ) if error_type == &enclosing_error => Ok(()),
+        (TryKind::Result { error_type, .. }, TryKind::Result { error_type: enclosing_error, .. }) => {
+            bail!(
+                "E-TRY-003: propagated error type must exactly match the enclosing function error type (got {:?}, expected {:?})",
+                error_type,
+                enclosing_error
+            )
+        }
+        (TryKind::Option { .. }, TryKind::Option { .. }) => Ok(()),
+        _ => bail!(
+            "E-TRY-002: `(try ...)` operand and enclosing return must use the same result/option kind"
+        ),
+    }
+}
+
+fn validate_try_in_expr(
+    expr: &Expr,
+    fn_ctx: Option<&UserFnContext>,
+    enums: &HashMap<String, EnumDef>,
+) -> Result<()> {
+    match expr {
+        Expr::Try { inner, kind } => {
+            validate_try_kind(kind, fn_ctx, enums)?;
+            validate_try_in_expr(inner, fn_ctx, enums)?;
+        }
+        Expr::Mutable(inner) | Expr::Cast { from: inner, .. } => {
+            validate_try_in_expr(inner, fn_ctx, enums)?
+        }
+        Expr::Reference { target, .. } => validate_try_in_expr(target, fn_ctx, enums)?,
+        Expr::Call { call, .. } => {
+            for argument in &call.args {
+                validate_try_in_expr(argument, fn_ctx, enums)?;
+            }
+        }
+        Expr::HostCall { args, .. } | Expr::Primitive { args, .. } => {
+            for argument in args {
+                validate_try_in_expr(argument, fn_ctx, enums)?;
+            }
+        }
+        Expr::EnumConstructor { payload, .. } => {
+            if let Some(payload) = payload {
+                validate_try_in_expr(payload, fn_ctx, enums)?;
+            }
+        }
+        Expr::Record(fields) => {
+            for value in fields.values() {
+                validate_try_in_expr(value, fn_ctx, enums)?;
+            }
+        }
+        Expr::Tuple(values) | Expr::Array(values) => {
+            for value in values {
+                validate_try_in_expr(value, fn_ctx, enums)?;
+            }
+        }
+        Expr::Map(entries) => {
+            for (key, value) in entries {
+                validate_try_in_expr(key, fn_ctx, enums)?;
+                validate_try_in_expr(value, fn_ctx, enums)?;
+            }
+        }
+        Expr::Range { start, end, step } => {
+            validate_try_in_expr(start, fn_ctx, enums)?;
+            validate_try_in_expr(end, fn_ctx, enums)?;
+            validate_try_in_expr(step, fn_ctx, enums)?;
+        }
+        Expr::If {
+            cond,
+            then_e,
+            else_e,
+        } => {
+            validate_try_in_expr(cond, fn_ctx, enums)?;
+            validate_try_in_expr(then_e, fn_ctx, enums)?;
+            validate_try_in_expr(else_e, fn_ctx, enums)?;
+        }
+        Expr::Value(_) | Expr::VarRef(_) => {}
+    }
+    Ok(())
+}
+
+fn expression_contains_try(expr: &Expr) -> bool {
+    match expr {
+        Expr::Try { .. } => true,
+        Expr::Mutable(inner) | Expr::Cast { from: inner, .. } => expression_contains_try(inner),
+        Expr::Reference { target, .. } => expression_contains_try(target),
+        Expr::Call { call, .. } => call.args.iter().any(expression_contains_try),
+        Expr::HostCall { args, .. } | Expr::Primitive { args, .. } => {
+            args.iter().any(expression_contains_try)
+        }
+        Expr::EnumConstructor { payload, .. } => {
+            payload.as_deref().is_some_and(expression_contains_try)
+        }
+        Expr::Record(fields) => fields.values().any(expression_contains_try),
+        Expr::Tuple(values) | Expr::Array(values) => values.iter().any(expression_contains_try),
+        Expr::Map(entries) => entries
+            .iter()
+            .any(|(key, value)| expression_contains_try(key) || expression_contains_try(value)),
+        Expr::Range { start, end, step } => {
+            expression_contains_try(start)
+                || expression_contains_try(end)
+                || expression_contains_try(step)
+        }
+        Expr::If {
+            cond,
+            then_e,
+            else_e,
+        } => {
+            expression_contains_try(cond)
+                || expression_contains_try(then_e)
+                || expression_contains_try(else_e)
+        }
+        Expr::Value(_) | Expr::VarRef(_) => false,
+    }
+}
+
+fn statement_contains_try(statement: &Statement) -> bool {
+    match statement {
+        Statement::Call(call) => call.args.iter().any(expression_contains_try),
+        Statement::Let { value, .. } => match value {
+            LetValue::Call(call) => call.args.iter().any(expression_contains_try),
+            LetValue::Expr(expr) => expression_contains_try(expr),
+        },
+        Statement::Set { value, .. } | Statement::Return(value) | Statement::Eval(value) => {
+            expression_contains_try(value)
+        }
+        Statement::Match { target, arms } => {
+            expression_contains_try(target)
+                || arms
+                    .iter()
+                    .any(|arm| arm.body.iter().any(statement_contains_try))
+        }
+        Statement::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expression_contains_try(cond)
+                || then_body.iter().any(statement_contains_try)
+                || else_body.iter().any(statement_contains_try)
+        }
+        Statement::While { cond, body } => {
+            expression_contains_try(cond) || body.iter().any(statement_contains_try)
+        }
+        Statement::For { source, body, .. } => {
+            expression_contains_try(source) || body.iter().any(statement_contains_try)
+        }
+        Statement::Task { body, .. } => body.iter().any(statement_contains_try),
+        Statement::Spawn { value, .. } => expression_contains_try(value),
+        Statement::Join { .. } | Statement::Break | Statement::Continue => false,
+    }
+}
+
+fn validate_try_in_statement(
+    statement: &Statement,
+    fn_ctx: Option<&UserFnContext>,
+    enums: &HashMap<String, EnumDef>,
+) -> Result<()> {
+    match statement {
+        Statement::Call(call) => {
+            for argument in &call.args {
+                validate_try_in_expr(argument, fn_ctx, enums)?;
+            }
+        }
+        Statement::Let { value, .. } => match value {
+            LetValue::Call(call) => {
+                for argument in &call.args {
+                    validate_try_in_expr(argument, fn_ctx, enums)?;
+                }
+            }
+            LetValue::Expr(expr) => validate_try_in_expr(expr, fn_ctx, enums)?,
+        },
+        Statement::Set { value, .. } | Statement::Return(value) | Statement::Eval(value) => {
+            validate_try_in_expr(value, fn_ctx, enums)?
+        }
+        Statement::Match { target, arms } => {
+            validate_try_in_expr(target, fn_ctx, enums)?;
+            for arm in arms {
+                for statement in &arm.body {
+                    validate_try_in_statement(statement, fn_ctx, enums)?;
+                }
+            }
+        }
+        Statement::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            validate_try_in_expr(cond, fn_ctx, enums)?;
+            for statement in then_body.iter().chain(else_body) {
+                validate_try_in_statement(statement, fn_ctx, enums)?;
+            }
+        }
+        Statement::While { cond, body } => {
+            validate_try_in_expr(cond, fn_ctx, enums)?;
+            for statement in body {
+                validate_try_in_statement(statement, fn_ctx, enums)?;
+            }
+        }
+        Statement::For { source, body, .. } => {
+            validate_try_in_expr(source, fn_ctx, enums)?;
+            for statement in body {
+                validate_try_in_statement(statement, fn_ctx, enums)?;
+            }
+        }
+        Statement::Task { body, .. } => {
+            for statement in body {
+                validate_try_in_statement(statement, fn_ctx, enums)?;
+            }
+            if body.iter().any(statement_contains_try) {
+                bail!("E-TRY-004: `(try ...)` cannot propagate across a structured task boundary");
+            }
+        }
+        Statement::Spawn { value, .. } => {
+            validate_try_in_expr(value, fn_ctx, enums)?;
+            if expression_contains_try(value) {
+                bail!(
+                    "E-TRY-004: `(try ...)` cannot propagate across a spawned computation boundary"
+                );
+            }
+        }
+        Statement::Join { .. } | Statement::Break | Statement::Continue => {}
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_statement_inner(
+    step: &Value,
+    sigs: &HashMap<String, FunctionSig>,
+    constants: &HashMap<String, RuntimeValue>,
+    type_aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+    impls: &HashMap<ImplKey, ImplBody>,
+    locals: &mut HashMap<String, TypeRef>,
+    warnings: &mut Vec<String>,
+    fn_ctx: Option<&UserFnContext>,
+) -> Result<Statement> {
     let stmt = step.as_mapping().context("statement must be a mapping")?;
     let home = stmt_home_module(fn_ctx);
 
@@ -6280,6 +6589,21 @@ fn lower_statement(
             );
         }
         Ok(Statement::Return(expr))
+    } else if map_get_str(stmt, "$try").is_some() {
+        if stmt.len() != 1 {
+            bail!("E-TRY-001: `$try` statement must contain only the `$try` key");
+        }
+        Ok(Statement::Eval(parse_expr(
+            step,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            home,
+            warnings,
+        )?))
     } else if map_get_str(stmt, "$match").is_some() {
         parse_match_statement(
             stmt,
@@ -7582,6 +7906,33 @@ fn parse_expr(
         )? {
             return Ok(expr);
         }
+        if let Some(inner_value) = map_get_str(m, "$try") {
+            if m.len() != 1 {
+                bail!("E-TRY-001: `$try` must contain only the `$try` key");
+            }
+            let inner = parse_expr(
+                inner_value,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                home_module,
+                warnings,
+            )?;
+            let inner_type = infer_expr_type(&inner, constants, locals, type_aliases, enums)
+                .context("E-TRY-001: could not infer `(try ...)` operand type")?;
+            let kind = try_kind_for_type(&inner_type, enums).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "E-TRY-001: `(try ...)` operand must be a `result` or `option`, got {inner_type:?}"
+                )
+            })?;
+            return Ok(Expr::Try {
+                inner: Box::new(inner),
+                kind,
+            });
+        }
         if m.len() == 1 {
             if let Some(literal) = map_get_str(m, "$literal") {
                 if let Some(typed) = literal.as_mapping() {
@@ -8325,6 +8676,7 @@ pub(crate) fn infer_expr_type(
         }
         Expr::Primitive { return_type, .. } => Some(return_type.clone()),
         Expr::Cast { target, .. } => Some(target.clone()),
+        Expr::Try { kind, .. } => Some(kind.value_type().clone()),
         Expr::Record(fields) => fields
             .iter()
             .map(|(k, v)| {
@@ -8784,6 +9136,51 @@ fn enum_target_def<'a>(
                 .map(|(_, v)| v)
         })
         .map(|def| (enum_key.clone(), def))
+}
+
+/// Recover the success/error payload types for the two stdlib fallible enums.
+///
+/// The legacy type registry retains generic enum applications as an
+/// `Instantiated` type, which lets `try` preserve the nominal enum identity
+/// while substituting its payload parameters. A user-defined enum that merely
+/// has an `ok` or `some` tag is not accepted: the base name and canonical tag
+/// set must identify `result` or `option`.
+pub(crate) fn try_kind_for_type(ty: &TypeRef, enums: &HashMap<String, EnumDef>) -> Option<TryKind> {
+    let TypeRef::Instantiated { base, type_args } = ty else {
+        return None;
+    };
+    let bare = strip_module_prefix(base);
+    let enum_def = enums.get(base).or_else(|| {
+        enums
+            .iter()
+            .find(|(key, _)| strip_module_prefix(key) == bare)
+            .map(|(_, def)| def)
+    })?;
+    if enum_def.type_params.len() != type_args.len() {
+        return None;
+    }
+    let substitutions = enum_def
+        .type_params
+        .iter()
+        .cloned()
+        .zip(type_args.iter().cloned())
+        .collect::<HashMap<_, _>>();
+    match bare {
+        "result" if enum_def.tags.contains_key("ok") && enum_def.tags.contains_key("err") => {
+            Some(TryKind::Result {
+                enum_key: base.clone(),
+                value_type: substitute_type(enum_def.tags.get("ok")?, &substitutions),
+                error_type: substitute_type(enum_def.tags.get("err")?, &substitutions),
+            })
+        }
+        "option" if enum_def.tags.contains_key("some") && enum_def.tags.contains_key("none") => {
+            Some(TryKind::Option {
+                enum_key: base.clone(),
+                value_type: substitute_type(enum_def.tags.get("some")?, &substitutions),
+            })
+        }
+        _ => None,
+    }
 }
 
 /// Whether an integer value is exactly representable at `ty`.

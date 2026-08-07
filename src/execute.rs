@@ -806,6 +806,47 @@ fn with_effect_scope<T>(
     }
 }
 
+/// Internal non-error control flow for `(try ...)` propagation.
+///
+/// The interpreter's value evaluator intentionally keeps its existing
+/// `Result<RuntimeValue>` API so the execution-bounds accounting path remains
+/// shared with the Wasm host bridge. The payload is held in a thread-local
+/// slot because `RuntimeValue` contains Rc-backed cells and therefore cannot
+/// be stored in anyhow's Send + Sync error object directly.
+#[derive(Debug)]
+struct TryPropagation;
+
+impl std::fmt::Display for TryPropagation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("try propagation")
+    }
+}
+
+impl std::error::Error for TryPropagation {}
+
+thread_local! {
+    static TRY_PROPAGATION: RefCell<Option<RuntimeValue>> = const { RefCell::new(None) };
+}
+
+fn raise_try_propagation(value: RuntimeValue) -> anyhow::Error {
+    TRY_PROPAGATION.with(|slot| *slot.borrow_mut() = Some(value));
+    anyhow::Error::new(TryPropagation)
+}
+
+fn take_try_propagation() -> Option<RuntimeValue> {
+    TRY_PROPAGATION.with(|slot| slot.borrow_mut().take())
+}
+
+fn clear_try_propagation() {
+    TRY_PROPAGATION.with(|slot| {
+        slot.borrow_mut().take();
+    });
+}
+
+fn is_try_propagation(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<TryPropagation>().is_some()
+}
+
 pub(crate) fn eval_expr(
     expr: &Expr,
     env: &HashMap<String, RuntimeValue>,
@@ -981,6 +1022,32 @@ fn eval_expr_with_accounting(
                 },
                 account_allocations,
             )
+        }
+        Expr::Try { inner, kind } => {
+            let value =
+                eval_expr_with_accounting(inner, env, program, files, config, account_allocations)?;
+            let RuntimeValue::Enum { tag, payload, .. } = untyped(&value) else {
+                bail!("E-TRY-001: `(try ...)` operand did not evaluate to an enum")
+            };
+            let is_success = match kind {
+                crate::lower::TryKind::Result { .. } => tag == "ok",
+                crate::lower::TryKind::Option { .. } => tag == "some",
+            };
+            let is_failure = match kind {
+                crate::lower::TryKind::Result { .. } => tag == "err",
+                crate::lower::TryKind::Option { .. } => tag == "none",
+            };
+            if is_success {
+                account_allocated_value(
+                    files,
+                    payload.as_deref().cloned().unwrap_or(RuntimeValue::Void),
+                    account_allocations,
+                )
+            } else if is_failure {
+                Err(raise_try_propagation(value))
+            } else {
+                bail!("E-TRY-001: `(try ...)` operand had an invalid fallible tag `{tag}`")
+            }
         }
         Expr::EnumConstructor {
             enum_key,
@@ -1587,10 +1654,20 @@ fn exec_statement(
                     .with_context(|| format!("E-TASK-001: missing captured value `{name}`"))?;
                 child.insert(name.clone(), value.clone());
             }
-            let flow =
+            let flow_result =
                 with_effect_scope(files, &statements_effect_domains(body, program), |files| {
                     run_block(body, program, &mut child, files, config)
-                })?;
+                });
+            let flow = match flow_result {
+                Ok(flow) => flow,
+                Err(error) if is_try_propagation(&error) => {
+                    clear_try_propagation();
+                    bail!(
+                        "E-TRY-004: `(try ...)` cannot propagate across a structured task boundary"
+                    )
+                }
+                Err(error) => return Err(error),
+            };
             match flow {
                 ExecFlow::Next => Ok(ExecFlow::Next),
                 ExecFlow::Return(_) | ExecFlow::Break | ExecFlow::Continue => {
@@ -1611,10 +1688,20 @@ fn exec_statement(
                     .with_context(|| format!("E-TASK-001: missing captured value `{name}`"))?;
                 child.insert(name.clone(), value.clone());
             }
-            let result =
-                with_effect_scope(files, &expression_effect_domains(value, program), |files| {
-                    eval_expr(value, &child, program, files, config)
-                })?;
+            let result = match with_effect_scope(
+                files,
+                &expression_effect_domains(value, program),
+                |files| eval_expr(value, &child, program, files, config),
+            ) {
+                Ok(value) => value,
+                Err(error) if is_try_propagation(&error) => {
+                    clear_try_propagation();
+                    bail!(
+                        "E-TRY-004: `(try ...)` cannot propagate across a spawned computation boundary"
+                    )
+                }
+                Err(error) => return Err(error),
+            };
             let id = SOURCE_TASKS.with(|tasks| tasks.borrow_mut().spawn(result))?;
             env.insert(handle.clone(), RuntimeValue::JoinHandle(id));
             Ok(ExecFlow::Next)
@@ -1962,6 +2049,138 @@ fn value_f64(value: &RuntimeValue) -> Result<f64> {
     match untyped(value) {
         RuntimeValue::Float(value) => Ok(*value),
         other => bail!("expected float, got {other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod try_tests {
+    use super::*;
+
+    fn stdlib_path(name: &str) -> String {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("stdlib/src/{name}.vib"))
+            .display()
+            .to_string()
+            .replace('\\', "/")
+    }
+
+    fn lower(source: &str) -> (tempfile::TempDir, LoweredProgram) {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vib");
+        std::fs::write(&entry, source).unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        let lowered = crate::lower::lower_program(&loaded).unwrap();
+        (dir, lowered)
+    }
+
+    fn call_zero_args(program: &LoweredProgram, callee_key: &str) -> RuntimeValue {
+        let call = Call {
+            callee_key: callee_key.to_string(),
+            type_args: Vec::new(),
+            args: Vec::new(),
+            source_args: Vec::new(),
+            argument_targets: Vec::new(),
+        };
+        let mut files = FileTable::new(RunConfig::default().max_open_files);
+        exec_call(
+            &call,
+            program,
+            &HashMap::new(),
+            &mut files,
+            &RunConfig::default(),
+        )
+        .unwrap()
+    }
+
+    fn enum_value(value: RuntimeValue) -> (String, String, Option<RuntimeValue>) {
+        let RuntimeValue::Enum {
+            enum_key,
+            tag,
+            payload,
+        } = value
+        else {
+            panic!("expected enum value, got {value:?}");
+        };
+        (enum_key, tag, payload.map(|payload| *payload))
+    }
+
+    #[test]
+    fn try_unwraps_result_success_payload() {
+        let source = format!(
+            r#"(import result "{result}")
+(defn result-success () (result.result int64 str)
+  (do
+    (let value (try (result.from-ok int64 str 17)))
+    (return (result.from-ok int64 str value))))
+(defn main () void (do))
+"#,
+            result = stdlib_path("result")
+        );
+        let (_dir, program) = lower(&source);
+
+        let (_enum_key, tag, payload) = enum_value(call_zero_args(&program, "result-success"));
+        assert_eq!(tag, "ok");
+        assert_eq!(payload, Some(RuntimeValue::Int(17)));
+    }
+
+    #[test]
+    fn try_propagates_result_error_through_nested_if() {
+        let source = format!(
+            r#"(import result "{result}")
+(defn result-error () (result.result int64 str)
+  (do
+    (if true
+      (do
+        (let value (try (result.from-err int64 str "boom")))
+        (return (result.from-ok int64 str value)))
+      (do (return (result.from-ok int64 str 99))))))
+(defn main () void (do))
+"#,
+            result = stdlib_path("result")
+        );
+        let (_dir, program) = lower(&source);
+
+        let (_enum_key, tag, payload) = enum_value(call_zero_args(&program, "result-error"));
+        assert_eq!(tag, "err");
+        assert_eq!(payload, Some(RuntimeValue::Str("boom".to_string())));
+    }
+
+    #[test]
+    fn try_unwraps_option_some_payload() {
+        let source = format!(
+            r#"(import option "{option}")
+(defn option-some () (option.option int64)
+  (do
+    (let value (try (option.from-value int64 23)))
+    (return (option.from-value int64 value))))
+(defn main () void (do))
+"#,
+            option = stdlib_path("option")
+        );
+        let (_dir, program) = lower(&source);
+
+        let (_enum_key, tag, payload) = enum_value(call_zero_args(&program, "option-some"));
+        assert_eq!(tag, "some");
+        assert_eq!(payload, Some(RuntimeValue::Int(23)));
+    }
+
+    #[test]
+    fn try_propagates_option_none() {
+        let source = format!(
+            r#"(import option "{option}")
+(defn option-none () (option.option int64)
+  (do
+    (let value (try (option.empty int64 false)))
+    (return (option.from-value int64 value))))
+(defn main () void (do))
+"#,
+            option = stdlib_path("option")
+        );
+        let (_dir, program) = lower(&source);
+
+        let (_enum_key, tag, payload) = enum_value(call_zero_args(&program, "option-none"));
+        assert_eq!(tag, "none");
+        assert_eq!(payload, None);
     }
 }
 
@@ -2545,7 +2764,7 @@ fn exec_call_inner(
     match &sig.body {
         FunctionBody::User { statements } => {
             let domains = function_effect_domains(sig, program);
-            with_effect_scope(files, &domains, |files| {
+            let result = with_effect_scope(files, &domains, |files| {
                 if charge_fuel {
                     files.consume_fuel(1)?;
                 }
@@ -2568,7 +2787,17 @@ fn exec_call_inner(
                     );
                 }
                 Ok(RuntimeValue::Void)
-            })
+            });
+            match result {
+                Ok(value) => Ok(value),
+                Err(error) if is_try_propagation(&error) => {
+                    take_try_propagation().context("E-TRY-004: missing propagated try value")
+                }
+                Err(error) => {
+                    clear_try_propagation();
+                    Err(error)
+                }
+            }
         }
         FunctionBody::Wasm { import, wasm_args } => {
             let domains = function_effect_domains(sig, program);

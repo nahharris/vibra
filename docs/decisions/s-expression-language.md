@@ -292,6 +292,7 @@ expr = atom
      | "(", "range", expr, expr, expr, ")"
      | "(", "convert", expr, type-expr, literal, ")"
      | "(", "cast", expr, type-expr, ")"
+     | "(", "try", expr, ")"
      | "(", "task", captures, body, ")"
      | "(", "spawn", symbol, captures, expr, ")"
      | "(", "join", symbol, symbol, ")" ;
@@ -316,6 +317,59 @@ operations (`add`, `equal`, `not`, and peers), enum constructors, imported
 functions, inherent operations, and interface dispatch all use ordinary call
 syntax.
 
+### Result and option propagation
+
+`(try expr)` is the one canonical propagation form. It has exactly one
+operand; `?` suffixes, reader macros, and other operator spellings are not
+part of the language. For a `(result u err)` operand, the enclosing function
+must return `(result t err)` with the identical error type. Success continues
+with the operand's `u` value; an error returns from the enclosing function
+unchanged. An operand whose error type differs requires an explicit conversion
+call before propagation; Vibra does not infer an `into`-style conversion at a
+`try` site.
+
+The same form applies to options: `(try expr)` accepts an `(option u)` operand
+only inside a function returning `(option t)`. `some` continues with its
+payload, while `none` propagates from the enclosing option-returning function.
+The result and option kinds cannot be mixed.
+
+Propagation is also result handling for the unhandled-result/option rule in
+issue #247. A result or option consumed by `(try ...)` is therefore not an
+unhandled statement value; no second `match` is required merely to satisfy
+that diagnostic.
+
+`try` does not cross a structured task or spawned-computation boundary. Those
+sites are rejected instead of attempting to return through a computation that
+owns a different control-flow scope. This is a boundary rule, not automatic
+cleanup: host handles are still closed only by explicit operations such as
+`stream.manage.close`. Early propagation can therefore expose the same
+pre-existing handle leak as any other early return; handle lifecycle is owned
+by issue #255. The async runtime has scope open/close machinery, but no
+user-facing scope form currently connects it to this language contract, so
+`try` promises no additional scope teardown.
+
+#### Corpus measurement for issue #248
+
+The `examples/fs-roundtrip.vib` migration is measured mechanically from the
+source file: physical lines, `match` forms, maximum simultaneously open
+`match` forms, and explicit error-conversion calls. An error-conversion call
+means a call such as `fs.stream-error` that changes one error type into
+another; result constructors do not count.
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Physical lines | 36 | 31 |
+| `match` forms | 3 | 1 |
+| Maximum nested `match` depth | 2 | 1 |
+| Explicit error-conversion calls | 0 | 0 |
+
+The migrated helper has two `try` sites, both using `fs-error` directly, so
+the explicit conversion frequency is `0/2` among its propagation sites. This
+single example does not establish a corpus-wide conversion rate; it records
+only the observable cost of this migration.
+
+### Unhandled result and option values
+
 The stdlib `result` and `option` types are fallible values. A value of either
 type in non-final statement position must be handled with `match` or retained
 by `let`/`let-as`; otherwise the compiler emits `W-RESULT-001`. The final
@@ -324,7 +378,6 @@ values and are exempt. Intentional disposal uses the existing wildcard binder,
 for example `(let _ (stream.write.string out text))`. A named `let` or match
 `(bind name)` that is never read emits the distinct `W-BIND-001`; a read on any
 match arm counts as a read.
-
 Dropping the `$` sigil makes a primitive name syntactically indistinguishable
 from a user function of the same name, which the legacy `$`-prefixed table
 never had to resolve. The adopted rule: an unqualified call head matching one

@@ -740,6 +740,7 @@ fn collect_expr_calls(expr: &Expr, edges: &mut BTreeSet<String>) {
     match expr {
         Expr::Call { call, .. } => collect_call(call, edges),
         Expr::Mutable(value) | Expr::Cast { from: value, .. } => collect_expr_calls(value, edges),
+        Expr::Try { inner, .. } => collect_expr_calls(inner, edges),
         Expr::Reference { target, .. } => collect_expr_calls(target, edges),
         Expr::Primitive { args, .. } | Expr::Tuple(args) | Expr::Array(args) => {
             for argument in args {

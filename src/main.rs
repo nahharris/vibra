@@ -1263,6 +1263,9 @@ fn collect_expr_details(
         Expr::Mutable(value) | Expr::Cast { from: value, .. } => {
             collect_expr_details(source, value, primitive_names, primitives)?
         }
+        Expr::Try { inner, .. } => {
+            collect_expr_details(source, inner, primitive_names, primitives)?
+        }
         Expr::Reference { target, .. } => {
             collect_expr_details(source, target, primitive_names, primitives)?
         }

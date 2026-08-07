@@ -401,6 +401,7 @@ fn visit_expr(expr: &Expr, context: &DocContext<'_>, facts: &mut Vec<SemanticFac
             visit_expr(value, context, facts);
         }
         ExprKind::Set { value, .. } => visit_expr(value, context, facts),
+        ExprKind::Try(value) => visit_expr(value, context, facts),
         ExprKind::Return(value) => {
             if let Some(value) = value {
                 visit_expr(value, context, facts);

@@ -1226,6 +1226,7 @@ struct FunctionCompiler<'a, 'b> {
     function: Function,
     locals: HashMap<String, u32>,
     match_temp: u32,
+    try_temp: u32,
     next_shadow: u32,
     is_main: bool,
     scope_id: Option<u32>,
@@ -1271,6 +1272,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         }
         let match_temp = next;
         next += 1;
+        let try_temp = next;
+        next += 1;
         let next_shadow = next;
         next += count_pattern_bindings(statements) as u32;
         let mut for_temps = Vec::new();
@@ -1291,6 +1294,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             }),
             locals,
             match_temp,
+            try_temp,
             next_shadow,
             is_main,
             scope_id,
@@ -1572,6 +1576,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     .instruction(&Instruction::LocalGet(self.locals[name]));
                 self.function.instruction(&Instruction::Call(HOST_READ));
             }
+            Expr::Try { inner, kind } => self.emit_try(inner, kind),
             Expr::Call { call, .. } => self.emit_call(call),
             Expr::If {
                 cond,
@@ -1610,6 +1615,46 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     .instruction(&Instruction::Call(HOST_CONSTRUCT));
             }
         }
+    }
+
+    fn emit_try(&mut self, inner: &Expr, kind: &crate::lower::TryKind) {
+        self.emit_expr(inner);
+        self.function
+            .instruction(&Instruction::LocalSet(self.try_temp));
+
+        let payload = match kind {
+            crate::lower::TryKind::Result { value_type, .. }
+            | crate::lower::TryKind::Option { value_type, .. } => *value_type != TypeRef::Void,
+        };
+        let pattern = try_success_pattern(kind, payload);
+        let pattern_id = self.compiler.pattern_id(pattern);
+        self.function
+            .instruction(&Instruction::I32Const(pattern_id as i32));
+        self.function
+            .instruction(&Instruction::LocalGet(self.try_temp));
+        self.function.instruction(&Instruction::Call(HOST_MATCH));
+        self.function
+            .instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+        if payload {
+            self.function.instruction(&Instruction::I32Const(0));
+            self.function.instruction(&Instruction::Call(HOST_BINDING));
+        } else {
+            self.emit_const_value(RuntimeValue::Void);
+        }
+        self.function.instruction(&Instruction::Else);
+        self.emit_try_propagation_return();
+        self.function.instruction(&Instruction::End);
+    }
+
+    fn emit_try_propagation_return(&mut self) {
+        self.emit_scope_exit();
+        self.function
+            .instruction(&Instruction::LocalGet(self.try_temp));
+        if self.is_main {
+            self.function.instruction(&Instruction::Drop);
+            self.function.instruction(&Instruction::Call(HOST_STATUS));
+        }
+        self.function.instruction(&Instruction::Return);
     }
     fn emit_raw_if_place(&mut self, expr: &Expr) {
         if let Expr::VarRef(name) = expr {
@@ -1731,11 +1776,24 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
     }
 }
 
+fn try_success_pattern(kind: &crate::lower::TryKind, payload: bool) -> Pattern {
+    let (enum_key, tag) = match kind {
+        crate::lower::TryKind::Result { enum_key, .. } => (enum_key, "ok"),
+        crate::lower::TryKind::Option { enum_key, .. } => (enum_key, "some"),
+    };
+    Pattern::Enum {
+        enum_key: enum_key.clone(),
+        tag: tag.into(),
+        payload: payload.then(|| Box::new(Pattern::Bind("__vibra_try_payload".into()))),
+    }
+}
+
 fn expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::Mutable(v) | Expr::Cast { from: v, .. } => {
             vec![v]
         }
+        Expr::Try { inner, .. } => vec![inner],
         Expr::Reference { target, .. } => vec![target],
         Expr::EnumConstructor { payload, .. } => payload.iter().map(|v| v.as_ref()).collect(),
         Expr::Record(fields) => fields.values().collect(),
@@ -2168,6 +2226,62 @@ mod tests {
                 ..
             } if import.module == ABI_MODULE
         )));
+    }
+
+    #[test]
+    fn wasm_try_unwraps_success_and_propagates_original_enum_value() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let result = root.join("stdlib/src/result.vib").display().to_string();
+        let option = root.join("stdlib/src/option.vib").display().to_string();
+        let test = root.join("stdlib/src/test.vib").display().to_string();
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("entry.vib");
+        std::fs::write(
+            &entry,
+            format!(
+                r#"(import result "{result}")
+(import option "{option}")
+(import test "{test}")
+(defn result-success () (result.result int64 str)
+  (do
+    (let value (try (result.from-ok int64 str 17)))
+    (return (result.from-ok int64 str value))))
+(defn result-error () (result.result int64 str)
+  (do
+    (let value (try (result.from-err int64 str "boom")))
+    (return (result.from-ok int64 str value))))
+(defn option-some () (option.option int64)
+  (do
+    (let value (try (option.from-value int64 23)))
+    (return (option.from-value int64 value))))
+(defn option-none () (option.option int64)
+  (do
+    (let value (try (option.empty int64 false)))
+    (return (option.from-value int64 value))))
+(defn main () void
+  (do
+    (match (result-success)
+      (result.result.ok (bind value)) (test.assert-eq-int value 17)
+      _ (test.fail "result success was not unwrapped"))
+    (match (result-error)
+      (result.result.err (bind error)) (test.assert-eq-str error "boom")
+      _ (test.fail "result error was not propagated"))
+    (match (option-some)
+      (option.option.some (bind value)) (test.assert-eq-int value 23)
+      _ (test.fail "option some was not unwrapped"))
+    (match (option-none)
+      (option.option.none) (test.assert true)
+      _ (test.fail "option none was not propagated"))))
+"#,
+                result = result.replace('\\', "/"),
+                option = option.replace('\\', "/"),
+                test = test.replace('\\', "/"),
+            ),
+        )
+        .unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        let program = crate::lower::lower_program(&loaded).unwrap();
+        run_lowered(&program, &RunConfig::default()).unwrap();
     }
 
     #[test]
