@@ -656,6 +656,12 @@ fn with_effect_scope<T>(
     }
 }
 
+#[derive(Debug)]
+enum EvalOutcome<T> {
+    Value(T),
+    Return(RuntimeValue),
+}
+
 pub(crate) fn eval_expr(
     expr: &Expr,
     env: &HashMap<String, RuntimeValue>,
@@ -663,11 +669,36 @@ pub(crate) fn eval_expr(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
+    match eval_expr_flow(expr, env, program, files, config)? {
+        EvalOutcome::Value(value) => Ok(value),
+        EvalOutcome::Return(_) => {
+            bail!("E-TRY-004: `(try ...)` escaped its enclosing user function")
+        }
+    }
+}
+
+fn eval_expr_flow(
+    expr: &Expr,
+    env: &HashMap<String, RuntimeValue>,
+    program: &LoweredProgram,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<EvalOutcome<RuntimeValue>> {
+    macro_rules! eval_value {
+        ($expr:expr) => {
+            match eval_expr_flow($expr, env, program, files, config)? {
+                EvalOutcome::Value(value) => value,
+                EvalOutcome::Return(value) => return Ok(EvalOutcome::Return(value)),
+            }
+        };
+    }
+
     match expr {
-        Expr::Value(v) => Ok(v.clone()),
+        Expr::Value(v) => Ok(EvalOutcome::Value(v.clone())),
         Expr::VarRef(v) => env
             .get(v)
             .map(read_place_value)
+            .map(EvalOutcome::Value)
             .with_context(|| format!("unknown variable `${v}`")),
         Expr::Mutable(inner) => {
             if let Expr::VarRef(name) = inner.as_ref() {
@@ -677,13 +708,15 @@ pub(crate) fn eval_expr(
                         | RuntimeValue::Reference {
                             cell,
                             mutable: true,
-                        } => return Ok(RuntimeValue::Mutable(cell.clone())),
+                        } => return Ok(EvalOutcome::Value(RuntimeValue::Mutable(cell.clone()))),
                         _ => {}
                     }
                 }
             }
-            let value = eval_expr(inner, env, program, files, config)?;
-            Ok(RuntimeValue::Mutable(Rc::new(RefCell::new(value))))
+            let value = eval_value!(inner);
+            Ok(EvalOutcome::Value(RuntimeValue::Mutable(Rc::new(
+                RefCell::new(value),
+            ))))
         }
         Expr::Reference { target, mutable } => {
             let cell = if let Expr::VarRef(name) = target.as_ref() {
@@ -697,27 +730,27 @@ pub(crate) fn eval_expr(
                     value => Rc::new(RefCell::new(value.clone())),
                 }
             } else {
-                match eval_expr(target, env, program, files, config)? {
+                match eval_value!(target) {
                     RuntimeValue::Mutable(cell) | RuntimeValue::Reference { cell, .. } => cell,
                     value => Rc::new(RefCell::new(value)),
                 }
             };
-            Ok(RuntimeValue::Reference {
+            Ok(EvalOutcome::Value(RuntimeValue::Reference {
                 cell,
                 mutable: *mutable,
-            })
+            }))
         }
-        Expr::Call { call, .. } => exec_call(call, program, env, files, config),
+        Expr::Call { call, .. } => exec_call_flow(call, program, env, files, config),
         Expr::HostCall {
             import,
             args,
             return_type,
             intrinsic,
         } => {
-            let values = args
-                .iter()
-                .map(|arg| eval_expr(arg, env, program, files, config))
-                .collect::<Result<Vec<_>>>()?;
+            let mut values = Vec::with_capacity(args.len());
+            for arg in args {
+                values.push(eval_value!(arg));
+            }
             let entry =
                 crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
                     format!(
@@ -749,13 +782,13 @@ pub(crate) fn eval_expr(
                 other => bail!("unsupported host module `{other}`"),
             }?;
             if *intrinsic {
-                Ok(mint_validated_host_result(
+                Ok(EvalOutcome::Value(mint_validated_host_result(
                     result,
                     return_type,
                     &program.type_aliases,
-                ))
+                )))
             } else {
-                Ok(result)
+                Ok(EvalOutcome::Value(result))
             }
         }
         Expr::Primitive {
@@ -764,52 +797,63 @@ pub(crate) fn eval_expr(
             operand_type,
             return_type,
         } => {
-            let values = args
-                .iter()
-                .map(|arg| eval_expr(arg, env, program, files, config))
-                .collect::<Result<Vec<_>>>()?;
-            eval_primitive(*op, operand_type, return_type, &values)
+            let mut values = Vec::with_capacity(args.len());
+            for arg in args {
+                values.push(eval_value!(arg));
+            }
+            Ok(EvalOutcome::Value(eval_primitive(
+                *op,
+                operand_type,
+                return_type,
+                &values,
+            )?))
         }
-        Expr::Cast { from, target } => Ok(RuntimeValue::Typed {
+        Expr::Cast { from, target } => Ok(EvalOutcome::Value(RuntimeValue::Typed {
             type_ref: target.clone(),
-            value: Box::new(eval_expr(from, env, program, files, config)?),
-        }),
+            value: Box::new(eval_value!(from)),
+        })),
+        Expr::Try { inner, kind } => eval_try(kind, eval_value!(inner)),
         Expr::EnumConstructor {
             enum_key,
             tag,
             payload,
         } => {
-            let payload_value = payload
-                .as_ref()
-                .map(|p| eval_expr(p, env, program, files, config))
-                .transpose()?
-                .map(Box::new);
-            Ok(RuntimeValue::Enum {
+            let payload_value = match payload.as_ref() {
+                Some(payload) => Some(Box::new(eval_value!(payload))),
+                None => None,
+            };
+            Ok(EvalOutcome::Value(RuntimeValue::Enum {
                 enum_key: enum_key.clone(),
                 tag: tag.clone(),
                 payload: payload_value,
-            })
+            }))
         }
-        Expr::Record(fields) => fields
-            .iter()
-            .map(|(name, expr)| Ok((name.clone(), eval_expr(expr, env, program, files, config)?)))
-            .collect::<Result<std::collections::BTreeMap<_, _>>>()
-            .map(RuntimeValue::Record),
-        Expr::Tuple(items) => items
-            .iter()
-            .map(|expr| eval_expr(expr, env, program, files, config))
-            .collect::<Result<Vec<_>>>()
-            .map(RuntimeValue::Tuple),
-        Expr::Array(items) => items
-            .iter()
-            .map(|expr| eval_expr(expr, env, program, files, config))
-            .collect::<Result<Vec<_>>>()
-            .map(RuntimeValue::Array),
+        Expr::Record(fields) => {
+            let mut values = BTreeMap::new();
+            for (name, expr) in fields {
+                values.insert(name.clone(), eval_value!(expr));
+            }
+            Ok(EvalOutcome::Value(RuntimeValue::Record(values)))
+        }
+        Expr::Tuple(items) => {
+            let mut values = Vec::with_capacity(items.len());
+            for expr in items {
+                values.push(eval_value!(expr));
+            }
+            Ok(EvalOutcome::Value(RuntimeValue::Tuple(values)))
+        }
+        Expr::Array(items) => {
+            let mut values = Vec::with_capacity(items.len());
+            for expr in items {
+                values.push(eval_value!(expr));
+            }
+            Ok(EvalOutcome::Value(RuntimeValue::Array(values)))
+        }
         Expr::Map(items) => {
             let mut values: Vec<(RuntimeValue, RuntimeValue)> = Vec::with_capacity(items.len());
             for (key, value) in items {
-                let key = eval_expr(key, env, program, files, config)?;
-                let value = eval_expr(value, env, program, files, config)?;
+                let key = eval_value!(key);
+                let value = eval_value!(value);
                 // Map literals have the same deterministic upsert rule as the
                 // public API: the first key fixes order and the last value wins.
                 if let Some((_, current)) = values
@@ -821,26 +865,45 @@ pub(crate) fn eval_expr(
                     values.push((key, value));
                 }
             }
-            Ok(RuntimeValue::Map(values))
+            Ok(EvalOutcome::Value(RuntimeValue::Map(values)))
         }
         Expr::Range { start, end, step } => {
-            let start = value_i64(&eval_expr(start, env, program, files, config)?)?;
-            let end = value_i64(&eval_expr(end, env, program, files, config)?)?;
-            let step = value_i64(&eval_expr(step, env, program, files, config)?)?;
+            let start = value_i64(&eval_value!(start))?;
+            let end = value_i64(&eval_value!(end))?;
+            let step = value_i64(&eval_value!(step))?;
             if step == 0 {
                 bail!("E-ITER-002: `$range.step` must not be zero");
             }
-            Ok(RuntimeValue::Range { start, end, step })
+            Ok(EvalOutcome::Value(RuntimeValue::Range { start, end, step }))
         }
         Expr::If {
             cond,
             then_e,
             else_e,
-        } => match eval_expr(cond, env, program, files, config)? {
-            RuntimeValue::Bool(true) => eval_expr(then_e, env, program, files, config),
-            RuntimeValue::Bool(false) => eval_expr(else_e, env, program, files, config),
+        } => match eval_value!(cond) {
+            RuntimeValue::Bool(true) => eval_expr_flow(then_e, env, program, files, config),
+            RuntimeValue::Bool(false) => eval_expr_flow(else_e, env, program, files, config),
             other => bail!("`$if` condition must be `$bool`, got {other:?}"),
         },
+    }
+}
+
+fn eval_try(
+    kind: &crate::lower::TryKind,
+    value: RuntimeValue,
+) -> Result<EvalOutcome<RuntimeValue>> {
+    let RuntimeValue::Enum { tag, payload, .. } = untyped(&value) else {
+        bail!("E-TRY-001: `(try ...)` operand did not evaluate to an enum")
+    };
+
+    match (kind, tag.as_str()) {
+        (crate::lower::TryKind::Result { .. }, "ok")
+        | (crate::lower::TryKind::Option { .. }, "some") => Ok(EvalOutcome::Value(
+            payload.as_deref().cloned().unwrap_or(RuntimeValue::Void),
+        )),
+        (crate::lower::TryKind::Result { .. }, "err")
+        | (crate::lower::TryKind::Option { .. }, "none") => Ok(EvalOutcome::Return(value)),
+        _ => bail!("E-TRY-001: `(try ...)` operand had an invalid fallible tag `{tag}`"),
     }
 }
 
@@ -1166,27 +1229,37 @@ fn exec_statement(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<ExecFlow> {
+    macro_rules! eval_statement_value {
+        ($expr:expr) => {
+            match eval_expr_flow($expr, env, program, files, config)? {
+                EvalOutcome::Value(value) => value,
+                EvalOutcome::Return(value) => return Ok(ExecFlow::Return(value)),
+            }
+        };
+    }
+
     match stmt {
-        Statement::Return(expr) => Ok(ExecFlow::Return(eval_expr(
-            expr, env, program, files, config,
-        )?)),
-        Statement::Call(call) => {
-            let _ = exec_call(call, program, env, files, config)?;
-            Ok(ExecFlow::Next)
-        }
+        Statement::Return(expr) => Ok(ExecFlow::Return(eval_statement_value!(expr))),
+        Statement::Call(call) => match exec_call_flow(call, program, env, files, config)? {
+            EvalOutcome::Value(_) => Ok(ExecFlow::Next),
+            EvalOutcome::Return(value) => Ok(ExecFlow::Return(value)),
+        },
         Statement::Let {
             var,
             value: binding,
         } => {
             let value = match binding {
-                LetValue::Call(c) => exec_call(c, program, env, files, config)?,
-                LetValue::Expr(e) => eval_expr(e, env, program, files, config)?,
+                LetValue::Call(c) => match exec_call_flow(c, program, env, files, config)? {
+                    EvalOutcome::Value(value) => value,
+                    EvalOutcome::Return(value) => return Ok(ExecFlow::Return(value)),
+                },
+                LetValue::Expr(e) => eval_statement_value!(e),
             };
             env.insert(var.clone(), value);
             Ok(ExecFlow::Next)
         }
         Statement::Set { var, value } => {
-            let next = eval_expr(value, env, program, files, config)?;
+            let next = eval_statement_value!(value);
             let target = env
                 .get(var)
                 .with_context(|| format!("E-SET-002: unknown `$set` target `{var}`"))?;
@@ -1203,7 +1276,7 @@ fn exec_statement(
             }
         }
         Statement::Match { target, arms } => {
-            let value = eval_expr(target, env, program, files, config)?;
+            let value = eval_statement_value!(target);
             for arm in arms {
                 let mut scoped = env.clone();
                 if pattern_matches(&arm.pattern, &value, program, &mut scoped)? {
@@ -1213,20 +1286,20 @@ fn exec_statement(
             bail!("non-exhaustive $match reached runtime with value `{value:?}`")
         }
         Statement::Eval(expr) => {
-            eval_expr(expr, env, program, files, config)?;
+            let _ = eval_statement_value!(expr);
             Ok(ExecFlow::Next)
         }
         Statement::If {
             cond,
             then_body,
             else_body,
-        } => match eval_expr(cond, env, program, files, config)? {
+        } => match eval_statement_value!(cond) {
             RuntimeValue::Bool(true) => run_block(then_body, program, env, files, config),
             RuntimeValue::Bool(false) => run_block(else_body, program, env, files, config),
             other => bail!("`$if` condition must be `$bool`, got {other:?}"),
         },
         Statement::While { cond, body } => loop {
-            match eval_expr(cond, env, program, files, config)? {
+            match eval_statement_value!(cond) {
                 RuntimeValue::Bool(true) => match run_block(body, program, env, files, config)? {
                     ExecFlow::Next | ExecFlow::Continue => {}
                     ExecFlow::Break => return Ok(ExecFlow::Next),
@@ -1237,7 +1310,7 @@ fn exec_statement(
             }
         },
         Statement::For { var, source, body } => {
-            let source = eval_expr(source, env, program, files, config)?;
+            let source = eval_statement_value!(source);
             let items = iteration_items(source, config.max_alloc_len)?;
             for item in items {
                 let mut scoped = env.clone();
@@ -1282,10 +1355,18 @@ fn exec_statement(
                     .with_context(|| format!("E-TASK-001: missing captured value `{name}`"))?;
                 child.insert(name.clone(), value.clone());
             }
-            let result =
-                with_effect_scope(files, &expression_effect_domains(value, program), |files| {
-                    eval_expr(value, &child, program, files, config)
-                })?;
+            let result = with_effect_scope(
+                files,
+                &expression_effect_domains(value, program),
+                |files| {
+                    match eval_expr_flow(value, &child, program, files, config)? {
+                        EvalOutcome::Value(value) => Ok(value),
+                        EvalOutcome::Return(_) => bail!(
+                            "E-TRY-004: `(try ...)` cannot propagate across a spawned computation boundary"
+                        ),
+                    }
+                },
+            )?;
             let id = SOURCE_TASKS.with(|tasks| tasks.borrow_mut().spawn(result))?;
             env.insert(handle.clone(), RuntimeValue::JoinHandle(id));
             Ok(ExecFlow::Next)
@@ -2067,16 +2148,34 @@ pub(crate) fn exec_call(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
+    match exec_call_flow(call, program, env, files, config)? {
+        EvalOutcome::Value(value) => Ok(value),
+        EvalOutcome::Return(_) => {
+            bail!("E-TRY-004: `(try ...)` escaped its enclosing user function")
+        }
+    }
+}
+
+fn exec_call_flow(
+    call: &Call,
+    program: &LoweredProgram,
+    env: &HashMap<String, RuntimeValue>,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<EvalOutcome<RuntimeValue>> {
     let sig = program
         .functions
         .get(&call.callee_key)
         .with_context(|| format!("missing function `{}`", call.callee_key))?;
-    let evaluated_args = evaluate_call_arguments(call, env, program, files, config)?;
+    let evaluated_args = match evaluate_call_arguments(call, env, program, files, config)? {
+        EvalOutcome::Value(values) => values,
+        EvalOutcome::Return(value) => return Ok(EvalOutcome::Return(value)),
+    };
 
     match &sig.body {
         FunctionBody::User { statements } => {
             let domains = function_effect_domains(sig, program);
-            with_effect_scope(files, &domains, |files| {
+            let value = with_effect_scope(files, &domains, |files| {
                 let mut fn_env: HashMap<String, RuntimeValue> = HashMap::new();
                 for (idx, parameter) in sig.parameters.iter().enumerate() {
                     let val = evaluated_args[idx].clone();
@@ -2096,11 +2195,12 @@ pub(crate) fn exec_call(
                     );
                 }
                 Ok(RuntimeValue::Void)
-            })
+            })?;
+            Ok(EvalOutcome::Value(value))
         }
         FunctionBody::Wasm { import, wasm_args } => {
             let domains = function_effect_domains(sig, program);
-            with_effect_scope(files, &domains, |files| {
+            let value = with_effect_scope(files, &domains, |files| {
                 let entry =
                     crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
                         format!(
@@ -2143,7 +2243,8 @@ pub(crate) fn exec_call(
                     "vibra_test" => exec_vibra_test(entry.name, &host_args),
                     other => bail!("unsupported host module `{other}`"),
                 }
-            })
+            })?;
+            Ok(EvalOutcome::Value(value))
         }
     }
 }
@@ -2154,13 +2255,16 @@ fn evaluate_call_arguments(
     program: &LoweredProgram,
     files: &mut FileTable,
     config: &RunConfig,
-) -> Result<Vec<RuntimeValue>> {
+) -> Result<EvalOutcome<Vec<RuntimeValue>>> {
     if call.source_args.is_empty() {
-        return call
-            .args
-            .iter()
-            .map(|argument| eval_expr(argument, env, program, files, config))
-            .collect();
+        let mut values = Vec::with_capacity(call.args.len());
+        for argument in &call.args {
+            match eval_expr_flow(argument, env, program, files, config)? {
+                EvalOutcome::Value(value) => values.push(value),
+                EvalOutcome::Return(value) => return Ok(EvalOutcome::Return(value)),
+            }
+        }
+        return Ok(EvalOutcome::Value(values));
     }
     let fixed_count = call
         .argument_targets
@@ -2178,7 +2282,10 @@ fn evaluate_call_arguments(
     let mut fixed = vec![None; fixed_count];
     let mut variadic = Vec::new();
     for (argument, target) in call.source_args.iter().zip(&call.argument_targets) {
-        let value = eval_expr(argument, env, program, files, config)?;
+        let value = match eval_expr_flow(argument, env, program, files, config)? {
+            EvalOutcome::Value(value) => value,
+            EvalOutcome::Return(value) => return Ok(EvalOutcome::Return(value)),
+        };
         match target {
             crate::lower::CallArgumentTarget::Fixed(index) => fixed[*index] = Some(value),
             crate::lower::CallArgumentTarget::Variadic => variadic.push(value),
@@ -2194,7 +2301,7 @@ fn evaluate_call_arguments(
     if has_variadic {
         result.push(RuntimeValue::Array(variadic));
     }
-    Ok(result)
+    Ok(EvalOutcome::Value(result))
 }
 
 fn exec_vibra_v1(
@@ -3790,6 +3897,139 @@ mod collection_tests {
         let loaded = crate::load::load_program(&entry).unwrap();
         let lowered = crate::lower::lower_program(&loaded).unwrap();
         run_lowered_interpreted(&lowered, &RunConfig::default()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod try_tests {
+    use super::*;
+
+    fn stdlib_path(name: &str) -> String {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("stdlib/src/{name}.vib"))
+            .display()
+            .to_string()
+            .replace('\\', "/")
+    }
+
+    fn lower(source: &str) -> (tempfile::TempDir, LoweredProgram) {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.vib");
+        std::fs::write(&entry, source).unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        let lowered = crate::lower::lower_program(&loaded).unwrap();
+        (dir, lowered)
+    }
+
+    fn call_zero_args(program: &LoweredProgram, callee_key: &str) -> RuntimeValue {
+        let call = Call {
+            callee_key: callee_key.to_string(),
+            type_args: Vec::new(),
+            args: Vec::new(),
+            source_args: Vec::new(),
+            argument_targets: Vec::new(),
+        };
+        let mut files = FileTable::new(RunConfig::default().max_open_files);
+        let value = exec_call(
+            &call,
+            program,
+            &HashMap::new(),
+            &mut files,
+            &RunConfig::default(),
+        )
+        .unwrap();
+        value
+    }
+
+    fn enum_value(value: RuntimeValue) -> (String, String, Option<RuntimeValue>) {
+        let RuntimeValue::Enum {
+            enum_key,
+            tag,
+            payload,
+        } = value
+        else {
+            panic!("expected enum value, got {value:?}");
+        };
+        (enum_key, tag, payload.map(|payload| *payload))
+    }
+
+    #[test]
+    fn try_unwraps_result_success_payload() {
+        let source = format!(
+            r#"(import result "{result}")
+(defn result-success () (result.result int64 str)
+  (do
+    (let value (try (result.from-ok int64 str 17)))
+    (return (result.from-ok int64 str value))))
+(defn main () void (do))
+"#,
+            result = stdlib_path("result")
+        );
+        let (_dir, program) = lower(&source);
+
+        let (_enum_key, tag, payload) = enum_value(call_zero_args(&program, "result-success"));
+        assert_eq!(tag, "ok");
+        assert_eq!(payload, Some(RuntimeValue::Int(17)));
+    }
+
+    #[test]
+    fn try_propagates_result_error_through_nested_if() {
+        let source = format!(
+            r#"(import result "{result}")
+(defn result-error () (result.result int64 str)
+  (do
+    (if true
+      (do
+        (let value (try (result.from-err int64 str "boom")))
+        (return (result.from-ok int64 str value)))
+      (do (return (result.from-ok int64 str 99))))))
+(defn main () void (do))
+"#,
+            result = stdlib_path("result")
+        );
+        let (_dir, program) = lower(&source);
+
+        let (_enum_key, tag, payload) = enum_value(call_zero_args(&program, "result-error"));
+        assert_eq!(tag, "err");
+        assert_eq!(payload, Some(RuntimeValue::Str("boom".to_string())));
+    }
+
+    #[test]
+    fn try_unwraps_option_some_payload() {
+        let source = format!(
+            r#"(import option "{option}")
+(defn option-some () (option.option int64)
+  (do
+    (let value (try (option.from-value int64 23)))
+    (return (option.from-value int64 value))))
+(defn main () void (do))
+"#,
+            option = stdlib_path("option")
+        );
+        let (_dir, program) = lower(&source);
+
+        let (_enum_key, tag, payload) = enum_value(call_zero_args(&program, "option-some"));
+        assert_eq!(tag, "some");
+        assert_eq!(payload, Some(RuntimeValue::Int(23)));
+    }
+
+    #[test]
+    fn try_propagates_option_none() {
+        let source = format!(
+            r#"(import option "{option}")
+(defn option-none () (option.option int64)
+  (do
+    (let value (try (option.empty int64 false)))
+    (return (option.from-value int64 value))))
+(defn main () void (do))
+"#,
+            option = stdlib_path("option")
+        );
+        let (_dir, program) = lower(&source);
+
+        let (_enum_key, tag, payload) = enum_value(call_zero_args(&program, "option-none"));
+        assert_eq!(tag, "none");
+        assert_eq!(payload, None);
     }
 }
 
