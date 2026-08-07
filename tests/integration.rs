@@ -6023,6 +6023,45 @@ fn vibra_lint_json_and_sarif_outputs_are_explicit() {
 }
 
 #[test]
+fn vibra_lint_sarif_reports_handle_lifecycle_related_location() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("handle.vib");
+    std::fs::write(
+        &source,
+        "(defn main (resource (handle @write)) void (do (stream.manage.close resource) (stream.write.string resource \"late\")))\n",
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "style",
+            "--format",
+            "sarif",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "warning-only lifecycle lint failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let result = &report["runs"][0]["results"][0];
+    assert_eq!(result["ruleId"], "W-HANDLE-001");
+    assert_eq!(result["level"], "warning");
+    assert_eq!(result["relatedLocations"][0]["id"], 0);
+    assert!(result["relatedLocations"][0]["physicalLocation"].is_object());
+    assert_eq!(
+        report["runs"][0]["tool"]["driver"]["rules"][0]["shortDescription"]["text"],
+        "Handle binding is used after a same-binding close"
+    );
+}
+
+#[test]
 fn vibra_lint_sarif_preserves_scope_related_locations_and_rule_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("scope.vib");
