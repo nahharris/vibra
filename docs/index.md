@@ -2,7 +2,7 @@
 title: Vibra Documentation Index
 category: index
 status: current
-updated: 2026-08-02
+updated: 2026-08-07
 ---
 
 # Vibra documentation
@@ -99,6 +99,7 @@ language contracts. Machine-readable fixtures remain under
 
 - [Retired YAML-surface draft](archive/yaml-surface-draft.md)
 - [Reverted capability-host ABI design](archive/capability-host-abi-design.md)
+- [Archived capability and policy grammar](archive/capability-policy-grammar.md)
 - [S-expression migration handoff](archive/2026-07-25-s-expression-handoff.md)
 - [Dependency-solver vectors](test-vectors/dependency-solver-vectors.json)
 

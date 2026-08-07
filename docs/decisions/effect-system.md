@@ -13,7 +13,7 @@ Calls contribute the exact union of the callee's declared ceiling. There is no
 dependency-closure pass, compound-effect declaration, or runtime permission
 value.
 
-```lisp
+```text
 (deffect read
   (defn open (path path) (result reader fs-error)
     (intrinsic @fs-open-read path)
