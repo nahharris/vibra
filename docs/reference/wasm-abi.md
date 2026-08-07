@@ -68,7 +68,7 @@ Opaque host handles are valid only in the program instance that minted them;
 copying the value does not duplicate the underlying resource or its authority.
 Dynamic resources have one explicit close transition. The first close releases
 the resource immediately. Duplicate close and every operation through an alias
-after close return `fs-error.resource-closed`; a never-minted handle returns
+after close return `stream.error.resource-closed`; a never-minted handle returns
 `fs-error.invalid-handle`. Standard streams are borrowed from the process:
 close is a no-op and cannot revoke them. Stdin is a singleton per instance, so
 repeated access cannot grow the handle table.

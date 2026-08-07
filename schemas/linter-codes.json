@@ -268,6 +268,16 @@
       "summary": "Declaration includes nominal effects not inferred from its body; extra declarations warn while roots may subsume leaves"
     },
     {
+      "code": "W-HANDLE-001",
+      "severity": "warning",
+      "summary": "Handle binding is used after a same-binding close on the current control-flow path"
+    },
+    {
+      "code": "W-HANDLE-002",
+      "severity": "warning",
+      "summary": "Handle binding is closed more than once on the current control-flow path"
+    },
+    {
       "code": "E-WASM-001",
       "severity": "error",
       "summary": "$wasm encoding does not match active compiler WASM mode"
