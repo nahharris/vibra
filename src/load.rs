@@ -16,6 +16,7 @@
 //! extension outright (`E-SYN-012`) before this module ever sees it.
 
 use crate::ast;
+use crate::body_semantics::{self, BodySource};
 use crate::frontend::{self, SourceModule, SurfaceProgram};
 use crate::legacy_value::{Mapping, Value};
 use crate::surface_adapter::{self, LocalSignatures};
@@ -31,6 +32,9 @@ pub struct LoadedProgram {
     pub entry: PathBuf,
     pub modules: HashMap<PathBuf, Value>,
     pub module_parts: HashMap<PathBuf, Vec<PathBuf>>,
+    /// Source origins for lowered function and test bodies, keyed by the same
+    /// qualified symbol names used by the legacy lowering registry.
+    pub(crate) body_sources: HashMap<String, BodySource>,
     /// Canonical compile-time input path to raw-content SHA-256. This is part
     /// of the compiler fingerprint even when two inputs produce equal values.
     pub embedded_files: BTreeMap<PathBuf, String>,
@@ -118,11 +122,13 @@ pub fn load_program_with_flags(entry: &Path, flags: &CompilationFlags) -> Result
 pub fn load_legacy_yaml_program(entry: &Path, flags: &CompilationFlags) -> Result<LoadedProgram> {
     flags.validate()?;
     let surface = frontend::load_surface_program(entry, flags)?;
+    let body_sources = body_semantics::collect_body_sources(&surface);
     let modules = convert_surface_program(&surface)?;
     Ok(LoadedProgram {
         entry: surface.entry,
         modules,
         module_parts: surface.module_parts.into_iter().collect(),
+        body_sources,
         embedded_files: surface.embedded_files,
     })
 }
@@ -208,6 +214,7 @@ pub fn load_legacy_yaml_inline_program(base_dir: &Path, root: Value) -> Result<L
     let flags = CompilationFlags::default();
     let roots = inline_import_roots(&entry, &root)?;
     let surface = frontend::load_surface_program_multi_root(&roots, &flags)?;
+    let body_sources = body_semantics::collect_body_sources(&surface);
     let mut modules = convert_surface_program(&surface)?;
     modules.insert(entry.clone(), root);
     let mut module_parts: HashMap<PathBuf, Vec<PathBuf>> =
@@ -217,6 +224,7 @@ pub fn load_legacy_yaml_inline_program(base_dir: &Path, root: Value) -> Result<L
         entry,
         modules,
         module_parts,
+        body_sources,
         embedded_files: surface.embedded_files,
     })
 }

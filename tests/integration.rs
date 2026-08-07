@@ -242,11 +242,16 @@ fn lower_unhandled_fixture(main_body: &str) -> Vec<String> {
   (do (return (result.from-ok int64 str 1))))
 (defn optional () (option.option int64)
   (do (return (option.from-value int64 1))))
-(defn main () void {main_body})
+    (defn main () void {main_body})
 "#
     ));
     let loaded = vibra::load::load_program(&entry).unwrap();
-    vibra::lower::lower_program(&loaded).unwrap().warnings
+    vibra::lower::lower_program(&loaded)
+        .unwrap()
+        .warnings
+        .into_iter()
+        .filter(|warning| !warning.contains("binding `ignored-"))
+        .collect()
 }
 
 fn assert_scope_error(source: &str, label: &str) {
@@ -500,11 +505,134 @@ fn compile_diagnostics_exposes_unhandled_value_codes() {
 "#
     ));
     let diagnostics = vibra::tooling::compile_diagnostics(&entry);
-    assert_eq!(diagnostics.len(), 1, "diagnostics: {diagnostics:?}");
-    assert_eq!(diagnostics[0].code, "W-RESULT-001");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W-RESULT-001")
+        .unwrap_or_else(|| panic!("diagnostics: {diagnostics:?}"));
+    assert_eq!(diagnostic.severity, vibra::diagnostics::Severity::Warning);
+}
+
+#[test]
+fn compile_diagnostics_points_unhandled_results_and_bindings_to_source_with_fixes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let source = format!(
+        r#"(import result "{result}")
+(defn fallible () (result.result int64 str)
+  (do (return (result.from-ok int64 str 1))))
+(defn main () void
+  (do
+    (fallible)
+    (let unused (fallible))
+    (let _ true)))
+"#
+    );
+    let (_dir, entry) = write_scope_fixture(&source);
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+
+    let result_diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W-RESULT-001")
+        .expect("unhandled result diagnostic");
+    let call_start = source.find("    (fallible)").unwrap() + 4;
+    let call_end = call_start + "(fallible)".len();
+    assert_eq!(result_diagnostic.span.start.offset, Some(call_start));
+    assert_eq!(result_diagnostic.span.end.offset, Some(call_end));
     assert_eq!(
-        diagnostics[0].severity,
-        vibra::diagnostics::Severity::Warning
+        result_diagnostic
+            .fix
+            .as_ref()
+            .and_then(|fixes| { fixes[0]["span"]["start"]["offset"].as_u64() }),
+        Some(call_start as u64)
+    );
+
+    let binding_diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code == "W-BIND-001"
+                && diagnostic.span.uri == vibra::diagnostics::file_uri(&entry)
+        })
+        .expect("unused binding diagnostic");
+    let binding_start = source.find("unused").unwrap();
+    let binding_end = binding_start + "unused".len();
+    assert_eq!(binding_diagnostic.span.start.offset, Some(binding_start));
+    assert_eq!(binding_diagnostic.span.end.offset, Some(binding_end));
+    assert_eq!(
+        binding_diagnostic
+            .fix
+            .as_ref()
+            .and_then(|fixes| { fixes[0]["span"]["start"]["offset"].as_u64() }),
+        Some(binding_start as u64)
+    );
+}
+
+#[test]
+fn imported_user_function_bodies_are_checked_for_unhandled_values() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let helper = dir.path().join("helper.vib");
+    let entry = dir.path().join("entry.vib");
+    let helper_source = format!(
+        r#"(import result "{result}")
+(defn helper () void
+  (do
+    (result.from-ok int64 str 1)
+    (let _ true)))
+"#
+    );
+    std::fs::write(&helper, &helper_source).unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"(import helper "{}")
+(defn main () void (do (helper.helper) (let _ true)))
+"#,
+            path_str(&helper)
+        ),
+    )
+    .unwrap();
+
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+    let warning = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W-RESULT-001")
+        .expect("imported helper's unhandled result diagnostic");
+    assert_eq!(warning.span.uri, vibra::diagnostics::file_uri(&helper));
+    assert_eq!(
+        warning.span.start.offset,
+        Some(helper_source.find("(result.from-ok").unwrap())
+    );
+}
+
+#[test]
+fn selected_tests_validate_ordinary_helper_function_bodies() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let test = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap());
+    let (_dir, entry) = write_scope_fixture(&format!(
+        r#"(import result "{result}")
+(import test "{test}")
+(defn helper () void
+  (do
+    (result.from-ok int64 str 1)
+    (let _ true)))
+(test.scenario
+  "helpers"
+  (test.case "helper-warning" (test.assert true) profile: @core))
+"#
+    ));
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_named_test(&loaded, "helpers::helper-warning").unwrap();
+    assert!(
+        lowered
+            .program
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("W-RESULT-001")),
+        "helper body warning missing: {:?}",
+        lowered.program.warnings
     );
 }
 

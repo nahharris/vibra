@@ -437,13 +437,16 @@ pub fn compile_diagnostics_with_flags(
         if !map.contains_key(&crate::legacy_value::Value::String("main".to_string())) {
             return Ok(Vec::new());
         }
-        lower::lower_program(&program).map(|lowered| lowered.warnings)
+        lower::lower_program(&program).map(|lowered| {
+            lowered
+                .body_diagnostics
+                .into_iter()
+                .map(|warning| body_warning_diagnostic(path, warning))
+                .collect()
+        })
     });
     match result {
-        Ok(warnings) => warnings
-            .into_iter()
-            .filter_map(|warning| lowered_warning_diagnostic(path, warning))
-            .collect(),
+        Ok(diagnostics) => diagnostics,
         Err(err) => {
             if let Some(error) = err.downcast_ref::<crate::frontend::ScopeValidationError>() {
                 return vec![scope_diagnostic(error, path)];
@@ -463,20 +466,43 @@ pub fn compile_diagnostics_with_flags(
     }
 }
 
-fn lowered_warning_diagnostic(path: &Path, message: String) -> Option<Diagnostic> {
-    let code = extract_diagnostic_code(&message)?;
-    if !matches!(code, "W-RESULT-001" | "W-BIND-001") {
-        return None;
-    }
-    Some(Diagnostic {
+fn body_warning_diagnostic(
+    fallback_path: &Path,
+    warning: crate::body_semantics::BodyDiagnostic,
+) -> Diagnostic {
+    let crate::body_semantics::BodyDiagnostic {
+        code,
+        message,
+        span,
+        fix,
+    } = warning;
+    let diagnostic_span = span
+        .as_ref()
+        .map(|location| {
+            let source = fs::read_to_string(&location.path).unwrap_or_default();
+            crate::sexpr_tooling::tooling_span(&location.path, &source, location.span)
+        })
+        .unwrap_or_else(|| point_span(fallback_path, 0, 0));
+    let fixes = fix.map(|location| {
+        let source = fs::read_to_string(&location.path).unwrap_or_default();
+        vec![json!({
+            "span": crate::sexpr_tooling::tooling_span(&location.path, &source, location.span),
+            "suggestion": match code {
+                "W-BIND-001" => "replace this binder with `_`",
+                "W-RESULT-001" => "handle or explicitly discard this value",
+                _ => "review this diagnostic",
+            },
+        })]
+    });
+    Diagnostic {
         code: code.to_string(),
         message,
         severity: Severity::Warning,
-        span: point_span(path, 0, 0),
+        span: diagnostic_span,
         related: None,
-        fix: None,
+        fix: fixes,
         category: Category::Compile,
-    })
+    }
 }
 
 fn contains_noncanonical_option(value: &crate::legacy_value::Value) -> bool {

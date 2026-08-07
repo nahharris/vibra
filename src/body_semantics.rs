@@ -4,6 +4,11 @@
 //! Expression inference remains owned by the legacy lowerer until its
 //! enum/alias dependencies can be extracted as one semantic unit.
 
+use crate::ast::{
+    AnnotationKind, Expr as AstExpr, ExprKind as AstExprKind, Pattern as AstPattern,
+    PatternKind as AstPatternKind, TopLevel,
+};
+use crate::frontend::SurfaceProgram;
 use crate::lower::{
     Call, Expr, FunctionBody, FunctionSig, LetValue, Pattern, RuntimeValue, Statement, TypeAlias,
     TypeRef,
@@ -11,6 +16,255 @@ use crate::lower::{
 use crate::type_semantics::substitute_type;
 use anyhow::{bail, Result};
 use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceSpan {
+    pub path: PathBuf,
+    pub span: crate::syntax::Span,
+}
+
+impl SourceSpan {
+    fn new(path: &Path, span: crate::syntax::Span) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BodySource {
+    pub statements: Vec<StatementSource>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StatementSource {
+    pub span: Option<SourceSpan>,
+    pub binder: Option<SourceSpan>,
+    pub patterns: Vec<PatternSource>,
+    pub bodies: Vec<BodySource>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum PatternSource {
+    None,
+    Bind(SourceSpan),
+    Constructor(Vec<PatternSource>),
+    Record(std::collections::BTreeMap<String, PatternSource>),
+    Items(Vec<PatternSource>),
+    Map(Vec<(PatternSource, PatternSource)>),
+    Newtype(Box<PatternSource>),
+    Interface(Box<PatternSource>),
+}
+
+impl BodySource {
+    pub(crate) fn from_ast(path: &Path, body: &[AstExpr]) -> Self {
+        let mut statements = Vec::new();
+        push_ast_statements(path, body, &mut statements);
+        Self { statements }
+    }
+}
+
+fn push_ast_statements(path: &Path, body: &[AstExpr], out: &mut Vec<StatementSource>) {
+    for expr in body {
+        if let AstExprKind::Do(inner) = &expr.value {
+            push_ast_statements(path, inner, out);
+        } else {
+            out.push(statement_source(path, expr));
+        }
+    }
+}
+
+fn statement_source(path: &Path, expr: &AstExpr) -> StatementSource {
+    let mut source = StatementSource {
+        span: Some(SourceSpan::new(path, expr.span)),
+        ..StatementSource::default()
+    };
+    match &expr.value {
+        AstExprKind::Let { name, .. } => {
+            source.binder = Some(SourceSpan::new(path, name.span));
+        }
+        AstExprKind::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            source.bodies.push(BodySource::from_ast(path, then_body));
+            source.bodies.push(BodySource::from_ast(path, else_body));
+        }
+        AstExprKind::While { body, .. }
+        | AstExprKind::For { body, .. }
+        | AstExprKind::Task { body, .. } => {
+            source.bodies.push(BodySource::from_ast(path, body));
+        }
+        AstExprKind::Match { cases, .. } => {
+            source.patterns = cases
+                .iter()
+                .map(|case| pattern_source(path, &case.pattern))
+                .collect();
+            source.bodies = cases
+                .iter()
+                .map(|case| BodySource::from_ast(path, &case.body))
+                .collect();
+        }
+        _ => {}
+    }
+    source
+}
+
+fn pattern_source(path: &Path, pattern: &AstPattern) -> PatternSource {
+    match &pattern.value {
+        AstPatternKind::Bind(name) => PatternSource::Bind(SourceSpan::new(path, name.span)),
+        AstPatternKind::Constructor { arguments, .. } => PatternSource::Constructor(
+            arguments
+                .iter()
+                .map(|pattern| pattern_source(path, pattern))
+                .collect(),
+        ),
+        AstPatternKind::Record(fields) => PatternSource::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    (
+                        field.name.value.clone(),
+                        pattern_source(path, &field.pattern),
+                    )
+                })
+                .collect(),
+        ),
+        AstPatternKind::Tuple(items) | AstPatternKind::Array(items) => PatternSource::Items(
+            items
+                .iter()
+                .map(|pattern| pattern_source(path, pattern))
+                .collect(),
+        ),
+        AstPatternKind::Map(items) => PatternSource::Map(
+            items
+                .iter()
+                .map(|(key, value)| (pattern_source(path, key), pattern_source(path, value)))
+                .collect(),
+        ),
+        AstPatternKind::Newtype { pattern, .. } | AstPatternKind::Interface { pattern, .. } => {
+            let inner = pattern_source(path, pattern);
+            if matches!(&pattern.value, AstPatternKind::Newtype { .. }) {
+                PatternSource::Newtype(Box::new(inner))
+            } else {
+                PatternSource::Interface(Box::new(inner))
+            }
+        }
+        AstPatternKind::Literal(_) | AstPatternKind::Wildcard => PatternSource::None,
+    }
+}
+
+/// Collect source origins for every ordinary body that can be lowered into a
+/// function or test. The map uses the same qualified keys as the legacy
+/// lowering registry, so imported bodies retain their defining file.
+pub(crate) fn collect_body_sources(program: &SurfaceProgram) -> HashMap<String, BodySource> {
+    let mut sources = HashMap::new();
+    let mut visited = std::collections::HashSet::new();
+    collect_module_sources(program, &program.entry, "", &mut visited, &mut sources);
+    sources
+}
+
+fn collect_module_sources(
+    program: &SurfaceProgram,
+    path: &Path,
+    alias: &str,
+    visited: &mut std::collections::HashSet<(PathBuf, String)>,
+    sources: &mut HashMap<String, BodySource>,
+) {
+    if !visited.insert((path.to_path_buf(), alias.to_string())) {
+        return;
+    }
+    let Some(module) = program.modules.get(path) else {
+        return;
+    };
+    for part in &module.parts {
+        for form in &part.module.forms {
+            collect_form_source(alias, &part.path, form, sources);
+        }
+    }
+    let imports = program
+        .imports
+        .get(path)
+        .into_iter()
+        .flat_map(|imports| imports.iter())
+        .map(|(child_alias, child_path)| (child_alias.clone(), child_path.clone()))
+        .collect::<Vec<_>>();
+    for (child_alias, child_path) in imports {
+        let child_alias = if alias.is_empty() {
+            child_alias
+        } else {
+            format!("{alias}.{child_alias}")
+        };
+        collect_module_sources(program, &child_path, &child_alias, visited, sources);
+    }
+}
+
+fn collect_form_source(
+    alias: &str,
+    path: &Path,
+    form: &TopLevel,
+    sources: &mut HashMap<String, BodySource>,
+) {
+    let key = |name: &str| {
+        if alias.is_empty() {
+            name.to_string()
+        } else {
+            format!("{alias}.{name}")
+        }
+    };
+    match form {
+        TopLevel::Function(function) => {
+            sources.insert(
+                key(&function.name.value),
+                BodySource::from_ast(path, &function.body),
+            );
+        }
+        TopLevel::Test(test) => {
+            sources.insert(
+                key(&test.name.value),
+                BodySource::from_ast(path, &test.body),
+            );
+        }
+        TopLevel::TestScenario(scenario) => {
+            for test in &scenario.cases {
+                let name = format!("{}::{}", scenario.name.value, test.name.value);
+                sources.insert(key(&name), BodySource::from_ast(path, &test.body));
+            }
+        }
+        TopLevel::Definition(definition) => {
+            for annotation in &definition.annotations {
+                let AnnotationKind::Definitions(functions) = &annotation.value else {
+                    continue;
+                };
+                for function in functions {
+                    let name = format!("{}.{}", definition.name.value, function.name.value);
+                    sources.insert(key(&name), BodySource::from_ast(path, &function.body));
+                }
+            }
+        }
+        TopLevel::Deffect(deffect) => {
+            for operation in &deffect.operations {
+                let name = format!("{}.{}", deffect.name.value, operation.function.name.value);
+                sources.insert(
+                    key(&name),
+                    BodySource::from_ast(path, &operation.function.body),
+                );
+            }
+        }
+        TopLevel::Import(_) | TopLevel::Constant(_) | TopLevel::Macro(_) => {}
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BodyDiagnostic {
+    pub code: &'static str,
+    pub message: String,
+    pub span: Option<SourceSpan>,
+    pub fix: Option<SourceSpan>,
+}
 
 pub(crate) const UNHANDLED_RESULT_CODE: &str = "W-RESULT-001";
 pub(crate) const UNUSED_BINDING_CODE: &str = "W-BIND-001";
@@ -114,13 +368,15 @@ pub(crate) fn validate_unhandled_values(
     statements: &[Statement],
     functions: &HashMap<String, FunctionSig>,
     type_aliases: &HashMap<String, TypeAlias>,
+    sources: &HashMap<String, BodySource>,
+    main_source: Option<&BodySource>,
     warnings: &mut Vec<String>,
+    diagnostics: &mut Vec<BodyDiagnostic>,
 ) {
     let mut function_keys: Vec<_> = functions
         .iter()
         .filter_map(|(key, signature)| {
-            (signature.alias.is_empty() && matches!(signature.body, FunctionBody::User { .. }))
-                .then_some(key)
+            matches!(signature.body, FunctionBody::User { .. }).then_some(key)
         })
         .collect();
     function_keys.sort();
@@ -134,13 +390,29 @@ pub(crate) fn validate_unhandled_values(
         else {
             continue;
         };
-        validate_unhandled_body(statements, parameters, functions, type_aliases, warnings);
+        validate_unhandled_body(
+            statements,
+            parameters,
+            functions,
+            type_aliases,
+            sources.get(key),
+            warnings,
+            diagnostics,
+        );
     }
 
     // `main` is lowered separately from ordinary user functions by the legacy
     // frontend.  The typed frontend materializes it as a normal user function,
     // so this call is harmless there and keeps both paths covered.
-    validate_unhandled_body(statements, &[], functions, type_aliases, warnings);
+    validate_unhandled_body(
+        statements,
+        &[],
+        functions,
+        type_aliases,
+        main_source,
+        warnings,
+        diagnostics,
+    );
 }
 
 pub(crate) fn validate_unhandled_body(
@@ -148,7 +420,9 @@ pub(crate) fn validate_unhandled_body(
     parameters: &[crate::lower::Parameter],
     functions: &HashMap<String, FunctionSig>,
     type_aliases: &HashMap<String, TypeAlias>,
+    source: Option<&BodySource>,
     warnings: &mut Vec<String>,
+    diagnostics: &mut Vec<BodyDiagnostic>,
 ) {
     let mut analysis = BindingAnalysis::default();
     let mut scopes = vec![Scope::default()];
@@ -158,9 +432,18 @@ pub(crate) fn validate_unhandled_body(
             &parameter.name,
             Some(parameter.ty.clone()),
             false,
+            None,
         );
     }
-    analysis.walk_scope(statements, &mut scopes, functions, type_aliases, warnings);
+    analysis.walk_scope(
+        statements,
+        &mut scopes,
+        functions,
+        type_aliases,
+        source,
+        warnings,
+        diagnostics,
+    );
 }
 
 #[derive(Default)]
@@ -172,6 +455,7 @@ struct Scope {
 struct BindingState {
     name: String,
     ty: Option<TypeRef>,
+    span: Option<SourceSpan>,
     read: bool,
     report: bool,
     reported: bool,
@@ -184,7 +468,14 @@ struct BindingAnalysis {
 }
 
 impl BindingAnalysis {
-    fn declare(&mut self, scope: &mut Scope, name: &str, ty: Option<TypeRef>, report: bool) {
+    fn declare(
+        &mut self,
+        scope: &mut Scope,
+        name: &str,
+        ty: Option<TypeRef>,
+        report: bool,
+        span: Option<SourceSpan>,
+    ) {
         if name == "_" {
             return;
         }
@@ -197,6 +488,7 @@ impl BindingAnalysis {
             BindingState {
                 name: name.to_string(),
                 ty,
+                span,
                 read: false,
                 report,
                 reported: false,
@@ -225,17 +517,30 @@ impl BindingAnalysis {
         self.bindings.get(&id)?.ty.clone()
     }
 
-    fn finish_scope(&mut self, scope: &Scope, warnings: &mut Vec<String>) {
+    fn finish_scope(
+        &mut self,
+        scope: &Scope,
+        warnings: &mut Vec<String>,
+        diagnostics: &mut Vec<BodyDiagnostic>,
+    ) {
         for id in &scope.declared {
             let Some(binding) = self.bindings.get_mut(id) else {
                 continue;
             };
             if binding.report && !binding.read && !binding.reported {
                 binding.reported = true;
-                warnings.push(format!(
+                let message = format!(
                     "{UNUSED_BINDING_CODE}: binding `{}` is never read; remove it or replace it with `_`",
                     binding.name
-                ));
+                );
+                push_warning(
+                    UNUSED_BINDING_CODE,
+                    message,
+                    binding.span.clone(),
+                    binding.span.clone(),
+                    warnings,
+                    diagnostics,
+                );
             }
         }
     }
@@ -246,12 +551,22 @@ impl BindingAnalysis {
         scopes: &mut Vec<Scope>,
         functions: &HashMap<String, FunctionSig>,
         type_aliases: &HashMap<String, TypeAlias>,
+        source: Option<&BodySource>,
         warnings: &mut Vec<String>,
+        diagnostics: &mut Vec<BodyDiagnostic>,
     ) {
         scopes.push(Scope::default());
-        self.walk_sequence(statements, scopes, functions, type_aliases, warnings);
+        self.walk_sequence(
+            statements,
+            scopes,
+            functions,
+            type_aliases,
+            source,
+            warnings,
+            diagnostics,
+        );
         let scope = scopes.pop().expect("walk scope pushed a scope");
-        self.finish_scope(&scope, warnings);
+        self.finish_scope(&scope, warnings, diagnostics);
     }
 
     fn walk_sequence(
@@ -260,16 +575,20 @@ impl BindingAnalysis {
         scopes: &mut Vec<Scope>,
         functions: &HashMap<String, FunctionSig>,
         type_aliases: &HashMap<String, TypeAlias>,
+        source: Option<&BodySource>,
         warnings: &mut Vec<String>,
+        diagnostics: &mut Vec<BodyDiagnostic>,
     ) {
         for (index, statement) in statements.iter().enumerate() {
             self.walk_statement(
                 statement,
                 index + 1 == statements.len(),
+                source.and_then(|source| source.statements.get(index)),
                 scopes,
                 functions,
                 type_aliases,
                 warnings,
+                diagnostics,
             );
         }
     }
@@ -278,10 +597,12 @@ impl BindingAnalysis {
         &mut self,
         statement: &Statement,
         is_final: bool,
+        source: Option<&StatementSource>,
         scopes: &mut Vec<Scope>,
         functions: &HashMap<String, FunctionSig>,
         type_aliases: &HashMap<String, TypeAlias>,
         warnings: &mut Vec<String>,
+        diagnostics: &mut Vec<BodyDiagnostic>,
     ) {
         match statement {
             Statement::Call(call) => {
@@ -293,7 +614,9 @@ impl BindingAnalysis {
                         call_return_type(call, functions),
                         call.callee_key.as_str(),
                         type_aliases,
+                        source.and_then(|source| source.span.as_ref()),
                         warnings,
+                        diagnostics,
                     );
                 }
             }
@@ -304,7 +627,9 @@ impl BindingAnalysis {
                         self.expr_type(expr, scopes),
                         "expression",
                         type_aliases,
+                        source.and_then(|source| source.span.as_ref()),
                         warnings,
+                        diagnostics,
                     );
                 }
             }
@@ -326,6 +651,7 @@ impl BindingAnalysis {
                     var,
                     value_type,
                     true,
+                    source.and_then(|source| source.binder.clone()),
                 );
             }
             Statement::Set { var, value } => {
@@ -335,13 +661,26 @@ impl BindingAnalysis {
             Statement::Return(expr) => self.walk_expr_reads(expr, scopes),
             Statement::Match { target, arms } => {
                 self.walk_expr_reads(target, scopes);
-                for arm in arms {
+                for (index, arm) in arms.iter().enumerate() {
                     scopes.push(Scope::default());
                     let target_type = self.expr_type(target, scopes);
-                    self.walk_pattern(&arm.pattern, target_type.as_ref(), scopes);
-                    self.walk_sequence(&arm.body, scopes, functions, type_aliases, warnings);
+                    self.walk_pattern(
+                        &arm.pattern,
+                        target_type.as_ref(),
+                        source.and_then(|source| source.patterns.get(index)),
+                        scopes,
+                    );
+                    self.walk_sequence(
+                        &arm.body,
+                        scopes,
+                        functions,
+                        type_aliases,
+                        source.and_then(|source| source.bodies.get(index)),
+                        warnings,
+                        diagnostics,
+                    );
                     let scope = scopes.pop().expect("match arm pushed a scope");
-                    self.finish_scope(&scope, warnings);
+                    self.finish_scope(&scope, warnings, diagnostics);
                 }
             }
             Statement::If {
@@ -350,31 +689,76 @@ impl BindingAnalysis {
                 else_body,
             } => {
                 self.walk_expr_reads(cond, scopes);
-                self.walk_scope(then_body, scopes, functions, type_aliases, warnings);
-                self.walk_scope(else_body, scopes, functions, type_aliases, warnings);
+                self.walk_scope(
+                    then_body,
+                    scopes,
+                    functions,
+                    type_aliases,
+                    source.and_then(|source| source.bodies.first()),
+                    warnings,
+                    diagnostics,
+                );
+                self.walk_scope(
+                    else_body,
+                    scopes,
+                    functions,
+                    type_aliases,
+                    source.and_then(|source| source.bodies.get(1)),
+                    warnings,
+                    diagnostics,
+                );
             }
             Statement::While { cond, body } => {
                 self.walk_expr_reads(cond, scopes);
-                self.walk_scope(body, scopes, functions, type_aliases, warnings);
+                self.walk_scope(
+                    body,
+                    scopes,
+                    functions,
+                    type_aliases,
+                    source.and_then(|source| source.bodies.first()),
+                    warnings,
+                    diagnostics,
+                );
             }
-            Statement::For { var, source, body } => {
-                self.walk_expr_reads(source, scopes);
+            Statement::For {
+                var,
+                source: iter_source,
+                body,
+            } => {
+                self.walk_expr_reads(iter_source, scopes);
                 scopes.push(Scope::default());
                 self.declare(
                     scopes.last_mut().expect("for has a scope"),
                     var,
                     None,
                     false,
+                    None,
                 );
-                self.walk_sequence(body, scopes, functions, type_aliases, warnings);
+                self.walk_sequence(
+                    body,
+                    scopes,
+                    functions,
+                    type_aliases,
+                    source.and_then(|source| source.bodies.first()),
+                    warnings,
+                    diagnostics,
+                );
                 let scope = scopes.pop().expect("for pushed a scope");
-                self.finish_scope(&scope, warnings);
+                self.finish_scope(&scope, warnings, diagnostics);
             }
             Statement::Task { captures, body } => {
                 for capture in captures {
                     self.mark_read(scopes, capture);
                 }
-                self.walk_scope(body, scopes, functions, type_aliases, warnings);
+                self.walk_scope(
+                    body,
+                    scopes,
+                    functions,
+                    type_aliases,
+                    source.and_then(|source| source.bodies.first()),
+                    warnings,
+                    diagnostics,
+                );
             }
             Statement::Spawn {
                 captures, value, ..
@@ -393,6 +777,7 @@ impl BindingAnalysis {
         &mut self,
         pattern: &Pattern,
         expected_type: Option<&TypeRef>,
+        source: Option<&PatternSource>,
         scopes: &mut Vec<Scope>,
     ) {
         match pattern {
@@ -402,29 +787,40 @@ impl BindingAnalysis {
                 name,
                 expected_type.cloned(),
                 true,
+                pattern_source_span(source),
             ),
             Pattern::Enum { payload, .. } => {
                 if let Some(payload) = payload {
-                    self.walk_pattern(payload, None, scopes);
+                    self.walk_pattern(payload, None, pattern_source_child(source, 0), scopes);
                 }
             }
             Pattern::Record(fields) => {
-                for field in fields.values() {
-                    self.walk_pattern(field, None, scopes);
+                for (name, field) in fields {
+                    self.walk_pattern(field, None, pattern_source_field(source, name), scopes);
                 }
             }
             Pattern::Tuple(items) | Pattern::Array(items) => {
-                for item in items {
-                    self.walk_pattern(item, None, scopes);
+                for (index, item) in items.iter().enumerate() {
+                    self.walk_pattern(item, None, pattern_source_child(source, index), scopes);
                 }
             }
             Pattern::Map(items) => {
-                for (key, value) in items {
-                    self.walk_pattern(key, None, scopes);
-                    self.walk_pattern(value, None, scopes);
+                for (index, (key, value)) in items.iter().enumerate() {
+                    self.walk_pattern(key, None, pattern_source_child(source, index * 2), scopes);
+                    self.walk_pattern(
+                        value,
+                        None,
+                        pattern_source_child(source, index * 2 + 1),
+                        scopes,
+                    );
                 }
             }
-            Pattern::Newtype { inner, .. } => self.walk_pattern(inner, expected_type, scopes),
+            Pattern::Newtype { inner, .. } => self.walk_pattern(
+                inner,
+                expected_type,
+                pattern_source_child(source, 0),
+                scopes,
+            ),
         }
     }
 
@@ -515,14 +911,73 @@ impl BindingAnalysis {
         ty: Option<TypeRef>,
         source: &str,
         type_aliases: &HashMap<String, TypeAlias>,
+        span: Option<&SourceSpan>,
         warnings: &mut Vec<String>,
+        diagnostics: &mut Vec<BodyDiagnostic>,
     ) {
         let Some(kind) = ty.as_ref().and_then(|ty| fallible_kind(ty, type_aliases)) else {
             return;
         };
-        warnings.push(format!(
+        let message = format!(
             "{UNHANDLED_RESULT_CODE}: {kind} value from `{source}` is not handled in statement position; use `match`, bind it with `let`, or discard it with `(let _ ...)`"
-        ));
+        );
+        push_warning(
+            UNHANDLED_RESULT_CODE,
+            message,
+            span.cloned(),
+            span.cloned(),
+            warnings,
+            diagnostics,
+        );
+    }
+}
+
+fn push_warning(
+    code: &'static str,
+    message: String,
+    span: Option<SourceSpan>,
+    fix: Option<SourceSpan>,
+    warnings: &mut Vec<String>,
+    diagnostics: &mut Vec<BodyDiagnostic>,
+) {
+    warnings.push(message.clone());
+    diagnostics.push(BodyDiagnostic {
+        code,
+        message,
+        span,
+        fix,
+    });
+}
+
+fn pattern_source_span(source: Option<&PatternSource>) -> Option<SourceSpan> {
+    match source {
+        Some(PatternSource::Bind(span)) => Some(span.clone()),
+        _ => None,
+    }
+}
+
+fn pattern_source_child(source: Option<&PatternSource>, index: usize) -> Option<&PatternSource> {
+    match source {
+        Some(PatternSource::Constructor(items)) | Some(PatternSource::Items(items)) => {
+            items.get(index)
+        }
+        Some(PatternSource::Map(items)) => items
+            .get(index / 2)
+            .and_then(|(key, value)| (index % 2 == 0).then_some(key).or_else(|| Some(value))),
+        Some(PatternSource::Newtype(inner)) | Some(PatternSource::Interface(inner)) => {
+            (index == 0).then_some(inner.as_ref())
+        }
+        _ => None,
+    }
+}
+
+fn pattern_source_field<'a>(
+    source: Option<&'a PatternSource>,
+    name: &str,
+) -> Option<&'a PatternSource> {
+    match source {
+        Some(PatternSource::Record(fields)) => fields.get(name),
+        _ => None,
     }
 }
 

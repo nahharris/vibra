@@ -330,7 +330,7 @@ fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     let workspace = tempfile::tempdir().unwrap();
     let manifest = "(project\n  (package \"overlay-test\" \"0.1.0\")\n  (target app kind: @bin root: \".\" entry: \"main.vib\"))\n";
     let main = "(import helper \"helper.vib\")\n(defn main () void (do (helper.run)))\n";
-    let valid = "(defn run () void (do (let value 1)))\n";
+    let valid = "(defn run () void (do (let _ 1)))\n";
     let broken = "(defn run () void (do (missing) (let value 1)))\n";
     std::fs::write(workspace.path().join("project.vib"), manifest).unwrap();
     std::fs::write(workspace.path().join("main.vib"), main).unwrap();

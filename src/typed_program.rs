@@ -131,6 +131,7 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
         functions,
         impls,
         warnings,
+        body_diagnostics: Vec::new(),
         foreign_modules,
     })
 }
@@ -221,12 +222,15 @@ fn lower_typed_test_case(
         test,
     )?;
     let mut warnings = ctx.warnings.clone();
+    let mut body_diagnostics = Vec::new();
     validate_unhandled_body(
         &statements,
         &[],
         &ctx.functions,
         &ctx.signatures.aliases,
+        None,
         &mut warnings,
+        &mut body_diagnostics,
     );
     validate_task_handles(&statements)
         .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in test `{name}`"))?;
@@ -241,6 +245,7 @@ fn lower_typed_test_case(
             functions: ctx.functions.clone(),
             impls: ctx.signatures.impls.clone(),
             warnings,
+            body_diagnostics,
             foreign_modules: BTreeMap::new(),
         },
     })

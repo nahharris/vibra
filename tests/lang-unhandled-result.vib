@@ -11,6 +11,23 @@
     profile: @core
   )
   (test.case
+    "unhandled-result-diagnostic"
+    (result.from-ok int64 str 7)
+    (test.assert true)
+    profile: @core
+  )
+  (test.case
+    "explicit-bind-name"
+    (match
+      (result.from-ok int64 str 7)
+      (result.result.ok (bind name))
+      (do (test.assert-eq-int name 7))
+      (result.result.err _)
+      (do (test.fail "expected ok result"))
+    )
+    profile: @core
+  )
+  (test.case
     "match-and-read-binding"
     (let value (result.from-ok int64 str 7))
     (match
