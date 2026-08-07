@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
-use crate::ast::{AnnotationKind, Test, TopLevel};
+use crate::ast::{self, AnnotationKind, Test, TopLevel};
 use crate::body_semantics::validate_task_handles;
 use crate::frontend::SurfaceProgram;
 use crate::lower::{
@@ -51,6 +51,7 @@ use crate::typed_readers::{self, StagedExpectedError, StagedTypedTest};
 ///   categories are produced and which legacy kebab-case advisories have no
 ///   typed equivalent yet.
 pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
+    validate_typed_lexical_scopes(program)?;
     let order = typed_module_order(program)?;
     let inputs = typed_module_inputs(program, &order)?;
     let signatures = typed_lower::lower_typed_signatures(inputs.iter().copied())
@@ -147,6 +148,7 @@ struct TypedTestContext {
 }
 
 fn build_typed_test_context(program: &SurfaceProgram) -> Result<TypedTestContext> {
+    validate_typed_lexical_scopes(program)?;
     let order = typed_module_order(program)?;
     let inputs = typed_module_inputs(program, &order)?;
     let signatures = typed_lower::lower_typed_signatures(inputs.iter().copied())
@@ -167,6 +169,16 @@ fn build_typed_test_context(program: &SurfaceProgram) -> Result<TypedTestContext
         declared_aliases,
         warnings,
     })
+}
+
+fn validate_typed_lexical_scopes(program: &SurfaceProgram) -> Result<()> {
+    for module in program.modules.values() {
+        for part in &module.parts {
+            ast::validate_lexical_scopes(&part.module)
+                .with_context(|| format!("validate lexical scopes in {}", part.path.display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Locate the entry logical module's `$test` node named `name`, across all of

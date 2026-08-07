@@ -224,6 +224,138 @@ fn legacy_pattern_match_arm_key_is_rejected() {
     );
 }
 
+fn write_scope_fixture(source: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(&entry, source).unwrap();
+    (dir, entry)
+}
+
+fn assert_scope_error(source: &str, label: &str) {
+    let (_dir, entry) = write_scope_fixture(source);
+    let error =
+        vibra::frontend::load_surface_program(&entry, &vibra::load::CompilationFlags::default())
+            .expect_err(label);
+    let rendered = format!("{error:#}");
+    assert!(rendered.contains("E-SCOPE-001"), "{label}: {rendered}");
+}
+
+#[test]
+fn lexical_shadowing_rejects_nested_let_and_let_as() {
+    assert_scope_error(
+        r#"(defn main () void
+  (do
+    (let outer true)
+    (if true (do (let outer false)) (do))))
+"#,
+        "nested let shadowing must be rejected",
+    );
+    assert_scope_error(
+        r#"(defn main () void
+  (do
+    (let outer true)
+    (if true (do (let-as outer bool false)) (do))))
+"#,
+        "let-as shadowing must be rejected",
+    );
+}
+
+#[test]
+fn lexical_shadowing_rejects_parameter_match_and_for_binders() {
+    assert_scope_error(
+        "(defn main (value bool) void (do (if true (do (let value false)) (do))))\n",
+        "parameter shadowing must be rejected",
+    );
+    assert_scope_error(
+        r#"(defn main () void
+  (do
+    (let outer true)
+    (match 1 1 (do (let outer false)) _ (do))))
+"#,
+        "match-arm shadowing must be rejected",
+    );
+    assert_scope_error(
+        "(defn main () void (do (let number 0) (for number (range 0 0 1) (do))))\n",
+        "for-binder shadowing must be rejected",
+    );
+}
+
+#[test]
+fn lexical_scope_allows_sibling_reuse_and_repeated_wildcards() {
+    let (_dir, entry) = write_scope_fixture(
+        r#"(defn main () void
+  (do
+    (if true (do (let value true)) (do (let value false)))
+    (match 1
+      1 (do (let message true))
+      _ (do (let message false)))
+    (for number (range 0 0 1) (do))
+    (for number (range 0 0 1) (do))
+    (let _ true)
+    (let _ false)))
+"#,
+    );
+    let loaded = vibra::load::load_program(&entry).expect("sibling reuse must remain legal");
+    vibra::lower::lower_program(&loaded).expect("sibling reuse must lower successfully");
+}
+
+#[test]
+fn lexical_scope_does_not_reject_module_or_import_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let imported = dir.path().join("helper.vib");
+    std::fs::write(&imported, "(defn answer () bool true)\n").unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"(import imported "{}")
+(defn outer () bool true)
+(defn main (outer bool) void (do))
+(defn imported-user (imported bool) void (do))
+"#,
+            path_str(&imported)
+        ),
+    )
+    .unwrap();
+
+    vibra::frontend::load_surface_program(&entry, &vibra::load::CompilationFlags::default())
+        .expect("module and import names are not lexical bindings");
+}
+
+#[test]
+fn hygienic_macro_binder_does_not_shadow_call_site_name() {
+    let (_dir, entry) = write_scope_fixture(
+        r#"(macro
+  bind-temporary
+  (value @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax
+    (let temporary (unquote value)))))
+(defn main (temporary bool) void
+  (do (bind-temporary temporary)))
+"#,
+    );
+    let loaded = vibra::load::load_program(&entry).expect("hygienic macro binder is distinct");
+    vibra::lower::lower_program(&loaded).expect("hygienic macro binder must lower successfully");
+}
+
+#[test]
+fn shadowing_diagnostic_points_to_binder_and_original_binding() {
+    let source =
+        "(defn main () void (do (let outer true) (if true (do (let outer false)) (do))))\n";
+    let (_dir, entry) = write_scope_fixture(source);
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+    assert_eq!(diagnostics.len(), 1, "diagnostics: {diagnostics:?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostic.code, "E-SCOPE-001");
+    let original = source.find("(let outer true)").unwrap() + "(let ".len();
+    let shadowing = source.find("(let outer false)").unwrap() + "(let ".len();
+    assert_eq!(diagnostic.span.start.offset, Some(shadowing));
+    let related = diagnostic.related.as_ref().expect("original binding span");
+    assert_eq!(related.len(), 1);
+    assert_eq!(related[0].span.start.offset, Some(original));
+}
+
 #[test]
 fn generic_alias_instantiation_prefers_current_module_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -878,7 +1010,7 @@ fn structured_match_form_is_rejected_with_e_one_007() {
 }
 
 #[test]
-fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
+fn match_arm_shadowing_is_rejected_before_runtime() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
     let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
@@ -907,10 +1039,13 @@ fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
-        .expect("outer x should remain a string after the match arm");
+    let error = vibra::load::load_program(&entry)
+        .expect_err("match-arm shadowing must be a hard compiler error");
+    let rendered = format!("{error:#}");
+    assert!(
+        rendered.contains("E-SCOPE-001"),
+        "unexpected error: {rendered}"
+    );
 }
 
 #[test]

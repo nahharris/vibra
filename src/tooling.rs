@@ -417,6 +417,9 @@ pub fn compile_diagnostics_with_flags(
     match result {
         Ok(()) => Vec::new(),
         Err(err) => {
+            if let Some(error) = err.downcast_ref::<crate::frontend::ScopeValidationError>() {
+                return vec![scope_diagnostic(error, path)];
+            }
             let message = format!("{err:#}");
             let code = extract_diagnostic_code(&message).unwrap_or("E-COMPILE-001");
             vec![Diagnostic {
@@ -536,11 +539,43 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-INTRINSIC-005",
         "E-EFFECT-008",
         "E-WASM-008",
+        "E-SCOPE-001",
     ];
     KNOWN_CODES
         .iter()
         .copied()
         .find(|code| message.contains(code))
+}
+
+fn scope_diagnostic(
+    error: &crate::frontend::ScopeValidationError,
+    fallback_path: &Path,
+) -> Diagnostic {
+    let primary = error.primary_location();
+    let primary_path = error.path_for(primary).unwrap_or(fallback_path);
+    let primary_source = fs::read_to_string(primary_path).unwrap_or_default();
+    let related = error
+        .error
+        .related
+        .iter()
+        .map(|(message, location)| {
+            let path = error.path_for(*location).unwrap_or(fallback_path);
+            let source = fs::read_to_string(path).unwrap_or_default();
+            RelatedDiagnostic {
+                message: message.clone(),
+                span: crate::sexpr_tooling::tooling_span(path, &source, location.span),
+            }
+        })
+        .collect();
+    Diagnostic {
+        code: error.error.code.to_string(),
+        message: error.error.to_string(),
+        severity: Severity::Error,
+        span: crate::sexpr_tooling::tooling_span(primary_path, &primary_source, primary.span),
+        related: Some(related),
+        fix: None,
+        category: Category::Compile,
+    }
 }
 
 fn point_span(path: &Path, line: usize, column: usize) -> Span {
