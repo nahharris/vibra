@@ -7,7 +7,8 @@ S-expression surface that compiles to WebAssembly.
 - **Historical record:** [retired YAML draft](docs/archive/yaml-surface-draft.md)
 - **Documentation index:** [docs/index.md](docs/index.md)
 - **Project layout:** [docs/reference/project-layout.md](docs/reference/project-layout.md)
-- **Schemas and tooling contracts:** [schemas/](schemas/)
+- **Schemas and tooling contracts:** [schemas/](schemas/), including the
+  [normalized retrieval index schema](schemas/index.schema.json)
 - **Examples:** [examples/](examples/)
 - **Agent skills:** [skills/](skills/) and [usage notes](docs/reference/agent-skills.md)
 - [Container images](docs/reference/containers.md)
@@ -112,6 +113,14 @@ vibra effects examples/fs-roundtrip.vib
 reports declared/performed surfaces, per-function and per-operation rows, call
 edges, and primitive capability witnesses — see
 [schemas/effects.schema.json](schemas/effects.schema.json).
+
+`vibra index [--format json] <entry>` emits one deterministic, normalized
+retrieval record per function, including private functions. It uses the same
+`vibra fmt` normalization for corpus text that consumers must apply to query
+text, while preserving comments and identifiers. Retrieval evaluation should
+measure rejection precision (how accurately candidates can be eliminated by
+the verifier), not top-k ranking; see
+[schemas/index.schema.json](schemas/index.schema.json).
 
 Effects are static and fully erased: there is no runtime representation and no
 enforcement. Every host operation remains unconditionally available at runtime,
