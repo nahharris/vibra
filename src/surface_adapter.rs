@@ -2414,6 +2414,7 @@ mod tests {
             entry,
             modules,
             module_parts: HashMap::new(),
+            body_sources: HashMap::new(),
             embedded_files: Default::default(),
         }
     }
@@ -2686,6 +2687,7 @@ mod tests {
             entry: entry_path,
             modules,
             module_parts: HashMap::new(),
+            body_sources: HashMap::new(),
             embedded_files: Default::default(),
         };
         if let Err(error) = crate::lower::lower_library(&program) {

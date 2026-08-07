@@ -644,6 +644,7 @@ pub struct LoweredProgram {
     pub functions: HashMap<String, FunctionSig>,
     pub impls: HashMap<ImplKey, ImplBody>,
     pub warnings: Vec<String>,
+    pub(crate) body_diagnostics: Vec<crate::body_semantics::BodyDiagnostic>,
     /// Canonical `@dependency` module name to validated static wasm bytes.
     /// These bytes are included in the deterministic guest execution plan.
     pub foreign_modules: BTreeMap<String, Vec<u8>>,
@@ -2210,6 +2211,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     let mut enums: HashMap<String, EnumDef> = HashMap::new();
     let mut impls: HashMap<ImplKey, ImplBody> = HashMap::new();
     let mut warnings = Vec::new();
+    let mut body_diagnostics = Vec::new();
     let mut pending_user_bodies: Vec<(String, Vec<Value>)> = Vec::new();
     let mut visited_import_defs: HashSet<(String, PathBuf)> = HashSet::new();
 
@@ -2317,6 +2319,15 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
             None,
         )?);
     }
+    crate::body_semantics::validate_unhandled_values(
+        &statements,
+        &sigs,
+        &type_aliases,
+        &program.body_sources,
+        program.body_sources.get("main"),
+        &mut warnings,
+        &mut body_diagnostics,
+    );
     crate::body_semantics::validate_task_handles(&statements)
         .context("E-TASK-003: invalid task-handle lifetime in `main`")?;
 
@@ -2342,6 +2353,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         functions: sigs,
         impls,
         warnings,
+        body_diagnostics,
         foreign_modules,
     })
 }
@@ -2357,6 +2369,8 @@ struct TestContext {
     enums: HashMap<String, EnumDef>,
     impls: HashMap<ImplKey, ImplBody>,
     warnings: Vec<String>,
+    body_sources: HashMap<String, crate::body_semantics::BodySource>,
+    body_diagnostics: Vec<crate::body_semantics::BodyDiagnostic>,
 }
 
 /// Build the shared lowering context for `program`'s entry module: resolve all
@@ -2378,6 +2392,7 @@ fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
     let mut enums: HashMap<String, EnumDef> = HashMap::new();
     let mut impls: HashMap<ImplKey, ImplBody> = HashMap::new();
     let mut warnings = Vec::new();
+    let mut body_diagnostics = Vec::new();
     let mut pending_user_bodies: Vec<(String, Vec<Value>)> = Vec::new();
     let mut visited_import_defs: HashSet<(String, PathBuf)> = HashSet::new();
 
@@ -2437,6 +2452,16 @@ fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
     )?;
     mark_interface_methods(&mut sigs, &impls);
 
+    crate::body_semantics::validate_unhandled_values(
+        &[],
+        &sigs,
+        &type_aliases,
+        &program.body_sources,
+        None,
+        &mut warnings,
+        &mut body_diagnostics,
+    );
+
     validate_wasm_bodies(&sigs, &type_aliases)?;
     validate_declared_effects(&sigs, &mut warnings)?;
 
@@ -2447,6 +2472,8 @@ fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
         enums,
         impls,
         warnings,
+        body_sources: program.body_sources.clone(),
+        body_diagnostics,
     })
 }
 
@@ -2483,6 +2510,15 @@ fn lower_single_test_body(
             None,
         )?);
     }
+    crate::body_semantics::validate_unhandled_body(
+        &statements,
+        &[],
+        &ctx.sigs,
+        &ctx.type_aliases,
+        ctx.body_sources.get(name),
+        &mut ctx.warnings,
+        &mut ctx.body_diagnostics,
+    );
     crate::body_semantics::validate_task_handles(&statements)
         .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in test `{name}`"))?;
     validate_all_where_bounds(&ctx.type_aliases, &ctx.sigs, &ctx.enums)?;
@@ -2534,6 +2570,7 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
                 functions: ctx.sigs.clone(),
                 impls: ctx.impls.clone(),
                 warnings: ctx.warnings.clone(),
+                body_diagnostics: ctx.body_diagnostics.clone(),
                 foreign_modules: BTreeMap::new(),
             },
         });
@@ -2593,6 +2630,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         type_aliases,
         impls,
         warnings,
+        body_diagnostics,
         ..
     } = ctx;
 
@@ -2607,6 +2645,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
             functions: sigs,
             impls,
             warnings,
+            body_diagnostics,
             foreign_modules: BTreeMap::new(),
         },
     })
@@ -2800,6 +2839,7 @@ pub fn lower_exec_expr(
             functions: sigs,
             impls,
             warnings,
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         },
     })
@@ -9200,6 +9240,12 @@ fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: 
 /// Widened to `pub(crate)` so `typed_program.rs` can reuse the exact legacy
 /// wording for the kebab-case advisory instead of re-deriving it.
 pub(crate) fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {
+    // `_` is the explicit source-level discard spelling, not a user-facing
+    // symbol.  It must not produce a style warning when used for intentional
+    // result/option or pattern-value disposal.
+    if name == "_" {
+        return;
+    }
     // Canonical effect-operation symbols are qualified with `.` (for example
     // `stream.read.string`).  Treat each namespace segment as a symbol so the
     // required qualification does not produce a false lint warning.

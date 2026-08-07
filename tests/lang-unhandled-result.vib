@@ -1,0 +1,48 @@
+(import test "../stdlib/src/test.vib")
+(import result "../stdlib/src/result.vib")
+(import option "../stdlib/src/option.vib")
+(test.scenario
+  "fallible-values"
+  (test.case
+    "explicit-discard"
+    (let _ (result.from-err int64 str "deliberate"))
+    (let _ (option.from-value int64 1))
+    (test.assert true)
+    profile: @core
+  )
+  (test.case
+    "unhandled-result-diagnostic"
+    (result.from-ok int64 str 7)
+    (test.assert true)
+    profile: @core
+  )
+  (test.case
+    "explicit-bind-name"
+    (match
+      (result.from-ok int64 str 7)
+      (result.result.ok (bind name))
+      (do (test.assert-eq-int name 7))
+      (result.result.err _)
+      (do (test.fail "expected ok result"))
+    )
+    profile: @core
+  )
+  (test.case
+    "match-and-read-binding"
+    (let value (result.from-ok int64 str 7))
+    (match
+      value
+      (result.result.ok (bind payload))
+      (do (test.assert-eq-int payload 7))
+      (result.result.err _)
+      (do (test.fail "expected ok result"))
+    )
+    profile: @core
+  )
+  (test.case
+    "unused-binding-diagnostic"
+    (let unused (result.from-ok int64 str 7))
+    (test.assert true)
+    profile: @core
+  )
+)

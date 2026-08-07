@@ -266,6 +266,7 @@ impl HostExecution {
             functions,
             impls,
             warnings: vec![],
+            body_diagnostics: Vec::new(),
             foreign_modules: plan.foreign_modules.clone(),
         };
         let seed_env = HashMap::new();
@@ -1931,6 +1932,7 @@ mod tests {
             functions: HashMap::new(),
             impls: HashMap::new(),
             warnings: vec![],
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         }
     }

@@ -330,6 +330,8 @@ fn rule_summary(code: &str) -> &'static str {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
         "W-STYLE-002" => "Labelled arguments must precede variadic arguments",
         "W-EFFECT-001" => "Declaration includes nominal effects not inferred from its body",
+        "W-RESULT-001" => "Result or option value is unhandled in statement position",
+        "W-BIND-001" => "Binding is never read",
         "W-HANDLE-001" => "Handle binding is used after a same-binding close",
         "W-HANDLE-002" => "Handle binding is closed more than once",
         "E-SCOPE-001" => "Lexical binding shadows an enclosing binding",
@@ -424,7 +426,7 @@ pub fn compile_diagnostics_with_flags(
 ) -> Vec<Diagnostic> {
     let result = load::load_legacy_yaml_program(path, flags).and_then(|program| {
         let Some(entry) = program.modules.get(&program.entry) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         if contains_noncanonical_option(entry) {
             anyhow::bail!(
@@ -432,15 +434,21 @@ pub fn compile_diagnostics_with_flags(
             );
         }
         let Some(map) = entry.as_mapping() else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         if !map.contains_key(&crate::legacy_value::Value::String("main".to_string())) {
-            return Ok(());
+            return Ok(Vec::new());
         }
-        lower::lower_program(&program).map(|_| ())
+        lower::lower_program(&program).map(|lowered| {
+            lowered
+                .body_diagnostics
+                .into_iter()
+                .map(|warning| body_warning_diagnostic(path, warning))
+                .collect()
+        })
     });
     match result {
-        Ok(()) => Vec::new(),
+        Ok(diagnostics) => diagnostics,
         Err(err) => {
             if let Some(error) = err.downcast_ref::<crate::frontend::ScopeValidationError>() {
                 return vec![scope_diagnostic(error, path)];
@@ -457,6 +465,45 @@ pub fn compile_diagnostics_with_flags(
                 category: Category::Compile,
             }]
         }
+    }
+}
+
+fn body_warning_diagnostic(
+    fallback_path: &Path,
+    warning: crate::body_semantics::BodyDiagnostic,
+) -> Diagnostic {
+    let crate::body_semantics::BodyDiagnostic {
+        code,
+        message,
+        span,
+        fix,
+    } = warning;
+    let diagnostic_span = span
+        .as_ref()
+        .map(|location| {
+            let source = fs::read_to_string(&location.path).unwrap_or_default();
+            crate::sexpr_tooling::tooling_span(&location.path, &source, location.span)
+        })
+        .unwrap_or_else(|| point_span(fallback_path, 0, 0));
+    let fixes = fix.map(|location| {
+        let source = fs::read_to_string(&location.path).unwrap_or_default();
+        vec![json!({
+            "span": crate::sexpr_tooling::tooling_span(&location.path, &source, location.span),
+            "suggestion": match code {
+                "W-BIND-001" => "replace this binder with `_`",
+                "W-RESULT-001" => "handle or explicitly discard this value",
+                _ => "review this diagnostic",
+            },
+        })]
+    });
+    Diagnostic {
+        code: code.to_string(),
+        message,
+        severity: Severity::Warning,
+        span: diagnostic_span,
+        related: None,
+        fix: fixes,
+        category: Category::Compile,
     }
 }
 
@@ -565,6 +612,8 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-EFFECT-008",
         "E-WASM-008",
         "E-SCOPE-001",
+        "W-RESULT-001",
+        "W-BIND-001",
     ];
     KNOWN_CODES
         .iter()
