@@ -182,8 +182,9 @@ response. This makes logs and benchmark denominators auditable.
 
 Strict typed mode is the default. On `unsupported`, `stale-snapshot`, or
 `not-ready`, it returns no typed mask and does not silently switch modes. A
-caller may opt into syntax-only fallback at request creation or after an
-`unsupported` response. In that case every decision is tagged
+caller may opt into syntax-only fallback at request creation or by sending an
+explicit fallback request after any of those three responses. In that case
+every decision is tagged
 `mode: syntax-only`, `degraded: true`, and includes a stable fallback reason
 such as `unsupported-generic-type` or `graph-not-ready`.
 
@@ -237,13 +238,20 @@ does not speculate about future modules or unbounded generic instantiations.
 
 1. Parse and normalize the changed module, then extract its public signatures,
    non-generic aliases, and source locations.
-2. Resolve imports and compute a deterministic module signature hash from the
-   canonical source, imported signature hashes, language/stdlib contract
-   version, and feature profile.
+2. Resolve imports and compute two deterministic module identities:
+   - `public-signature-identity` hashes the canonical exported signatures,
+     non-generic alias expansions, ordered imported public-signature
+     identities, language/stdlib contract version, and feature profile. It
+     deliberately excludes function bodies and private source text.
+   - `body-source-identity` hashes the canonical full module source together
+     with the language/stdlib contract version and feature profile. It is used
+     for local prefix-state invalidation and is not exported to dependent
+     signature graphs.
 3. Reuse unchanged module graph fragments. Rebuild the changed fragment and
    its reverse dependents only when a public signature, alias expansion, or
-   import edge changes; a body-only edit invalidates local prefix states but
-   does not invalidate dependent signature graphs.
+   import edge changes; a body-only edit changes only the local
+   `body-source-identity` and invalidates local prefix states without
+   invalidating dependent signature graphs.
 4. Publish the new graph as an immutable snapshot. Requests name the snapshot
    explicitly, so a request cannot mix declarations from two edits.
 
@@ -253,18 +261,40 @@ The graph cache key is:
 
 ```text
 (language-contract, compiler-build, feature-profile,
- root-module-signature-hash, ordered-import-closure-hash)
+ budget-profile, root-module-public-signature-identity,
+ ordered-import-closure-public-signature-identity)
 ```
 
 The type-inhabitation cache key adds the expected type, lexical-environment
-fingerprint, search-depth budget, and reachable-scope fingerprint. The prefix
-automaton cache key adds the snapshot ID, canonical prefix hash, parser state,
-expected type, and budget. Positive and negative results are both bounded and
-evictable; negative results must never survive a snapshot/profile change.
+fingerprint, budget-profile, and reachable-scope fingerprint. The prefix
+automaton cache key adds the snapshot ID, `body-source-identity`, canonical
+prefix hash, parser state, expected type, and budget profile. Positive and
+negative results are both bounded and evictable; negative results must never
+survive a snapshot/profile/budget change.
 
 Cache hits, misses, invalidations, graph-build time, graph size, and search
 budget exhaustion are observable counters in the protocol and benchmark. A
 stale graph is a protocol status, not a cache hit.
+
+The prototype freezes one reproducible budget profile, `decoding-v1`, for every
+model, task, and run:
+
+| Resource | Fixed cap | Exceeded-cap result |
+| --- | ---: | --- |
+| Source snapshot | 1,048,576 bytes | `unsupported` with `snapshot-too-large` |
+| Prefix length | 4,096 tokens | `unsupported` with `prefix-too-long` |
+| Candidates per `admit` batch | 256 | `unsupported` with `candidate-batch-too-large` |
+| Type-search depth | 8 levels | `unsupported` with `search-depth-exceeded` |
+| Type-search states per decision | 10,000 states | `unsupported` with `search-budget-exceeded` |
+| Graph nodes per snapshot | 100,000 nodes | `unsupported` with `graph-size-exceeded` |
+| Graph build wall time | 2,000 ms | `unsupported` with `graph-build-timeout` |
+| Prefix-decision wall time | 50 ms | `unsupported` with `decision-timeout` |
+
+Declaration, token, and search traversal order is deterministic. The state,
+size, and depth caps are the semantic cutoff; wall-time caps are fixed safety
+limits measured on the frozen benchmark environment and reported separately.
+No task, model, or failure class may tune these values. Any change creates a
+new budget-profile ID and invalidates the relevant caches.
 
 ## Cheap versus expensive language features
 
@@ -305,7 +335,9 @@ paper:
 
 - `Syntax`: idealized syntax-only constraint, where all baseline syntax-invalid
   instances are treated as repaired by grammar constraint. If a real grammar
-  mask is later implemented, report it separately as a sensitivity check.
+  mask is later implemented, report it separately as a sensitivity check. The
+  idealized control has no executable prefix-decision latency and is therefore
+  an error-rate ceiling only.
 - `Types`: strict type-constrained decoding over the supported Vibra profile.
 - `Fallback`: explicit syntax-only operation after an observable unsupported or
   readiness result; never pool this with `Types`.
@@ -337,15 +369,33 @@ Use the source paper's three reporting concepts without renaming them:
 | --- | --- | --- |
 | `Syntax` | Reader/parser/formatter-shape failure before a typed program can be formed. | Count once per generated artifact. |
 | `Types` | Static semantic failure after parsing, including unresolved names, invalid member/operator use, argument/return mismatch, and other type-check failures. | Count once per generated artifact. |
-| `Compiler errors` | Any artifact that does not compile; the headline total is the union of `Syntax` and `Types`. | Report counts and rates exactly as `Vanilla`, `Syntax`, and `Types` columns, not message counts. |
+| `Compiler errors` | The disjoint union `Syntax ∪ Types ∪ Other`, where `Other` is a compiler rejection that is neither a syntax nor a static-typing failure. | Report the three class counts and their sum once per artifact, never once per diagnostic message. |
 
 Vibra-specific failures that are not syntax or static typing—manifest/workspace,
 effect-policy, host/ABI, timeout, or service-protocol failures—are reported in
-an explicit `Other/out-of-scope` side column and never silently folded into
-`Types`. They are excluded from the paper-comparable compiler-error headline
-only when the run record identifies them; an unexplained failure invalidates
-that sample. Unsupported/fallback outcomes are also side-counted and do not
-become successful `Types` samples.
+an explicit side column. A manifest/workspace, effect-policy, or host/ABI
+rejection returned by the compiler belongs in `Other` and is included in the
+compiler-error headline; a service/protocol or harness failure that prevents a
+compiler outcome belongs in `Infrastructure` and is not a compiler-error
+class. Unsupported/fallback outcomes are also side-counted and do not become
+successful `Types` samples.
+
+For each run, let `A` be all attempted artifacts, `I` the artifacts with an
+infrastructure/harness failure, and `C = A - I` the artifacts for which the
+compiler or paper-equivalent classifier returned an outcome. The compiler
+outcome denominator is explicitly:
+
+```text
+C = Valid ∪ Syntax ∪ Types ∪ Other
+Compiler-error rate = (Syntax + Types + Other) / C
+```
+
+These four sets are disjoint and exhaustive within `C`; `Other` is not removed
+from the numerator or denominator. Report `I`, unsupported results, fallback
+results, and typed-subset coverage alongside the compiler-error rate. An
+unexplained artifact that cannot be assigned to `Valid`, `Syntax`, `Types`,
+`Other`, or `Infrastructure` invalidates the sample rather than silently
+changing its denominator.
 
 ### Metrics and decision rule
 
@@ -367,8 +417,11 @@ families and a majority of evaluated model families:
 
 1. `Types` does not reduce `Types`-taxonomy compiler-error instances by at least
    25% relative to the `Syntax` condition; or
-2. p95 prefix-decision latency exceeds 2× the syntax-only condition, or more
-   than 20% of target artifacts require `unsupported`/fallback.
+2. once an executable grammar-mask `Syntax` control exists, p95
+   prefix-decision latency exceeds 2× that control, or more than 20% of target
+   artifacts require `unsupported`/fallback. Until that control exists, report
+   absolute median/p95/p99 latency and leave the latency-ratio branch
+   unevaluated; the idealized `Syntax` condition is not a latency denominator.
 
 Meeting the error threshold while failing coverage or latency is evidence for a
 smaller language profile, not permission to silently broaden fallback. Meeting
