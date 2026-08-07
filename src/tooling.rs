@@ -332,6 +332,8 @@ fn rule_summary(code: &str) -> &'static str {
         "W-EFFECT-001" => "Declaration includes nominal effects not inferred from its body",
         "W-RESULT-001" => "Result or option value is unhandled in statement position",
         "W-BIND-001" => "Binding is never read",
+        "W-HANDLE-001" => "Handle binding is used after a same-binding close",
+        "W-HANDLE-002" => "Handle binding is closed more than once",
         "E-SCOPE-001" => "Lexical binding shadows an enclosing binding",
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-YAML-002" => "YAML comments are forbidden",
