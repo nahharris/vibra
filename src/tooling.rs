@@ -330,6 +330,8 @@ fn rule_summary(code: &str) -> &'static str {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
         "W-STYLE-002" => "Labelled arguments must precede variadic arguments",
         "W-EFFECT-001" => "Declaration includes nominal effects not inferred from its body",
+        "W-HANDLE-001" => "Handle binding is used after a same-binding close",
+        "W-HANDLE-002" => "Handle binding is closed more than once",
         "E-SCOPE-001" => "Lexical binding shadows an enclosing binding",
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-YAML-002" => "YAML comments are forbidden",

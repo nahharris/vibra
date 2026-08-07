@@ -9,6 +9,7 @@ use std::path::Path;
 use crate::ast::{
     self, Annotation, AnnotationKind, Expr, ExprKind, ImplItem, MacroExpr, MacroExprKind,
     MethodBinding, Module, Name, Pattern, PatternKind, TestMeta, TopLevel, TypeExpr, TypeExprKind,
+    WasmArgument,
 };
 use crate::diagnostics::{
     file_uri, Category, Diagnostic, Position, RelatedDiagnostic, Severity, Span,
@@ -616,7 +617,298 @@ fn lint_function(
     for expression in &function.body {
         lint_expr(path, source, expression, diagnostics);
     }
+    lint_lifecycle_body(path, source, &function.body, diagnostics);
     lint_annotations(path, source, &function.annotations, diagnostics);
+}
+
+const HANDLE_USE_AFTER_CLOSE_CODE: &str = "W-HANDLE-001";
+const HANDLE_DOUBLE_CLOSE_CODE: &str = "W-HANDLE-002";
+
+#[derive(Debug, Clone, Default)]
+struct LifecycleState {
+    closed: BTreeMap<String, syntax::Span>,
+}
+
+/// Check only direct binding uses in one function/control-flow body. This is
+/// deliberately not an alias, aggregate, generic, task, or interprocedural
+/// analysis.
+fn lint_lifecycle_body(
+    path: &Path,
+    source: &str,
+    body: &[Expr],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let _ = lint_lifecycle_exprs(path, source, body, LifecycleState::default(), diagnostics);
+}
+
+fn lint_lifecycle_exprs(
+    path: &Path,
+    source: &str,
+    expressions: &[Expr],
+    mut state: LifecycleState,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> LifecycleState {
+    for expression in expressions {
+        state = lint_lifecycle_expr(path, source, expression, state, diagnostics);
+    }
+    state
+}
+
+fn lint_lifecycle_expr(
+    path: &Path,
+    source: &str,
+    expression: &Expr,
+    mut state: LifecycleState,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> LifecycleState {
+    match &expression.value {
+        ExprKind::Literal(_) | ExprKind::Break | ExprKind::Continue => {}
+        ExprKind::Reference(binding) => {
+            if let Some(close_span) = state.closed.get(binding).copied() {
+                lifecycle_warning(
+                    path,
+                    source,
+                    HANDLE_USE_AFTER_CLOSE_CODE,
+                    format!("use of closed handle binding `{binding}`"),
+                    expression.span,
+                    binding,
+                    close_span,
+                    diagnostics,
+                );
+            }
+        }
+        ExprKind::Call {
+            callee, arguments, ..
+        } => {
+            if callee.value == "stream.manage.close" {
+                if let Some(argument) = arguments.first().map(|argument| argument.value()) {
+                    if let ExprKind::Reference(binding) = &argument.value {
+                        record_close(
+                            path,
+                            source,
+                            expression.span,
+                            binding,
+                            &mut state,
+                            diagnostics,
+                        );
+                        for argument in arguments.iter().skip(1) {
+                            state = lint_lifecycle_expr(
+                                path,
+                                source,
+                                argument.value(),
+                                state,
+                                diagnostics,
+                            );
+                        }
+                        return state;
+                    }
+                }
+            }
+            for argument in arguments {
+                state = lint_lifecycle_expr(path, source, argument.value(), state, diagnostics);
+            }
+        }
+        ExprKind::AnonymousFunction { .. } => {}
+        ExprKind::Do(values) => {
+            state = lint_lifecycle_exprs(path, source, values, state, diagnostics);
+        }
+        ExprKind::Let { value, .. } => {
+            state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+        }
+        ExprKind::Set { name, value } => {
+            state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+            if let Some(close_span) = state.closed.get(&name.value).copied() {
+                lifecycle_warning(
+                    path,
+                    source,
+                    HANDLE_USE_AFTER_CLOSE_CODE,
+                    format!("use of closed handle binding `{}`", name.value),
+                    name.span,
+                    &name.value,
+                    close_span,
+                    diagnostics,
+                );
+            }
+        }
+        ExprKind::Return(value) => {
+            if let Some(value) = value {
+                state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+            }
+        }
+        ExprKind::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            let after_condition = lint_lifecycle_expr(path, source, condition, state, diagnostics);
+            let then_state = lint_lifecycle_exprs(
+                path,
+                source,
+                then_body,
+                after_condition.clone(),
+                diagnostics,
+            );
+            let else_state =
+                lint_lifecycle_exprs(path, source, else_body, after_condition, diagnostics);
+            state = merge_lifecycle_states(then_state, else_state);
+        }
+        ExprKind::While { condition, body } => {
+            state = lint_lifecycle_expr(path, source, condition, state, diagnostics);
+            let _ = lint_lifecycle_exprs(path, source, body, state.clone(), diagnostics);
+        }
+        ExprKind::For {
+            source: value,
+            body,
+            ..
+        } => {
+            state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+            let _ = lint_lifecycle_exprs(path, source, body, state.clone(), diagnostics);
+        }
+        ExprKind::Match { target, cases } => {
+            let after_target = lint_lifecycle_expr(path, source, target, state, diagnostics);
+            let mut merged = None;
+            for case in cases {
+                let arm_state = lint_lifecycle_exprs(
+                    path,
+                    source,
+                    &case.body,
+                    after_target.clone(),
+                    diagnostics,
+                );
+                merged = Some(match merged {
+                    None => arm_state,
+                    Some(previous) => merge_lifecycle_states(previous, arm_state),
+                });
+            }
+            state = merged.unwrap_or(after_target);
+        }
+        ExprKind::Record(fields) => {
+            for field in fields {
+                state = lint_lifecycle_expr(path, source, &field.value, state, diagnostics);
+            }
+        }
+        ExprKind::Tuple(values) | ExprKind::Array(values) => {
+            for value in values {
+                state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+            }
+        }
+        ExprKind::Map(entries) => {
+            for (key, value) in entries {
+                state = lint_lifecycle_expr(path, source, key, state, diagnostics);
+                state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+            }
+        }
+        ExprKind::Mutable(value) | ExprKind::ReferenceOf(value) => {
+            state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+        }
+        ExprKind::Range(start, end, step) => {
+            state = lint_lifecycle_expr(path, source, start, state, diagnostics);
+            state = lint_lifecycle_expr(path, source, end, state, diagnostics);
+            state = lint_lifecycle_expr(path, source, step, state, diagnostics);
+        }
+        ExprKind::Convert { value, .. } | ExprKind::Cast { value, .. } => {
+            state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+        }
+        ExprKind::Embed { .. } => {}
+        ExprKind::Template { bindings, .. } => {
+            for binding in bindings {
+                state = lint_lifecycle_expr(path, source, &binding.value, state, diagnostics);
+            }
+        }
+        ExprKind::Intrinsic { name, arguments } => {
+            if name.value == "fd-close" {
+                if let Some(argument) = arguments.first() {
+                    if let ExprKind::Reference(binding) = &argument.value {
+                        record_close(
+                            path,
+                            source,
+                            expression.span,
+                            binding,
+                            &mut state,
+                            diagnostics,
+                        );
+                        for argument in arguments.iter().skip(1) {
+                            state = lint_lifecycle_expr(path, source, argument, state, diagnostics);
+                        }
+                        return state;
+                    }
+                }
+            }
+            for argument in arguments {
+                state = lint_lifecycle_expr(path, source, argument, state, diagnostics);
+            }
+        }
+        ExprKind::Wasm { arguments, .. } => {
+            for argument in arguments {
+                if let WasmArgument::Expression(value) = argument {
+                    state = lint_lifecycle_expr(path, source, value, state, diagnostics);
+                }
+            }
+        }
+        // A task or function is a separate computation. Do not carry lifecycle
+        // state into it or infer anything about values it captures.
+        ExprKind::Task { .. } | ExprKind::Spawn { .. } => {}
+        ExprKind::Join { .. } => {}
+    }
+    state
+}
+
+fn record_close(
+    path: &Path,
+    source: &str,
+    close_span: syntax::Span,
+    binding: &str,
+    state: &mut LifecycleState,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(previous_close_span) = state.closed.get(binding).copied() {
+        lifecycle_warning(
+            path,
+            source,
+            HANDLE_DOUBLE_CLOSE_CODE,
+            format!("handle binding `{binding}` is closed more than once"),
+            close_span,
+            binding,
+            previous_close_span,
+            diagnostics,
+        );
+    } else {
+        state.closed.insert(binding.to_string(), close_span);
+    }
+}
+
+fn merge_lifecycle_states(left: LifecycleState, right: LifecycleState) -> LifecycleState {
+    let closed = left
+        .closed
+        .into_iter()
+        .filter(|(binding, _)| right.closed.contains_key(binding))
+        .collect();
+    LifecycleState { closed }
+}
+
+fn lifecycle_warning(
+    path: &Path,
+    source: &str,
+    code: &str,
+    message: String,
+    span: syntax::Span,
+    binding: &str,
+    close_span: syntax::Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    diagnostics.push(diagnostic(
+        path,
+        source,
+        code,
+        message,
+        Severity::Warning,
+        Category::Style,
+        span,
+        Some(vec![RelatedDiagnostic {
+            message: format!("handle binding `{binding}` was closed here"),
+            span: tooling_span(path, source, close_span),
+        }]),
+    ));
 }
 
 fn lint_annotations(
@@ -1171,5 +1463,90 @@ mod tests {
         let source = "(test.scenario \"fails\" (test.case \"fails\" unit\n\
                       expect-error: (@compile E-OP-002 \"overflow\")))\n";
         assert!(staged_lint_sexpr(Path::new("test.vib"), source).is_empty());
+    }
+
+    #[test]
+    fn linter_warns_for_same_binding_use_after_close() {
+        let source = "(defn close-and-use (resource (handle @any)) void\n\
+                      (do (stream.manage.close resource)\n\
+                          (stream.write.string resource \"late\")))\n";
+
+        let diagnostics = staged_lint_sexpr(Path::new("handle.vib"), source);
+
+        let warning = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "W-HANDLE-001")
+            .expect("same-binding use after close should warn");
+        assert!(warning.message.contains("resource"));
+        assert_eq!(warning.severity, Severity::Warning);
+        let related = warning
+            .related
+            .as_ref()
+            .expect("warning should identify the closing site");
+        assert_eq!(related.len(), 1);
+        assert!(related[0].message.contains("closed here"));
+        assert_eq!(
+            related[0].span.start.offset,
+            Some(source.find("(stream.manage.close").unwrap())
+        );
+    }
+
+    #[test]
+    fn linter_warns_for_same_binding_double_close() {
+        let source = "(defn double-close (resource (handle @any)) void\n\
+                      (do (stream.manage.close resource)\n\
+                          (stream.manage.close resource)))\n";
+
+        let diagnostics = staged_lint_sexpr(Path::new("handle.vib"), source);
+
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "W-HANDLE-002"));
+    }
+
+    #[test]
+    fn lifecycle_lint_is_path_local_and_does_not_follow_aliases_or_tasks() {
+        let source = "(defn path-local (resource (handle @any)) void\n\
+                      (do\n\
+                        (let alias resource)\n\
+                        (if true\n\
+                            (do (stream.manage.close resource)\n\
+                                (stream.write.string resource \"late\"))\n\
+                            (do (stream.write.string resource \"live\")))\n\
+                        (stream.write.string resource \"after\")\n\
+                        (task\n\
+                          (do (stream.manage.close resource)\n\
+                              (stream.write.string resource \"task\"))\n\
+                          captures: (resource))\n\
+                        (stream.write.string alias \"alias\")))\n";
+
+        let diagnostics = staged_lint_sexpr(Path::new("handle.vib"), source);
+
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "W-HANDLE-001")
+                .count(),
+            1,
+            "only the use on the closing branch should warn: {diagnostics:?}"
+        );
+        assert!(!diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "W-HANDLE-002"));
+    }
+
+    #[test]
+    fn lifecycle_warning_codes_are_registered_as_warnings() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../schemas/linter-codes.json")).unwrap();
+        let codes = schema["codes"].as_array().unwrap();
+
+        for code in ["W-HANDLE-001", "W-HANDLE-002"] {
+            let entry = codes
+                .iter()
+                .find(|entry| entry["code"] == code)
+                .unwrap_or_else(|| panic!("{code} must be registered"));
+            assert_eq!(entry["severity"], "warning");
+        }
     }
 }
