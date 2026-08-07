@@ -74,6 +74,12 @@ pub struct ScopeLimits {
     pub pending_operations: usize,
     pub open_resources: usize,
     pub draining_operations: usize,
+    /// Maximum coarse fuel units available to this scope. `u64::MAX` means
+    /// that the scope has no configured fuel ceiling.
+    pub fuel: u64,
+    /// Maximum accounted runtime-value bytes available to this scope.
+    /// `usize::MAX` means that the scope has no configured memory ceiling.
+    pub memory_bytes: usize,
 }
 
 impl Default for ScopeLimits {
@@ -83,6 +89,8 @@ impl Default for ScopeLimits {
             pending_operations: 1024,
             open_resources: 256,
             draining_operations: 256,
+            fuel: u64::MAX,
+            memory_bytes: usize::MAX,
         }
     }
 }
@@ -93,6 +101,8 @@ impl ScopeLimits {
             && self.pending_operations <= parent.pending_operations
             && self.open_resources <= parent.open_resources
             && self.draining_operations <= parent.draining_operations
+            && self.fuel <= parent.fuel
+            && self.memory_bytes <= parent.memory_bytes
     }
 }
 
@@ -102,6 +112,8 @@ pub enum ResourceLimit {
     PendingOperations,
     OpenResources,
     DrainingOperations,
+    Fuel,
+    Memory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -140,7 +152,14 @@ pub struct CapabilityRuntime {
 
 impl CapabilityRuntime {
     pub fn new(grants: impl IntoIterator<Item = CapabilityGrant>) -> Self {
-        let scheduler = Scheduler::new(grants);
+        Self::new_with_limits(grants, ScopeLimits::default())
+    }
+
+    pub fn new_with_limits(
+        grants: impl IntoIterator<Item = CapabilityGrant>,
+        limits: ScopeLimits,
+    ) -> Self {
+        let scheduler = Scheduler::new_with_limits(grants, limits);
         let root = scheduler.root();
         Self {
             scheduler,
@@ -201,6 +220,28 @@ impl CapabilityRuntime {
         self.scheduler.check_domain(self.current_scope(), domain)
     }
 
+    pub fn consume_fuel(&mut self, amount: u64) -> Result<(), RuntimeError> {
+        let scope = self.current_scope();
+        self.scheduler.consume_fuel(scope, amount)
+    }
+
+    pub fn reserve_memory(&mut self, bytes: usize) -> Result<(), RuntimeError> {
+        let scope = self.current_scope();
+        self.scheduler.reserve_memory(scope, bytes)
+    }
+
+    /// Abort the active child scope after an uncatchable execution-budget
+    /// failure. The closed child remains on the stack until the adapter's
+    /// ordinary scope-teardown hook runs; this keeps cleanup composable with
+    /// future early-return control flow instead of popping a parent by
+    /// accident.
+    pub fn abort_current_scope(&mut self, reason: CancelReason) -> Result<(), RuntimeError> {
+        let scope = self.current_scope();
+        self.scheduler.cancel_scope(scope, reason);
+        self.scheduler.close_scope(scope)?;
+        Ok(())
+    }
+
     pub fn scheduler(&self) -> &Scheduler {
         &self.scheduler
     }
@@ -215,6 +256,8 @@ pub enum CancelReason {
     SiblingFailed,
     CapabilityRevoked,
     ScopeClosed,
+    FuelExhausted,
+    MemoryExhausted,
     ResourceLimit,
 }
 
@@ -246,6 +289,8 @@ struct Scope {
     resources: Vec<ResourceId>,
     grants: BTreeSet<CapabilityGrant>,
     limits: ScopeLimits,
+    fuel_remaining: u64,
+    memory_used: usize,
     deadline: Option<u64>,
     cancelled: Option<CancelReason>,
     closed: bool,
@@ -310,6 +355,8 @@ pub enum RuntimeError {
     UnknownOperation,
     ResourceLimit(ResourceLimit),
     LimitsExceedParent,
+    FuelExhausted,
+    MemoryExhausted,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -388,6 +435,8 @@ impl Scheduler {
                 resources: vec![],
                 grants: grants.into_iter().collect(),
                 limits,
+                fuel_remaining: limits.fuel,
+                memory_used: 0,
                 deadline: None,
                 cancelled: None,
                 closed: false,
@@ -526,7 +575,7 @@ impl Scheduler {
     ) -> Result<ScopeId, RuntimeError> {
         let requested: BTreeSet<_> = grants.into_iter().collect();
         let parent_scope = self.scopes.get(&parent).ok_or(RuntimeError::UnknownScope)?;
-        if parent_scope.closed {
+        if parent_scope.closed || parent_scope.cancelled.is_some() {
             return Err(RuntimeError::ScopeClosed);
         }
         if !limits.is_within(parent_scope.limits) {
@@ -558,6 +607,8 @@ impl Scheduler {
                 resources: vec![],
                 grants: requested,
                 limits,
+                fuel_remaining: limits.fuel,
+                memory_used: 0,
                 deadline,
                 cancelled: None,
                 closed: false,
@@ -567,6 +618,99 @@ impl Scheduler {
         self.trace
             .push(TraceEvent::scope(self.now, EventKind::ScopeOpened, id));
         Ok(id)
+    }
+
+    fn ensure_scope_active(&mut self, scope: ScopeId) -> Result<(), RuntimeError> {
+        let deadline_expired = {
+            let owner = self.scopes.get(&scope).ok_or(RuntimeError::UnknownScope)?;
+            if owner.closed || owner.cancelled.is_some() {
+                return Err(RuntimeError::ScopeClosed);
+            }
+            owner.deadline.is_some_and(|deadline| deadline <= self.now)
+        };
+        if deadline_expired {
+            self.cancel_scope(scope, CancelReason::Deadline);
+            return Err(RuntimeError::ScopeClosed);
+        }
+        Ok(())
+    }
+
+    fn scope_chain(&self, scope: ScopeId) -> Result<Vec<ScopeId>, RuntimeError> {
+        let mut chain = Vec::new();
+        let mut current = Some(scope);
+        while let Some(id) = current {
+            let owner = self.scopes.get(&id).ok_or(RuntimeError::UnknownScope)?;
+            chain.push(id);
+            current = owner.parent;
+        }
+        Ok(chain)
+    }
+
+    fn abort_scope(&mut self, scope: ScopeId, reason: CancelReason) {
+        self.cancel_scope(scope, reason);
+        // Fuel and memory exhaustion are hard scope aborts. Closing here makes
+        // cleanup deterministic for callers that cannot safely continue to a
+        // normal structured-scope exit.
+        let _ = self.close_scope(scope);
+    }
+
+    /// Consume coarse execution fuel for a call or loop back-edge.
+    pub fn consume_fuel(&mut self, scope: ScopeId, amount: u64) -> Result<(), RuntimeError> {
+        self.ensure_scope_active(scope)?;
+        let chain = self.scope_chain(scope)?;
+        let exhausted = {
+            chain.iter().any(|id| {
+                amount
+                    > self
+                        .scopes
+                        .get(id)
+                        .expect("scope chain is valid")
+                        .fuel_remaining
+            })
+        };
+        if exhausted {
+            self.trace
+                .push(TraceEvent::admission(self.now, scope, ResourceLimit::Fuel));
+            self.abort_scope(scope, CancelReason::FuelExhausted);
+            Err(RuntimeError::FuelExhausted)
+        } else {
+            for id in chain {
+                self.scopes
+                    .get_mut(&id)
+                    .expect("scope chain is valid")
+                    .fuel_remaining -= amount;
+            }
+            Ok(())
+        }
+    }
+
+    /// Reserve accounted runtime-value memory for a scope.
+    pub fn reserve_memory(&mut self, scope: ScopeId, bytes: usize) -> Result<(), RuntimeError> {
+        self.ensure_scope_active(scope)?;
+        let chain = self.scope_chain(scope)?;
+        let exhausted = {
+            chain.iter().any(|id| {
+                let owner = self.scopes.get(id).expect("scope chain is valid");
+                bytes > owner.limits.memory_bytes.saturating_sub(owner.memory_used)
+            })
+        };
+        if exhausted {
+            self.trace.push(TraceEvent::admission(
+                self.now,
+                scope,
+                ResourceLimit::Memory,
+            ));
+            self.abort_scope(scope, CancelReason::MemoryExhausted);
+            Err(RuntimeError::MemoryExhausted)
+        } else {
+            for id in chain {
+                self.scopes
+                    .get_mut(&id)
+                    .expect("scope chain is valid")
+                    .memory_used += bytes;
+            }
+            Ok(())
+        }
     }
 
     pub fn spawn_scripted(
@@ -965,8 +1109,17 @@ impl Scheduler {
     }
 
     pub fn close_scope(&mut self, scope: ScopeId) -> Result<CleanupReport, RuntimeError> {
-        if !self.scopes.contains_key(&scope) {
-            return Err(RuntimeError::UnknownScope);
+        let already_closed = match self.scopes.get(&scope) {
+            Some(owner) => owner.closed,
+            None => return Err(RuntimeError::UnknownScope),
+        };
+        if already_closed {
+            return Ok(CleanupReport {
+                cancelled_tasks: 0,
+                closed_resources: 0,
+                draining_operations: 0,
+                leaked_resources: 0,
+            });
         }
         let before = self
             .tasks
@@ -1569,6 +1722,7 @@ mod tests {
             pending_operations: 1,
             open_resources: 1,
             draining_operations: 1,
+            ..ScopeLimits::default()
         };
         let mut scheduler = Scheduler::new_with_limits([], limits);
         let root = scheduler.root();
@@ -1612,6 +1766,140 @@ mod tests {
                 .filter(|event| event.kind == EventKind::AdmissionRejected)
                 .count(),
             3
+        );
+    }
+
+    #[test]
+    fn execution_limits_are_inherited_and_narrowed_monotonically() {
+        let parent_limits = ScopeLimits {
+            fuel: 10,
+            memory_bytes: 100,
+            ..ScopeLimits::default()
+        };
+        let mut scheduler = Scheduler::new_with_limits([], parent_limits);
+        let root = scheduler.root();
+        let child_limits = ScopeLimits {
+            fuel: 4,
+            memory_bytes: 40,
+            ..parent_limits
+        };
+        let child = scheduler
+            .open_scope_with_limits(root, [], None, child_limits)
+            .unwrap();
+        let grandchild = scheduler.open_scope(child, [], None).unwrap();
+
+        scheduler.consume_fuel(grandchild, 4).unwrap();
+        scheduler.reserve_memory(grandchild, 40).unwrap();
+        assert_eq!(
+            scheduler.consume_fuel(grandchild, 1),
+            Err(RuntimeError::FuelExhausted)
+        );
+
+        let sibling = scheduler.open_scope(child, [], None).unwrap();
+        assert_eq!(
+            scheduler.reserve_memory(sibling, 41),
+            Err(RuntimeError::MemoryExhausted)
+        );
+    }
+
+    #[test]
+    fn execution_limit_amplification_is_rejected() {
+        let parent_limits = ScopeLimits {
+            fuel: 10,
+            memory_bytes: 100,
+            ..ScopeLimits::default()
+        };
+        let mut scheduler = Scheduler::new_with_limits([], parent_limits);
+        let root = scheduler.root();
+        let requested = ScopeLimits {
+            fuel: 11,
+            ..parent_limits
+        };
+        assert_eq!(
+            scheduler.open_scope_with_limits(root, [], None, requested),
+            Err(RuntimeError::LimitsExceedParent)
+        );
+    }
+
+    #[test]
+    fn fuel_abort_cleans_up_tasks_and_resources() {
+        let limits = ScopeLimits {
+            fuel: 1,
+            ..ScopeLimits::default()
+        };
+        let mut scheduler = Scheduler::new_with_limits([], limits);
+        let root = scheduler.root();
+        let mut task = scheduler
+            .spawn_scripted(root, 100, TaskOutcome::Completed("never".into()))
+            .unwrap();
+        let resource = scheduler.open_resource(root).unwrap();
+
+        assert_eq!(
+            scheduler.consume_fuel(root, 2),
+            Err(RuntimeError::FuelExhausted)
+        );
+        assert_eq!(
+            scheduler.join(&mut task).unwrap(),
+            TaskOutcome::Cancelled(CancelReason::ParentCancelled)
+        );
+        assert!(scheduler.trace().iter().any(|event| {
+            event.kind == EventKind::ScopeCancelled
+                && event.scope == root
+                && event.reason == Some(CancelReason::FuelExhausted)
+        }));
+        assert!(scheduler.trace().iter().any(|event| {
+            event.kind == EventKind::ResourceClosed && event.resource == Some(resource)
+        }));
+    }
+
+    #[test]
+    fn deadline_wins_over_fuel_at_the_same_instant() {
+        let limits = ScopeLimits {
+            fuel: 1,
+            ..ScopeLimits::default()
+        };
+        let mut scheduler = Scheduler::new_with_limits([], limits);
+        let root = scheduler.root();
+        let deadline_scope = scheduler
+            .open_scope_with_limits(root, [], Some(10), limits)
+            .unwrap();
+        scheduler.advance_to(10);
+        assert_eq!(
+            scheduler.consume_fuel(deadline_scope, 1),
+            Err(RuntimeError::ScopeClosed)
+        );
+        assert!(scheduler.trace().iter().any(|event| {
+            event.kind == EventKind::ScopeCancelled
+                && event.scope == deadline_scope
+                && event.reason == Some(CancelReason::Deadline)
+        }));
+
+        let fuel_scope = scheduler
+            .open_scope_with_limits(root, [], None, limits)
+            .unwrap();
+        assert_eq!(
+            scheduler.consume_fuel(fuel_scope, 2),
+            Err(RuntimeError::FuelExhausted)
+        );
+        assert!(scheduler.trace().iter().any(|event| {
+            event.kind == EventKind::ScopeCancelled
+                && event.scope == fuel_scope
+                && event.reason == Some(CancelReason::FuelExhausted)
+        }));
+    }
+
+    #[test]
+    fn cancelled_parent_rejects_new_child_scope_admission() {
+        let mut scheduler = Scheduler::new([]);
+        let parent = scheduler
+            .open_scope(scheduler.root(), [], Some(10))
+            .unwrap();
+
+        scheduler.advance_to(10);
+
+        assert_eq!(
+            scheduler.open_scope(parent, [], None),
+            Err(RuntimeError::ScopeClosed)
         );
     }
 }

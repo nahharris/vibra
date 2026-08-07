@@ -164,8 +164,11 @@ pub fn run(path: &Path, config: &RunConfig) -> Result<()> {
         bail!("E-PKG-008: packaged Wasm does not match packaged sources");
     }
     let mut runtime_config = config.clone();
-    runtime_config.capability_grants =
-        project::capability_grants_for_file(&temp.path().join(entry))?;
+    let entry_path = temp.path().join(entry);
+    runtime_config.capability_grants = project::capability_grants_for_file(&entry_path)?;
+    if let Some(limits) = project::execution_limits_for_file(&entry_path)? {
+        runtime_config.scope_limits = limits;
+    }
     wasm_backend::run_wasm(&expected, &runtime_config)
 }
 

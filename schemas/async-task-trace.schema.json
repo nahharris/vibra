@@ -41,7 +41,7 @@
         "operation": { "$ref": "#/$defs/id" },
         "resource": { "$ref": "#/$defs/id" },
         "reason": {
-          "enum": ["explicit", "parent-cancelled", "deadline", "sibling-failed", "capability-revoked", "scope-closed", "resource-limit", "closed", "busy"]
+          "enum": ["explicit", "parent-cancelled", "deadline", "sibling-failed", "capability-revoked", "scope-closed", "fuel-exhausted", "memory-exhausted", "resource-limit", "closed", "busy"]
         },
         "detail": { "type": ["string", "integer", "boolean", "null"] }
       }

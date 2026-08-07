@@ -37,6 +37,11 @@ fn async_contract_schema_and_vectors_are_well_formed() {
     let allowed = schema["$defs"]["event"]["properties"]["kind"]["enum"]
         .as_array()
         .expect("event kind enum");
+    let reasons = schema["$defs"]["event"]["properties"]["reason"]["enum"]
+        .as_array()
+        .expect("event reason enum");
+    assert!(reasons.contains(&Value::String("fuel-exhausted".into())));
+    assert!(reasons.contains(&Value::String("memory-exhausted".into())));
     for case in cases {
         let name = case["name"].as_str().expect("vector name");
         assert!(

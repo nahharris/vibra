@@ -79,6 +79,21 @@ completion, task creation sequence, then operation sequence. Wall time and
 timezone never participate. Production hosts map their monotonic clock into
 this contract; tests advance a fake clock explicitly.
 
+## Execution budgets
+
+Issue #251 adds optional project-level `(limits fuel: ... memory: ...)`
+ceilings. Fuel is charged at function entry and loop headers. Accounted memory
+is charged at host-arena value insertion and propagated through active ancestor
+scopes. Exhaustion cancels and closes the active scope; it is not a catchable
+guest result, and ordinary scope teardown still owns cleanup. Budgets are
+separate from capability grants and may only narrow through child scopes.
+
+The current arena remains instance-owned and is not reclaimed at these scope
+boundaries. Consequently the memory figure is deterministic high-water
+accounting, not a working-set guarantee. The reclamation blocker and required
+escape-analysis work are tracked in
+[`2026-08-07-execution-bounds.md`](../status/2026-08-07-execution-bounds.md).
+
 ## Capabilities
 
 A child begins with an immutable snapshot no greater than its parent's current
