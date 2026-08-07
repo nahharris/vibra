@@ -83,6 +83,11 @@
       "summary": "Embed or template expansion has not been cut over to the typed S-expression frontend"
     },
     {
+      "code": "E-SCOPE-001",
+      "severity": "error",
+      "summary": "Lexical binding shadows a binding from an enclosing scope"
+    },
+    {
       "code": "E-MACRO-001",
       "severity": "error",
       "summary": "Typed macro invocation has the wrong number of arguments"

@@ -477,7 +477,7 @@ fn diagnostic(
     }
 }
 
-fn tooling_span(path: &Path, source: &str, span: syntax::Span) -> Span {
+pub(crate) fn tooling_span(path: &Path, source: &str, span: syntax::Span) -> Span {
     let index = LineIndex::new(source);
     let start = index.position(source, span.start);
     let end = index.position(source, span.end);

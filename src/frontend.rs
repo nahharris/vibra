@@ -7,6 +7,7 @@
 //! to the legacy YAML value tree.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -56,6 +57,37 @@ pub struct SurfaceProgram {
     /// import resolution has exactly one implementation.
     pub imports: BTreeMap<PathBuf, BTreeMap<String, PathBuf>>,
 }
+
+/// A post-expansion lexical-scope error together with the source paths for
+/// every document that participated in the loaded program. Keeping the path
+/// map here lets compiler tooling render both the primary and related spans,
+/// including when the original binding is in an imported module.
+#[derive(Debug)]
+pub struct ScopeValidationError {
+    pub error: ast::ScopeError,
+    pub paths: BTreeMap<DocumentId, PathBuf>,
+}
+
+impl ScopeValidationError {
+    pub fn primary_location(&self) -> ast::SourceLocation {
+        ast::SourceLocation {
+            document: self.error.document,
+            span: self.error.span,
+        }
+    }
+
+    pub fn path_for(&self, location: ast::SourceLocation) -> Option<&Path> {
+        self.paths.get(&location.document).map(PathBuf::as_path)
+    }
+}
+
+impl fmt::Display for ScopeValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for ScopeValidationError {}
 
 const MAX_TEMPLATE_SOURCE_BYTES: usize = 1_048_576;
 const MAX_EMBED_SOURCE_BYTES: usize = 1_048_576;
@@ -128,6 +160,7 @@ pub(crate) fn load_surface_program_multi_root(
             part.module = expanded_part;
         }
     }
+    validate_lexical_scopes(&modules)?;
     let embedded_files = expand_compile_time_data(&mut modules)?;
     validate_unique_symbols(&modules)?;
     validate_direct_import_aliases(&modules)?;
@@ -150,6 +183,34 @@ pub(crate) fn load_surface_program_multi_root(
         embedded_files,
         imports,
     })
+}
+
+fn validate_lexical_scopes(modules: &BTreeMap<PathBuf, SourceModule>) -> Result<()> {
+    let paths = modules
+        .values()
+        .flat_map(|module| {
+            module
+                .parts
+                .iter()
+                .map(|part| (part.module.document_id, part.path.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for module in modules.values() {
+        for part in &module.parts {
+            if let Err(error) = ast::validate_lexical_scopes(&part.module) {
+                return Err(anyhow::Error::new(ScopeValidationError {
+                    error,
+                    paths: paths.clone(),
+                })
+                .context(format!(
+                    "validate lexical scopes in {}",
+                    part.path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn load_surface_entry_for_test_discovery(entry: &Path) -> Result<(PathBuf, SourceModule)> {
