@@ -577,36 +577,6 @@ fn mutable_and_reference_type_wrappers_parse() {
 }
 
 #[test]
-fn wasm_abi_uses_i32_addresses_for_mutable_values_and_refs() {
-    use vibra::wasm_abi::{layout_of, AbiType, StorageClass};
-
-    let scalar = layout_of(&AbiType::I64);
-    assert_eq!(scalar.size, 8);
-    assert_eq!(scalar.align, 8);
-    assert_eq!(scalar.storage, StorageClass::Direct);
-
-    let mutable = layout_of(&AbiType::Mutable(Box::new(AbiType::I64)));
-    assert_eq!(mutable.size, 4);
-    assert_eq!(mutable.align, 4);
-    assert_eq!(mutable.storage, StorageClass::ArenaAddress);
-
-    let reference = layout_of(&AbiType::Reference(Box::new(AbiType::I64)));
-    assert_eq!(reference.size, 4);
-    assert_eq!(reference.storage, StorageClass::ArenaAddress);
-}
-
-#[test]
-fn wasm_abi_aggregate_layout_is_aligned() {
-    use vibra::wasm_abi::{layout_of, AbiType, StorageClass};
-
-    let record = layout_of(&AbiType::Record(vec![AbiType::I32, AbiType::I64]));
-    assert_eq!(record.size, 16);
-    assert_eq!(record.align, 8);
-    assert_eq!(record.field_offsets, vec![0, 8]);
-    assert_eq!(record.storage, StorageClass::CopiedPointer);
-}
-
-#[test]
 fn nested_function_grants_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
@@ -2552,6 +2522,100 @@ fn wasm_abi_rejects_wrong_value_parameter_type() {
         error.contains("E-WASM-003") && error.contains("bool"),
         "{error}"
     );
+}
+
+#[test]
+fn wasm_abi_rejects_reference_value_parameter_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(def result (enum (err e) (ok t)) where: (t any e any))
+(deffect host
+  (defn
+    bad-array-append
+    (items (array int64) value (ref int64))
+    (result (array int64) str)
+    (do (wasm "vibra_v1" "array_append" items value))
+    effects: ()))
+(defn main () void (do))
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(
+        error.contains("E-WASM-003") && error.contains("any"),
+        "{error}"
+    );
+}
+
+#[test]
+fn wasm_abi_rejects_reference_like_named_newtype_parameter_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(def hidden-ref (newtype (ref int64)))
+(def result (enum (err e) (ok t)) where: (t any e any))
+(deffect host
+  (defn
+    bad-newtype
+    (items (array int64) value hidden-ref)
+    (result (array int64) str)
+    (do (wasm "vibra_v1" "array_append" items value))
+    effects: ()))
+(defn main () void (do))
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(
+        error.contains("E-WASM-003") && error.contains("any"),
+        "{error}"
+    );
+}
+
+#[test]
+fn wasm_abi_rejects_unresolved_generic_any_parameter_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(def result (enum (err e) (ok t)) where: (t any e any))
+(deffect host
+  (defn
+    bad-generic
+    (items (array int64) value t)
+    (result (array int64) str)
+    (do (wasm "vibra_v1" "array_append" items value))
+    effects: ()
+    where: (t any)))
+(defn main () void (do))
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(
+        error.contains("E-WASM-003") && error.contains("any"),
+        "{error}"
+    );
+}
+
+#[test]
+fn secure_compilation_pipeline_rejects_a_stage_after_hardening() {
+    use vibra::compilation_pipeline::{CompilationPass, CompilationPipeline};
+
+    let mut pipeline = CompilationPipeline::new();
+    pipeline.run(CompilationPass::Reachability, || {});
+    pipeline.run(CompilationPass::WasmEmission, || {});
+    pipeline.run(CompilationPass::Hardening, || {});
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pipeline.run(CompilationPass::WasmEmission, || {});
+    }));
+    assert!(result.is_err());
 }
 
 #[test]

@@ -852,20 +852,16 @@ fn validate_external_wasm_export(
     let store = wasmer::Store::default();
     let module = wasmer::Module::new(&store, bytes)
         .with_context(|| format!("E-WASM-005: compile dependency `{alias}` wasm artifact"))?;
-    let mut has_memory = false;
-    for import in module.imports() {
-        let allowed_memory = import.module() == "vibra_ffi"
-            && import.name() == "memory"
-            && matches!(import.ty(), wasmer::ExternType::Memory(_));
-        if !allowed_memory {
-            bail!(
-                "E-WASM-005: dependency `{alias}` has forbidden wasm import `{}.{}`; v1 permits only `vibra_ffi.memory`",
-                import.module(),
-                import.name()
-            );
-        }
-        has_memory = true;
-    }
+    let has_memory = validate_static_wasm_imports(
+        alias,
+        module.imports().map(|import| {
+            (
+                import.module().to_string(),
+                import.name().to_string(),
+                matches!(import.ty(), wasmer::ExternType::Memory(_)),
+            )
+        }),
+    )?;
     if requires_memory && !has_memory {
         bail!(
             "E-WASM-005: dependency `{alias}` buffer wrapper `{symbol}` requires import `vibra_ffi.memory`"
@@ -912,6 +908,26 @@ fn validate_external_wasm_export(
         );
     }
     Ok(())
+}
+
+fn validate_static_wasm_imports(
+    alias: &str,
+    imports: impl IntoIterator<Item = (String, String, bool)>,
+) -> Result<bool> {
+    let mut has_memory = false;
+    for (module, name, is_memory) in imports {
+        let allowed_memory = module == "vibra_ffi" && name == "memory" && is_memory;
+        if !allowed_memory {
+            bail!(
+                "E-WASM-005: dependency `{alias}` has forbidden wasm import `{module}.{name}`; v1 permits only `vibra_ffi.memory`"
+            );
+        }
+        if has_memory {
+            bail!("E-WASM-005: dependency `{alias}` imports `vibra_ffi.memory` more than once");
+        }
+        has_memory = true;
+    }
+    Ok(has_memory)
 }
 
 fn validate_dependency_paths(project: &LoadedProject) -> Result<()> {
@@ -1846,6 +1862,25 @@ mod tests {
         let error = format!("{:#}", check_project(project.path()).unwrap_err());
         assert!(
             error.contains("E-WASM-005") && error.contains("vibra_ffi.memory"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn static_wasm_import_validation_rejects_duplicate_memory_imports() {
+        let error = format!(
+            "{:#}",
+            validate_static_wasm_imports(
+                "math",
+                [
+                    ("vibra_ffi".into(), "memory".into(), true),
+                    ("vibra_ffi".into(), "memory".into(), true),
+                ],
+            )
+            .unwrap_err()
+        );
+        assert!(
+            error.contains("E-WASM-005") && error.contains("more than once"),
             "{error}"
         );
     }
