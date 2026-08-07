@@ -246,12 +246,7 @@ fn lower_unhandled_fixture(main_body: &str) -> Vec<String> {
 "#
     ));
     let loaded = vibra::load::load_program(&entry).unwrap();
-    vibra::lower::lower_program(&loaded)
-        .unwrap()
-        .warnings
-        .into_iter()
-        .filter(|warning| !warning.contains("binding `ignored-"))
-        .collect()
+    vibra::lower::lower_program(&loaded).unwrap().warnings
 }
 
 fn assert_scope_error(source: &str, label: &str) {
@@ -602,6 +597,23 @@ fn imported_user_function_bodies_are_checked_for_unhandled_values() {
     assert_eq!(
         warning.span.start.offset,
         Some(helper_source.find("(result.from-ok").unwrap())
+    );
+}
+
+#[test]
+fn trusted_stdlib_function_bodies_do_not_emit_user_diagnostics() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let (_dir, entry) = write_scope_fixture(&format!(
+        r#"(import result "{result}")
+(defn main () void (do (let _ true)))
+"#
+    ));
+
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+    assert!(
+        diagnostics.is_empty(),
+        "trusted stdlib bodies must not produce user diagnostics: {diagnostics:?}"
     );
 }
 

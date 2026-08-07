@@ -33,8 +33,21 @@ impl SourceSpan {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BodySourceKind {
+    User,
+    TrustedStdlib,
+}
+
+impl Default for BodySourceKind {
+    fn default() -> Self {
+        Self::User
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BodySource {
+    pub kind: BodySourceKind,
     pub statements: Vec<StatementSource>,
 }
 
@@ -59,24 +72,29 @@ pub(crate) enum PatternSource {
 }
 
 impl BodySource {
-    pub(crate) fn from_ast(path: &Path, body: &[AstExpr]) -> Self {
+    pub(crate) fn from_ast(path: &Path, body: &[AstExpr], kind: BodySourceKind) -> Self {
         let mut statements = Vec::new();
-        push_ast_statements(path, body, &mut statements);
-        Self { statements }
+        push_ast_statements(path, body, kind, &mut statements);
+        Self { kind, statements }
     }
 }
 
-fn push_ast_statements(path: &Path, body: &[AstExpr], out: &mut Vec<StatementSource>) {
+fn push_ast_statements(
+    path: &Path,
+    body: &[AstExpr],
+    kind: BodySourceKind,
+    out: &mut Vec<StatementSource>,
+) {
     for expr in body {
         if let AstExprKind::Do(inner) = &expr.value {
-            push_ast_statements(path, inner, out);
+            push_ast_statements(path, inner, kind, out);
         } else {
-            out.push(statement_source(path, expr));
+            out.push(statement_source(path, expr, kind));
         }
     }
 }
 
-fn statement_source(path: &Path, expr: &AstExpr) -> StatementSource {
+fn statement_source(path: &Path, expr: &AstExpr, kind: BodySourceKind) -> StatementSource {
     let mut source = StatementSource {
         span: Some(SourceSpan::new(path, expr.span)),
         ..StatementSource::default()
@@ -90,13 +108,17 @@ fn statement_source(path: &Path, expr: &AstExpr) -> StatementSource {
             else_body,
             ..
         } => {
-            source.bodies.push(BodySource::from_ast(path, then_body));
-            source.bodies.push(BodySource::from_ast(path, else_body));
+            source
+                .bodies
+                .push(BodySource::from_ast(path, then_body, kind));
+            source
+                .bodies
+                .push(BodySource::from_ast(path, else_body, kind));
         }
         AstExprKind::While { body, .. }
         | AstExprKind::For { body, .. }
         | AstExprKind::Task { body, .. } => {
-            source.bodies.push(BodySource::from_ast(path, body));
+            source.bodies.push(BodySource::from_ast(path, body, kind));
         }
         AstExprKind::Match { cases, .. } => {
             source.patterns = cases
@@ -105,7 +127,7 @@ fn statement_source(path: &Path, expr: &AstExpr) -> StatementSource {
                 .collect();
             source.bodies = cases
                 .iter()
-                .map(|case| BodySource::from_ast(path, &case.body))
+                .map(|case| BodySource::from_ast(path, &case.body, kind))
                 .collect();
         }
         _ => {}
@@ -163,7 +185,17 @@ fn pattern_source(path: &Path, pattern: &AstPattern) -> PatternSource {
 pub(crate) fn collect_body_sources(program: &SurfaceProgram) -> HashMap<String, BodySource> {
     let mut sources = HashMap::new();
     let mut visited = std::collections::HashSet::new();
-    collect_module_sources(program, &program.entry, "", &mut visited, &mut sources);
+    let trusted_stdlib_root = crate::project::locate_stdlib_source()
+        .ok()
+        .and_then(|path| std::fs::canonicalize(path).ok());
+    collect_module_sources(
+        program,
+        &program.entry,
+        "",
+        &mut visited,
+        &mut sources,
+        trusted_stdlib_root.as_deref(),
+    );
     sources
 }
 
@@ -173,6 +205,7 @@ fn collect_module_sources(
     alias: &str,
     visited: &mut std::collections::HashSet<(PathBuf, String)>,
     sources: &mut HashMap<String, BodySource>,
+    trusted_stdlib_root: Option<&Path>,
 ) {
     if !visited.insert((path.to_path_buf(), alias.to_string())) {
         return;
@@ -181,8 +214,9 @@ fn collect_module_sources(
         return;
     };
     for part in &module.parts {
+        let kind = source_kind(&part.path, trusted_stdlib_root);
         for form in &part.module.forms {
-            collect_form_source(alias, &part.path, form, sources);
+            collect_form_source(alias, &part.path, form, kind, sources);
         }
     }
     let imports = program
@@ -198,14 +232,29 @@ fn collect_module_sources(
         } else {
             format!("{alias}.{child_alias}")
         };
-        collect_module_sources(program, &child_path, &child_alias, visited, sources);
+        collect_module_sources(
+            program,
+            &child_path,
+            &child_alias,
+            visited,
+            sources,
+            trusted_stdlib_root,
+        );
     }
+}
+
+fn source_kind(path: &Path, trusted_stdlib_root: Option<&Path>) -> BodySourceKind {
+    trusted_stdlib_root
+        .is_some_and(|root| path.starts_with(root))
+        .then_some(BodySourceKind::TrustedStdlib)
+        .unwrap_or_default()
 }
 
 fn collect_form_source(
     alias: &str,
     path: &Path,
     form: &TopLevel,
+    source_kind: BodySourceKind,
     sources: &mut HashMap<String, BodySource>,
 ) {
     let key = |name: &str| {
@@ -219,19 +268,22 @@ fn collect_form_source(
         TopLevel::Function(function) => {
             sources.insert(
                 key(&function.name.value),
-                BodySource::from_ast(path, &function.body),
+                BodySource::from_ast(path, &function.body, source_kind),
             );
         }
         TopLevel::Test(test) => {
             sources.insert(
                 key(&test.name.value),
-                BodySource::from_ast(path, &test.body),
+                BodySource::from_ast(path, &test.body, source_kind),
             );
         }
         TopLevel::TestScenario(scenario) => {
             for test in &scenario.cases {
                 let name = format!("{}::{}", scenario.name.value, test.name.value);
-                sources.insert(key(&name), BodySource::from_ast(path, &test.body));
+                sources.insert(
+                    key(&name),
+                    BodySource::from_ast(path, &test.body, source_kind),
+                );
             }
         }
         TopLevel::Definition(definition) => {
@@ -241,7 +293,10 @@ fn collect_form_source(
                 };
                 for function in functions {
                     let name = format!("{}.{}", definition.name.value, function.name.value);
-                    sources.insert(key(&name), BodySource::from_ast(path, &function.body));
+                    sources.insert(
+                        key(&name),
+                        BodySource::from_ast(path, &function.body, source_kind),
+                    );
                 }
             }
         }
@@ -250,7 +305,7 @@ fn collect_form_source(
                 let name = format!("{}.{}", deffect.name.value, operation.function.name.value);
                 sources.insert(
                     key(&name),
-                    BodySource::from_ast(path, &operation.function.body),
+                    BodySource::from_ast(path, &operation.function.body, source_kind),
                 );
             }
         }
@@ -376,7 +431,11 @@ pub(crate) fn validate_unhandled_values(
     let mut function_keys: Vec<_> = functions
         .iter()
         .filter_map(|(key, signature)| {
-            matches!(signature.body, FunctionBody::User { .. }).then_some(key)
+            (matches!(&signature.body, FunctionBody::User { .. })
+                && !sources
+                    .get(key)
+                    .is_some_and(|source| source.kind == BodySourceKind::TrustedStdlib))
+            .then_some(key)
         })
         .collect();
     function_keys.sort();
