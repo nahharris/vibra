@@ -1,8 +1,8 @@
 //! Execute lowered Vibra programs with stdlib io/fs support.
 
 use crate::async_runtime::{
-    CapabilityGrant, CapabilityRuntime, JoinHandle as RuntimeJoinHandle, RuntimeError, Scheduler,
-    TaskOutcome,
+    CancelReason, CapabilityGrant, CapabilityRuntime, JoinHandle as RuntimeJoinHandle,
+    RuntimeError, Scheduler, ScopeLimits, TaskOutcome,
 };
 use crate::lower::{
     Call, Expr, FunctionBody, HandleAccess, HostHandle, LetValue, LiteralType, LoweredExec,
@@ -30,8 +30,10 @@ pub(crate) fn run_lowered_interpreted(program: &LoweredProgram, config: &RunConf
     let mut env: HashMap<String, RuntimeValue> = HashMap::new();
     let mut files = FileTable::new(config.max_open_files);
     files.configure_authority(config.capability_grants.as_deref());
+    files.configure_execution_limits(config.scope_limits);
     files.enter_effect_scope(&main_effect_domains(program))?;
     let result = (|| {
+        files.consume_fuel(1)?;
         for stmt in &program.statements {
             if !matches!(
                 exec_statement(stmt, program, &mut env, &mut files, config)?,
@@ -75,8 +77,10 @@ pub(crate) fn run_lowered_interpreted_with_io(
     files.stdout_sink = Some(stdout);
     files.stderr_sink = Some(stderr);
     files.configure_authority(config.capability_grants.as_deref());
+    files.configure_execution_limits(config.scope_limits);
     files.enter_effect_scope(&main_effect_domains(program))?;
     let result = (|| {
+        files.consume_fuel(1)?;
         for stmt in &program.statements {
             if !matches!(
                 exec_statement(stmt, program, &mut env, &mut files, config)?,
@@ -100,6 +104,7 @@ pub fn eval_lowered_exec(
     let env = bindings.clone();
     let mut files = FileTable::new(config.max_open_files);
     files.configure_authority(config.capability_grants.as_deref());
+    files.configure_execution_limits(config.scope_limits);
     eval_expr(&exec.expr, &env, &exec.program, &mut files, config)
 }
 
@@ -168,6 +173,9 @@ pub(crate) struct FileTable {
     /// None means a direct module invocation without a project authority
     /// policy. Some is explicit, including an empty fail-closed authority.
     capability_runtime: Option<CapabilityRuntime>,
+    /// Execution budgets are deliberately separate from capability authority.
+    /// A direct module may have a budget without acquiring any host grants.
+    execution_runtime: Option<CapabilityRuntime>,
 }
 
 impl FileTable {
@@ -185,6 +193,7 @@ impl FileTable {
             stderr_sink: None,
             limit,
             capability_runtime: None,
+            execution_runtime: None,
         }
     }
 
@@ -200,21 +209,71 @@ impl FileTable {
             grants.map(|grants| CapabilityRuntime::new(grants.iter().cloned()));
     }
 
+    pub(crate) fn configure_execution_limits(&mut self, limits: ScopeLimits) {
+        self.execution_runtime = (limits != ScopeLimits::default())
+            .then(|| CapabilityRuntime::new_with_limits([], limits));
+    }
+
     pub(crate) fn enter_effect_scope(&mut self, domains: &BTreeSet<String>) -> Result<()> {
-        let Some(runtime) = &mut self.capability_runtime else {
-            return Ok(());
-        };
-        runtime
-            .enter_effect_scope(domains)
-            .map(|_| ())
-            .map_err(capability_runtime_error)
+        if let Some(runtime) = &mut self.capability_runtime {
+            runtime
+                .enter_effect_scope(domains)
+                .map_err(capability_runtime_error)?;
+        }
+        if let Some(runtime) = &mut self.execution_runtime {
+            runtime
+                .enter_grant_scope([])
+                .map_err(execution_runtime_error)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn leave_effect_scope(&mut self) -> Result<()> {
-        let Some(runtime) = &mut self.capability_runtime else {
+        if let Some(runtime) = &mut self.execution_runtime {
+            runtime.leave_scope().map_err(execution_runtime_error)?;
+        }
+        if let Some(runtime) = &mut self.capability_runtime {
+            runtime.leave_scope().map_err(capability_runtime_error)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn consume_fuel(&mut self, amount: u64) -> Result<()> {
+        let Some(runtime) = &mut self.execution_runtime else {
             return Ok(());
         };
-        runtime.leave_scope().map_err(capability_runtime_error)
+        if let Err(error) = runtime.consume_fuel(amount) {
+            let reason = match &error {
+                RuntimeError::FuelExhausted => CancelReason::FuelExhausted,
+                RuntimeError::MemoryExhausted => CancelReason::MemoryExhausted,
+                _ => CancelReason::ResourceLimit,
+            };
+            let _ = runtime.abort_current_scope(reason.clone());
+            if let Some(authority) = &mut self.capability_runtime {
+                let _ = authority.abort_current_scope(reason);
+            }
+            return Err(execution_runtime_error(error));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn reserve_memory(&mut self, bytes: usize) -> Result<()> {
+        let Some(runtime) = &mut self.execution_runtime else {
+            return Ok(());
+        };
+        if let Err(error) = runtime.reserve_memory(bytes) {
+            let reason = match &error {
+                RuntimeError::MemoryExhausted => CancelReason::MemoryExhausted,
+                RuntimeError::FuelExhausted => CancelReason::FuelExhausted,
+                _ => CancelReason::ResourceLimit,
+            };
+            let _ = runtime.abort_current_scope(reason.clone());
+            if let Some(authority) = &mut self.capability_runtime {
+                let _ = authority.abort_current_scope(reason);
+            }
+            return Err(execution_runtime_error(error));
+        }
+        Ok(())
     }
 
     /// Check every effect performed by one concrete host operation. This is
@@ -564,6 +623,10 @@ impl HandleLifecycleError {
 
 fn capability_runtime_error(error: RuntimeError) -> anyhow::Error {
     anyhow::anyhow!("E-CAPABILITY-001: {error:?}")
+}
+
+fn execution_runtime_error(error: RuntimeError) -> anyhow::Error {
+    anyhow::anyhow!("E-EXECUTION-001: {error:?}")
 }
 
 fn operation_resource_prefixes(name: &str, args: &[RuntimeValue]) -> Result<Vec<String>> {
@@ -1228,7 +1291,9 @@ fn exec_statement(
         Statement::While { cond, body } => loop {
             match eval_expr(cond, env, program, files, config)? {
                 RuntimeValue::Bool(true) => match run_block(body, program, env, files, config)? {
-                    ExecFlow::Next | ExecFlow::Continue => {}
+                    ExecFlow::Next | ExecFlow::Continue => {
+                        files.consume_fuel(1)?;
+                    }
                     ExecFlow::Break => return Ok(ExecFlow::Next),
                     flow @ ExecFlow::Return(_) => return Ok(flow),
                 },
@@ -1243,7 +1308,9 @@ fn exec_statement(
                 let mut scoped = env.clone();
                 scoped.insert(var.clone(), item);
                 match run_block(body, program, &mut scoped, files, config)? {
-                    ExecFlow::Next | ExecFlow::Continue => {}
+                    ExecFlow::Next | ExecFlow::Continue => {
+                        files.consume_fuel(1)?;
+                    }
                     ExecFlow::Break => return Ok(ExecFlow::Next),
                     flow @ ExecFlow::Return(_) => return Ok(flow),
                 }
@@ -1766,6 +1833,116 @@ mod iteration_tests {
         run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
         run_lowered(&program, &RunConfig::default()).unwrap();
     }
+
+    #[test]
+    fn zero_fuel_aborts_interpreter_and_wasm_before_user_work() {
+        let (_dir, program) = lower("(defn main () void (do))\n");
+        let config = RunConfig {
+            scope_limits: ScopeLimits {
+                fuel: 0,
+                ..ScopeLimits::default()
+            },
+            ..RunConfig::default()
+        };
+        let interpreted = run_lowered_interpreted(&program, &config).unwrap_err();
+        let wasm = run_lowered(&program, &config).unwrap_err();
+        assert!(format!("{interpreted:#}").contains("FuelExhausted"));
+        assert!(format!("{wasm:#}").contains("FuelExhausted"));
+    }
+
+    #[test]
+    fn fuel_exhaustion_stops_a_loop_in_both_runtimes() {
+        let (_dir, program) = lower("(defn main () void (do (while true (do))))\n");
+        let config = RunConfig {
+            scope_limits: ScopeLimits {
+                fuel: 3,
+                ..ScopeLimits::default()
+            },
+            ..RunConfig::default()
+        };
+        let interpreted = run_lowered_interpreted(&program, &config).unwrap_err();
+        let wasm = run_lowered(&program, &config).unwrap_err();
+        assert!(format!("{interpreted:#}").contains("FuelExhausted"));
+        assert!(format!("{wasm:#}").contains("FuelExhausted"));
+    }
+
+    #[test]
+    fn zero_iteration_loops_do_not_consume_back_edge_fuel() {
+        let (_dir, program) = lower("(defn main () void (do (while false (do))))\n");
+        let config = RunConfig {
+            scope_limits: ScopeLimits {
+                fuel: 1,
+                ..ScopeLimits::default()
+            },
+            ..RunConfig::default()
+        };
+        run_lowered_interpreted(&program, &config).unwrap();
+        run_lowered(&program, &config).unwrap();
+    }
+
+    #[test]
+    fn wasm_host_calls_consume_one_fuel_unit_at_the_call_boundary() {
+        let (_dir, program) = lower(
+            r#"(deffect now
+  (defn open () uint64
+    (intrinsic @clock-now-unix-millis)
+    effects: (time.now)))
+(defn main () void
+  (do (let ignored (now.open)))
+    effects: (entry.now time.now))
+"#,
+        );
+        let config = RunConfig {
+            scope_limits: ScopeLimits {
+                fuel: 2,
+                ..ScopeLimits::default()
+            },
+            ..RunConfig::default()
+        };
+        run_lowered_interpreted(&program, &config).unwrap();
+        run_lowered(&program, &config).unwrap();
+    }
+
+    #[test]
+    fn memory_exhaustion_is_reported_by_the_wasm_arena_boundary() {
+        let (_dir, program) = lower("(defn main () void (do (let value (array 1 2 3))))\n");
+        let config = RunConfig {
+            scope_limits: ScopeLimits {
+                memory_bytes: 0,
+                ..ScopeLimits::default()
+            },
+            ..RunConfig::default()
+        };
+        let wasm = run_lowered(&program, &config).unwrap_err();
+        assert!(format!("{wasm:#}").contains("MemoryExhausted"));
+    }
+
+    #[test]
+    fn budget_abort_does_not_duplicate_scope_completion() {
+        let mut files = FileTable::new(0);
+        files.configure_execution_limits(ScopeLimits {
+            fuel: 0,
+            ..ScopeLimits::default()
+        });
+        files.enter_effect_scope(&BTreeSet::new()).unwrap();
+        let scope = files.execution_runtime.as_ref().unwrap().current_scope();
+
+        let error = files.consume_fuel(1).unwrap_err();
+        assert!(error.to_string().contains("FuelExhausted"));
+        let completions = files
+            .execution_runtime
+            .as_ref()
+            .unwrap()
+            .scheduler()
+            .trace()
+            .iter()
+            .filter(|event| {
+                event.scope == scope
+                    && event.kind == crate::async_runtime::EventKind::ScopeCompleted
+            })
+            .count();
+        assert_eq!(completions, 1);
+    }
 }
 
 /// Unwrap a runtime value to a non-negative file handle.
@@ -2067,6 +2244,32 @@ pub(crate) fn exec_call(
     files: &mut FileTable,
     config: &RunConfig,
 ) -> Result<RuntimeValue> {
+    exec_call_inner(call, program, env, files, config, true)
+}
+
+/// Execute a call whose boundary was emitted by the Wasm backend.
+///
+/// The backend charges the host-call boundary in `HostExecution::call`, so
+/// this path must not charge it a second time while still sharing the normal
+/// effect-scope and host-dispatch logic.
+pub(crate) fn exec_call_from_wasm(
+    call: &Call,
+    program: &LoweredProgram,
+    env: &HashMap<String, RuntimeValue>,
+    files: &mut FileTable,
+    config: &RunConfig,
+) -> Result<RuntimeValue> {
+    exec_call_inner(call, program, env, files, config, false)
+}
+
+fn exec_call_inner(
+    call: &Call,
+    program: &LoweredProgram,
+    env: &HashMap<String, RuntimeValue>,
+    files: &mut FileTable,
+    config: &RunConfig,
+    charge_fuel: bool,
+) -> Result<RuntimeValue> {
     let sig = program
         .functions
         .get(&call.callee_key)
@@ -2077,6 +2280,9 @@ pub(crate) fn exec_call(
         FunctionBody::User { statements } => {
             let domains = function_effect_domains(sig, program);
             with_effect_scope(files, &domains, |files| {
+                if charge_fuel {
+                    files.consume_fuel(1)?;
+                }
                 let mut fn_env: HashMap<String, RuntimeValue> = HashMap::new();
                 for (idx, parameter) in sig.parameters.iter().enumerate() {
                     let val = evaluated_args[idx].clone();
@@ -2101,6 +2307,9 @@ pub(crate) fn exec_call(
         FunctionBody::Wasm { import, wasm_args } => {
             let domains = function_effect_domains(sig, program);
             with_effect_scope(files, &domains, |files| {
+                if charge_fuel {
+                    files.consume_fuel(1)?;
+                }
                 let entry =
                     crate::host_abi::lookup(&import.module, &import.name).with_context(|| {
                         format!(

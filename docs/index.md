@@ -93,6 +93,7 @@ claims stop describing the current state.
 - [Open issue roadmap](status/open-issues-roadmap.md)
 - [Kernel and standard-library gap analysis](status/kernel-stdlib-gap-analysis.md)
 - [S-expression migration status](status/s-expression-migration-status.md)
+- [Execution bounds implementation status](status/2026-08-07-execution-bounds.md)
 
 ### History and working records
 

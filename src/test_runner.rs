@@ -661,6 +661,9 @@ fn run_one_child(
     if child_config.capability_grants.is_none() {
         child_config.capability_grants = project::capability_grants_for_file(&item.path)?;
     }
+    if let Some(limits) = project::execution_limits_for_file(&item.path)? {
+        child_config.scope_limits = limits;
+    }
     if item.profile == "capability" && child_config.capability_grants.is_none() {
         child_config.capability_grants = Some(vec![]);
     }

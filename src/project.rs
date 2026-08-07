@@ -1,6 +1,6 @@
 //! Project manifest, scaffold, dependency sync, and import validation.
 
-use crate::async_runtime::CapabilityGrant;
+use crate::async_runtime::{CapabilityGrant, ScopeLimits};
 use anyhow::{bail, Context, Result};
 use git2::{build::CheckoutBuilder, Oid, Repository};
 use serde::{Deserialize, Serialize};
@@ -37,11 +37,32 @@ pub struct ProjectManifest {
     /// legacy/direct module invocation from an explicit empty authority set.
     #[serde(default)]
     pub authority: Option<ProjectAuthority>,
+    /// Optional execution ceilings. This is intentionally separate from the
+    /// authority grant set: limits constrain work, while grants authorize it.
+    #[serde(default)]
+    pub limits: Option<ProjectLimits>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ProjectAuthority {
     pub grants: Vec<CapabilityGrant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct ProjectLimits {
+    pub fuel: u64,
+    #[serde(rename = "memory-bytes")]
+    pub memory_bytes: usize,
+}
+
+impl From<ProjectLimits> for ScopeLimits {
+    fn from(limits: ProjectLimits) -> Self {
+        Self {
+            fuel: limits.fuel,
+            memory_bytes: limits.memory_bytes,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -246,6 +267,7 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
     let mut dependencies = HashMap::new();
     let mut plugin_interfaces = BTreeMap::new();
     let mut authority = None;
+    let mut limits = None;
     for child in forms(&root[1..]) {
         let form = list(child, "project child")?;
         match symbol(form.first(), "project child")? {
@@ -370,6 +392,12 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
                 }
                 authority = Some(parse_authority(&form[1..])?);
             }
+            "limits" => {
+                if limits.is_some() {
+                    bail!("E-PROJECT-001: duplicate `(limits ...)` form");
+                }
+                limits = Some(parse_limits(&form[1..])?);
+            }
             other => bail!("E-PROJECT-001: unknown project form `{other}`"),
         }
     }
@@ -381,6 +409,7 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
         dependencies,
         plugin_interfaces,
         authority,
+        limits,
     })
 }
 
@@ -423,6 +452,36 @@ fn parse_authority(nodes: &[crate::syntax::Node]) -> Result<ProjectAuthority> {
         grants.push(grant);
     }
     Ok(ProjectAuthority { grants })
+}
+
+fn parse_limits(nodes: &[crate::syntax::Node]) -> Result<ProjectLimits> {
+    let attrs = attributes(nodes, &["fuel", "memory"], &[], "limits")?;
+    if attrs.is_empty() {
+        bail!("E-PROJECT-001: limits requires `fuel:` or `memory:`");
+    }
+    let fuel = attrs
+        .get("fuel")
+        .map(|node| non_negative_limit(node, "limits fuel").map(|value| value as u64))
+        .transpose()?
+        .unwrap_or(u64::MAX);
+    let memory_bytes = attrs
+        .get("memory")
+        .map(|node| {
+            non_negative_limit(node, "limits memory")
+                .and_then(|value| usize::try_from(value).context("memory limit is too large"))
+        })
+        .transpose()?
+        .unwrap_or(usize::MAX);
+    Ok(ProjectLimits { fuel, memory_bytes })
+}
+
+fn non_negative_limit(node: &crate::syntax::Node, context: &str) -> Result<u64> {
+    match &node.kind {
+        crate::syntax::NodeKind::Atom(crate::syntax::Atom::Int(value)) if *value >= 0 => {
+            u64::try_from(*value).context("limit is too large")
+        }
+        _ => bail!("E-PROJECT-001: {context} must be a non-negative integer"),
+    }
 }
 
 fn forms(nodes: &[crate::syntax::Node]) -> impl Iterator<Item = &crate::syntax::Node> {
@@ -533,6 +592,13 @@ pub fn capability_grants_for_file(path: &Path) -> Result<Option<Vec<CapabilityGr
             .map(|authority| authority.grants)
             .unwrap_or_default()
     }))
+}
+
+/// Resolve the optional execution ceilings declared by the project containing
+/// an entry file. A direct module invocation has no manifest-derived budget;
+/// callers retain their embedding defaults in that case.
+pub fn execution_limits_for_file(path: &Path) -> Result<Option<ScopeLimits>> {
+    Ok(find_project_for_file(path)?.and_then(|project| project.manifest.limits.map(Into::into)))
 }
 
 /// Resolve and read every statically declared wasm library for the project
@@ -1748,6 +1814,24 @@ mod tests {
     }
 
     #[test]
+    fn manifest_execution_limits_are_typed_and_optional() {
+        let manifest = parse_manifest(
+            r#"(project
+  (package "sample" "0.1.0")
+  (limits fuel: 123 memory: 4096))"#,
+        )
+        .unwrap();
+        let limits = manifest
+            .limits
+            .expect("execution limits should be retained");
+        assert_eq!(limits.fuel, 123);
+        assert_eq!(limits.memory_bytes, 4096);
+
+        let without_limits = parse_manifest("(project (package \"sample\" \"0.1.0\"))").unwrap();
+        assert!(without_limits.limits.is_none());
+    }
+
+    #[test]
     fn capability_grants_follow_the_containing_project_manifest() {
         let temp = tempfile::tempdir().unwrap();
         let source_dir = temp.path().join("src");
@@ -1782,6 +1866,37 @@ mod tests {
         let direct_entry = direct.path().join("main.vib");
         fs::write(&direct_entry, "(defn main () void (do))\n").unwrap();
         assert_eq!(capability_grants_for_file(&direct_entry).unwrap(), None);
+    }
+
+    #[test]
+    fn execution_limits_follow_the_containing_project_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let source_dir = temp.path().join("src");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(
+            temp.path().join(MANIFEST_FILE),
+            r#"(project
+  (package "sample" "0.1.0")
+  (limits fuel: 12 memory: 4096))
+"#,
+        )
+        .unwrap();
+        let entry = source_dir.join("main.vib");
+        fs::write(&entry, "(defn main () void (do))\n").unwrap();
+
+        assert_eq!(
+            execution_limits_for_file(&entry).unwrap(),
+            Some(ScopeLimits {
+                fuel: 12,
+                memory_bytes: 4096,
+                ..ScopeLimits::default()
+            })
+        );
+
+        let direct = tempfile::tempdir().unwrap();
+        let direct_entry = direct.path().join("main.vib");
+        fs::write(&direct_entry, "(defn main () void (do))\n").unwrap();
+        assert_eq!(execution_limits_for_file(&direct_entry).unwrap(), None);
     }
 
     #[test]

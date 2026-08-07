@@ -41,7 +41,8 @@ const HOST_ITER_LEN: u32 = 13;
 const HOST_ITER_GET: u32 = 14;
 const HOST_SCOPE_ENTER: u32 = 15;
 const HOST_SCOPE_EXIT: u32 = 16;
-const HOST_FUNCTIONS: u32 = 17;
+const HOST_FUEL: u32 = 17;
+const HOST_FUNCTIONS: u32 = 18;
 
 const ABI_IMPORTS: &[&str] = &[
     "seed",
@@ -61,6 +62,7 @@ const ABI_IMPORTS: &[&str] = &[
     "iter_get",
     "scope_enter",
     "scope_exit",
+    "fuel",
 ];
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct WasmPlan {
@@ -172,6 +174,9 @@ fn run_wasm_inner(
     let scope_enter =
         HostFunction::new_typed(&mut store, |id: i32| host_unit(|host| host.enter_scope(id)));
     let scope_exit = HostFunction::new_typed(&mut store, || host_unit(|host| host.leave_scope()));
+    let fuel = HostFunction::new_typed(&mut store, || -> i32 {
+        host_value(|host| host.files.consume_fuel(1).map(|()| 1))
+    });
     let imports = imports! { ABI_MODULE => {
         "seed" => seed, "value_const" => value_const, "value_read" => value_read,
         "frame_begin" => frame_begin, "frame_push" => frame_push, "value_construct" => construct,
@@ -179,7 +184,7 @@ fn run_wasm_inner(
         "pattern_match" => pattern_match, "pattern_binding" => pattern_binding,
         "status" => status, "no_match" => no_match,
         "iter_len" => iter_len, "iter_get" => iter_get,
-        "scope_enter" => scope_enter, "scope_exit" => scope_exit,
+        "scope_enter" => scope_enter, "scope_exit" => scope_exit, "fuel" => fuel,
     }};
     let instance =
         Instance::new(&mut store, &module, &imports).context("instantiate Vibra Wasm")?;
@@ -187,13 +192,14 @@ fn run_wasm_inner(
         .exports
         .get_typed_function::<(), i32>(&store, "main")
         .context("Vibra Wasm must export main")?;
-    let status = main.call(&mut store).context("execute Vibra Wasm main")?;
+    let call_result = main.call(&mut store);
     let execution = HOST_EXECUTION
         .with(|slot| slot.borrow_mut().take())
         .context("missing Vibra host execution")?;
     if let Some(error) = execution.error {
         bail!(error);
     }
+    let status = call_result.context("execute Vibra Wasm main")?;
     if status != 0 {
         bail!("Vibra guest failed with status {status}");
     }
@@ -276,6 +282,7 @@ impl HostExecution {
             None => crate::execute::FileTable::new(config.max_open_files),
         };
         files.configure_authority(config.capability_grants.as_deref());
+        files.configure_execution_limits(config.scope_limits);
         Ok(Self {
             files,
             program,
@@ -306,9 +313,11 @@ impl HostExecution {
         self.files.leave_effect_scope()
     }
 
-    fn alloc(&mut self, value: RuntimeValue) -> i32 {
+    fn alloc(&mut self, value: RuntimeValue) -> Result<i32> {
+        self.files
+            .reserve_memory(accounted_runtime_value_bytes(&value))?;
         self.arena.push(value);
-        self.arena.len() as i32
+        i32::try_from(self.arena.len()).context("guest value arena is too large for wasm32")
     }
     fn get(&self, handle: i32) -> Result<&RuntimeValue> {
         handle
@@ -327,7 +336,7 @@ impl HostExecution {
             .get(name)
             .with_context(|| format!("missing seeded main value `{name}`"))?
             .clone();
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn constant(&mut self, id: i32) -> Result<i32> {
         let expr = self
@@ -338,7 +347,7 @@ impl HostExecution {
         let Expr::Value(value) = expr else {
             bail!("expression is not a constant")
         };
-        Ok(self.alloc(value.clone()))
+        self.alloc(value.clone())
     }
     fn read(&mut self, handle: i32) -> Result<i32> {
         let value = match self.get(handle)? {
@@ -347,7 +356,7 @@ impl HostExecution {
             }
             value => value.clone(),
         };
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn frame_push(&mut self, handle: i32) -> Result<()> {
         self.get(handle)?;
@@ -456,7 +465,7 @@ impl HostExecution {
             }
             other => bail!("unsupported host value construction {other:?}"),
         };
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn call(&mut self, id: i32) -> Result<i32> {
         let mut call = self
@@ -478,24 +487,27 @@ impl HostExecution {
                 call.callee_key
             )
         }
+        self.files.consume_fuel(1)?;
         if let FunctionBody::Wasm { import, .. } = &sig.body {
             if import.module.starts_with('@') {
                 let value =
                     exec_static_wasm_scalar(&self.plan.foreign_modules, import, sig, &values)?;
-                return Ok(self.alloc(value));
+                return self.alloc(value);
             }
         }
-        let value = crate::execute::exec_call(
+        let value = crate::execute::exec_call_from_wasm(
             &call,
             &self.program,
             &self.seed_env,
             &mut self.files,
             &self.config,
         )?;
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn set(&mut self, target: i32, value: i32) -> Result<()> {
         let next = self.get(value)?.clone();
+        self.files
+            .reserve_memory(accounted_runtime_value_bytes(&next))?;
         match self.get(target)? {
             RuntimeValue::Mutable(cell)
             | RuntimeValue::Reference {
@@ -543,7 +555,7 @@ impl HostExecution {
             .get(index as usize)
             .context("invalid pattern binding")?
             .clone();
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn iter_len(&mut self, handle: i32) -> Result<i32> {
         let len = match self.get(handle)? {
@@ -591,7 +603,90 @@ impl HostExecution {
             other => bail!("E-ITER-001: value is not traversable: {other:?}"),
         }
         .context("E-ITER-005: traversal index out of bounds")?;
-        Ok(self.alloc(item))
+        self.alloc(item)
+    }
+}
+
+/// Account the logical host-arena representation of a value. This is a
+/// deterministic high-water metric, not a claim about allocator bytes: the
+/// arena is still instance-owned and unreclaimed until escape analysis lands.
+fn accounted_runtime_value_bytes(value: &RuntimeValue) -> usize {
+    let mut seen_cells = BTreeSet::new();
+    accounted_runtime_value_bytes_inner(value, &mut seen_cells)
+}
+
+fn accounted_runtime_value_bytes_inner(
+    value: &RuntimeValue,
+    seen_cells: &mut BTreeSet<usize>,
+) -> usize {
+    let base = std::mem::size_of::<RuntimeValue>();
+    match value {
+        RuntimeValue::Atom(text) | RuntimeValue::Str(text) => base.saturating_add(text.len()),
+        RuntimeValue::Array(values) | RuntimeValue::Tuple(values) => values.iter().fold(
+            base.saturating_add(values.len().saturating_mul(base)),
+            |total, value| {
+                total.saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
+            },
+        ),
+        RuntimeValue::Record(fields) => fields.iter().fold(
+            base.saturating_add(
+                fields
+                    .len()
+                    .saturating_mul(std::mem::size_of::<(String, RuntimeValue)>()),
+            ),
+            |total, (name, value)| {
+                total
+                    .saturating_add(name.len())
+                    .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
+            },
+        ),
+        RuntimeValue::Map(entries) => entries.iter().fold(
+            base.saturating_add(
+                entries
+                    .len()
+                    .saturating_mul(std::mem::size_of::<(RuntimeValue, RuntimeValue)>()),
+            ),
+            |total, (key, value)| {
+                total
+                    .saturating_add(accounted_runtime_value_bytes_inner(key, seen_cells))
+                    .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells))
+            },
+        ),
+        RuntimeValue::Typed { value, .. } => base
+            .saturating_add(std::mem::size_of::<RuntimeValue>())
+            .saturating_add(accounted_runtime_value_bytes_inner(value, seen_cells)),
+        RuntimeValue::Enum {
+            enum_key,
+            tag,
+            payload,
+        } => base
+            .saturating_add(enum_key.len())
+            .saturating_add(tag.len())
+            .saturating_add(
+                payload
+                    .as_deref()
+                    .map(|value| accounted_runtime_value_bytes_inner(value, seen_cells))
+                    .unwrap_or(0),
+            ),
+        RuntimeValue::Mutable(cell) | RuntimeValue::Reference { cell, .. } => {
+            let pointer = Rc::as_ptr(cell) as usize;
+            if !seen_cells.insert(pointer) {
+                base
+            } else {
+                base.saturating_add(std::mem::size_of::<RefCell<RuntimeValue>>())
+                    .saturating_add(match cell.try_borrow() {
+                        Ok(value) => accounted_runtime_value_bytes_inner(&value, seen_cells),
+                        Err(_) => usize::MAX,
+                    })
+            }
+        }
+        RuntimeValue::Bool(_)
+        | RuntimeValue::Int(_)
+        | RuntimeValue::Float(_)
+        | RuntimeValue::Range { .. }
+        | RuntimeValue::HostHandle(_)
+        | RuntimeValue::JoinHandle(_)
+        | RuntimeValue::Void => base,
     }
 }
 
@@ -1071,6 +1166,7 @@ impl<'a> Compiler<'a> {
             ("iter_get", 4),
             ("scope_enter", 2),
             ("scope_exit", 1),
+            ("fuel", 5),
         ] {
             imports.import(ABI_MODULE, name, EntityType::Function(ty));
         }
@@ -1130,6 +1226,7 @@ impl<'a> Compiler<'a> {
         let scope_id = self.scope_id(scope_domains);
         let mut context = FunctionCompiler::new(self, args, vec![], statements, false, scope_id);
         context.emit_scope_enter();
+        context.emit_fuel_check();
         context.emit_statements(statements);
         context.emit_scope_exit();
         context.emit_const_value(RuntimeValue::Void);
@@ -1159,6 +1256,7 @@ impl<'a> Compiler<'a> {
             context.function.instruction(&Instruction::LocalSet(local));
         }
         context.emit_scope_enter();
+        context.emit_fuel_check();
         context.emit_statements(&statements);
         context.emit_scope_exit();
         context
@@ -1299,6 +1397,15 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         self.emit_scope_enter_id(self.scope_id);
     }
 
+    fn emit_fuel_check(&mut self) {
+        self.function.instruction(&Instruction::Call(HOST_FUEL));
+        self.function.instruction(&Instruction::I32Eqz);
+        self.function
+            .instruction(&Instruction::If(BlockType::Empty));
+        self.function.instruction(&Instruction::Unreachable);
+        self.function.instruction(&Instruction::End);
+    }
+
     fn emit_scope_enter_id(&mut self, scope_id: Option<u32>) {
         if let Some(id) = scope_id {
             self.function.instruction(&Instruction::I32Const(id as i32));
@@ -1380,6 +1487,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.function.instruction(&Instruction::I32Eqz);
                 self.function.instruction(&Instruction::BrIf(1));
                 self.emit_statements(body);
+                self.emit_fuel_check();
                 self.function.instruction(&Instruction::Br(0));
                 self.function.instruction(&Instruction::End);
                 self.function.instruction(&Instruction::End);
@@ -1431,6 +1539,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.function.instruction(&Instruction::I32Add);
                 self.function
                     .instruction(&Instruction::LocalSet(index_local));
+                self.emit_fuel_check();
                 self.function.instruction(&Instruction::Br(0));
                 self.function.instruction(&Instruction::End);
                 self.function.instruction(&Instruction::End);
@@ -1471,7 +1580,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     .instruction(&Instruction::Br(self.control_depth - target));
             }
             Statement::Continue => {
-                let (_, target) = self.loop_stack.last().expect("validated loop control");
+                let target = self.loop_stack.last().expect("validated loop control").1;
+                self.emit_fuel_check();
                 self.function
                     .instruction(&Instruction::Br(self.control_depth - target));
             }
@@ -2140,6 +2250,48 @@ mod tests {
                 ..
             } if import.module == ABI_MODULE
         )));
+    }
+
+    #[test]
+    fn logical_memory_accounting_ignores_allocator_capacity() {
+        let compact = RuntimeValue::Array(vec![RuntimeValue::Int(1)]);
+        let mut padded_items = Vec::with_capacity(16);
+        padded_items.push(RuntimeValue::Int(1));
+        let padded = RuntimeValue::Array(padded_items);
+        assert_eq!(
+            accounted_runtime_value_bytes(&compact),
+            accounted_runtime_value_bytes(&padded)
+        );
+
+        let compact = RuntimeValue::Str("x".into());
+        let mut padded_text = String::with_capacity(32);
+        padded_text.push('x');
+        let padded = RuntimeValue::Str(padded_text);
+        assert_eq!(
+            accounted_runtime_value_bytes(&compact),
+            accounted_runtime_value_bytes(&padded)
+        );
+    }
+
+    #[test]
+    fn mutable_cell_replacements_count_toward_the_memory_ceiling() {
+        let cell = RuntimeValue::Mutable(Rc::new(RefCell::new(RuntimeValue::Int(0))));
+        let replacement = RuntimeValue::Str("replacement".into());
+        let memory_bytes = accounted_runtime_value_bytes(&cell)
+            .saturating_add(accounted_runtime_value_bytes(&replacement));
+        let config = RunConfig {
+            scope_limits: crate::async_runtime::ScopeLimits {
+                memory_bytes,
+                ..crate::async_runtime::ScopeLimits::default()
+            },
+            ..RunConfig::default()
+        };
+        let mut host = HostExecution::new(config, WasmPlan::default(), None).unwrap();
+        let cell_handle = host.alloc(cell).unwrap();
+        let replacement_handle = host.alloc(replacement).unwrap();
+
+        let error = host.set(cell_handle, replacement_handle).unwrap_err();
+        assert!(format!("{error:#}").contains("MemoryExhausted"));
     }
 
     #[test]

@@ -127,6 +127,11 @@ requirements. A project's optional `project.vib` `(authority ...)` grants seed
 the root authority; omission is fail-closed for project execution. Host
 operations re-check their canonical effect grant and resource prefix at the
 operation boundary. Direct module embedding may configure grants explicitly.
+The optional `(limits fuel: ... memory: ...)` form separately declares
+execution ceilings: fuel is charged per call and loop iteration, and memory is
+tracked as deterministic logical high-water accounting for host-arena values.
+Child scopes can narrow either ceiling but cannot amplify it; these limits do
+not grant capabilities.
 
 ## Projects
 
@@ -141,6 +146,7 @@ compiler-owned package metadata are canonical JSON.
   (dependency std path: "../stdlib")
   (authority
     (grant fs.read "/safe"))
+  (limits fuel: 100000 memory: 1048576)
 )
 ```
 

@@ -10,6 +10,7 @@ project commands; the filename does not use a separate manifest extension.
   (authority
     (grant fs.read "/safe")
     (grant net.connect "example.com:443"))
+  (limits fuel: 100000 memory: 1048576)
   (target core kind: @lib root: "src/core" entry: "lib.vib")
   (target hello kind: @bin root: "src/hello" entry: "main.vib")
   (dependency std
@@ -24,6 +25,12 @@ project commands; the filename does not use a separate manifest extension.
 - `(authority (grant <domain>.<action> [resource-prefix]) ...)` declares
   project root capability grants. Omitting it denies all effectful host
   operations during project execution.
+- `(limits fuel: <non-negative-int> memory: <non-negative-int>)` declares
+  optional execution ceilings. Either label may be omitted; an omitted limit
+  is unbounded. Fuel is charged per function call and loop iteration, while
+  memory is deterministic logical high-water accounting for host-arena values.
+  Limits are independent of capability authority and child scopes may only
+  narrow them.
 - `(target <name> kind: <@bin|@lib> root: <root> entry: <entry>)` declares a source target.
 - `(dependency <alias> ...)` declares a local, Git, or static Wasm dependency.
 
