@@ -1,7 +1,7 @@
 # Vibra nominal effect system
 
-Date: 2026-08-01
-Status: accepted implementation contract for issue #240 (parent issue #151)
+Date: 2026-08-07
+Status: accepted implementation contract for issue #240 (amended by #249; parent issue #151)
 Migration: intentionally breaking; only nominal roots and `deffect` operations are supported
 
 ## Decision
@@ -9,9 +9,23 @@ Migration: intentionally breaking; only nominal roots and `deffect` operations a
 Vibra effects are compiler-native, nominal roots declared with `deffect`.
 Each operation owns exactly one root and may list additional roots in its
 `effects:` annotation. The owner is implicit; the annotation is additive.
-Calls contribute the exact union of the callee's declared ceiling. There is no
-dependency-closure pass, compound-effect declaration, or runtime permission
-value.
+Exported functions, interface methods, and deffect operations declare their
+complete effect ceiling. Module-private functions infer their performed row
+from their body. `main` also infers; program authority is a project-level
+contract and is not repeated in the function signature.
+
+Inference builds the lowered module call graph and computes the least fixed
+point of the effect-set join operation. Calls contribute the callee's inferred
+row, so private call chains and recursive components are handled without
+requiring private annotations. Interface dispatch is already collapsed to a
+concrete callee key before this pass. An inferred row always reports leaf
+operations; it never expands to a declaration root.
+
+At a declaration boundary, the declared row must cover the inferred row.
+Under-declaration is `E-EFFECT-001`. Over-declaration is accepted with a
+deterministic `W-EFFECT-001` warning. A bare declared root such as `fs` covers
+`fs.read`, `fs.write`, and `fs.metadata` for this comparison only; it does not
+change the stored declaration or inferred output.
 
 ```text
 (deffect read
@@ -32,8 +46,8 @@ import alias.
 
 Effects are static and erased. They describe observable host actions and the
 ambient authority a function can reach; they do not sandbox an embedder.
-Ordinary functions and interface methods declare their complete ceiling.
-Implementations must remain below the interface method's ceiling.
+Implementations must remain below the interface method's ceiling, even when
+their concrete performed rows differ from another implementation.
 
 ## Native boundary
 
@@ -98,8 +112,16 @@ operations.
 
 `vibra effects` exposes `surface.declared` and `surface.performed`, per-function
 declared/performed rows, operation owner/additive rows, call edges, and primitive
-witnesses containing input/result capability shapes and required roots. There are
-no legacy effect fields or structural aliases in the report.
+witnesses containing input/result capability shapes and required roots. The
+`performed` rows are the same least-fixed-point inference used for validation;
+the report does not maintain a second call-graph definition. There are no
+legacy effect fields or structural aliases in the report.
+
+As a corpus migration check, the four tracked example entrypoints no longer
+repeat their transitive effect unions on `main`: 15 effect labels were removed
+from those annotations (15 to 0). Boundary declarations on ordinary exported
+functions, interface methods, deffect operations, and foreign operations remain
+explicit.
 
 `E-EFFECT-001..007` retain their existing meanings where applicable. Native
 surface diagnostics additionally cover malformed/duplicate `deffect`
@@ -108,6 +130,8 @@ to forge or cast host-backed endpoint types.
 
 ## Non-goals
 
-Effects are not handlers, parameterized rows, implicit dependency graphs, or
-runtime permissions. Host handles remain copyable for this migration; affine
-ownership and borrowing are a follow-up design.
+Effects are not handlers, parameterized rows, effect-polymorphic function
+types, or runtime permissions. A generic combinator therefore keeps a fixed
+declared ceiling; effect sets as type-level values belong with #151. Host
+handles remain copyable for this migration; affine ownership and borrowing are
+a follow-up design.

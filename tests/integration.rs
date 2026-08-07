@@ -1541,15 +1541,20 @@ fn declared_effects_are_a_ceiling() {
     );
 }
 
-/// Effects propagate through calls using the callee's *declaration*, which is what
-/// makes inference a single pass rather than a fixpoint.
+/// Effects propagate through calls using the callee's performed body effects.
+/// This requires a real graph/fixpoint rather than trusting declarations or
+/// assuming that callees have already been visited.
 #[test]
-fn effects_propagate_to_callers_through_declarations() {
+fn effects_propagate_to_callers_through_bodies() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn leaf () void (do (let ok true)) effects: (env.read))
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn leaf () void (do (host.read)) effects: (entry.host env.read))
 (defn middle () void (do (leaf)))
 (defn main () void (do (middle)))
 "#,
@@ -1562,7 +1567,246 @@ fn effects_propagate_to_callers_through_declarations() {
     let reported = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         reported.contains("`middle` declares no effects") && reported.contains("via `leaf`"),
-        "expected the caller to inherit the callee's declared effect, got: {reported}"
+        "expected the caller to inherit the callee's performed effect, got: {reported}"
+    );
+}
+
+#[test]
+fn private_call_chain_infers_effects_without_private_annotations() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn leaf () void (do (host.read)) visibility: @private)
+(defn middle () void (do (leaf)) visibility: @private)
+(defn main () void (do (middle)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog)
+        .expect("private functions should infer effects through the whole call chain");
+    let inferred =
+        vibra::effect_semantics::infer_function(&lowered.functions["-middle"], &lowered.functions);
+    assert!(inferred.labels().contains(&("env".into(), "read".into())));
+}
+
+#[test]
+fn mutual_private_recursion_reaches_a_least_fixpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn first () void (do (host.read) (second)) visibility: @private)
+(defn second () void (do (first)) visibility: @private)
+(defn main () void (do (first)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog)
+        .expect("mutual private recursion should converge during effect inference");
+    for key in ["-first", "-second"] {
+        assert!(vibra::effect_semantics::infer_function(
+            &lowered.functions[key],
+            &lowered.functions
+        )
+        .labels()
+        .contains(&("env".into(), "read".into())));
+    }
+}
+
+#[test]
+fn over_declared_effects_are_reported_as_warnings() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(defn api () void (do (let ok true)) effects: (env.read))
+(defn main () void (do (api)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    assert!(
+        lowered
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("over-declares") && warning.contains("api")),
+        "expected a deterministic over-declaration warning, got: {:?}",
+        lowered.warnings
+    );
+}
+
+#[test]
+fn under_declared_exported_effects_remain_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn api () void (do (host.read)))
+(defn main () void (do (api)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        error.contains("E-EFFECT-001") && error.contains("`api`"),
+        "expected an under-declared exported function to fail, got: {error}"
+    );
+}
+
+#[test]
+fn under_declared_legacy_main_effects_remain_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn main () void (do (host.read)) effects: ())
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        error.contains("E-EFFECT-001") && error.contains("`main`"),
+        "expected an explicitly under-declared legacy main to fail, got: {error}"
+    );
+}
+
+#[test]
+fn declared_effect_roots_subsume_only_at_the_declaration_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @fs-metadata (intrinsic @path-new "x"))))
+    effects: (fs.metadata)))
+(defn api () void (do (host.read)) effects: (fs entry.host))
+(defn main () void (do (api)) effects: (fs entry.host))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog)
+        .expect("a declared root should cover its leaf operations");
+    assert_eq!(
+        lowered.functions["api"].effects.labels,
+        [
+            ("entry".to_string(), "host".to_string()),
+            ("fs".to_string(), "".to_string()),
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert_eq!(
+        vibra::effect_semantics::infer_function(&lowered.functions["api"], &lowered.functions)
+            .labels(),
+        [
+            ("entry".to_string(), "host".to_string()),
+            ("fs".to_string(), "metadata".to_string()),
+        ]
+        .into_iter()
+        .collect()
+    );
+}
+
+#[test]
+fn interface_dispatch_infers_each_concrete_implementation_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(def display (interface (fmt (fn-type (self self) str effects: (entry.host env.read)))))
+(def quiet-box (newtype int64)
+  impls: ((impl display methods: ((method fmt
+    (fn (self self) str (do (return "quiet")) effects: ()))))))
+(def loud-box (newtype int64)
+  impls: ((impl display methods: ((method fmt
+    (fn (self self) str (do (host.read) (return "loud")) effects: (entry.host env.read)))))))
+(defn quiet-call (value quiet-box) void (do (display.fmt value)) effects: ())
+(defn loud-call (value loud-box) void (do (display.fmt value)) effects: (entry.host env.read))
+(defn main () void
+  (do
+    (let quiet (cast 1 quiet-box))
+    (let loud (cast 2 loud-box))
+    (quiet-call quiet)
+    (loud-call loud)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog)
+        .expect("static interface dispatch should resolve before effect inference");
+    assert!(vibra::effect_semantics::infer_function(
+        &lowered.functions["quiet-call"],
+        &lowered.functions,
+    )
+    .labels()
+    .is_empty());
+    let loud_effects = vibra::effect_semantics::infer_function(
+        &lowered.functions["loud-call"],
+        &lowered.functions,
+    )
+    .labels();
+    assert!(loud_effects.contains(&("env".into(), "read".into())));
+    assert!(loud_effects.contains(&("entry".into(), "host".into())));
+}
+
+#[test]
+fn deffect_operation_owner_is_still_inferred_at_the_operation_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect read
+  (defn open () void (do (let ok true)) effects: ()))
+(defn main () void (do (read.open)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let inferred = vibra::effect_semantics::infer_function(
+        &lowered.functions["read.open"],
+        &lowered.functions,
+    );
+    assert!(
+        inferred.labels().contains(&("entry".into(), "read".into())),
+        "inferred: {inferred:?}, signature: {:?}",
+        lowered.functions["read.open"]
     );
 }
 
@@ -1574,20 +1818,20 @@ fn task_effects_belong_to_the_enclosing_function() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn leaf () void (do (let ok true)) effects: (env.read))
-(defn main () void (do (task (do (leaf)) captures: ())))
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn main () void (do (task (do (host.read)) captures: ())))
 "#,
     )
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    // Enforcement is a hard error now, so the task body's effect surfaces as a lowering
-    // failure against the enclosing function rather than a `report_effects` line.
-    let reported = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        reported.contains("`main` declares no effects") && reported.contains("env.read"),
-        "expected a task body's effects to belong to its parent, got: {reported}"
-    );
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let inferred =
+        vibra::effect_semantics::infer_statements(&lowered.statements, &lowered.functions);
+    assert!(inferred.labels().contains(&("env".into(), "read".into())));
 }
 
 /// `effects:` accepts nominal root names, and an absent attribute means pure.

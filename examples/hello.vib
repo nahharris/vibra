@@ -1,9 +1,2 @@
 (import io "../stdlib/src/io.vib")
-(import stream "../stdlib/src/stream.vib")
-(defn
-  main
-  ()
-  void
-  (io.stdout.println "Hello, World!")
-  effects: (io.stdout stream.write)
-)
+(defn main () void (io.stdout.println "Hello, World!"))

@@ -972,7 +972,9 @@ fn print_effects(
 ) -> Result<()> {
     let loaded = load::load_legacy_yaml_program(path, flags)?;
     let lowered = lower::lower_program(&loaded)?;
-    let reachable = reachable_functions(&lowered);
+    let inference = vibra::effect_semantics::infer_program(&lowered.functions);
+    let main_call_edges = vibra::effect_semantics::call_edges_for_statements(&lowered.statements);
+    let reachable = reachable_functions(&inference, &main_call_edges);
     let mut functions = lowered
         .functions
         .iter()
@@ -980,10 +982,9 @@ fn print_effects(
         .collect::<Vec<_>>();
     functions.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    // The effect surface now comes from declarations rather than from re-walking the
-    // call graph for host imports. Declarations are checked against inference at
-    // lowering, so this is exact rather than an approximation, and it stays correct
-    // for a function that reaches the host only indirectly.
+    // The effect surface and call edges come from the shared semantic inference
+    // result. Primitive witnesses remain presentation details collected from the
+    // lowered bodies.
     let label = |(domain, action): &(String, String)| EffectLabel {
         domain: domain.clone(),
         action: action.clone(),
@@ -995,21 +996,28 @@ fn print_effects(
     let mut primitive_witnesses = Vec::new();
 
     for (source, signature) in &functions {
-        let inferred = vibra::effect_semantics::infer_function(signature, &lowered.functions);
+        let inferred = inference
+            .functions
+            .get(*source)
+            .cloned()
+            .unwrap_or_default();
         let declared: Vec<_> = signature.effects.labels.iter().map(label).collect();
         let performed: Vec<_> = inferred.labels().iter().map(label).collect();
         declared_surface.extend(signature.effects.labels.iter().cloned());
         performed_surface.extend(inferred.labels());
 
-        let mut call_edges = std::collections::BTreeSet::new();
         let mut function_primitives = Vec::new();
         collect_function_details(
             source,
             signature,
-            &mut call_edges,
             &mut function_primitives,
             &mut primitive_witnesses,
         )?;
+        let call_edges = inference
+            .call_edges
+            .get(*source)
+            .cloned()
+            .unwrap_or_default();
         let primitive_names = function_primitives.clone();
         per_function.push(FunctionEffects {
             source: (*source).clone(),
@@ -1051,11 +1059,12 @@ fn print_effects(
         vibra::effect_semantics::infer_statements(&lowered.statements, &lowered.functions);
     declared_surface.extend(lowered.main_effects.labels.iter().cloned());
     performed_surface.extend(main_inferred.labels());
-    let mut main_calls = std::collections::BTreeSet::new();
     let mut main_primitives = Vec::new();
     let main_signature = lower::FunctionSig {
         alias: String::new(),
         symbol: "main".into(),
+        visibility: lower::FunctionVisibility::Public,
+        interface_method: false,
         owner_effect: None,
         type_params: Vec::new(),
         type_param_bounds: Vec::new(),
@@ -1070,7 +1079,6 @@ fn print_effects(
     collect_function_details(
         "main",
         &main_signature,
-        &mut main_calls,
         &mut main_primitives,
         &mut primitive_witnesses,
     )?;
@@ -1078,7 +1086,7 @@ fn print_effects(
         source: "main".into(),
         declared: lowered.main_effects.labels.iter().map(label).collect(),
         performed: main_inferred.labels().iter().map(label).collect(),
-        call_edges: main_calls.into_iter().collect(),
+        call_edges: main_call_edges.into_iter().collect(),
         primitive_witnesses: main_primitives,
     });
 
@@ -1124,7 +1132,6 @@ fn operation_owner(signature: &lower::FunctionSig) -> Option<(String, String)> {
 fn collect_function_details(
     source: &str,
     signature: &lower::FunctionSig,
-    call_edges: &mut std::collections::BTreeSet<String>,
     primitive_names: &mut Vec<String>,
     primitives: &mut Vec<PrimitiveWitness>,
 ) -> Result<()> {
@@ -1133,7 +1140,7 @@ fn collect_function_details(
             collect_primitive(source, import, false, primitive_names, primitives)?;
         }
         lower::FunctionBody::User { statements } => {
-            collect_statements_details(source, statements, call_edges, primitive_names, primitives)?
+            collect_statements_details(source, statements, primitive_names, primitives)?
         }
     }
     Ok(())
@@ -1142,7 +1149,6 @@ fn collect_function_details(
 fn collect_statements_details(
     source: &str,
     statements: &[lower::Statement],
-    call_edges: &mut std::collections::BTreeSet<String>,
     primitive_names: &mut Vec<String>,
     primitives: &mut Vec<PrimitiveWitness>,
 ) -> Result<()> {
@@ -1150,47 +1156,27 @@ fn collect_statements_details(
     for statement in statements {
         match statement {
             Statement::Call(call) => {
-                call_edges.insert(call.callee_key.clone());
                 for argument in &call.args {
-                    collect_expr_details(
-                        source,
-                        argument,
-                        call_edges,
-                        primitive_names,
-                        primitives,
-                    )?;
+                    collect_expr_details(source, argument, primitive_names, primitives)?;
                 }
             }
             Statement::Let { value, .. } => match value {
                 LetValue::Call(call) => {
-                    call_edges.insert(call.callee_key.clone());
                     for argument in &call.args {
-                        collect_expr_details(
-                            source,
-                            argument,
-                            call_edges,
-                            primitive_names,
-                            primitives,
-                        )?;
+                        collect_expr_details(source, argument, primitive_names, primitives)?;
                     }
                 }
                 LetValue::Expr(expr) => {
-                    collect_expr_details(source, expr, call_edges, primitive_names, primitives)?
+                    collect_expr_details(source, expr, primitive_names, primitives)?
                 }
             },
             Statement::Set { value, .. } | Statement::Return(value) | Statement::Eval(value) => {
-                collect_expr_details(source, value, call_edges, primitive_names, primitives)?
+                collect_expr_details(source, value, primitive_names, primitives)?
             }
             Statement::Match { target, arms } => {
-                collect_expr_details(source, target, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, target, primitive_names, primitives)?;
                 for arm in arms {
-                    collect_statements_details(
-                        source,
-                        &arm.body,
-                        call_edges,
-                        primitive_names,
-                        primitives,
-                    )?;
+                    collect_statements_details(source, &arm.body, primitive_names, primitives)?;
                 }
             }
             Statement::If {
@@ -1198,39 +1184,27 @@ fn collect_statements_details(
                 then_body,
                 else_body,
             } => {
-                collect_expr_details(source, cond, call_edges, primitive_names, primitives)?;
-                collect_statements_details(
-                    source,
-                    then_body,
-                    call_edges,
-                    primitive_names,
-                    primitives,
-                )?;
-                collect_statements_details(
-                    source,
-                    else_body,
-                    call_edges,
-                    primitive_names,
-                    primitives,
-                )?;
+                collect_expr_details(source, cond, primitive_names, primitives)?;
+                collect_statements_details(source, then_body, primitive_names, primitives)?;
+                collect_statements_details(source, else_body, primitive_names, primitives)?;
             }
             Statement::While { cond, body } => {
-                collect_expr_details(source, cond, call_edges, primitive_names, primitives)?;
-                collect_statements_details(source, body, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, cond, primitive_names, primitives)?;
+                collect_statements_details(source, body, primitive_names, primitives)?;
             }
             Statement::For {
                 source: value,
                 body,
                 ..
             } => {
-                collect_expr_details(source, value, call_edges, primitive_names, primitives)?;
-                collect_statements_details(source, body, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, value, primitive_names, primitives)?;
+                collect_statements_details(source, body, primitive_names, primitives)?;
             }
             Statement::Task { body, .. } => {
-                collect_statements_details(source, body, call_edges, primitive_names, primitives)?
+                collect_statements_details(source, body, primitive_names, primitives)?
             }
             Statement::Spawn { value, .. } => {
-                collect_expr_details(source, value, call_edges, primitive_names, primitives)?
+                collect_expr_details(source, value, primitive_names, primitives)?
             }
             Statement::Join { .. } | Statement::Break | Statement::Continue => {}
         }
@@ -1241,16 +1215,14 @@ fn collect_statements_details(
 fn collect_expr_details(
     source: &str,
     expr: &lower::Expr,
-    call_edges: &mut std::collections::BTreeSet<String>,
     primitive_names: &mut Vec<String>,
     primitives: &mut Vec<PrimitiveWitness>,
 ) -> Result<()> {
     use lower::Expr;
     match expr {
         Expr::Call { call, .. } => {
-            call_edges.insert(call.callee_key.clone());
             for argument in &call.args {
-                collect_expr_details(source, argument, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, argument, primitive_names, primitives)?;
             }
         }
         Expr::HostCall {
@@ -1261,39 +1233,39 @@ fn collect_expr_details(
         } => {
             collect_primitive(source, import, *intrinsic, primitive_names, primitives)?;
             for argument in args {
-                collect_expr_details(source, argument, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, argument, primitive_names, primitives)?;
             }
         }
         Expr::Mutable(value) | Expr::Cast { from: value, .. } => {
-            collect_expr_details(source, value, call_edges, primitive_names, primitives)?
+            collect_expr_details(source, value, primitive_names, primitives)?
         }
         Expr::Reference { target, .. } => {
-            collect_expr_details(source, target, call_edges, primitive_names, primitives)?
+            collect_expr_details(source, target, primitive_names, primitives)?
         }
         Expr::Primitive { args, .. } | Expr::Tuple(args) | Expr::Array(args) => {
             for argument in args {
-                collect_expr_details(source, argument, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, argument, primitive_names, primitives)?;
             }
         }
         Expr::EnumConstructor { payload, .. } => {
             if let Some(payload) = payload {
-                collect_expr_details(source, payload, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, payload, primitive_names, primitives)?;
             }
         }
         Expr::Record(fields) => {
             for value in fields.values() {
-                collect_expr_details(source, value, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, value, primitive_names, primitives)?;
             }
         }
         Expr::Map(entries) => {
             for (key, value) in entries {
-                collect_expr_details(source, key, call_edges, primitive_names, primitives)?;
-                collect_expr_details(source, value, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, key, primitive_names, primitives)?;
+                collect_expr_details(source, value, primitive_names, primitives)?;
             }
         }
         Expr::Range { start, end, step } => {
             for value in [start, end, step] {
-                collect_expr_details(source, value, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, value, primitive_names, primitives)?;
             }
         }
         Expr::If {
@@ -1302,7 +1274,7 @@ fn collect_expr_details(
             else_e,
         } => {
             for value in [cond, then_e, else_e] {
-                collect_expr_details(source, value, call_edges, primitive_names, primitives)?;
+                collect_expr_details(source, value, primitive_names, primitives)?;
             }
         }
         Expr::Value(_) | Expr::VarRef(_) => {}
@@ -1359,105 +1331,18 @@ fn collect_primitive(
     Ok(())
 }
 
-fn reachable_functions(program: &lower::LoweredProgram) -> std::collections::BTreeSet<String> {
-    fn visit_expr(expr: &lower::Expr, pending: &mut Vec<String>) {
-        use lower::Expr;
-        match expr {
-            Expr::Call { call, .. } => visit_call(call, pending),
-            Expr::Mutable(value) | Expr::Cast { from: value, .. } => visit_expr(value, pending),
-            Expr::Reference { target, .. } => visit_expr(target, pending),
-            Expr::EnumConstructor { payload, .. } => {
-                if let Some(payload) = payload {
-                    visit_expr(payload, pending);
-                }
-            }
-            Expr::Record(fields) => fields.values().for_each(|value| visit_expr(value, pending)),
-            Expr::Tuple(values) | Expr::Array(values) => {
-                values.iter().for_each(|value| visit_expr(value, pending));
-            }
-            Expr::Primitive { args, .. } | Expr::HostCall { args, .. } => {
-                args.iter().for_each(|value| visit_expr(value, pending));
-            }
-            Expr::Map(entries) => entries.iter().for_each(|(key, value)| {
-                visit_expr(key, pending);
-                visit_expr(value, pending);
-            }),
-            Expr::Range { start, end, step } => {
-                visit_expr(start, pending);
-                visit_expr(end, pending);
-                visit_expr(step, pending);
-            }
-            Expr::If {
-                cond,
-                then_e,
-                else_e,
-            } => {
-                visit_expr(cond, pending);
-                visit_expr(then_e, pending);
-                visit_expr(else_e, pending);
-            }
-            Expr::Value(_) | Expr::VarRef(_) => {}
-        }
-    }
-    fn visit_call(call: &lower::Call, pending: &mut Vec<String>) {
-        pending.push(call.callee_key.clone());
-        call.args.iter().for_each(|arg| visit_expr(arg, pending));
-    }
-    fn visit_statements(statements: &[lower::Statement], pending: &mut Vec<String>) {
-        use lower::{LetValue, Statement};
-        for statement in statements {
-            match statement {
-                Statement::Call(call) => visit_call(call, pending),
-                Statement::Let { value, .. } => match value {
-                    LetValue::Call(call) => visit_call(call, pending),
-                    LetValue::Expr(expr) => visit_expr(expr, pending),
-                },
-                Statement::Set { value, .. }
-                | Statement::Return(value)
-                | Statement::Eval(value) => {
-                    visit_expr(value, pending);
-                }
-                Statement::Match { target, arms } => {
-                    visit_expr(target, pending);
-                    arms.iter()
-                        .for_each(|arm| visit_statements(&arm.body, pending));
-                }
-                Statement::If {
-                    cond,
-                    then_body,
-                    else_body,
-                } => {
-                    visit_expr(cond, pending);
-                    visit_statements(then_body, pending);
-                    visit_statements(else_body, pending);
-                }
-                Statement::While { cond, body } => {
-                    visit_expr(cond, pending);
-                    visit_statements(body, pending);
-                }
-                Statement::For { source, body, .. } => {
-                    visit_expr(source, pending);
-                    visit_statements(body, pending);
-                }
-                Statement::Task { body, .. } => visit_statements(body, pending),
-                Statement::Spawn { value, .. } => visit_expr(value, pending),
-                Statement::Join { .. } => {}
-                Statement::Break | Statement::Continue => {}
-            }
-        }
-    }
-
+fn reachable_functions(
+    inference: &vibra::effect_semantics::InferenceResult,
+    main_call_edges: &std::collections::BTreeSet<String>,
+) -> std::collections::BTreeSet<String> {
     let mut reachable = std::collections::BTreeSet::new();
-    let mut pending = Vec::new();
-    visit_statements(&program.statements, &mut pending);
+    let mut pending = main_call_edges.iter().cloned().collect::<Vec<_>>();
     while let Some(name) = pending.pop() {
         if !reachable.insert(name.clone()) {
             continue;
         }
-        if let Some(signature) = program.functions.get(&name) {
-            if let lower::FunctionBody::User { statements } = &signature.body {
-                visit_statements(statements, &mut pending);
-            }
+        if let Some(edges) = inference.call_edges.get(&name) {
+            pending.extend(edges.iter().cloned());
         }
     }
     reachable

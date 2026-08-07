@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
-use crate::ast::{Test, TopLevel};
+use crate::ast::{AnnotationKind, Test, TopLevel};
 use crate::body_semantics::validate_task_handles;
 use crate::frontend::SurfaceProgram;
 use crate::lower::{
@@ -57,8 +57,10 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
         .context("typed signature lowering")?;
     let bodies = typed_body::lower_typed_bodies(inputs.iter().copied(), &signatures)
         .context("typed body lowering")?;
-    let functions = typed_body::materialize_typed_functions(&signatures, &bodies)
-        .context("materializing typed functions")?;
+    let mut warnings = Vec::new();
+    let functions =
+        typed_body::materialize_typed_functions_with_warnings(&signatures, &bodies, &mut warnings)
+            .context("materializing typed functions")?;
     let constants = typed_body::materialize_constants(&signatures, &bodies)
         .context("materializing typed constants")?;
     let impls: HashMap<ImplKey, ImplBody> = signatures.impls.clone();
@@ -74,6 +76,23 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
         bail!("`main` must be an ordinary function body, not a wasm import");
     };
     let statements = statements.clone();
+    let main_effects = main_sig.effects.clone();
+    let main_effects_declared = program
+        .modules
+        .get(&program.entry)
+        .is_some_and(|module| {
+            module.forms().any(|form| {
+                matches!(
+                    form,
+                    TopLevel::Function(function)
+                        if function.name.value == "main"
+                            && function
+                                .annotations
+                                .iter()
+                                .any(|annotation| matches!(annotation.value, AnnotationKind::Effects(_)))
+                )
+            })
+        });
 
     let mut main_arg_bindings: Vec<(String, TypeRef)> = Vec::new();
     for parameter in &main_sig.parameters {
@@ -86,16 +105,26 @@ pub fn lower_typed_program(program: &SurfaceProgram) -> Result<LoweredProgram> {
     }
     validate_task_handles(&statements)
         .context("E-TASK-003: invalid task-handle lifetime in `main`")?;
+    crate::effect_semantics::validate_entry_effects(
+        &statements,
+        main_effects_declared.then_some(&main_effects),
+        &functions,
+    )?;
 
     let test_names = discover_typed_test_names(program).unwrap_or_default();
-    let warnings = collect_typed_warnings(&order, &functions, &constants, &test_names);
+    warnings.extend(collect_typed_warnings(
+        &order,
+        &functions,
+        &constants,
+        &test_names,
+    ));
 
     let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
 
     Ok(LoweredProgram {
         statements,
         main_arg_bindings,
-        main_effects: main_sig.effects.clone(),
+        main_effects,
         constants,
         type_aliases: signatures.aliases.clone(),
         functions,
@@ -114,6 +143,7 @@ struct TypedTestContext {
     functions: HashMap<String, FunctionSig>,
     constants: HashMap<String, RuntimeValue>,
     declared_aliases: BTreeSet<String>,
+    warnings: Vec<String>,
 }
 
 fn build_typed_test_context(program: &SurfaceProgram) -> Result<TypedTestContext> {
@@ -123,8 +153,10 @@ fn build_typed_test_context(program: &SurfaceProgram) -> Result<TypedTestContext
         .context("typed signature lowering")?;
     let bodies = typed_body::lower_typed_bodies(inputs.iter().copied(), &signatures)
         .context("typed body lowering")?;
-    let functions = typed_body::materialize_typed_functions(&signatures, &bodies)
-        .context("materializing typed functions")?;
+    let mut warnings = Vec::new();
+    let functions =
+        typed_body::materialize_typed_functions_with_warnings(&signatures, &bodies, &mut warnings)
+            .context("materializing typed functions")?;
     let constants = typed_body::materialize_constants(&signatures, &bodies)
         .context("materializing typed constants")?;
     let declared_aliases = signatures.aliases.keys().cloned().collect();
@@ -133,6 +165,7 @@ fn build_typed_test_context(program: &SurfaceProgram) -> Result<TypedTestContext
         functions,
         constants,
         declared_aliases,
+        warnings,
     })
 }
 
@@ -187,7 +220,7 @@ fn lower_typed_test_case(
             type_aliases: ctx.signatures.aliases.clone(),
             functions: ctx.functions.clone(),
             impls: ctx.signatures.impls.clone(),
-            warnings: Vec::new(),
+            warnings: ctx.warnings.clone(),
             foreign_modules: BTreeMap::new(),
         },
     })
@@ -440,6 +473,44 @@ mod tests {
         );
         assert_eq!(lowered.statements.len(), 2);
         assert!(matches!(lowered.statements[0], Statement::Let { .. }));
+    }
+
+    #[test]
+    fn typed_main_infers_effects_without_a_declaration_ceiling() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vib");
+        write(
+            &entry,
+            "(deffect host\n\
+               (defn read () void (do (intrinsic @env-list)) effects: (env.read)))\n\
+             (defn main () void (do (host.read)))\n",
+        );
+        let program = load(&entry);
+        let lowered = lower_typed_program(&program).unwrap();
+        let inferred =
+            crate::effect_semantics::infer_statements(&lowered.statements, &lowered.functions);
+        assert!(inferred.labels().contains(&("env".into(), "read".into())));
+        assert!(inferred
+            .labels()
+            .contains(&("module".into(), "host".into())));
+    }
+
+    #[test]
+    fn typed_main_rejects_an_explicit_under_declared_effect_row() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.vib");
+        write(
+            &entry,
+            "(deffect host\n\
+               (defn read () void (do (intrinsic @env-list)) effects: (env.read)))\n\
+             (defn main () void (do (host.read)) effects: ())\n",
+        );
+        let program = load(&entry);
+        let error = format!("{:#}", lower_typed_program(&program).unwrap_err());
+        assert!(
+            error.contains("E-EFFECT-001") && error.contains("`main`"),
+            "expected an explicitly under-declared typed main to fail, got: {error}"
+        );
     }
 
     #[test]

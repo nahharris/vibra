@@ -2,12 +2,12 @@
 //!
 //! The index deliberately stops at normalized source and compiler-known
 //! semantic relations. It does not embed, rank, or persist vectors. A future
-//! effect-inference pass can populate the reserved `effects.inferred` field
-//! without changing the record shape used by consumers today.
+//! effect-inference pass populates the `effects.inferred` field without
+//! changing the record shape used by consumers today.
 
 use anyhow::{Context, Result};
 use serde_json::{Map, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use crate::ast::{AnnotationKind, Origin, TopLevel, Visibility};
@@ -43,6 +43,7 @@ pub fn build(entry: &Path, flags: &CompilationFlags) -> Result<Value> {
     let lowered = lower::lower_program(&loaded)?;
     let surface_functions = collect_surface_functions(&surface)?;
     let root = corpus_root(&surface.entry, &surface.modules)?;
+    let inference = crate::effect_semantics::infer_program(&lowered.functions);
 
     let mut records = Vec::new();
     let mut functions = lowered.functions.iter().collect::<Vec<_>>();
@@ -54,18 +55,23 @@ pub fn build(entry: &Path, flags: &CompilationFlags) -> Result<Value> {
             &surface_functions,
             &root,
             &surface.entry,
-            &lowered.functions,
+            inference
+                .functions
+                .get(key)
+                .with_context(|| format!("effect inference missing `{key}`"))?,
         )?);
     }
 
     let main_signature = main_signature(&lowered);
+    let main_inferred =
+        crate::effect_semantics::infer_statements(&lowered.statements, &lowered.functions);
     records.push(build_record(
         "main",
         &main_signature,
         &surface_functions,
         &root,
         &surface.entry,
-        &lowered.functions,
+        &main_inferred,
     )?);
     records.sort_by(|left, right| {
         let left_name = left["qualified-name"].as_str().unwrap_or_default();
@@ -98,7 +104,7 @@ fn build_record(
     surface: &SurfaceFunctions,
     root: &Path,
     entry: &Path,
-    signatures: &HashMap<String, FunctionSig>,
+    inferred: &crate::effect_semantics::InferredEffects,
 ) -> Result<Value> {
     let metadata = surface.functions.get(key);
     let generated =
@@ -124,8 +130,7 @@ fn build_record(
         .map(|value| value.visibility)
         .unwrap_or_else(|| visibility_from_key(key));
     let declared = effect_labels(&signature.effects);
-    let performed = crate::effect_semantics::infer_function(signature, signatures);
-    let performed = performed
+    let inferred_labels: Vec<_> = inferred
         .labels()
         .into_iter()
         .map(|label| format!("{}.{}", label.0, label.1))
@@ -146,8 +151,8 @@ fn build_record(
             "effects",
             sorted_json(object([
                 ("declared", Value::Array(declared)),
-                ("inferred", Value::Null),
-                ("performed", Value::Array(performed)),
+                ("inferred", Value::Array(inferred_labels.clone())),
+                ("performed", Value::Array(inferred_labels)),
             ])),
         ),
         (
@@ -189,6 +194,8 @@ fn main_signature(program: &lower::LoweredProgram) -> FunctionSig {
     FunctionSig {
         alias: String::new(),
         symbol: "main".into(),
+        visibility: lower::FunctionVisibility::Public,
+        interface_method: false,
         owner_effect: None,
         type_params: Vec::new(),
         type_param_bounds: Vec::new(),
@@ -834,6 +841,8 @@ mod tests {
         let signature = FunctionSig {
             alias: String::new(),
             symbol: key.to_string(),
+            visibility: lower::FunctionVisibility::Public,
+            interface_method: false,
             owner_effect: None,
             type_params: Vec::new(),
             type_param_bounds: Vec::new(),
@@ -852,7 +861,7 @@ mod tests {
             &surface,
             Path::new("."),
             Path::new("src/main.vib"),
-            &HashMap::new(),
+            &crate::effect_semantics::InferredEffects::default(),
         )
         .unwrap();
 

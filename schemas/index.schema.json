@@ -25,14 +25,9 @@
           "items": { "type": "string" }
         },
         "inferred": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": { "type": "string" }
-            },
-            { "type": "null" }
-          ],
-          "description": "Reserved integration seam for #249 effect inference; null means this compiler does not yet expose a distinct inferred row."
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The deterministic effect row inferred from the function body and its callees."
         },
         "performed": {
           "type": "array",

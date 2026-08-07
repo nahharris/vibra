@@ -200,7 +200,12 @@ fn lower_module(
                         input.alias,
                         declared_aliases,
                     )?;
-                    let owner = (input.alias.to_string(), deffect.name.value.clone());
+                    let owner_module = if input.alias.is_empty() {
+                        "module"
+                    } else {
+                        input.alias
+                    };
+                    let owner = (owner_module.to_string(), deffect.name.value.clone());
                     let signature = index
                         .functions
                         .get_mut(&key)
@@ -575,8 +580,9 @@ fn annotations<'a>(
 }
 
 /// Lower the surface `effects:` annotation for the staged typed index. Native
-/// roots are nominal dotted names (`module.root`). No dependency closure is
-/// inferred here: this is exactly the row written on the declaration.
+/// roots accept either a leaf (`module.root`) or a known declaration-side root
+/// (`module`). No dependency closure is inferred here: this is exactly the row
+/// written on the declaration.
 fn lower_effect_row(
     annotations: &[Annotation],
     _module_alias: &str,
@@ -595,12 +601,10 @@ fn lower_effect_row(
     for label in &row.labels {
         let identity = match &label.value {
             TypeExprKind::Named(name) => {
-                let Some((domain, action)) = name.split_once('.') else {
-                    bail!(
-                        "E-EFFECT-002: typed effect `{name}` must be a nominal `module.root` name"
-                    );
+                let Some((domain, action)) = typed_nominal_effect_name(name) else {
+                    bail!("E-EFFECT-002: typed effect `{name}` is not a known nominal effect root");
                 };
-                (domain.to_string(), action.to_string())
+                (domain, action)
             }
             other => {
                 bail!("E-EFFECT-002: typed effect row entry must be a nominal root, got {other:?}")
@@ -609,6 +613,25 @@ fn lower_effect_row(
         lowered.labels.insert(identity);
     }
     Ok(lowered)
+}
+
+fn typed_nominal_effect_name(name: &str) -> Option<(String, String)> {
+    if let Some((domain, action)) = name.split_once('.') {
+        if crate::intrinsics::is_known_root(domain, action)
+            || !domain.is_empty()
+                && !action.is_empty()
+                && domain
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch == '-')
+                && action
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch == '-')
+        {
+            return Some((domain.to_string(), action.to_string()));
+        }
+        return None;
+    }
+    crate::intrinsics::is_known_root(name, "").then(|| (name.to_string(), String::new()))
 }
 
 pub(crate) fn lower_type(
@@ -692,10 +715,9 @@ pub(crate) fn lower_type(
                 .iter()
                 .map(|label| match lower(label)? {
                     TypeRef::Named(name) => {
-                        let Some((domain, action)) = name.split_once('.') else {
-                            bail!("E-EFFECT-002: `fn-type` effects entry must be a nominal root")
-                        };
-                        Ok((domain.to_string(), action.to_string()))
+                        typed_nominal_effect_name(&name).with_context(|| {
+                            "E-EFFECT-002: `fn-type` effects entry must be a known nominal root"
+                        })
                     }
                     other => {
                         bail!("E-EFFECT-002: `fn-type` effects entry is not a nominal root: {other:?}")

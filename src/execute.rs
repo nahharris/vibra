@@ -561,6 +561,8 @@ pub(crate) fn eval_expr(
             let signature = crate::lower::FunctionSig {
                 alias: String::new(),
                 symbol: import.name.clone(),
+                visibility: crate::lower::FunctionVisibility::Public,
+                interface_method: false,
                 owner_effect: None,
                 type_params: Vec::new(),
                 type_param_bounds: Vec::new(),

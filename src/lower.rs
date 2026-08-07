@@ -333,10 +333,32 @@ pub enum FunctionBody {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FunctionVisibility {
+    Public,
+    Private,
+}
+
+impl Default for FunctionVisibility {
+    fn default() -> Self {
+        Self::Public
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionSig {
     pub alias: String,
     pub symbol: String,
+    /// Surface visibility carried into the shared IR. Legacy lowering also
+    /// preserves its historical `-`-prefixed symbol encoding, but effect
+    /// analysis uses this explicit field so typed and legacy paths agree.
+    #[serde(default)]
+    pub visibility: FunctionVisibility,
+    /// True when this signature is used as an interface implementation method.
+    /// Interface methods remain declaration boundaries even when their concrete
+    /// implementation is otherwise private to the module.
+    #[serde(default)]
+    pub interface_method: bool,
     /// Canonical owner root for a native deffect operation. This is carried
     /// separately from `alias`: the latter is the import spelling at the
     /// call site and may differ from the module that defined the operation.
@@ -374,15 +396,32 @@ impl EffectRow {
         self.labels.is_empty()
     }
 
+    /// Whether a declaration permits an inferred leaf. A bare `(fs)` row is
+    /// stored as `(fs, "")` and subsumes every `fs.*` leaf only at declaration
+    /// checking time.
+    pub fn covers(&self, label: &(String, String)) -> bool {
+        self.labels
+            .iter()
+            .any(|declared| declared == label || (declared.0 == label.0 && declared.1.is_empty()))
+    }
+
     /// Labels in `self` that `other` does not declare.
     pub fn difference(&self, other: &EffectRow) -> Vec<(String, String)> {
-        self.labels.difference(&other.labels).cloned().collect()
+        self.labels
+            .iter()
+            .filter(|label| !other.covers(label))
+            .cloned()
+            .collect()
     }
 }
 
 /// Render a `(domain, action)` pair the way source spells it, for diagnostics.
 pub fn effect_label_display(label: &(String, String)) -> String {
-    format!("{}.{}", label.0, label.1)
+    if label.1.is_empty() {
+        label.0.clone()
+    } else {
+        format!("{}.{}", label.0, label.1)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1930,6 +1969,19 @@ fn strip_module_prefix(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
+fn function_visibility(symbol: &str) -> FunctionVisibility {
+    let private = symbol.starts_with('-')
+        || symbol
+            .rsplit('.')
+            .next()
+            .is_some_and(|segment| segment.starts_with('-'));
+    if private {
+        FunctionVisibility::Private
+    } else {
+        FunctionVisibility::Public
+    }
+}
+
 fn resolve_import_path(
     module_path: &std::path::Path,
     import: &str,
@@ -1965,40 +2017,29 @@ fn join_module_prefix(parent: &str, child: &str) -> String {
 /// `$stream.read` inside module `io` resolves to `io.stream.read` (and `a.io.stream.read`
 /// when `io` is mounted under `a`). If the prefix misses, accept `name` when it is already
 /// a registered key (fully-qualified reference). Otherwise keep `name` unqualified.
-/// Check every function body against its declared effect row.
-///
-/// `main` is handled alongside the registered functions because it is never in
-/// `sigs` -- it is skipped during collection and lowered inline.
-///
-/// Reporting is sorted and stops at the first offender so the diagnostic is
-/// deterministic rather than dependent on hash order.
+/// Check declaration-boundary functions against the shared effect graph.
+/// `main` deliberately infers and is not a registered declaration boundary.
 fn validate_declared_effects(
     sigs: &HashMap<String, FunctionSig>,
-    main_statements: &[Statement],
-    main_effects: &EffectRow,
+    warnings: &mut Vec<String>,
 ) -> Result<()> {
-    let mut owners: Vec<&String> = sigs.keys().collect();
-    owners.sort();
-    for owner in owners {
-        let sig = &sigs[owner];
-        let performed = crate::effect_semantics::infer_function(sig, sigs);
-        if let Some(witness) = performed.undeclared(&sig.effects).first() {
-            bail!(crate::effect_semantics::undeclared_effect_message(
-                owner,
-                &sig.effects,
-                witness
-            ));
+    crate::effect_semantics::validate_declared_effects(sigs, warnings)
+}
+
+fn mark_interface_methods(
+    sigs: &mut HashMap<String, FunctionSig>,
+    impls: &HashMap<ImplKey, ImplBody>,
+) {
+    for implementation in impls.values() {
+        for binding in implementation.methods.values() {
+            let key = match binding {
+                ImplMethodBinding::Fresh(key) | ImplMethodBinding::Alias(key) => key,
+            };
+            if let Some(signature) = sigs.get_mut(key) {
+                signature.interface_method = true;
+            }
         }
     }
-    let performed = crate::effect_semantics::infer_statements(main_statements, sigs);
-    if let Some(witness) = performed.undeclared(main_effects).first() {
-        bail!(crate::effect_semantics::undeclared_effect_message(
-            "main",
-            main_effects,
-            witness
-        ));
-    }
-    Ok(())
 }
 
 /// Resolve a declaration's `=effects` labels to nominal root identities.
@@ -2044,6 +2085,9 @@ fn resolve_effect_row(
 /// deffects may introduce additional nominal roots. Ordinary type names still
 /// go through the declared alias table.
 fn nominal_effect_name(name: &str) -> Option<(&str, &str)> {
+    if !name.contains('.') {
+        return crate::intrinsics::is_known_root(name, "").then_some((name, ""));
+    }
     let (domain, action) = name.split_once('.')?;
     if crate::intrinsics::is_known_root(domain, action)
         || !domain.is_empty()
@@ -2232,6 +2276,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         &impls,
         &mut warnings,
     )?;
+    mark_interface_methods(&mut sigs, &impls);
 
     let main = map_get_str(entry_map, "main").context("missing top-level `main`")?;
     let main_env = parse_def_envelope(main, &mut warnings)
@@ -2292,7 +2337,9 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
     validate_wasm_bodies(&sigs, &type_aliases)?;
     let main_effects = resolve_effect_row(&main_env, "", &type_aliases, "main", &mut warnings)?;
-    validate_declared_effects(&sigs, &statements, &main_effects)?;
+    let declared_main_effects = main_env.effect_values.is_some().then_some(&main_effects);
+    validate_declared_effects(&sigs, &mut warnings)?;
+    crate::effect_semantics::validate_entry_effects(&statements, declared_main_effects, &sigs)?;
 
     let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
     Ok(LoweredProgram {
@@ -2397,8 +2444,10 @@ fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
         &impls,
         &mut warnings,
     )?;
+    mark_interface_methods(&mut sigs, &impls);
 
     validate_wasm_bodies(&sigs, &type_aliases)?;
+    validate_declared_effects(&sigs, &mut warnings)?;
 
     Ok(TestContext {
         sigs,
@@ -3352,6 +3401,8 @@ fn try_register_function(
         FunctionSig {
             alias: alias.to_string(),
             symbol: name.to_string(),
+            visibility: function_visibility(name),
+            interface_method: false,
             owner_effect: env.owner_effect.clone(),
             type_params: env.type_params.clone(),
             type_param_bounds: resolved_bounds,
@@ -3436,9 +3487,10 @@ pub(crate) fn validate_wasm_bodies(
         let FunctionBody::Wasm { import, wasm_args } = &sig.body else {
             continue;
         };
-        // A host import's effects are the registry's, not whatever the wrapper felt
-        // like claiming. Equality rather than inclusion: under-declaring would launder
-        // the effect away, and over-declaring would misreport the host surface.
+        // A host import's performed effects come from the registry, not whatever
+        // the wrapper felt like claiming. Declaration-side roots are allowed to
+        // cover registry leaves; the shared boundary validator reports any
+        // additional declared labels as over-declaration warnings.
         if !import.module.starts_with('@') {
             let registry: BTreeSet<(String, String)> =
                 crate::host_abi::effects_for(&import.module, &import.name)
@@ -3455,7 +3507,11 @@ pub(crate) fn validate_wasm_bodies(
                     declared.remove(owner);
                 }
             }
-            if registry != declared {
+            let declared_row = EffectRow {
+                labels: declared.clone(),
+                tail: None,
+            };
+            if registry.iter().any(|label| !declared_row.covers(label)) {
                 let render = |labels: &BTreeSet<(String, String)>| {
                     if labels.is_empty() {
                         "no effects".to_string()
@@ -3468,7 +3524,7 @@ pub(crate) fn validate_wasm_bodies(
                     }
                 };
                 bail!(
-                    "E-EFFECT-005: `{key}` binds host import `{}.{}`, which performs {}, but declares {}; a host-import body must declare exactly the registry's effects",
+                    "E-EFFECT-005: `{key}` binds host import `{}.{}`, which performs {}, but declares {}; the declaration must cover the registry's effects",
                     import.module,
                     import.name,
                     render(&registry),
@@ -3922,6 +3978,8 @@ fn register_one_inherent_function(
         FunctionSig {
             alias: sig_alias,
             symbol: sig_symbol,
+            visibility: function_visibility(entry_name),
+            interface_method: false,
             owner_effect: env.owner_effect.clone(),
             type_params: all_type_params,
             type_param_bounds: full_bounds,
@@ -4396,10 +4454,15 @@ fn bind_impl_method(
         effects: allowed, ..
     } = expected_fn_type
     {
-        let excess: Vec<_> = declared_effects.labels.difference(allowed).collect();
+        let allowed_row = EffectRow {
+            labels: allowed.clone(),
+            tail: None,
+        };
+        let excess = declared_effects.difference(&allowed_row);
         if let Some((domain, action)) = excess.first() {
             bail!(
-                "E-EFFECT-003: impl method `{method_name}` declares `{domain}.{action}`, which interface method `{iface_qualified}.{method_name}` does not permit; an implementation may not exceed the interface's declared effects"
+                "E-EFFECT-003: impl method `{method_name}` declares `{}`, which interface method `{iface_qualified}.{method_name}` does not permit; an implementation may not exceed the interface's declared effects",
+                effect_label_display(&(domain.clone(), action.clone()))
             );
         }
     }
@@ -4409,6 +4472,8 @@ fn bind_impl_method(
         FunctionSig {
             alias: module_alias.to_string(),
             symbol: sig_symbol,
+            visibility: function_visibility(method_name),
+            interface_method: true,
             owner_effect: env.owner_effect.clone(),
             type_params: sig_type_params,
             type_param_bounds: sig_bounds,

@@ -6,15 +6,15 @@
 use crate::ast::{
     AnnotationKind, CallArgument, Expr as AstExpr, ExprKind, Function, ImplItem, Literal,
     MethodBinding, Module, Origin, Pattern as AstPattern, PatternKind, SourceLocation, TopLevel,
-    WasmArgument,
+    Visibility, WasmArgument,
 };
 use crate::body_semantics::{validate_function_body, validate_task_handles};
 use crate::lower::{
     conversion_fallback_fits, infer_expr_type, nominal_type_key_for_module_scope,
     primitive_integer, primitive_numeric, resolve_iface_key_for_scope, typed_primitive_op, Call,
-    EnumDef, Expr, FunctionBody, FunctionSig, ImplKey, ImplMethodBinding, ImportTarget, LetValue,
-    LiteralType, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef,
-    WasmArgSpec,
+    EnumDef, Expr, FunctionBody, FunctionSig, FunctionVisibility, ImplKey, ImplMethodBinding,
+    ImportTarget, LetValue, LiteralType, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement,
+    TypeAlias, TypeRef, WasmArgSpec,
 };
 use crate::type_semantics::{
     host_backed_newtype, resolve_alias_type, substitute_type, type_compatible,
@@ -268,7 +268,8 @@ pub fn materialize_typed_identity_functions(
     signatures: &TypedSignatureIndex,
     bodies: &TypedBodyIndex,
 ) -> Result<HashMap<String, FunctionSig>> {
-    materialize_typed_functions(signatures, bodies)
+    let mut warnings = Vec::new();
+    materialize_typed_functions_with_warnings(signatures, bodies, &mut warnings)
 }
 
 /// Validate and materialize the safe, non-generic typed body subset.
@@ -279,6 +280,19 @@ pub fn materialize_typed_functions(
     signatures: &TypedSignatureIndex,
     bodies: &TypedBodyIndex,
 ) -> Result<HashMap<String, FunctionSig>> {
+    let mut warnings = Vec::new();
+    materialize_typed_functions_with_warnings(signatures, bodies, &mut warnings)
+}
+
+/// Materialize typed functions and retain effect diagnostics in the caller's
+/// warning sink. The compatibility wrapper above is kept for existing staged
+/// callers that only need the function map; complete typed program lowering
+/// uses this sink-aware entry point.
+pub fn materialize_typed_functions_with_warnings(
+    signatures: &TypedSignatureIndex,
+    bodies: &TypedBodyIndex,
+    warnings: &mut Vec<String>,
+) -> Result<HashMap<String, FunctionSig>> {
     let signature_keys: BTreeSet<_> = signatures.functions.keys().cloned().collect();
     let body_keys: BTreeSet<_> = bodies.functions.keys().cloned().collect();
     if signature_keys != body_keys {
@@ -287,6 +301,14 @@ pub fn materialize_typed_functions(
         );
     }
     let constants = materialize_constants(signatures, bodies)?;
+    let interface_method_keys: BTreeSet<String> = signatures
+        .impls
+        .values()
+        .flat_map(|implementation| implementation.methods.values())
+        .map(|binding| match binding {
+            ImplMethodBinding::Fresh(key) | ImplMethodBinding::Alias(key) => key.clone(),
+        })
+        .collect();
     let materialized: HashMap<String, FunctionSig> = bodies
         .functions
         .iter()
@@ -379,22 +401,27 @@ pub fn materialize_typed_functions(
                     }
                 }
             };
-            Ok((key.clone(), materialize(signature, checked)))
+            let visibility = match signatures
+                .visibility
+                .get(key)
+                .copied()
+                .unwrap_or(Visibility::Public)
+            {
+                Visibility::Public => FunctionVisibility::Public,
+                Visibility::Private => FunctionVisibility::Private,
+            };
+            Ok((
+                key.clone(),
+                materialize(
+                    signature,
+                    checked,
+                    visibility,
+                    interface_method_keys.contains(key),
+                ),
+            ))
         })
         .collect::<Result<_>>()?;
-    for (key, signature) in &materialized {
-        let inferred = crate::effect_semantics::infer_function(signature, &materialized);
-        if let Some(witness) = inferred.undeclared(&signature.effects).first() {
-            bail!(
-                "{}",
-                crate::effect_semantics::undeclared_effect_message(
-                    key,
-                    &signature.effects,
-                    witness
-                )
-            );
-        }
-    }
+    crate::effect_semantics::validate_declared_effects(&materialized, warnings)?;
     Ok(materialized)
 }
 
@@ -505,6 +532,8 @@ fn validate_wasm_import_body(
                 import: import.clone(),
                 wasm_args: wasm_args.to_vec(),
             },
+            FunctionVisibility::Public,
+            false,
         ),
     );
     crate::lower::validate_wasm_bodies(&sigs, aliases)
@@ -1445,10 +1474,17 @@ fn format_location(location: &SourceLocation) -> String {
     )
 }
 
-fn materialize(signature: &TypedFunctionSignature, body: FunctionBody) -> FunctionSig {
+fn materialize(
+    signature: &TypedFunctionSignature,
+    body: FunctionBody,
+    visibility: FunctionVisibility,
+    interface_method: bool,
+) -> FunctionSig {
     FunctionSig {
         alias: signature.alias.clone(),
         symbol: signature.symbol.clone(),
+        visibility,
+        interface_method,
         owner_effect: signature.owner_effect.clone(),
         type_params: signature.type_params.clone(),
         type_param_bounds: signature.type_param_bounds.clone(),
