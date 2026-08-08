@@ -6085,7 +6085,7 @@ fn validate_try_in_expr(
     Ok(())
 }
 
-fn expression_contains_try(expr: &Expr) -> bool {
+pub(crate) fn expression_contains_try(expr: &Expr) -> bool {
     match expr {
         Expr::Try { .. } => true,
         Expr::Mutable(inner) | Expr::Cast { from: inner, .. } => expression_contains_try(inner),

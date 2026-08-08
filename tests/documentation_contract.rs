@@ -13,39 +13,61 @@ struct FencedBlock {
     body: String,
 }
 
+/// Every normative document — accepted contracts under `docs/decisions/` and
+/// the operational guides under `docs/reference/` — must contain only Vibra
+/// source that the live grammars still accept. Both directories are gated so
+/// that a language change cannot silently strand either one.
 #[test]
-fn decision_document_source_blocks_match_live_grammars() {
+fn contract_document_source_blocks_match_live_grammars() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let decisions = root.join("docs/decisions");
-    let mut paths = fs::read_dir(&decisions)
-        .unwrap_or_else(|error| panic!("read {}: {error}", decisions.display()))
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
-        .collect::<Vec<_>>();
-    paths.sort();
-
-    let blocks = paths
-        .iter()
-        .flat_map(|path| read_fenced_blocks(path))
-        .collect::<Vec<_>>();
     let mut failures = Vec::new();
 
-    for block in &blocks {
-        let result = match block.tag.as_str() {
-            "vibra" => parse_module(&block.body),
-            "vibra-expr" => parse_module(&format!("(defn __doc () void (do {}))\n", block.body)),
-            "vibra-project" => parse_project(&block.body),
-            "text" | "ebnf" => Ok(()),
-            tag => Err(format!("unrecognized documentation fence tag `{tag}`")),
-        };
-        if let Err(error) = result {
-            let relative = block.path.strip_prefix(root).unwrap_or(&block.path);
-            failures.push(format!(
-                "{}:{} ({}): {error}",
-                relative.display(),
-                block.opening_line,
-                block.tag
-            ));
+    for directory in ["docs/decisions", "docs/reference"] {
+        let directory = root.join(directory);
+        let mut paths = fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
+            .collect::<Vec<_>>();
+        paths.sort();
+
+        for block in paths.iter().flat_map(|path| read_fenced_blocks(path)) {
+            let result = match block.tag.as_str() {
+                "vibra" => parse_module(&block.body),
+                "vibra-expr" => {
+                    parse_module(&format!("(defn __doc () void (do {}))\n", block.body))
+                }
+                "vibra-project" => parse_project(&block.body),
+                // A manifest fragment shown on its own (one or more
+                // `(dependency ...)` forms). Spliced into a minimal valid
+                // manifest so the fragment's own grammar is still checked.
+                "vibra-project-fragment" => parse_project(&format!(
+                    "(project\n  (package \"doc\" \"0.0.0\")\n  (target doc kind: @lib root: \"src\" entry: \"lib.vib\")\n{})\n",
+                    block.body.trim_end()
+                )),
+                // Prose, grammar productions, and genuinely foreign source
+                // (shell transcripts, CI workflows, editor config, tooling
+                // payloads). These are not Vibra and have no Vibra grammar to
+                // drift against.
+                "text" | "ebnf" | "sh" | "json" | "yaml" | "lua" => Ok(()),
+                // Syntax a document proposes but the compiler does not yet
+                // accept. Deliberately ungated: gating it would force either a
+                // false claim of implementation or the deletion of the
+                // proposal. The tag is what keeps that choice explicit, so a
+                // block only carries it while its document says the design is
+                // unimplemented.
+                "vibra-proposed" => Ok(()),
+                tag => Err(format!("unrecognized documentation fence tag `{tag}`")),
+            };
+            if let Err(error) = result {
+                let relative = block.path.strip_prefix(root).unwrap_or(&block.path);
+                failures.push(format!(
+                    "{}:{} ({}): {error}",
+                    relative.display(),
+                    block.opening_line,
+                    block.tag
+                ));
+            }
         }
     }
 
@@ -120,7 +142,9 @@ fn parse_project(source: &str) -> Result<(), String> {
     fs::write(&path, source).map_err(|error| error.to_string())?;
     vibra::project::load_project(&path)
         .map(|_| ())
-        .map_err(|error| error.to_string())
+        // `{:#}` keeps the whole context chain; the outermost layer is only
+        // ever "parse <tempfile>", which names no actual defect.
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[test]

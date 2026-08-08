@@ -2791,7 +2791,14 @@ fn exec_call_inner(
             match result {
                 Ok(value) => Ok(value),
                 Err(error) if is_try_propagation(&error) => {
-                    take_try_propagation().context("E-TRY-004: missing propagated try value")
+                    // Defensive: `raise_try_propagation` always fills the slot,
+                    // and every catch site either takes the payload or replaces
+                    // the error. An empty slot here is an interpreter
+                    // invariant failure, not a `try` boundary violation, so it
+                    // must not borrow `E-TRY-004`'s meaning.
+                    take_try_propagation().context(
+                        "internal error: `(try ...)` propagation reached a function boundary with no payload",
+                    )
                 }
                 Err(error) => {
                     clear_try_propagation();

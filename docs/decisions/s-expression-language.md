@@ -340,13 +340,23 @@ that diagnostic.
 
 `try` does not cross a structured task or spawned-computation boundary. Those
 sites are rejected instead of attempting to return through a computation that
-owns a different control-flow scope. This is a boundary rule, not automatic
-cleanup: host handles are still closed only by explicit operations such as
-`stream.manage.close`. Early propagation can therefore expose the same
-pre-existing handle leak as any other early return; handle lifecycle is owned
-by issue #255. The async runtime has scope open/close machinery, but no
-user-facing scope form currently connects it to this language contract, so
-`try` promises no additional scope teardown.
+owns a different control-flow scope.
+
+A `try` is also an exit for the affine task-handle rule. Because propagation
+returns from the enclosing function, a `try` whose statement is reachable while
+any spawned handle is still live is rejected as `E-TASK-003`, exactly as a
+written `(return ...)` in the same position is. Join every handle before the
+propagation site, or move the propagation after the joins. Only the failure
+path leaves the function, so this is a restriction on where `try` may appear,
+not a change to what the success path evaluates to.
+
+Task handles are the only lifetime `try` enforces. This remains a boundary
+rule, not automatic cleanup: host handles are still closed only by explicit
+operations such as `stream.manage.close`. Early propagation can therefore
+expose the same pre-existing handle leak as any other early return; handle
+lifecycle is owned by issue #255. The async runtime has scope open/close
+machinery, but no user-facing scope form currently connects it to this
+language contract, so `try` promises no additional scope teardown.
 
 #### Corpus measurement for issue #248
 

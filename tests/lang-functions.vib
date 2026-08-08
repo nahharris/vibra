@@ -3,7 +3,7 @@
 (defn echo-bool (subject bool) bool (return subject))
 (defn second (a bool b bool) bool (return b))
 (defn check () bool (let r (ready)) (return r))
-(deffect owned (defn ping () void (let ok true) effects: ()))
+(deffect owned (defn ping () void (let _ true) effects: ()))
 (defn private-leaf () bool (owned.ping) (return true) visibility: @private)
 (defn
   private-middle

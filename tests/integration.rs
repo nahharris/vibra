@@ -769,6 +769,63 @@ fn host_calls_are_general_nested_expressions_in_both_backends() {
     vibra::wasm_backend::run_wasm(&wasm, &vibra::runtime::RunConfig::default()).unwrap();
 }
 
+/// `(try ...)` returns from the enclosing function on failure, so it must obey
+/// the same affine-handle rule as a written `(return ...)`. Issue #257 called
+/// this out as the exposure `try` multiplies.
+#[test]
+fn try_propagation_past_a_live_task_handle_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    let source = |body: &str| {
+        format!(
+            r#"(import result "{}")
+(defn probe () (result.result int64 str) (do {body}))
+(defn main () void (do))
+"#,
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("stdlib/src/result.vib")
+                .display()
+                .to_string()
+                .replace('\\', "/")
+        )
+    };
+
+    std::fs::write(
+        &entry,
+        source(
+            r#"(spawn worker 7 captures: ())
+    (let value (try (result.from-err int64 str "boom")))
+    (join worker joined)
+    (return (result.from-ok int64 str (add value joined)))"#,
+        ),
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = match vibra::lower::lower_program(&loaded) {
+        Ok(_) => panic!("a try that can propagate past a live task handle must not lower"),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(error.contains("E-TASK-003"), "unexpected error: {error}");
+    assert!(
+        error.contains("must be joined before leaving their scope"),
+        "unexpected error: {error}"
+    );
+
+    // The same `try` is fine once every handle is already joined.
+    std::fs::write(
+        &entry,
+        source(
+            r#"(spawn worker 7 captures: ())
+    (join worker joined)
+    (let value (try (result.from-err int64 str "boom")))
+    (return (result.from-ok int64 str (add value joined)))"#,
+        ),
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded).expect("a try after every join lowers");
+}
+
 #[test]
 fn spawned_task_handles_are_typed_affine_and_scheduler_backed() {
     let dir = tempfile::tempdir().unwrap();

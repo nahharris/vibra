@@ -4,7 +4,7 @@ Vibra's first foreign-function boundary is static WebAssembly linking. It does
 not load code at runtime and does not define a native ABI. A project dependency
 may expose one package-relative `.wasm` artifact:
 
-```vibra
+```vibra-project-fragment
 (dependency math path: "foreign/math" wasm: "math.wasm")
 ```
 

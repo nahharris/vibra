@@ -52,6 +52,27 @@ the relevant schema/test contract as evidence of the current implementation,
 then update the prose or explicitly record the transition. Do not use a status
 or archive document as the current language specification.
 
+## Source blocks in normative documents
+
+`tests/documentation_contract.rs` parses every fenced block in
+[`decisions/`](decisions/) and [`reference/`](reference/) against the live
+grammars, so a language or manifest change cannot silently strand either
+directory. An unrecognized tag fails the test; pick the one that states what
+the block is.
+
+| Tag | Checked against | Use for |
+| --- | --- | --- |
+| `vibra` | Module grammar | Top-level Vibra source |
+| `vibra-expr` | Module grammar, wrapped in a function body | Statements and expressions shown on their own |
+| `vibra-project` | `project.vib` loader | A complete manifest |
+| `vibra-project-fragment` | Loader, spliced into a minimal manifest | One or more bare `(dependency ...)` forms |
+| `vibra-proposed` | Nothing | Syntax a document proposes but the compiler does not accept yet |
+| `text`, `ebnf`, `sh`, `json`, `yaml`, `lua` | Nothing | Prose, grammar productions, and non-Vibra source |
+
+`vibra-proposed` is the only tag that lets Vibra-looking syntax escape the
+grammar check. Use it only while the surrounding document states the design is
+unimplemented, and retag the block when the feature lands.
+
 ## Documentation map
 
 ### Reference

@@ -35,7 +35,7 @@ closed or transferred to its parent by an explicit API.
 
 A task moves exactly once through:
 
-```
+```text
 created -> runnable -> waiting -> runnable -> completed(value)
                                  |          -> failed(error)
                                  +----------> cancelled(reason)

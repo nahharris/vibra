@@ -4,7 +4,7 @@
 S-expression syntax as modules, with a `(project ...)` root interpreted by
 project commands; the filename does not use a separate manifest extension.
 
-```vibra
+```vibra-project
 (project
   (package "hello" "0.1.0")
   (authority
@@ -97,13 +97,13 @@ Imports beginning with `@` resolve through project namespaces:
 
 Local dependencies:
 
-```vibra
+```vibra-project-fragment
 (dependency local-utils path: "../local-utils")
 ```
 
 Git dependencies:
 
-```vibra
+```vibra-project-fragment
 (dependency math
   git: "https://github.com/example/vibra-math.git"
   rev: "0123456789abcdef0123456789abcdef01234567")
@@ -127,7 +127,7 @@ selection, lock migration, and offline behavior, is documented in
 
 `vibra init` seeds the current toolchain stdlib into `dep/std` for immediate offline use and records its canonical source and exact revision as:
 
-```vibra
+```vibra-project-fragment
 (dependency std
   git: "https://github.com/nahharris/vibra-stdlib.git"
   rev: "6b9fa5838e4f4122ff141e13a5ef737e99955dad")

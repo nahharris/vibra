@@ -5,7 +5,7 @@ project-declared interface. It is deliberately separate from static `$wasm`
 dependencies: the plugin path is chosen at runtime and is not embedded in the
 application or lockfile.
 
-```vibra
+```vibra-project
 (project
   (package "plugin-host" "0.1.0")
   (plugin-interface arithmetic

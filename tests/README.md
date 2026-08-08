@@ -69,6 +69,10 @@ uses `--allow-test-workspace`. Otherwise the case is skipped.
   library modules.
 - Bare `vibra test` selects the `core` profile. Put non-hermetic host tests in
   explicit profiles such as `env`, `net`, `process`, `random`, or `system`.
+- A case whose point is to *emit* a compiler warning belongs in the
+  `diagnostics` profile, not `core`. Such a case can never pass
+  `--deny-warnings`, and leaving it in `core` makes that flag unusable as a
+  whole-repo gate. `vibra test --deny-warnings` must stay green.
 
 ## Assertions
 

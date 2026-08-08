@@ -337,6 +337,32 @@ pub(crate) fn validate_function_body(
 }
 
 pub(crate) fn validate_task_handles(statements: &[Statement]) -> Result<()> {
+    // A `(try ...)` in this statement's own expression positions, ignoring
+    // nested bodies because `walk` visits those with their own live set.
+    fn statement_owns_try(statement: &Statement) -> bool {
+        use crate::lower::expression_contains_try as has_try;
+        match statement {
+            Statement::Call(call) => call.args.iter().any(has_try),
+            Statement::Let { value, .. } => match value {
+                LetValue::Call(call) => call.args.iter().any(has_try),
+                LetValue::Expr(expr) => has_try(expr),
+            },
+            Statement::Set { value, .. } | Statement::Return(value) | Statement::Eval(value) => {
+                has_try(value)
+            }
+            Statement::Match { target, .. } => has_try(target),
+            Statement::If { cond, .. } | Statement::While { cond, .. } => has_try(cond),
+            Statement::For { source, .. } => has_try(source),
+            // `try` inside a task or spawned computation is already rejected as
+            // `E-TRY-004`, and those bodies never observe the enclosing live set.
+            Statement::Task { .. }
+            | Statement::Spawn { .. }
+            | Statement::Join { .. }
+            | Statement::Break
+            | Statement::Continue => false,
+        }
+    }
+
     // `Some(live)` means execution can fall through with `live` handles;
     // `None` means every path through the block exits via `return`. Keeping
     // those states distinct is necessary for a branch such as
@@ -347,6 +373,16 @@ pub(crate) fn validate_task_handles(statements: &[Statement]) -> Result<()> {
         mut live: BTreeSet<String>,
     ) -> Result<Option<BTreeSet<String>>> {
         for statement in statements {
+            // A `try` is a conditional exit: on failure it returns from the
+            // enclosing function, abandoning any handle that is still live.
+            // The success path falls through, so this is a check rather than
+            // a state transition.
+            if !live.is_empty() && statement_owns_try(statement) {
+                bail!(
+                    "`(try ...)` can propagate out of this function while a task handle is live; \
+                     task handles must be joined before leaving their scope"
+                );
+            }
             match statement {
                 Statement::Spawn { handle, .. } => {
                     if !live.insert(handle.clone()) {
@@ -459,6 +495,61 @@ mod tests {
 
     fn return_statement() -> Statement {
         Statement::Return(Expr::Value(RuntimeValue::Void))
+    }
+
+    /// `(let name (try ...))`, which exits the enclosing function whenever the
+    /// operand carries a failure.
+    fn try_let(var: &str) -> Statement {
+        Statement::Let {
+            var: var.to_string(),
+            value: crate::lower::LetValue::Expr(Expr::Try {
+                inner: Box::new(Expr::Value(RuntimeValue::Int(0))),
+                kind: crate::lower::TryKind::Result {
+                    enum_key: "result.result".to_string(),
+                    value_type: TypeRef::Int64,
+                    error_type: TypeRef::Str,
+                },
+            }),
+        }
+    }
+
+    #[test]
+    fn rejects_a_try_propagation_with_a_live_task_handle() {
+        let error =
+            validate_task_handles(&[spawn("worker"), try_let("value"), join("worker", "j")])
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("task handles must be joined before leaving their scope"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn accepts_a_try_propagation_after_joining_all_task_handles() {
+        validate_task_handles(&[spawn("worker"), join("worker", "j"), try_let("value")])
+            .expect("a try after every join cannot abandon a handle");
+    }
+
+    #[test]
+    fn rejects_a_try_propagation_nested_in_a_branch_with_a_live_task_handle() {
+        let error = validate_task_handles(&[
+            spawn("worker"),
+            Statement::If {
+                cond: Expr::Value(RuntimeValue::Bool(true)),
+                then_body: vec![try_let("value")],
+                else_body: vec![],
+            },
+            join("worker", "j"),
+        ])
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("task handles must be joined before leaving their scope"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
