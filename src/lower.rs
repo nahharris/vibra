@@ -157,6 +157,10 @@ pub enum Expr {
         from: Box<Expr>,
         target: TypeRef,
     },
+    Try {
+        inner: Box<Expr>,
+        kind: TryKind,
+    },
     EnumConstructor {
         enum_key: String,
         tag: String,
@@ -176,6 +180,27 @@ pub enum Expr {
         then_e: Box<Expr>,
         else_e: Box<Expr>,
     },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum TryKind {
+    Result {
+        enum_key: String,
+        value_type: TypeRef,
+        error_type: TypeRef,
+    },
+    Option {
+        enum_key: String,
+        value_type: TypeRef,
+    },
+}
+
+impl TryKind {
+    fn value_type(&self) -> &TypeRef {
+        match self {
+            Self::Result { value_type, .. } | Self::Option { value_type, .. } => value_type,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -333,10 +358,32 @@ pub enum FunctionBody {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FunctionVisibility {
+    Public,
+    Private,
+}
+
+impl Default for FunctionVisibility {
+    fn default() -> Self {
+        Self::Public
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionSig {
     pub alias: String,
     pub symbol: String,
+    /// Surface visibility carried into the shared IR. Legacy lowering also
+    /// preserves its historical `-`-prefixed symbol encoding, but effect
+    /// analysis uses this explicit field so typed and legacy paths agree.
+    #[serde(default)]
+    pub visibility: FunctionVisibility,
+    /// True when this signature is used as an interface implementation method.
+    /// Interface methods remain declaration boundaries even when their concrete
+    /// implementation is otherwise private to the module.
+    #[serde(default)]
+    pub interface_method: bool,
     /// Canonical owner root for a native deffect operation. This is carried
     /// separately from `alias`: the latter is the import spelling at the
     /// call site and may differ from the module that defined the operation.
@@ -374,15 +421,32 @@ impl EffectRow {
         self.labels.is_empty()
     }
 
+    /// Whether a declaration permits an inferred leaf. A bare `(fs)` row is
+    /// stored as `(fs, "")` and subsumes every `fs.*` leaf only at declaration
+    /// checking time.
+    pub fn covers(&self, label: &(String, String)) -> bool {
+        self.labels
+            .iter()
+            .any(|declared| declared == label || (declared.0 == label.0 && declared.1.is_empty()))
+    }
+
     /// Labels in `self` that `other` does not declare.
     pub fn difference(&self, other: &EffectRow) -> Vec<(String, String)> {
-        self.labels.difference(&other.labels).cloned().collect()
+        self.labels
+            .iter()
+            .filter(|label| !other.covers(label))
+            .cloned()
+            .collect()
     }
 }
 
 /// Render a `(domain, action)` pair the way source spells it, for diagnostics.
 pub fn effect_label_display(label: &(String, String)) -> String {
-    format!("{}.{}", label.0, label.1)
+    if label.1.is_empty() {
+        label.0.clone()
+    } else {
+        format!("{}.{}", label.0, label.1)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -605,6 +669,7 @@ pub struct LoweredProgram {
     pub functions: HashMap<String, FunctionSig>,
     pub impls: HashMap<ImplKey, ImplBody>,
     pub warnings: Vec<String>,
+    pub(crate) body_diagnostics: Vec<crate::body_semantics::BodyDiagnostic>,
     /// Canonical `@dependency` module name to validated static wasm bytes.
     /// These bytes are included in the deterministic guest execution plan.
     pub foreign_modules: BTreeMap<String, Vec<u8>>,
@@ -1930,6 +1995,19 @@ fn strip_module_prefix(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
+fn function_visibility(symbol: &str) -> FunctionVisibility {
+    let private = symbol.starts_with('-')
+        || symbol
+            .rsplit('.')
+            .next()
+            .is_some_and(|segment| segment.starts_with('-'));
+    if private {
+        FunctionVisibility::Private
+    } else {
+        FunctionVisibility::Public
+    }
+}
+
 fn resolve_import_path(
     module_path: &std::path::Path,
     import: &str,
@@ -1965,40 +2043,29 @@ fn join_module_prefix(parent: &str, child: &str) -> String {
 /// `$stream.read` inside module `io` resolves to `io.stream.read` (and `a.io.stream.read`
 /// when `io` is mounted under `a`). If the prefix misses, accept `name` when it is already
 /// a registered key (fully-qualified reference). Otherwise keep `name` unqualified.
-/// Check every function body against its declared effect row.
-///
-/// `main` is handled alongside the registered functions because it is never in
-/// `sigs` -- it is skipped during collection and lowered inline.
-///
-/// Reporting is sorted and stops at the first offender so the diagnostic is
-/// deterministic rather than dependent on hash order.
+/// Check declaration-boundary functions against the shared effect graph.
+/// `main` deliberately infers and is not a registered declaration boundary.
 fn validate_declared_effects(
     sigs: &HashMap<String, FunctionSig>,
-    main_statements: &[Statement],
-    main_effects: &EffectRow,
+    warnings: &mut Vec<String>,
 ) -> Result<()> {
-    let mut owners: Vec<&String> = sigs.keys().collect();
-    owners.sort();
-    for owner in owners {
-        let sig = &sigs[owner];
-        let performed = crate::effect_semantics::infer_function(sig, sigs);
-        if let Some(witness) = performed.undeclared(&sig.effects).first() {
-            bail!(crate::effect_semantics::undeclared_effect_message(
-                owner,
-                &sig.effects,
-                witness
-            ));
+    crate::effect_semantics::validate_declared_effects(sigs, warnings)
+}
+
+fn mark_interface_methods(
+    sigs: &mut HashMap<String, FunctionSig>,
+    impls: &HashMap<ImplKey, ImplBody>,
+) {
+    for implementation in impls.values() {
+        for binding in implementation.methods.values() {
+            let key = match binding {
+                ImplMethodBinding::Fresh(key) | ImplMethodBinding::Alias(key) => key,
+            };
+            if let Some(signature) = sigs.get_mut(key) {
+                signature.interface_method = true;
+            }
         }
     }
-    let performed = crate::effect_semantics::infer_statements(main_statements, sigs);
-    if let Some(witness) = performed.undeclared(main_effects).first() {
-        bail!(crate::effect_semantics::undeclared_effect_message(
-            "main",
-            main_effects,
-            witness
-        ));
-    }
-    Ok(())
 }
 
 /// Resolve a declaration's `=effects` labels to nominal root identities.
@@ -2044,17 +2111,11 @@ fn resolve_effect_row(
 /// deffects may introduce additional nominal roots. Ordinary type names still
 /// go through the declared alias table.
 fn nominal_effect_name(name: &str) -> Option<(&str, &str)> {
+    if !name.contains('.') {
+        return crate::intrinsics::is_known_root(name, "").then_some((name, ""));
+    }
     let (domain, action) = name.split_once('.')?;
-    if crate::intrinsics::is_known_root(domain, action)
-        || !domain.is_empty()
-            && !action.is_empty()
-            && domain
-                .chars()
-                .all(|ch| ch.is_ascii_lowercase() || ch == '-')
-            && action
-                .chars()
-                .all(|ch| ch.is_ascii_lowercase() || ch == '-')
-    {
+    if crate::intrinsics::is_valid_effect_root(domain, action) {
         Some((domain, action))
     } else {
         None
@@ -2175,6 +2236,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     let mut enums: HashMap<String, EnumDef> = HashMap::new();
     let mut impls: HashMap<ImplKey, ImplBody> = HashMap::new();
     let mut warnings = Vec::new();
+    let mut body_diagnostics = Vec::new();
     let mut pending_user_bodies: Vec<(String, Vec<Value>)> = Vec::new();
     let mut visited_import_defs: HashSet<(String, PathBuf)> = HashSet::new();
 
@@ -2232,6 +2294,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         &impls,
         &mut warnings,
     )?;
+    mark_interface_methods(&mut sigs, &impls);
 
     let main = map_get_str(entry_map, "main").context("missing top-level `main`")?;
     let main_env = parse_def_envelope(main, &mut warnings)
@@ -2281,6 +2344,15 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
             None,
         )?);
     }
+    crate::body_semantics::validate_unhandled_values(
+        &statements,
+        &sigs,
+        &type_aliases,
+        &program.body_sources,
+        program.body_sources.get("main"),
+        &mut warnings,
+        &mut body_diagnostics,
+    );
     crate::body_semantics::validate_task_handles(&statements)
         .context("E-TASK-003: invalid task-handle lifetime in `main`")?;
 
@@ -2292,7 +2364,9 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &statements)?;
     validate_wasm_bodies(&sigs, &type_aliases)?;
     let main_effects = resolve_effect_row(&main_env, "", &type_aliases, "main", &mut warnings)?;
-    validate_declared_effects(&sigs, &statements, &main_effects)?;
+    let declared_main_effects = main_env.effect_values.is_some().then_some(&main_effects);
+    validate_declared_effects(&sigs, &mut warnings)?;
+    crate::effect_semantics::validate_entry_effects(&statements, declared_main_effects, &sigs)?;
 
     let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
     Ok(LoweredProgram {
@@ -2304,6 +2378,7 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
         functions: sigs,
         impls,
         warnings,
+        body_diagnostics,
         foreign_modules,
     })
 }
@@ -2319,6 +2394,8 @@ struct TestContext {
     enums: HashMap<String, EnumDef>,
     impls: HashMap<ImplKey, ImplBody>,
     warnings: Vec<String>,
+    body_sources: HashMap<String, crate::body_semantics::BodySource>,
+    body_diagnostics: Vec<crate::body_semantics::BodyDiagnostic>,
 }
 
 /// Build the shared lowering context for `program`'s entry module: resolve all
@@ -2340,6 +2417,7 @@ fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
     let mut enums: HashMap<String, EnumDef> = HashMap::new();
     let mut impls: HashMap<ImplKey, ImplBody> = HashMap::new();
     let mut warnings = Vec::new();
+    let mut body_diagnostics = Vec::new();
     let mut pending_user_bodies: Vec<(String, Vec<Value>)> = Vec::new();
     let mut visited_import_defs: HashSet<(String, PathBuf)> = HashSet::new();
 
@@ -2397,8 +2475,20 @@ fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
         &impls,
         &mut warnings,
     )?;
+    mark_interface_methods(&mut sigs, &impls);
+
+    crate::body_semantics::validate_unhandled_values(
+        &[],
+        &sigs,
+        &type_aliases,
+        &program.body_sources,
+        None,
+        &mut warnings,
+        &mut body_diagnostics,
+    );
 
     validate_wasm_bodies(&sigs, &type_aliases)?;
+    validate_declared_effects(&sigs, &mut warnings)?;
 
     Ok(TestContext {
         sigs,
@@ -2407,6 +2497,8 @@ fn build_test_context(program: &LoadedProgram) -> Result<TestContext> {
         enums,
         impls,
         warnings,
+        body_sources: program.body_sources.clone(),
+        body_diagnostics,
     })
 }
 
@@ -2443,6 +2535,15 @@ fn lower_single_test_body(
             None,
         )?);
     }
+    crate::body_semantics::validate_unhandled_body(
+        &statements,
+        &[],
+        &ctx.sigs,
+        &ctx.type_aliases,
+        ctx.body_sources.get(name),
+        &mut ctx.warnings,
+        &mut ctx.body_diagnostics,
+    );
     crate::body_semantics::validate_task_handles(&statements)
         .with_context(|| format!("E-TASK-003: invalid task-handle lifetime in test `{name}`"))?;
     validate_all_where_bounds(&ctx.type_aliases, &ctx.sigs, &ctx.enums)?;
@@ -2494,6 +2595,7 @@ pub fn lower_tests(program: &LoadedProgram) -> Result<Vec<LoweredTestCase>> {
                 functions: ctx.sigs.clone(),
                 impls: ctx.impls.clone(),
                 warnings: ctx.warnings.clone(),
+                body_diagnostics: ctx.body_diagnostics.clone(),
                 foreign_modules: BTreeMap::new(),
             },
         });
@@ -2553,6 +2655,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
         type_aliases,
         impls,
         warnings,
+        body_diagnostics,
         ..
     } = ctx;
 
@@ -2567,6 +2670,7 @@ pub fn lower_named_test(program: &LoadedProgram, name: &str) -> Result<LoweredTe
             functions: sigs,
             impls,
             warnings,
+            body_diagnostics,
             foreign_modules: BTreeMap::new(),
         },
     })
@@ -2760,6 +2864,7 @@ pub fn lower_exec_expr(
             functions: sigs,
             impls,
             warnings,
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         },
     })
@@ -3352,6 +3457,8 @@ fn try_register_function(
         FunctionSig {
             alias: alias.to_string(),
             symbol: name.to_string(),
+            visibility: function_visibility(name),
+            interface_method: false,
             owner_effect: env.owner_effect.clone(),
             type_params: env.type_params.clone(),
             type_param_bounds: resolved_bounds,
@@ -3436,9 +3543,10 @@ pub(crate) fn validate_wasm_bodies(
         let FunctionBody::Wasm { import, wasm_args } = &sig.body else {
             continue;
         };
-        // A host import's effects are the registry's, not whatever the wrapper felt
-        // like claiming. Equality rather than inclusion: under-declaring would launder
-        // the effect away, and over-declaring would misreport the host surface.
+        // A host import's performed effects come from the registry, not whatever
+        // the wrapper felt like claiming. Declaration-side roots are allowed to
+        // cover registry leaves; the shared boundary validator reports any
+        // additional declared labels as over-declaration warnings.
         if !import.module.starts_with('@') {
             let registry: BTreeSet<(String, String)> =
                 crate::host_abi::effects_for(&import.module, &import.name)
@@ -3455,7 +3563,11 @@ pub(crate) fn validate_wasm_bodies(
                     declared.remove(owner);
                 }
             }
-            if registry != declared {
+            let declared_row = EffectRow {
+                labels: declared.clone(),
+                tail: None,
+            };
+            if registry.iter().any(|label| !declared_row.covers(label)) {
                 let render = |labels: &BTreeSet<(String, String)>| {
                     if labels.is_empty() {
                         "no effects".to_string()
@@ -3468,7 +3580,7 @@ pub(crate) fn validate_wasm_bodies(
                     }
                 };
                 bail!(
-                    "E-EFFECT-005: `{key}` binds host import `{}.{}`, which performs {}, but declares {}; a host-import body must declare exactly the registry's effects",
+                    "E-EFFECT-005: `{key}` binds host import `{}.{}`, which performs {}, but declares {}; the declaration must cover the registry's effects",
                     import.module,
                     import.name,
                     render(&registry),
@@ -3580,7 +3692,38 @@ pub(crate) fn abi_value_type_matches(
     ty: &TypeRef,
     aliases: &HashMap<String, TypeAlias>,
 ) -> bool {
+    abi_value_type_matches_with_policy(kind, ty, aliases, true)
+}
+
+/// Intrinsic wrappers are the typed generic standard-library surface. Their
+/// `Any` slots are checked for reference-like aliases, while an unresolved
+/// type parameter is validated when the wrapper is specialized by its caller.
+pub(crate) fn abi_intrinsic_value_type_matches(
+    kind: crate::host_abi::ValueKind,
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    abi_value_type_matches_with_policy(kind, ty, aliases, false)
+}
+
+fn abi_value_type_matches_with_policy(
+    kind: crate::host_abi::ValueKind,
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+    reject_unresolved_generics: bool,
+) -> bool {
     use crate::host_abi::ValueKind as A;
+    // `vibra_v1` values are represented by host-owned arena indices, but an
+    // index must never smuggle a shared cell, reference, or function value
+    // across the compartment boundary. Check the complete source shape so
+    // aliases and aggregate payloads cannot bypass the direct-type cases.
+    if contains_reference_like_boundary_type(ty, aliases)
+        || reject_unresolved_generics
+            && matches!(kind, A::Any | A::OptionAny | A::ResultAny)
+            && contains_unresolved_generic_type(ty, aliases)
+    {
+        return false;
+    }
     let resolved = match ty {
         TypeRef::Named(name) => aliases.get(name).map(|alias| &alias.body).unwrap_or(ty),
         _ => ty,
@@ -3636,23 +3779,120 @@ pub(crate) fn abi_value_type_matches(
         A::ProcessHandle => endpoint_access()
             .is_some_and(|access| matches!(access, HandleAccess::Process)),
         A::AnyHandle => endpoint_access().is_some(),
-        A::ResultVoid => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Void, t, aliases))),
-        A::ResultStr => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
-        A::ResultBytes => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Bytes, t, aliases))),
-        A::ResultReadHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::ReadHandle, t, aliases))),
-        A::ResultWriteHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::WriteHandle, t, aliases))),
-        A::ResultProcessHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::ProcessHandle, t, aliases))),
-        A::ResultPaths => instantiated("result").is_some_and(|args| matches!(args.first(), Some(TypeRef::Array(inner)) if abi_value_type_matches(A::Path, inner, aliases))),
-        A::ResultPath => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
-        A::OptionPath => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Path, t, aliases))),
-        A::OptionStr => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches(A::Str, t, aliases))),
-        A::Any => true,
+        A::ResultVoid => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Void, t, aliases, reject_unresolved_generics))),
+        A::ResultStr => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Str, t, aliases, reject_unresolved_generics))),
+        A::ResultBytes => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Bytes, t, aliases, reject_unresolved_generics))),
+        A::ResultReadHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::ReadHandle, t, aliases, reject_unresolved_generics))),
+        A::ResultWriteHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::WriteHandle, t, aliases, reject_unresolved_generics))),
+        A::ResultProcessHandle => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::ProcessHandle, t, aliases, reject_unresolved_generics))),
+        A::ResultPaths => instantiated("result").is_some_and(|args| matches!(args.first(), Some(TypeRef::Array(inner)) if abi_value_type_matches_with_policy(A::Path, inner, aliases, reject_unresolved_generics))),
+        A::ResultPath => instantiated("result").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Path, t, aliases, reject_unresolved_generics))),
+        A::OptionPath => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Path, t, aliases, reject_unresolved_generics))),
+        A::OptionStr => instantiated("option").is_some_and(|args| args.first().is_some_and(|t| abi_value_type_matches_with_policy(A::Str, t, aliases, reject_unresolved_generics))),
+        A::Any => !contains_reference_like_boundary_type(ty, aliases),
         A::Array => matches!(resolved, TypeRef::Array(_)),
-        A::StringMap => matches!(resolved, TypeRef::Map { key, .. } if abi_value_type_matches(A::Str, key, aliases)),
+        A::StringMap => matches!(resolved, TypeRef::Map { key, .. } if abi_value_type_matches_with_policy(A::Str, key, aliases, reject_unresolved_generics)),
         A::Record => matches!(resolved, TypeRef::Record(_)),
         A::OptionAny => instantiated("option").is_some(),
         A::ResultAny => instantiated("result").is_some(),
     }
+}
+
+fn contains_reference_like_boundary_type(
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+) -> bool {
+    contains_boundary_hazard(ty, aliases, BoundaryHazard::ReferenceLike)
+}
+
+fn contains_unresolved_generic_type(ty: &TypeRef, aliases: &HashMap<String, TypeAlias>) -> bool {
+    contains_boundary_hazard(ty, aliases, BoundaryHazard::UnresolvedGeneric)
+}
+
+#[derive(Clone, Copy)]
+enum BoundaryHazard {
+    ReferenceLike,
+    UnresolvedGeneric,
+}
+
+fn contains_boundary_hazard(
+    ty: &TypeRef,
+    aliases: &HashMap<String, TypeAlias>,
+    hazard: BoundaryHazard,
+) -> bool {
+    fn visit(
+        ty: &TypeRef,
+        aliases: &HashMap<String, TypeAlias>,
+        visiting: &mut HashSet<String>,
+        hazard: BoundaryHazard,
+    ) -> bool {
+        match ty {
+            TypeRef::Mutable(_) | TypeRef::Reference { .. } | TypeRef::FnType { .. } => {
+                matches!(hazard, BoundaryHazard::ReferenceLike)
+            }
+            // A generic has no concrete representation for an opaque `any`
+            // argument slot. Generic aggregate result shapes remain valid so
+            // collection wrappers such as `option<t>` can be checked against
+            // their contextual source type.
+            TypeRef::Generic(_) | TypeRef::SelfType => {
+                matches!(hazard, BoundaryHazard::UnresolvedGeneric)
+            }
+            TypeRef::Named(name) => {
+                let Some(alias) = aliases.get(name) else {
+                    // Built-in nominal ABI shapes (for example `path` and
+                    // `duration`) are intentionally not aliases in every
+                    // lowering context, so an unknown nominal name remains
+                    // subject to the specific ValueKind matcher below.
+                    return false;
+                };
+                if !alias.type_params.is_empty() || !visiting.insert(name.clone()) {
+                    return true;
+                }
+                let result = visit(&alias.body, aliases, visiting, hazard);
+                visiting.remove(name);
+                result
+            }
+            TypeRef::Instantiated { base, type_args } => {
+                if type_args
+                    .iter()
+                    .any(|arg| visit(arg, aliases, visiting, hazard))
+                {
+                    return true;
+                }
+                let Some(alias) = aliases.get(base) else {
+                    return false;
+                };
+                if alias.type_params.len() != type_args.len() || !visiting.insert(base.clone()) {
+                    return true;
+                }
+                let substitutions = alias
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(type_args.iter().cloned())
+                    .collect();
+                let expanded = substitute_type(&alias.body, &substitutions);
+                let result = visit(&expanded, aliases, visiting, hazard);
+                visiting.remove(base);
+                result
+            }
+            TypeRef::Array(inner) | TypeRef::JoinHandle(inner) | TypeRef::Newtype { inner, .. } => {
+                visit(inner, aliases, visiting, hazard)
+            }
+            TypeRef::Record(fields) | TypeRef::Enum(fields) | TypeRef::Interface(fields) => fields
+                .values()
+                .any(|field| visit(field, aliases, visiting, hazard)),
+            TypeRef::Tuple(items) | TypeRef::Union(items) | TypeRef::Intersect(items) => items
+                .iter()
+                .any(|item| visit(item, aliases, visiting, hazard)),
+            TypeRef::Map { key, value } => {
+                visit(key, aliases, visiting, hazard) || visit(value, aliases, visiting, hazard)
+            }
+            _ => false,
+        }
+    }
+
+    visit(ty, aliases, &mut HashSet::new(), hazard)
 }
 
 /// Validate the nominal specialization of a generic `ResultAny` intrinsic.
@@ -3922,6 +4162,8 @@ fn register_one_inherent_function(
         FunctionSig {
             alias: sig_alias,
             symbol: sig_symbol,
+            visibility: function_visibility(entry_name),
+            interface_method: false,
             owner_effect: env.owner_effect.clone(),
             type_params: all_type_params,
             type_param_bounds: full_bounds,
@@ -4396,10 +4638,15 @@ fn bind_impl_method(
         effects: allowed, ..
     } = expected_fn_type
     {
-        let excess: Vec<_> = declared_effects.labels.difference(allowed).collect();
+        let allowed_row = EffectRow {
+            labels: allowed.clone(),
+            tail: None,
+        };
+        let excess = declared_effects.difference(&allowed_row);
         if let Some((domain, action)) = excess.first() {
             bail!(
-                "E-EFFECT-003: impl method `{method_name}` declares `{domain}.{action}`, which interface method `{iface_qualified}.{method_name}` does not permit; an implementation may not exceed the interface's declared effects"
+                "E-EFFECT-003: impl method `{method_name}` declares `{}`, which interface method `{iface_qualified}.{method_name}` does not permit; an implementation may not exceed the interface's declared effects",
+                effect_label_display(&(domain.clone(), action.clone()))
             );
         }
     }
@@ -4409,6 +4656,8 @@ fn bind_impl_method(
         FunctionSig {
             alias: module_alias.to_string(),
             symbol: sig_symbol,
+            visibility: function_visibility(method_name),
+            interface_method: true,
             owner_effect: env.owner_effect.clone(),
             type_params: sig_type_params,
             type_param_bounds: sig_bounds,
@@ -4980,6 +5229,16 @@ fn check_expr_call_bounds(
         }
         Expr::Cast { from, .. } => check_expr_call_bounds(
             from,
+            sigs,
+            type_aliases,
+            impls,
+            enclosing_params,
+            enclosing_bounds,
+            referrer_owner,
+            context,
+        )?,
+        Expr::Try { inner, .. } => check_expr_call_bounds(
+            inner,
             sigs,
             type_aliases,
             impls,
@@ -5677,7 +5936,7 @@ fn parse_for_statement(
         .context("`$for.do` must be a block sequence")?;
     let baseline = locals.clone();
     let mut body_locals = baseline.clone();
-    body_locals.insert(var.clone(), item_ty);
+    insert_lexical_local(&mut body_locals, &var, item_ty)?;
     let _guard = LoopNestingGuard::enter();
     let mut body = Vec::with_capacity(steps.len());
     for step in steps {
@@ -5699,6 +5958,280 @@ fn parse_for_statement(
 
 #[allow(clippy::too_many_arguments)]
 fn lower_statement(
+    step: &Value,
+    sigs: &HashMap<String, FunctionSig>,
+    constants: &HashMap<String, RuntimeValue>,
+    type_aliases: &HashMap<String, TypeAlias>,
+    enums: &HashMap<String, EnumDef>,
+    impls: &HashMap<ImplKey, ImplBody>,
+    locals: &mut HashMap<String, TypeRef>,
+    warnings: &mut Vec<String>,
+    fn_ctx: Option<&UserFnContext>,
+) -> Result<Statement> {
+    let statement = lower_statement_inner(
+        step,
+        sigs,
+        constants,
+        type_aliases,
+        enums,
+        impls,
+        locals,
+        warnings,
+        fn_ctx,
+    )?;
+    validate_try_in_statement(&statement, fn_ctx, enums)?;
+    Ok(statement)
+}
+
+fn validate_try_kind(
+    kind: &TryKind,
+    fn_ctx: Option<&UserFnContext>,
+    enums: &HashMap<String, EnumDef>,
+) -> Result<()> {
+    let context = fn_ctx.ok_or_else(|| {
+        anyhow::anyhow!(
+            "E-TRY-002: `(try ...)` is only valid inside a function returning `result` or `option`"
+        )
+    })?;
+    let enclosing = try_kind_for_type(&context.return_type, enums).ok_or_else(|| {
+        anyhow::anyhow!(
+            "E-TRY-002: `(try ...)` requires an enclosing `result` or `option` return type, got {:?}",
+            context.return_type
+        )
+    })?;
+    match (kind, enclosing) {
+        (
+            TryKind::Result { error_type, .. },
+            TryKind::Result {
+                error_type: enclosing_error,
+                ..
+            },
+        ) if error_type == &enclosing_error => Ok(()),
+        (TryKind::Result { error_type, .. }, TryKind::Result { error_type: enclosing_error, .. }) => {
+            bail!(
+                "E-TRY-003: propagated error type must exactly match the enclosing function error type (got {:?}, expected {:?})",
+                error_type,
+                enclosing_error
+            )
+        }
+        (TryKind::Option { .. }, TryKind::Option { .. }) => Ok(()),
+        _ => bail!(
+            "E-TRY-002: `(try ...)` operand and enclosing return must use the same result/option kind"
+        ),
+    }
+}
+
+fn validate_try_in_expr(
+    expr: &Expr,
+    fn_ctx: Option<&UserFnContext>,
+    enums: &HashMap<String, EnumDef>,
+) -> Result<()> {
+    match expr {
+        Expr::Try { inner, kind } => {
+            validate_try_kind(kind, fn_ctx, enums)?;
+            validate_try_in_expr(inner, fn_ctx, enums)?;
+        }
+        Expr::Mutable(inner) | Expr::Cast { from: inner, .. } => {
+            validate_try_in_expr(inner, fn_ctx, enums)?
+        }
+        Expr::Reference { target, .. } => validate_try_in_expr(target, fn_ctx, enums)?,
+        Expr::Call { call, .. } => {
+            for argument in &call.args {
+                validate_try_in_expr(argument, fn_ctx, enums)?;
+            }
+        }
+        Expr::HostCall { args, .. } | Expr::Primitive { args, .. } => {
+            for argument in args {
+                validate_try_in_expr(argument, fn_ctx, enums)?;
+            }
+        }
+        Expr::EnumConstructor { payload, .. } => {
+            if let Some(payload) = payload {
+                validate_try_in_expr(payload, fn_ctx, enums)?;
+            }
+        }
+        Expr::Record(fields) => {
+            for value in fields.values() {
+                validate_try_in_expr(value, fn_ctx, enums)?;
+            }
+        }
+        Expr::Tuple(values) | Expr::Array(values) => {
+            for value in values {
+                validate_try_in_expr(value, fn_ctx, enums)?;
+            }
+        }
+        Expr::Map(entries) => {
+            for (key, value) in entries {
+                validate_try_in_expr(key, fn_ctx, enums)?;
+                validate_try_in_expr(value, fn_ctx, enums)?;
+            }
+        }
+        Expr::Range { start, end, step } => {
+            validate_try_in_expr(start, fn_ctx, enums)?;
+            validate_try_in_expr(end, fn_ctx, enums)?;
+            validate_try_in_expr(step, fn_ctx, enums)?;
+        }
+        Expr::If {
+            cond,
+            then_e,
+            else_e,
+        } => {
+            validate_try_in_expr(cond, fn_ctx, enums)?;
+            validate_try_in_expr(then_e, fn_ctx, enums)?;
+            validate_try_in_expr(else_e, fn_ctx, enums)?;
+        }
+        Expr::Value(_) | Expr::VarRef(_) => {}
+    }
+    Ok(())
+}
+
+pub(crate) fn expression_contains_try(expr: &Expr) -> bool {
+    match expr {
+        Expr::Try { .. } => true,
+        Expr::Mutable(inner) | Expr::Cast { from: inner, .. } => expression_contains_try(inner),
+        Expr::Reference { target, .. } => expression_contains_try(target),
+        Expr::Call { call, .. } => call.args.iter().any(expression_contains_try),
+        Expr::HostCall { args, .. } | Expr::Primitive { args, .. } => {
+            args.iter().any(expression_contains_try)
+        }
+        Expr::EnumConstructor { payload, .. } => {
+            payload.as_deref().is_some_and(expression_contains_try)
+        }
+        Expr::Record(fields) => fields.values().any(expression_contains_try),
+        Expr::Tuple(values) | Expr::Array(values) => values.iter().any(expression_contains_try),
+        Expr::Map(entries) => entries
+            .iter()
+            .any(|(key, value)| expression_contains_try(key) || expression_contains_try(value)),
+        Expr::Range { start, end, step } => {
+            expression_contains_try(start)
+                || expression_contains_try(end)
+                || expression_contains_try(step)
+        }
+        Expr::If {
+            cond,
+            then_e,
+            else_e,
+        } => {
+            expression_contains_try(cond)
+                || expression_contains_try(then_e)
+                || expression_contains_try(else_e)
+        }
+        Expr::Value(_) | Expr::VarRef(_) => false,
+    }
+}
+
+fn statement_contains_try(statement: &Statement) -> bool {
+    match statement {
+        Statement::Call(call) => call.args.iter().any(expression_contains_try),
+        Statement::Let { value, .. } => match value {
+            LetValue::Call(call) => call.args.iter().any(expression_contains_try),
+            LetValue::Expr(expr) => expression_contains_try(expr),
+        },
+        Statement::Set { value, .. } | Statement::Return(value) | Statement::Eval(value) => {
+            expression_contains_try(value)
+        }
+        Statement::Match { target, arms } => {
+            expression_contains_try(target)
+                || arms
+                    .iter()
+                    .any(|arm| arm.body.iter().any(statement_contains_try))
+        }
+        Statement::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expression_contains_try(cond)
+                || then_body.iter().any(statement_contains_try)
+                || else_body.iter().any(statement_contains_try)
+        }
+        Statement::While { cond, body } => {
+            expression_contains_try(cond) || body.iter().any(statement_contains_try)
+        }
+        Statement::For { source, body, .. } => {
+            expression_contains_try(source) || body.iter().any(statement_contains_try)
+        }
+        Statement::Task { body, .. } => body.iter().any(statement_contains_try),
+        Statement::Spawn { value, .. } => expression_contains_try(value),
+        Statement::Join { .. } | Statement::Break | Statement::Continue => false,
+    }
+}
+
+fn validate_try_in_statement(
+    statement: &Statement,
+    fn_ctx: Option<&UserFnContext>,
+    enums: &HashMap<String, EnumDef>,
+) -> Result<()> {
+    match statement {
+        Statement::Call(call) => {
+            for argument in &call.args {
+                validate_try_in_expr(argument, fn_ctx, enums)?;
+            }
+        }
+        Statement::Let { value, .. } => match value {
+            LetValue::Call(call) => {
+                for argument in &call.args {
+                    validate_try_in_expr(argument, fn_ctx, enums)?;
+                }
+            }
+            LetValue::Expr(expr) => validate_try_in_expr(expr, fn_ctx, enums)?,
+        },
+        Statement::Set { value, .. } | Statement::Return(value) | Statement::Eval(value) => {
+            validate_try_in_expr(value, fn_ctx, enums)?
+        }
+        Statement::Match { target, arms } => {
+            validate_try_in_expr(target, fn_ctx, enums)?;
+            for arm in arms {
+                for statement in &arm.body {
+                    validate_try_in_statement(statement, fn_ctx, enums)?;
+                }
+            }
+        }
+        Statement::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            validate_try_in_expr(cond, fn_ctx, enums)?;
+            for statement in then_body.iter().chain(else_body) {
+                validate_try_in_statement(statement, fn_ctx, enums)?;
+            }
+        }
+        Statement::While { cond, body } => {
+            validate_try_in_expr(cond, fn_ctx, enums)?;
+            for statement in body {
+                validate_try_in_statement(statement, fn_ctx, enums)?;
+            }
+        }
+        Statement::For { source, body, .. } => {
+            validate_try_in_expr(source, fn_ctx, enums)?;
+            for statement in body {
+                validate_try_in_statement(statement, fn_ctx, enums)?;
+            }
+        }
+        Statement::Task { body, .. } => {
+            for statement in body {
+                validate_try_in_statement(statement, fn_ctx, enums)?;
+            }
+            if body.iter().any(statement_contains_try) {
+                bail!("E-TRY-004: `(try ...)` cannot propagate across a structured task boundary");
+            }
+        }
+        Statement::Spawn { value, .. } => {
+            validate_try_in_expr(value, fn_ctx, enums)?;
+            if expression_contains_try(value) {
+                bail!(
+                    "E-TRY-004: `(try ...)` cannot propagate across a spawned computation boundary"
+                );
+            }
+        }
+        Statement::Join { .. } | Statement::Break | Statement::Continue => {}
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_statement_inner(
     step: &Value,
     sigs: &HashMap<String, FunctionSig>,
     constants: &HashMap<String, RuntimeValue>,
@@ -5879,7 +6412,7 @@ fn lower_statement(
             if ret_ty == TypeRef::Void {
                 bail!("cannot bind void return in $let");
             }
-            locals.insert(var.clone(), ret_ty);
+            insert_lexical_local(locals, &var, ret_ty)?;
             Ok(Statement::Let {
                 var,
                 value: LetValue::Call(call),
@@ -5904,7 +6437,7 @@ fn lower_statement(
             if expr_ty == TypeRef::Void {
                 bail!("cannot bind void expression in $let");
             }
-            locals.insert(var.clone(), expr_ty);
+            insert_lexical_local(locals, &var, expr_ty)?;
             Ok(Statement::Let {
                 var,
                 value: LetValue::Expr(expr),
@@ -6000,7 +6533,12 @@ fn lower_statement(
                 let entry = crate::intrinsics::lookup(&import.name).with_context(|| {
                     format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name)
                 })?;
-                if !abi_value_type_matches(entry.result, &ctx.return_type, type_aliases) {
+                let result_matches = if builtin_host_call {
+                    abi_intrinsic_value_type_matches(entry.result, &ctx.return_type, type_aliases)
+                } else {
+                    abi_value_type_matches(entry.result, &ctx.return_type, type_aliases)
+                };
+                if !result_matches {
                     bail!(
                         "E-INTRINSIC-005: intrinsic `{}` result requires `{}`, got {:?}",
                         import.name,
@@ -6051,6 +6589,21 @@ fn lower_statement(
             );
         }
         Ok(Statement::Return(expr))
+    } else if map_get_str(stmt, "$try").is_some() {
+        if stmt.len() != 1 {
+            bail!("E-TRY-001: `$try` statement must contain only the `$try` key");
+        }
+        Ok(Statement::Eval(parse_expr(
+            step,
+            sigs,
+            constants,
+            type_aliases,
+            enums,
+            impls,
+            locals,
+            home,
+            warnings,
+        )?))
     } else if map_get_str(stmt, "$match").is_some() {
         parse_match_statement(
             stmt,
@@ -7353,6 +7906,33 @@ fn parse_expr(
         )? {
             return Ok(expr);
         }
+        if let Some(inner_value) = map_get_str(m, "$try") {
+            if m.len() != 1 {
+                bail!("E-TRY-001: `$try` must contain only the `$try` key");
+            }
+            let inner = parse_expr(
+                inner_value,
+                sigs,
+                constants,
+                type_aliases,
+                enums,
+                impls,
+                locals,
+                home_module,
+                warnings,
+            )?;
+            let inner_type = infer_expr_type(&inner, constants, locals, type_aliases, enums)
+                .context("E-TRY-001: could not infer `(try ...)` operand type")?;
+            let kind = try_kind_for_type(&inner_type, enums).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "E-TRY-001: `(try ...)` operand must be a `result` or `option`, got {inner_type:?}"
+                )
+            })?;
+            return Ok(Expr::Try {
+                inner: Box::new(inner),
+                kind,
+            });
+        }
         if m.len() == 1 {
             if let Some(literal) = map_get_str(m, "$literal") {
                 if let Some(typed) = literal.as_mapping() {
@@ -7445,6 +8025,9 @@ fn parse_expr(
                 crate::host_abi::lookup(module, name)
                     .with_context(|| format!("E-WASM-002: unknown host import `{module}.{name}`"))?
             };
+            let builtin_host_call = intrinsic
+                || ((module == "vibra_v1" || module == "vibra_test")
+                    && crate::intrinsics::lookup(name).is_some());
             let values = map_get_str(host, "args")
                 .and_then(Value::as_sequence)
                 .context("E-WASM-003: host call args must be a sequence")?;
@@ -7481,7 +8064,12 @@ fn parse_expr(
             for (index, (arg, kind)) in args.iter().zip(entry.params).enumerate() {
                 let ty = infer_expr_type(arg, constants, locals, type_aliases, enums)
                     .context("E-WASM-003: cannot infer host-call argument type")?;
-                if !abi_value_type_matches(*kind, &ty, type_aliases) {
+                let argument_matches = if builtin_host_call {
+                    abi_intrinsic_value_type_matches(*kind, &ty, type_aliases)
+                } else {
+                    abi_value_type_matches(*kind, &ty, type_aliases)
+                };
+                if !argument_matches {
                     if intrinsic {
                         bail!("E-INTRINSIC-005: intrinsic `{name}` argument {index} requires `{}`, got {ty:?}", kind.as_str());
                     }
@@ -8088,6 +8676,7 @@ pub(crate) fn infer_expr_type(
         }
         Expr::Primitive { return_type, .. } => Some(return_type.clone()),
         Expr::Cast { target, .. } => Some(target.clone()),
+        Expr::Try { kind, .. } => Some(kind.value_type().clone()),
         Expr::Record(fields) => fields
             .iter()
             .map(|(k, v)| {
@@ -8549,6 +9138,51 @@ fn enum_target_def<'a>(
         .map(|def| (enum_key.clone(), def))
 }
 
+/// Recover the success/error payload types for the two stdlib fallible enums.
+///
+/// The legacy type registry retains generic enum applications as an
+/// `Instantiated` type, which lets `try` preserve the nominal enum identity
+/// while substituting its payload parameters. A user-defined enum that merely
+/// has an `ok` or `some` tag is not accepted: the base name and canonical tag
+/// set must identify `result` or `option`.
+pub(crate) fn try_kind_for_type(ty: &TypeRef, enums: &HashMap<String, EnumDef>) -> Option<TryKind> {
+    let TypeRef::Instantiated { base, type_args } = ty else {
+        return None;
+    };
+    let bare = strip_module_prefix(base);
+    let enum_def = enums.get(base).or_else(|| {
+        enums
+            .iter()
+            .find(|(key, _)| strip_module_prefix(key) == bare)
+            .map(|(_, def)| def)
+    })?;
+    if enum_def.type_params.len() != type_args.len() {
+        return None;
+    }
+    let substitutions = enum_def
+        .type_params
+        .iter()
+        .cloned()
+        .zip(type_args.iter().cloned())
+        .collect::<HashMap<_, _>>();
+    match bare {
+        "result" if enum_def.tags.contains_key("ok") && enum_def.tags.contains_key("err") => {
+            Some(TryKind::Result {
+                enum_key: base.clone(),
+                value_type: substitute_type(enum_def.tags.get("ok")?, &substitutions),
+                error_type: substitute_type(enum_def.tags.get("err")?, &substitutions),
+            })
+        }
+        "option" if enum_def.tags.contains_key("some") && enum_def.tags.contains_key("none") => {
+            Some(TryKind::Option {
+                enum_key: base.clone(),
+                value_type: substitute_type(enum_def.tags.get("some")?, &substitutions),
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Whether an integer value is exactly representable at `ty`.
 fn int_literal_fits(value: i64, ty: &TypeRef) -> bool {
     match ty {
@@ -8603,6 +9237,23 @@ fn literal_widens_to(
 /// makes that payload irrefutable, not the arm, and a nested `enum.tag` pattern covers
 /// nothing at the outer match's level. Coverage and totality are recorded by the caller
 /// via `record_top_level_coverage` and `pattern_is_irrefutable`.
+fn insert_lexical_local(
+    locals: &mut HashMap<String, TypeRef>,
+    name: &str,
+    ty: TypeRef,
+) -> Result<()> {
+    if name == "_" {
+        return Ok(());
+    }
+    if locals.contains_key(name) {
+        bail!(
+            "E-SCOPE-001: binding `{name}` shadows an enclosing lexical binding; choose a different name"
+        );
+    }
+    locals.insert(name.to_string(), ty);
+    Ok(())
+}
+
 fn validate_pattern(
     pattern: &Pattern,
     target_ty: &TypeRef,
@@ -8612,10 +9263,7 @@ fn validate_pattern(
 ) -> Result<()> {
     match pattern {
         Pattern::Wildcard => Ok(()),
-        Pattern::Bind(name) => {
-            locals.insert(name.clone(), target_ty.clone());
-            Ok(())
-        }
+        Pattern::Bind(name) => insert_lexical_local(locals, name, target_ty.clone()),
         Pattern::Literal(value) => {
             let lit_ty = infer_expr_type(
                 &Expr::Value(value.clone()),
@@ -8989,6 +9637,12 @@ fn looks_like_call(v: &Value, sigs: &HashMap<String, FunctionSig>, home_module: 
 /// Widened to `pub(crate)` so `typed_program.rs` can reuse the exact legacy
 /// wording for the kebab-case advisory instead of re-deriving it.
 pub(crate) fn maybe_warn_kebab(name: &str, context: &str, warnings: &mut Vec<String>) {
+    // `_` is the explicit source-level discard spelling, not a user-facing
+    // symbol.  It must not produce a style warning when used for intentional
+    // result/option or pattern-value disposal.
+    if name == "_" {
+        return;
+    }
     // Canonical effect-operation symbols are qualified with `.` (for example
     // `stream.read.string`).  Treat each namespace segment as a symbol so the
     // required qualification does not produce a false lint warning.
@@ -9103,5 +9757,121 @@ mod enum_resolution_tests {
             resolve_call_site_type_argument(TypeRef::Named("t".to_string()), &locals),
             TypeRef::Generic("t".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod abi_boundary_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn alias(name: &str, body: TypeRef) -> TypeAlias {
+        TypeAlias {
+            alias: String::new(),
+            name: name.into(),
+            type_params: Vec::new(),
+            type_param_bounds: Vec::new(),
+            body,
+            doc: None,
+        }
+    }
+
+    #[test]
+    fn abi_any_rejects_reference_like_values_through_named_newtypes() {
+        let aliases = HashMap::from([
+            (
+                "ref-box".into(),
+                alias(
+                    "ref-box",
+                    TypeRef::Newtype {
+                        name: "ref-box".into(),
+                        inner: Box::new(TypeRef::Reference {
+                            inner: Box::new(TypeRef::Int64),
+                            mutable: false,
+                        }),
+                    },
+                ),
+            ),
+            (
+                "mutable-box".into(),
+                alias(
+                    "mutable-box",
+                    TypeRef::Newtype {
+                        name: "mutable-box".into(),
+                        inner: Box::new(TypeRef::Mutable(Box::new(TypeRef::Int64))),
+                    },
+                ),
+            ),
+            (
+                "function-box".into(),
+                alias(
+                    "function-box",
+                    TypeRef::Newtype {
+                        name: "function-box".into(),
+                        inner: Box::new(TypeRef::FnType {
+                            parameters: Vec::new(),
+                            return_type: Box::new(TypeRef::Void),
+                            effects: Default::default(),
+                        }),
+                    },
+                ),
+            ),
+        ]);
+
+        for name in ["ref-box", "mutable-box", "function-box"] {
+            assert!(
+                !abi_value_type_matches(
+                    crate::host_abi::ValueKind::Any,
+                    &TypeRef::Named(name.into()),
+                    &aliases,
+                ),
+                "named newtype `{name}` must not cross an `any` ABI slot"
+            );
+        }
+    }
+
+    #[test]
+    fn abi_any_rejects_unresolved_generics_and_generic_newtype_specializations() {
+        let aliases = HashMap::from([(
+            "box".into(),
+            TypeAlias {
+                alias: String::new(),
+                name: "box".into(),
+                type_params: vec!["t".into()],
+                type_param_bounds: vec![Vec::new()],
+                body: TypeRef::Newtype {
+                    name: "box".into(),
+                    inner: Box::new(TypeRef::Generic("t".into())),
+                },
+                doc: None,
+            },
+        )]);
+        let wrapped_reference = TypeRef::Instantiated {
+            base: "box".into(),
+            type_args: vec![TypeRef::Reference {
+                inner: Box::new(TypeRef::Int64),
+                mutable: false,
+            }],
+        };
+        let wrapped_generic = TypeRef::Instantiated {
+            base: "box".into(),
+            type_args: vec![TypeRef::Generic("t".into())],
+        };
+
+        assert!(!abi_value_type_matches(
+            crate::host_abi::ValueKind::Any,
+            &TypeRef::Generic("t".into()),
+            &aliases,
+        ));
+        assert!(!abi_value_type_matches(
+            crate::host_abi::ValueKind::Any,
+            &wrapped_reference,
+            &aliases,
+        ));
+        assert!(!abi_value_type_matches(
+            crate::host_abi::ValueKind::Any,
+            &wrapped_generic,
+            &aliases,
+        ));
     }
 }

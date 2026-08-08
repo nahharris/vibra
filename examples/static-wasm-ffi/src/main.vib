@@ -8,4 +8,4 @@
     effects: ()
   )
 )
-(defn main () void (let answer (ffi.foreign-sum 20 22)) effects: (main.ffi))
+(defn main () void (let answer (ffi.foreign-sum 20 22)))

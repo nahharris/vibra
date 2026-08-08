@@ -2,7 +2,7 @@
 title: Vibra Philosophy
 category: decisions
 status: current
-updated: 2026-08-01
+updated: 2026-08-07
 summary: >-
   Design principles for making Vibra predictable, explicit, and safe for
   LLM-authored code and its tooling.
@@ -35,14 +35,20 @@ needs to predict the next valid node in a structured document.
 
 Prefer:
 
-- Regular YAML shapes over clever syntax.
-- Reserved `$` keys for language forms and qualified calls.
+- One canonical S-expression spelling for each semantic construct.
+- Explicit signatures and typed boundaries that constrain valid continuations.
 - Stable schemas and diagnostics that tools can feed back into agents.
 - Explicit imports and names that make local context sufficient.
 - Small, typed APIs with visible argument names.
 
 Avoid designs that depend on taste, convention, hidden global state, or several
-equally valid spellings. Every extra choice is another chance for hallucination.
+equally valid spellings. Canonical syntax and mandatory signatures make
+type-constrained decoding tractable: a decoder can search a small, typed
+prefix automaton for valid next forms instead of guessing among equivalent
+spellings. Canonical formatting also makes retrieval operate over normalized
+structure — types, effects, API calls, and control-flow summaries — rather
+than over surface variants. Prefer type-system features whose decoding
+automaton remains small.
 
 ## One-Way Code
 
@@ -55,10 +61,9 @@ Language and tooling should favor:
 - One invocation shape for intrinsics, user functions, and imports.
 - One statement sequencing form in each context.
 - One canonical formatting style.
-- One annotation spelling, currently `=`-prefixed annotations such as `=where`
-  and `=doc`.
+- One attribute spelling, currently trailing labels such as `where:` and `doc:`.
 - One import model, with public symbols defined by top-level names and private
-  symbols marked by a leading `-`.
+  symbols marked by `visibility: @private`.
 
 Compatibility should not preserve ambiguity indefinitely. Migration tools are
 better than permanent alternate syntaxes.
@@ -74,12 +79,16 @@ Vibra should prefer:
 - Typed `result` and `option` flows instead of unchecked failure paths.
 - Clear diagnostics when code crosses a trust boundary.
 
-Host interaction must be visible and mechanically auditable. `$wasm` binds only
-to the closed, versioned host ABI and is checked against its complete typed
-signature. Vibra does not run untrusted host-privileged code: every host
-operation (filesystem, network, process, clock, random, environment, stdin)
-is unconditionally available to any program at runtime, so embedders must not
-run untrusted Vibra source without their own sandboxing.
+Host interaction must be visible and mechanically auditable. The `wasm` form
+binds only to the closed, versioned host ABI and is checked against its complete
+typed signature. Project execution reads root authority from `project.vib`;
+the optional `(authority ...)` form contains canonical `<domain>.<action>`
+grants and optional resource prefixes. Omitting authority is fail-closed for
+project execution. Declared effect ceilings and private inferred rows become
+attenuated runtime scope requirements, and every concrete host operation
+re-checks the matching grant at the operation boundary. Direct module
+embedding may leave grants unset for compatibility, while an explicit empty
+grant set denies all effectful host operations.
 
 ## Explicit Intent
 
@@ -91,8 +100,8 @@ Prefer:
 
 - Explicit `args` and `return` on functions.
 - Explicit generic type arguments at call sites and type positions.
-- Explicit `$cast` for nominal wrapper boundaries.
-- Explicit `$match` arms with local bindings.
+- Explicit `cast` for nominal wrapper boundaries.
+- Explicit `match` arms with local bindings.
 - Explicit implementation blocks for nominal interface satisfaction.
 
 Inference is useful only when it narrows a local expression without hiding a
@@ -108,8 +117,8 @@ Tooling should provide:
 
 - Check-only formatting by default, with mutation behind an explicit `--write`.
 - Structured diagnostics with stable codes, spans, severity, and fixes.
-- YAML-first output for agent workflows, with JSON and SARIF as compatibility
-  formats.
+- JSON-first output for agent workflows, with human and SARIF renderings where
+  appropriate.
 - Schemas for expressions, types, diagnostics, manifests, and query responses.
 - Context queries that tell an agent which keys, types, imports, and symbols are
   valid at a position.
@@ -121,7 +130,8 @@ runtime has to reject it.
 
 Choose the design that is easiest for an LLM to complete correctly from local
 context. Prefer explicit structure over cleverness, guardrails over trust,
-canonical forms over personal style, and typed authority over ambient power.
+canonical forms over personal style, and explicit boundaries over ambient
+authority.
 
 For the current language specification, see
 [`s-expression-language.md`](s-expression-language.md). For the implemented

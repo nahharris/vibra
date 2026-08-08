@@ -1,5 +1,6 @@
 //! Project manifest, scaffold, dependency sync, and import validation.
 
+use crate::async_runtime::{CapabilityGrant, ScopeLimits};
 use anyhow::{bail, Context, Result};
 use git2::{build::CheckoutBuilder, Oid, Repository};
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,36 @@ pub struct ProjectManifest {
     pub dependencies: HashMap<String, Dependency>,
     #[serde(default, rename = "plugin-interfaces")]
     pub plugin_interfaces: BTreeMap<String, PluginInterface>,
+    /// Program authority declared by the project. `None` distinguishes a
+    /// legacy/direct module invocation from an explicit empty authority set.
+    #[serde(default)]
+    pub authority: Option<ProjectAuthority>,
+    /// Optional execution ceilings. This is intentionally separate from the
+    /// authority grant set: limits constrain work, while grants authorize it.
+    #[serde(default)]
+    pub limits: Option<ProjectLimits>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ProjectAuthority {
+    pub grants: Vec<CapabilityGrant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct ProjectLimits {
+    pub fuel: u64,
+    #[serde(rename = "memory-bytes")]
+    pub memory_bytes: usize,
+}
+
+impl From<ProjectLimits> for ScopeLimits {
+    fn from(limits: ProjectLimits) -> Self {
+        Self {
+            fuel: limits.fuel,
+            memory_bytes: limits.memory_bytes,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,6 +266,8 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
     let mut targets = Targets::default();
     let mut dependencies = HashMap::new();
     let mut plugin_interfaces = BTreeMap::new();
+    let mut authority = None;
+    let mut limits = None;
     for child in forms(&root[1..]) {
         let form = list(child, "project child")?;
         match symbol(form.first(), "project child")? {
@@ -353,6 +386,18 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
                 }
                 plugin_interfaces.insert(name, PluginInterface { functions });
             }
+            "authority" => {
+                if authority.is_some() {
+                    bail!("E-PROJECT-001: duplicate `(authority ...)` form");
+                }
+                authority = Some(parse_authority(&form[1..])?);
+            }
+            "limits" => {
+                if limits.is_some() {
+                    bail!("E-PROJECT-001: duplicate `(limits ...)` form");
+                }
+                limits = Some(parse_limits(&form[1..])?);
+            }
             other => bail!("E-PROJECT-001: unknown project form `{other}`"),
         }
     }
@@ -363,7 +408,80 @@ fn parse_manifest(source: &str) -> Result<ProjectManifest> {
         targets,
         dependencies,
         plugin_interfaces,
+        authority,
+        limits,
     })
+}
+
+fn parse_authority(nodes: &[crate::syntax::Node]) -> Result<ProjectAuthority> {
+    let mut grants = Vec::new();
+    for node in forms(nodes) {
+        let form = list(node, "authority grant")?;
+        if form.len() < 2 || symbol(form.first(), "authority grant")? != "grant" {
+            bail!(
+                "E-PROJECT-001: authority children must be `(grant <effect-root> [<resource-prefix>])`"
+            );
+        }
+        if form.len() > 3 {
+            bail!("E-PROJECT-001: authority grants accept one resource prefix");
+        }
+        let domain = scalar_text(&form[1], "grant effect root")?;
+        let (domain_name, action) = domain.split_once('.').ok_or_else(|| {
+            anyhow::anyhow!(
+                "E-PROJECT-001: grant effect root `{domain}` must use canonical `<domain>.<action>` spelling"
+            )
+        })?;
+        if !crate::intrinsics::is_valid_effect_root(domain_name, action) {
+            bail!("E-PROJECT-001: unknown grant effect root `{domain}`");
+        }
+        let resource_prefix = form
+            .get(2)
+            .map(|node| string(node, "grant resource prefix").map(str::to_owned))
+            .transpose()?
+            .unwrap_or_default();
+        let grant = CapabilityGrant {
+            domain,
+            resource_prefix,
+        };
+        if grants.contains(&grant) {
+            bail!(
+                "E-PROJECT-001: duplicate authority grant `{}`",
+                grant.domain
+            );
+        }
+        grants.push(grant);
+    }
+    Ok(ProjectAuthority { grants })
+}
+
+fn parse_limits(nodes: &[crate::syntax::Node]) -> Result<ProjectLimits> {
+    let attrs = attributes(nodes, &["fuel", "memory"], &[], "limits")?;
+    if attrs.is_empty() {
+        bail!("E-PROJECT-001: limits requires `fuel:` or `memory:`");
+    }
+    let fuel = attrs
+        .get("fuel")
+        .map(|node| non_negative_limit(node, "limits fuel").map(|value| value as u64))
+        .transpose()?
+        .unwrap_or(u64::MAX);
+    let memory_bytes = attrs
+        .get("memory")
+        .map(|node| {
+            non_negative_limit(node, "limits memory")
+                .and_then(|value| usize::try_from(value).context("memory limit is too large"))
+        })
+        .transpose()?
+        .unwrap_or(usize::MAX);
+    Ok(ProjectLimits { fuel, memory_bytes })
+}
+
+fn non_negative_limit(node: &crate::syntax::Node, context: &str) -> Result<u64> {
+    match &node.kind {
+        crate::syntax::NodeKind::Atom(crate::syntax::Atom::Int(value)) if *value >= 0 => {
+            u64::try_from(*value).context("limit is too large")
+        }
+        _ => bail!("E-PROJECT-001: {context} must be a non-negative integer"),
+    }
 }
 
 fn forms(nodes: &[crate::syntax::Node]) -> impl Iterator<Item = &crate::syntax::Node> {
@@ -460,6 +578,27 @@ pub fn find_project_for_file(path: &Path) -> Result<Option<LoadedProject>> {
             return Ok(None);
         }
     }
+}
+
+/// Resolve the program authority that applies to an entry file. A project
+/// manifest without an authority form intentionally returns `Some(vec![])` so
+/// execution fails closed; a file outside any project returns `None` for
+/// direct-module compatibility.
+pub fn capability_grants_for_file(path: &Path) -> Result<Option<Vec<CapabilityGrant>>> {
+    Ok(find_project_for_file(path)?.map(|project| {
+        project
+            .manifest
+            .authority
+            .map(|authority| authority.grants)
+            .unwrap_or_default()
+    }))
+}
+
+/// Resolve the optional execution ceilings declared by the project containing
+/// an entry file. A direct module invocation has no manifest-derived budget;
+/// callers retain their embedding defaults in that case.
+pub fn execution_limits_for_file(path: &Path) -> Result<Option<ScopeLimits>> {
+    Ok(find_project_for_file(path)?.and_then(|project| project.manifest.limits.map(Into::into)))
 }
 
 /// Resolve and read every statically declared wasm library for the project
@@ -852,20 +991,16 @@ fn validate_external_wasm_export(
     let store = wasmer::Store::default();
     let module = wasmer::Module::new(&store, bytes)
         .with_context(|| format!("E-WASM-005: compile dependency `{alias}` wasm artifact"))?;
-    let mut has_memory = false;
-    for import in module.imports() {
-        let allowed_memory = import.module() == "vibra_ffi"
-            && import.name() == "memory"
-            && matches!(import.ty(), wasmer::ExternType::Memory(_));
-        if !allowed_memory {
-            bail!(
-                "E-WASM-005: dependency `{alias}` has forbidden wasm import `{}.{}`; v1 permits only `vibra_ffi.memory`",
-                import.module(),
-                import.name()
-            );
-        }
-        has_memory = true;
-    }
+    let has_memory = validate_static_wasm_imports(
+        alias,
+        module.imports().map(|import| {
+            (
+                import.module().to_string(),
+                import.name().to_string(),
+                matches!(import.ty(), wasmer::ExternType::Memory(_)),
+            )
+        }),
+    )?;
     if requires_memory && !has_memory {
         bail!(
             "E-WASM-005: dependency `{alias}` buffer wrapper `{symbol}` requires import `vibra_ffi.memory`"
@@ -912,6 +1047,26 @@ fn validate_external_wasm_export(
         );
     }
     Ok(())
+}
+
+fn validate_static_wasm_imports(
+    alias: &str,
+    imports: impl IntoIterator<Item = (String, String, bool)>,
+) -> Result<bool> {
+    let mut has_memory = false;
+    for (module, name, is_memory) in imports {
+        let allowed_memory = module == "vibra_ffi" && name == "memory" && is_memory;
+        if !allowed_memory {
+            bail!(
+                "E-WASM-005: dependency `{alias}` has forbidden wasm import `{module}.{name}`; v1 permits only `vibra_ffi.memory`"
+            );
+        }
+        if has_memory {
+            bail!("E-WASM-005: dependency `{alias}` imports `vibra_ffi.memory` more than once");
+        }
+        has_memory = true;
+    }
+    Ok(has_memory)
 }
 
 fn validate_dependency_paths(project: &LoadedProject) -> Result<()> {
@@ -1466,7 +1621,9 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
 }
 
 fn manifest_text(name: &str, targets: &[(&str, &str, &str, &str)]) -> String {
-    let mut text = format!("(project\n  (package \"{name}\" \"0.1.0\")\n");
+    let mut text = format!(
+        "(project\n  (package \"{name}\" \"0.1.0\")\n  (authority\n    (grant io.stdout)\n    (grant stream.write))\n"
+    );
     for (kind, target_name, root, entry) in targets {
         text.push_str(&format!(
             "  (target {target_name} kind: @{kind} root: \"{root}\" entry: \"{entry}\")\n"
@@ -1622,6 +1779,124 @@ mod tests {
         ] {
             assert!(parse_manifest(invalid).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn manifest_authority_is_typed_and_optional() {
+        let manifest = parse_manifest(
+            r#"(project
+  (package "sample" "0.1.0")
+  (authority
+    (grant fs.read "/safe")
+    (grant net.connect "example.com:443")))"#,
+        )
+        .unwrap();
+        let authority = manifest
+            .authority
+            .as_ref()
+            .expect("authority declaration should be retained");
+        assert_eq!(
+            authority.grants,
+            [
+                crate::async_runtime::CapabilityGrant {
+                    domain: "fs.read".into(),
+                    resource_prefix: "/safe".into(),
+                },
+                crate::async_runtime::CapabilityGrant {
+                    domain: "net.connect".into(),
+                    resource_prefix: "example.com:443".into(),
+                },
+            ]
+        );
+
+        let without_authority = parse_manifest("(project (package \"sample\" \"0.1.0\"))").unwrap();
+        assert!(without_authority.authority.is_none());
+    }
+
+    #[test]
+    fn manifest_execution_limits_are_typed_and_optional() {
+        let manifest = parse_manifest(
+            r#"(project
+  (package "sample" "0.1.0")
+  (limits fuel: 123 memory: 4096))"#,
+        )
+        .unwrap();
+        let limits = manifest
+            .limits
+            .expect("execution limits should be retained");
+        assert_eq!(limits.fuel, 123);
+        assert_eq!(limits.memory_bytes, 4096);
+
+        let without_limits = parse_manifest("(project (package \"sample\" \"0.1.0\"))").unwrap();
+        assert!(without_limits.limits.is_none());
+    }
+
+    #[test]
+    fn capability_grants_follow_the_containing_project_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let source_dir = temp.path().join("src");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(
+            temp.path().join(MANIFEST_FILE),
+            r#"(project
+  (package "sample" "0.1.0")
+  (authority (grant time.now)))
+"#,
+        )
+        .unwrap();
+        let entry = source_dir.join("main.vib");
+        fs::write(&entry, "(defn main () void (do))\n").unwrap();
+
+        assert_eq!(
+            capability_grants_for_file(&entry).unwrap(),
+            Some(vec![CapabilityGrant {
+                domain: "time.now".into(),
+                resource_prefix: String::new(),
+            }])
+        );
+
+        fs::write(
+            temp.path().join(MANIFEST_FILE),
+            "(project (package \"sample\" \"0.1.0\"))\n",
+        )
+        .unwrap();
+        assert_eq!(capability_grants_for_file(&entry).unwrap(), Some(vec![]));
+
+        let direct = tempfile::tempdir().unwrap();
+        let direct_entry = direct.path().join("main.vib");
+        fs::write(&direct_entry, "(defn main () void (do))\n").unwrap();
+        assert_eq!(capability_grants_for_file(&direct_entry).unwrap(), None);
+    }
+
+    #[test]
+    fn execution_limits_follow_the_containing_project_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let source_dir = temp.path().join("src");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(
+            temp.path().join(MANIFEST_FILE),
+            r#"(project
+  (package "sample" "0.1.0")
+  (limits fuel: 12 memory: 4096))
+"#,
+        )
+        .unwrap();
+        let entry = source_dir.join("main.vib");
+        fs::write(&entry, "(defn main () void (do))\n").unwrap();
+
+        assert_eq!(
+            execution_limits_for_file(&entry).unwrap(),
+            Some(ScopeLimits {
+                fuel: 12,
+                memory_bytes: 4096,
+                ..ScopeLimits::default()
+            })
+        );
+
+        let direct = tempfile::tempdir().unwrap();
+        let direct_entry = direct.path().join("main.vib");
+        fs::write(&direct_entry, "(defn main () void (do))\n").unwrap();
+        assert_eq!(execution_limits_for_file(&direct_entry).unwrap(), None);
     }
 
     #[test]
@@ -1846,6 +2121,25 @@ mod tests {
         let error = format!("{:#}", check_project(project.path()).unwrap_err());
         assert!(
             error.contains("E-WASM-005") && error.contains("vibra_ffi.memory"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn static_wasm_import_validation_rejects_duplicate_memory_imports() {
+        let error = format!(
+            "{:#}",
+            validate_static_wasm_imports(
+                "math",
+                [
+                    ("vibra_ffi".into(), "memory".into(), true),
+                    ("vibra_ffi".into(), "memory".into(), true),
+                ],
+            )
+            .unwrap_err()
+        );
+        assert!(
+            error.contains("E-WASM-005") && error.contains("more than once"),
             "{error}"
         );
     }

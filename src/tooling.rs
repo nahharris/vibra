@@ -253,6 +253,7 @@ fn sarif_report(report: &LintReport) -> serde_json::Value {
             json!({
                 "id": diagnostic.code,
                 "shortDescription": { "text": rule_summary(&diagnostic.code) },
+                "fullDescription": { "text": rule_summary(&diagnostic.code) },
             })
         });
     }
@@ -260,22 +261,31 @@ fn sarif_report(report: &LintReport) -> serde_json::Value {
         .diagnostics
         .iter()
         .map(|diagnostic| {
-            json!({
+            let mut result = json!({
                 "ruleId": diagnostic.code,
                 "level": sarif_level(diagnostic.severity),
                 "message": { "text": diagnostic.message },
                 "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": { "uri": diagnostic.span.uri },
-                        "region": {
-                            "startLine": diagnostic.span.start.line + 1,
-                            "startColumn": diagnostic.span.start.column + 1,
-                            "endLine": diagnostic.span.end.line + 1,
-                            "endColumn": diagnostic.span.end.column + 1,
-                        }
-                    }
+                    "physicalLocation": sarif_physical_location(&diagnostic.span)
                 }]
-            })
+            });
+            if let Some(related) = &diagnostic.related {
+                let related_locations: Vec<_> = related
+                    .iter()
+                    .enumerate()
+                    .map(|(id, related)| {
+                        json!({
+                            "id": id,
+                            "message": { "text": related.message },
+                            "physicalLocation": sarif_physical_location(&related.span),
+                        })
+                    })
+                    .collect();
+                if !related_locations.is_empty() {
+                    result["relatedLocations"] = serde_json::Value::Array(related_locations);
+                }
+            }
+            result
         })
         .collect();
 
@@ -294,6 +304,18 @@ fn sarif_report(report: &LintReport) -> serde_json::Value {
     })
 }
 
+fn sarif_physical_location(span: &Span) -> serde_json::Value {
+    json!({
+        "artifactLocation": { "uri": span.uri },
+        "region": {
+            "startLine": span.start.line + 1,
+            "startColumn": span.start.column + 1,
+            "endLine": span.end.line + 1,
+            "endColumn": span.end.column + 1,
+        }
+    })
+}
+
 fn sarif_level(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "error",
@@ -307,6 +329,12 @@ fn rule_summary(code: &str) -> &'static str {
     match code {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
         "W-STYLE-002" => "Labelled arguments must precede variadic arguments",
+        "W-EFFECT-001" => "Declaration includes nominal effects not inferred from its body",
+        "W-RESULT-001" => "Result or option value is unhandled in statement position",
+        "W-BIND-001" => "Binding is never read",
+        "W-HANDLE-001" => "Handle binding is used after a same-binding close",
+        "W-HANDLE-002" => "Handle binding is closed more than once",
+        "E-SCOPE-001" => "Lexical binding shadows an enclosing binding",
         "E-YAML-001" => "YAML parse or strict-subset violation",
         "E-YAML-002" => "YAML comments are forbidden",
         "E-COMMENT-001" => "`=comment` must be a string scalar",
@@ -351,10 +379,10 @@ fn rule_summary(code: &str) -> &'static str {
         "E-IMPL-005" => "`=impl` method signature does not match interface declaration",
         "E-IMPL-006" => "`=impl` method alias does not resolve",
         "E-OPTION-001" => "Noncanonical option representation",
-        "E-EFFECT-001" => "Function body performs an undeclared effect",
+        "E-EFFECT-001" => "Body performs a nominal effect outside its declared row",
         "E-EFFECT-002" => "Name in `effects:` does not resolve to an effect",
         "E-EFFECT-003" => "Impl method exceeds its interface's declared effects",
-        "E-EFFECT-005" => "Host-import body disagrees with the registry's effects",
+        "E-EFFECT-005" => "Host-import declaration does not cover registry effects",
         "E-EFFECT-004" => "Malformed effect construction",
         "E-EFFECT-006" => "`effects:` is only valid on a function declaration",
         "E-EFFECT-007" => "Reserved effect syntax (handler operands or row tail)",
@@ -398,7 +426,7 @@ pub fn compile_diagnostics_with_flags(
 ) -> Vec<Diagnostic> {
     let result = load::load_legacy_yaml_program(path, flags).and_then(|program| {
         let Some(entry) = program.modules.get(&program.entry) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         if contains_noncanonical_option(entry) {
             anyhow::bail!(
@@ -406,16 +434,25 @@ pub fn compile_diagnostics_with_flags(
             );
         }
         let Some(map) = entry.as_mapping() else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         if !map.contains_key(&crate::legacy_value::Value::String("main".to_string())) {
-            return Ok(());
+            return Ok(Vec::new());
         }
-        lower::lower_program(&program).map(|_| ())
+        lower::lower_program(&program).map(|lowered| {
+            lowered
+                .body_diagnostics
+                .into_iter()
+                .map(|warning| body_warning_diagnostic(path, warning))
+                .collect()
+        })
     });
     match result {
-        Ok(()) => Vec::new(),
+        Ok(diagnostics) => diagnostics,
         Err(err) => {
+            if let Some(error) = err.downcast_ref::<crate::frontend::ScopeValidationError>() {
+                return vec![scope_diagnostic(error, path)];
+            }
             let message = format!("{err:#}");
             let code = extract_diagnostic_code(&message).unwrap_or("E-COMPILE-001");
             vec![Diagnostic {
@@ -428,6 +465,45 @@ pub fn compile_diagnostics_with_flags(
                 category: Category::Compile,
             }]
         }
+    }
+}
+
+fn body_warning_diagnostic(
+    fallback_path: &Path,
+    warning: crate::body_semantics::BodyDiagnostic,
+) -> Diagnostic {
+    let crate::body_semantics::BodyDiagnostic {
+        code,
+        message,
+        span,
+        fix,
+    } = warning;
+    let diagnostic_span = span
+        .as_ref()
+        .map(|location| {
+            let source = fs::read_to_string(&location.path).unwrap_or_default();
+            crate::sexpr_tooling::tooling_span(&location.path, &source, location.span)
+        })
+        .unwrap_or_else(|| point_span(fallback_path, 0, 0));
+    let fixes = fix.map(|location| {
+        let source = fs::read_to_string(&location.path).unwrap_or_default();
+        vec![json!({
+            "span": crate::sexpr_tooling::tooling_span(&location.path, &source, location.span),
+            "suggestion": match code {
+                "W-BIND-001" => "replace this binder with `_`",
+                "W-RESULT-001" => "handle or explicitly discard this value",
+                _ => "review this diagnostic",
+            },
+        })]
+    });
+    Diagnostic {
+        code: code.to_string(),
+        message,
+        severity: Severity::Warning,
+        span: diagnostic_span,
+        related: None,
+        fix: fixes,
+        category: Category::Compile,
     }
 }
 
@@ -535,11 +611,45 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-INTRINSIC-005",
         "E-EFFECT-008",
         "E-WASM-008",
+        "E-SCOPE-001",
+        "W-RESULT-001",
+        "W-BIND-001",
     ];
     KNOWN_CODES
         .iter()
         .copied()
         .find(|code| message.contains(code))
+}
+
+fn scope_diagnostic(
+    error: &crate::frontend::ScopeValidationError,
+    fallback_path: &Path,
+) -> Diagnostic {
+    let primary = error.primary_location();
+    let primary_path = error.path_for(primary).unwrap_or(fallback_path);
+    let primary_source = fs::read_to_string(primary_path).unwrap_or_default();
+    let related = error
+        .error
+        .related
+        .iter()
+        .map(|(message, location)| {
+            let path = error.path_for(*location).unwrap_or(fallback_path);
+            let source = fs::read_to_string(path).unwrap_or_default();
+            RelatedDiagnostic {
+                message: message.clone(),
+                span: crate::sexpr_tooling::tooling_span(path, &source, location.span),
+            }
+        })
+        .collect();
+    Diagnostic {
+        code: error.error.code.to_string(),
+        message: error.error.to_string(),
+        severity: Severity::Error,
+        span: crate::sexpr_tooling::tooling_span(primary_path, &primary_source, primary.span),
+        related: Some(related),
+        fix: None,
+        category: Category::Compile,
+    }
 }
 
 fn point_span(path: &Path, line: usize, column: usize) -> Span {

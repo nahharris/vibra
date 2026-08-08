@@ -1235,20 +1235,6 @@ impl<'a> Converter<'a> {
         );
 
         let param_names: Vec<String> = params.iter().map(|p| p.name.value.clone()).collect();
-        let mut bound = Vec::new();
-        collect_binding_names(&function.body, &mut bound);
-        for name in &bound {
-            if param_names.contains(name) {
-                bail!(
-                    "E-ADAPT-048: a local binding named `{name}` in `fn {}` shadows a \
-                     parameter of the same name; the adapter does not support this, because \
-                     legacy stores parameters as `args.{name}` and locals as bare `{name}` in \
-                     separate namespaces, so a same-named local would not actually shadow the \
-                     parameter the way the typed source intends",
-                    function.name.value
-                );
-            }
-        }
         let previous_params = std::mem::replace(&mut self.current_params, param_names);
         let previous_intrinsic_owner = self.intrinsic_owner;
         self.intrinsic_owner = owner_root.is_some();
@@ -1608,6 +1594,7 @@ impl<'a> Converter<'a> {
                 m.insert(Value::String("or".into()), literal_value(&fallback.value));
                 Ok(Value::Mapping(m))
             }
+            ExprKind::Try(value) => Ok(single_dollar("try", self.expr_value(value)?)),
             ExprKind::Cast { value, into } => {
                 let mut m = Mapping::new();
                 m.insert(Value::String("$cast".into()), self.expr_value(value)?);
@@ -1946,151 +1933,6 @@ impl<'a> Converter<'a> {
                  application), found a value expression"
             ),
         }
-    }
-}
-
-/// Collect every name a function body introduces as a *new* local binding
-/// (`let`, `for`, match binds, spawn/join handles). Used to reject -- fail
-/// closed -- a local binding that reuses one of the enclosing function's own
-/// parameter names, which the adapter's `args.{name}` / bare-`{name}`
-/// namespace split (see `Converter::current_params`) cannot represent as
-/// real shadowing.
-fn collect_binding_names(body: &[AstExpr], names: &mut Vec<String>) {
-    for expr in body {
-        collect_binding_names_expr(expr, names);
-    }
-}
-
-fn collect_binding_names_expr(expr: &AstExpr, names: &mut Vec<String>) {
-    match &expr.value {
-        ExprKind::Let { name, value, .. } => {
-            names.push(name.value.clone());
-            collect_binding_names_expr(value, names);
-        }
-        ExprKind::Set { value, .. } => collect_binding_names_expr(value, names),
-        ExprKind::Return(value) => {
-            if let Some(value) = value {
-                collect_binding_names_expr(value, names);
-            }
-        }
-        ExprKind::If {
-            condition,
-            then_body,
-            else_body,
-        } => {
-            collect_binding_names_expr(condition, names);
-            collect_binding_names(then_body, names);
-            collect_binding_names(else_body, names);
-        }
-        ExprKind::While { condition, body } => {
-            collect_binding_names_expr(condition, names);
-            collect_binding_names(body, names);
-        }
-        ExprKind::For {
-            binding,
-            source,
-            body,
-        } => {
-            names.push(binding.value.clone());
-            collect_binding_names_expr(source, names);
-            collect_binding_names(body, names);
-        }
-        ExprKind::Match { target, cases } => {
-            collect_binding_names_expr(target, names);
-            for case in cases {
-                collect_pattern_binding_names(&case.pattern, names);
-                collect_binding_names(&case.body, names);
-            }
-        }
-        ExprKind::Do(items) => collect_binding_names(items, names),
-        ExprKind::Record(fields) => {
-            for field in fields {
-                collect_binding_names_expr(&field.value, names);
-            }
-        }
-        ExprKind::Tuple(items) | ExprKind::Array(items) => {
-            for item in items {
-                collect_binding_names_expr(item, names);
-            }
-        }
-        ExprKind::Map(pairs) => {
-            for (k, v) in pairs {
-                collect_binding_names_expr(k, names);
-                collect_binding_names_expr(v, names);
-            }
-        }
-        ExprKind::Mutable(inner) | ExprKind::ReferenceOf(inner) => {
-            collect_binding_names_expr(inner, names);
-        }
-        ExprKind::Range(start, end, step) => {
-            collect_binding_names_expr(start, names);
-            collect_binding_names_expr(end, names);
-            collect_binding_names_expr(step, names);
-        }
-        ExprKind::Convert { value, .. } | ExprKind::Cast { value, .. } => {
-            collect_binding_names_expr(value, names)
-        }
-        ExprKind::Call { arguments, .. } => {
-            for arg in arguments {
-                collect_binding_names_expr(arg.value(), names);
-            }
-        }
-        ExprKind::Intrinsic { arguments, .. } => {
-            for argument in arguments {
-                collect_binding_names_expr(argument, names);
-            }
-        }
-        ExprKind::AnonymousFunction { body, .. } => {
-            for value in body {
-                collect_binding_names_expr(value, names);
-            }
-        }
-        ExprKind::Template { bindings, .. } => {
-            for field in bindings {
-                collect_binding_names_expr(&field.value, names);
-            }
-        }
-        ExprKind::Task { body, .. } => collect_binding_names(body, names),
-        ExprKind::Spawn { handle, value, .. } => {
-            names.push(handle.value.clone());
-            collect_binding_names_expr(value, names);
-        }
-        ExprKind::Join { binding, .. } => names.push(binding.value.clone()),
-        ExprKind::Literal(_)
-        | ExprKind::Reference(_)
-        | ExprKind::Break
-        | ExprKind::Continue
-        | ExprKind::Embed { .. }
-        | ExprKind::Wasm { .. } => {}
-    }
-}
-
-fn collect_pattern_binding_names(pattern: &AstPattern, names: &mut Vec<String>) {
-    match &pattern.value {
-        PatternKind::Bind(name) => names.push(name.value.clone()),
-        PatternKind::Constructor { arguments, .. } => {
-            for p in arguments {
-                collect_pattern_binding_names(p, names);
-            }
-        }
-        PatternKind::Record(fields) => {
-            for field in fields {
-                collect_pattern_binding_names(&field.pattern, names);
-            }
-        }
-        PatternKind::Tuple(items) | PatternKind::Array(items) => {
-            for p in items {
-                collect_pattern_binding_names(p, names);
-            }
-        }
-        PatternKind::Map(pairs) => {
-            for (k, v) in pairs {
-                collect_pattern_binding_names(k, names);
-                collect_pattern_binding_names(v, names);
-            }
-        }
-        PatternKind::Newtype { pattern, .. } => collect_pattern_binding_names(pattern, names),
-        PatternKind::Literal(_) | PatternKind::Wildcard | PatternKind::Interface { .. } => {}
     }
 }
 
@@ -2573,6 +2415,7 @@ mod tests {
             entry,
             modules,
             module_parts: HashMap::new(),
+            body_sources: HashMap::new(),
             embedded_files: Default::default(),
         }
     }
@@ -2845,6 +2688,7 @@ mod tests {
             entry: entry_path,
             modules,
             module_parts: HashMap::new(),
+            body_sources: HashMap::new(),
             embedded_files: Default::default(),
         };
         if let Err(error) = crate::lower::lower_library(&program) {

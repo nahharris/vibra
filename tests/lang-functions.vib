@@ -3,6 +3,16 @@
 (defn echo-bool (subject bool) bool (return subject))
 (defn second (a bool b bool) bool (return b))
 (defn check () bool (let r (ready)) (return r))
+(deffect owned (defn ping () void (let _ true) effects: ()))
+(defn private-leaf () bool (owned.ping) (return true) visibility: @private)
+(defn
+  private-middle
+  ()
+  bool
+  (let ready (private-leaf))
+  (return ready)
+  visibility: @private
+)
 (test.scenario
   "zero-arg-call"
   (test.case "zero-arg-call" (let v (ready)) (test.assert v) profile: @core)
@@ -28,4 +38,13 @@
 (test.scenario
   "nested-call"
   (test.case "nested-call" (let v (check)) (test.assert v) profile: @core)
+)
+(test.scenario
+  "private-effect-chain"
+  (test.case
+    "private-effect-chain"
+    (let v (private-middle))
+    (test.assert v)
+    profile: @core
+  )
 )

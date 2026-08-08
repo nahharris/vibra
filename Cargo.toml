@@ -34,3 +34,4 @@ tempfile = "3.14"
 zip = { version = "2.4", default-features = false }
 
 [dev-dependencies]
+jsonschema = { version = "0.49.5", default-features = false }
