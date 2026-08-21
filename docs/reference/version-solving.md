@@ -16,7 +16,7 @@ Resolution uses semantic versions as specified by SemVer 2.0.0. Normal ranges
 use the familiar comparator syntax (`>=1.2.0 <2.0.0`), with `^1.2.3` and
 `~1.2.3` as sugar. The manifest addition is:
 
-```vibra
+```vibra-proposed
 (dependency math
   git: "https://github.com/example/vibra-math.git"
   version: "^1.2.0")

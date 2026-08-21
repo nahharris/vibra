@@ -4,9 +4,13 @@
 S-expression syntax as modules, with a `(project ...)` root interpreted by
 project commands; the filename does not use a separate manifest extension.
 
-```vibra
+```vibra-project
 (project
   (package "hello" "0.1.0")
+  (authority
+    (grant fs.read "/safe")
+    (grant net.connect "example.com:443"))
+  (limits fuel: 100000 memory: 1048576)
   (target core kind: @lib root: "src/core" entry: "lib.vib")
   (target hello kind: @bin root: "src/hello" entry: "main.vib")
   (dependency std
@@ -18,6 +22,15 @@ project commands; the filename does not use a separate manifest extension.
 ## Fields
 
 - `(package <name> <version>)` declares package identity.
+- `(authority (grant <domain>.<action> [resource-prefix]) ...)` declares
+  project root capability grants. Omitting it denies all effectful host
+  operations during project execution.
+- `(limits fuel: <non-negative-int> memory: <non-negative-int>)` declares
+  optional execution ceilings. Either label may be omitted; an omitted limit
+  is unbounded. Fuel is charged per function call and loop iteration, while
+  memory is deterministic logical high-water accounting for host-arena values.
+  Limits are independent of capability authority and child scopes may only
+  narrow them.
 - `(target <name> kind: <@bin|@lib> root: <root> entry: <entry>)` declares a source target.
 - `(dependency <alias> ...)` declares a local, Git, or static Wasm dependency.
 
@@ -84,13 +97,13 @@ Imports beginning with `@` resolve through project namespaces:
 
 Local dependencies:
 
-```vibra
+```vibra-project-fragment
 (dependency local-utils path: "../local-utils")
 ```
 
 Git dependencies:
 
-```vibra
+```vibra-project-fragment
 (dependency math
   git: "https://github.com/example/vibra-math.git"
   rev: "0123456789abcdef0123456789abcdef01234567")
@@ -114,7 +127,7 @@ selection, lock migration, and offline behavior, is documented in
 
 `vibra init` seeds the current toolchain stdlib into `dep/std` for immediate offline use and records its canonical source and exact revision as:
 
-```vibra
+```vibra-project-fragment
 (dependency std
   git: "https://github.com/nahharris/vibra-stdlib.git"
   rev: "6b9fa5838e4f4122ff141e13a5ef737e99955dad")

@@ -7,7 +7,8 @@ S-expression surface that compiles to WebAssembly.
 - **Historical record:** [retired YAML draft](docs/archive/yaml-surface-draft.md)
 - **Documentation index:** [docs/index.md](docs/index.md)
 - **Project layout:** [docs/reference/project-layout.md](docs/reference/project-layout.md)
-- **Schemas and tooling contracts:** [schemas/](schemas/)
+- **Schemas and tooling contracts:** [schemas/](schemas/), including the
+  [normalized retrieval index schema](schemas/index.schema.json)
 - **Examples:** [examples/](examples/)
 - **Agent skills:** [skills/](skills/) and [usage notes](docs/reference/agent-skills.md)
 - [Container images](docs/reference/containers.md)
@@ -113,9 +114,24 @@ reports declared/performed surfaces, per-function and per-operation rows, call
 edges, and primitive capability witnesses — see
 [schemas/effects.schema.json](schemas/effects.schema.json).
 
-Effects are static and fully erased: there is no runtime representation and no
-enforcement. Every host operation remains unconditionally available at runtime,
-so embedders must still sandbox untrusted Vibra source themselves.
+`vibra index [--format json] <entry>` emits one deterministic, normalized
+retrieval record per function, including private functions. It uses the same
+`vibra fmt` normalization for corpus text that consumers must apply to query
+text, while preserving comments and identifiers. Retrieval evaluation should
+measure rejection precision (how accurately candidates can be eliminated by
+the verifier), not top-k ranking; see
+[schemas/index.schema.json](schemas/index.schema.json).
+
+Effects remain statically checked, then lower into attenuated runtime scope
+requirements. A project's optional `project.vib` `(authority ...)` grants seed
+the root authority; omission is fail-closed for project execution. Host
+operations re-check their canonical effect grant and resource prefix at the
+operation boundary. Direct module embedding may configure grants explicitly.
+The optional `(limits fuel: ... memory: ...)` form separately declares
+execution ceilings: fuel is charged per call and loop iteration, and memory is
+tracked as deterministic logical high-water accounting for host-arena values.
+Child scopes can narrow either ceiling but cannot amplify it; these limits do
+not grant capabilities.
 
 ## Projects
 
@@ -127,7 +143,11 @@ compiler-owned package metadata are canonical JSON.
 (project
   (package "hello" "0.1.0")
   (target hello kind: @bin root: "src" entry: "main.vib")
-  (dependency std path: "../stdlib"))
+  (dependency std path: "../stdlib")
+  (authority
+    (grant fs.read "/safe"))
+  (limits fuel: 100000 memory: 1048576)
+)
 ```
 
 ## Tests

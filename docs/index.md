@@ -2,7 +2,7 @@
 title: Vibra Documentation Index
 category: index
 status: current
-updated: 2026-08-02
+updated: 2026-08-07
 ---
 
 # Vibra documentation
@@ -36,11 +36,14 @@ or update documentation as the compiler evolves.
 | Design principles and language trade-offs | [`decisions/philosophy.md`](decisions/philosophy.md) | Current decision contract |
 | Language syntax and typing | [`decisions/s-expression-language.md`](decisions/s-expression-language.md) | Accepted contract |
 | Static effects | [`decisions/effect-system.md`](decisions/effect-system.md) | Accepted contract |
+| Secure compilation boundary | [`decisions/secure-compilation.md`](decisions/secure-compilation.md) | Accepted contract |
+| Normalized retrieval index | [`schemas/index.schema.json`](../schemas/index.schema.json) and [`README.md`](../README.md) | Current tooling contract |
 | Project manifests, imports, and dependency workflow | [`reference/project-layout.md`](reference/project-layout.md) | Current reference |
 | WebAssembly and host boundary | [`reference/wasm-abi.md`](reference/wasm-abi.md) and [`reference/static-wasm-ffi.md`](reference/static-wasm-ffi.md) | Current reference |
 | Machine-readable interfaces | [`schemas/`](../schemas/) | Tooling contract |
 | Standard library API | [`stdlib/README.md`](../stdlib/README.md), `stdlib/src/`, and matching tests | Current implementation |
 | Test conventions | [`tests/README.md`](../tests/README.md) | Current reference |
+| Type-constrained decoding design | [`plans/2026-08-02-decoding-service.md`](plans/2026-08-02-decoding-service.md) | Proposed design; prototype gated on typed frontend parity |
 | Roadmaps, migration reports, and gap analyses | [`status/`](status/) | Non-normative snapshots |
 | Superseded designs and handoffs | [`archive/`](archive/) | Historical only |
 
@@ -48,6 +51,27 @@ When code, tests, schemas, and prose disagree, treat executable behavior and
 the relevant schema/test contract as evidence of the current implementation,
 then update the prose or explicitly record the transition. Do not use a status
 or archive document as the current language specification.
+
+## Source blocks in normative documents
+
+`tests/documentation_contract.rs` parses every fenced block in
+[`decisions/`](decisions/) and [`reference/`](reference/) against the live
+grammars, so a language or manifest change cannot silently strand either
+directory. An unrecognized tag fails the test; pick the one that states what
+the block is.
+
+| Tag | Checked against | Use for |
+| --- | --- | --- |
+| `vibra` | Module grammar | Top-level Vibra source |
+| `vibra-expr` | Module grammar, wrapped in a function body | Statements and expressions shown on their own |
+| `vibra-project` | `project.vib` loader | A complete manifest |
+| `vibra-project-fragment` | Loader, spliced into a minimal manifest | One or more bare `(dependency ...)` forms |
+| `vibra-proposed` | Nothing | Syntax a document proposes but the compiler does not accept yet |
+| `text`, `ebnf`, `sh`, `json`, `yaml`, `lua` | Nothing | Prose, grammar productions, and non-Vibra source |
+
+`vibra-proposed` is the only tag that lets Vibra-looking syntax escape the
+grammar check. Use it only while the surrounding document states the design is
+unimplemented, and retag the block when the feature lands.
 
 ## Documentation map
 
@@ -78,6 +102,8 @@ well-written: its status line must say that it is accepted, and implementation
 and tests must be kept aligned with it.
 
 - [Vibra philosophy](decisions/philosophy.md)
+- [S-expression language contract](decisions/s-expression-language.md)
+- [Secure compilation boundary](decisions/secure-compilation.md)
 
 ### Status
 
@@ -88,6 +114,7 @@ claims stop describing the current state.
 - [Open issue roadmap](status/open-issues-roadmap.md)
 - [Kernel and standard-library gap analysis](status/kernel-stdlib-gap-analysis.md)
 - [S-expression migration status](status/s-expression-migration-status.md)
+- [Execution bounds implementation status](status/2026-08-07-execution-bounds.md)
 
 ### History and working records
 
@@ -99,6 +126,7 @@ language contracts. Machine-readable fixtures remain under
 
 - [Retired YAML-surface draft](archive/yaml-surface-draft.md)
 - [Reverted capability-host ABI design](archive/capability-host-abi-design.md)
+- [Archived capability and policy grammar](archive/capability-policy-grammar.md)
 - [S-expression migration handoff](archive/2026-07-25-s-expression-handoff.md)
 - [Dependency-solver vectors](test-vectors/dependency-solver-vectors.json)
 
@@ -108,8 +136,11 @@ Implementation plans live in [`plans/`](plans/) and are execution aids rather
 than current contracts:
 
 - [Plan directory guide](plans/README.md)
+- [Secure compilation constraints plan](plans/2026-08-07-issue-252-secure-compilation.md)
 - [Type-system and ADT foundation plan](plans/2026-05-05-type-system-adt-foundation.md)
 - [Vib source extension and call argument order](plans/2026-08-02-vib-extension-and-call-order.md)
+- [Capability grants implementation plan](plans/2026-08-07-capability-grants-implementation.md)
+- [Handle lifecycle review fix plan](plans/2026-08-07-issue-255-review-fix.md)
 
 Research-grounded roadmap plans, in execution order. Rationale and sources are
 in [`research/01-design-directions.md`](research/01-design-directions.md);
@@ -127,7 +158,7 @@ tracking issue #257.
 | 3 | [Bounded execution](plans/2026-08-02-execution-bounds.md) | #251 |
 | 4 | [Capability grants](plans/2026-08-02-capability-grants.md) | #253 |
 | 5 | [Handle lifecycle spike](plans/2026-08-02-handle-lifecycle-spike.md) | #255 |
-| 6 | [Type-constrained decoding](plans/2026-08-02-decoding-service.md) | #254 |
+| 6 | [Type-constrained decoding design](plans/2026-08-02-decoding-service.md) | #254 |
 
 Pre-implementation investigations for those plans — verified findings with
 `file:line` evidence, several of which corrected the plans they belong to —

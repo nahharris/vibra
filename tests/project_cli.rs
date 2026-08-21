@@ -807,7 +807,7 @@ fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
     std::fs::write(project.join("foreign/math.wasm"), scalar_ffi_module(0)).unwrap();
     std::fs::write(
         project.join("project.vib"),
-        "(project\n  (package \"ffi-app\" \"0.1.0\")\n  (target ffi-app kind: @bin root: \"src\" entry: \"main.vib\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
+        "(project\n  (package \"ffi-app\" \"0.1.0\")\n  (authority (grant main.ffi))\n  (target ffi-app kind: @bin root: \"src\" entry: \"main.vib\")\n  (dependency math path: \"foreign\" wasm: \"math.wasm\"))\n",
     ).unwrap();
     std::fs::write(
         project.join("src/main.vib"),
@@ -952,7 +952,7 @@ fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
     std::fs::write(project.join("foreign/text.wasm"), buffer_ffi_module()).unwrap();
     std::fs::write(
         project.join("project.vib"),
-        "(project\n  (package \"ffi-buffer-app\" \"0.1.0\")\n  (target ffi-buffer-app kind: @bin root: \"src\" entry: \"main.vib\")\n  (dependency text-ffi path: \"foreign\" wasm: \"text.wasm\"))\n",
+        "(project\n  (package \"ffi-buffer-app\" \"0.1.0\")\n  (authority (grant main.ffi))\n  (target ffi-buffer-app kind: @bin root: \"src\" entry: \"main.vib\")\n  (dependency text-ffi path: \"foreign\" wasm: \"text.wasm\"))\n",
     ).unwrap();
     std::fs::write(
         project.join("src/main.vib"),

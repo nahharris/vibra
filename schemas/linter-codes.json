@@ -83,6 +83,11 @@
       "summary": "Embed or template expansion has not been cut over to the typed S-expression frontend"
     },
     {
+      "code": "E-SCOPE-001",
+      "severity": "error",
+      "summary": "Lexical binding shadows a binding from an enclosing scope"
+    },
+    {
       "code": "E-MACRO-001",
       "severity": "error",
       "summary": "Typed macro invocation has the wrong number of arguments"
@@ -258,6 +263,39 @@
       "summary": "Labelled arguments must precede variadic arguments"
     },
     {
+      "code": "W-EFFECT-001",
+      "severity": "warning",
+      "summary": "Declaration includes nominal effects not inferred from its body; extra declarations warn while roots may subsume leaves"
+    },
+    {
+      "code": "W-RESULT-001",
+      "severity": "warning",
+      "summary": "Result or option value is unhandled in non-final statement position",
+      "fix": {
+        "span": "statement",
+        "suggestion": "Handle the value with match or let, or explicitly discard it with (let _ ...)."
+      }
+    },
+    {
+      "code": "W-BIND-001",
+      "severity": "warning",
+      "summary": "Binding is never read",
+      "fix": {
+        "span": "binder",
+        "suggestion": "Remove the binding or replace its name with _."
+      }
+    },
+    {
+      "code": "W-HANDLE-001",
+      "severity": "warning",
+      "summary": "Handle binding is used after a same-binding close on the current control-flow path"
+    },
+    {
+      "code": "W-HANDLE-002",
+      "severity": "warning",
+      "summary": "Handle binding is closed more than once on the current control-flow path"
+    },
+    {
       "code": "E-WASM-001",
       "severity": "error",
       "summary": "$wasm encoding does not match active compiler WASM mode"
@@ -378,14 +416,34 @@
       "summary": "Noncanonical option representation; use the tagged stdlib option enum instead of `$option` sugar or a direct `$void` union member"
     },
     {
+      "code": "E-TRY-001",
+      "severity": "error",
+      "summary": "Malformed `try` form or `try` operand is not a `result` or `option` value"
+    },
+    {
+      "code": "E-TRY-002",
+      "severity": "error",
+      "summary": "`try` is outside a function returning the same `result` or `option` kind"
+    },
+    {
+      "code": "E-TRY-003",
+      "severity": "error",
+      "summary": "Propagated result error type does not exactly match the enclosing function error type"
+    },
+    {
+      "code": "E-TRY-004",
+      "severity": "error",
+      "summary": "`try` cannot propagate across a structured task or spawned computation boundary"
+    },
+    {
       "code": "E-EFFECT-001",
       "severity": "error",
-      "summary": "A function body performs an effect its `effects:` attribute does not declare; the declared row is a ceiling the body may not exceed"
+      "summary": "A body performs a nominal effect not covered by its declared row; a declared root subsumes its leaf effects"
     },
     {
       "code": "E-EFFECT-005",
       "severity": "error",
-      "summary": "A `(wasm ...)` body must declare exactly the effects the host ABI registry states for that import, so a host import cannot be laundered through an empty declaration"
+      "summary": "A `(wasm ...)` body must declare a row covering the host ABI registry effects; additional nominal declarations are over-declaration warnings"
     },
     {
       "code": "E-EFFECT-003",

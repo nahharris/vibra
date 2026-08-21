@@ -4,12 +4,6 @@ Date: 2026-07-25
 Status: accepted implementation contract for issue #150  
 Compatibility: intentionally breaking; there is no YAML compatibility mode
 
-> **Note:** the `capability`/`policy`/`policy.narrow` grammar and the
-> capability model referenced below were later fully decommissioned (every
-> host operation is now unconditionally available at runtime, with no
-> authority type or narrowing expression). Passages describing them are
-> historical; they do not describe current syntax or semantics.
-
 ## Decision
 
 Vibra source becomes a small, regular S-expression language. YAML is removed
@@ -20,10 +14,10 @@ only as an explicitly requested external-data decoder for `embed`; decoded data
 immediately becomes ordinary Vibra values and is never exposed as Vibra syntax
 or compiler-owned YAML output.
 
-This change preserves Vibra's static types, value semantics, capability model,
-module visibility, generics, nominal implementations, tests, and WebAssembly
-runtime behavior. It changes their spelling and removes syntax that exists only
-to fit semantic nodes into YAML mappings.
+This change preserves Vibra's static types, value semantics, module visibility,
+generics, nominal implementations, tests, and WebAssembly runtime behavior. It
+changes their spelling and removes syntax that exists only to fit semantic
+nodes into YAML mappings.
 
 Calls accept fixed positional, labelled, and variadic arguments. The reader
 accepts mixed source order, and unlabelled values fill the next unbound fixed
@@ -117,9 +111,24 @@ A bare symbol in expression position is a lexical, module, imported, or
 compiler-provided value reference. Function arguments are ordinary lexical
 names; `$args.name` is removed.
 
+### Lexical names and scoping
+
+Lexical shadowing is a hard compiler error, not a suppressible style lint.
+Every `let` or `let-as` binder, function parameter, match `(bind name)`, and
+`for` binder must have a name that is not already visible in an enclosing
+lexical scope. The compiler reports `E-SCOPE-001` with the shadowing binder as
+the primary span and the original binding as related information. Names in
+separate sibling scopes may be reused.
+
+Module names and import aliases are not part of this rule. `_` is a wildcard
+and is exempt, so repeated `_` binders remain legal. Scope validation runs on
+the resolved, post-expansion surface; hygienic macro binders therefore use
+their compiler-resolved identities rather than being compared by raw source
+text.
+
 Every non-special executable list is a call:
 
-```vibra
+```vibra-expr
 (ready)
 (echo-bool true)
 (second false true)
@@ -132,7 +141,7 @@ checked against the resolved signature.
 Generic calls normally infer types. When inference is impossible, `types:`
 supplies all generic arguments in declaration order:
 
-```vibra
+```vibra-expr
 (identity true types: (bool))
 (first-of true "ignored" types: (bool str))
 ```
@@ -145,9 +154,12 @@ Partial type application and named type arguments are invalid.
 import     = "(", "import", symbol, string, ")" ;
 definition = "(", "def", symbol, type-expr, { attribute }, ")" ;
 constant   = "(", "const", symbol, type-expr, expr, { attribute }, ")" ;
-function   = "(", "fn", symbol, parameters, type-expr, body,
+function   = "(", "defn", symbol, parameters, type-expr, body,
              { attribute }, ")" ;
-test       = "(", "test", symbol, symbol, body, { attribute }, ")" ;
+inline-function = "(", "fn", parameters, type-expr, body,
+                  { attribute }, ")" ;
+test       = "(", "test.scenario", string, test-case+, ")" ;
+test-case  = "(", "test.case", string, expr+, { attribute }, ")" ;
 private    = "(", "private",
              (definition | constant | function | macro), ")" ;
 parameters = "(", { "(", symbol, type-expr, ")" }, ")" ;
@@ -157,20 +169,20 @@ body       = "(", "do", { expr }, ")" ;
 Imports are public module-local aliases but are never re-exported. Definitions,
 constants, functions, and macros are public unless wrapped by `private`. Tests
 are runner-discovered declarations rather than exported symbols. `private`
-accepts exactly one `def`, `const`, `fn`, or `macro`; imports and tests cannot
+accepts exactly one `def`, `const`, `defn`, or `macro`; imports and tests cannot
 be wrapped. `main` remains the program entrypoint.
 
 ```vibra
 (import io "../stdlib/src/io.vib")
 
-(defn write-prefix (text str) void (do (io.stdout.print text)) visibility: private)
+(defn write-prefix (text str) void (do (io.stdout.print text)) visibility: @private)
 
 (defn main () void (do (write-prefix "Hello") (io.stdout.println ", World!")))
 ```
 
-Constants are `(def name Type expression ...)`, not untyped top-level
-expressions. Type definitions use `def` and place a type constructor directly
-after the name.
+Type definitions use `(def name type-expr ...)` and place a type constructor
+directly after the name. Typed constants use `(const name type-expr expression
+...)`; neither form is an untyped top-level expression.
 
 ## Type expressions
 
@@ -204,16 +216,11 @@ handle-type      = "(", "handle", symbol, ")" ;
 effect-type      = "(", "effect", atom, atom, ")" ;
 ```
 
-`capability-type` and `policy-type` were removed with the authority system in
-#213. `effect-type` was added by the effect system (see
-`docs/decisions/effect-system.md`); its two operands are the
-domain and the action, and further operands are reserved for handler definitions.
-
-The capability domain and handle access are positional operands, not part of
-the head. The legacy surface fused them in — `$capability.env-read`,
-`$handle.read` — which is exactly the head-varies-by-payload shape this
-grammar removes. A capability carries zero or more policy groups; a handle
-takes its access mode and nothing else.
+`effect-type` was added by the effect system (see
+`docs/decisions/effect-system.md`); its two operands are the domain and the
+action, and further operands are reserved for handler definitions. The former
+capability/policy grammar and its rationale, including `policy.narrow`, are
+historical; see [`archive/capability-policy-grammar.md`](../archive/capability-policy-grammar.md).
 
 Generic type application uses the same direct, call-like list shape as other
 Vibra forms: `(constructor type...)`. There is no generic `inst` head. Type
@@ -252,10 +259,9 @@ Examples:
 )
 ```
 
-Capability, handle, policy, function-interface, and WebAssembly signature
-forms follow the same rule: one head followed by positional children. Their
-semantic inventory does not change, but no form may accept both a compact and
-expanded spelling.
+Handle, function-interface, and WebAssembly signature forms follow the same
+rule: one head followed by positional children. Their semantic inventory does
+not change, but no form may accept both a compact and expanded spelling.
 
 ## Expressions and statements
 
@@ -274,7 +280,7 @@ expr = atom
      | "(", "if", expr, body, body, ")"
      | "(", "while", expr, body, ")"
      | "(", "for", symbol, expr, body, ")"
-     | "(", "match", expr, case+, ")"
+     | "(", "match", expr, match-arm+, ")"
      | "(", "break", ")"
      | "(", "continue", ")"
      | "(", "record", field-value*, ")"
@@ -286,7 +292,7 @@ expr = atom
      | "(", "range", expr, expr, expr, ")"
      | "(", "convert", expr, type-expr, literal, ")"
      | "(", "cast", expr, type-expr, ")"
-     | "(", "policy.narrow", expr, type-expr, ")"
+     | "(", "try", expr, ")"
      | "(", "task", captures, body, ")"
      | "(", "spawn", symbol, captures, expr, ")"
      | "(", "join", symbol, symbol, ")" ;
@@ -295,8 +301,15 @@ call        = "(", symbol, expr*, ")" ;
 field-value = "(", symbol, expr, ")" ;
 map-entry   = "(", expr, expr, ")" ;
 captures    = "(", "captures", symbol*, ")" ;
-case        = "(", "case", pattern, body, ")" ;
+match-arm   = pattern, expr ;
 ```
+
+Match arms are bare alternating pattern/body pairs, not `(case pattern body)`
+lists. This is less regular because arm boundaries are positional rather than
+delimited, but the corpus-compatible form is retained because it is the
+implemented reader grammar. The irregularity is a known trade-off for the
+otherwise canonical surface and should be revisited if a future control-flow
+extension needs a more regular arm delimiter.
 
 `return` without an expression returns `unit`. `break` and `continue` never
 take operands. `join`'s final symbol is the new result binding. Primitive
@@ -304,6 +317,77 @@ operations (`add`, `equal`, `not`, and peers), enum constructors, imported
 functions, inherent operations, and interface dispatch all use ordinary call
 syntax.
 
+### Result and option propagation
+
+`(try expr)` is the one canonical propagation form. It has exactly one
+operand; `?` suffixes, reader macros, and other operator spellings are not
+part of the language. For a `(result u err)` operand, the enclosing function
+must return `(result t err)` with the identical error type. Success continues
+with the operand's `u` value; an error returns from the enclosing function
+unchanged. An operand whose error type differs requires an explicit conversion
+call before propagation; Vibra does not infer an `into`-style conversion at a
+`try` site.
+
+The same form applies to options: `(try expr)` accepts an `(option u)` operand
+only inside a function returning `(option t)`. `some` continues with its
+payload, while `none` propagates from the enclosing option-returning function.
+The result and option kinds cannot be mixed.
+
+Propagation is also result handling for the unhandled-result/option rule in
+issue #247. A result or option consumed by `(try ...)` is therefore not an
+unhandled statement value; no second `match` is required merely to satisfy
+that diagnostic.
+
+`try` does not cross a structured task or spawned-computation boundary. Those
+sites are rejected instead of attempting to return through a computation that
+owns a different control-flow scope.
+
+A `try` is also an exit for the affine task-handle rule. Because propagation
+returns from the enclosing function, a `try` whose statement is reachable while
+any spawned handle is still live is rejected as `E-TASK-003`, exactly as a
+written `(return ...)` in the same position is. Join every handle before the
+propagation site, or move the propagation after the joins. Only the failure
+path leaves the function, so this is a restriction on where `try` may appear,
+not a change to what the success path evaluates to.
+
+Task handles are the only lifetime `try` enforces. This remains a boundary
+rule, not automatic cleanup: host handles are still closed only by explicit
+operations such as `stream.manage.close`. Early propagation can therefore
+expose the same pre-existing handle leak as any other early return; handle
+lifecycle is owned by issue #255. The async runtime has scope open/close
+machinery, but no user-facing scope form currently connects it to this
+language contract, so `try` promises no additional scope teardown.
+
+#### Corpus measurement for issue #248
+
+The `examples/fs-roundtrip.vib` migration is measured mechanically from the
+source file: physical lines, `match` forms, maximum simultaneously open
+`match` forms, and explicit error-conversion calls. An error-conversion call
+means a call such as `fs.stream-error` that changes one error type into
+another; result constructors do not count.
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Physical lines | 36 | 31 |
+| `match` forms | 3 | 1 |
+| Maximum nested `match` depth | 2 | 1 |
+| Explicit error-conversion calls | 0 | 0 |
+
+The migrated helper has two `try` sites, both using `fs-error` directly, so
+the explicit conversion frequency is `0/2` among its propagation sites. This
+single example does not establish a corpus-wide conversion rate; it records
+only the observable cost of this migration.
+
+### Unhandled result and option values
+
+The stdlib `result` and `option` types are fallible values. A value of either
+type in non-final statement position must be handled with `match` or retained
+by `let`/`let-as`; otherwise the compiler emits `W-RESULT-001`. The final
+expression of a `do` and a `return` operand are consumed as block/function
+values and are exempt. Intentional disposal uses the existing wildcard binder,
+for example `(let _ (stream.write.string out text))`. A named `let` or match
+`(bind name)` that is never read emits the distinct `W-BIND-001`; a read on any
+match arm counts as a read.
 Dropping the `$` sigil makes a primitive name syntactically indistinguishable
 from a user function of the same name, which the legacy `$`-prefixed table
 never had to resolve. The adopted rule: an unqualified call head matching one
@@ -328,18 +412,9 @@ falls through to ordinary call resolution rather than raising an enum-tag
 error -- otherwise a function that merely shares a name with an enum type,
 such as the standard library's `option.empty`, could never be called.
 
-`policy.narrow` is a distinct expression head, not a spelling of `cast`.
-Narrowing a `policy` value into a `capability` (or a more specific `policy`)
-requires subsumption checking -- the target's authority must already be
-covered by the source's -- which is a different rule from `cast`'s newtype
-conversion. Overloading `cast` on whether its target happens to be a
-policy/capability type would reintroduce shape-dependent meaning the rest of
-this contract removes; a distinct head also keeps the diagnostic honest when
-a narrow's target is not a policy or capability type at all, rather than
-letting it silently succeed or fail as an ordinary cast. `policy.narrow`
-target normalization and subsumption reuse the same relation module `cast`
-and `convert` use for their own checks, so all three stay defined in terms of
-one shared implementation rather than three separate ones.
+The former `policy.narrow` expression and its subsumption rationale are
+archived with the decommissioned capability grammar at
+[`archive/capability-policy-grammar.md`](../archive/capability-policy-grammar.md).
 
 The current structured-concurrency, reference, mutation, range, conversion,
 cast, collection, checked-arithmetic, and scope rules remain unchanged.
@@ -373,17 +448,17 @@ type-param = "(", symbol, type-expr*, ")" ;
 impl       = "(", "impl", type-expr,
              [ "types:", "(", type-expr*, ")" ],
              [ "methods:", "(", method*, ")" ], ")" ;
-method     = "(", "method", symbol, (qualified-symbol | function), ")" ;
+method     = "(", "method", symbol, (qualified-symbol | inline-function), ")" ;
 ```
 
 The known definition/function/macro attributes are `doc: string`, `where:
 (type-param*)`, `defs: (function*)`, and `impls: (impl*)`. `where:` lists type
 parameters in declaration order inside its single list value. Each following
 type is an interface bound; no following types means unbounded. `defs:`
-contains named functions using ordinary `fn` syntax. An `impl` keeps its
+contains named functions using ordinary `defn` syntax. An `impl` keeps its
 required interface positional, then uses `types:` and `methods:` for optional
 configuration. A method binding is either a qualified function symbol or an
-inline `fn`. Existing nominal dispatch and orphan rules remain.
+inline anonymous `fn`. Existing nominal dispatch and orphan rules remain.
 
 `comment:` and `lint:` attributes do not exist. Lint suppression moves to CLI or
 project configuration so source semantics do not contain diagnostic policy.
@@ -396,9 +471,9 @@ The canonical test form is:
 (test.scenario "arithmetic"
   (test.case "addition is checked"
     (test.assert-eq-int (add 1 1) 2)
-    tags: (language arithmetic)
-    expect-error: (compile E-OP-002 "overflow")
-    clock: (fixed 0 0)))
+    tags: (@language @arithmetic)
+    expect-error: (@compile E-OP-002 "overflow")
+    clock: (@fixed 0 0)))
 ```
 
 Each metadata label consumes one value with its own positional schema. Known
@@ -418,10 +493,10 @@ commands interpret that root as the project description. Repeated children
 replace mappings and sequences. The filename has no separate manifest
 extension.
 
-```vibra
+```vibra-project
 (project
   (package "example" "0.1.0")
-  (target app kind: bin root: "src" entry: "main.vib")
+  (target app kind: @bin root: "src" entry: "main.vib")
   (dependency std path: "../stdlib"))
 ```
 
@@ -446,14 +521,14 @@ publish, install, or sync.
 The `embed` expression remains, with one positional path and optional explicit
 format:
 
-```vibra
+```vibra-expr
 (embed "assets/message.txt")
-(embed "assets/config.json" format: json)
+(embed "assets/config.json" format: @json)
 ```
 
 Supported formats are `text`, `binary`, `yaml`, `json`, `toml`, and `xml`.
 `yaml` is an external data-interoperability format only. It is accepted by
-explicit `(embed "path" format: yaml)` and may be inferred from `.yaml` or
+explicit `(embed "path" format: @yaml)` and may be inferred from `.yaml` or
 `.yml`.
 The decoder accepts the library's safe data model, rejects tags and non-string
 record keys, and converts mappings, sequences, strings, booleans, numbers, and
@@ -533,8 +608,8 @@ random authority.
 macro          = "(", "macro", symbol, macro-parameters, syntax-category,
                  macro-body, { attribute }, ")" ;
 macro-parameters = "(", { "(", symbol, syntax-category, ")" }, ")" ;
-syntax-category = "expr-syntax" | "type-syntax" | "pattern-syntax"
-                | "definition-syntax" | "module-syntax" ;
+syntax-category = "@expr-syntax" | "@type-syntax" | "@pattern-syntax"
+                | "@definition-syntax" | "@module-syntax" ;
 macro-body     = "(", "do", macro-expr+, ")" ;
 macro-expr     = atom
                | "(", "let", symbol, macro-expr, ")"
@@ -553,14 +628,16 @@ or definition positions:
 ```vibra
 (macro
   unless
-  (condition expr-syntax body expr-syntax)
-  expr-syntax
+  (condition @expr-syntax body @expr-syntax)
+  @expr-syntax
   (do
-    (quote expr-syntax (if (not (unquote condition)) (do (unquote body)) (do)))
+    (quote @expr-syntax (if (not (unquote condition)) (do (unquote body)) (do)))
   )
 )
 
-(unless ready (io.stdout.println "not ready"))
+(defn main () void
+  (do
+    (unless ready (io.stdout.println "not ready"))))
 ```
 
 `quote` requires an explicit result category. `unquote` inserts exactly one

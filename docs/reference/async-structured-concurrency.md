@@ -4,11 +4,10 @@ Status: design contract for issue #105. This document defines observable
 semantics; it does not select an executor, native threads, Wasm threads, or a
 shared-memory synchronization model.
 
-> **Note:** the "capability"/"capability grant" vocabulary below is this
-> module's own structured-concurrency resource-attenuation model
-> (`src/async_runtime.rs::CapabilityGrant`), independent of Vibra's former
-> `$policy`/`$capability.<domain>` host-authority system, which has been
-> fully decommissioned. Do not conflate the two.
+> **Note:** `CapabilityGrant` is shared infrastructure for structured
+> concurrency and the #253 runtime authority model. Async scopes attenuate
+> parent grants monotonically; #251's resource budgets remain a separate
+> concern and are not part of this contract.
 
 The machine-readable trace format is
 [`async-task-trace.schema.json`](../../schemas/async-task-trace.schema.json). The
@@ -36,7 +35,7 @@ closed or transferred to its parent by an explicit API.
 
 A task moves exactly once through:
 
-```
+```text
 created -> runnable -> waiting -> runnable -> completed(value)
                                  |          -> failed(error)
                                  +----------> cancelled(reason)
@@ -79,6 +78,21 @@ Equal-time events are ordered: existing cancellation, deadline expiry, I/O
 completion, task creation sequence, then operation sequence. Wall time and
 timezone never participate. Production hosts map their monotonic clock into
 this contract; tests advance a fake clock explicitly.
+
+## Execution budgets
+
+Issue #251 adds optional project-level `(limits fuel: ... memory: ...)`
+ceilings. Fuel is charged at function entry and loop headers. Accounted memory
+is charged at host-arena value insertion and propagated through active ancestor
+scopes. Exhaustion cancels and closes the active scope; it is not a catchable
+guest result, and ordinary scope teardown still owns cleanup. Budgets are
+separate from capability grants and may only narrow through child scopes.
+
+The current arena remains instance-owned and is not reclaimed at these scope
+boundaries. Consequently the memory figure is deterministic high-water
+accounting, not a working-set guarantee. The reclamation blocker and required
+escape-analysis work are tracked in
+[`2026-08-07-execution-bounds.md`](../status/2026-08-07-execution-bounds.md).
 
 ## Capabilities
 

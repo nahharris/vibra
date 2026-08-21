@@ -6,15 +6,17 @@
 use crate::ast::{
     AnnotationKind, CallArgument, Expr as AstExpr, ExprKind, Function, ImplItem, Literal,
     MethodBinding, Module, Origin, Pattern as AstPattern, PatternKind, SourceLocation, TopLevel,
-    WasmArgument,
+    Visibility, WasmArgument,
 };
-use crate::body_semantics::{validate_function_body, validate_task_handles};
+use crate::body_semantics::{
+    validate_function_body, validate_task_handles, validate_unhandled_values,
+};
 use crate::lower::{
     conversion_fallback_fits, infer_expr_type, nominal_type_key_for_module_scope,
     primitive_integer, primitive_numeric, resolve_iface_key_for_scope, typed_primitive_op, Call,
-    EnumDef, Expr, FunctionBody, FunctionSig, ImplKey, ImplMethodBinding, ImportTarget, LetValue,
-    LiteralType, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement, TypeAlias, TypeRef,
-    WasmArgSpec,
+    EnumDef, Expr, FunctionBody, FunctionSig, FunctionVisibility, ImplKey, ImplMethodBinding,
+    ImportTarget, LetValue, LiteralType, MatchArm, Pattern, PrimitiveOp, RuntimeValue, Statement,
+    TypeAlias, TypeRef, WasmArgSpec,
 };
 use crate::type_semantics::{
     host_backed_newtype, resolve_alias_type, substitute_type, type_compatible,
@@ -268,7 +270,8 @@ pub fn materialize_typed_identity_functions(
     signatures: &TypedSignatureIndex,
     bodies: &TypedBodyIndex,
 ) -> Result<HashMap<String, FunctionSig>> {
-    materialize_typed_functions(signatures, bodies)
+    let mut warnings = Vec::new();
+    materialize_typed_functions_with_warnings(signatures, bodies, &mut warnings)
 }
 
 /// Validate and materialize the safe, non-generic typed body subset.
@@ -279,6 +282,19 @@ pub fn materialize_typed_functions(
     signatures: &TypedSignatureIndex,
     bodies: &TypedBodyIndex,
 ) -> Result<HashMap<String, FunctionSig>> {
+    let mut warnings = Vec::new();
+    materialize_typed_functions_with_warnings(signatures, bodies, &mut warnings)
+}
+
+/// Materialize typed functions and retain effect diagnostics in the caller's
+/// warning sink. The compatibility wrapper above is kept for existing staged
+/// callers that only need the function map; complete typed program lowering
+/// uses this sink-aware entry point.
+pub fn materialize_typed_functions_with_warnings(
+    signatures: &TypedSignatureIndex,
+    bodies: &TypedBodyIndex,
+    warnings: &mut Vec<String>,
+) -> Result<HashMap<String, FunctionSig>> {
     let signature_keys: BTreeSet<_> = signatures.functions.keys().cloned().collect();
     let body_keys: BTreeSet<_> = bodies.functions.keys().cloned().collect();
     if signature_keys != body_keys {
@@ -287,6 +303,14 @@ pub fn materialize_typed_functions(
         );
     }
     let constants = materialize_constants(signatures, bodies)?;
+    let interface_method_keys: BTreeSet<String> = signatures
+        .impls
+        .values()
+        .flat_map(|implementation| implementation.methods.values())
+        .map(|binding| match binding {
+            ImplMethodBinding::Fresh(key) | ImplMethodBinding::Alias(key) => key.clone(),
+        })
+        .collect();
     let materialized: HashMap<String, FunctionSig> = bodies
         .functions
         .iter()
@@ -379,22 +403,37 @@ pub fn materialize_typed_functions(
                     }
                 }
             };
-            Ok((key.clone(), materialize(signature, checked)))
+            let visibility = match signatures
+                .visibility
+                .get(key)
+                .copied()
+                .unwrap_or(Visibility::Public)
+            {
+                Visibility::Public => FunctionVisibility::Public,
+                Visibility::Private => FunctionVisibility::Private,
+            };
+            Ok((
+                key.clone(),
+                materialize(
+                    signature,
+                    checked,
+                    visibility,
+                    interface_method_keys.contains(key),
+                ),
+            ))
         })
         .collect::<Result<_>>()?;
-    for (key, signature) in &materialized {
-        let inferred = crate::effect_semantics::infer_function(signature, &materialized);
-        if let Some(witness) = inferred.undeclared(&signature.effects).first() {
-            bail!(
-                "{}",
-                crate::effect_semantics::undeclared_effect_message(
-                    key,
-                    &signature.effects,
-                    witness
-                )
-            );
-        }
-    }
+    let mut body_diagnostics = Vec::new();
+    validate_unhandled_values(
+        &[],
+        &materialized,
+        &signatures.aliases,
+        &HashMap::new(),
+        None,
+        warnings,
+        &mut body_diagnostics,
+    );
+    crate::effect_semantics::validate_declared_effects(&materialized, warnings)?;
     Ok(materialized)
 }
 
@@ -505,6 +544,8 @@ fn validate_wasm_import_body(
                 import: import.clone(),
                 wasm_args: wasm_args.to_vec(),
             },
+            FunctionVisibility::Public,
+            false,
         ),
     );
     crate::lower::validate_wasm_bodies(&sigs, aliases)
@@ -609,7 +650,8 @@ fn validate_statements(
                 &statement_origin,
             )?),
             Statement::Let { var, value } => {
-                if locals.contains_key(var) {
+                let is_wildcard = var == "_";
+                if !is_wildcard && locals.contains_key(var) {
                     bail!("typed local `{var}` is already bound in `{context}`");
                 }
                 let (value, ty) = match value {
@@ -649,7 +691,9 @@ fn validate_statements(
                         );
                     }
                 }
-                locals.insert(var.clone(), ty);
+                if !is_wildcard {
+                    locals.insert(var.clone(), ty);
+                }
                 Statement::Let {
                     var: var.clone(),
                     value,
@@ -763,11 +807,13 @@ fn validate_statements(
                     other => bail!("typed for source must be array or range, got {other:?}"),
                 };
                 let mut nested = locals.clone();
-                if nested.contains_key(var) {
+                if var != "_" && nested.contains_key(var) {
                     origins.select(&statement_origin);
                     bail!("typed for binding `{var}` shadows an existing local");
                 }
-                nested.insert(var.clone(), item);
+                if var != "_" {
+                    nested.insert(var.clone(), item);
+                }
                 let body = validate_statements(
                     body,
                     &mut nested,
@@ -1018,7 +1064,7 @@ fn apply_host_context(
         if *intrinsic {
             let entry = crate::intrinsics::lookup(&import.name)
                 .with_context(|| format!("E-INTRINSIC-003: unknown intrinsic `{}`", import.name))?;
-            if !crate::lower::abi_value_type_matches(entry.result, expected, aliases) {
+            if !crate::lower::abi_intrinsic_value_type_matches(entry.result, expected, aliases) {
                 bail!(
                     "E-INTRINSIC-005: intrinsic `{}` result requires `{}`, got {:?}",
                     import.name,
@@ -1139,9 +1185,17 @@ fn validate_expr(
                 .iter()
                 .map(|arg| validate_expr(arg, locals, constants, signatures, context, origins))
                 .collect::<Result<Vec<_>>>()?;
+            let builtin_host_call = *intrinsic
+                || ((import.module == "vibra_v1" || import.module == "vibra_test")
+                    && crate::intrinsics::lookup(&import.name).is_some());
             for (index, (arg, kind)) in args.iter().zip(entry.params).enumerate() {
                 let ty = infer(arg, locals, constants, signatures, context)?;
-                if !crate::lower::abi_value_type_matches(*kind, &ty, &signatures.aliases) {
+                let argument_matches = if builtin_host_call {
+                    crate::lower::abi_intrinsic_value_type_matches(*kind, &ty, &signatures.aliases)
+                } else {
+                    crate::lower::abi_value_type_matches(*kind, &ty, &signatures.aliases)
+                };
+                if !argument_matches {
                     if *intrinsic {
                         bail!("E-INTRINSIC-005: intrinsic `{}` argument {index} requires `{}`, got {ty:?}", import.name, kind.as_str());
                     }
@@ -1357,6 +1411,15 @@ fn validate_expr(
             }
             bail!("typed cast forms remain staged")
         }
+        Expr::Try { inner, .. } => {
+            let inner = validate_expr(inner, locals, constants, signatures, context, origins)?;
+            let actual = infer(&inner, locals, constants, signatures, context)?;
+            let kind = validate_typed_try(&actual, signatures, context)?;
+            Expr::Try {
+                inner: Box::new(inner),
+                kind,
+            }
+        }
         Expr::If {
             cond,
             then_e,
@@ -1412,6 +1475,58 @@ fn infer(
     .with_context(|| format!("cannot infer typed expression in `{context}`"))
 }
 
+/// Validate the typed-path contract for `(try expr)` and return the canonical
+/// propagation metadata for the operand. The enclosing function signature is
+/// already indexed by `context`; keeping this check here means both ordinary
+/// calls and local bindings receive the same exact-match diagnostics.
+fn validate_typed_try(
+    operand_type: &TypeRef,
+    signatures: &TypedSignatureIndex,
+    context: &str,
+) -> Result<crate::lower::TryKind> {
+    let enums = typed_enum_defs(signatures);
+    let operand_kind = crate::lower::try_kind_for_type(operand_type, &enums).ok_or_else(|| {
+        anyhow::anyhow!(
+            "E-TRY-001: typed `(try ...)` operand must be a `result` or `option`, got {operand_type:?}"
+        )
+    })?;
+    let signature = signatures.functions.get(context).with_context(|| {
+        format!("E-TRY-002: typed `(try ...)` has no enclosing signature for `{context}`")
+    })?;
+    let enclosing_kind = crate::lower::try_kind_for_type(&signature.return_type, &enums)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "E-TRY-002: typed `(try ...)` requires an enclosing `result` or `option` return type, got {:?}",
+                signature.return_type
+            )
+        })?;
+    match (&operand_kind, &enclosing_kind) {
+        (
+            crate::lower::TryKind::Result { error_type, .. },
+            crate::lower::TryKind::Result {
+                error_type: enclosing_error,
+                ..
+            },
+        ) if error_type == enclosing_error => Ok(operand_kind),
+        (
+            crate::lower::TryKind::Result { error_type, .. },
+            crate::lower::TryKind::Result {
+                error_type: enclosing_error,
+                ..
+            },
+        ) => bail!(
+            "E-TRY-003: typed propagated error type must exactly match the enclosing function error type (got {error_type:?}, expected {enclosing_error:?})"
+        ),
+        (
+            crate::lower::TryKind::Option { .. },
+            crate::lower::TryKind::Option { .. },
+        ) => Ok(operand_kind),
+        _ => bail!(
+            "E-TRY-002: typed `(try ...)` operand and enclosing return must use the same result/option kind"
+        ),
+    }
+}
+
 /// Build a legacy-shaped `EnumDef` registry from the typed alias table, so
 /// the shared `infer_expr_type` (which predates typed aliases) can resolve
 /// `Expr::EnumConstructor` payload and instantiated-type inference exactly as
@@ -1445,10 +1560,17 @@ fn format_location(location: &SourceLocation) -> String {
     )
 }
 
-fn materialize(signature: &TypedFunctionSignature, body: FunctionBody) -> FunctionSig {
+fn materialize(
+    signature: &TypedFunctionSignature,
+    body: FunctionBody,
+    visibility: FunctionVisibility,
+    interface_method: bool,
+) -> FunctionSig {
     FunctionSig {
         alias: signature.alias.clone(),
         symbol: signature.symbol.clone(),
+        visibility,
+        interface_method,
         owner_effect: signature.owner_effect.clone(),
         type_params: signature.type_params.clone(),
         type_param_bounds: signature.type_param_bounds.clone(),
@@ -1611,6 +1733,49 @@ fn runtime_name(name: &str, context: &str, signatures: &TypedSignatureIndex) -> 
     }
 }
 
+#[derive(Debug, Default)]
+struct TypedBindingScopes {
+    scopes: Vec<BTreeSet<String>>,
+}
+
+impl TypedBindingScopes {
+    fn new() -> Self {
+        Self {
+            scopes: vec![BTreeSet::new()],
+        }
+    }
+
+    fn push(&mut self) {
+        self.scopes.push(BTreeSet::new());
+    }
+
+    fn pop(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn bind(&mut self, name: &str) -> Result<()> {
+        if name == "_" {
+            return Ok(());
+        }
+        if self.scopes.last().is_some_and(|scope| scope.contains(name)) {
+            bail!("typed lexical binding `{name}` is reused in the same scope");
+        }
+        if self
+            .scopes
+            .iter()
+            .take(self.scopes.len().saturating_sub(1))
+            .any(|scope| scope.contains(name))
+        {
+            bail!("typed lexical binding `{name}` shadows an enclosing local");
+        }
+        self.scopes
+            .last_mut()
+            .expect("typed binding scopes always have a root")
+            .insert(name.to_string());
+        Ok(())
+    }
+}
+
 fn collect_body_metadata(
     expressions: &[AstExpr],
     module_alias: &str,
@@ -1619,58 +1784,99 @@ fn collect_body_metadata(
     let_types: &mut HashMap<String, TypeRef>,
     bindings: &mut BTreeSet<String>,
 ) -> Result<()> {
+    let mut scopes = TypedBindingScopes::new();
+    collect_body_metadata_in_scope(
+        expressions,
+        module_alias,
+        declared_aliases,
+        generics,
+        let_types,
+        bindings,
+        &mut scopes,
+    )
+}
+
+fn collect_body_metadata_in_scope(
+    expressions: &[AstExpr],
+    module_alias: &str,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+    let_types: &mut HashMap<String, TypeRef>,
+    bindings: &mut BTreeSet<String>,
+    scopes: &mut TypedBindingScopes,
+) -> Result<()> {
     for expression in expressions {
         match &expression.value {
-            ExprKind::Do(body) | ExprKind::While { body, .. } | ExprKind::Task { body, .. } => {
-                collect_body_metadata(
+            ExprKind::Do(body) => collect_body_metadata_in_scope(
+                body,
+                module_alias,
+                declared_aliases,
+                generics,
+                let_types,
+                bindings,
+                scopes,
+            )?,
+            ExprKind::While { body, .. } | ExprKind::Task { body, .. } => {
+                scopes.push();
+                let result = collect_body_metadata_in_scope(
                     body,
                     module_alias,
                     declared_aliases,
                     generics,
                     let_types,
                     bindings,
-                )?
+                    scopes,
+                );
+                scopes.pop();
+                result?;
             }
             ExprKind::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_body_metadata(
+                collect_scoped_body_metadata(
                     then_body,
                     module_alias,
                     declared_aliases,
                     generics,
                     let_types,
                     bindings,
+                    scopes,
                 )?;
-                collect_body_metadata(
+                collect_scoped_body_metadata(
                     else_body,
                     module_alias,
                     declared_aliases,
                     generics,
                     let_types,
                     bindings,
+                    scopes,
                 )?;
             }
             ExprKind::Match { cases, .. } => {
                 for case in cases {
-                    collect_body_metadata(
-                        &case.body,
-                        module_alias,
-                        declared_aliases,
-                        generics,
-                        let_types,
-                        bindings,
-                    )?;
+                    scopes.push();
+                    let result = collect_pattern_metadata(&case.pattern, scopes, bindings)
+                        .and_then(|()| {
+                            collect_body_metadata_in_scope(
+                                &case.body,
+                                module_alias,
+                                declared_aliases,
+                                generics,
+                                let_types,
+                                bindings,
+                                scopes,
+                            )
+                        });
+                    scopes.pop();
+                    result?;
                 }
             }
             ExprKind::Let { name, ty, .. } => {
-                if !bindings.insert(name.value.clone()) {
-                    bail!(
-                        "typed lexical binding `{}` is reused; body materialization requires globally unique local names",
-                        name.value
-                    );
+                scopes.bind(&name.value)?;
+                if name.value != "_" {
+                    bindings.insert(name.value.clone());
                 }
                 if let Some(ty) = ty {
                     let ty = lower_type(ty, generics, module_alias, declared_aliases)?;
@@ -1681,34 +1887,94 @@ fn collect_body_metadata(
             | ExprKind::Mutable(value)
             | ExprKind::ReferenceOf(value)
             | ExprKind::Cast { value, .. }
-            | ExprKind::Convert { value, .. } => collect_body_metadata(
+            | ExprKind::Convert { value, .. } => collect_body_metadata_in_scope(
                 std::slice::from_ref(value.as_ref()),
                 module_alias,
                 declared_aliases,
                 generics,
                 let_types,
                 bindings,
+                scopes,
             )?,
             ExprKind::For { binding, body, .. } => {
-                if !bindings.insert(binding.value.clone()) {
-                    bail!(
-                        "typed lexical binding `{}` is reused; body materialization requires globally unique local names",
-                        binding.value
-                    );
-                }
-                collect_body_metadata(
-                    body,
-                    module_alias,
-                    declared_aliases,
-                    generics,
-                    let_types,
-                    bindings,
-                )?;
+                scopes.push();
+                let result = (|| {
+                    scopes.bind(&binding.value)?;
+                    if binding.value != "_" {
+                        bindings.insert(binding.value.clone());
+                    }
+                    collect_body_metadata_in_scope(
+                        body,
+                        module_alias,
+                        declared_aliases,
+                        generics,
+                        let_types,
+                        bindings,
+                        scopes,
+                    )
+                })();
+                scopes.pop();
+                result?;
             }
             _ => {}
         }
     }
     Ok(())
+}
+
+fn collect_scoped_body_metadata(
+    expressions: &[AstExpr],
+    module_alias: &str,
+    declared_aliases: &BTreeSet<String>,
+    generics: &BTreeSet<String>,
+    let_types: &mut HashMap<String, TypeRef>,
+    bindings: &mut BTreeSet<String>,
+    scopes: &mut TypedBindingScopes,
+) -> Result<()> {
+    scopes.push();
+    let result = collect_body_metadata_in_scope(
+        expressions,
+        module_alias,
+        declared_aliases,
+        generics,
+        let_types,
+        bindings,
+        scopes,
+    );
+    scopes.pop();
+    result
+}
+
+fn collect_pattern_metadata(
+    pattern: &AstPattern,
+    scopes: &mut TypedBindingScopes,
+    bindings: &mut BTreeSet<String>,
+) -> Result<()> {
+    match &pattern.value {
+        PatternKind::Bind(name) => {
+            scopes.bind(&name.value)?;
+            if name.value != "_" {
+                bindings.insert(name.value.clone());
+            }
+            Ok(())
+        }
+        PatternKind::Constructor { arguments, .. }
+        | PatternKind::Tuple(arguments)
+        | PatternKind::Array(arguments) => arguments
+            .iter()
+            .try_for_each(|pattern| collect_pattern_metadata(pattern, scopes, bindings)),
+        PatternKind::Record(fields) => fields
+            .iter()
+            .try_for_each(|field| collect_pattern_metadata(&field.pattern, scopes, bindings)),
+        PatternKind::Map(entries) => entries.iter().try_for_each(|(key, value)| {
+            collect_pattern_metadata(key, scopes, bindings)?;
+            collect_pattern_metadata(value, scopes, bindings)
+        }),
+        PatternKind::Newtype { pattern, .. } | PatternKind::Interface { pattern, .. } => {
+            collect_pattern_metadata(pattern, scopes, bindings)
+        }
+        PatternKind::Literal(_) | PatternKind::Wildcard => Ok(()),
+    }
 }
 
 struct OriginCursor<'a> {
@@ -2263,6 +2529,34 @@ fn lower_expr(
                 // annotation.
                 operand_type: TypeRef::Void,
                 return_type: target,
+            }
+        }
+        ExprKind::Try(inner) => {
+            let inner = lower(inner)?;
+            let inner_type = infer_expr_type(
+                &inner,
+                &HashMap::new(),
+                local_types,
+                &signatures.aliases,
+                &typed_enum_defs(signatures),
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "E-TRY-001: could not infer the typed `(try ...)` operand type"
+                )
+            })?;
+            let kind = crate::lower::try_kind_for_type(
+                &inner_type,
+                &typed_enum_defs(signatures),
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "E-TRY-001: typed `(try ...)` operand must be a `result` or `option`, got {inner_type:?}"
+                )
+            })?;
+            Expr::Try {
+                inner: Box::new(inner),
+                kind,
             }
         }
         ExprKind::Embed { .. } | ExprKind::Template { .. } => {
@@ -3463,6 +3757,46 @@ mod tests {
     }
 
     #[test]
+    fn typed_body_scope_allows_sibling_reuse_and_repeated_wildcards() {
+        let source = module(
+            r#"(defn main () void
+  (do
+    (if true (do (let value true)) (do (let value false)))
+    (let _ true)
+    (let _ false)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures)
+            .expect("sibling typed bindings and repeated wildcards are legal");
+        materialize_typed_identity_functions(&signatures, &bodies)
+            .expect("legal typed scopes should materialize");
+    }
+
+    #[test]
+    fn typed_body_scope_still_rejects_nested_shadowing() {
+        let source = module(
+            r#"(defn main (value bool) void
+  (do
+    (if true (do (let value false)) (do))))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let error = materialize_typed_identity_functions(&signatures, &bodies).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("typed local `value` is already bound"),
+            "nested shadowing must remain rejected: {error:#}"
+        );
+    }
+
+    #[test]
     fn lowers_and_materializes_native_deffect_intrinsics() {
         let source = module(
             r#"(deffect now
@@ -3562,6 +3896,7 @@ mod tests {
             functions: HashMap::new(),
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         assert!(crate::execute::pattern_matches(
@@ -3673,6 +4008,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -3757,6 +4093,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -3812,6 +4149,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -4178,6 +4516,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -4456,6 +4795,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -4781,6 +5121,118 @@ mod tests {
         assert!(error.contains("single value"), "{error}");
     }
 
+    // ---- Expr::Try ----
+
+    fn fallible_module() -> Module {
+        module(
+            r#"(def result (enum (err e) (ok t)) where: (t any e any))
+(def option (enum (some t) (none void)) where: (t any))
+(defn result-ok (input (result int64 atom)) (result int64 atom) (do (return input)))
+(defn result-wrong-error (input (result int64 atom)) (result int64 str) (do (return input)))
+(defn option-ok (input (option int64)) (option int64) (do (return input)))
+(defn result-in-void (input (result int64 atom)) void (do (return)))
+(defn primitive (input int64) int64 (do (return input)))"#,
+        )
+    }
+
+    #[test]
+    fn typed_try_lowers_result_operands_to_propagation_ir() {
+        let source = module(
+            r#"(def result (enum (err e) (ok t)) where: (t any e any))
+(defn propagate (input (result int64 atom)) (result int64 atom)
+  (do (let value (try input)) (return input)))"#,
+        );
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
+        let FunctionBody::User { statements } = &bodies.functions["propagate"] else {
+            panic!("expected user body");
+        };
+        let Statement::Let {
+            value: LetValue::Expr(Expr::Try { kind, .. }),
+            ..
+        } = &statements[0]
+        else {
+            panic!("expected a typed try expression in the let binding");
+        };
+        assert!(matches!(
+            kind,
+            crate::lower::TryKind::Result {
+                enum_key,
+                value_type: TypeRef::Int64,
+                error_type: TypeRef::Atom,
+            } if enum_key == "result"
+        ));
+    }
+
+    #[test]
+    fn typed_try_rejects_a_non_result_or_option_operand_at_lowering() {
+        let source =
+            module("(defn bad (input int64) int64 (do (let value (try input)) (return input)))");
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let error = format!("{:#}", lower_typed_bodies(inputs, &signatures).unwrap_err());
+        assert!(error.contains("E-TRY-001"), "{error}");
+    }
+
+    #[test]
+    fn typed_try_checks_enclosing_result_option_and_exact_error_types() {
+        let source = fallible_module();
+        let inputs = [TypedModuleInput {
+            alias: "",
+            module: &source,
+        }];
+        let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
+        let result_operand = signatures.functions["result-ok"].parameters[0].ty.clone();
+        let option_operand = signatures.functions["option-ok"].parameters[0].ty.clone();
+
+        assert!(matches!(
+            validate_typed_try(&result_operand, &signatures, "result-ok").unwrap(),
+            crate::lower::TryKind::Result {
+                value_type: TypeRef::Int64,
+                error_type: TypeRef::Atom,
+                ..
+            }
+        ));
+        assert!(matches!(
+            validate_typed_try(&option_operand, &signatures, "option-ok").unwrap(),
+            crate::lower::TryKind::Option {
+                value_type: TypeRef::Int64,
+                ..
+            }
+        ));
+
+        let mismatch = format!(
+            "{:#}",
+            validate_typed_try(&result_operand, &signatures, "result-wrong-error").unwrap_err()
+        );
+        assert!(mismatch.contains("E-TRY-003"), "{mismatch}");
+
+        let wrong_kind = format!(
+            "{:#}",
+            validate_typed_try(&result_operand, &signatures, "option-ok").unwrap_err()
+        );
+        assert!(wrong_kind.contains("E-TRY-002"), "{wrong_kind}");
+
+        let void_return = format!(
+            "{:#}",
+            validate_typed_try(&result_operand, &signatures, "result-in-void").unwrap_err()
+        );
+        assert!(void_return.contains("E-TRY-002"), "{void_return}");
+
+        let non_fallible = format!(
+            "{:#}",
+            validate_typed_try(&TypeRef::Int64, &signatures, "result-ok").unwrap_err()
+        );
+        assert!(non_fallible.contains("E-TRY-001"), "{non_fallible}");
+    }
+
     // ---- Statement::Spawn / Statement::Join ----
 
     #[test]
@@ -4840,6 +5292,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -4951,6 +5404,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();
@@ -5115,6 +5569,7 @@ mod tests {
             functions,
             impls: HashMap::new(),
             warnings: Vec::new(),
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         };
         crate::execute::run_lowered_interpreted(&program, &RunConfig::default()).unwrap();

@@ -1,0 +1,13 @@
+(import test "../stdlib/src/test.vib")
+(test.scenario
+  "lexical-scope-diagnostics"
+  (test.case
+    "rejects-match-arm-shadowing"
+    (let outer true)
+    (let subject 1)
+    (match subject 1 (do (let outer false)) _ (do))
+    (test.assert outer)
+    profile: @core
+    expect-error: (@load E-SCOPE-001 "shadows")
+  )
+)

@@ -453,6 +453,7 @@ fn expand_expr(
                 .map(|value| expand_expr(*value, macros, state, depth).map(Box::new))
                 .transpose()?,
         ),
+        ExprKind::Try(value) => ExprKind::Try(Box::new(expand_expr(*value, macros, state, depth)?)),
         ExprKind::If {
             condition,
             then_body,
@@ -1329,6 +1330,7 @@ fn substitute_expr_kind(
         ExprKind::Return(value) => {
             ExprKind::Return(value.map(|value| one(*value).map(Box::new)).transpose()?)
         }
+        ExprKind::Try(value) => ExprKind::Try(Box::new(one(*value)?)),
         ExprKind::If {
             condition,
             then_body,
@@ -1885,17 +1887,18 @@ fn hygienize_expr(
                 definition_symbols,
             );
         }
-        ExprKind::Return(Some(value)) | ExprKind::Mutable(value) | ExprKind::ReferenceOf(value) => {
-            hygienize_expr(
-                value,
-                definition_document,
-                definition_span,
-                hygiene_id,
-                bindings,
-                caller_alias,
-                definition_symbols,
-            )
-        }
+        ExprKind::Return(Some(value))
+        | ExprKind::Mutable(value)
+        | ExprKind::ReferenceOf(value)
+        | ExprKind::Try(value) => hygienize_expr(
+            value,
+            definition_document,
+            definition_span,
+            hygiene_id,
+            bindings,
+            caller_alias,
+            definition_symbols,
+        ),
         ExprKind::Range(start, end, step) => {
             for value in [start, end, step] {
                 let mut value_scope = bindings.clone();
@@ -2375,6 +2378,9 @@ fn annotate_generated_expr(
             annotate_generated_expr(value, definition, call, state)?;
         }
         ExprKind::Return(Some(value)) | ExprKind::Mutable(value) | ExprKind::ReferenceOf(value) => {
+            annotate_generated_expr(value, definition, call, state)?;
+        }
+        ExprKind::Try(value) => {
             annotate_generated_expr(value, definition, call, state)?;
         }
         ExprKind::If {

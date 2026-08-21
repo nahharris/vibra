@@ -39,7 +39,10 @@ const HOST_STATUS: u32 = 11;
 const HOST_NO_MATCH: u32 = 12;
 const HOST_ITER_LEN: u32 = 13;
 const HOST_ITER_GET: u32 = 14;
-const HOST_FUNCTIONS: u32 = 15;
+const HOST_SCOPE_ENTER: u32 = 15;
+const HOST_SCOPE_EXIT: u32 = 16;
+const HOST_FUEL: u32 = 17;
+const HOST_FUNCTIONS: u32 = 18;
 
 const ABI_IMPORTS: &[&str] = &[
     "seed",
@@ -57,56 +60,10 @@ const ABI_IMPORTS: &[&str] = &[
     "no_match",
     "iter_len",
     "iter_get",
+    "scope_enter",
+    "scope_exit",
+    "fuel",
 ];
-const WASI_IMPORTS: &[&str] = &[
-    "args_get",
-    "args_sizes_get",
-    "environ_get",
-    "environ_sizes_get",
-    "clock_res_get",
-    "clock_time_get",
-    "fd_advise",
-    "fd_allocate",
-    "fd_close",
-    "fd_datasync",
-    "fd_fdstat_get",
-    "fd_fdstat_set_flags",
-    "fd_fdstat_set_rights",
-    "fd_filestat_get",
-    "fd_filestat_set_size",
-    "fd_filestat_set_times",
-    "fd_pread",
-    "fd_prestat_get",
-    "fd_prestat_dir_name",
-    "fd_pwrite",
-    "fd_read",
-    "fd_readdir",
-    "fd_renumber",
-    "fd_seek",
-    "fd_sync",
-    "fd_tell",
-    "fd_write",
-    "path_create_directory",
-    "path_filestat_get",
-    "path_filestat_set_times",
-    "path_link",
-    "path_open",
-    "path_readlink",
-    "path_remove_directory",
-    "path_rename",
-    "path_symlink",
-    "path_unlink_file",
-    "poll_oneoff",
-    "proc_exit",
-    "proc_raise",
-    "random_get",
-    "sched_yield",
-    "sock_accept",
-    "sock_recv",
-    "sock_send",
-    "sock_shutdown",
-];
-
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct WasmPlan {
     seeds: Vec<String>,
@@ -118,6 +75,8 @@ struct WasmPlan {
     host_functions: BTreeMap<String, crate::lower::FunctionSig>,
     impl_keys: Vec<crate::lower::ImplKey>,
     foreign_modules: BTreeMap<String, Vec<u8>>,
+    #[serde(default)]
+    scope_requirements: Vec<Vec<String>>,
 }
 
 struct CompiledProgram {
@@ -212,6 +171,12 @@ fn run_wasm_inner(
     let iter_get = HostFunction::new_typed(&mut store, |handle: i32, index: i32| {
         host_value(|host| host.iter_get(handle, index))
     });
+    let scope_enter =
+        HostFunction::new_typed(&mut store, |id: i32| host_unit(|host| host.enter_scope(id)));
+    let scope_exit = HostFunction::new_typed(&mut store, || host_unit(|host| host.leave_scope()));
+    let fuel = HostFunction::new_typed(&mut store, || -> i32 {
+        host_value(|host| host.files.consume_fuel(1).map(|()| 1))
+    });
     let imports = imports! { ABI_MODULE => {
         "seed" => seed, "value_const" => value_const, "value_read" => value_read,
         "frame_begin" => frame_begin, "frame_push" => frame_push, "value_construct" => construct,
@@ -219,6 +184,7 @@ fn run_wasm_inner(
         "pattern_match" => pattern_match, "pattern_binding" => pattern_binding,
         "status" => status, "no_match" => no_match,
         "iter_len" => iter_len, "iter_get" => iter_get,
+        "scope_enter" => scope_enter, "scope_exit" => scope_exit, "fuel" => fuel,
     }};
     let instance =
         Instance::new(&mut store, &module, &imports).context("instantiate Vibra Wasm")?;
@@ -226,13 +192,14 @@ fn run_wasm_inner(
         .exports
         .get_typed_function::<(), i32>(&store, "main")
         .context("Vibra Wasm must export main")?;
-    let status = main.call(&mut store).context("execute Vibra Wasm main")?;
+    let call_result = main.call(&mut store);
     let execution = HOST_EXECUTION
         .with(|slot| slot.borrow_mut().take())
         .context("missing Vibra host execution")?;
     if let Some(error) = execution.error {
         bail!(error);
     }
+    let status = call_result.context("execute Vibra Wasm main")?;
     if status != 0 {
         bail!("Vibra guest failed with status {status}");
     }
@@ -298,7 +265,6 @@ impl HostExecution {
             .collect();
         let program = LoweredProgram {
             statements: vec![],
-            // Effects are erased before codegen; the backend never consults them.
             main_effects: Default::default(),
             main_arg_bindings: plan.main_arg_bindings.clone(),
             constants: HashMap::new(),
@@ -306,15 +272,18 @@ impl HostExecution {
             functions,
             impls,
             warnings: vec![],
+            body_diagnostics: Vec::new(),
             foreign_modules: plan.foreign_modules.clone(),
         };
         let seed_env = HashMap::new();
-        let files = match io {
+        let mut files = match io {
             Some((stdout, stderr)) => {
                 crate::execute::FileTable::with_io(config.max_open_files, stdout, stderr)
             }
             None => crate::execute::FileTable::new(config.max_open_files),
         };
+        files.configure_authority(config.capability_grants.as_deref());
+        files.configure_execution_limits(config.scope_limits);
         Ok(Self {
             files,
             program,
@@ -328,9 +297,27 @@ impl HostExecution {
         })
     }
 
-    fn alloc(&mut self, value: RuntimeValue) -> i32 {
+    fn enter_scope(&mut self, id: i32) -> Result<()> {
+        let id = usize::try_from(id).context("negative capability scope id")?;
+        let domains = self
+            .plan
+            .scope_requirements
+            .get(id)
+            .context("invalid capability scope id")?
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        self.files.enter_effect_scope(&domains)
+    }
+
+    fn leave_scope(&mut self) -> Result<()> {
+        self.files.leave_effect_scope()
+    }
+
+    fn alloc(&mut self, value: RuntimeValue) -> Result<i32> {
+        self.files.reserve_value(&value)?;
         self.arena.push(value);
-        self.arena.len() as i32
+        i32::try_from(self.arena.len()).context("guest value arena is too large for wasm32")
     }
     fn get(&self, handle: i32) -> Result<&RuntimeValue> {
         handle
@@ -349,7 +336,7 @@ impl HostExecution {
             .get(name)
             .with_context(|| format!("missing seeded main value `{name}`"))?
             .clone();
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn constant(&mut self, id: i32) -> Result<i32> {
         let expr = self
@@ -360,7 +347,7 @@ impl HostExecution {
         let Expr::Value(value) = expr else {
             bail!("expression is not a constant")
         };
-        Ok(self.alloc(value.clone()))
+        self.alloc(value.clone())
     }
     fn read(&mut self, handle: i32) -> Result<i32> {
         let value = match self.get(handle)? {
@@ -369,7 +356,7 @@ impl HostExecution {
             }
             value => value.clone(),
         };
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn frame_push(&mut self, handle: i32) -> Result<()> {
         self.get(handle)?;
@@ -427,7 +414,7 @@ impl HostExecution {
                 return_type,
                 intrinsic,
                 ..
-            } => crate::execute::eval_expr(
+            } => crate::execute::eval_expr_unaccounted(
                 &Expr::HostCall {
                     import,
                     args: values.into_iter().map(Expr::Value).collect(),
@@ -478,7 +465,7 @@ impl HostExecution {
             }
             other => bail!("unsupported host value construction {other:?}"),
         };
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn call(&mut self, id: i32) -> Result<i32> {
         let mut call = self
@@ -500,24 +487,26 @@ impl HostExecution {
                 call.callee_key
             )
         }
+        self.files.consume_fuel(1)?;
         if let FunctionBody::Wasm { import, .. } = &sig.body {
             if import.module.starts_with('@') {
                 let value =
                     exec_static_wasm_scalar(&self.plan.foreign_modules, import, sig, &values)?;
-                return Ok(self.alloc(value));
+                return self.alloc(value);
             }
         }
-        let value = crate::execute::exec_call(
+        let value = crate::execute::exec_call_from_wasm(
             &call,
             &self.program,
             &self.seed_env,
             &mut self.files,
             &self.config,
         )?;
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn set(&mut self, target: i32, value: i32) -> Result<()> {
         let next = self.get(value)?.clone();
+        self.files.reserve_value(&next)?;
         match self.get(target)? {
             RuntimeValue::Mutable(cell)
             | RuntimeValue::Reference {
@@ -565,7 +554,7 @@ impl HostExecution {
             .get(index as usize)
             .context("invalid pattern binding")?
             .clone();
-        Ok(self.alloc(value))
+        self.alloc(value)
     }
     fn iter_len(&mut self, handle: i32) -> Result<i32> {
         let len = match self.get(handle)? {
@@ -613,7 +602,7 @@ impl HostExecution {
             other => bail!("E-ITER-001: value is not traversable: {other:?}"),
         }
         .context("E-ITER-005: traversal index out of bounds")?;
-        Ok(self.alloc(item))
+        self.alloc(item)
     }
 }
 
@@ -847,8 +836,19 @@ fn range_len(start: i64, end: i64, step: i64) -> Result<usize> {
 }
 
 fn compile_program(program: &LoweredProgram) -> CompiledProgram {
-    let mut compiler = Compiler::new(program);
-    compiler.compile()
+    let mut pipeline = crate::compilation_pipeline::CompilationPipeline::new();
+    let mut compiler = pipeline.run(
+        crate::compilation_pipeline::CompilationPass::Reachability,
+        || Compiler::new(program),
+    );
+    let compiled = pipeline.run(
+        crate::compilation_pipeline::CompilationPass::WasmEmission,
+        || compiler.compile(),
+    );
+    pipeline.run(
+        crate::compilation_pipeline::CompilationPass::Hardening,
+        || compiled,
+    )
 }
 
 struct Compiler<'a> {
@@ -1080,6 +1080,9 @@ impl<'a> Compiler<'a> {
             ("no_match", 1),
             ("iter_len", 0),
             ("iter_get", 4),
+            ("scope_enter", 2),
+            ("scope_exit", 1),
+            ("fuel", 5),
         ] {
             imports.import(ABI_MODULE, name, EntityType::Function(ty));
         }
@@ -1135,8 +1138,13 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|parameter| format!("args.{}", parameter.name))
             .collect();
-        let mut context = FunctionCompiler::new(self, args, vec![], statements, false);
+        let scope_domains = crate::execute::function_effect_domains(sig, self.program);
+        let scope_id = self.scope_id(scope_domains);
+        let mut context = FunctionCompiler::new(self, args, vec![], statements, false, scope_id);
+        context.emit_scope_enter();
+        context.emit_fuel_check();
         context.emit_statements(statements);
+        context.emit_scope_exit();
         context.emit_const_value(RuntimeValue::Void);
         context.function.instruction(&Instruction::End);
         context.function
@@ -1150,7 +1158,10 @@ impl<'a> Compiler<'a> {
             .iter()
             .map(|(name, _)| name.clone())
             .collect();
-        let mut context = FunctionCompiler::new(self, vec![], seeds.clone(), &statements, true);
+        let scope_domains = crate::execute::main_effect_domains(self.program);
+        let scope_id = self.scope_id(scope_domains);
+        let mut context =
+            FunctionCompiler::new(self, vec![], seeds.clone(), &statements, true, scope_id);
         for name in seeds {
             let seed = context.compiler.seed_id(name.clone());
             let local = context.locals[&name];
@@ -1160,7 +1171,10 @@ impl<'a> Compiler<'a> {
             context.function.instruction(&Instruction::Call(HOST_SEED));
             context.function.instruction(&Instruction::LocalSet(local));
         }
+        context.emit_scope_enter();
+        context.emit_fuel_check();
         context.emit_statements(&statements);
+        context.emit_scope_exit();
         context
             .function
             .instruction(&Instruction::Call(HOST_STATUS));
@@ -1188,6 +1202,23 @@ impl<'a> Compiler<'a> {
         self.plan.patterns.push(pattern);
         (self.plan.patterns.len() - 1) as u32
     }
+
+    fn scope_id(&mut self, domains: BTreeSet<String>) -> Option<u32> {
+        if domains.is_empty() {
+            return None;
+        }
+        let domains = domains.into_iter().collect::<Vec<_>>();
+        if let Some(index) = self
+            .plan
+            .scope_requirements
+            .iter()
+            .position(|existing| existing == &domains)
+        {
+            return Some(index as u32);
+        }
+        self.plan.scope_requirements.push(domains);
+        Some((self.plan.scope_requirements.len() - 1) as u32)
+    }
 }
 
 struct FunctionCompiler<'a, 'b> {
@@ -1195,8 +1226,10 @@ struct FunctionCompiler<'a, 'b> {
     function: Function,
     locals: HashMap<String, u32>,
     match_temp: u32,
+    try_temp: u32,
     next_shadow: u32,
     is_main: bool,
+    scope_id: Option<u32>,
     for_temps: Vec<(u32, u32)>,
     for_depth: usize,
     control_depth: u32,
@@ -1212,6 +1245,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         declared: Vec<String>,
         statements: &[Statement],
         is_main: bool,
+        scope_id: Option<u32>,
     ) -> Self {
         let mut names = Vec::new();
         collect_locals(statements, &mut names);
@@ -1238,6 +1272,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
         }
         let match_temp = next;
         next += 1;
+        let try_temp = next;
+        next += 1;
         let next_shadow = next;
         next += count_pattern_bindings(statements) as u32;
         let mut for_temps = Vec::new();
@@ -1258,8 +1294,10 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             }),
             locals,
             match_temp,
+            try_temp,
             next_shadow,
             is_main,
+            scope_id,
             for_temps,
             for_depth: 0,
             control_depth: 0,
@@ -1274,6 +1312,39 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             self.emit_statement(statement);
         }
     }
+
+    fn emit_scope_enter(&mut self) {
+        self.emit_scope_enter_id(self.scope_id);
+    }
+
+    fn emit_fuel_check(&mut self) {
+        self.function.instruction(&Instruction::Call(HOST_FUEL));
+        self.function.instruction(&Instruction::I32Eqz);
+        self.function
+            .instruction(&Instruction::If(BlockType::Empty));
+        self.function.instruction(&Instruction::Unreachable);
+        self.function.instruction(&Instruction::End);
+    }
+
+    fn emit_scope_enter_id(&mut self, scope_id: Option<u32>) {
+        if let Some(id) = scope_id {
+            self.function.instruction(&Instruction::I32Const(id as i32));
+            self.function
+                .instruction(&Instruction::Call(HOST_SCOPE_ENTER));
+        }
+    }
+
+    fn emit_scope_exit(&mut self) {
+        self.emit_scope_exit_id(self.scope_id);
+    }
+
+    fn emit_scope_exit_id(&mut self, scope_id: Option<u32>) {
+        if scope_id.is_some() {
+            self.function
+                .instruction(&Instruction::Call(HOST_SCOPE_EXIT));
+        }
+    }
+
     fn emit_statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Call(call) => {
@@ -1296,6 +1367,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
             }
             Statement::Return(expr) => {
                 self.emit_expr(expr);
+                self.emit_scope_exit();
                 if self.is_main {
                     self.function.instruction(&Instruction::Drop);
                     self.function.instruction(&Instruction::Call(HOST_STATUS));
@@ -1335,6 +1407,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.function.instruction(&Instruction::I32Eqz);
                 self.function.instruction(&Instruction::BrIf(1));
                 self.emit_statements(body);
+                self.emit_fuel_check();
                 self.function.instruction(&Instruction::Br(0));
                 self.function.instruction(&Instruction::End);
                 self.function.instruction(&Instruction::End);
@@ -1386,6 +1459,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.function.instruction(&Instruction::I32Add);
                 self.function
                     .instruction(&Instruction::LocalSet(index_local));
+                self.emit_fuel_check();
                 self.function.instruction(&Instruction::Br(0));
                 self.function.instruction(&Instruction::End);
                 self.function.instruction(&Instruction::End);
@@ -1393,12 +1467,24 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                 self.control_depth -= 2;
                 self.for_depth -= 1;
             }
-            Statement::Task { body, .. } => self.emit_statements(body),
+            Statement::Task { body, .. } => {
+                let domains =
+                    crate::execute::statements_effect_domains(body, self.compiler.program);
+                let scope_id = self.compiler.scope_id(domains);
+                self.emit_scope_enter_id(scope_id);
+                self.emit_statements(body);
+                self.emit_scope_exit_id(scope_id);
+            }
             Statement::Spawn { handle, value, .. } => {
                 // The deterministic Wasm executor runs the child computation
                 // to its first (currently terminal) result, then retains that
                 // value in the opaque handle local until `$join`.
+                let domains =
+                    crate::execute::expression_effect_domains(value, self.compiler.program);
+                let scope_id = self.compiler.scope_id(domains);
+                self.emit_scope_enter_id(scope_id);
                 self.emit_expr(value);
+                self.emit_scope_exit_id(scope_id);
                 self.function
                     .instruction(&Instruction::LocalSet(self.locals[handle]));
             }
@@ -1414,7 +1500,8 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     .instruction(&Instruction::Br(self.control_depth - target));
             }
             Statement::Continue => {
-                let (_, target) = self.loop_stack.last().expect("validated loop control");
+                let target = self.loop_stack.last().expect("validated loop control").1;
+                self.emit_fuel_check();
                 self.function
                     .instruction(&Instruction::Br(self.control_depth - target));
             }
@@ -1489,6 +1576,7 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     .instruction(&Instruction::LocalGet(self.locals[name]));
                 self.function.instruction(&Instruction::Call(HOST_READ));
             }
+            Expr::Try { inner, kind } => self.emit_try(inner, kind),
             Expr::Call { call, .. } => self.emit_call(call),
             Expr::If {
                 cond,
@@ -1527,6 +1615,46 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
                     .instruction(&Instruction::Call(HOST_CONSTRUCT));
             }
         }
+    }
+
+    fn emit_try(&mut self, inner: &Expr, kind: &crate::lower::TryKind) {
+        self.emit_expr(inner);
+        self.function
+            .instruction(&Instruction::LocalSet(self.try_temp));
+
+        let payload = match kind {
+            crate::lower::TryKind::Result { value_type, .. }
+            | crate::lower::TryKind::Option { value_type, .. } => *value_type != TypeRef::Void,
+        };
+        let pattern = try_success_pattern(kind, payload);
+        let pattern_id = self.compiler.pattern_id(pattern);
+        self.function
+            .instruction(&Instruction::I32Const(pattern_id as i32));
+        self.function
+            .instruction(&Instruction::LocalGet(self.try_temp));
+        self.function.instruction(&Instruction::Call(HOST_MATCH));
+        self.function
+            .instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+        if payload {
+            self.function.instruction(&Instruction::I32Const(0));
+            self.function.instruction(&Instruction::Call(HOST_BINDING));
+        } else {
+            self.emit_const_value(RuntimeValue::Void);
+        }
+        self.function.instruction(&Instruction::Else);
+        self.emit_try_propagation_return();
+        self.function.instruction(&Instruction::End);
+    }
+
+    fn emit_try_propagation_return(&mut self) {
+        self.emit_scope_exit();
+        self.function
+            .instruction(&Instruction::LocalGet(self.try_temp));
+        if self.is_main {
+            self.function.instruction(&Instruction::Drop);
+            self.function.instruction(&Instruction::Call(HOST_STATUS));
+        }
+        self.function.instruction(&Instruction::Return);
     }
     fn emit_raw_if_place(&mut self, expr: &Expr) {
         if let Expr::VarRef(name) = expr {
@@ -1648,11 +1776,24 @@ impl<'a, 'b> FunctionCompiler<'a, 'b> {
     }
 }
 
+fn try_success_pattern(kind: &crate::lower::TryKind, payload: bool) -> Pattern {
+    let (enum_key, tag) = match kind {
+        crate::lower::TryKind::Result { enum_key, .. } => (enum_key, "ok"),
+        crate::lower::TryKind::Option { enum_key, .. } => (enum_key, "some"),
+    };
+    Pattern::Enum {
+        enum_key: enum_key.clone(),
+        tag: tag.into(),
+        payload: payload.then(|| Box::new(Pattern::Bind("__vibra_try_payload".into()))),
+    }
+}
+
 fn expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::Mutable(v) | Expr::Cast { from: v, .. } => {
             vec![v]
         }
+        Expr::Try { inner, .. } => vec![inner],
         Expr::Reference { target, .. } => vec![target],
         Expr::EnumConstructor { payload, .. } => payload.iter().map(|v| v.as_ref()).collect(),
         Expr::Record(fields) => fields.values().collect(),
@@ -1791,9 +1932,7 @@ fn collect_pattern_bindings(pattern: &Pattern, names: &mut Vec<String>) {
 fn validate_imports(module: &wasmer::Module) -> Result<()> {
     for import in module.imports() {
         let valid_vibra = import.module() == ABI_MODULE && ABI_IMPORTS.contains(&import.name());
-        let valid_wasi =
-            import.module() == "wasi_snapshot_preview1" && WASI_IMPORTS.contains(&import.name());
-        if !valid_vibra && !valid_wasi {
+        if !valid_vibra {
             bail!(
                 "unsupported Wasm import `{}.{}`",
                 import.module(),
@@ -1853,6 +1992,7 @@ fn deterministic_program_fingerprint(program: &LoweredProgram) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execute::accounted_runtime_value_bytes;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -1876,6 +2016,7 @@ mod tests {
             functions: HashMap::new(),
             impls: HashMap::new(),
             warnings: vec![],
+            body_diagnostics: Vec::new(),
             foreign_modules: BTreeMap::new(),
         }
     }
@@ -1920,6 +2061,32 @@ mod tests {
     fn emitted_program_executes_through_vibra_v1() {
         run_lowered(&empty_program(), &RunConfig::default()).unwrap();
     }
+
+    #[test]
+    fn wasm_host_operation_requires_manifest_grant_before_execution() {
+        let mut program = empty_program();
+        program.statements.push(Statement::Eval(Expr::HostCall {
+            import: crate::lower::ImportTarget {
+                module: ABI_MODULE.into(),
+                name: "clock_now_unix_millis".into(),
+            },
+            args: vec![],
+            return_type: TypeRef::UInt64,
+            intrinsic: true,
+        }));
+
+        let mut denied = RunConfig::default();
+        denied.capability_grants = Some(vec![]);
+        let error = run_lowered(&program, &denied).unwrap_err();
+        assert!(error.to_string().contains("E-CAPABILITY-001"), "{error:#}");
+
+        let mut allowed = RunConfig::default();
+        allowed.capability_grants = Some(vec![crate::async_runtime::CapabilityGrant {
+            domain: "time.now".into(),
+            resource_prefix: String::new(),
+        }]);
+        run_lowered(&program, &allowed).unwrap();
+    }
     #[test]
     fn emitted_program_uses_fine_grained_versioned_host_imports() {
         let store = Store::default();
@@ -1929,11 +2096,35 @@ mod tests {
             .map(|i| (i.module().to_string(), i.name().to_string()))
             .collect();
         assert!(!imports.iter().any(|(_, n)| n == RUN_PROGRAM_IMPORT));
-        assert!(imports
-            .iter()
-            .all(|(m, _)| m == ABI_MODULE || m == "wasi_snapshot_preview1"));
+        assert!(imports.iter().all(|(m, _)| m == ABI_MODULE));
         assert!(imports.iter().any(|(_, n)| n == "value_const"));
         assert!(imports.iter().any(|(_, n)| n == "host_call"));
+        for import in module
+            .imports()
+            .filter(|import| import.module() == ABI_MODULE)
+        {
+            let wasmer::ExternType::Function(function) = import.ty() else {
+                panic!("vibra_v1 import `{}` is not a function", import.name());
+            };
+            assert!(
+                function
+                    .params()
+                    .iter()
+                    .all(|ty| matches!(ty, wasmer::Type::I32)),
+                "vibra_v1 import `{}` must use i32 arena indices: {:?}",
+                import.name(),
+                function.params()
+            );
+            assert!(
+                function
+                    .results()
+                    .iter()
+                    .all(|ty| matches!(ty, wasmer::Type::I32)),
+                "vibra_v1 import `{}` must return i32 arena indices: {:?}",
+                import.name(),
+                function.results()
+            );
+        }
         validate_imports(&module).unwrap();
     }
 
@@ -1948,9 +2139,27 @@ mod tests {
             module.section(&types).section(&imports);
             wasmer::Module::new(&Store::default(), module.finish()).unwrap()
         }
-        validate_imports(&imported("wasi_snapshot_preview1", "fd_write")).unwrap();
+        assert!(validate_imports(&imported("wasi_snapshot_preview1", "fd_write")).is_err());
         assert!(validate_imports(&imported("wasi_snapshot_preview1", "secret")).is_err());
         assert!(validate_imports(&imported(ABI_MODULE, "run_program")).is_err());
+    }
+
+    #[test]
+    fn hardening_passes_are_terminal() {
+        use crate::compilation_pipeline::{CompilationPass, CompilationPipeline};
+
+        let mut pipeline = CompilationPipeline::new();
+        pipeline.run(CompilationPass::Reachability, || {});
+        pipeline.run(CompilationPass::WasmEmission, || {});
+        pipeline.run(CompilationPass::Hardening, || {});
+        assert_eq!(
+            pipeline.passes(),
+            &[
+                CompilationPass::Reachability,
+                CompilationPass::WasmEmission,
+                CompilationPass::Hardening,
+            ]
+        );
     }
 
     #[test]
@@ -2017,6 +2226,104 @@ mod tests {
                 ..
             } if import.module == ABI_MODULE
         )));
+    }
+
+    #[test]
+    fn wasm_try_unwraps_success_and_propagates_original_enum_value() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let result = root.join("stdlib/src/result.vib").display().to_string();
+        let option = root.join("stdlib/src/option.vib").display().to_string();
+        let test = root.join("stdlib/src/test.vib").display().to_string();
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("entry.vib");
+        std::fs::write(
+            &entry,
+            format!(
+                r#"(import result "{result}")
+(import option "{option}")
+(import test "{test}")
+(defn result-success () (result.result int64 str)
+  (do
+    (let value (try (result.from-ok int64 str 17)))
+    (return (result.from-ok int64 str value))))
+(defn result-error () (result.result int64 str)
+  (do
+    (let value (try (result.from-err int64 str "boom")))
+    (return (result.from-ok int64 str value))))
+(defn option-some () (option.option int64)
+  (do
+    (let value (try (option.from-value int64 23)))
+    (return (option.from-value int64 value))))
+(defn option-none () (option.option int64)
+  (do
+    (let value (try (option.empty int64 false)))
+    (return (option.from-value int64 value))))
+(defn main () void
+  (do
+    (match (result-success)
+      (result.result.ok (bind value)) (test.assert-eq-int value 17)
+      _ (test.fail "result success was not unwrapped"))
+    (match (result-error)
+      (result.result.err (bind error)) (test.assert-eq-str error "boom")
+      _ (test.fail "result error was not propagated"))
+    (match (option-some)
+      (option.option.some (bind value)) (test.assert-eq-int value 23)
+      _ (test.fail "option some was not unwrapped"))
+    (match (option-none)
+      (option.option.none) (test.assert true)
+      _ (test.fail "option none was not propagated"))))
+"#,
+                result = result.replace('\\', "/"),
+                option = option.replace('\\', "/"),
+                test = test.replace('\\', "/"),
+            ),
+        )
+        .unwrap();
+        let loaded = crate::load::load_program(&entry).unwrap();
+        let program = crate::lower::lower_program(&loaded).unwrap();
+        run_lowered(&program, &RunConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn logical_memory_accounting_ignores_allocator_capacity() {
+        let compact = RuntimeValue::Array(vec![RuntimeValue::Int(1)]);
+        let mut padded_items = Vec::with_capacity(16);
+        padded_items.push(RuntimeValue::Int(1));
+        let padded = RuntimeValue::Array(padded_items);
+        assert_eq!(
+            accounted_runtime_value_bytes(&compact),
+            accounted_runtime_value_bytes(&padded)
+        );
+
+        let compact = RuntimeValue::Str("x".into());
+        let mut padded_text = String::with_capacity(32);
+        padded_text.push('x');
+        let padded = RuntimeValue::Str(padded_text);
+        assert_eq!(
+            accounted_runtime_value_bytes(&compact),
+            accounted_runtime_value_bytes(&padded)
+        );
+    }
+
+    #[test]
+    fn mutable_cell_replacements_count_toward_the_memory_ceiling() {
+        let cell = RuntimeValue::Mutable(Rc::new(RefCell::new(RuntimeValue::Int(0))));
+        let replacement = RuntimeValue::Str("replacement".into());
+        let memory_bytes = accounted_runtime_value_bytes(&cell)
+            .saturating_add(accounted_runtime_value_bytes(&replacement));
+        let config = RunConfig {
+            scope_limits: crate::async_runtime::ScopeLimits {
+                memory_bytes,
+                ..crate::async_runtime::ScopeLimits::default()
+            },
+            ..RunConfig::default()
+        };
+        let mut host = HostExecution::new(config, WasmPlan::default(), None).unwrap();
+        let cell_handle = host.alloc(cell).unwrap();
+        let replacement_handle = host.alloc(replacement).unwrap();
+
+        let error = host.set(cell_handle, replacement_handle).unwrap_err();
+        assert!(format!("{error:#}").contains("MemoryExhausted"));
     }
 
     #[test]

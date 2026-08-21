@@ -500,6 +500,7 @@ pub enum ExprKind {
         value: Box<Expr>,
     },
     Return(Option<Box<Expr>>),
+    Try(Box<Expr>),
     If {
         condition: Box<Expr>,
         then_body: Vec<Expr>,
@@ -1625,6 +1626,10 @@ fn parse_expr(node: &Node) -> Result<Expr, AstError> {
                     .map(Box::new),
             )
         }
+        "try" => {
+            exact_arity("try", &args, 1, node.span)?;
+            ExprKind::Try(Box::new(parse_expr(args[0])?))
+        }
         "if" => {
             exact_arity("if", &args, 3, node.span)?;
             ExprKind::If {
@@ -2726,6 +2731,21 @@ mod tests {
             matches!(arguments[2], CallArgument::Labelled { ref label, .. } if label.value == "second")
         );
         assert_eq!(type_arguments.len(), 1);
+    }
+
+    #[test]
+    fn parses_try_as_a_single_argument_propagation_form() {
+        let parsed = module("(defn read () int64 (return (try value)))").unwrap();
+        let TopLevel::Function(function) = &parsed.forms[0] else {
+            panic!("expected function");
+        };
+        let ExprKind::Return(Some(value)) = &function.body[0].value else {
+            panic!("expected return");
+        };
+        assert!(matches!(
+            &value.value,
+            ExprKind::Try(inner) if matches!(&inner.value, ExprKind::Reference(name) if name == "value")
+        ));
     }
 
     #[test]

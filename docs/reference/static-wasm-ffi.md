@@ -4,7 +4,7 @@ Vibra's first foreign-function boundary is static WebAssembly linking. It does
 not load code at runtime and does not define a native ABI. A project dependency
 may expose one package-relative `.wasm` artifact:
 
-```vibra
+```vibra-project-fragment
 (dependency math path: "foreign/math" wasm: "math.wasm")
 ```
 
@@ -26,6 +26,21 @@ The visible `wasm` form is the explicit unsafe boundary and is restricted to
 operations inside a nominal `deffect`. The wrapper owns conversion of integer
 status codes into typed Vibra `result` values; v1 performs no automatic foreign
 error translation.
+
+## Boundary scope
+
+Static FFI is a separate, weaker boundary from the guest module's
+scalar-only `vibra_v1` host boundary. A buffer-bearing call passes a pointer and
+length into host-owned linear memory supplied to dependency code. It must not
+be described as shared-reference-free `vibra_v1` traffic or as an isolation
+theorem for the foreign module.
+
+The host limits this exception with a fresh Store, Memory, and Instance for
+each call; an allowlist that accepts only `vibra_ffi.memory` as an import; full
+wasm32 range, overflow, alignment, growth, and write checks; and a contract
+that the callee may use the buffer only during the call and must not retain its
+pointer. These are boundary-specific mitigations, not a claim that pointers
+cannot exist anywhere in the toolchain.
 
 ## ABI
 

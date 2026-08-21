@@ -34,14 +34,3 @@
     profile: @core
   )
 )
-(test.scenario
-  "match-arm-binding-does-not-leak"
-  (test.case
-    "match-arm-binding-does-not-leak"
-    (let outer true)
-    (let subject 1)
-    (match subject 1 (do (let outer false)) _ (do))
-    (test.assert outer)
-    profile: @core
-  )
-)

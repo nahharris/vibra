@@ -224,6 +224,430 @@ fn legacy_pattern_match_arm_key_is_rejected() {
     );
 }
 
+fn write_scope_fixture(source: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(&entry, source).unwrap();
+    (dir, entry)
+}
+
+fn lower_unhandled_fixture(main_body: &str) -> Vec<String> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let option = path_str(&std::fs::canonicalize(root.join("stdlib/src/option.vib")).unwrap());
+    let (_dir, entry) = write_scope_fixture(&format!(
+        r#"(import result "{result}")
+(import option "{option}")
+(defn fallible () (result.result int64 str)
+  (do (return (result.from-ok int64 str 1))))
+(defn optional () (option.option int64)
+  (do (return (option.from-value int64 1))))
+    (defn main () void {main_body})
+"#
+    ));
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded).unwrap().warnings
+}
+
+fn assert_scope_error(source: &str, label: &str) {
+    let (_dir, entry) = write_scope_fixture(source);
+    let error =
+        vibra::frontend::load_surface_program(&entry, &vibra::load::CompilationFlags::default())
+            .expect_err(label);
+    let rendered = format!("{error:#}");
+    assert!(rendered.contains("E-SCOPE-001"), "{label}: {rendered}");
+}
+
+#[test]
+fn lexical_shadowing_rejects_nested_let_and_let_as() {
+    assert_scope_error(
+        r#"(defn main () void
+  (do
+    (let outer true)
+    (if true (do (let outer false)) (do))))
+"#,
+        "nested let shadowing must be rejected",
+    );
+    assert_scope_error(
+        r#"(defn main () void
+  (do
+    (let outer true)
+    (if true (do (let-as outer bool false)) (do))))
+"#,
+        "let-as shadowing must be rejected",
+    );
+}
+
+#[test]
+fn lexical_shadowing_rejects_parameter_match_and_for_binders() {
+    assert_scope_error(
+        "(defn main (value bool) void (do (if true (do (let value false)) (do))))\n",
+        "parameter shadowing must be rejected",
+    );
+    assert_scope_error(
+        r#"(defn main () void
+  (do
+    (let outer true)
+    (match 1 1 (do (let outer false)) _ (do))))
+"#,
+        "match-arm shadowing must be rejected",
+    );
+    assert_scope_error(
+        "(defn main () void (do (let number 0) (for number (range 0 0 1) (do))))\n",
+        "for-binder shadowing must be rejected",
+    );
+}
+
+#[test]
+fn lexical_scope_allows_sibling_reuse_and_repeated_wildcards() {
+    let (_dir, entry) = write_scope_fixture(
+        r#"(defn main () void
+  (do
+    (if true (do (let value true)) (do (let value false)))
+    (match 1
+      1 (do (let message true))
+      _ (do (let message false)))
+    (for number (range 0 0 1) (do))
+    (for number (range 0 0 1) (do))
+    (let _ true)
+    (let _ false)))
+"#,
+    );
+    let loaded = vibra::load::load_program(&entry).expect("sibling reuse must remain legal");
+    vibra::lower::lower_program(&loaded).expect("sibling reuse must lower successfully");
+}
+
+#[test]
+fn lexical_scope_does_not_reject_module_or_import_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let imported = dir.path().join("helper.vib");
+    std::fs::write(&imported, "(defn answer () bool true)\n").unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        format!(
+            r#"(import imported "{}")
+(defn outer () bool true)
+(defn main (outer bool) void (do))
+(defn imported-user (imported bool) void (do))
+"#,
+            path_str(&imported)
+        ),
+    )
+    .unwrap();
+
+    vibra::frontend::load_surface_program(&entry, &vibra::load::CompilationFlags::default())
+        .expect("module and import names are not lexical bindings");
+}
+
+#[test]
+fn hygienic_macro_binder_does_not_shadow_call_site_name() {
+    let (_dir, entry) = write_scope_fixture(
+        r#"(macro
+  bind-temporary
+  (value @expr-syntax)
+  @expr-syntax
+  (do (quote @expr-syntax
+    (let temporary (unquote value)))))
+(defn main (temporary bool) void
+  (do (bind-temporary temporary)))
+"#,
+    );
+    let loaded = vibra::load::load_program(&entry).expect("hygienic macro binder is distinct");
+    vibra::lower::lower_program(&loaded).expect("hygienic macro binder must lower successfully");
+}
+
+#[test]
+fn shadowing_diagnostic_points_to_binder_and_original_binding() {
+    let source =
+        "(defn main () void (do (let outer true) (if true (do (let outer false)) (do))))\n";
+    let (_dir, entry) = write_scope_fixture(source);
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+    assert_eq!(diagnostics.len(), 1, "diagnostics: {diagnostics:?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostic.code, "E-SCOPE-001");
+    let original = source.find("(let outer true)").unwrap() + "(let ".len();
+    let shadowing = source.find("(let outer false)").unwrap() + "(let ".len();
+    assert_eq!(diagnostic.span.start.offset, Some(shadowing));
+    let related = diagnostic.related.as_ref().expect("original binding span");
+    assert_eq!(related.len(), 1);
+    assert_eq!(related[0].span.start.offset, Some(original));
+}
+
+#[test]
+fn unhandled_fallible_statement_is_reported() {
+    let warnings = lower_unhandled_fixture("(do (fallible) (optional) (let _ true))");
+    assert!(
+        warnings
+            .iter()
+            .filter(|warning| warning.starts_with("W-RESULT-001"))
+            .count()
+            == 2,
+        "expected result and option warnings, got {warnings:?}"
+    );
+}
+
+#[test]
+fn final_return_and_let_rhs_fallible_values_are_not_reported() {
+    let final_warnings = lower_unhandled_fixture("(do (fallible))");
+    assert!(
+        !final_warnings
+            .iter()
+            .any(|warning| warning.starts_with("W-RESULT-001")),
+        "final expression must remain a block value: {final_warnings:?}"
+    );
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let (_dir, entry) = write_scope_fixture(&format!(
+        r#"(import result "{result}")
+(defn fallible () (result.result int64 str)
+  (do (return (result.from-ok int64 str 1))))
+(defn wrapper () (result.result int64 str)
+  (do (return (fallible))))
+(defn main () void
+  (do
+    (let-as value (result.result int64 str) (wrapper))
+    (let _ value)))
+"#
+    ));
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let warnings = vibra::lower::lower_program(&loaded).unwrap().warnings;
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.starts_with("W-RESULT-001")),
+        "return operands and let RHS values are handled: {warnings:?}"
+    );
+}
+
+#[test]
+fn unused_fallible_binding_is_reported_but_match_reads_count_on_any_path() {
+    let unused = lower_unhandled_fixture("(do (let value (fallible)) (let _ true))");
+    assert!(
+        unused
+            .iter()
+            .any(|warning| warning.starts_with("W-BIND-001")),
+        "expected an unread binding warning, got {unused:?}"
+    );
+
+    let read_in_one_arm = lower_unhandled_fixture(
+        r#"(do
+  (let value (fallible))
+  (match true
+    true (do (let _ value))
+    _ (do)))"#,
+    );
+    assert!(
+        !read_in_one_arm
+            .iter()
+            .any(|warning| warning.starts_with("W-BIND-001")),
+        "a read on one match path counts as a read: {read_in_one_arm:?}"
+    );
+}
+
+#[test]
+fn explicit_discard_and_match_handling_are_not_reported() {
+    let warnings = lower_unhandled_fixture(
+        r#"(do
+  (let _ (fallible))
+  (match (fallible)
+    (result.result.ok (bind value)) (do (let _ value))
+    (result.result.err _) (do)))"#,
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.starts_with("W-RESULT-001")),
+        "explicit discard and match handling are intentional: {warnings:?}"
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.starts_with("W-BIND-001")),
+        "match-arm binding is read on its arm: {warnings:?}"
+    );
+}
+
+#[test]
+fn structurally_similar_enum_is_not_must_use() {
+    let (_dir, entry) = write_scope_fixture(
+        r#"(def outcome (enum (err e) (ok t)) where: (t any e any))
+(defn outcome-value () (outcome int64 str)
+  (do (return (outcome.ok 1))))
+(defn main () void (do (outcome-value) (let _ true)))
+"#,
+    );
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let warnings = vibra::lower::lower_program(&loaded).unwrap().warnings;
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.starts_with("W-RESULT-001")),
+        "only the stdlib result and option types are must-use: {warnings:?}"
+    );
+}
+
+#[test]
+fn compile_diagnostics_exposes_unhandled_value_codes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let (_dir, entry) = write_scope_fixture(&format!(
+        r#"(import result "{result}")
+(defn fallible () (result.result int64 str)
+  (do (return (result.from-ok int64 str 1))))
+(defn main () void (do (fallible) (let _ true)))
+"#
+    ));
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W-RESULT-001")
+        .unwrap_or_else(|| panic!("diagnostics: {diagnostics:?}"));
+    assert_eq!(diagnostic.severity, vibra::diagnostics::Severity::Warning);
+}
+
+#[test]
+fn compile_diagnostics_points_unhandled_results_and_bindings_to_source_with_fixes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let source = format!(
+        r#"(import result "{result}")
+(defn fallible () (result.result int64 str)
+  (do (return (result.from-ok int64 str 1))))
+(defn main () void
+  (do
+    (fallible)
+    (let unused (fallible))
+    (let _ true)))
+"#
+    );
+    let (_dir, entry) = write_scope_fixture(&source);
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+
+    let result_diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W-RESULT-001")
+        .expect("unhandled result diagnostic");
+    let call_start = source.find("    (fallible)").unwrap() + 4;
+    let call_end = call_start + "(fallible)".len();
+    assert_eq!(result_diagnostic.span.start.offset, Some(call_start));
+    assert_eq!(result_diagnostic.span.end.offset, Some(call_end));
+    assert_eq!(
+        result_diagnostic
+            .fix
+            .as_ref()
+            .and_then(|fixes| { fixes[0]["span"]["start"]["offset"].as_u64() }),
+        Some(call_start as u64)
+    );
+
+    let binding_diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code == "W-BIND-001"
+                && diagnostic.span.uri == vibra::diagnostics::file_uri(&entry)
+        })
+        .expect("unused binding diagnostic");
+    let binding_start = source.find("unused").unwrap();
+    let binding_end = binding_start + "unused".len();
+    assert_eq!(binding_diagnostic.span.start.offset, Some(binding_start));
+    assert_eq!(binding_diagnostic.span.end.offset, Some(binding_end));
+    assert_eq!(
+        binding_diagnostic
+            .fix
+            .as_ref()
+            .and_then(|fixes| { fixes[0]["span"]["start"]["offset"].as_u64() }),
+        Some(binding_start as u64)
+    );
+}
+
+#[test]
+fn imported_user_function_bodies_are_checked_for_unhandled_values() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let helper = dir.path().join("helper.vib");
+    let entry = dir.path().join("entry.vib");
+    let helper_source = format!(
+        r#"(import result "{result}")
+(defn helper () void
+  (do
+    (result.from-ok int64 str 1)
+    (let _ true)))
+"#
+    );
+    std::fs::write(&helper, &helper_source).unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"(import helper "{}")
+(defn main () void (do (helper.helper) (let _ true)))
+"#,
+            path_str(&helper)
+        ),
+    )
+    .unwrap();
+
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+    let warning = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W-RESULT-001")
+        .expect("imported helper's unhandled result diagnostic");
+    assert_eq!(warning.span.uri, vibra::diagnostics::file_uri(&helper));
+    assert_eq!(
+        warning.span.start.offset,
+        Some(helper_source.find("(result.from-ok").unwrap())
+    );
+}
+
+#[test]
+fn trusted_stdlib_function_bodies_do_not_emit_user_diagnostics() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let (_dir, entry) = write_scope_fixture(&format!(
+        r#"(import result "{result}")
+(defn main () void (do (let _ true)))
+"#
+    ));
+
+    let diagnostics = vibra::tooling::compile_diagnostics(&entry);
+    assert!(
+        diagnostics.is_empty(),
+        "trusted stdlib bodies must not produce user diagnostics: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn selected_tests_validate_ordinary_helper_function_bodies() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let test = path_str(&std::fs::canonicalize(root.join("stdlib/src/test.vib")).unwrap());
+    let (_dir, entry) = write_scope_fixture(&format!(
+        r#"(import result "{result}")
+(import test "{test}")
+(defn helper () void
+  (do
+    (result.from-ok int64 str 1)
+    (let _ true)))
+(test.scenario
+  "helpers"
+  (test.case "helper-warning" (test.assert true) profile: @core))
+"#
+    ));
+
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_named_test(&loaded, "helpers::helper-warning").unwrap();
+    assert!(
+        lowered
+            .program
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("W-RESULT-001")),
+        "helper body warning missing: {:?}",
+        lowered.program.warnings
+    );
+}
+
 #[test]
 fn generic_alias_instantiation_prefers_current_module_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -345,6 +769,63 @@ fn host_calls_are_general_nested_expressions_in_both_backends() {
     vibra::wasm_backend::run_wasm(&wasm, &vibra::runtime::RunConfig::default()).unwrap();
 }
 
+/// `(try ...)` returns from the enclosing function on failure, so it must obey
+/// the same affine-handle rule as a written `(return ...)`. Issue #257 called
+/// this out as the exposure `try` multiplies.
+#[test]
+fn try_propagation_past_a_live_task_handle_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    let source = |body: &str| {
+        format!(
+            r#"(import result "{}")
+(defn probe () (result.result int64 str) (do {body}))
+(defn main () void (do))
+"#,
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("stdlib/src/result.vib")
+                .display()
+                .to_string()
+                .replace('\\', "/")
+        )
+    };
+
+    std::fs::write(
+        &entry,
+        source(
+            r#"(spawn worker 7 captures: ())
+    (let value (try (result.from-err int64 str "boom")))
+    (join worker joined)
+    (return (result.from-ok int64 str (add value joined)))"#,
+        ),
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = match vibra::lower::lower_program(&loaded) {
+        Ok(_) => panic!("a try that can propagate past a live task handle must not lower"),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(error.contains("E-TASK-003"), "unexpected error: {error}");
+    assert!(
+        error.contains("must be joined before leaving their scope"),
+        "unexpected error: {error}"
+    );
+
+    // The same `try` is fine once every handle is already joined.
+    std::fs::write(
+        &entry,
+        source(
+            r#"(spawn worker 7 captures: ())
+    (join worker joined)
+    (let value (try (result.from-err int64 str "boom")))
+    (return (result.from-ok int64 str (add value joined)))"#,
+        ),
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    vibra::lower::lower_program(&loaded).expect("a try after every join lowers");
+}
+
 #[test]
 fn spawned_task_handles_are_typed_affine_and_scheduler_backed() {
     let dir = tempfile::tempdir().unwrap();
@@ -442,36 +923,6 @@ fn mutable_and_reference_type_wrappers_parse() {
 
     let loaded = vibra::load::load_program(&entry).unwrap();
     vibra::lower::lower_program(&loaded).expect("mut/ref type wrappers should parse");
-}
-
-#[test]
-fn wasm_abi_uses_i32_addresses_for_mutable_values_and_refs() {
-    use vibra::wasm_abi::{layout_of, AbiType, StorageClass};
-
-    let scalar = layout_of(&AbiType::I64);
-    assert_eq!(scalar.size, 8);
-    assert_eq!(scalar.align, 8);
-    assert_eq!(scalar.storage, StorageClass::Direct);
-
-    let mutable = layout_of(&AbiType::Mutable(Box::new(AbiType::I64)));
-    assert_eq!(mutable.size, 4);
-    assert_eq!(mutable.align, 4);
-    assert_eq!(mutable.storage, StorageClass::ArenaAddress);
-
-    let reference = layout_of(&AbiType::Reference(Box::new(AbiType::I64)));
-    assert_eq!(reference.size, 4);
-    assert_eq!(reference.storage, StorageClass::ArenaAddress);
-}
-
-#[test]
-fn wasm_abi_aggregate_layout_is_aligned() {
-    use vibra::wasm_abi::{layout_of, AbiType, StorageClass};
-
-    let record = layout_of(&AbiType::Record(vec![AbiType::I32, AbiType::I64]));
-    assert_eq!(record.size, 16);
-    assert_eq!(record.align, 8);
-    assert_eq!(record.field_offsets, vec![0, 8]);
-    assert_eq!(record.storage, StorageClass::CopiedPointer);
 }
 
 #[test]
@@ -878,7 +1329,7 @@ fn structured_match_form_is_rejected_with_e_one_007() {
 }
 
 #[test]
-fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
+fn match_arm_shadowing_is_rejected_before_runtime() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
     let io = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/src/io.vib"))
@@ -907,10 +1358,13 @@ fn match_arm_rebinding_does_not_leak_to_parent_runtime_scope() {
     )
     .unwrap();
 
-    let prog = vibra::load::load_program(&entry).unwrap();
-    let lowered = vibra::lower::lower_program(&prog).unwrap();
-    vibra::execute::run_lowered(&lowered, &vibra::runtime::RunConfig::default())
-        .expect("outer x should remain a string after the match arm");
+    let error = vibra::load::load_program(&entry)
+        .expect_err("match-arm shadowing must be a hard compiler error");
+    let rendered = format!("{error:#}");
+    assert!(
+        rendered.contains("E-SCOPE-001"),
+        "unexpected error: {rendered}"
+    );
 }
 
 #[test]
@@ -1541,15 +1995,20 @@ fn declared_effects_are_a_ceiling() {
     );
 }
 
-/// Effects propagate through calls using the callee's *declaration*, which is what
-/// makes inference a single pass rather than a fixpoint.
+/// Effects propagate through calls using the callee's performed body effects.
+/// This requires a real graph/fixpoint rather than trusting declarations or
+/// assuming that callees have already been visited.
 #[test]
-fn effects_propagate_to_callers_through_declarations() {
+fn effects_propagate_to_callers_through_bodies() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn leaf () void (do (let ok true)) effects: (env.read))
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn leaf () void (do (host.read)) effects: (entry.host env.read))
 (defn middle () void (do (leaf)))
 (defn main () void (do (middle)))
 "#,
@@ -1562,7 +2021,246 @@ fn effects_propagate_to_callers_through_declarations() {
     let reported = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
     assert!(
         reported.contains("`middle` declares no effects") && reported.contains("via `leaf`"),
-        "expected the caller to inherit the callee's declared effect, got: {reported}"
+        "expected the caller to inherit the callee's performed effect, got: {reported}"
+    );
+}
+
+#[test]
+fn private_call_chain_infers_effects_without_private_annotations() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn leaf () void (do (host.read)) visibility: @private)
+(defn middle () void (do (leaf)) visibility: @private)
+(defn main () void (do (middle)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog)
+        .expect("private functions should infer effects through the whole call chain");
+    let inferred =
+        vibra::effect_semantics::infer_function(&lowered.functions["-middle"], &lowered.functions);
+    assert!(inferred.labels().contains(&("env".into(), "read".into())));
+}
+
+#[test]
+fn mutual_private_recursion_reaches_a_least_fixpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn first () void (do (host.read) (second)) visibility: @private)
+(defn second () void (do (first)) visibility: @private)
+(defn main () void (do (first)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog)
+        .expect("mutual private recursion should converge during effect inference");
+    for key in ["-first", "-second"] {
+        assert!(vibra::effect_semantics::infer_function(
+            &lowered.functions[key],
+            &lowered.functions
+        )
+        .labels()
+        .contains(&("env".into(), "read".into())));
+    }
+}
+
+#[test]
+fn over_declared_effects_are_reported_as_warnings() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(defn api () void (do (let ok true)) effects: (env.read))
+(defn main () void (do (api)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    assert!(
+        lowered
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("over-declares") && warning.contains("api")),
+        "expected a deterministic over-declaration warning, got: {:?}",
+        lowered.warnings
+    );
+}
+
+#[test]
+fn under_declared_exported_effects_remain_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn api () void (do (host.read)))
+(defn main () void (do (api)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        error.contains("E-EFFECT-001") && error.contains("`api`"),
+        "expected an under-declared exported function to fail, got: {error}"
+    );
+}
+
+#[test]
+fn under_declared_legacy_main_effects_remain_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn main () void (do (host.read)) effects: ())
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
+    assert!(
+        error.contains("E-EFFECT-001") && error.contains("`main`"),
+        "expected an explicitly under-declared legacy main to fail, got: {error}"
+    );
+}
+
+#[test]
+fn declared_effect_roots_subsume_only_at_the_declaration_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @fs-metadata (intrinsic @path-new "x"))))
+    effects: (fs.metadata)))
+(defn api () void (do (host.read)) effects: (fs entry.host))
+(defn main () void (do (api)) effects: (fs entry.host))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog)
+        .expect("a declared root should cover its leaf operations");
+    assert_eq!(
+        lowered.functions["api"].effects.labels,
+        [
+            ("entry".to_string(), "host".to_string()),
+            ("fs".to_string(), "".to_string()),
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert_eq!(
+        vibra::effect_semantics::infer_function(&lowered.functions["api"], &lowered.functions)
+            .labels(),
+        [
+            ("entry".to_string(), "host".to_string()),
+            ("fs".to_string(), "metadata".to_string()),
+        ]
+        .into_iter()
+        .collect()
+    );
+}
+
+#[test]
+fn interface_dispatch_infers_each_concrete_implementation_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(def display (interface (fmt (fn-type (self self) str effects: (entry.host env.read)))))
+(def quiet-box (newtype int64)
+  impls: ((impl display methods: ((method fmt
+    (fn (self self) str (do (return "quiet")) effects: ()))))))
+(def loud-box (newtype int64)
+  impls: ((impl display methods: ((method fmt
+    (fn (self self) str (do (host.read) (return "loud")) effects: (entry.host env.read)))))))
+(defn quiet-call (value quiet-box) void (do (display.fmt value)) effects: ())
+(defn loud-call (value loud-box) void (do (display.fmt value)) effects: (entry.host env.read))
+(defn main () void
+  (do
+    (let quiet (cast 1 quiet-box))
+    (let loud (cast 2 loud-box))
+    (quiet-call quiet)
+    (loud-call loud)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog)
+        .expect("static interface dispatch should resolve before effect inference");
+    assert!(vibra::effect_semantics::infer_function(
+        &lowered.functions["quiet-call"],
+        &lowered.functions,
+    )
+    .labels()
+    .is_empty());
+    let loud_effects = vibra::effect_semantics::infer_function(
+        &lowered.functions["loud-call"],
+        &lowered.functions,
+    )
+    .labels();
+    assert!(loud_effects.contains(&("env".into(), "read".into())));
+    assert!(loud_effects.contains(&("entry".into(), "host".into())));
+}
+
+#[test]
+fn deffect_operation_owner_is_still_inferred_at_the_operation_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(deffect read
+  (defn open () void (do (let ok true)) effects: ()))
+(defn main () void (do (read.open)))
+"#,
+    )
+    .unwrap();
+
+    let prog = vibra::load::load_program(&entry).unwrap();
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let inferred = vibra::effect_semantics::infer_function(
+        &lowered.functions["read.open"],
+        &lowered.functions,
+    );
+    assert!(
+        inferred.labels().contains(&("entry".into(), "read".into())),
+        "inferred: {inferred:?}, signature: {:?}",
+        lowered.functions["read.open"]
     );
 }
 
@@ -1574,20 +2272,20 @@ fn task_effects_belong_to_the_enclosing_function() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn leaf () void (do (let ok true)) effects: (env.read))
-(defn main () void (do (task (do (leaf)) captures: ())))
+        r#"(deffect host
+  (defn read () void
+    (do (let ignored (intrinsic @env-list)))
+    effects: (env.read)))
+(defn main () void (do (task (do (host.read)) captures: ())))
 "#,
     )
     .unwrap();
 
     let prog = vibra::load::load_program(&entry).unwrap();
-    // Enforcement is a hard error now, so the task body's effect surfaces as a lowering
-    // failure against the enclosing function rather than a `report_effects` line.
-    let reported = format!("{:#}", vibra::lower::lower_program(&prog).unwrap_err());
-    assert!(
-        reported.contains("`main` declares no effects") && reported.contains("env.read"),
-        "expected a task body's effects to belong to its parent, got: {reported}"
-    );
+    let lowered = vibra::lower::lower_program(&prog).unwrap();
+    let inferred =
+        vibra::effect_semantics::infer_statements(&lowered.statements, &lowered.functions);
+    assert!(inferred.labels().contains(&("env".into(), "read".into())));
 }
 
 /// `effects:` accepts nominal root names, and an absent attribute means pure.
@@ -2173,6 +2871,100 @@ fn wasm_abi_rejects_wrong_value_parameter_type() {
         error.contains("E-WASM-003") && error.contains("bool"),
         "{error}"
     );
+}
+
+#[test]
+fn wasm_abi_rejects_reference_value_parameter_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(def result (enum (err e) (ok t)) where: (t any e any))
+(deffect host
+  (defn
+    bad-array-append
+    (items (array int64) value (ref int64))
+    (result (array int64) str)
+    (do (wasm "vibra_v1" "array_append" items value))
+    effects: ()))
+(defn main () void (do))
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(
+        error.contains("E-WASM-003") && error.contains("any"),
+        "{error}"
+    );
+}
+
+#[test]
+fn wasm_abi_rejects_reference_like_named_newtype_parameter_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(def hidden-ref (newtype (ref int64)))
+(def result (enum (err e) (ok t)) where: (t any e any))
+(deffect host
+  (defn
+    bad-newtype
+    (items (array int64) value hidden-ref)
+    (result (array int64) str)
+    (do (wasm "vibra_v1" "array_append" items value))
+    effects: ()))
+(defn main () void (do))
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(
+        error.contains("E-WASM-003") && error.contains("any"),
+        "{error}"
+    );
+}
+
+#[test]
+fn wasm_abi_rejects_unresolved_generic_any_parameter_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("entry.vib");
+    std::fs::write(
+        &entry,
+        r#"(def result (enum (err e) (ok t)) where: (t any e any))
+(deffect host
+  (defn
+    bad-generic
+    (items (array int64) value t)
+    (result (array int64) str)
+    (do (wasm "vibra_v1" "array_append" items value))
+    effects: ()
+    where: (t any)))
+(defn main () void (do))
+"#,
+    )
+    .unwrap();
+    let loaded = vibra::load::load_program(&entry).unwrap();
+    let error = format!("{:#}", vibra::lower::lower_program(&loaded).unwrap_err());
+    assert!(
+        error.contains("E-WASM-003") && error.contains("any"),
+        "{error}"
+    );
+}
+
+#[test]
+fn secure_compilation_pipeline_rejects_a_stage_after_hardening() {
+    use vibra::compilation_pipeline::{CompilationPass, CompilationPipeline};
+
+    let mut pipeline = CompilationPipeline::new();
+    pipeline.run(CompilationPass::Reachability, || {});
+    pipeline.run(CompilationPass::WasmEmission, || {});
+    pipeline.run(CompilationPass::Hardening, || {});
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pipeline.run(CompilationPass::WasmEmission, || {});
+    }));
+    assert!(result.is_err());
 }
 
 #[test]
@@ -5419,6 +6211,22 @@ fn vibra_lint_defaults_to_json_and_reports_kebab_case_locations() {
 }
 
 #[test]
+fn underscore_discard_does_not_exempt_other_symbol_roles_from_style_lint() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("style.vib");
+    let text = "(defn _ () void (do unit))\n(defn main () void (do unit))\n";
+    std::fs::write(&source, text).unwrap();
+
+    let diagnostics = vibra::sexpr_tooling::staged_lint_sexpr(&source, text);
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "W-STYLE-001" && diagnostic.message.contains("function: `_`")
+        }),
+        "underscore should only be exempt as a discard binding: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn vibra_lint_suppression_and_deny_warnings_are_respected() {
     // Per-line `=lint:`/`=comment:` source annotations do not exist in the
     // S-expression surface (see the "Definition attributes" section of
@@ -5576,6 +6384,90 @@ fn vibra_lint_json_and_sarif_outputs_are_explicit() {
             .as_str()
             .unwrap()
             .contains("BadName")
+    );
+}
+
+#[test]
+fn vibra_lint_sarif_reports_handle_lifecycle_related_location() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("handle.vib");
+    std::fs::write(
+        &source,
+        "(defn main (resource (handle @write)) void (do (stream.manage.close resource) (stream.write.string resource \"late\")))\n",
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "style",
+            "--format",
+            "sarif",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "warning-only lifecycle lint failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let result = &report["runs"][0]["results"][0];
+    assert_eq!(result["ruleId"], "W-HANDLE-001");
+    assert_eq!(result["level"], "warning");
+    assert_eq!(result["relatedLocations"][0]["id"], 0);
+    assert!(result["relatedLocations"][0]["physicalLocation"].is_object());
+    assert_eq!(
+        report["runs"][0]["tool"]["driver"]["rules"][0]["shortDescription"]["text"],
+        "Handle binding is used after a same-binding close"
+    );
+}
+
+#[test]
+fn vibra_lint_sarif_preserves_scope_related_locations_and_rule_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("scope.vib");
+    std::fs::write(
+        &source,
+        "(defn main () void (do (let outer true) (if true (do (let outer false)) (do))))\n",
+    )
+    .unwrap();
+
+    let output = vibra_cmd()
+        .args([
+            "lint",
+            &path_str(&source),
+            "--category",
+            "compile",
+            "--format",
+            "sarif",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "shadowing must fail compile lint");
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let result = &report["runs"][0]["results"][0];
+    assert_eq!(result["ruleId"], "E-SCOPE-001");
+    assert_eq!(result["relatedLocations"][0]["id"], 0);
+    assert_eq!(
+        result["relatedLocations"][0]["message"]["text"],
+        "original binding is here"
+    );
+    assert!(result["relatedLocations"][0]["physicalLocation"].is_object());
+
+    let rule = &report["runs"][0]["tool"]["driver"]["rules"][0];
+    assert_eq!(rule["id"], "E-SCOPE-001");
+    assert_eq!(
+        rule["shortDescription"]["text"],
+        "Lexical binding shadows an enclosing binding"
+    );
+    assert_eq!(
+        rule["fullDescription"]["text"],
+        "Lexical binding shadows an enclosing binding"
     );
 }
 

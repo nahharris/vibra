@@ -1,6 +1,5 @@
 (import io "../stdlib/src/io.vib")
 (import result "../stdlib/src/result.vib")
-(import stream "../stdlib/src/stream.vib")
 (defn
   main
   ()
@@ -14,5 +13,4 @@
     (result.result.err (bind err))
     (do (io.stderr.println "failed to read stdin"))
   )
-  effects: (io.stdout io.stdin io.stderr stream.write stream.read)
 )
