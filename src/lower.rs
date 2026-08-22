@@ -2221,6 +2221,18 @@ fn qualify_named_type(alias: &str, ty: TypeRef, aliases: &HashMap<String, TypeAl
 // ===== Public lowering entry point =====
 
 pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
+    lower_program_inner(program, true)
+}
+
+/// Lower a module graph for diagnostics without requiring an executable entry
+/// function. Library files still go through declaration, body, bound, wasm,
+/// and effect validation; only the entry-specific statement lowering is
+/// omitted.
+pub fn lower_library_program(program: &LoadedProgram) -> Result<LoweredProgram> {
+    lower_program_inner(program, false)
+}
+
+fn lower_program_inner(program: &LoadedProgram, require_main: bool) -> Result<LoweredProgram> {
     let entry_map = program
         .modules
         .get(&program.entry)
@@ -2296,7 +2308,28 @@ pub fn lower_program(program: &LoadedProgram) -> Result<LoweredProgram> {
     )?;
     mark_interface_methods(&mut sigs, &impls);
 
-    let main = map_get_str(entry_map, "main").context("missing top-level `main`")?;
+    let Some(main) = map_get_str(entry_map, "main") else {
+        if require_main {
+            bail!("missing top-level `main`");
+        }
+        validate_all_where_bounds(&type_aliases, &sigs, &enums)?;
+        validate_all_instantiation_bounds(&type_aliases, &sigs, &enums, &impls, &[])?;
+        validate_wasm_bodies(&sigs, &type_aliases)?;
+        validate_declared_effects(&sigs, &mut warnings)?;
+        let foreign_modules = crate::project::static_wasm_artifacts_for_entry(&program.entry)?;
+        return Ok(LoweredProgram {
+            statements: Vec::new(),
+            main_effects: EffectRow::default(),
+            main_arg_bindings: Vec::new(),
+            constants,
+            type_aliases,
+            functions: sigs,
+            impls,
+            warnings,
+            body_diagnostics,
+            foreign_modules,
+        });
+    };
     let main_env = parse_def_envelope(main, &mut warnings)
         .context("`main` must be a `$function` definition")?;
     if main_env.form_key != "$function" {

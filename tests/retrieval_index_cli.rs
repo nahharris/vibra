@@ -25,11 +25,11 @@ fn write_fixture() -> tempfile::TempDir {
   identity
   (value t)
   t
+  where:
+  (t any)
   (do ; identity comment
-    (return value))
-  where: (t any)
-)
-(defn hidden (value int64) int64 (do (return value)) visibility: @private)
+    (return value)))
+(defn hidden (value int64) int64 visibility: @private (do (return value)))
 (def result (enum (ok t) (err e)) where: (t any e any))
 (defn maybe (value int64) (result int64 error-kind)
   (do (return (result.ok value))))
@@ -47,7 +47,7 @@ fn write_fixture() -> tempfile::TempDir {
     ))
   ))
 (deffect clock
-  (defn now () int64 (do (return 1)) effects: ()))
+  (defn now () int64 effects: () (do (return 1))))
 (defn -touches-clock () void (do (let tick (clock.now))))
 (defn render (value box) str (do (let text (display.show value)) (return text)))
 (defn main () void (do (let value (box.boxed 1)) (let rendered (render value)) (-touches-clock)))

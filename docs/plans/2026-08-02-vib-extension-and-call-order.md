@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `.vib` the only Vibra source-module extension and canonicalize calls so labelled arguments precede variadic positional arguments while keeping parsing tolerant.
+**Goal:** Make `.vib` the only Vibra source-module extension and require calls to place fixed positional operands before labelled operands before variadic positional operands.
 
-**Architecture:** Use `project.vib` for the project source file as well as all other Vibra source files; its `(project ...)` root is interpreted by project commands and there is no separate manifest extension. Update the typed frontend, test discovery, tooling discovery, generated fixtures, source imports, and tracked source filenames to use `.vib`. Use the existing AST call representation to identify fixed positional, labelled, and variadic arguments for formatter normalization, while the AST parser continues preserving source order; add a style diagnostic for noncanonical call order.
+**Architecture:** Use `project.vib` for the project source file as well as all other Vibra source files; its `(project ...)` root is interpreted by project commands and there is no separate manifest extension. Update the typed frontend, test discovery, tooling discovery, generated fixtures, source imports, and tracked source filenames to use `.vib`. Use the existing AST call representation to identify fixed positional, labelled, and variadic arguments for validation while preserving source order; reject invalid order with `E-SYN-013` and keep formatting limited to layout.
 
 **Tech Stack:** Rust compiler and tooling, native S-expression parser/printer, Vibra source modules, Rust unit/integration tests, Vibra-language tests, JSON linter-code registry.
 
@@ -40,19 +40,21 @@ fn rejects_legacy_vibra_source_extension() {
 }
 ```
 
-- [x] **Step 3: Add a parser-tolerance, formatter, and linter regression for call order**
+- [x] **Step 3: Add parser, formatter, and linter regressions for call order**
 
 ```rust
 #[test]
-fn parser_tolerates_labels_after_variadic_arguments() {
+fn rejects_labels_after_variadic_arguments() {
     let source = "(defn caller () void (do (target 1 2 3 label-1: 4 label-2: 5)))\n";
-    assert!(staged_sexpr_diagnostics(Path::new("call.vib"), source).is_empty());
+    assert!(staged_sexpr_diagnostics(Path::new("call.vib"), source)
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E-SYN-013"));
 }
 
 #[test]
-fn formatter_moves_labelled_arguments_before_variadic_arguments() {
+fn formatter_preserves_valid_labelled_argument_order() {
     let source = "(defn target (first int64 second int64 label-1 int64 label-2 int64 rest... int64) void (do unit))\n\
-(defn caller () void (do (target 1 2 3 label-1: 4 label-2: 5)))\n";
+(defn caller () void (do (target 1 2 label-1: 4 label-2: 5 3)))\n";
     let formatted = staged_format_sexpr(Path::new("call.vib"), source).unwrap();
     assert!(formatted.contains("(target 1 2 label-1: 4 label-2: 5 3)"));
     assert_eq!(formatted, staged_format_sexpr(Path::new("call.vib"), &formatted).unwrap());
@@ -64,7 +66,7 @@ fn linter_warns_when_labelled_argument_follows_variadic_argument() {
 (defn caller () void (do (target 1 2 3 label-1: 4)))\n";
     let diagnostics = staged_lint_sexpr(Path::new("call.vib"), source);
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "W-STYLE-002"
+        diagnostic.code == "E-SYN-013"
             && diagnostic.message.contains("labelled arguments")
     }));
 }
@@ -72,7 +74,7 @@ fn linter_warns_when_labelled_argument_follows_variadic_argument() {
 
 - [x] **Step 4: Run the focused tests and confirm they fail for the missing behavior**
 
-Run: `cargo test tooling::discovery_tests::only_discovers_sexpression_vibra_sources --lib` and `cargo test sexpr_tooling::tests::formatter_moves_labelled_arguments_before_variadic_arguments --lib`.
+Run: `cargo test tooling::discovery_tests::only_discovers_sexpression_vibra_sources --lib` and `cargo test sexpr_tooling::tests::formatter_preserves_valid_labelled_argument_order --lib`.
 
 Expected: FAIL because the current discovery accepts `.vibra`, the formatter preserves the original call order, and the new lint code does not yet exist.
 
@@ -101,34 +103,34 @@ Expected: PASS with `.vib` accepted and `.vibra` rejected.
 ### Task 3: Canonicalize call order in formatting and linting
 
 **Files:**
-- Modify: `src/sexpr_tooling.rs` for local call-signature collection, AST-driven formatter normalization, and `W-STYLE-002` diagnostics.
+- Modify: `src/sexpr_tooling.rs` for local call-signature collection, AST-aware validation, and `E-SYN-013` diagnostics.
 - Modify: `src/syntax/printer.rs` only if the formatter normalization needs a printer helper for stable node output.
-- Modify: `src/tooling.rs:306-376` to describe `W-STYLE-002` in structured lint output.
-- Modify: `schemas/linter-codes.json` to register `W-STYLE-002` as a warning.
+- Modify: `src/tooling.rs:306-376` to describe `E-SYN-013` in structured lint output.
+- Modify: `schemas/linter-codes.json` to register `E-SYN-013` as an error.
 
 - [x] **Step 1: Collect local call signatures from the lowered module**
 
-Record each local function’s fixed parameter count and whether its final parameter is variadic. Use that information when a call’s callee resolves to a local function; preserve unknown/imported calls through a syntax-safe fallback that only moves labels across a known trailing positional segment.
+Record each local function’s fixed parameter count and whether its final parameter is variadic. Use that information when a call’s callee resolves to a local function; reject a label that appears after the remainder or variadic segment with `E-SYN-013`.
 
-- [x] **Step 2: Normalize formatter nodes without changing parser order**
+- [x] **Step 2: Preserve formatter nodes without changing parser order**
 
-For each AST call, match its source span to the corresponding syntax list. Preserve the current semantic binding while emitting fixed positional arguments first, labelled arguments second, and variadic positional arguments last. Keep `types:` as the final call attribute and leave comments attached to their original node groups. Do not make `parse_call_arguments` reject or reorder source input.
+For each AST call, preserve source node order while requiring fixed positional arguments first, labelled arguments (including `types:`) second, and variadic positional arguments last. The formatter must not reorder syntax nodes.
 
 - [x] **Step 3: Add the style lint diagnostic**
 
-When a call contains a positional argument bound to the variadic tail before a later labelled argument, emit:
+When a call contains a labelled argument after the remainder or variadic segment, emit:
 
 ```text
-W-STYLE-002: labelled arguments should precede variadic arguments; move `<label>:` before the variadic values
+E-SYN-013: labelled arguments must precede the remainder or variadic values
 ```
 
-Use `Severity::Warning` and `Category::Style`, anchored to the later label. Do not emit an error or alter the parser/semantic binder.
+Use `Severity::Error` and `Category::Syntax`, anchored to the later label. Do not reorder the source as a compatibility bridge.
 
 - [x] **Step 4: Run the call-order focused tests and the formatter twice**
 
 Run: `cargo test sexpr_tooling::tests --lib` and `cargo test syntax::printer::tests --lib`.
 
-Expected: parser tolerance remains green, the formatter produces canonical order and is idempotent, and the linter reports only the new warning for the noncanonical call.
+Expected: strict ordering rejects the old trailing-label form directly with `E-SYN-013`.
 
 ### Task 4: Update current documentation, schemas, and repository tooling
 
@@ -143,9 +145,9 @@ Document `project.vib` as the project source file and use `.vib` for source
 modules, conditional parts, imports, editor associations, and package entry
 patterns.
 
-- [x] **Step 2: Document the non-error call-order rule**
+- [x] **Step 2: Document the strict call-order rule**
 
-State that parsing accepts mixed order, formatting emits fixed positional → labelled → variadic order, and linting reports `W-STYLE-002` without failing ordinary compilation.
+State that parsing requires fixed positional → labelled → variadic order and reports `E-SYN-013` for trailing labels; formatting preserves valid source order and only changes layout.
 
 - [x] **Step 3: Add the plan link to `docs/index.md`**
 

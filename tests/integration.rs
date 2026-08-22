@@ -49,7 +49,7 @@ fn structural_effect_syntax_is_rejected() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        "(defn main () void (do) effects: ((effect @fs @read)))\n",
+        "(defn main () void effects: ((effect @fs @read)) (do))\n",
     )
     .unwrap();
 
@@ -537,8 +537,10 @@ fn compile_diagnostics_points_unhandled_results_and_bindings_to_source_with_fixe
         result_diagnostic
             .fix
             .as_ref()
-            .and_then(|fixes| { fixes[0]["span"]["start"]["offset"].as_u64() }),
-        Some(call_start as u64)
+            .and_then(|fixes| fixes.first())
+            .and_then(|fix| fix.edits.first())
+            .and_then(|edit| edit.span.start.offset),
+        Some(call_start)
     );
 
     let binding_diagnostic = diagnostics
@@ -556,8 +558,10 @@ fn compile_diagnostics_points_unhandled_results_and_bindings_to_source_with_fixe
         binding_diagnostic
             .fix
             .as_ref()
-            .and_then(|fixes| { fixes[0]["span"]["start"]["offset"].as_u64() }),
-        Some(binding_start as u64)
+            .and_then(|fixes| fixes.first())
+            .and_then(|fix| fix.edits.first())
+            .and_then(|edit| edit.span.start.offset),
+        Some(binding_start)
     );
 }
 
@@ -631,7 +635,7 @@ fn selected_tests_validate_ordinary_helper_function_bodies() {
     (let _ true)))
 (test.scenario
   "helpers"
-  (test.case "helper-warning" (test.assert true) profile: @core))
+  (test.case "helper-warning" profile: @core (test.assert true)))
 "#
     ));
 
@@ -719,7 +723,7 @@ fn structured_task_lowers_and_rejects_mutable_reference_captures() {
   main
   ()
   void
-  (do (let answer 42) (task (let snapshot answer) captures: (answer)))
+  (do (let answer 42) (task captures: (answer) (let snapshot answer)))
 )
 "#,
     )
@@ -735,7 +739,7 @@ fn structured_task_lowers_and_rejects_mutable_reference_captures() {
 
     std::fs::write(
         &entry,
-        r#"(defn main () void (do (let count (mut 0)) (task unit captures: (count))))
+        r#"(defn main () void (do (let count (mut 0)) (task captures: (count) unit)))
 "#,
     )
     .unwrap();
@@ -755,10 +759,14 @@ fn host_calls_are_general_nested_expressions_in_both_backends() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn assert (value bool) void
-    (wasm "vibra_test" "assert" value)
-    effects: ()))
-(defn main () void (host.assert (equal 1 1)) effects: (entry.host))
+  (defn
+    assert
+    (value bool)
+    void
+    effects:
+    ()
+    (wasm "vibra_test" "assert" value)))
+(defn main () void effects: (entry.host) (host.assert (equal 1 1)))
 "#,
     )
     .unwrap();
@@ -937,7 +945,7 @@ fn nested_function_grants_are_rejected() {
     // exercised.
     std::fs::write(
         &entry,
-        "(defn main () void (do) grants: (fs-read mandatory))\n",
+        "(defn main () void grants: (fs-read mandatory) (do))\n",
     )
     .unwrap();
 
@@ -1014,7 +1022,7 @@ fn grant_names_must_be_kebab_case() {
     // `grants:` is unknown syntax now, rejected by the reader.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
-    std::fs::write(&entry, "(defn main () void (do) grants: (fs_read))\n").unwrap();
+    std::fs::write(&entry, "(defn main () void grants: (fs_read) (do))\n").unwrap();
 
     let prog = vibra::load::load_program(&entry);
     let err = match prog {
@@ -1045,7 +1053,7 @@ fn private_module_symbol_is_reachable_locally() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn main-helper () void (do (return)) visibility: @private)
+        r#"(defn main-helper () void visibility: @private (do (return)))
 (defn main () void (do (main-helper)))
 "#,
     )
@@ -1096,7 +1104,7 @@ fn imported_module_private_helper_works_internally() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &lib,
-        r#"(defn priv () void (do (return)) visibility: @private)
+        r#"(defn priv () void visibility: @private (do (return)))
 (defn pub-entry () void (do (priv)))
 "#,
     )
@@ -1122,7 +1130,7 @@ fn importer_cannot_reference_private_symbol_on_imported_module() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &lib,
-        r#"(defn priv () void (do (return)) visibility: @private)
+        r#"(defn priv () void visibility: @private (do (return)))
 "#,
     )
     .unwrap();
@@ -1237,6 +1245,8 @@ fn enum_match_lowers_with_new_syntax() {
   main
   ()
   void
+  effects:
+  (io.stdout stream.write)
   (do
     (let value (m.number.int 7))
     (match
@@ -1246,9 +1256,7 @@ fn enum_match_lowers_with_new_syntax() {
   (m.number.none)
   (do (io.stdout.println "none"))
 )
-  )
-  effects: (io.stdout stream.write)
-)
+  ))
 "#,
             m = model.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -1344,14 +1352,14 @@ fn match_arm_shadowing_is_rejected_before_runtime() {
   main
   ()
   void
+  effects:
+  (io.stdout stream.write)
   (do
     (let x "outer")
     (let value (maybe.some "payload"))
     (match value (maybe.some (bind payload)) (do (let x 42)) (maybe.none) (do))
     (io.stdout.println x)
-  )
-  effects: (io.stdout stream.write)
-)
+  ))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -1408,9 +1416,9 @@ fn if_merges_locals_when_both_branches_bind_same_name_with_same_type() {
   main
   ()
   void
-  (do (if true (do (let x "then")) (do (let x "else"))) (io.stdout.println x))
-  effects: (io.stdout stream.write)
-)
+  effects:
+  (io.stdout stream.write)
+  (do (if true (do (let x "then")) (do (let x "else"))) (io.stdout.println x)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -1463,6 +1471,8 @@ fn record_tuple_array_and_map_patterns_bind_values() {
   main
   ()
   void
+  effects:
+  (io.stdout stream.write)
   (do
     (let
       value
@@ -1483,9 +1493,7 @@ fn record_tuple_array_and_map_patterns_bind_values() {
   _
   (do (io.stdout.println "no match"))
 )
-  )
-  effects: (io.stdout stream.write)
-)
+  ))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -1690,7 +1698,7 @@ fn warns_for_non_kebab_case_symbols() {
         format!(
             r#"(import BadImport "{m}")
 (import io "{io}")
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             m = mod_file.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -1733,6 +1741,8 @@ fn supports_void_enum_constructor_without_payload() {
   main
   ()
   void
+  effects:
+  (io.stdout stream.write)
   (do
     (let value-none (m.option.none))
     (match
@@ -1742,9 +1752,7 @@ fn supports_void_enum_constructor_without_payload() {
   (m.option.some (bind text))
   (do (io.stdout.println text))
 )
-  )
-  effects: (io.stdout stream.write)
-)
+  ))
 "#,
             m = model.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -1883,9 +1891,12 @@ fn impl_method_may_not_exceed_the_interface_effect_ceiling() {
 (def env-lister (newtype int64)
   impls: ((impl lister
     methods: ((method all
-      (fn (self self) (array str)
-        (do (return (wasm "vibra_v1" "env_list")))
-        effects: (env.read)))))))
+      (fn
+        (self self)
+        (array str)
+        effects:
+        (env.read)
+        (do (return (wasm "vibra_v1" "env_list")))))))))
 (defn main () void (do (let ok true)))
 "#,
     )
@@ -1909,9 +1920,12 @@ fn interface_effect_ceiling_admits_a_matching_impl() {
 (def env-lister (newtype int64)
   impls: ((impl lister
     methods: ((method all
-      (fn (self self) (array str)
-        (do (return (wasm "vibra_v1" "env_list")))
-        effects: (env.read)))))))
+      (fn
+        (self self)
+        (array str)
+        effects:
+        (env.read)
+        (do (return (wasm "vibra_v1" "env_list")))))))))
 (defn main () void (do (let ok true)))
 "#,
     )
@@ -1980,8 +1994,8 @@ fn declared_effects_are_a_ceiling() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn exact () void (do (let ok true)) effects: (env.read))
-(defn main () void (do (exact)) effects: (env.read fs.read))
+        r#"(defn exact () void effects: (env.read) (do (let ok true)))
+(defn main () void effects: (env.read fs.read) (do (exact)))
 "#,
     )
     .unwrap();
@@ -2005,10 +2019,14 @@ fn effects_propagate_to_callers_through_bodies() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn read () void
-    (do (let ignored (intrinsic @env-list)))
-    effects: (env.read)))
-(defn leaf () void (do (host.read)) effects: (entry.host env.read))
+  (defn
+    read
+    ()
+    void
+    effects:
+    (env.read)
+    (do (let ignored (intrinsic @env-list)))))
+(defn leaf () void effects: (entry.host env.read) (do (host.read)))
 (defn middle () void (do (leaf)))
 (defn main () void (do (middle)))
 "#,
@@ -2032,11 +2050,15 @@ fn private_call_chain_infers_effects_without_private_annotations() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn read () void
-    (do (let ignored (intrinsic @env-list)))
-    effects: (env.read)))
-(defn leaf () void (do (host.read)) visibility: @private)
-(defn middle () void (do (leaf)) visibility: @private)
+  (defn
+    read
+    ()
+    void
+    effects:
+    (env.read)
+    (do (let ignored (intrinsic @env-list)))))
+(defn leaf () void visibility: @private (do (host.read)))
+(defn middle () void visibility: @private (do (leaf)))
 (defn main () void (do (middle)))
 "#,
     )
@@ -2057,11 +2079,15 @@ fn mutual_private_recursion_reaches_a_least_fixpoint() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn read () void
-    (do (let ignored (intrinsic @env-list)))
-    effects: (env.read)))
-(defn first () void (do (host.read) (second)) visibility: @private)
-(defn second () void (do (first)) visibility: @private)
+  (defn
+    read
+    ()
+    void
+    effects:
+    (env.read)
+    (do (let ignored (intrinsic @env-list)))))
+(defn first () void visibility: @private (do (host.read) (second)))
+(defn second () void visibility: @private (do (first)))
 (defn main () void (do (first)))
 "#,
     )
@@ -2086,7 +2112,7 @@ fn over_declared_effects_are_reported_as_warnings() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn api () void (do (let ok true)) effects: (env.read))
+        r#"(defn api () void effects: (env.read) (do (let ok true)))
 (defn main () void (do (api)))
 "#,
     )
@@ -2111,9 +2137,13 @@ fn under_declared_exported_effects_remain_errors() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn read () void
-    (do (let ignored (intrinsic @env-list)))
-    effects: (env.read)))
+  (defn
+    read
+    ()
+    void
+    effects:
+    (env.read)
+    (do (let ignored (intrinsic @env-list)))))
 (defn api () void (do (host.read)))
 (defn main () void (do (api)))
 "#,
@@ -2135,10 +2165,14 @@ fn under_declared_legacy_main_effects_remain_errors() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn read () void
-    (do (let ignored (intrinsic @env-list)))
-    effects: (env.read)))
-(defn main () void (do (host.read)) effects: ())
+  (defn
+    read
+    ()
+    void
+    effects:
+    (env.read)
+    (do (let ignored (intrinsic @env-list)))))
+(defn main () void effects: () (do (host.read)))
 "#,
     )
     .unwrap();
@@ -2158,11 +2192,15 @@ fn declared_effect_roots_subsume_only_at_the_declaration_boundary() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn read () void
-    (do (let ignored (intrinsic @fs-metadata (intrinsic @path-new "x"))))
-    effects: (fs.metadata)))
-(defn api () void (do (host.read)) effects: (fs entry.host))
-(defn main () void (do (api)) effects: (fs entry.host))
+  (defn
+    read
+    ()
+    void
+    effects:
+    (fs.metadata)
+    (do (let ignored (intrinsic @fs-metadata (intrinsic @path-new "x"))))))
+(defn api () void effects: (fs entry.host) (do (host.read)))
+(defn main () void effects: (fs entry.host) (do (api)))
 "#,
     )
     .unwrap();
@@ -2198,18 +2236,22 @@ fn interface_dispatch_infers_each_concrete_implementation_effects() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn read () void
-    (do (let ignored (intrinsic @env-list)))
-    effects: (env.read)))
+  (defn
+    read
+    ()
+    void
+    effects:
+    (env.read)
+    (do (let ignored (intrinsic @env-list)))))
 (def display (interface (fmt (fn-type (self self) str effects: (entry.host env.read)))))
 (def quiet-box (newtype int64)
   impls: ((impl display methods: ((method fmt
-    (fn (self self) str (do (return "quiet")) effects: ()))))))
+    (fn (self self) str effects: () (do (return "quiet"))))))))
 (def loud-box (newtype int64)
   impls: ((impl display methods: ((method fmt
-    (fn (self self) str (do (host.read) (return "loud")) effects: (entry.host env.read)))))))
-(defn quiet-call (value quiet-box) void (do (display.fmt value)) effects: ())
-(defn loud-call (value loud-box) void (do (display.fmt value)) effects: (entry.host env.read))
+    (fn (self self) str effects: (entry.host env.read) (do (host.read) (return "loud"))))))))
+(defn quiet-call (value quiet-box) void effects: () (do (display.fmt value)))
+(defn loud-call (value loud-box) void effects: (entry.host env.read) (do (display.fmt value)))
 (defn main () void
   (do
     (let quiet (cast 1 quiet-box))
@@ -2245,7 +2287,7 @@ fn deffect_operation_owner_is_still_inferred_at_the_operation_boundary() {
     std::fs::write(
         &entry,
         r#"(deffect read
-  (defn open () void (do (let ok true)) effects: ()))
+  (defn open () void effects: () (do (let ok true))))
 (defn main () void (do (read.open)))
 "#,
     )
@@ -2273,10 +2315,14 @@ fn task_effects_belong_to_the_enclosing_function() {
     std::fs::write(
         &entry,
         r#"(deffect host
-  (defn read () void
-    (do (let ignored (intrinsic @env-list)))
-    effects: (env.read)))
-(defn main () void (do (task (do (host.read)) captures: ())))
+  (defn
+    read
+    ()
+    void
+    effects:
+    (env.read)
+    (do (let ignored (intrinsic @env-list)))))
+(defn main () void (do (task captures: () (do (host.read)))))
 "#,
     )
     .unwrap();
@@ -2295,16 +2341,16 @@ fn effects_attribute_accepts_nominal_labels() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn named () void (do (let ok true)) effects: (fs.read))
-(defn inline () void (do (let ok true)) effects: (net.connect stream.read))
+        r#"(defn named () void effects: (fs.read) (do (let ok true)))
+(defn inline () void effects: (net.connect stream.read) (do (let ok true)))
 (defn pure-fn () void (do (let ok true)))
 (defn
   main
   ()
   void
-  (do (named) (inline) (pure-fn))
-   effects: (fs.read net.connect stream.read)
-)
+  effects:
+  (fs.read net.connect stream.read)
+  (do (named) (inline) (pure-fn)))
 "#,
     )
     .unwrap();
@@ -2339,10 +2385,10 @@ fn nominal_roots_are_canonical_and_alias_independent() {
         format!(
             r#"(import a "{a}")
 (import b "{b}")
- (defn via-first () void (do (let ok true)) effects: (fs.read))
- (defn via-second () void (do (let ok true)) effects: (fs.read))
-(defn via-inline () void (do (let ok true)) effects: (fs.read))
-(defn main () void (do (via-first) (via-second) (via-inline)) effects: (fs.read))
+ (defn via-first () void effects: (fs.read) (do (let ok true)))
+ (defn via-second () void effects: (fs.read) (do (let ok true)))
+(defn via-inline () void effects: (fs.read) (do (let ok true)))
+(defn main () void effects: (fs.read) (do (via-first) (via-second) (via-inline)))
 "#,
             a = first.display().to_string().replace('\\', "/"),
             b = second.display().to_string().replace('\\', "/"),
@@ -2364,8 +2410,8 @@ fn nominal_root_needs_no_import() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn touches-fs () void (do (let ok true)) effects: (fs.read))
-(defn main () void (do (touches-fs)) effects: (fs.read))
+        r#"(defn touches-fs () void effects: (fs.read) (do (let ok true)))
+(defn main () void effects: (fs.read) (do (touches-fs)))
 "#,
     )
     .unwrap();
@@ -2381,7 +2427,7 @@ fn effects_is_rejected_on_non_function_declarations() {
         ("const", "(const limit int64 7 effects: ())\n"),
         (
             "macro",
-            "(macro twice (a @expr-syntax) @expr-syntax (do a) effects: ())\n",
+            "(macro twice (a @expr-syntax) @expr-syntax effects: () (do a))\n",
         ),
     ] {
         let dir = tempfile::tempdir().unwrap();
@@ -2408,7 +2454,7 @@ fn unknown_or_non_effect_names_are_rejected() {
         std::fs::write(
             &entry,
             format!(
-                r#"{extra}(defn f () void (do (let ok true)) effects: ({label}))
+                r#"{extra}(defn f () void effects: ({label}) (do (let ok true)))
 (defn main () void (do (f)))
 "#
             ),
@@ -2436,7 +2482,7 @@ fn named_effect_reference_obeys_the_declared_alias_rule() {
 
     std::fs::write(
         &inner,
-        "(deffect read (defn open () void (do) effects: ()))\n",
+        "(deffect read (defn open () void effects: () (do)))\n",
     )
     .unwrap();
     std::fs::write(
@@ -2452,7 +2498,7 @@ fn named_effect_reference_obeys_the_declared_alias_rule() {
         &entry,
         format!(
             r#"(import middle "{middle}")
-(defn f () void (do (middle.noop)) effects: (inner.read))
+(defn f () void effects: (inner.read) (do (middle.noop)))
 (defn main () void (do (f)))
 "#,
             middle = middle.display().to_string().replace('\\', "/"),
@@ -2475,9 +2521,9 @@ fn effect_declaration_lowers() {
     std::fs::write(
         &entry,
         r#"(deffect read
-  (defn open () void (do (let ok true)) effects: ()))
+  (defn open () void effects: () (do (let ok true))))
 (deffect write
-  (defn open () void (do (let ok true)) effects: ()))
+  (defn open () void effects: () (do (let ok true))))
 (defn main () void (do (let ok true)))
 "#,
     )
@@ -2495,7 +2541,7 @@ fn effect_binding_collides_with_a_type_of_the_same_name() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(deffect read (defn open () void (do (let ok true)) effects: ()))
+        r#"(deffect read (defn open () void effects: () (do (let ok true))))
 (def read (newtype str))
 (defn main () void (do (let ok true)))
 "#,
@@ -2859,8 +2905,9 @@ fn wasm_abi_rejects_wrong_value_parameter_type() {
     bad-assert
     (value str)
     void
-    (do (wasm "vibra_test" "assert" value))
-    effects: ()))
+    effects:
+    ()
+    (do (wasm "vibra_test" "assert" value))))
 (defn main () void (do))
 "#,
     )
@@ -2885,8 +2932,9 @@ fn wasm_abi_rejects_reference_value_parameter_type() {
     bad-array-append
     (items (array int64) value (ref int64))
     (result (array int64) str)
-    (do (wasm "vibra_v1" "array_append" items value))
-    effects: ()))
+    effects:
+    ()
+    (do (wasm "vibra_v1" "array_append" items value))))
 (defn main () void (do))
 "#,
     )
@@ -2912,8 +2960,9 @@ fn wasm_abi_rejects_reference_like_named_newtype_parameter_type() {
     bad-newtype
     (items (array int64) value hidden-ref)
     (result (array int64) str)
-    (do (wasm "vibra_v1" "array_append" items value))
-    effects: ()))
+    effects:
+    ()
+    (do (wasm "vibra_v1" "array_append" items value))))
 (defn main () void (do))
 "#,
     )
@@ -2938,9 +2987,11 @@ fn wasm_abi_rejects_unresolved_generic_any_parameter_type() {
     bad-generic
     (items (array int64) value t)
     (result (array int64) str)
-    (do (wasm "vibra_v1" "array_append" items value))
-    effects: ()
-    where: (t any)))
+    effects:
+    ()
+    where:
+    (t any)
+    (do (wasm "vibra_v1" "array_append" items value))))
 (defn main () void (do))
 "#,
     )
@@ -2978,8 +3029,9 @@ fn wasm_abi_rejects_wrong_return_type() {
     bad-assert
     (value bool)
     bool
-    (do (wasm "vibra_test" "assert" value))
-    effects: ()))
+    effects:
+    ()
+    (do (wasm "vibra_test" "assert" value))))
 (defn main () void (do))
 "#,
     )
@@ -3041,18 +3093,26 @@ fn effects_report_keeps_native_operation_owner_canonical_across_import_aliases()
     std::fs::write(
         &resource,
         r#"(deffect now
-  (defn open () uint64
-    (intrinsic @clock-now-unix-millis)
-    effects: ()))
+  (defn
+    open
+    ()
+    uint64
+    effects:
+    ()
+    (intrinsic @clock-now-unix-millis)))
 "#,
     )
     .unwrap();
     std::fs::write(
         &entry,
         r#"(import t "./time.vib")
-(defn main () void
-  (do (let value (t.now.open)))
-  effects: (time.now))
+(defn
+  main
+  ()
+  void
+  effects:
+  (time.now)
+  (do (let value (t.now.open))))
 "#,
     )
     .unwrap();
@@ -3085,7 +3145,7 @@ fn legacy_function_grants_are_rejected_after_policy_redesign() {
     // (E-SEC-001) this test originally exercised.
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
-    std::fs::write(&entry, "(defn main () void (do) grants: (fs-read))\n").unwrap();
+    std::fs::write(&entry, "(defn main () void grants: (fs-read) (do))\n").unwrap();
 
     let prog = vibra::load::load_program(&entry);
     let err = match prog {
@@ -3114,9 +3174,9 @@ fn fs_open_read_reads_a_file_without_any_authority_argument() {
   main
   ()
   void
-  (do (let path (fs.path.new "{path}")) (let text (fs.read.file path)))
-  effects: (fs.read stream.read stream.manage)
-)
+  effects:
+  (fs.read stream.read stream.manage)
+  (do (let path (fs.path.new "{path}")) (let text (fs.read.file path))))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             path = data.display().to_string().replace('\\', "/"),
@@ -3143,7 +3203,7 @@ fn duplicate_nested_imports_are_idempotent() {
         format!(
             r#"(import io "{io}")
 (import fs "{fs}")
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
             fs = fs.display().to_string().replace('\\', "/"),
@@ -3190,7 +3250,7 @@ fn nested_import_same_alias_is_scoped_to_parent() {
         format!(
             r#"(import util "{leaf}")
 (import io "{io}")
-(defn call () void (do (let x (util.id)) (io.stdout.println x)) effects: (io.stdout stream.write))
+(defn call () void effects: (io.stdout stream.write) (do (let x (util.id)) (io.stdout.println x)))
 "#,
             leaf = leaf_a.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -3202,7 +3262,7 @@ fn nested_import_same_alias_is_scoped_to_parent() {
         format!(
             r#"(import util "{leaf}")
 (import io "{io}")
-(defn call () void (do (let x (util.id)) (io.stdout.println x)) effects: (io.stdout stream.write))
+(defn call () void effects: (io.stdout stream.write) (do (let x (util.id)) (io.stdout.println x)))
 "#,
             leaf = leaf_b.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -3215,7 +3275,7 @@ fn nested_import_same_alias_is_scoped_to_parent() {
             r#"(import a "{a}")
 (import b "{b}")
 (import io "{io}")
-(defn main () void (do (a.call) (b.call)) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (a.call) (b.call)))
 "#,
             a = mod_a.display().to_string().replace('\\', "/"),
             b = mod_b.display().to_string().replace('\\', "/"),
@@ -3371,7 +3431,7 @@ fn doc_annotation_mentioning_import_alias_does_not_require_direct_import() {
 
     std::fs::write(
         &entry,
-        r#"(defn helper () void (do (return)) doc: "See $result.result for the canonical shape.")
+        r#"(defn helper () void doc: "See $result.result for the canonical shape." (do (return)))
 (defn main () void (do (helper)))
 "#,
     )
@@ -3558,6 +3618,8 @@ fn result_where_ok_and_err_type_params() {
   main
   ()
   void
+  effects:
+  (io.stdout stream.write)
   (do
     (let r-ok (m.result.ok 99))
     (match
@@ -3575,9 +3637,7 @@ fn result_where_ok_and_err_type_params() {
   (m.result.err (bind y2))
   (do (io.stdout.println y2))
 )
-  )
-  effects: (io.stdout stream.write)
-)
+  ))
 "#,
             m = model.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -3622,7 +3682,7 @@ fn where_only_generic_names_no_unscoped_uppercase_fallback() {
         format!(
             r#"(import m "{m}")
 (import io "{io}")
-(defn main () void (do (let v (m.opt.some 7)) (io.stdout.println "bad")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (let v (m.opt.some 7)) (io.stdout.println "bad")))
 "#,
             m = bad.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -3634,7 +3694,7 @@ fn where_only_generic_names_no_unscoped_uppercase_fallback() {
         format!(
             r#"(import m "{m}")
 (import io "{io}")
-(defn main () void (do (let v (m.opt.some 7)) (io.stdout.println "good")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (let v (m.opt.some 7)) (io.stdout.println "good")))
 "#,
             m = good.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -3666,7 +3726,7 @@ fn zero_arg_call_accepts_null_payload() {
         &entry,
         format!(
             r#"(import io "{io}")
-(defn main () void (do (io.stdout.flush)) effects: (io.stdout stream.manage))
+(defn main () void effects: (io.stdout stream.manage) (do (io.stdout.flush)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3729,8 +3789,8 @@ fn generic_user_fn_identity_returns_value() {
         &entry,
         format!(
             r#"(import io "{io}")
-(defn identity (input t) t (do (return input)) where: (t any))
-(defn main () void (do (let n (identity int64 7)) (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn identity (input t) t where: (t any) (do (return input)))
+(defn main () void effects: (io.stdout stream.write) (do (let n (identity int64 7)) (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -3751,7 +3811,7 @@ fn generic_call_requires_explicit_type_args() {
         &entry,
         format!(
             r#"(import io "{io}")
-(defn identity (input t) t (do (return input)) where: (t any))
+(defn identity (input t) t where: (t any) (do (return input)))
 (defn main () void (do (identity 7)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -3788,7 +3848,7 @@ fn generic_call_rejects_unknown_keys() {
         &entry,
         format!(
             r#"(import io "{io}")
-(defn identity (input t) t (do (return input)) where: (t any))
+(defn identity (input t) t where: (t any) (do (return input)))
 (defn main () void (do (identity int64 7 1)))
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -3946,7 +4006,7 @@ fn generic_call_value_arg_must_unify_with_substituted_type() {
         &entry,
         format!(
             r#"(import io "{io}")
-(defn identity (input t) t (do (return input)) where: (t any))
+(defn identity (input t) t where: (t any) (do (return input)))
 (defn main () void (do (identity int64 "hi")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -4000,7 +4060,7 @@ fn user_fn_imported_with_user_body_runs() {
         format!(
             r#"(import h "{h}")
 (import io "{io}")
-(defn main () void (do (let v (h.echo-int 42)) (io.stdout.println "z")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (let v (h.echo-int 42)) (io.stdout.println "z")))
 "#,
             h = helper.display().to_string().replace('\\', "/"),
             io = io.display().to_string().replace('\\', "/"),
@@ -4019,7 +4079,7 @@ fn generic_stdlib_wasm_wrapper_lowers() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &lib,
-        r#"(defn flush-generic (value t) void (do (let ok true)) where: (t any))
+        r#"(defn flush-generic (value t) void where: (t any) (do (let ok true)))
 "#,
     )
     .unwrap();
@@ -4074,7 +4134,7 @@ fn self_type_is_allowed_inside_interface_body() {
         format!(
             r#"(import io "{io}")
 (def display (interface (fmt (fn-type (self self) str))))
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4152,7 +4212,7 @@ fn self_type_is_allowed_in_nested_interface_inside_record() {
         format!(
             r#"(import io "{io}")
 (def holder (record (iface (interface (fmt (fn-type (self self) str))))))
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4185,7 +4245,7 @@ fn legacy_unprefixed_where_is_rejected_with_e_anno_002() {
         format!(
             r#"(import io "{io}")
 (def pair (tuple a b) where: (a any b any))
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4213,7 +4273,7 @@ fn legacy_unprefixed_doc_is_rejected_with_e_anno_002() {
         format!(
             r#"(import io "{io}")
 (def greeting (newtype str) doc: "the greeting")
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4240,7 +4300,7 @@ fn unknown_annotation_key_is_rejected() {
         &entry,
         format!(
             r#"(import io "{io}")
-(defn foo () void (do (io.stdout.println "x")) bogus: 1)
+(defn foo () void bogus: 1 (do (io.stdout.println "x")))
 (defn main () void (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
@@ -4275,11 +4335,12 @@ fn doc_string_lowers_on_function_and_type_decls() {
   echo
   (msg str)
   void
-  (do (io.stdout.println msg))
-  doc: "Echo a message to stdout."
-  effects: (io.stdout stream.write)
-)
-(defn main () void (do (echo "hi")) effects: (io.stdout stream.write))
+  doc:
+  "Echo a message to stdout."
+  effects:
+  (io.stdout stream.write)
+  (do (io.stdout.println msg)))
+(defn main () void effects: (io.stdout stream.write) (do (echo "hi")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4335,8 +4396,8 @@ fn where_key_order_defines_positional_type_param_order() {
         format!(
             r#"(import m "{m}")
 (import io "{io}")
-(defn take (input (m.pair int64 str)) void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn take (input (m.pair int64 str)) void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             m = modpath,
             io = io,
@@ -4397,8 +4458,8 @@ fn record_type_alias_lowers_and_is_usable_in_signature() {
         &entry,
         format!(
             r#"(import io "{io}")
-(defn take-vec (input io.ciovec) void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn take-vec (input io.ciovec) void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4427,8 +4488,8 @@ fn tuple_type_alias_with_where_lowers() {
         format!(
             r#"(import io "{io}")
 (def pair (tuple a b) where: (a any b any))
-(defn take (input (pair int64 str)) void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn take (input (pair int64 str)) void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4454,8 +4515,8 @@ fn map_type_alias_with_where_lowers() {
         format!(
             r#"(import io "{io}")
 (def dict (map k v) where: (k any v any))
-(defn take (input (dict str int64)) void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn take (input (dict str int64)) void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4481,7 +4542,7 @@ fn interface_type_alias_with_where_lowers() {
         format!(
             r#"(import io "{io}")
 (def container (interface (value t)) where: (t any))
-(defn main () void (do (io.stdout.println "ok")) effects: (io.stdout stream.write))
+(defn main () void effects: (io.stdout stream.write) (do (io.stdout.println "ok")))
 "#,
             io = io.display().to_string().replace('\\', "/"),
         ),
@@ -4748,7 +4809,7 @@ fn defs_on_a_function_definition_is_rejected_with_e_defs_001() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        r#"(defn main () void (do) defs: ((defn nope () void (do))))
+        r#"(defn main () void defs: ((defn nope () void (do))) (do))
 "#,
     )
     .unwrap();
@@ -4822,7 +4883,7 @@ fn where_with_interface_bound_is_satisfied_at_call_site() {
       (method fmt (fn (self self) str (do (return "boxed"))))
     ))
   ))
-(defn identity-displayable (x t) t (do (return x)) where: (t display))
+(defn identity-displayable (x t) t where: (t display) (do (return x)))
 (defn
   main
   ()
@@ -4847,7 +4908,7 @@ fn where_bound_violation_at_call_site_is_rejected_with_e_bound_001() {
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
-(defn identity-displayable (x t) t (do (return x)) where: (t display))
+(defn identity-displayable (x t) t where: (t display) (do (return x)))
 (defn main () void (do (let v (identity-displayable int64 7))))
 "#,
     )
@@ -4865,7 +4926,7 @@ fn let_expr_nested_generic_bound_violations_are_rejected_with_e_bound_001() {
     fn program_with_let_expr(expr: &str) -> String {
         format!(
             r#"(def display (interface (fmt (fn-type (self self) str))))
-(defn needs-display (x t) t (do (return x)) where: (t display))
+(defn needs-display (x t) t where: (t display) (do (return x)))
 (def meter (newtype int64))
 (defn main () void (do (let result {expr})))
 "#
@@ -4903,7 +4964,7 @@ fn call_argument_nested_generic_bound_violations_are_rejected_with_e_bound_001()
     fn program_with_main_statement(statement: &str) -> String {
         format!(
             r#"(def display (interface (fmt (fn-type (self self) str))))
-(defn needs-display (x t) t (do (return x)) where: (t display))
+(defn needs-display (x t) t where: (t display) (do (return x)))
 (defn takes-record (rec (record (y int64))) void (do (let ignored 0)))
 (defn wrap-record (rec (record (y int64))) (record (y int64)) (do (return rec)))
 (defn main () void (do {statement}))
@@ -4979,7 +5040,7 @@ fn where_bound_intersect_requires_both_interfaces() {
       (method fmt (fn (self self) str (do (return "half"))))
     ))
   ))
-(defn both-iface (x t) t (do (return x)) where: (t (intersect display debug)))
+(defn both-iface (x t) t where: (t (intersect display debug)) (do (return x)))
 (defn
   main
   ()
@@ -5007,14 +5068,14 @@ fn where_bound_chain_requires_caller_to_declare_bound() {
     std::fs::write(
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
-(defn needs-display (x t) t (do (return x)) where: (t display))
+(defn needs-display (x t) t where: (t display) (do (return x)))
 (defn
   forwarder
   (x u)
   u
-  (do (let y (needs-display u x)) (return y))
-  where: (u any)
-)
+  where:
+  (u any)
+  (do (let y (needs-display u x)) (return y)))
 (defn main () void (do))
 "#,
     )
@@ -5128,9 +5189,9 @@ fn iface_qualified_call_on_generic_value_is_rejected_with_e_dispatch_001() {
   fmt-via-bound
   (x t)
   str
-  (do (let s (display.fmt x)) (return s))
-  where: (t display)
-)
+  where:
+  (t display)
+  (do (let s (display.fmt x)) (return s)))
 (defn main () void (do))
 "#,
     )
@@ -5252,7 +5313,7 @@ fn impl_on_a_function_definition_is_rejected_with_e_impl_001() {
         &entry,
         r#"(def display (interface (fmt (fn-type (self self) str))))
 (defn whatever (self self) str (do (return "whatever")))
-(defn main () void (do) impls: ((impl display methods: ((method fmt whatever)))))
+(defn main () void impls: ((impl display methods: ((method fmt whatever)))) (do))
 "#,
     )
     .unwrap();
@@ -5602,7 +5663,7 @@ fn defs_inherent_op_cannot_shadow_enclosing_type_param() {
         r#"(def holder (record (value t))
   where: (t any)
   defs: (
-    (defn bad (self self) self (do (return self)) where: (t any))
+    (defn bad (self self) self where: (t any) (do (return self)))
   ))
 "#,
     )
@@ -5637,11 +5698,11 @@ fn vibra_test_runs_top_level_test_declarations_without_main() {
         r#"(import test "@std/test.vib")
 (test.scenario
   "passes"
-  (test.case "passes" (do (test.assert true)) profile: @core)
+  (test.case "passes" profile: @core (do (test.assert true)))
 )
 (test.scenario
   "also-passes"
-  (test.case "also-passes" (do (test.assert true)) profile: @core)
+  (test.case "also-passes" profile: @core (do (test.assert true)))
 )
 "#,
     )
@@ -5681,7 +5742,7 @@ fn vibra_test_reports_assertion_failures() {
     std::fs::write(
         tests_dir.join("fails.vib"),
         r#"(import test "@std/test.vib")
-(test.scenario "fails" (test.case "fails" (do (test.assert false)) profile: @core))
+(test.scenario "fails" (test.case "fails" profile: @core (do (test.assert false))))
 "#,
     )
     .unwrap();
@@ -5721,7 +5782,7 @@ fn vibra_test_typed_equality_helpers_report_expected_and_actual_values() {
         r#"(import test "@std/test.vib")
 (test.scenario
   "fails"
-  (test.case "fails" (do (test.assert-eq-int 1 2)) profile: @core)
+  (test.case "fails" profile: @core (do (test.assert-eq-int 1 2)))
 )
 "#,
     )
@@ -5762,7 +5823,7 @@ fn vibra_test_writes_json_report_file() {
         r#"(import test "@std/test.vib")
 (test.scenario
   "passes"
-  (test.case "passes" (do (test.assert true)) profile: @core)
+  (test.case "passes" profile: @core (do (test.assert true)))
 )
 "#,
     )
@@ -5821,9 +5882,9 @@ fn module_part_test_file_shares_base_module_definitions() {
   "uses-base-function"
   (test.case
     "uses-base-function"
-    (do (let ready (is-ready)) (test.assert ready))
-    profile: @core
-  )
+    profile:
+    @core
+    (do (let ready (is-ready)) (test.assert ready)))
 )
 "#,
     )
@@ -6167,7 +6228,7 @@ fn vibra_fmt_rejects_yaml_comments() {
 fn vibra_fmt_json_output_is_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("ok.vib");
-    std::fs::write(&source, "(defn main () void unit)\n").unwrap();
+    std::fs::write(&source, "(defn main () void\n  unit)\n").unwrap();
 
     let output = vibra_cmd()
         .args(["fmt", &path_str(&source), "--format", "json"])
@@ -6208,6 +6269,81 @@ fn vibra_lint_defaults_to_json_and_reports_kebab_case_locations() {
     // carry a byte offset, unlike the legacy YAML-subset style diagnostics
     // this test exercised before the S-expression cutover.
     assert_eq!(diagnostic["span"]["start"]["offset"], 6);
+}
+
+#[test]
+fn vibra_lint_fix_rewrites_redundant_body_do_until_stable() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("fix.vib");
+    let original =
+        "(defn main () void (do ; retain this comment\n  (let _ true)\n  (let _ false)))\n";
+    std::fs::write(&source, original).unwrap();
+
+    let first = vibra_cmd()
+        .args(["lint", &path_str(&source), "--fix"])
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "lint --fix failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert!(report["summary"]["fixed"].as_u64().unwrap() >= 1);
+    let fixed = std::fs::read_to_string(&source).unwrap();
+    assert!(fixed.contains("retain this comment"));
+    assert!(!fixed.contains("(do"));
+
+    let second = vibra_cmd()
+        .args(["lint", &path_str(&source), "--fix"])
+        .output()
+        .unwrap();
+    assert!(second.status.success());
+    let second_report: serde_json::Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_eq!(second_report["summary"]["fixed"], 0);
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), fixed);
+}
+
+#[test]
+fn vibra_lint_fix_applies_result_and_unused_binding_edits() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let result = path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap());
+    let source = format!(
+        r#"(import result "{result}")
+(defn fallible () (result.result int64 str)
+  (return (result.from-ok int64 str 1)))
+(defn main () void
+  (fallible)
+  (let unused (fallible))
+  (let _ true))
+"#
+    );
+    let (dir, path) = write_scope_fixture(&source);
+
+    let first = vibra_cmd()
+        .args(["lint", &path_str(&path), "--fix"])
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "lint --fix failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert!(report["summary"]["fixed"].as_u64().unwrap() >= 2);
+    let fixed = std::fs::read_to_string(&path).unwrap();
+    assert!(!fixed.contains("unused"));
+    assert!(fixed.matches("(let _ (fallible))").count() >= 2);
+
+    let second = vibra_cmd()
+        .args(["lint", &path_str(&path), "--fix"])
+        .output()
+        .unwrap();
+    assert!(second.status.success());
+    let second_report: serde_json::Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_eq!(second_report["summary"]["fixed"], 0);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), fixed);
+    drop(dir);
 }
 
 #[test]
@@ -6393,7 +6529,7 @@ fn vibra_lint_sarif_reports_handle_lifecycle_related_location() {
     let source = dir.path().join("handle.vib");
     std::fs::write(
         &source,
-        "(defn main (resource (handle @write)) void (do (stream.manage.close resource) (stream.write.string resource \"late\")))\n",
+        "(defn main (resource (handle @write)) void (stream.manage.close resource) (stream.write.string resource \"late\"))\n",
     )
     .unwrap();
 
@@ -6627,7 +6763,7 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
 
     std::fs::write(
         &entry,
-        "(test.scenario \"passes\" (test.case \"passes\" (do) profile: @core))\n",
+        "(test.scenario \"passes\" (test.case \"passes\" profile: @core (do)))\n",
     )
     .unwrap();
     let program = vibra::load::load_program(&entry).unwrap();
@@ -6652,12 +6788,12 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
         ),
         (
             "test args",
-            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @core args: void))\n",
+            "(test.scenario \"bad\" (test.case \"bad\" profile: @core args: void (do)))\n",
             "E-SYN-011",
         ),
         (
             "test return",
-            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @core return: void))\n",
+            "(test.scenario \"bad\" (test.case \"bad\" profile: @core return: void (do)))\n",
             "E-SYN-011",
         ),
         // A string where the profile symbol is required (the closest
@@ -6685,11 +6821,11 @@ fn test_envelope_uses_sibling_do_and_rejects_legacy_or_function_fields() {
     for (name, source) in [
         (
             "uppercase test profile",
-            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @Core))\n",
+            "(test.scenario \"bad\" (test.case \"bad\" profile: @Core (do)))\n",
         ),
         (
             "underscored test profile",
-            "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @core_profile))\n",
+            "(test.scenario \"bad\" (test.case \"bad\" profile: @core_profile (do)))\n",
         ),
     ] {
         std::fs::write(&entry, source).unwrap();
@@ -6711,17 +6847,21 @@ fn test_discovery_exposes_canonical_selection_metadata() {
   "fast"
   (test.case
     "fast"
-    (do)
-    profile: @core
-    tags: (@language @fast)
-    timeout-ms: 25
-    random-seed: 42
-    clock: (@fixed 1000 7)
-  )
+    profile:
+    @core
+    tags:
+    (@language @fast)
+    timeout-ms:
+    25
+    random-seed:
+    42
+    clock:
+    (@fixed 1000 7)
+    (do))
 )
 (test.scenario
   "skipped"
-  (test.case "skipped" (do) profile: @fs tags: (@filesystem) skip: "needs a sandbox")
+  (test.case "skipped" profile: @fs tags: (@filesystem) skip: "needs a sandbox" (do))
 )
 "#,
     )
@@ -6758,8 +6898,8 @@ fn test_discovery_rejects_invalid_selection_metadata() {
     // the reader's raw (untrimmed) emptiness check -- both still reach
     // legacy's E-TEST-001 selection-metadata validation.
     for source in [
-        "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @core tags: (@one @one)))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) skip: \"   \"))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" profile: @core tags: (@one @one) (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" skip: \"   \" (do)))\n",
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
@@ -6780,12 +6920,12 @@ fn test_discovery_rejects_invalid_selection_metadata() {
     // a rejection case here (kebab-case violations are lint warnings, per
     // `warns_for_non_kebab_case_symbols`, not load/lower errors).
     for source in [
-        "(test.scenario \"bad\" (test.case \"bad\" (do) timeout-ms: 0))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) skip: \"\"))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) random-seed: -1))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) clock: nope))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) clock: (@fixed 1)))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) clock: (@fixed 1 2 3)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" timeout-ms: 0 (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" skip: \"\" (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" random-seed: -1 (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" clock: nope (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" clock: (@fixed 1) (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" clock: (@fixed 1 2 3) (do)))\n",
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
@@ -6910,7 +7050,7 @@ fn test_discovery_trims_skip_reason_and_closes_profile_diagnostic() {
     let entry = dir.path().join("entry.vib");
     std::fs::write(
         &entry,
-        "(test.scenario \"skipped\" (test.case \"skipped\" (do) skip: \"  pending fixture  \"))\n",
+        "(test.scenario \"skipped\" (test.case \"skipped\" skip: \"  pending fixture  \" (do)))\n",
     )
     .unwrap();
     let program = vibra::load::load_program(&entry).unwrap();
@@ -6919,7 +7059,7 @@ fn test_discovery_trims_skip_reason_and_closes_profile_diagnostic() {
 
     std::fs::write(
         &entry,
-        "(test.scenario \"bad\" (test.case \"bad\" (do) profile: @Not-Kebab))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" profile: @Not-Kebab (do)))\n",
     )
     .unwrap();
     let err = vibra::load::load_program(&entry).unwrap_err();
@@ -6927,7 +7067,7 @@ fn test_discovery_trims_skip_reason_and_closes_profile_diagnostic() {
 
     std::fs::write(
         &entry,
-        "(test.scenario \"bad\" (test.case \"bad\" (do) profile: core))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" profile: core (do)))\n",
     )
     .unwrap();
     let err = vibra::load::load_program(&entry).unwrap_err();
@@ -6947,11 +7087,11 @@ fn test_discovery_rejects_malformed_expected_error_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("entry.vib");
     for source in [
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: compile))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@compile)))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@runtime E-RUNTIME-001)))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@unknown \"nope\")))\n",
-        "(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@compile E-OPTION-001 \"a\" \"b\")))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" expect-error: compile (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" expect-error: (@compile) (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" expect-error: (@runtime E-RUNTIME-001) (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" expect-error: (@unknown \"nope\") (do)))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" expect-error: (@compile E-OPTION-001 \"a\" \"b\") (do)))\n",
     ] {
         std::fs::write(&entry, source).unwrap();
         let err = match vibra::load::load_program(&entry) {
@@ -6986,7 +7126,7 @@ fn vibra_test_matches_structured_expected_errors() {
         format!(
             r#"(import test "{test_lib}")
 (def legacy (union void str))
-(test.scenario "compile-error" (test.case "compile-error" (do) expect-error: (@compile E-OPTION-001 "removed")))
+(test.scenario "compile-error" (test.case "compile-error" expect-error: (@compile E-OPTION-001 "removed") (do)))
 "#,
             test_lib = path_str(&test_lib),
         ),
@@ -7013,7 +7153,7 @@ fn vibra_test_matches_structured_expected_errors() {
         &runtime_entry,
         format!(
             r#"(import test "{test_lib}")
-(test.scenario "runtime-error" (test.case "runtime-error" (test.assert false) expect-error: (@runtime "assertion failed")))
+(test.scenario "runtime-error" (test.case "runtime-error" expect-error: (@runtime "assertion failed") (test.assert false)))
 "#,
             test_lib = path_str(&test_lib),
         ),
@@ -7038,7 +7178,7 @@ fn vibra_test_matches_load_error_before_imports_are_recursively_loaded() {
     let imported = dir.path().join("cycle.vib");
     std::fs::write(
         &entry,
-        "(import cycle \"cycle.vib\")\n(test.scenario \"load-error\" (test.case \"load-error\" (do) expect-error: (@load E-MOD-003)))\n",
+        "(import cycle \"cycle.vib\")\n(test.scenario \"load-error\" (test.case \"load-error\" expect-error: (@load E-MOD-003) (do)))\n",
     )
     .unwrap();
     std::fs::write(&imported, "(import entry \"load-error.vib\")\n").unwrap();
@@ -7066,7 +7206,7 @@ fn vibra_test_reports_expected_error_mismatches_from_the_parent() {
     let entry = dir.path().join("expected-error-mismatch.vib");
     std::fs::write(
         &entry,
-        "(test.scenario \"passes\" (test.case \"passes\" (do) expect-error: (@compile E-OPTION-001)))\n",
+        "(test.scenario \"passes\" (test.case \"passes\" expect-error: (@compile E-OPTION-001) (do)))\n",
     )
     .unwrap();
 
@@ -7089,20 +7229,20 @@ fn vibra_test_reports_phase_code_and_message_expectation_mismatches() {
         (
             "wrong-phase.vib",
             format!(
-                "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" (test.assert false) expect-error: (@compile E-OPTION-001)))\n",
+                "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" expect-error: (@compile E-OPTION-001) (test.assert false)))\n",
                 path_str(&test_lib)
             ),
             "expected compile error, but test failed during runtime",
         ),
         (
             "wrong-code.vib",
-            "(def legacy (union void str))\n(test.scenario \"bad\" (test.case \"bad\" (do) expect-error: (@compile E-CALL-001)))\n".to_string(),
+            "(def legacy (union void str))\n(test.scenario \"bad\" (test.case \"bad\" expect-error: (@compile E-CALL-001) (do)))\n".to_string(),
             "expected compile error code `E-CALL-001`, got `E-OPTION-001`",
         ),
         (
             "wrong-message.vib",
             format!(
-                "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" (test.assert false) expect-error: (@runtime \"expected different runtime error\")))\n",
+                "(import test \"{}\")\n(test.scenario \"bad\" (test.case \"bad\" expect-error: (@runtime \"expected different runtime error\") (test.assert false)))\n",
                 path_str(&test_lib)
             ),
             "expected runtime error message to contain `expected different runtime error`",
@@ -7129,9 +7269,9 @@ fn vibra_test_selects_profiles_and_tags_and_reports_skips() {
     std::fs::write(
         &entry,
         r#"(test.scenario "selection"
-  (test.case "core-language" (do) tags: (@language @fast))
-  (test.case "fs-language" (do) profile: @fs tags: (@language @filesystem))
-  (test.case "skipped-core" (do) tags: (@language) skip: "external fixture unavailable"))
+  (test.case "core-language" tags: (@language @fast) (do))
+  (test.case "fs-language" profile: @fs tags: (@language @filesystem) (do))
+  (test.case "skipped-core" tags: (@language) skip: "external fixture unavailable" (do)))
 "#,
     )
     .unwrap();
@@ -7191,7 +7331,7 @@ fn vibra_test_deny_skips_fails_after_reporting_selected_skip() {
     let entry = dir.path().join("skip.vib");
     std::fs::write(
         &entry,
-        "(test.scenario \"skipped\" (test.case \"skipped\" (do) skip: \"pending\"))\n",
+        "(test.scenario \"skipped\" (test.case \"skipped\" skip: \"pending\" (do)))\n",
     )
     .unwrap();
     let output = vibra_cmd()
@@ -7214,7 +7354,7 @@ fn vibra_test_caps_command_timeout_with_test_metadata() {
     let entry = dir.path().join("timeout.vib");
     std::fs::write(
         &entry,
-        "(test.scenario \"slow\" (test.case \"slow\" (while true (do)) timeout-ms: 1))\n",
+        "(test.scenario \"slow\" (test.case \"slow\" timeout-ms: 1 (while true (do))))\n",
     )
     .unwrap();
     let output = vibra_cmd()
@@ -7237,7 +7377,7 @@ fn vibra_test_caps_command_timeout_with_test_metadata() {
 fn vibra_test_temp_workspace_requires_explicit_opt_in_and_reports_the_skip() {
     let dir = tempfile::tempdir().unwrap();
     let entry = dir.path().join("workspace.vib");
-    std::fs::write(&entry, "(test.scenario \"needs-workspace\" (test.case \"needs-workspace\" (do) workspace: @temp))\n").unwrap();
+    std::fs::write(&entry, "(test.scenario \"needs-workspace\" (test.case \"needs-workspace\" workspace: @temp (do)))\n").unwrap();
 
     let skipped = vibra_cmd()
         .args(["test", &path_str(&entry), "--format", "human"])
@@ -7282,7 +7422,7 @@ fn vibra_test_workspace_metadata_rejects_unknown_values() {
     // E-TEST-001 check -- same rule, earlier enforcement point.
     std::fs::write(
         &entry,
-        "(test.scenario \"bad\" (test.case \"bad\" (do) workspace: @persistent))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" workspace: @persistent (do)))\n",
     )
     .unwrap();
     let error = vibra::load::load_program(&entry).unwrap_err();
@@ -7290,7 +7430,7 @@ fn vibra_test_workspace_metadata_rejects_unknown_values() {
 
     std::fs::write(
         &entry,
-        "(test.scenario \"bad\" (test.case \"bad\" (do) workspace: temp))\n",
+        "(test.scenario \"bad\" (test.case \"bad\" workspace: temp (do)))\n",
     )
     .unwrap();
     let error = vibra::load::load_program(&entry).unwrap_err();
@@ -7358,7 +7498,10 @@ fn vibra_test_temp_workspace_runs_fs_operations_relative_to_the_temp_cwd() {
 (import fs "{fs_lib}")
 (import result "{result_lib}")
 (test.scenario "workspace"
-  (test.case "workspace-read-write"
+  (test.case
+    "workspace-read-write"
+    workspace:
+    @temp
     (do
     (let path (fs.path.new "workspace-created"))
     (let created (fs.write.create-dirs path))
@@ -7370,8 +7513,7 @@ fn vibra_test_temp_workspace_runs_fs_operations_relative_to_the_temp_cwd() {
   (do (test.fail "workspace write failed"))
 )
      (let readable (fs.metadata.exists path))
-    (test.assert readable))
-    workspace: @temp))
+    (test.assert readable))))
 "#,
             result_lib =
                 path_str(&std::fs::canonicalize(root.join("stdlib/src/result.vib")).unwrap()),
@@ -7592,6 +7734,8 @@ fn guest_stdout_write_failure_yields_matchable_fs_error_io() {
   main
   ()
   void
+  effects:
+  (io.stdout stream.write)
   (do
     (let r (io.stdout.println "line that cannot be written"))
     (match
@@ -7607,9 +7751,7 @@ fn guest_stdout_write_failure_yields_matchable_fs_error_io() {
           )
         )
     )
-  )
-  effects: (io.stdout stream.write)
-)
+  ))
 "#,
             fs = path_str(&fs),
             result = path_str(&result),
@@ -7718,6 +7860,8 @@ fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
   main
   ()
   void
+  effects:
+  (fs.write stream.write stream.manage)
   (do
     (let pa (fs.path.new "{a}"))
     (let pb (fs.path.new "{b}"))
@@ -7764,9 +7908,7 @@ fn fs_open_handle_limit_is_enforced_and_freed_by_close() {
         )
       (result.result.err (bind oa-err)) (do)
     )
-  )
-  effects: (fs.write stream.write stream.manage)
-)
+  ))
 "#,
             fs = fs.display().to_string().replace('\\', "/"),
             result = result.display().to_string().replace('\\', "/"),
@@ -7820,6 +7962,8 @@ fn closed_file_aliases_return_stable_typed_lifecycle_errors() {
   main
   ()
   void
+  effects:
+  (fs.write stream.write stream.manage)
   (do
     (let path (fs.path.new "{target}"))
     (let opened (fs.write.open path))
@@ -7846,9 +7990,7 @@ fn closed_file_aliases_return_stable_typed_lifecycle_errors() {
       (result.result.err (bind _oa-err))
       (test.fail "lifecycle fixture could not open file")
     )
-  )
-  effects: (fs.write stream.write stream.manage)
-)
+  ))
 "#,
             fs = path_str(&fs),
             result = path_str(&result),
@@ -7887,6 +8029,8 @@ fn injected_clock_and_environment_are_deterministic_and_isolated() {
   main
   ()
   void
+  effects:
+  (env.read env.write time.now time.sleep)
   (do
     (let wall (time.now.unix-millis))
     (match
@@ -7914,9 +8058,7 @@ fn injected_clock_and_environment_are_deterministic_and_isolated() {
       (result.result.ok "changed") (do)
       _ (test.fail "injected-env-read-was-not-isolated")
     )
-  )
-     effects: (env.read env.write time.now time.sleep)
-)
+  ))
 "#,
             env_mod = path_str(&env_mod),
             time_mod = path_str(&time_mod),

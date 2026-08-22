@@ -1,74 +1,48 @@
 (import test "../stdlib/src/test.vib")
-(defn increment (value (mut int64)) int64 (set value 4) (return value))
+(defn increment (value (mut int64)) int64
+  (set value 4)
+  (return value))
 (test.scenario
   "mutable-set-and-copy"
   (test.case
     "mutable-set-and-copy"
+    profile: @core
     (let count (mut 0))
     (let snapshot count)
     (set count 1)
-    (match
-      snapshot
-      0
-      (do (test.assert true))
-      _
-      (do (test.fail "mutable read did not copy"))
-    )
-    (match
-      count
-      1
-      (do (test.assert true))
-      _
-      (do (test.fail "set did not update mutable binding"))
-    )
-    profile: @core
-  )
-)
+    (match snapshot
+      0 (test.assert true)
+      _ (test.fail "mutable read did not copy"))
+    (match count
+      1 (test.assert true)
+      _ (test.fail "set did not update mutable binding"))))
 (test.scenario
   "mutable-ref-writes-through"
   (test.case
     "mutable-ref-writes-through"
+    profile: @core
     (let count (mut 0))
     (let writer (ref (mut count)))
     (set writer 2)
-    (match
-      count
-      2
-      (do (test.assert true))
-      _
-      (do (test.fail "mutable ref did not update pointee"))
-    )
-    profile: @core
-  )
-)
+    (match count
+      2 (test.assert true)
+      _ (test.fail "mutable ref did not update pointee"))))
 (test.scenario
   "mutable-ref-temporary"
   (test.case
     "mutable-ref-temporary"
+    profile: @core
     (let writer (ref (mut 0)))
     (set writer 3)
-    (match
-      writer
-      3
-      (do (test.assert true))
-      _
-      (do (test.fail "mutable temporary ref did not retain storage"))
-    )
-    profile: @core
-  )
-)
+    (match writer
+      3 (test.assert true)
+      _ (test.fail "mutable temporary ref did not retain storage"))))
 (test.scenario
   "mutable-argument"
   (test.case
     "mutable-argument"
-    (let result (increment (mut 0)))
-    (match
-      result
-      4
-      (do (test.assert true))
-      _
-      (do (test.fail "mutable argument was not writable"))
-    )
     profile: @core
-  )
-)
+    (let result (increment (mut 0)))
+    (match result
+      4 (test.assert true)
+      _ (test.fail "mutable argument was not writable"))))

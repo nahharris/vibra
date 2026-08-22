@@ -5,59 +5,41 @@
   "construct-and-match-payload"
   (test.case
     "construct-and-match-payload"
-    (let s (signal.go 3))
-    (match
-      s
-      (signal.go (bind speed))
-      (do (match speed 3 (test.assert true) _ (test.fail "wrong payload")))
-      (signal.stop)
-      (do (test.fail "expected go"))
-    )
     profile: @core
-  )
-)
+    (let s (signal.go 3))
+    (match s
+      (signal.go (bind speed))
+        (match speed
+          3 (test.assert true)
+          _ (test.fail "wrong payload"))
+      (signal.stop) (test.fail "expected go"))))
 (test.scenario
   "void-variant-constructor"
   (test.case
     "void-variant-constructor"
-    (let s signal.stop)
-    (match
-      s
-      (signal.stop)
-      (do (test.assert true))
-      (signal.go _)
-      (do (test.fail "expected stop"))
-    )
     profile: @core
-  )
-)
+    (let s signal.stop)
+    (match s
+      (signal.stop) (test.assert true)
+      (signal.go _) (test.fail "expected stop"))))
 (test.scenario
   "option-like-some"
   (test.case
     "option-like-some"
-    (let v (opt.some "hi"))
-    (match
-      v
-      (opt.some (bind text))
-      (do (match text "hi" (test.assert true) _ (test.fail "wrong text")))
-      (opt.none)
-      (do (test.fail "expected some"))
-    )
     profile: @core
-  )
-)
+    (let v (opt.some "hi"))
+    (match v
+      (opt.some (bind text))
+        (match text
+          "hi" (test.assert true)
+          _ (test.fail "wrong text"))
+      (opt.none) (test.fail "expected some"))))
 (test.scenario
   "option-like-none"
   (test.case
     "option-like-none"
-    (let v opt.none)
-    (match
-      v
-      (opt.some _)
-      (do (test.fail "expected none"))
-      (opt.none)
-      (do (test.assert true))
-    )
     profile: @core
-  )
-)
+    (let v opt.none)
+    (match v
+      (opt.some _) (test.fail "expected none")
+      (opt.none) (test.assert true))))

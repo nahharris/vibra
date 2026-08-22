@@ -15,12 +15,12 @@ fn docs_resolves_local_and_imported_symbols_in_all_formats() {
     let main = dir.path().join("main.vib");
     std::fs::write(
         &helper,
-        "(defn greet (name str) str\n  (return name)\n  doc: \"Return a friendly greeting.\\n\\n```vibra\\n$helper.greet: {name: Vibra}\\n```\\n\")\n",
+        "(defn greet (name str) str\n  doc: \"Return a friendly greeting.\\n\\n```vibra\\n$helper.greet: {name: Vibra}\\n```\\n\"\n  (return name))\n",
     )
     .unwrap();
     std::fs::write(
         &main,
-        "(import helper \"./helper.vib\")\n(defn main () void (do) doc: \"Run the example application.\")\n",
+        "(import helper \"./helper.vib\")\n(defn main () void doc: \"Run the example application.\" (do))\n",
     )
     .unwrap();
 
@@ -822,7 +822,7 @@ fn static_wasm_scalar_executes_from_source_and_deterministic_vapp() {
     (value int32)
     void
     (do (wasm "@math" "assert_42" value))))
-(defn main () void (do (let answer (ffi.foreign-sum 20 22)) (ffi.foreign-assert answer)) effects: (main.ffi))
+(defn main () void effects: (main.ffi) (do (let answer (ffi.foreign-sum 20 22)) (ffi.foreign-assert answer)))
 "#,
     )
     .unwrap();
@@ -971,8 +971,8 @@ fn static_wasm_caller_owned_utf8_buffer_executes_from_source_and_vapp() {
   main
   ()
   void
-  (do (let status (ffi.foreign-status "Vï")) (ffi.foreign-assert status))
   effects: (main.ffi)
+  (do (let status (ffi.foreign-status "Vï")) (ffi.foreign-assert status))
 )
 "#,
     )

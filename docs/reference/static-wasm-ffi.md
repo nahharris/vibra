@@ -14,12 +14,9 @@ and traversal are rejected. The dependency alias is the stable module name:
 
 ```vibra
 (deffect ffi
-  (defn
-    foreign-sum
-    (left int32 right int32)
-    int32
-    (wasm "@math" "sum" left right)
-    effects: ()))
+  (defn foreign-sum (left int32 right int32) int32
+    effects: ()
+    (wasm "@math" "sum" left right)))
 ```
 
 The visible `wasm` form is the explicit unsafe boundary and is restricted to

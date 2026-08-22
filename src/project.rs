@@ -1576,7 +1576,7 @@ fn write_bin_template(root: &Path, name: &str) -> Result<()> {
     fs::create_dir_all(&src)?;
     fs::write(
         src.join("main.vib"),
-        "(import io \"@std/io.vib\")\n(defn main () void (do (io.stdout.println \"Hello, World!\")) effects: (io.stdout stream.write))\n",
+        "(import io \"@std/io.vib\")\n(defn main () void effects: (io.stdout stream.write) (io.stdout.println \"Hello, World!\"))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),
@@ -1605,7 +1605,7 @@ fn write_workspace_template(root: &Path, name: &str) -> Result<()> {
     )?;
     fs::write(
         root.join("src").join(name).join("main.vib"),
-        "(import io \"@std/io.vib\")\n(import core \"@core/lib.vib\")\n(defn main () void (do (io.stdout.println core.message)) effects: (io.stdout stream.write))\n",
+        "(import io \"@std/io.vib\")\n(import core \"@core/lib.vib\")\n(defn main () void effects: (io.stdout stream.write) (io.stdout.println core.message))\n",
     )?;
     fs::write(
         root.join(MANIFEST_FILE),

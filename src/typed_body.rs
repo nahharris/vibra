@@ -2307,11 +2307,13 @@ fn lower_statement(
             callee,
             arguments,
             type_arguments,
+            type_arguments_position,
         } => match lower_typed_call(
             module_alias,
             &callee.value,
             arguments,
             type_arguments,
+            *type_arguments_position,
             signatures,
             declared_aliases,
             generics,
@@ -2329,11 +2331,13 @@ fn lower_statement(
                     callee,
                     arguments,
                     type_arguments,
+                    type_arguments_position,
                 } => match lower_typed_call(
                     module_alias,
                     &callee.value,
                     arguments,
                     type_arguments,
+                    *type_arguments_position,
                     signatures,
                     declared_aliases,
                     generics,
@@ -2457,11 +2461,13 @@ fn lower_expr(
             callee,
             arguments,
             type_arguments,
+            type_arguments_position,
         } => match lower_typed_call(
             module_alias,
             &callee.value,
             arguments,
             type_arguments,
+            *type_arguments_position,
             signatures,
             declared_aliases,
             generics,
@@ -2674,6 +2680,7 @@ fn lower_call(
     callee: &str,
     arguments: &[CallArgument],
     type_arguments: &[crate::ast::TypeExpr],
+    type_arguments_position: Option<usize>,
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
@@ -2702,7 +2709,8 @@ fn lower_call(
         .functions
         .get(&callee_key)
         .with_context(|| format!("missing typed signature for `{callee_key}`"))?;
-    let bound_arguments = bind_call_arguments(callee, arguments, signature)?;
+    let bound_arguments =
+        bind_call_arguments(callee, arguments, signature, type_arguments_position)?;
     let source_args = bound_arguments
         .source
         .iter()
@@ -2785,6 +2793,7 @@ fn bind_call_arguments<'a>(
     callee: &str,
     arguments: &'a [CallArgument],
     signature: &TypedFunctionSignature,
+    type_arguments_position: Option<usize>,
 ) -> Result<BoundCallArguments<'a>> {
     let variadic = signature
         .parameters
@@ -2831,10 +2840,18 @@ fn bind_call_arguments<'a>(
     let mut tail = Vec::new();
     let mut source = Vec::with_capacity(arguments.len());
     let mut next_fixed = 0;
+    let mut saw_label = false;
+    let mut saw_variadic = false;
 
-    for argument in arguments {
+    for (source_index, argument) in arguments.iter().enumerate() {
         match argument {
             CallArgument::Labelled { label, value } => {
+                if saw_variadic {
+                    bail!(
+                        "E-SYN-013: typed call `{callee}` labelled arguments must precede variadic arguments; `{}` appears after the variadic tail",
+                        label.value
+                    );
+                }
                 let Some(index) = signature.parameters[..fixed_count]
                     .iter()
                     .position(|parameter| parameter.name == label.value)
@@ -2868,12 +2885,20 @@ fn bind_call_arguments<'a>(
                 while next_fixed < fixed_count && fixed[next_fixed].is_some() {
                     next_fixed += 1;
                 }
+                saw_label = true;
             }
             CallArgument::Positional(value) => {
+                let types_before =
+                    type_arguments_position.is_some_and(|position| source_index >= position);
                 while next_fixed < fixed_count
                     && (fixed[next_fixed].is_some() || reserved_fixed[next_fixed])
                 {
                     next_fixed += 1;
+                }
+                if (saw_label || types_before) && next_fixed < fixed_count {
+                    bail!(
+                        "E-SYN-013: typed call `{callee}` fixed positional arguments must precede labelled arguments"
+                    );
                 }
                 if next_fixed < fixed_count {
                     source.push(BoundSourceArgument {
@@ -2883,6 +2908,7 @@ fn bind_call_arguments<'a>(
                     fixed[next_fixed] = Some(value);
                     next_fixed += 1;
                 } else if variadic {
+                    saw_variadic = true;
                     tail.push(value);
                     source.push(BoundSourceArgument {
                         value,
@@ -3315,6 +3341,7 @@ fn lower_typed_call(
     callee: &str,
     arguments: &[CallArgument],
     type_arguments: &[crate::ast::TypeExpr],
+    type_arguments_position: Option<usize>,
     signatures: &TypedSignatureIndex,
     declared_aliases: &BTreeSet<String>,
     generics: &BTreeSet<String>,
@@ -3324,7 +3351,14 @@ fn lower_typed_call(
         .iter()
         .map(|argument| argument.value().clone())
         .collect::<Vec<_>>();
+    let has_labelled_argument = arguments
+        .iter()
+        .any(|argument| matches!(argument, CallArgument::Labelled { .. }));
     if let Some((op, arity)) = typed_primitive_head(callee) {
+        if type_arguments_position.is_some() || !type_arguments.is_empty() || has_labelled_argument
+        {
+            bail!("E-SYN-013: primitive `{callee}` accepts only fixed positional operands");
+        }
         return Ok(TypedCallResolution::Expr(lower_primitive_call(
             module_alias,
             callee,
@@ -3338,6 +3372,10 @@ fn lower_typed_call(
         )?));
     }
     if let Some((enum_key, tag)) = typed_enum_constructor_head(callee, module_alias, signatures) {
+        if type_arguments_position.is_some() || !type_arguments.is_empty() || has_labelled_argument
+        {
+            bail!("E-SYN-013: enum constructor `{callee}` accepts only fixed positional operands");
+        }
         return Ok(TypedCallResolution::Expr(lower_enum_constructor_call(
             module_alias,
             &enum_key,
@@ -3354,6 +3392,7 @@ fn lower_typed_call(
         callee,
         arguments,
         type_arguments,
+        type_arguments_position,
         signatures,
         declared_aliases,
         generics,
@@ -3800,9 +3839,13 @@ mod tests {
     fn lowers_and_materializes_native_deffect_intrinsics() {
         let source = module(
             r#"(deffect now
-  (defn unix-millis () uint64
-    (intrinsic @clock-now-unix-millis)
-    effects: ()))"#,
+  (defn
+    unix-millis
+    ()
+    uint64
+    effects:
+    ()
+    (intrinsic @clock-now-unix-millis)))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "time",
@@ -4037,7 +4080,7 @@ mod tests {
   (do (let cell (mut value)) (set cell 9) (return cell))
 )
 (defn forward (value int64) int64 (do (return (choose true value answer))))
-(defn observe (value int64) void (do (task (do value) captures: (value))))
+(defn observe (value int64) void (do (task captures: (value) (do value))))
 (defn
   loop-over
   (value int64)
@@ -4179,7 +4222,7 @@ mod tests {
         for source in [
             "(defn bad (value int64) int64 (do (return missing)))",
             "(defn bad (value int64) bool (do (return value)))",
-            "(defn bad (value t) t (do (return value)) where: (t any))",
+            "(defn bad (value t) t where: (t any) (do (return value)))",
             "(defn
   bad
   (value int64)
@@ -4193,7 +4236,7 @@ mod tests {
   bad
   (value int64)
   void
-  (do (let cell (mut value)) (task (do cell) captures: (cell)))
+  (do (let cell (mut value)) (task captures: (cell) (do cell)))
 )",
             "(defn target (value int64) int64 (do (return value))) (defn bad () int64 (do (return (target true))))",
         ] {
@@ -4235,7 +4278,7 @@ mod tests {
         let library = module(
             r#"(defn echo (value int64) int64 (do (return value)))
 (const answer int64 42)
-(defn hidden (value int64) int64 (do (return value)) visibility: @private)
+(defn hidden (value int64) int64 visibility: @private (do (return value)))
 (const secret int64 7 visibility: @private)"#,
         );
         let entry = module(
@@ -5773,7 +5816,7 @@ mod tests {
             r#"(defn target (first int64 second int64 rest... int64) int64
   (return first))
 (defn caller () int64
-  (return (target second: 2 1 3 4)))"#,
+  (return (target 1 second: 2 3 4)))"#,
         );
         let inputs = [TypedModuleInput {
             alias: "",
@@ -5797,11 +5840,11 @@ mod tests {
         assert!(matches!(tail[1], Expr::Value(RuntimeValue::Int(4))));
         assert!(matches!(
             call.source_args[0],
-            Expr::Value(RuntimeValue::Int(2))
+            Expr::Value(RuntimeValue::Int(1))
         ));
         assert!(matches!(
             call.source_args[1],
-            Expr::Value(RuntimeValue::Int(1))
+            Expr::Value(RuntimeValue::Int(2))
         ));
         assert!(matches!(
             call.source_args[2],
@@ -5814,8 +5857,8 @@ mod tests {
         assert!(matches!(
             call.argument_targets.as_slice(),
             [
-                crate::lower::CallArgumentTarget::Fixed(1),
                 crate::lower::CallArgumentTarget::Fixed(0),
+                crate::lower::CallArgumentTarget::Fixed(1),
                 crate::lower::CallArgumentTarget::Variadic,
                 crate::lower::CallArgumentTarget::Variadic
             ]
@@ -5823,7 +5866,7 @@ mod tests {
     }
 
     #[test]
-    fn labelled_arguments_after_variadic_values_remain_valid_calls() {
+    fn labelled_arguments_after_variadic_values_are_rejected() {
         let source = module(
             r#"(defn target (first int64 second int64 label-1 int64 rest... int64) int64
   (return label-1))
@@ -5835,32 +5878,9 @@ mod tests {
             module: &source,
         }];
         let signatures = crate::typed_lower::lower_typed_signatures(inputs).unwrap();
-        let bodies = lower_typed_bodies(inputs, &signatures).unwrap();
-        let FunctionBody::User { statements } = &bodies.functions["caller"] else {
-            panic!("expected user body");
-        };
-        let Statement::Return(Expr::Call { call, .. }) = &statements[0] else {
-            panic!("expected returned call");
-        };
-        assert!(matches!(call.args[0], Expr::Value(RuntimeValue::Int(1))));
-        assert!(matches!(call.args[1], Expr::Value(RuntimeValue::Int(2))));
-        assert!(matches!(call.args[2], Expr::Value(RuntimeValue::Int(4))));
-        let Expr::Array(tail) = &call.args[3] else {
-            panic!("expected one array operand for variadic tail");
-        };
-        assert!(matches!(
-            tail.as_slice(),
-            [Expr::Value(RuntimeValue::Int(3))]
-        ));
-        assert!(matches!(
-            call.argument_targets.as_slice(),
-            [
-                crate::lower::CallArgumentTarget::Fixed(0),
-                crate::lower::CallArgumentTarget::Fixed(1),
-                crate::lower::CallArgumentTarget::Variadic,
-                crate::lower::CallArgumentTarget::Fixed(2)
-            ]
-        ));
+        let error = lower_typed_bodies(inputs, &signatures)
+            .expect_err("labels after variadic values must be rejected");
+        assert!(format!("{error:#}").contains("labelled arguments must precede variadic arguments"));
     }
 
     #[test]

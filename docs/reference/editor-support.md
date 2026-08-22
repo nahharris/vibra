@@ -1,9 +1,13 @@
 # Editor support
 
 `vibra lsp` is a standard input/output language server. It provides diagnostics,
-completion, hover documentation, definitions, references, and whole-document
-formatting. Start the editor from a directory containing `project.vib`, or
-open that directory as the workspace root.
+completion, hover documentation, definitions, references, whole-document
+formatting, and `textDocument/codeAction` quick fixes. Start the editor from a
+directory containing `project.vib`, or open that directory as the workspace root.
+
+Code actions expose the same typed safe edits as the CLI for redundant `do`
+blocks, unused binders, and discarded result values. The server never writes a
+file for a code action; the editor applies the returned workspace edit.
 
 ## Visual Studio Code
 

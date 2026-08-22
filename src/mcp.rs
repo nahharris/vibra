@@ -298,8 +298,17 @@ impl Server {
     }
 
     fn run_lint(&self, args: &Map<String, Value>) -> ToolResult {
-        reject_unknown(args, &["paths", "categories", "severity", "denyWarnings"])?;
+        reject_unknown(
+            args,
+            &["paths", "categories", "severity", "denyWarnings", "fix"],
+        )?;
         self.validate_read_graph()?;
+        let fix = optional_bool(args, "fix")?.unwrap_or(false);
+        if fix && !self.allow_write {
+            return Err(permission_denied(
+                "vibra.lint fix mode requires starting vibra mcp with --allow-write",
+            ));
+        }
         let paths = path_array(args, "paths")?;
         let categories = string_array(args, "categories")?;
         for category in &categories {
@@ -331,6 +340,9 @@ impl Server {
         }
         if optional_bool(args, "denyWarnings")?.unwrap_or(false) {
             command.push("--deny-warnings".to_owned());
+        }
+        if fix {
+            command.push("--fix".to_owned());
         }
         command.extend(["--format".to_owned(), "json".to_owned()]);
         self.cli_json_owned(&command)
@@ -793,7 +805,10 @@ fn collect_workspace_files(
         })?;
         let path = entry.path();
         let name = entry.file_name();
-        if matches!(name.to_str(), Some(".git" | "target")) {
+        if matches!(
+            name.to_str(),
+            Some(".git" | ".worktrees" | ".agents" | "target" | "tmp" | "dep")
+        ) {
             continue;
         }
         let metadata = fs::symlink_metadata(&path).map_err(|error| ToolFailure {
@@ -883,7 +898,8 @@ fn tool_definitions() -> Vec<Value> {
             "paths": paths,
             "categories": {"type": "array", "items": {"enum": ["style", "syntax", "compile"]}},
             "severity": {"enum": ["error", "warning", "info", "hint"]},
-            "denyWarnings": {"type": "boolean", "default": false}
+            "denyWarnings": {"type": "boolean", "default": false},
+            "fix": {"type": "boolean", "default": false}
         }))),
         tool("vibra.test", "Run capability-free tests serially when the server was granted --allow-test.", object_schema(json!({
             "path": path, "filter": {"type": "string"},

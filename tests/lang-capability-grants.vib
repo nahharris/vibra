@@ -4,10 +4,8 @@
   "program-authority"
   (test.case
     "denies-an-undeclared-clock-grant"
-    (let now (time.now.unix-millis))
-    (test.assert true)
     profile: @capability
     tags: (@language @capability)
     expect-error: (@runtime "E-CAPABILITY-001")
-  )
-)
+    (let now (time.now.unix-millis))
+    (test.assert true)))

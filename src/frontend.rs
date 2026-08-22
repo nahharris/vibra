@@ -2030,8 +2030,13 @@ mod tests {
         );
         write(
             &temp.path().join("helpers.vib"),
-            "(macro secret (value @expr-syntax) @expr-syntax\n\
-               (do (unquote value)) visibility: @private)\n",
+            "(macro
+               secret
+               (value @expr-syntax)
+               @expr-syntax\n\
+               visibility:
+               @private
+               (do (unquote value)))\n",
         );
         let error = format!(
             "{:#}",

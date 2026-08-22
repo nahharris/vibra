@@ -6,82 +6,46 @@
   "array-generic-get"
   (test.case
     "array-generic-get"
-    (let found (collections.array-get str (array "alpha" "beta") 1))
-    (match
-      found
-      (option.option.some "beta")
-      (do (test.assert true))
-      (option.option.some _)
-      (do (test.fail "wrong value"))
-      (option.option.none)
-      (do (test.fail "expected value"))
-    )
     profile: @core
-  )
-)
+    (let found (collections.array-get str (array "alpha" "beta") 1))
+    (match found
+      (option.option.some "beta") (test.assert true)
+      (option.option.some _) (test.fail "wrong value")
+      (option.option.none) (test.fail "expected value"))))
 (test.scenario
   "array-copy-on-write-and-bounds"
   (test.case
     "array-copy-on-write-and-bounds"
+    profile: @core
     (let original (array 1 2))
     (let changed (collections.array-set int64 original 0 9))
-    (match
-      changed
+    (match changed
       (result.result.ok (array 9 2))
-      (do
-        (match
-          original
-          (array 1 2)
-          (test.assert true)
-          _
-          (test.fail "original was aliased")
-        )
-      )
-      (result.result.err _)
-      (do (test.fail "unexpected set error"))
-    )
+        (match original
+          (array 1 2) (test.assert true)
+          _ (test.fail "original was aliased"))
+      (result.result.err _) (test.fail "unexpected set error"))
     (let missing (collections.array-remove int64 original 2))
-    (match
-      missing
-      (result.result.ok _)
-      (do (test.fail "expected bounds error"))
+    (match missing
+      (result.result.ok _) (test.fail "expected bounds error")
       (result.result.err
-        (collections.collection-error.out-of-bounds (record (index 2) (len 2)))
-      )
-      (do (test.assert true))
-    )
-    profile: @core
-  )
-)
+        (collections.collection-error.out-of-bounds (record (index 2) (len 2))))
+        (test.assert true))))
 (test.scenario
   "map-upsert-is-deterministic"
   (test.case
     "map-upsert-is-deterministic"
+    profile: @core
     (let words (map ("alpha" 1) ("beta" 2)))
     (let updated (collections.map-insert int64 words "alpha" 3))
-    (match
-      updated
-      (result.result.ok (map ("alpha" 3) ("beta" 2)))
-      (do (test.assert true))
-      (result.result.err _)
-      (do (test.fail "unexpected map error"))
-    )
+    (match updated
+      (result.result.ok (map ("alpha" 3) ("beta" 2))) (test.assert true)
+      (result.result.err _) (test.fail "unexpected map error"))
     (let absent (collections.map-get int64 words "gamma"))
-    (match
-      absent
-      (option.option.none)
-      (do (test.assert true))
-      (option.option.some _)
-      (do (test.fail "expected none"))
-    )
+    (match absent
+      (option.option.none) (test.assert true)
+      (option.option.some _) (test.fail "expected none"))
     (let removed (collections.map-remove int64 words "alpha"))
-    (match
-      removed
-      (option.option.some (map ("beta" 2)))
-      (do (test.assert true))
-      _
-      (do (test.fail "wrong map removal"))
-    )
-    profile: @core
-  )
-)
+    (match removed
+      (option.option.some (map ("beta" 2))) (test.assert true)
+      _ (test.fail "wrong map removal"))))

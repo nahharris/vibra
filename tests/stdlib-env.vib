@@ -1,48 +1,33 @@
 (import test "../stdlib/src/test.vib")
 (import env "../stdlib/src/env.vib")
 (import result "../stdlib/src/result.vib")
-(defn accepts-names (value (array str)) bool (return true))
+(defn accepts-names (value (array str)) bool
+  (return true))
 (test.scenario
   "get-reads-an-explicitly-granted-variable"
   (test.case
     "get-reads-an-explicitly-granted-variable"
-    (let value (env.read.get "PATH"))
-    (match
-      value
-      (result.result.ok _)
-      (do (test.assert true))
-      (result.result.err _)
-      (do (test.fail "granted environment variable was not readable"))
-    )
-    (let names (env.read.list))
-    (let names-have-the-declared-type (accepts-names names))
-    (test.assert names-have-the-declared-type)
     profile: @env
     tags: (@stdlib)
-  )
-)
+    (let value (env.read.get "PATH"))
+    (match value
+      (result.result.ok _) (test.assert true)
+      (result.result.err _) (test.fail "granted environment variable was not readable"))
+    (let names (env.read.list))
+    (let names-have-the-declared-type (accepts-names names))
+    (test.assert names-have-the-declared-type)))
 (test.scenario
   "set-and-remove-use-the-exact-write-grant"
   (test.case
     "set-and-remove-use-the-exact-write-grant"
-    (let set-result (env.write.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present"))
-    (let remove-result (env.write.remove "VIBRA_STDLIB_ENV_REMOVE_TEST"))
-    (match
-      remove-result
-      (result.result.ok)
-      (do (test.assert true))
-      _
-      (do (test.fail "environment removal returned an error"))
-    )
-    (let after-remove (env.read.get "VIBRA_STDLIB_ENV_REMOVE_TEST"))
-    (match
-      after-remove
-      (result.result.err _)
-      (do (test.assert true))
-      _
-      (do (test.fail "removed environment variable remained visible"))
-    )
     profile: @env
     tags: (@stdlib)
-  )
-)
+    (let set-result (env.write.set "VIBRA_STDLIB_ENV_REMOVE_TEST" "present"))
+    (let remove-result (env.write.remove "VIBRA_STDLIB_ENV_REMOVE_TEST"))
+    (match remove-result
+      (result.result.ok) (test.assert true)
+      _ (test.fail "environment removal returned an error"))
+    (let after-remove (env.read.get "VIBRA_STDLIB_ENV_REMOVE_TEST"))
+    (match after-remove
+      (result.result.err _) (test.assert true)
+      _ (test.fail "removed environment variable remained visible"))))

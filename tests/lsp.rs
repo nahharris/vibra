@@ -50,7 +50,7 @@ fn lifecycle_and_capabilities_use_lsp_framing() {
 fn compilation_flags_flow_from_initialization_and_configuration_changes() {
     let workspace = tempfile::tempdir().unwrap();
     let main_path = workspace.path().join("main.vib");
-    let main = "(defn main () void (do (enabled)))\n";
+    let main = "(defn main () void (enabled))\n";
     std::fs::write(
         workspace.path().join("project.vib"),
         "(project\n  (package \"flags\" \"0.1.0\")\n  (target flags kind: @bin root: \".\" entry: \"main.vib\"))\n",
@@ -235,6 +235,41 @@ fn formatting_returns_a_whole_document_edit() {
 }
 
 #[test]
+fn code_actions_offer_typed_safe_do_fix_edits() {
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("main.vib");
+    let source = "(defn main () void (do unit))\n";
+    std::fs::write(&path, source).unwrap();
+    let uri = path_uri(&path);
+    let root_uri = path_uri(workspace.path());
+    let mut input = Vec::new();
+    for value in [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"text":source}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":30}},"context":{"diagnostics":[]}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"shutdown"}),
+        json!({"jsonrpc":"2.0","method":"exit"}),
+    ] {
+        input.extend(frame(value));
+    }
+    let mut output = Vec::new();
+    vibra::lsp::serve(Cursor::new(input), &mut output).unwrap();
+    let output = messages(&output);
+    let actions = output[2]["result"].as_array().unwrap();
+    assert!(!actions.is_empty(), "expected a redundant-do quick fix");
+    assert_eq!(actions[0]["kind"], "quickfix");
+    assert!(actions[0]["title"]
+        .as_str()
+        .unwrap()
+        .contains("redundant do"));
+    assert!(actions[0]["edit"]["changes"][&uri]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edit| edit["newText"] == ""));
+}
+
+#[test]
 fn navigation_uses_unsaved_s_expression_buffers() {
     let workspace = tempfile::tempdir().unwrap();
     let main_path = workspace.path().join("main.vib");
@@ -329,9 +364,9 @@ fn path_uri(path: &std::path::Path) -> String {
 fn compile_diagnostics_follow_unsaved_project_overlays_without_writing_disk() {
     let workspace = tempfile::tempdir().unwrap();
     let manifest = "(project\n  (package \"overlay-test\" \"0.1.0\")\n  (target app kind: @bin root: \".\" entry: \"main.vib\"))\n";
-    let main = "(import helper \"helper.vib\")\n(defn main () void (do (helper.run)))\n";
-    let valid = "(defn run () void (do (let _ 1)))\n";
-    let broken = "(defn run () void (do (missing) (let value 1)))\n";
+    let main = "(import helper \"helper.vib\")\n(defn main () void (helper.run))\n";
+    let valid = "(defn run () void (let _ 1))\n";
+    let broken = "(defn run () void (missing) (let value 1))\n";
     std::fs::write(workspace.path().join("project.vib"), manifest).unwrap();
     std::fs::write(workspace.path().join("main.vib"), main).unwrap();
     std::fs::write(workspace.path().join("helper.vib"), valid).unwrap();
@@ -488,10 +523,10 @@ fn checked_in_multi_package_sample_supports_core_editor_features() {
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":root_uri}}),
         json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":main_uri,"languageId":"vibra","version":1,"text":main}}}),
         json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":library_uri,"languageId":"vibra","version":1,"text":library}}}),
-        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":main_uri},"position":{"line":1,"character":26}}}),
-        json!({"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":main_uri},"position":{"line":1,"character":26}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":main_uri},"position":{"line":2,"character":6}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":main_uri},"position":{"line":2,"character":6}}}),
         json!({"jsonrpc":"2.0","id":4,"method":"textDocument/references","params":{"textDocument":{"uri":library_uri},"position":{"line":0,"character":6}}}),
-        json!({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":main_uri},"position":{"line":1,"character":26}}}),
+        json!({"jsonrpc":"2.0","id":5,"method":"textDocument/completion","params":{"textDocument":{"uri":main_uri},"position":{"line":2,"character":6}}}),
         json!({"jsonrpc":"2.0","id":6,"method":"textDocument/formatting","params":{"textDocument":{"uri":main_uri},"options":{"tabSize":2,"insertSpaces":true}}}),
         json!({"jsonrpc":"2.0","id":7,"method":"shutdown"}),
         json!({"jsonrpc":"2.0","method":"exit"}),

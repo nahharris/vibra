@@ -20,7 +20,7 @@ fn write_project(root: &Path) -> PathBuf {
     std::fs::write(&entry, "(defn main () void (do (let value 1)))\n").unwrap();
     std::fs::write(
         root.join("src/main.release.vib"),
-        "(defn enabled () void (do (let value 1)) doc: \"Enabled only in release mode\")\n",
+        "(defn enabled () void doc: \"Enabled only in release mode\" (do (let value 1)))\n",
     )
     .unwrap();
     entry

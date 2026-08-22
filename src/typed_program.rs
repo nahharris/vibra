@@ -507,7 +507,7 @@ mod tests {
         write(
             &entry,
             "(deffect host\n\
-               (defn read () void (do (intrinsic @env-list)) effects: (env.read)))\n\
+               (defn read () void effects: (env.read) (do (intrinsic @env-list))))\n\
              (defn main () void (do (host.read)))\n",
         );
         let program = load(&entry);
@@ -527,8 +527,8 @@ mod tests {
         write(
             &entry,
             "(deffect host\n\
-               (defn read () void (do (intrinsic @env-list)) effects: (env.read)))\n\
-             (defn main () void (do (host.read)) effects: ())\n",
+               (defn read () void effects: (env.read) (do (intrinsic @env-list))))\n\
+             (defn main () void effects: () (do (host.read)))\n",
         );
         let program = load(&entry);
         let error = format!("{:#}", lower_typed_program(&program).unwrap_err());
@@ -587,7 +587,7 @@ mod tests {
         write(
             &entry,
             "(defn main () void (do unit))\n\
-             (test.scenario \"paths\" (test.case \"fast-path\" unit tags: (@fast @smoke)) (test.case \"slow-path\" unit tags: (@slow) timeout-ms: 500 skip: \"flaky\"))\n",
+             (test.scenario \"paths\" (test.case \"fast-path\" tags: (@fast @smoke) unit) (test.case \"slow-path\" tags: (@slow) timeout-ms: 500 skip: \"flaky\" unit))\n",
         );
         let program = load(&entry);
         let specs = discover_typed_test_specs(&program).unwrap();

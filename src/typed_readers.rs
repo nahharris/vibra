@@ -533,7 +533,7 @@ mod tests {
         write(
             &entry,
             "(import helper \"helper.vib\")\n\
-             (defn main () void (do unit) doc: \"Entry docs\")\n",
+             (defn main () void doc: \"Entry docs\" (do unit))\n",
         );
         write(
             &temp.path().join("main.test.vib"),
@@ -543,9 +543,9 @@ mod tests {
             &temp.path().join("helper.vib"),
             "(def box (record (value int64))\n\
              doc: \"Box docs\"\n\
-             defs: ((defn get (input self) int64 (do (return 0)) doc: \"Getter docs\"))\n\
+             defs: ((defn get (input self) int64 doc: \"Getter docs\" (do (return 0))))\n\
              impls: ((impl display methods: ((method show\n\
-               (fn (input self) str (do (return \"box\")) doc: \"Show docs\"))))))\n",
+               (fn (input self) str doc: \"Show docs\" (do (return \"box\"))))))))\n",
         );
         let program =
             crate::frontend::load_surface_program(&entry, &CompilationFlags::new(["test"]))
@@ -585,15 +585,11 @@ mod tests {
         write(
             &entry,
             "(import helper \"helper.vib\")\n\
-             (test.scenario \"base\" (test.case \"base\" unit tags: (@fast)))\n",
+             (test.scenario \"base\" (test.case \"base\" tags: (@fast) unit))\n",
         );
         write(
             &temp.path().join("main.test.vib"),
-            "(test.scenario \"measured\" (test.case \"measured\" unit\n\
-             tags: (@slow @arithmetic)\n\
-             expect-error: (@compile E-OP-002 \"overflow\")\n\
-             clock: (@fixed 42 7)\n\
-             workspace: @temp))\n",
+            "(test.scenario \"measured\" (test.case \"measured\" tags: (@slow @arithmetic) expect-error: (@compile E-OP-002 \"overflow\") clock: (@fixed 42 7) workspace: @temp unit))\n",
         );
         write(
             &temp.path().join("helper.vib"),

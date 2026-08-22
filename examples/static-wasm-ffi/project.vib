@@ -1,5 +1,4 @@
 (project
   (package "static-wasm-ffi" "0.1.0")
   (target static-wasm-ffi kind: @bin root: "src" entry: "main.vib")
-  (dependency math path: "foreign" wasm: "math.wasm")
-)
+  (dependency math path: "foreign" wasm: "math.wasm"))

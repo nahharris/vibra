@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::sexpr_semantic::{SemanticIndex, SemanticKind};
 
@@ -94,6 +94,7 @@ impl Server {
                         "definitionProvider":true,
                         "referencesProvider":true,
                         "documentSymbolProvider":true,
+                        "codeActionProvider":true,
                         "completionProvider":{"triggerCharacters":["$", "."]}
                     }
                 }))
@@ -149,6 +150,7 @@ impl Server {
                     json!([{"range":{"start":{"line":0,"character":0},"end":end_position(&source)},"newText":formatted}]),
                 )
             }
+            "textDocument/codeAction" => self.code_actions(params),
             "textDocument/completion" => {
                 let (uri, _) = self.source(params)?;
                 let workspace = self.workspace()?;
@@ -197,6 +199,56 @@ impl Server {
             .or_else(|| uri_path(&uri).and_then(|p| fs::read_to_string(p).ok()))
             .context("document is not open and cannot be read")?;
         Ok((uri, source))
+    }
+
+    fn code_actions(&self, params: &Value) -> Result<Value> {
+        let (uri, source) = self.source(params)?;
+        let path = uri_path(&uri).unwrap_or_else(|| PathBuf::from("document.vib"));
+        let mut diagnostics = crate::tooling::diagnostics_for_source(&path, &source);
+        if !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == crate::tooling::Severity::Error)
+        {
+            diagnostics.extend(self.overlay_compile_diagnostics(&path).unwrap_or_default());
+        }
+        let mut actions = Vec::new();
+        for diagnostic in diagnostics {
+            let Some(fixes) = &diagnostic.fix else {
+                continue;
+            };
+            for fix in fixes {
+                let mut changes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+                for edit in &fix.edits {
+                    changes
+                        .entry(edit.span.uri.clone())
+                        .or_default()
+                        .push(json!({
+                            "range": {
+                                "start": {
+                                    "line": edit.span.start.line,
+                                    "character": edit.span.start.column
+                                },
+                                "end": {
+                                    "line": edit.span.end.line,
+                                    "character": edit.span.end.column
+                                }
+                            },
+                            "newText": edit.replacement
+                        }));
+                }
+                if changes.is_empty() {
+                    continue;
+                }
+                actions.push(json!({
+                    "title": fix.title,
+                    "kind": "quickfix",
+                    "isPreferred": true,
+                    "diagnostics": [lsp_diagnostic(diagnostic.clone())],
+                    "edit": {"changes": changes}
+                }));
+            }
+        }
+        Ok(Value::Array(actions))
     }
 
     fn diagnostic_notifications(&self, uri: String) -> Result<Value> {
@@ -261,14 +313,10 @@ impl Server {
         }
         let mirrored_document = mirror.path().join(document.strip_prefix(&root)?);
         let entry = mirrored_project_entry(mirror.path()).unwrap_or(mirrored_document);
-        let mirror_text = mirror.path().to_string_lossy();
-        let root_text = root.to_string_lossy();
         let mut diagnostics =
             crate::tooling::compile_diagnostics_with_flags(&entry, &self.compilation_flags);
         for diagnostic in &mut diagnostics {
-            diagnostic.message = diagnostic
-                .message
-                .replace(mirror_text.as_ref(), root_text.as_ref());
+            remap_diagnostic_paths(diagnostic, mirror.path(), &root);
         }
         Ok(diagnostics)
     }
@@ -694,7 +742,7 @@ fn discover_workspace_sources(
             if path.is_dir() {
                 if !matches!(
                     path.file_name().and_then(|v| v.to_str()),
-                    Some(".git" | "target")
+                    Some(".git" | ".worktrees" | ".agents" | "target" | "tmp" | "dep")
                 ) {
                     pending.push(path);
                 }
@@ -718,7 +766,10 @@ fn mirror_workspace(source: &std::path::Path, destination: &std::path::Path) -> 
     {
         let entry = entry?;
         let name = entry.file_name();
-        if matches!(name.to_str(), Some(".git" | "target")) {
+        if matches!(
+            name.to_str(),
+            Some(".git" | ".worktrees" | ".agents" | "target" | "tmp" | "dep")
+        ) {
             continue;
         }
         let from = entry.path();
@@ -752,6 +803,41 @@ fn lsp_diagnostic(diagnostic: crate::tooling::Diagnostic) -> Value {
         "code":diagnostic.code,"source":"vibra","message":diagnostic.message
     })
 }
+
+fn remap_diagnostic_paths(
+    diagnostic: &mut crate::tooling::Diagnostic,
+    mirror_root: &Path,
+    source_root: &Path,
+) {
+    let mirror_uri = crate::diagnostics::file_uri(mirror_root);
+    let source_uri = crate::diagnostics::file_uri(source_root);
+    let remap_uri = |uri: &mut String| {
+        if let Some(relative) = uri.strip_prefix(&(mirror_uri.clone() + "/")) {
+            *uri = format!("{}/{}", source_uri, relative);
+        } else if *uri == mirror_uri {
+            *uri = source_uri.clone();
+        }
+    };
+    remap_uri(&mut diagnostic.span.uri);
+    if let Some(related) = &mut diagnostic.related {
+        for item in related {
+            remap_uri(&mut item.span.uri);
+        }
+    }
+    if let Some(fixes) = &mut diagnostic.fix {
+        for fix in fixes {
+            for edit in &mut fix.edits {
+                remap_uri(&mut edit.span.uri);
+            }
+        }
+    }
+    let mirror_text = mirror_root.to_string_lossy();
+    let source_text = source_root.to_string_lossy();
+    diagnostic.message = diagnostic
+        .message
+        .replace(mirror_text.as_ref(), source_text.as_ref());
+}
+
 fn diagnostic_candidates(message: &str) -> Vec<String> {
     let mut candidates = Vec::new();
     let mut rest = message;

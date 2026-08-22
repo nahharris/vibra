@@ -51,10 +51,14 @@ fn write_project(root: &Path) {
         "(project\n  (package \"mcp-fixture\" \"0.1.0\")\n  (target app kind: @bin root: \"src\" entry: \"main.vib\"))\n",
     )
     .unwrap();
-    std::fs::write(root.join("src/main.vib"), "(defn main () void (do))\n").unwrap();
+    std::fs::write(
+        root.join("src/main.vib"),
+        "(defn main () void (do (let _ true)))\n",
+    )
+    .unwrap();
     std::fs::write(
         root.join("tests/basic.vib"),
-        "(test.scenario \"works\" (test.case \"works\" (do) profile: @core))\n",
+        "(test.scenario \"works\" (test.case \"works\" profile: @core (do)))\n",
     )
     .unwrap();
 }
@@ -190,7 +194,12 @@ fn write_and_test_gates_are_explicit() {
                 "vibra.fmt",
                 json!({"paths": ["src/main.vib"], "write": true}),
             ),
-            call(2, "vibra.test", json!({})),
+            call(
+                2,
+                "vibra.lint",
+                json!({"paths": ["src/main.vib"], "fix": true}),
+            ),
+            call(3, "vibra.test", json!({})),
         ],
     );
     assert_eq!(
@@ -201,15 +210,32 @@ fn write_and_test_gates_are_explicit() {
         denied[1]["result"]["structuredContent"]["code"],
         "permission-denied"
     );
+    assert_eq!(
+        denied[2]["result"]["structuredContent"]["code"],
+        "permission-denied"
+    );
 
     let allowed = run_mcp(
         workspace.path(),
-        &["--allow-test"],
-        &[call(3, "vibra.test", json!({}))],
+        &["--allow-write", "--allow-test"],
+        &[
+            call(
+                4,
+                "vibra.lint",
+                json!({"paths": ["src/main.vib"], "fix": true}),
+            ),
+            call(5, "vibra.test", json!({})),
+        ],
     );
     assert_eq!(allowed[0]["result"]["isError"], false);
+    assert!(
+        allowed[0]["result"]["structuredContent"]["output"]["summary"]["fixed"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
     assert_eq!(
-        allowed[0]["result"]["structuredContent"]["output"]["passed"],
+        allowed[1]["result"]["structuredContent"]["output"]["passed"],
         1
     );
 }

@@ -151,6 +151,9 @@ enum Command {
         /// Treat warnings as CI failures.
         #[arg(long = "deny-warnings")]
         deny_warnings: bool,
+        /// Apply all non-overlapping safe source fixes and recheck until stable.
+        #[arg(long)]
+        fix: bool,
     },
     /// Parse, compile (MVP), and run a `.vib` module via embedded Wasmer.
     Run {
@@ -561,6 +564,7 @@ fn run_cli() -> Result<()> {
             category,
             severity,
             deny_warnings,
+            fix,
         } => {
             let ok = tooling::run_lint(tooling::LintOptions {
                 inputs: path,
@@ -568,6 +572,7 @@ fn run_cli() -> Result<()> {
                 categories: category.into_iter().map(Into::into).collect(),
                 severity: severity.map(Into::into),
                 deny_warnings,
+                fix,
             })?;
             if !ok {
                 std::process::exit(1);
