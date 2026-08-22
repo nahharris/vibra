@@ -3,51 +3,41 @@
   "if-true-takes-then"
   (test.case
     "if-true-takes-then"
-    (if true (do (test.assert true)) (do (test.fail "then branch was skipped")))
     profile: @core
-  )
-)
+    (if true
+      (test.assert true)
+      (test.fail "then branch was skipped"))))
 (test.scenario
   "if-false-takes-else"
   (test.case
     "if-false-takes-else"
-    (if false (do (test.fail "then branch ran on false")) (do (test.assert true)))
     profile: @core
-  )
-)
+    (if false
+      (test.fail "then branch ran on false")
+      (test.assert true))))
 (test.scenario
   "if-on-bound-condition"
   (test.case
     "if-on-bound-condition"
-    (let flag true)
-    (if
-      flag
-      (do (test.assert true))
-      (do (test.fail "bound true condition took else"))
-    )
     profile: @core
-  )
-)
+    (let flag true)
+    (if flag
+      (test.assert true)
+      (test.fail "bound true condition took else"))))
 (test.scenario
   "nested-if"
   (test.case
     "nested-if"
-    (if
-      true
-      (do
-        (if false (do (test.fail "inner false took then")) (do (test.assert true)))
-      )
-      (do (test.fail "outer true took else"))
-    )
     profile: @core
-  )
-)
+    (if true
+      (if false
+        (test.fail "inner false took then")
+        (test.assert true))
+      (test.fail "outer true took else"))))
 (test.scenario
   "while-false-never-runs"
   (test.case
     "while-false-never-runs"
-    (while false (test.fail "while body ran on false condition"))
-    (test.assert true)
     profile: @core
-  )
-)
+    (while false (test.fail "while body ran on false condition"))
+    (test.assert true)))

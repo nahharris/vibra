@@ -5,56 +5,35 @@
   "typed-equality-helpers"
   (test.case
     "typed-equality-helpers"
+    profile: @core
     (test.assert-eq-bool true true)
     (test.assert-eq-int 42 42)
     (test.assert-eq-float 1.5 1.5)
-    (test.assert-eq-str "vibra" "vibra")
-    profile: @core
-  )
-)
+    (test.assert-eq-str "vibra" "vibra")))
 (test.scenario
   "seeded-random-and-fake-clock"
   (test.case
     "seeded-random-and-fake-clock"
+    profile: @core
+    random-seed: 42
+    clock: (@fixed 1000 40)
     (let value (random.generate.bytes 8))
     (let raw (cast value (array uint8)))
-    (match
-      raw
-      (array 149 110 235 47 38 50 215 189)
-      (do (test.assert true))
-      _
-      (do (test.fail "seeded random sequence changed"))
-    )
+    (match raw
+      (array 149 110 235 47 38 50 215 189) (test.assert true)
+      _ (test.fail "seeded random sequence changed"))
     (let wall (time.now.unix-millis))
-    (match
-      wall
-      1000
-      (do (test.assert true))
-      _
-      (do (test.fail "fake wall clock did not use fixture"))
-    )
+    (match wall
+      1000 (test.assert true)
+      _ (test.fail "fake wall clock did not use fixture"))
     (let before (time.now.monotonic-millis))
     (time.sleep.for (time.milliseconds 7))
     (let after (time.now.monotonic-millis))
     (let before-raw (cast before uint64))
     (let after-raw (cast after uint64))
-    (match
-      before-raw
+    (match before-raw
       40
-      (do
-        (match
-          after-raw
-          47
-          (test.assert true)
-          _
-          (test.fail "fake monotonic clock did not advance")
-        )
-      )
-      _
-      (do (test.fail "fake monotonic clock did not use fixture"))
-    )
-    profile: @core
-    random-seed: 42
-    clock: (@fixed 1000 40)
-  )
-)
+        (match after-raw
+          47 (test.assert true)
+          _ (test.fail "fake monotonic clock did not advance"))
+      _ (test.fail "fake monotonic clock did not use fixture"))))

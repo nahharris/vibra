@@ -78,6 +78,11 @@
       "summary": "Unsupported source extension for the S-expression frontend"
     },
     {
+      "code": "E-SYN-013",
+      "severity": "error",
+      "summary": "Labelled operands must precede remainder or variadic operands"
+    },
+    {
       "code": "E-FRONT-002",
       "severity": "error",
       "summary": "Embed or template expansion has not been cut over to the typed S-expression frontend"
@@ -258,9 +263,19 @@
       "summary": "Symbol-like key is not kebab-case"
     },
     {
-      "code": "W-STYLE-002",
+      "code": "W-STYLE-003",
       "severity": "warning",
-      "summary": "Labelled arguments must precede variadic arguments"
+      "summary": "Redundant sequencing do block",
+      "fix": {
+        "applicability": "safe",
+        "edits": [
+          {
+            "operation": "delete",
+            "description": "Remove the redundant do delimiters while retaining comments",
+            "preservesComments": true
+          }
+        ]
+      }
     },
     {
       "code": "W-EFFECT-001",
@@ -272,8 +287,13 @@
       "severity": "warning",
       "summary": "Result or option value is unhandled in non-final statement position",
       "fix": {
-        "span": "statement",
-        "suggestion": "Handle the value with match or let, or explicitly discard it with (let _ ...)."
+        "applicability": "safe",
+        "edits": [
+          {
+            "operation": "replace",
+            "replacement": "(let _ <expression>)"
+          }
+        ]
       }
     },
     {
@@ -281,8 +301,13 @@
       "severity": "warning",
       "summary": "Binding is never read",
       "fix": {
-        "span": "binder",
-        "suggestion": "Remove the binding or replace its name with _."
+        "applicability": "safe",
+        "edits": [
+          {
+            "operation": "replace",
+            "replacement": "_"
+          }
+        ]
       }
     },
     {

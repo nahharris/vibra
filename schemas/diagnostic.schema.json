@@ -48,8 +48,38 @@
     },
     "fix": {
       "type": "array",
-      "description": "RFC 6902 JSON Patch operations",
-      "items": { "type": "object" }
+      "description": "Safe source fixes. Each fix contains one or more non-overlapping text edits.",
+      "items": {
+        "type": "object",
+        "required": ["title", "applicability", "edits"],
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "applicability": { "const": "safe" },
+          "edits": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["span", "replacement"],
+              "additionalProperties": false,
+              "properties": {
+                "span": {
+                  "type": "object",
+                  "required": ["uri", "start", "end"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "uri": { "type": "string", "format": "uri" },
+                    "start": { "$ref": "#/$defs/position" },
+                    "end": { "$ref": "#/$defs/position" }
+                  }
+                },
+                "replacement": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

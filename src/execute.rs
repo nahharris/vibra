@@ -2365,12 +2365,20 @@ mod iteration_tests {
     fn wasm_host_calls_consume_one_fuel_unit_at_the_call_boundary() {
         let (_dir, program) = lower(
             r#"(deffect now
-  (defn open () uint64
-    (intrinsic @clock-now-unix-millis)
-    effects: (time.now)))
-(defn main () void
-  (do (let ignored (now.open)))
-    effects: (entry.now time.now))
+  (defn
+    open
+    ()
+    uint64
+    effects:
+    (time.now)
+    (intrinsic @clock-now-unix-millis)))
+(defn
+  main
+  ()
+  void
+  effects:
+  (entry.now time.now)
+  (do (let ignored (now.open))))
 "#,
         );
         let config = RunConfig {

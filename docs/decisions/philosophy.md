@@ -61,7 +61,8 @@ Language and tooling should favor:
 - One invocation shape for intrinsics, user functions, and imports.
 - One statement sequencing form in each context.
 - One canonical formatting style.
-- One attribute spelling, currently trailing labels such as `where:` and `doc:`.
+- One attribute spelling, with labels grouped before remainder/body expressions,
+  such as `where:` and `doc:`.
 - One import model, with public symbols defined by top-level names and private
   symbols marked by `visibility: @private`.
 

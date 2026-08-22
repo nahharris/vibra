@@ -5,46 +5,32 @@
   "fallible-values"
   (test.case
     "explicit-discard"
+    profile: @core
     (let _ (result.from-err int64 str "deliberate"))
     (let _ (option.from-value int64 1))
-    (test.assert true)
-    profile: @core
-  )
+    (test.assert true))
   ; Deliberately emits W-RESULT-001, so it cannot run under --deny-warnings.
   (test.case
     "unhandled-result-diagnostic"
-    (result.from-ok int64 str 7)
-    (test.assert true)
     profile: @diagnostics
-  )
+    (result.from-ok int64 str 7)
+    (test.assert true))
   (test.case
     "explicit-bind-name"
-    (match
-      (result.from-ok int64 str 7)
-      (result.result.ok (bind name))
-      (do (test.assert-eq-int name 7))
-      (result.result.err _)
-      (do (test.fail "expected ok result"))
-    )
     profile: @core
-  )
+    (match (result.from-ok int64 str 7)
+      (result.result.ok (bind name)) (test.assert-eq-int name 7)
+      (result.result.err _) (test.fail "expected ok result")))
   (test.case
     "match-and-read-binding"
-    (let value (result.from-ok int64 str 7))
-    (match
-      value
-      (result.result.ok (bind payload))
-      (do (test.assert-eq-int payload 7))
-      (result.result.err _)
-      (do (test.fail "expected ok result"))
-    )
     profile: @core
-  )
+    (let value (result.from-ok int64 str 7))
+    (match value
+      (result.result.ok (bind payload)) (test.assert-eq-int payload 7)
+      (result.result.err _) (test.fail "expected ok result")))
   ; Deliberately emits W-BIND-001, so it cannot run under --deny-warnings.
   (test.case
     "unused-binding-diagnostic"
-    (let unused (result.from-ok int64 str 7))
-    (test.assert true)
     profile: @diagnostics
-  )
-)
+    (let unused (result.from-ok int64 str 7))
+    (test.assert true)))

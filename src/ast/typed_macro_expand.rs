@@ -409,6 +409,7 @@ fn expand_expr(
             callee,
             arguments,
             type_arguments,
+            type_arguments_position,
         } => ExprKind::Call {
             callee,
             arguments: arguments
@@ -421,6 +422,7 @@ fn expand_expr(
                 .into_iter()
                 .map(|ty| expand_type(ty, macros, state, depth))
                 .collect::<Result<_, _>>()?,
+            type_arguments_position,
         },
         ExprKind::Do(values) => ExprKind::Do(expand_exprs(values, macros, state, depth)?),
         ExprKind::AnonymousFunction {
@@ -604,9 +606,21 @@ fn bind_macro_call_arguments(
     let mut fixed = vec![None; fixed_count];
     let mut tail = Vec::new();
     let mut next = 0;
+    let mut saw_label = false;
+    let mut saw_variadic = false;
     for argument in arguments {
         match argument {
             CallArgument::Labelled { label, value } => {
+                if saw_variadic {
+                    return Err(MacroExpansionError::at(
+                        "E-SYN-013",
+                        format!(
+                            "macro `{}` labelled arguments must precede variadic arguments; `{}` appears after the variadic tail",
+                            definition.name.value, label.value
+                        ),
+                        call_origin,
+                    ));
+                }
                 let Some(index) = definition.parameters[..fixed_count]
                     .iter()
                     .position(|parameter| parameter.name.value == label.value)
@@ -627,15 +641,27 @@ fn bind_macro_call_arguments(
                         call_origin,
                     ));
                 }
+                saw_label = true;
             }
             CallArgument::Positional(value) => {
                 while next < fixed_count && (fixed[next].is_some() || reserved_fixed[next]) {
                     next += 1;
                 }
+                if saw_label && next < fixed_count {
+                    return Err(MacroExpansionError::at(
+                        "E-SYN-013",
+                        format!(
+                            "macro `{}` fixed positional arguments must precede labelled arguments",
+                            definition.name.value
+                        ),
+                        call_origin,
+                    ));
+                }
                 if next < fixed_count {
                     fixed[next] = Some(value);
                     next += 1;
                 } else {
+                    saw_variadic = true;
                     tail.push(value);
                 }
             }
@@ -1304,6 +1330,7 @@ fn substitute_expr_kind(
             callee,
             arguments,
             type_arguments,
+            type_arguments_position,
         } => ExprKind::Call {
             callee,
             arguments: arguments
@@ -1316,6 +1343,7 @@ fn substitute_expr_kind(
                 .into_iter()
                 .map(|ty| substitute_type(ty, environment))
                 .collect::<Result<_, _>>()?,
+            type_arguments_position,
         },
         ExprKind::Do(values) => ExprKind::Do(substitute_exprs(values, environment, call_origin)?),
         ExprKind::Let { name, ty, value } => ExprKind::Let {
@@ -3081,11 +3109,11 @@ mod tests {
     }
 
     #[test]
-    fn labelled_macro_arguments_after_variadic_values_bind_by_name() {
+    fn labelled_macro_arguments_before_variadic_values_bind_by_name() {
         let source = r#"
 (macro select (left @expr-syntax right @expr-syntax rest... @expr-syntax) @expr-syntax
   (unquote left))
-(defn main () int64 (select 1 2 3 left: 4))"#;
+(defn main () int64 (select left: 4 right: 2 3))"#;
         let expanded = expand_typed_macros(module(source, 33)).unwrap();
         let TopLevel::Function(function) = &expanded.forms[0] else {
             panic!("expected function");

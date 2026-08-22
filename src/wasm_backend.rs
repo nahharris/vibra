@@ -2332,7 +2332,7 @@ mod tests {
         let entry = temp.path().join("entry.vib");
         std::fs::write(
             &entry,
-            r#"(defn identity (value t) t (do (return value)) where: (t any))
+            r#"(defn identity (value t) t where: (t any) (do (return value)))
 (defn unused-one () void (do (let x 1)))
 (defn unused-two () void (do (let y 2)))
 (defn main () void (do (identity bool true) (identity int64 7)))

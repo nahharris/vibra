@@ -17,7 +17,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "enum": ["all", "W-STYLE-001", "W-STYLE-002"]
+            "enum": ["all", "W-STYLE-001", "W-STYLE-003"]
           }
         }
       }

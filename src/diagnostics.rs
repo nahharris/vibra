@@ -21,7 +21,7 @@ pub enum Category {
     Compile,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Position {
     pub line: usize,
     /// Zero-based column. LSP-facing producers use UTF-16 code units.
@@ -30,20 +30,55 @@ pub struct Position {
     pub offset: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Span {
     pub uri: String,
     pub start: Position,
     pub end: Position,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RelatedDiagnostic {
     pub message: String,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Serialize)]
+/// A single source replacement in a diagnostic fix.
+///
+/// Offsets are carried by the typed `Span` positions so all consumers (CLI,
+/// MCP, and LSP) can apply the same edit without interpreting an ad-hoc JSON
+/// object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TextEdit {
+    pub span: Span,
+    pub replacement: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FixApplicability {
+    Safe,
+}
+
+/// A safe, source-preserving edit offered by a diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Fix {
+    pub title: String,
+    pub applicability: FixApplicability,
+    pub edits: Vec<TextEdit>,
+}
+
+impl Fix {
+    pub fn safe(title: impl Into<String>, edits: Vec<TextEdit>) -> Self {
+        Self {
+            title: title.into(),
+            applicability: FixApplicability::Safe,
+            edits,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
     pub code: String,
     pub message: String,
@@ -52,14 +87,18 @@ pub struct Diagnostic {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub related: Option<Vec<RelatedDiagnostic>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fix: Option<Vec<serde_json::Value>>,
+    pub fix: Option<Vec<Fix>>,
     #[serde(skip)]
     pub category: Category,
 }
 
 pub fn file_uri(path: &Path) -> String {
     let absolute = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let mut value = absolute.display().to_string().replace('\\', "/");
+    let mut value = absolute
+        .display()
+        .to_string()
+        .trim_start_matches(r"\\?\")
+        .replace('\\', "/");
     if !value.starts_with('/') {
         value = format!("/{value}");
     }

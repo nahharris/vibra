@@ -12,19 +12,54 @@ use crate::ast::{
     WasmArgument,
 };
 use crate::diagnostics::{
-    file_uri, Category, Diagnostic, Position, RelatedDiagnostic, Severity, Span,
+    file_uri, Category, Diagnostic, Fix, Position, RelatedDiagnostic, Severity, Span, TextEdit,
 };
 use crate::syntax::{self, Atom, Document, LineIndex, Node, NodeKind};
 
 /// Parse and type-check S-expression source before canonical printing.
 pub fn staged_format_sexpr(path: &Path, source: &str) -> Result<String, Diagnostic> {
-    let mut document =
-        syntax::parse(source).map_err(|error| syntax_diagnostic(path, source, error))?;
+    let document = syntax::parse(source).map_err(|error| syntax_diagnostic(path, source, error))?;
     let module = ast::lower_document_with_id(&document, ast::DocumentId::from_path(path))
         .map_err(|error| ast_diagnostic(path, source, error))?;
     let signatures = local_call_signatures(&module);
-    normalize_call_order(&mut document, &signatures);
-    Ok(syntax::print(&document))
+    if let Some(diagnostic) = call_order_diagnostics(path, source, &document, &signatures)
+        .into_iter()
+        .next()
+    {
+        return Err(diagnostic);
+    }
+    let formatted = syntax::print(&document);
+    // The formatter is deliberately a layout-only pass. Reparse the result
+    // and assert that its CST token tree is unchanged; this catches accidental
+    // operand movement or comment loss while retaining the canonical spelling
+    // normalization performed by the printer.
+    assert_eq!(
+        syntax_node_shape(&document),
+        syntax_node_shape(&syntax::parse(&formatted).expect("canonical printer output parses"))
+    );
+    Ok(formatted)
+}
+
+fn syntax_node_shape(document: &Document) -> Vec<String> {
+    fn visit(node: &Node, output: &mut Vec<String>) {
+        match &node.kind {
+            NodeKind::Atom(atom) => output.push(format!("atom:{atom:?}")),
+            NodeKind::Comment(comment) => output.push(format!("comment:{comment}")),
+            NodeKind::List(children) => {
+                output.push("[".to_string());
+                for child in children {
+                    visit(child, output);
+                }
+                output.push("]".to_string());
+            }
+        }
+    }
+
+    let mut output = Vec::new();
+    for node in &document.nodes {
+        visit(node, &mut output);
+    }
+    output
 }
 
 /// Return reader or typed-surface diagnostics for an in-memory S-expression.
@@ -34,7 +69,10 @@ pub fn staged_sexpr_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
         Err(error) => return vec![syntax_diagnostic(path, source, error)],
     };
     match ast::lower_document_with_id(&document, ast::DocumentId::from_path(path)) {
-        Ok(_) => Vec::new(),
+        Ok(module) => {
+            let signatures = local_call_signatures(&module);
+            call_order_diagnostics(path, source, &document, &signatures)
+        }
         Err(error) => vec![ast_diagnostic(path, source, error)],
     }
 }
@@ -51,9 +89,10 @@ pub fn staged_lint_sexpr(path: &Path, source: &str) -> Vec<Diagnostic> {
     };
     let signatures = local_call_signatures(&module);
     let mut diagnostics = Vec::new();
+    diagnostics.extend(call_order_diagnostics(path, source, &document, &signatures));
     lint_module_names(path, source, &module, &mut diagnostics);
     lint_labels(path, source, &document, &mut diagnostics);
-    lint_call_argument_order(path, source, &document, &signatures, &mut diagnostics);
+    lint_redundant_do(path, source, &document, &mut diagnostics);
     diagnostics.sort_by_key(|diagnostic| {
         (
             diagnostic.span.start.offset.unwrap_or_default(),
@@ -79,8 +118,8 @@ enum CallArgumentKind {
 
 #[derive(Debug, Clone)]
 enum CallArgumentNodes {
-    Positional(Node),
-    Labelled { label: Node, value: Node },
+    Positional { node: Node },
+    Labelled { label: Node },
 }
 
 fn local_call_signatures(module: &Module) -> BTreeMap<String, CallSignature> {
@@ -149,97 +188,31 @@ fn local_call_signatures(module: &Module) -> BTreeMap<String, CallSignature> {
     signatures
 }
 
-fn normalize_call_order(document: &mut Document, signatures: &BTreeMap<String, CallSignature>) {
-    for node in &mut document.nodes {
-        normalize_call_node(node, signatures);
-    }
-}
-
-fn normalize_call_node(node: &mut Node, signatures: &BTreeMap<String, CallSignature>) {
-    let NodeKind::List(children) = &mut node.kind else {
-        return;
-    };
-    for child in children.iter_mut() {
-        normalize_call_node(child, signatures);
-    }
-    let Some(head) = children.first().and_then(symbol) else {
-        return;
-    };
-    if is_structural_form_head(head) {
-        return;
-    }
-    let signature = signatures.get(head);
-    normalize_call_list(children, signature);
-}
-
-fn normalize_call_list(children: &mut Vec<Node>, signature: Option<&CallSignature>) {
-    let Some((arguments, trailing)) = parse_call_argument_nodes(children) else {
-        return;
-    };
-    if !arguments
+fn parse_call_argument_nodes(children: &[Node]) -> Option<Vec<CallArgumentNodes>> {
+    let semantic = children
         .iter()
-        .any(|argument| matches!(argument, CallArgumentNodes::Labelled { .. }))
-    {
-        return;
-    }
-    let kinds = classify_call_arguments(&arguments, signature);
-    let mut fixed = Vec::new();
-    let mut labelled = Vec::new();
-    let mut variadic = Vec::new();
-    for (argument, kind) in arguments.into_iter().zip(kinds) {
-        match kind {
-            CallArgumentKind::Fixed => fixed.push(argument),
-            CallArgumentKind::Labelled => labelled.push(argument),
-            CallArgumentKind::Variadic => variadic.push(argument),
-        }
-    }
-
-    let mut normalized = Vec::with_capacity(children.len());
-    normalized.push(children[0].clone());
-    for argument in fixed.into_iter().chain(labelled).chain(variadic) {
-        match argument {
-            CallArgumentNodes::Positional(value) => normalized.push(value),
-            CallArgumentNodes::Labelled { label, value } => {
-                normalized.push(label);
-                normalized.push(value);
-            }
-        }
-    }
-    normalized.extend(trailing);
-    *children = normalized;
-}
-
-fn parse_call_argument_nodes(children: &[Node]) -> Option<(Vec<CallArgumentNodes>, Vec<Node>)> {
-    if children.len() < 2
-        || children[1..]
-            .iter()
-            .any(|node| matches!(node.kind, NodeKind::Comment(_)))
-    {
+        .filter(|node| !matches!(node.kind, NodeKind::Comment(_)))
+        .collect::<Vec<_>>();
+    if semantic.len() < 2 || symbol(semantic[0]).is_none() {
         return None;
     }
-    let mut argument_end = children.len();
-    let trailing = if argument_end >= 3 && is_label(&children[argument_end - 2], "types") {
-        argument_end -= 2;
-        children[argument_end..].to_vec()
-    } else {
-        Vec::new()
-    };
     let mut arguments = Vec::new();
     let mut index = 1;
-    while index < argument_end {
-        if matches!(children[index].kind, NodeKind::Atom(Atom::Label(_))) {
-            let value = children.get(index + 1)?.clone();
+    while index < semantic.len() {
+        if matches!(semantic[index].kind, NodeKind::Atom(Atom::Label(_))) {
+            semantic.get(index + 1)?;
             arguments.push(CallArgumentNodes::Labelled {
-                label: children[index].clone(),
-                value,
+                label: semantic[index].clone(),
             });
             index += 2;
         } else {
-            arguments.push(CallArgumentNodes::Positional(children[index].clone()));
+            arguments.push(CallArgumentNodes::Positional {
+                node: semantic[index].clone(),
+            });
             index += 1;
         }
     }
-    Some((arguments, trailing))
+    Some(arguments)
 }
 
 fn classify_call_arguments(
@@ -255,8 +228,8 @@ fn classify_call_arguments(
                     saw_label = true;
                     CallArgumentKind::Labelled
                 }
-                CallArgumentNodes::Positional(_) if saw_label => CallArgumentKind::Variadic,
-                CallArgumentNodes::Positional(_) => CallArgumentKind::Fixed,
+                CallArgumentNodes::Positional { .. } if saw_label => CallArgumentKind::Variadic,
+                CallArgumentNodes::Positional { .. } => CallArgumentKind::Fixed,
             })
             .collect();
     };
@@ -280,7 +253,7 @@ fn classify_call_arguments(
         .iter()
         .map(|argument| match argument {
             CallArgumentNodes::Labelled { .. } => CallArgumentKind::Labelled,
-            CallArgumentNodes::Positional(_) => {
+            CallArgumentNodes::Positional { .. } => {
                 while next_fixed < signature.fixed_count && reserved[next_fixed] {
                     next_fixed += 1;
                 }
@@ -297,13 +270,13 @@ fn classify_call_arguments(
         .collect()
 }
 
-fn lint_call_argument_order(
+fn call_order_diagnostics(
     path: &Path,
     source: &str,
     document: &Document,
     signatures: &BTreeMap<String, CallSignature>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
     fn walk(
         path: &Path,
         source: &str,
@@ -317,17 +290,22 @@ fn lint_call_argument_order(
         for child in children {
             walk(path, source, child, signatures, diagnostics);
         }
-        let Some(head) = children.first().and_then(symbol) else {
+        let Some(head) = children
+            .iter()
+            .find(|child| !matches!(child.kind, NodeKind::Comment(_)))
+            .and_then(symbol)
+        else {
             return;
         };
         if is_structural_form_head(head) {
             return;
         }
-        let Some((arguments, _)) = parse_call_argument_nodes(children) else {
+        let Some(arguments) = parse_call_argument_nodes(children) else {
             return;
         };
         let kinds = classify_call_arguments(&arguments, signatures.get(head));
         let mut saw_variadic = false;
+        let mut saw_label = false;
         for (argument, kind) in arguments.iter().zip(kinds) {
             match (argument, kind) {
                 (CallArgumentNodes::Labelled { label, .. }, CallArgumentKind::Labelled)
@@ -339,15 +317,31 @@ fn lint_call_argument_order(
                     diagnostics.push(diagnostic(
                         path,
                         source,
-                        "W-STYLE-002",
+                        "E-SYN-013",
                         format!(
                             "labelled arguments should precede variadic arguments; move `{name}:` before the variadic values"
                         ),
-                        Severity::Warning,
-                        Category::Style,
+                        Severity::Error,
+                        Category::Syntax,
                         label.span,
                         None,
                     ));
+                }
+                (CallArgumentNodes::Positional { node }, CallArgumentKind::Fixed) if saw_label => {
+                    diagnostics.push(diagnostic(
+                        path,
+                        source,
+                        "E-SYN-013",
+                        "fixed positional arguments must precede labelled or variadic arguments"
+                            .to_string(),
+                        Severity::Error,
+                        Category::Syntax,
+                        node.span,
+                        None,
+                    ));
+                }
+                (CallArgumentNodes::Labelled { .. }, CallArgumentKind::Labelled) => {
+                    saw_label = true;
                 }
                 (_, CallArgumentKind::Variadic) => saw_variadic = true,
                 _ => {}
@@ -356,8 +350,9 @@ fn lint_call_argument_order(
     }
 
     for node in &document.nodes {
-        walk(path, source, node, signatures, diagnostics);
+        walk(path, source, node, signatures, &mut diagnostics);
     }
+    diagnostics
 }
 
 fn label_name(node: &Node) -> Option<&str> {
@@ -372,10 +367,6 @@ fn symbol(node: &Node) -> Option<&str> {
         NodeKind::Atom(Atom::Symbol(value)) => Some(value),
         _ => None,
     }
-}
-
-fn is_label(node: &Node, expected: &str) -> bool {
-    label_name(node) == Some(expected)
 }
 
 fn is_structural_form_head(head: &str) -> bool {
@@ -1483,6 +1474,133 @@ fn lint_labels(path: &Path, source: &str, document: &Document, diagnostics: &mut
     walk(path, source, &document.nodes, diagnostics);
 }
 
+/// Find sequencing blocks that add no semantics at their position.  Body
+/// owners accept a single outer `(do ...)` as a convenience, but the wrapper
+/// is redundant once the body is represented as a list of expressions.  In
+/// ordinary expression positions only a one-expression do is redundant;
+/// empty and multi-expression blocks remain meaningful there.
+fn lint_redundant_do(
+    path: &Path,
+    source: &str,
+    document: &Document,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    fn semantic<'a>(children: &'a [Node]) -> Vec<&'a Node> {
+        children
+            .iter()
+            .filter(|node| !matches!(node.kind, NodeKind::Comment(_)))
+            .collect()
+    }
+
+    fn head(node: &Node) -> Option<&str> {
+        let NodeKind::List(children) = &node.kind else {
+            return None;
+        };
+        semantic(children).first().and_then(|node| symbol(node))
+    }
+
+    fn body_owned_child(parent: &Node, candidate: &Node) -> bool {
+        let NodeKind::List(children) = &parent.kind else {
+            return false;
+        };
+        let values = semantic(children);
+        let Some(form) = values.first().and_then(|node| symbol(node)) else {
+            return false;
+        };
+        let fixed = match form {
+            "defn" | "macro" | "fn" => 3,
+            "test.case" | "while" => 1,
+            "for" => 2,
+            "task" => 0,
+            _ => return false,
+        };
+        // `fn` has two fixed operands (parameters and return type), unlike
+        // the declaration forms.  The match arm above keeps the policy table
+        // together while this adjustment mirrors the AST parser exactly.
+        let fixed = if form == "fn" { 2 } else { fixed };
+        let mut index = 1 + fixed;
+        while index + 1 < values.len()
+            && matches!(values[index].kind, NodeKind::Atom(Atom::Label(_)))
+        {
+            index += 2;
+        }
+        let Some([body]) = values.get(index..).map(|remainder| remainder) else {
+            return false;
+        };
+        body.span == candidate.span && head(body) == Some("do")
+    }
+
+    fn fix_for_do(path: &Path, source: &str, node: &Node) -> Fix {
+        let NodeKind::List(children) = &node.kind else {
+            unreachable!("redundant do must be a list")
+        };
+        let head = children
+            .iter()
+            .find(|child| !matches!(child.kind, NodeKind::Comment(_)))
+            .expect("redundant do has a semantic head");
+        let opening = syntax::Span::new(node.span.start, node.span.start.saturating_add(1));
+        let closing_start = node.span.end.saturating_sub(1);
+        Fix::safe(
+            "Remove redundant do block",
+            vec![
+                TextEdit {
+                    span: tooling_span(path, source, opening),
+                    replacement: String::new(),
+                },
+                TextEdit {
+                    span: tooling_span(path, source, head.span),
+                    replacement: String::new(),
+                },
+                TextEdit {
+                    span: tooling_span(
+                        path,
+                        source,
+                        syntax::Span::new(closing_start, node.span.end),
+                    ),
+                    replacement: String::new(),
+                },
+            ],
+        )
+    }
+
+    fn walk(
+        path: &Path,
+        source: &str,
+        node: &Node,
+        parent: Option<&Node>,
+        diagnostics: &mut Vec<Diagnostic>,
+        seen: &mut BTreeSet<(usize, usize)>,
+    ) {
+        let NodeKind::List(children) = &node.kind else {
+            return;
+        };
+        let values = semantic(children);
+        let is_do = values.first().and_then(|node| symbol(node)) == Some("do");
+        let semantic_count = values.len().saturating_sub(1);
+        let redundant = is_do
+            && (semantic_count == 1 || parent.is_some_and(|parent| body_owned_child(parent, node)));
+        if redundant && seen.insert((node.span.start, node.span.end)) {
+            diagnostics.push(Diagnostic {
+                code: "W-STYLE-003".to_string(),
+                message: "redundant `do` sequencing block; remove the wrapper".to_string(),
+                severity: Severity::Warning,
+                span: tooling_span(path, source, node.span),
+                related: None,
+                fix: Some(vec![fix_for_do(path, source, node)]),
+                category: Category::Style,
+            });
+        }
+        for child in children {
+            walk(path, source, child, Some(node), diagnostics, seen);
+        }
+    }
+
+    let mut seen = BTreeSet::new();
+    for node in &document.nodes {
+        walk(path, source, node, None, diagnostics, &mut seen);
+    }
+}
+
 fn is_kebab_qualified(name: &str) -> bool {
     name.split('.').all(is_kebab)
 }
@@ -1500,15 +1618,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parser_tolerates_labels_after_variadic_arguments() {
-        let source = "(defn caller () void (do (target 1 2 3 label-1: 4 label-2: 5)))\n";
-        assert!(staged_sexpr_diagnostics(Path::new("call.vib"), source).is_empty());
+    fn parser_rejects_labels_after_variadic_arguments() {
+        let source =
+            "(defn target (first int64 second int64 label-1 int64 rest... int64) void (do unit))\n\
+(defn caller () void (do (target 1 2 3 label-1: 4 label-2: 5)))\n";
+        let diagnostics = staged_sexpr_diagnostics(Path::new("call.vib"), source);
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E-SYN-013"));
     }
 
     #[test]
-    fn formatter_moves_labelled_arguments_before_variadic_arguments() {
+    fn formatter_preserves_already_canonical_argument_order() {
         let source = "(defn target (first int64 second int64 label-1 int64 label-2 int64 rest... int64) void (do unit))\n\
-(defn caller () void (do (target 1 2 3 label-1: 4 label-2: 5)))\n";
+(defn caller () void (do (target 1 2 label-1: 4 label-2: 5 3)))\n";
         let formatted = staged_format_sexpr(Path::new("call.vib"), source).unwrap();
         assert!(formatted.contains("(target 1 2 label-1: 4 label-2: 5 3)"));
         assert_eq!(
@@ -1518,20 +1641,63 @@ mod tests {
     }
 
     #[test]
-    fn linter_warns_when_labelled_argument_follows_variadic_argument() {
+    fn linter_reports_redundant_single_item_do_with_a_fix() {
+        let source = "(defn main () void (if true (do (return unit)) (do unit)))\n";
+        let diagnostics = staged_lint_sexpr(Path::new("do.vib"), source);
+        let redundant = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "W-STYLE-003")
+            .expect("single-item do should be diagnosed");
+        assert!(
+            redundant.fix.is_some(),
+            "diagnostic should carry a safe edit"
+        );
+    }
+
+    #[test]
+    fn body_owned_do_is_redundant_even_when_empty_or_multi_item() {
+        for source in [
+            "(defn empty () void (do))\n",
+            "(defn multi () void (do (let _ true) (return unit)))\n",
+        ] {
+            let diagnostics = staged_lint_sexpr(Path::new("do.vib"), source);
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "W-STYLE-003" && diagnostic.fix.is_some()
+            }));
+        }
+        for source in ["(if true (do) (do (unit) (unit)))\n"] {
+            assert!(staged_lint_sexpr(Path::new("do.vib"), source)
+                .iter()
+                .all(|diagnostic| diagnostic.code != "W-STYLE-003"));
+        }
+    }
+
+    #[test]
+    fn linter_reports_when_labelled_argument_follows_variadic_argument() {
         let source =
             "(defn target (first int64 second int64 label-1 int64 rest... int64) void (do unit))\n\
 (defn caller () void (do (target 1 2 3 label-1: 4)))\n";
         let diagnostics = staged_lint_sexpr(Path::new("call.vib"), source);
         assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "W-STYLE-002" && diagnostic.message.contains("labelled arguments")
+            diagnostic.code == "E-SYN-013" && diagnostic.message.contains("labelled arguments")
+        }));
+    }
+
+    #[test]
+    fn call_order_diagnostics_ignore_reader_comments_without_reordering() {
+        let source = "(defn target (first int64 label-1 int64 rest... int64) void (do unit))\n\
+(defn caller () void (do (target 1 2 ; keep this note\n label-1: 3)))\n";
+        let diagnostics = staged_sexpr_diagnostics(Path::new("call.vib"), source);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E-SYN-013"
+                && diagnostic.span.start.offset == Some(source.find("label-1:").unwrap())
         }));
     }
 
     #[test]
     fn formatting_is_typed_idempotent_and_preserves_comments_and_labels() {
         let path = Path::new("src/main.vib");
-        let source = "; lead\n(defn hello-world (name str) str\n(do ; body\n(return name)) doc: \"Greets\")\n";
+        let source = "; lead\n(defn hello-world (name str) str doc: \"Greets\"\n(do ; body\n(return name)))\n";
         let once = staged_format_sexpr(path, source).unwrap();
         let twice = staged_format_sexpr(path, &once).unwrap();
         assert_eq!(once, twice);
@@ -1556,7 +1722,7 @@ mod tests {
 
     #[test]
     fn ast_errors_use_precise_unicode_ranges() {
-        let source = "; λ\n(defn bad () void (do unit) mystery: true)\n";
+        let source = "; λ\n(defn bad () void mystery: true (do unit))\n";
         let diagnostics = staged_sexpr_diagnostics(Path::new("unicode.vib"), source);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E-SYN-011");
@@ -1570,7 +1736,7 @@ mod tests {
 
     #[test]
     fn diagnostic_columns_use_utf16_code_units() {
-        let source = "(defn valid () void (do unit) doc: \"😀\" mystery: true)\n";
+        let source = "(defn valid () void doc: \"😀\" mystery: true (do unit))\n";
         let diagnostics = staged_sexpr_diagnostics(Path::new("emoji.vib"), source);
         assert_eq!(diagnostics.len(), 1);
         let offset = source.find("mystery:").unwrap();
@@ -1587,8 +1753,7 @@ mod tests {
 
     #[test]
     fn typed_lint_visits_nested_names() {
-        let source =
-            "(defn Bad_Name (BadArg int64) int64 (do (let Local_Value BadArg) Local_Value))\n";
+        let source = "(defn Bad_Name (BadArg int64) int64 (let Local_Value BadArg) Local_Value)\n";
         let diagnostics = staged_lint_sexpr(Path::new("lint.vib"), source);
         assert!(diagnostics
             .iter()
@@ -1614,15 +1779,14 @@ mod tests {
     #[test]
     fn formatter_rejects_typed_invalid_source() {
         let error =
-            staged_format_sexpr(Path::new("bad.vib"), "(defn bad () void (do unit) nope: 1)")
+            staged_format_sexpr(Path::new("bad.vib"), "(defn bad () void nope: 1 (do unit))")
                 .unwrap_err();
         assert_eq!(error.code, "E-SYN-011");
     }
 
     #[test]
     fn expect_error_codes_are_not_kebab_linted() {
-        let source = "(test.scenario \"fails\" (test.case \"fails\" unit\n\
-                      expect-error: (@compile E-OP-002 \"overflow\")))\n";
+        let source = "(test.scenario \"fails\" (test.case \"fails\" expect-error: (@compile E-OP-002 \"overflow\") unit))\n";
         assert!(staged_lint_sexpr(Path::new("test.vib"), source).is_empty());
     }
 
@@ -1676,9 +1840,9 @@ mod tests {
                             (do (stream.write.string resource \"live\")))\n\
                         (stream.write.string resource \"after\")\n\
                         (task\n\
+                          captures: (resource)\n\
                           (do (stream.manage.close resource)\n\
-                              (stream.write.string resource \"task\"))\n\
-                          captures: (resource))\n\
+                              (stream.write.string resource \"task\")))\n\
                         (stream.write.string alias \"alias\")))\n";
 
         let diagnostics = staged_lint_sexpr(Path::new("handle.vib"), source);
@@ -1761,9 +1925,13 @@ mod tests {
     fn lifecycle_lint_does_not_follow_aggregates_generics_or_calls() {
         let source = "(defn closes (resource (handle @any)) void\n\
                       (do (stream.manage.close resource)))\n\
-                    (defn generic-closes (resource (handle @any) marker t) void\n\
-                      (do (stream.manage.close resource))\n\
-                      where: (t any))\n\
+                    (defn
+                      generic-closes
+                      (resource (handle @any) marker t)
+                      void\n\
+                      where:
+                      (t any)
+                      (do (stream.manage.close resource)))\n\
                     (defn caller (resource (handle @any)) void\n\
                       (do\n\
                         (let boxed (record (handle resource)))\n\
@@ -1772,9 +1940,9 @@ mod tests {
                         (closes resource)\n\
                         (generic-closes resource 1)\n\
                         (task\n\
+                          captures: (resource)\n\
                           (do (stream.manage.close resource)\n\
-                              (stream.write.string resource \"task\"))\n\
-                          captures: (resource))\n\
+                              (stream.write.string resource \"task\")))\n\
                         (stream.write.string resource \"live\")))\n";
 
         let diagnostics = staged_lint_sexpr(Path::new("handle.vib"), source);

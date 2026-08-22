@@ -15,7 +15,8 @@ vibra mcp --workspace /path/to/project --allow-test
 vibra mcp --workspace /path/to/project --allow-write
 ```
 
-`--allow-write` permits `vibra.fmt` with `write: true` and `vibra.build`.
+`--allow-write` permits `vibra.fmt` with `write: true`, `vibra.lint` with
+`fix: true`, and `vibra.build`.
 `--allow-test` permits `vibra.test`. These flags do not grant Vibra host
 capabilities: MCP tests run without filesystem, environment, network, process,
 clock, randomness, or system-information approvals. Tests that require an
@@ -48,7 +49,7 @@ is also published as
 | `vibra.check` | `vibra check --format json` | read-only |
 | `vibra.docs` | `vibra docs --format json` | read-only |
 | `vibra.fmt` | `vibra fmt --format json` | check-only |
-| `vibra.lint` | `vibra lint --format json` | read-only |
+| `vibra.lint` | `vibra lint --format json` (or `fix: true`) | read-only; write authority for fixes |
 | `vibra.test` | `vibra test --jobs 1 --format json` | requires `--allow-test` |
 | `vibra.build` | `vibra build --format json` | requires `--allow-write` |
 

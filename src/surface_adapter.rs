@@ -13,9 +13,10 @@
 //! `src/lower.rs`'s call sites key every non-primary argument by the
 //! callee's *declared parameter name* (`merge_call_payload`,
 //! `parse_call_args`), and every generic call requires *explicit* type
-//! arguments in that same named mapping (no type inference). Converting a
-//! positional S-expression call therefore requires knowing the callee's
-//! parameter names ahead of time. [`collect_local_signatures`] gathers those
+//! arguments in the `types:` labelled group (no type inference). A legacy
+//! leading-positional spelling is still understood while old embedded
+//! fixtures are migrated. Converting a positional S-expression call therefore
+//! requires knowing the callee's parameter names ahead of time. [`collect_local_signatures`] gathers those
 //! names for one module; [`resolve_signatures`] combines a module's own
 //! names with its imports' names (mirroring how `tools/corpus-migrator`
 //! resolves qualified calls); [`module_to_value`] then performs the actual
@@ -39,7 +40,7 @@ use crate::ast::{
     TypeMember, Visibility, WasmArgument, WasmImport,
 };
 use crate::legacy_value::{Mapping, Value};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
 
 // ===================== Signature index =====================
@@ -51,6 +52,7 @@ use std::collections::BTreeMap;
 pub(crate) struct CallSignature {
     pub(crate) type_params: Vec<String>,
     pub(crate) arg_names: Vec<String>,
+    pub(crate) variadic: bool,
 }
 
 /// One module's own (unqualified) call, generic-type, and interface
@@ -146,6 +148,9 @@ pub(crate) fn collect_local_signatures(module: &Module) -> Result<LocalSignature
                                         .iter()
                                         .map(|parameter| parameter.name.value.clone())
                                         .collect(),
+                                    variadic: parameters
+                                        .last()
+                                        .is_some_and(|parameter| parameter.variadic),
                                 },
                             );
                         }
@@ -210,6 +215,10 @@ fn insert_call_signature(
         CallSignature {
             type_params,
             arg_names,
+            variadic: function
+                .parameters
+                .last()
+                .is_some_and(|parameter| parameter.variadic),
         },
     );
 }
@@ -1526,8 +1535,16 @@ impl<'a> Converter<'a> {
                 Ok(Value::String(format!("${}", self.local_name_ref(name))))
             }
             ExprKind::Call {
-                callee, arguments, ..
-            } => self.call_value(&callee.value, arguments),
+                callee,
+                arguments,
+                type_arguments,
+                type_arguments_position,
+            } => self.call_value(
+                &callee.value,
+                arguments,
+                type_arguments,
+                *type_arguments_position,
+            ),
             ExprKind::AnonymousFunction { .. } => bail!(
                 "E-ADAPT-046: anonymous function values are staged and cannot be represented by the legacy adapter"
             ),
@@ -1756,24 +1773,58 @@ impl<'a> Converter<'a> {
         qualified.to_string()
     }
 
-    fn call_value(&mut self, callee: &str, args: &[crate::ast::CallArgument]) -> Result<Value> {
-        let args = args
-            .iter()
-            .map(|argument| argument.value().clone())
-            .collect::<Vec<_>>();
+    fn call_value(
+        &mut self,
+        callee: &str,
+        args: &[crate::ast::CallArgument],
+        type_arguments: &[TypeExpr],
+        type_arguments_position: Option<usize>,
+    ) -> Result<Value> {
         if !callee.contains('.') {
             if let Some((_, arity)) = crate::lower::typed_primitive_op(callee) {
-                return self.primitive_value(callee, arity, &args);
+                if type_arguments_position.is_some() || !type_arguments.is_empty() {
+                    bail!("E-ADAPT-023: primitive `{callee}` does not accept `types:` arguments");
+                }
+                let positional = args
+                    .iter()
+                    .map(|argument| match argument {
+                        crate::ast::CallArgument::Positional(value) => Ok(value),
+                        crate::ast::CallArgument::Labelled { label, .. } => bail!(
+                            "E-SYN-013: primitive `{callee}` does not accept labelled argument `{}`",
+                            label.value
+                        ),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                return self.primitive_value(callee, arity, &positional);
             }
         }
         if let Some(sig) = self.sig.calls.get(callee).cloned() {
-            return self.named_call_value(callee, &sig, &args);
+            return self.named_call_value(
+                callee,
+                &sig,
+                args,
+                type_arguments,
+                type_arguments_position,
+            );
+        }
+        if type_arguments_position.is_some()
+            || !type_arguments.is_empty()
+            || args
+                .iter()
+                .any(|argument| matches!(argument, crate::ast::CallArgument::Labelled { .. }))
+        {
+            bail!(
+                "E-ADAPT-023: call to `{callee}` has labelled or generic arguments but no signature in the adapter's index"
+            );
         }
         let key = self.dashify_private_reference(callee);
         match args.len() {
             0 => Ok(single_dollar(&key, Value::Null)),
             1 => {
-                let v = self.expr_value(&args[0])?;
+                let crate::ast::CallArgument::Positional(value) = &args[0] else {
+                    unreachable!("labelled arguments were rejected above")
+                };
+                let v = self.expr_value(value)?;
                 Ok(single_dollar(&key, v))
             }
             n => bail!(
@@ -1785,7 +1836,7 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn primitive_value(&mut self, name: &str, arity: usize, args: &[AstExpr]) -> Result<Value> {
+    fn primitive_value(&mut self, name: &str, arity: usize, args: &[&AstExpr]) -> Result<Value> {
         if args.len() != arity {
             bail!(
                 "E-ADAPT-024: primitive `{name}` expects {arity} operand(s), found {}",
@@ -1808,97 +1859,248 @@ impl<'a> Converter<'a> {
         &mut self,
         callee: &str,
         sig: &CallSignature,
-        args: &[AstExpr],
+        args: &[crate::ast::CallArgument],
+        explicit_type_arguments: &[TypeExpr],
+        type_arguments_position: Option<usize>,
     ) -> Result<Value> {
         let type_arity = sig.type_params.len();
-        if args.len() < type_arity {
+        let mut type_values = Vec::new();
+        let mut runtime_args = args;
+        let mut source_offset = 0usize;
+        if type_arguments_position.is_some() {
+            if type_arity == 0 {
+                bail!("E-ADAPT-025: non-generic call `{callee}` cannot supply `types:` arguments");
+            }
+            if explicit_type_arguments.len() != type_arity {
+                bail!(
+                    "E-ADAPT-025: call to `{callee}` supplies {} type argument(s), expected {}",
+                    explicit_type_arguments.len(),
+                    type_arity
+                );
+            }
+            type_values = explicit_type_arguments
+                .iter()
+                .map(|ty| self.type_value(ty))
+                .collect::<Result<Vec<_>>>()?;
+        } else if type_arity > 0 {
+            if args.len() < type_arity {
+                bail!(
+                    "E-ADAPT-025: call to `{callee}` supplies {} argument(s), fewer than its {} \
+                     type parameter(s); generic calls must spell type arguments explicitly",
+                    args.len(),
+                    type_arity
+                );
+            }
+            runtime_args = &args[type_arity..];
+            source_offset = type_arity;
+            let fixed_count = sig
+                .arg_names
+                .len()
+                .saturating_sub(usize::from(sig.variadic));
+            let arity_ok = if sig.variadic {
+                runtime_args.len() >= fixed_count
+            } else {
+                runtime_args.len() == sig.arg_names.len()
+            };
+            if !arity_ok {
+                bail!(
+                    "E-ADAPT-026: call to `{callee}` supplies {} value argument(s), expected {}",
+                    runtime_args.len(),
+                    sig.arg_names.len()
+                );
+            }
+            for argument in &args[..type_arity] {
+                let crate::ast::CallArgument::Positional(value) = argument else {
+                    bail!(
+                        "E-SYN-013: generic call `{callee}` type arguments must precede labelled operands"
+                    );
+                };
+                type_values.push(self.expr_as_type_value(value)?);
+            }
+        } else if !explicit_type_arguments.is_empty() {
+            bail!("E-ADAPT-025: non-generic call `{callee}` cannot supply type arguments");
+        }
+        if type_values.len() != type_arity {
             bail!(
-                "E-ADAPT-025: call to `{callee}` supplies {} argument(s), fewer than its {} \
-                 type parameter(s); the adapter requires generic calls to spell type arguments \
-                 explicitly as leading positional arguments (matching the migrated corpus's \
-                 convention) -- it does not perform type inference",
-                args.len(),
+                "E-ADAPT-025: call to `{callee}` supplies {} type argument(s), expected {}",
+                type_values.len(),
                 type_arity
             );
         }
-        let (type_args, value_args) = args.split_at(type_arity);
-        if value_args.len() != sig.arg_names.len() {
-            bail!(
-                "E-ADAPT-026: call to `{callee}` supplies {} value argument(s), expected {}",
-                value_args.len(),
-                sig.arg_names.len()
-            );
-        }
-        let legacy_head = self.dashify_private_reference(callee);
-        if type_arity == 0 {
-            return match sig.arg_names.len() {
-                0 => {
-                    if !args.is_empty() {
-                        bail!("E-ADAPT-027: call to `{callee}` takes no arguments");
-                    }
-                    Ok(single_dollar(&legacy_head, Value::Null))
-                }
-                1 => {
-                    let v = self.expr_value(&value_args[0])?;
-                    Ok(single_dollar(&legacy_head, v))
-                }
-                _ if self.is_interface_dispatch_call(callee) => {
-                    // Legacy's `reject_iface_nested_call_bundle`
-                    // (`src/lower.rs`) requires a multi-argument interface
-                    // dispatch call to spell its dispatch value as the
-                    // callee's own payload, with every other argument as a
-                    // *sibling* key at the same mapping level as the callee
-                    // -- never all bundled into one mapping nested under the
-                    // callee. `tools/corpus-migrator`'s `named_call`
-                    // reconstructs exactly this sibling shape back into an
-                    // ordinary positional call, confirming it as the
-                    // canonical legacy spelling for this construct, not the
-                    // generic per-callee-name-bundle shape ordinary
-                    // (non-interface) multi-argument calls use.
-                    let primary = self.expr_value(&value_args[0])?;
-                    let mut m = Mapping::new();
-                    m.insert(Value::String(format!("${legacy_head}")), primary);
-                    for (name, expr) in sig.arg_names[1..].iter().zip(&value_args[1..]) {
-                        let v = self.expr_value(expr)?;
-                        m.insert(Value::String(name.clone()), v);
-                    }
-                    Ok(Value::Mapping(m))
-                }
-                _ => {
-                    let mut m = Mapping::new();
-                    for (name, expr) in sig.arg_names.iter().zip(value_args) {
-                        let v = self.expr_value(expr)?;
-                        m.insert(Value::String(name.clone()), v);
-                    }
-                    Ok(single_dollar(&legacy_head, Value::Mapping(m)))
-                }
+
+        let variadic = sig.variadic;
+        let fixed_count = sig.arg_names.len().saturating_sub(usize::from(variadic));
+        let mut reserved = vec![false; fixed_count];
+        for argument in runtime_args {
+            let crate::ast::CallArgument::Labelled { label, .. } = argument else {
+                continue;
             };
-        }
-        let mut m = Mapping::new();
-        for (name, expr) in sig.type_params.iter().zip(type_args) {
-            let v = self.expr_as_type_value(expr)?;
-            m.insert(Value::String(name.clone()), v);
-        }
-        for (name, expr) in sig.arg_names.iter().zip(value_args) {
-            let key = Value::String(name.clone());
-            if m.contains_key(&key) {
+            let Some(index) = sig.arg_names[..fixed_count]
+                .iter()
+                .position(|name| name == &label.value)
+            else {
+                if variadic
+                    && sig
+                        .arg_names
+                        .last()
+                        .is_some_and(|name| name == &label.value)
+                {
+                    bail!(
+                        "typed call `{callee}` variadic parameter `{}` is positional-only",
+                        label.value
+                    );
+                }
                 bail!(
-                    "E-ADAPT-028: call to `{callee}`: value argument `{name}` collides with a \
-                     type-parameter name of the same name"
+                    "E-ADAPT-026: call to `{callee}` has no parameter named `{}`",
+                    label.value
+                );
+            };
+            if reserved[index] {
+                bail!(
+                    "E-ADAPT-026: call to `{callee}` binds parameter `{}` more than once",
+                    label.value
                 );
             }
-            let v = self.expr_value(expr)?;
-            m.insert(key, v);
+            reserved[index] = true;
+        }
+        let mut fixed = vec![None; fixed_count];
+        let mut variadic_values = Vec::new();
+        let mut next_fixed = 0usize;
+        let mut saw_label = false;
+        let mut saw_variadic = false;
+        for (index, argument) in runtime_args.iter().enumerate() {
+            match argument {
+                crate::ast::CallArgument::Labelled { label, value } => {
+                    if saw_variadic {
+                        bail!(
+                            "E-SYN-013: call `{callee}` labelled arguments must precede variadic arguments"
+                        );
+                    }
+                    let index = sig.arg_names[..fixed_count]
+                        .iter()
+                        .position(|name| name == &label.value)
+                        .with_context(|| {
+                            format!(
+                                "E-ADAPT-026: call to `{callee}` has no parameter named `{}`",
+                                label.value
+                            )
+                        })?;
+                    if fixed[index].replace(value).is_some() {
+                        bail!(
+                            "E-ADAPT-026: call to `{callee}` binds parameter `{}` more than once",
+                            label.value
+                        );
+                    }
+                    while next_fixed < fixed_count && fixed[next_fixed].is_some() {
+                        next_fixed += 1;
+                    }
+                    saw_label = true;
+                }
+                crate::ast::CallArgument::Positional(value) => {
+                    while next_fixed < fixed_count
+                        && (fixed[next_fixed].is_some() || reserved[next_fixed])
+                    {
+                        next_fixed += 1;
+                    }
+                    let types_before = type_arguments_position
+                        .is_some_and(|position| source_offset + index >= position);
+                    if (saw_label || types_before) && next_fixed < fixed_count {
+                        bail!(
+                            "E-SYN-013: call `{callee}` fixed positional arguments must precede labelled arguments"
+                        );
+                    }
+                    if next_fixed < fixed_count {
+                        fixed[next_fixed] = Some(value);
+                        next_fixed += 1;
+                    } else if variadic {
+                        saw_variadic = true;
+                        variadic_values.push(value);
+                    } else {
+                        bail!(
+                            "E-ADAPT-026: call to `{callee}` supplies more than {} value argument(s)",
+                            fixed_count
+                        );
+                    }
+                }
+            }
+        }
+        let fixed = fixed
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value.with_context(|| {
+                    format!(
+                        "E-ADAPT-026: call to `{callee}` is missing parameter `{}`",
+                        sig.arg_names[index]
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let legacy_head = self.dashify_private_reference(callee);
+        let mut m = Mapping::new();
+        for (name, value) in sig.type_params.iter().zip(type_values) {
+            m.insert(Value::String(name.clone()), value);
+        }
+        let fixed_values = fixed
+            .iter()
+            .map(|value| self.expr_value(value))
+            .collect::<Result<Vec<_>>>()?;
+        for (name, value) in sig.arg_names[..fixed_count]
+            .iter()
+            .cloned()
+            .zip(fixed_values)
+        {
+            let key = Value::String(name.clone());
+            if m.insert(key, value).is_some() {
+                bail!(
+                    "E-ADAPT-028: call to `{callee}`: value argument `{name}` collides with a type-parameter name"
+                );
+            }
+        }
+        if variadic {
+            let name = sig
+                .arg_names
+                .last()
+                .expect("variadic signature has a parameter");
+            let value = Value::Sequence(
+                variadic_values
+                    .iter()
+                    .map(|expr| self.expr_value(expr))
+                    .collect::<Result<Vec<_>>>()?,
+            );
+            if m.insert(Value::String(name.clone()), value).is_some() {
+                bail!(
+                    "E-ADAPT-028: call to `{callee}`: variadic argument `{name}` collides with a type-parameter name"
+                );
+            }
+        }
+        if type_arity == 0 && !variadic && fixed_count == 0 {
+            return Ok(single_dollar(&legacy_head, Value::Null));
+        }
+        if type_arity == 0 && !variadic && fixed_count == 1 {
+            return Ok(single_dollar(
+                &legacy_head,
+                m.shift_remove(&Value::String(sig.arg_names[0].clone()))
+                    .expect("single fixed value inserted"),
+            ));
+        }
+        if type_arity == 0 && self.is_interface_dispatch_call(callee) && fixed_count > 1 {
+            let primary = m
+                .shift_remove(&Value::String(sig.arg_names[0].clone()))
+                .expect("interface primary inserted");
+            let mut envelope = Mapping::new();
+            envelope.insert(Value::String(format!("${legacy_head}")), primary);
+            for (name, value) in m {
+                envelope.insert(name, value);
+            }
+            return Ok(Value::Mapping(envelope));
         }
         Ok(single_dollar(&legacy_head, Value::Mapping(m)))
     }
 
-    /// Reinterpret an expression written in a generic call's leading
-    /// (type-argument) position as a type. The migrated corpus always
-    /// spells explicit type arguments as ordinary positional expressions
-    /// (a bare type name parses identically to a variable reference; a
-    /// generic type application parses identically to a call) -- see
-    /// `tools/corpus-migrator`'s `named_call`, which never emits `apply`.
+    /// Reinterpret an expression written in the legacy leading
+    /// (type-argument) position as a type. Canonical source uses `types:`;
+    /// this helper remains only for already-materialized adapter fixtures.
     fn expr_as_type_value(&mut self, expr: &AstExpr) -> Result<Value> {
         match &expr.value {
             ExprKind::Reference(name) => Ok(dollar_name(name)),
@@ -2471,9 +2673,13 @@ mod tests {
         let module = module_from_source(
             r#"(defn main () void (do (let value 1)))
 (deffect now
-  (defn unix-millis () uint64
-    (intrinsic @clock-now-unix-millis)
-    effects: ()))"#,
+  (defn
+    unix-millis
+    ()
+    uint64
+    effects:
+    ()
+    (intrinsic @clock-now-unix-millis)))"#,
         );
         let signatures = collect_local_signatures(&module).expect("collect signatures");
         let resolved = resolve_signatures("time", &signatures, &[]);
@@ -2510,9 +2716,13 @@ mod tests {
         let module = module_from_source(
             r#"(defn main () void (do (let value 1)))
 (deffect now
-  (defn unix-millis () uint64
-    (intrinsic @clock-now-unix-millis)
-    effects: (stream.read)))"#,
+  (defn
+    unix-millis
+    ()
+    uint64
+    effects:
+    (stream.read)
+    (intrinsic @clock-now-unix-millis)))"#,
         );
         let signatures = collect_local_signatures(&module).expect("collect signatures");
         let resolved = resolve_signatures("time", &signatures, &[]);
@@ -2542,9 +2752,13 @@ mod tests {
             r#"(def io.input (newtype (handle @read)))
 (defn main () void (do (let value 1)))
 (deffect stdin
-  (defn open () io.input
-    (intrinsic @stdin-open)
-    effects: ()))"#,
+  (defn
+    open
+    ()
+    io.input
+    effects:
+    ()
+    (intrinsic @stdin-open)))"#,
         );
         let signatures = collect_local_signatures(&module).expect("collect signatures");
         let resolved = resolve_signatures("io", &signatures, &[]);
@@ -2568,9 +2782,13 @@ mod tests {
     fn intrinsic_result_shape_cannot_be_laundered_by_a_return_annotation() {
         let module = module_from_source(
             r#"(deffect now
-  (defn unix-millis () str
-    (intrinsic @clock-now-unix-millis)
-    effects: ()))"#,
+  (defn
+    unix-millis
+    ()
+    str
+    effects:
+    ()
+    (intrinsic @clock-now-unix-millis)))"#,
         );
         let signatures = collect_local_signatures(&module).expect("collect signatures");
         let resolved = resolve_signatures("time", &signatures, &[]);
@@ -2602,9 +2820,13 @@ mod tests {
             r#"(defn bad () uint64
   (do (wasm "vibra_v1" "clock_now_unix_millis")))
 (deffect now
-  (defn unix-millis () uint64
-    (intrinsic @clock-now-unix-millis)
-    effects: ()))"#,
+  (defn
+    unix-millis
+    ()
+    uint64
+    effects:
+    ()
+    (intrinsic @clock-now-unix-millis)))"#,
         );
         let signatures = collect_local_signatures(&module).expect("collect signatures");
         let resolved = resolve_signatures("time", &signatures, &[]);
@@ -2619,9 +2841,9 @@ mod tests {
     fn generic_function_with_where_lowers() {
         assert_lowers(
             r#"
-(defn pair-up (a t b t) (tuple t t) (do (return (tuple a b))) where: (t any))
+(defn pair-up (a t b t) (tuple t t) where: (t any) (do (return (tuple a b))))
 
-(defn use-pair-up () (tuple int64 int64) (do (return (pair-up int64 1 2))))
+(defn use-pair-up () (tuple int64 int64) (do (return (pair-up 1 2 types: (int64)))))
 "#,
         );
     }
@@ -2722,8 +2944,8 @@ mod tests {
             r#"
 (test.scenario "arithmetic"
   (test.case "addition-is-checked"
-    (let ok (equal 1 1))
-    tags: (@fast @language)))
+    tags: (@fast @language) (let ok (equal 1 1))
+    ))
 "#,
         );
         let signatures = collect_local_signatures(&module).unwrap();

@@ -20,6 +20,7 @@ cargo run -- run examples/hello.vib
 cargo run -- check examples/hello.vib
 cargo run -- fmt
 cargo run -- lint --deny-warnings
+cargo run -- lint --fix
 cargo run -- test
 ```
 
@@ -32,29 +33,27 @@ vibra build . --output build/app.vapp --ctx release
 
 Vibra source uses UTF-8 S-expressions. A module contains imports and
 definitions; calls support fixed positional, labelled, and variadic arguments.
-The parser accepts mixed argument order, while formatting emits fixed
-positional arguments, then labelled arguments, then variadic arguments. The
-lint rule `W-STYLE-002` reports a noncanonical order without making it an error.
+Operands are strict everywhere: fixed positional operands come first, followed
+by labelled operands, then variadic values. A label after the remainder is a
+syntax error (E-SYN-013); the formatter never reorders syntax nodes.
 
 ```vibra
 (import io "../stdlib/src/io.vib")
 (import stream "../stdlib/src/stream.vib")
 
-(defn main () void (do (io.stdout.println "Hello, World!")) effects: (io.stdout stream.write))
+(defn main () void
+  effects: (io.stdout stream.write)
+  (io.stdout.println "Hello, World!"))
 ```
 
 Use `;` for reader comments. Persisted documentation belongs in a trailing
 `doc:` attribute, not in comments.
 
 ```vibra
-(defn
-  greet
-  (name str)
-  void
-  (do (io.stdout.println name))
+(defn greet (name str) void
   effects: (io.stdout stream.write)
   doc: "Write a name followed by a newline."
-)
+  (io.stdout.println name))
 ```
 
 ## Atoms
@@ -66,9 +65,11 @@ patterns, and key maps. Each atom also names a singleton type that widens to
 
 ```vibra
 (defn classify (value atom) bool
-  (do (match value @ok (do (return true)) _ (do (return false)))))
+  (match value
+    @ok (return true)
+    _ (return false)))
 
-(defn always-ok () @ok (do (return @ok)))
+(defn always-ok () @ok (return @ok))
 ```
 
 Contextual keywords are atoms too: `visibility: @public`, `kind: @bin`,
@@ -89,8 +90,8 @@ declared union—there is no compound-root or dependency-closure mechanism.
 ```vibra
 (deffect read
   (defn open (path path) (result reader fs-error)
-    (intrinsic @fs-open-read path)
-    effects: ()))
+    effects: ()
+    (intrinsic @fs-open-read path)))
 ```
 
 `read.open` is the operation name; a module-level `file` remains `file`, not
@@ -146,8 +147,7 @@ compiler-owned package metadata are canonical JSON.
   (dependency std path: "../stdlib")
   (authority
     (grant fs.read "/safe"))
-  (limits fuel: 100000 memory: 1048576)
-)
+  (limits fuel: 100000 memory: 1048576))
 ```
 
 ## Tests
@@ -160,8 +160,8 @@ free `core` profile.
 
 (test.scenario "truth"
   (test.case "is true"
-    (test.assert true)
-    tags: (@language)))
+    tags: (@language)
+    (test.assert true)))
 ```
 
 ```sh

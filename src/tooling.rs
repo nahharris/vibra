@@ -1,15 +1,17 @@
 //! Formatter and JSON-first linter support for the Vibra CLI.
 
 pub use crate::diagnostics::{
-    file_uri, Category, Diagnostic, Position, RelatedDiagnostic, Severity, Span,
+    file_uri, Category, Diagnostic, Fix, FixApplicability, Position, RelatedDiagnostic, Severity,
+    Span, TextEdit,
 };
 use crate::{load, lower};
 use anyhow::{bail, Context, Result};
 use glob::glob;
 use serde::Serialize;
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +48,7 @@ pub struct FmtReport {
 #[derive(Debug, Serialize)]
 pub struct LintSummary {
     pub files: usize,
+    pub fixed: usize,
     pub errors: usize,
     pub warnings: usize,
     pub infos: usize,
@@ -72,6 +75,7 @@ pub struct LintOptions {
     pub categories: Vec<Category>,
     pub severity: Option<Severity>,
     pub deny_warnings: bool,
+    pub fix: bool,
 }
 
 pub fn run_fmt(options: FmtOptions) -> Result<bool> {
@@ -146,8 +150,14 @@ pub fn diagnostics_for_source(path: &Path, source: &str) -> Vec<Diagnostic> {
 
 pub fn run_lint(options: LintOptions) -> Result<bool> {
     let files = discover_vibra_files(&options.inputs)?;
-    let active_categories = active_categories(&options.categories);
+    let mut active_categories = active_categories(&options.categories);
+    if options.fix {
+        // `--fix` is explicitly an opt-in write operation and includes the
+        // two compiler-backed safe edits as well as style edits.
+        active_categories.insert(Category::Compile);
+    }
     let mut diagnostics = Vec::new();
+    let mut fixed = 0;
 
     for path in &files {
         let source =
@@ -155,32 +165,23 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
         if path.file_name().and_then(|name| name.to_str()) == Some(crate::project::MANIFEST_FILE) {
             continue;
         }
-        let suppressions = Suppressions::parse(&source);
-        let mut file_diagnostics = Vec::new();
-
-        // Source is always S-expression (see `src/load.rs` module docs): reader
-        // and typed-surface diagnostics come from `sexpr_tooling`, not the
-        // legacy map-based lowering path. Style and compile passes both
-        // require a structurally valid document, so this check always runs
-        // and gates them even when the Syntax category itself is not selected.
-        let syntax_diagnostics = crate::sexpr_tooling::staged_sexpr_diagnostics(path, &source);
-        let syntax_ok = syntax_diagnostics.is_empty();
-        if active_categories.contains(&Category::Syntax) {
-            file_diagnostics.extend(syntax_diagnostics);
-        }
-
-        if syntax_ok && active_categories.contains(&Category::Style) {
-            file_diagnostics.extend(crate::sexpr_tooling::staged_lint_sexpr(path, &source));
-        }
-
-        if syntax_ok && active_categories.contains(&Category::Compile) {
-            file_diagnostics.extend(compile_diagnostics(path));
-        }
-
-        diagnostics.extend(file_diagnostics.into_iter().filter(|diagnostic| {
-            diagnostic.severity == Severity::Error
-                || !suppressions.suppresses(&diagnostic.code, diagnostic.span.start.line)
-        }));
+        let source = if options.fix {
+            let (updated, applied) = apply_safe_fixes(path, &source, &active_categories)?;
+            if updated != source {
+                fs::write(path, &updated)
+                    .with_context(|| format!("write lint fixes to {}", path.display()))?;
+            }
+            fixed += applied;
+            updated
+        } else {
+            source
+        };
+        diagnostics.extend(collect_file_diagnostics(
+            path,
+            &source,
+            &active_categories,
+            active_categories.contains(&Category::Compile),
+        ));
     }
 
     if let Some(min_severity) = options.severity {
@@ -197,7 +198,7 @@ pub fn run_lint(options: LintOptions) -> Result<bool> {
     });
 
     let report = LintReport {
-        summary: lint_summary(files.len(), &diagnostics),
+        summary: lint_summary(files.len(), fixed, &diagnostics),
         diagnostics,
     };
     print_lint_report(&report, options.format)?;
@@ -227,9 +228,10 @@ fn print_lint_report(report: &LintReport, format: LintOutputFormat) -> Result<()
     Ok(())
 }
 
-fn lint_summary(files: usize, diagnostics: &[Diagnostic]) -> LintSummary {
+fn lint_summary(files: usize, fixed: usize, diagnostics: &[Diagnostic]) -> LintSummary {
     let mut summary = LintSummary {
         files,
+        fixed,
         errors: 0,
         warnings: 0,
         infos: 0,
@@ -244,6 +246,221 @@ fn lint_summary(files: usize, diagnostics: &[Diagnostic]) -> LintSummary {
         }
     }
     summary
+}
+
+fn collect_file_diagnostics(
+    path: &Path,
+    source: &str,
+    active_categories: &BTreeSet<Category>,
+    include_compile: bool,
+) -> Vec<Diagnostic> {
+    let suppressions = Suppressions::parse(source);
+    // Source is always S-expression: style and compile passes are gated on a
+    // valid reader/typed surface even when syntax is not selected for output.
+    let syntax_diagnostics = crate::sexpr_tooling::staged_sexpr_diagnostics(path, source);
+    let syntax_ok = syntax_diagnostics.is_empty();
+    let mut file_diagnostics = Vec::new();
+    if active_categories.contains(&Category::Syntax) {
+        file_diagnostics.extend(syntax_diagnostics);
+    }
+    if syntax_ok && active_categories.contains(&Category::Style) {
+        file_diagnostics.extend(crate::sexpr_tooling::staged_lint_sexpr(path, source));
+    }
+    if syntax_ok && active_categories.contains(&Category::Compile) && include_compile {
+        file_diagnostics.extend(compile_diagnostics(path));
+    }
+    file_diagnostics
+        .into_iter()
+        .filter(|diagnostic| {
+            diagnostic.severity == Severity::Error
+                || !suppressions.suppresses(&diagnostic.code, diagnostic.span.start.line)
+        })
+        .collect()
+}
+
+fn apply_safe_fixes(
+    path: &Path,
+    source: &str,
+    active_categories: &BTreeSet<Category>,
+) -> Result<(String, usize)> {
+    let mut current = source.to_string();
+    let mut applied = 0;
+    let mut seen = HashSet::from([current.clone()]);
+    let mut iterations = 0usize;
+    let baseline_compile_errors = compile_diagnostics(path)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .map(|diagnostic| diagnostic.code)
+        .collect::<BTreeSet<_>>();
+    loop {
+        iterations += 1;
+        if iterations > 1024 {
+            bail!(
+                "lint autofix iteration limit exceeded for {}",
+                path.display()
+            );
+        }
+        // Compile diagnostics read the current on-disk source. They are
+        // included on the first pass (before any candidate write); subsequent
+        // passes use the in-memory candidate and therefore only need the
+        // syntax/style stages whose spans are derived from that candidate.
+        let include_compile = current == source;
+        let diagnostics =
+            collect_file_diagnostics(path, &current, active_categories, include_compile);
+        let (next, count) = apply_diagnostic_fixes(path, &current, &diagnostics);
+        if count == 0 || next == current {
+            break;
+        }
+        if !seen.insert(next.clone()) {
+            bail!("lint autofix cycle detected for {}", path.display());
+        }
+        validate_candidate_source(path, &next, &baseline_compile_errors)?;
+        current = next;
+        applied += count;
+    }
+    Ok((current, applied))
+}
+
+fn validate_candidate_source(
+    path: &Path,
+    source: &str,
+    baseline_compile_errors: &BTreeSet<String>,
+) -> Result<()> {
+    let syntax_errors = crate::sexpr_tooling::staged_sexpr_diagnostics(path, source)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .collect::<Vec<_>>();
+    if !syntax_errors.is_empty() {
+        bail!("safe lint fix validation failed for {}", path.display());
+    }
+
+    // Type-check the candidate in a sibling temporary file so relative
+    // imports resolve exactly as they do for the user's source.  Existing
+    // compile errors are allowed to remain; a safe fix must not introduce a
+    // new error when the original source was otherwise valid.
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let suffix = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| format!(".{extension}"))
+        .unwrap_or_else(|| ".vib".to_string());
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".vibra-lint-fix-")
+        .suffix(&suffix)
+        .tempfile_in(parent)
+        .with_context(|| format!("create lint validation file beside {}", path.display()))?;
+    temporary
+        .as_file_mut()
+        .set_len(0)
+        .context("truncate lint validation file")?;
+    temporary
+        .as_file_mut()
+        .seek(SeekFrom::Start(0))
+        .context("seek lint validation file")?;
+    temporary
+        .as_file_mut()
+        .write_all(source.as_bytes())
+        .context("write lint validation file")?;
+    temporary
+        .as_file_mut()
+        .flush()
+        .context("flush lint validation file")?;
+    let compile_errors = compile_diagnostics(temporary.path())
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .collect::<Vec<_>>();
+    if compile_errors
+        .iter()
+        .any(|diagnostic| !baseline_compile_errors.contains(&diagnostic.code))
+    {
+        bail!("safe lint fix validation failed for {}", path.display());
+    }
+    Ok(())
+}
+
+fn apply_diagnostic_fixes(
+    path: &Path,
+    source: &str,
+    diagnostics: &[Diagnostic],
+) -> (String, usize) {
+    #[derive(Clone)]
+    struct Candidate {
+        edits: Vec<TextEdit>,
+        start: usize,
+    }
+
+    let uri = file_uri(path);
+    let mut candidates = diagnostics
+        .iter()
+        .flat_map(|diagnostic| diagnostic.fix.as_ref().into_iter().flatten())
+        .filter_map(|fix| {
+            if fix.edits.iter().any(|edit| edit.span.uri != uri) {
+                return None;
+            }
+            let edits = fix.edits.clone();
+            let start = edits
+                .iter()
+                .filter_map(|edit| edit.span.start.offset)
+                .min()?;
+            (!edits.is_empty()).then_some(Candidate { edits, start })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| right.start.cmp(&left.start));
+
+    let mut selected = Vec::new();
+    let mut selected_ranges = Vec::<(usize, usize)>::new();
+    for candidate in candidates {
+        let mut ranges = Vec::new();
+        let mut valid = true;
+        for edit in &candidate.edits {
+            let Some(start) = edit.span.start.offset else {
+                valid = false;
+                break;
+            };
+            let Some(end) = edit.span.end.offset else {
+                valid = false;
+                break;
+            };
+            if start > end || end > source.len() {
+                valid = false;
+                break;
+            }
+            if ranges
+                .iter()
+                .any(|(other_start, other_end)| start < *other_end && *other_start < end)
+                || selected_ranges
+                    .iter()
+                    .any(|(other_start, other_end)| start < *other_end && *other_start < end)
+            {
+                valid = false;
+                break;
+            }
+            ranges.push((start, end));
+        }
+        if valid {
+            selected_ranges.extend(ranges);
+            selected.push(candidate.edits);
+        }
+    }
+    let selected_count = selected.len();
+    let mut edits = selected.into_iter().flatten().collect::<Vec<_>>();
+    edits.sort_by(|left, right| {
+        right
+            .span
+            .start
+            .offset
+            .unwrap_or_default()
+            .cmp(&left.span.start.offset.unwrap_or_default())
+    });
+    let count = selected_count;
+    let mut output = source.to_string();
+    for edit in edits {
+        let (Some(start), Some(end)) = (edit.span.start.offset, edit.span.end.offset) else {
+            continue;
+        };
+        output.replace_range(start..end, &edit.replacement);
+    }
+    (output, count)
 }
 
 fn sarif_report(report: &LintReport) -> serde_json::Value {
@@ -328,7 +545,7 @@ fn sarif_level(severity: Severity) -> &'static str {
 fn rule_summary(code: &str) -> &'static str {
     match code {
         "W-STYLE-001" => "Symbol-like key is not kebab-case",
-        "W-STYLE-002" => "Labelled arguments must precede variadic arguments",
+        "W-STYLE-003" => "Redundant sequencing do block",
         "W-EFFECT-001" => "Declaration includes nominal effects not inferred from its body",
         "W-RESULT-001" => "Result or option value is unhandled in statement position",
         "W-BIND-001" => "Binding is never read",
@@ -402,6 +619,7 @@ fn rule_summary(code: &str) -> &'static str {
         "E-TY-002" => "Returned value type does not match the declared return type",
         "E-MATCH-001" => "`match` over an enum is missing an arm for a tag",
         "E-MATCH-002" => "`match` over an open-ended type requires a `_` arm",
+        "E-SYN-013" => "Labelled operands must precede remainder or variadic operands",
         _ => "Vibra diagnostic",
     }
 }
@@ -433,13 +651,19 @@ pub fn compile_diagnostics_with_flags(
                 "E-OPTION-001: noncanonical option representation; use the tagged stdlib option enum"
             );
         }
-        let Some(map) = entry.as_mapping() else {
-            return Ok(Vec::new());
+        let has_main = program
+            .modules
+            .get(&program.entry)
+            .and_then(crate::legacy_value::Value::as_mapping)
+            .is_some_and(|module| {
+                module.contains_key(&crate::legacy_value::Value::String("main".to_string()))
+            });
+        let lower = if has_main {
+            lower::lower_program(&program)
+        } else {
+            lower::lower_library_program(&program)
         };
-        if !map.contains_key(&crate::legacy_value::Value::String("main".to_string())) {
-            return Ok(Vec::new());
-        }
-        lower::lower_program(&program).map(|lowered| {
+        lower.map(|lowered| {
             lowered
                 .body_diagnostics
                 .into_iter()
@@ -487,14 +711,21 @@ fn body_warning_diagnostic(
         .unwrap_or_else(|| point_span(fallback_path, 0, 0));
     let fixes = fix.map(|location| {
         let source = fs::read_to_string(&location.path).unwrap_or_default();
-        vec![json!({
-            "span": crate::sexpr_tooling::tooling_span(&location.path, &source, location.span),
-            "suggestion": match code {
-                "W-BIND-001" => "replace this binder with `_`",
-                "W-RESULT-001" => "handle or explicitly discard this value",
-                _ => "review this diagnostic",
-            },
-        })]
+        let span = crate::sexpr_tooling::tooling_span(&location.path, &source, location.span);
+        let replacement = match code {
+            "W-BIND-001" => "_".to_string(),
+            "W-RESULT-001" => source
+                .get(location.span.range())
+                .map(|expression| format!("(let _ {})", expression.trim()))
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let title = match code {
+            "W-BIND-001" => "Replace unused binder with `_`",
+            "W-RESULT-001" => "Discard result with an explicit `let`",
+            _ => "Apply safe fix",
+        };
+        vec![Fix::safe(title, vec![TextEdit { span, replacement }])]
     });
     Diagnostic {
         code: code.to_string(),
@@ -553,6 +784,7 @@ fn extract_diagnostic_code(message: &str) -> Option<&'static str> {
         "E-YAML-002",
         "E-YAML-003",
         "E-SYN-001",
+        "E-SYN-013",
         "E-ONE-001",
         "E-ONE-002",
         "E-ONE-003",
@@ -716,7 +948,10 @@ fn collect_dir(dir: &Path, files: &mut BTreeSet<PathBuf>) -> Result<()> {
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if name == ".git" || name == "target" {
+            if matches!(
+                name,
+                ".git" | ".worktrees" | ".agents" | "target" | "tmp" | "dep"
+            ) {
                 continue;
             }
             collect_dir(&path, files)?;
@@ -760,7 +995,10 @@ mod discovery_tests {
 }
 
 fn display_path(path: &Path) -> String {
-    path.display().to_string().replace('\\', "/")
+    path.display()
+        .to_string()
+        .trim_start_matches(r"\\?\")
+        .replace('\\', "/")
 }
 
 #[derive(Debug, Default)]

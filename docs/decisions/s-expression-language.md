@@ -19,13 +19,13 @@ generics, nominal implementations, tests, and WebAssembly runtime behavior. It
 changes their spelling and removes syntax that exists only to fit semantic
 nodes into YAML mappings.
 
-Calls accept fixed positional, labelled, and variadic arguments. The reader
-accepts mixed source order, and unlabelled values fill the next unbound fixed
-parameter, so a misplaced label remains parseable and semantically checkable.
-Canonical formatting emits fixed positional arguments first, labelled arguments
-second, and variadic values last. `W-STYLE-002` reports a labelled argument
-that follows a variadic value as a warning; it is not a hard parse or type error.
-Generic type arguments use the reserved final `types:` call attribute.
+Calls accept fixed positional, labelled, and variadic arguments. Fixed
+positional operands must come first, followed by labelled operands, then the
+remainder or variadic tail. This order is strict for local, imported, and
+variadic calls; a late label is rejected directly with E-SYN-013. Formatting
+preserves source order and only changes whitespace and canonical token spelling.
+Generic type arguments use the reserved `types:` call attribute, which belongs
+to the labelled operand group before any remainder or variadic values.
 
 ## Reader contract
 
@@ -87,10 +87,7 @@ Vibra does not implement a general-purpose Lisp reader.
 Trailing labeled attributes configure their containing form:
 
 ```vibra
-(def option
-  (enum (some t) (none void))
-  where: (t any)
-  doc: "A value that may be absent.")
+(def option (enum (some t) (none void)) where: (t any) doc: "A value that may be absent.")
 ```
 
 The governing rule is: required, ordered, evaluated input is positional;
@@ -98,12 +95,12 @@ optional, unordered configuration of the containing form is labeled. A label
 is a reader-level structural atom, not a runtime value or Erlang-style atom.
 Each label consumes exactly one following form.
 
-All positional operands must precede the first labeled attribute. Attributes
-are semantically unordered unless a form explicitly documents otherwise. The
-typed grammar rejects unknown, duplicate, missing-value, and misplaced labels.
-Ordinary function calls remain positional; labels do not create named
-arguments. The lossless CST preserves labels and source order for macros and
-formatting.
+All fixed positional operands must precede the labelled group, and the
+labelled group must precede a form's remainder or variadic operands. Label
+order within that group is preserved. The typed grammar rejects unknown,
+duplicate, and missing-value labels with `E-SYN-011`, and late labels with
+`E-SYN-013`. The lossless CST
+preserves labels and source order for macros and formatting.
 
 ## Names, values, and calls
 
@@ -154,16 +151,16 @@ Partial type application and named type arguments are invalid.
 import     = "(", "import", symbol, string, ")" ;
 definition = "(", "def", symbol, type-expr, { attribute }, ")" ;
 constant   = "(", "const", symbol, type-expr, expr, { attribute }, ")" ;
-function   = "(", "defn", symbol, parameters, type-expr, body,
-             { attribute }, ")" ;
-inline-function = "(", "fn", parameters, type-expr, body,
-                  { attribute }, ")" ;
+function   = "(", "defn", symbol, parameters, type-expr,
+             { attribute }, { expr }, ")" ;
+inline-function = "(", "fn", parameters, type-expr,
+                  { attribute }, { expr }, ")" ;
 test       = "(", "test.scenario", string, test-case+, ")" ;
-test-case  = "(", "test.case", string, expr+, { attribute }, ")" ;
+test-case  = "(", "test.case", string, { attribute }, { expr }, ")" ;
 private    = "(", "private",
              (definition | constant | function | macro), ")" ;
 parameters = "(", { "(", symbol, type-expr, ")" }, ")" ;
-body       = "(", "do", { expr }, ")" ;
+body       = expr ;
 ```
 
 Imports are public module-local aliases but are never re-exported. Definitions,
@@ -175,9 +172,13 @@ be wrapped. `main` remains the program entrypoint.
 ```vibra
 (import io "../stdlib/src/io.vib")
 
-(defn write-prefix (text str) void (do (io.stdout.print text)) visibility: @private)
+(defn write-prefix (text str) void
+  visibility: @private
+  (io.stdout.print text))
 
-(defn main () void (do (write-prefix "Hello") (io.stdout.println ", World!")))
+(defn main () void
+  (write-prefix "Hello")
+  (io.stdout.println ", World!"))
 ```
 
 Type definitions use `(def name type-expr ...)` and place a type constructor
@@ -242,21 +243,11 @@ Examples:
   where: (t any)
   doc: "A value that may be absent.")
 
-(defn
-  unwrap-or
-  (input (option t) fallback t)
-  t
-  (do
-    (match
-  input
-  (option.some (bind value))
-  (do (return value))
-  (option.none)
-  (do (return fallback))
-)
-  )
+(defn unwrap-or (input (option t) fallback t) t
   where: (t any)
-)
+  (match input
+    (option.some (bind value)) (return value)
+    (option.none) (return fallback)))
 ```
 
 Handle, function-interface, and WebAssembly signature forms follow the same
@@ -266,8 +257,10 @@ not change, but no form may accept both a compact and expanded spelling.
 ## Expressions and statements
 
 `do` is the only sequencing form. Its final expression is its value; an empty
-`do` has value `unit`. Function, loop, task, test, match-arm, and conditional
-bodies use explicit `do` lists. There is no statement-only sibling-key syntax.
+`do` has value `unit`. Function, loop, task, and test bodies are direct
+expression sequences; match arms and conditional branches each contain one
+expression. Use an explicit `do` in those expression positions when multiple
+steps are required. There is no statement-only sibling-key syntax.
 
 ```ebnf
 expr = atom
@@ -300,7 +293,7 @@ expr = atom
 call        = "(", symbol, expr*, ")" ;
 field-value = "(", symbol, expr, ")" ;
 map-entry   = "(", expr, expr, ")" ;
-captures    = "(", "captures", symbol*, ")" ;
+captures    = "captures:", "(", symbol*, ")" ;
 match-arm   = pattern, expr ;
 ```
 
@@ -470,17 +463,18 @@ The canonical test form is:
 ```vibra
 (test.scenario "arithmetic"
   (test.case "addition is checked"
-    (test.assert-eq-int (add 1 1) 2)
     tags: (@language @arithmetic)
     expect-error: (@compile E-OP-002 "overflow")
-    clock: (@fixed 0 0)))
+    clock: (@fixed 0 0)
+    (test.assert-eq-int (add 1 1) 2)))
 ```
 
 Each metadata label consumes one value with its own positional schema. Known
 labels are `tags:`, `expect-error:`, `clock:`, `benchmark:`, and `workspace:`.
 Profiles and tags still
 select tests only. Workspace access remains an explicit runner option.
-Metadata is unordered and must follow the body.
+Labels preserve source order within the labelled group and must precede the
+body/remainder operands.
 
 ## Source files, manifests, locks, and packages
 
@@ -572,8 +566,9 @@ form.
 Every token and syntax node stores a half-open UTF-8 byte span `[start, end)`.
 Diagnostics additionally derive one-based line and Unicode-scalar column for
 display. The byte span is authoritative for editors and fixes. Related spans
-and fixes continue using the diagnostic schema, but fixes identify a document
-revision and byte range rather than JSON Patch over YAML mappings.
+and fixes continue using the diagnostic schema. A fix has a title, safe
+applicability, and one or more typed document spans with replacements; there is
+no JSON Patch over YAML mappings.
 
 Semantic diagnostics retain their existing stable codes when the semantic rule
 is unchanged. Messages and examples must use the new spelling.
@@ -587,14 +582,22 @@ is unchanged. Messages and examples must use the new spelling.
 - one space between atoms on the same line;
 - no trailing whitespace;
 - short leaf lists remain on one line when the result is at most 88 columns;
-- a multiline list places its head after `(`, each remaining child on its own
-  indented line, and `)` at the parent's indentation;
+- `defn` keeps its name, parameter list, and return type together when they fit,
+  then prints labels before body expressions;
+- `match` keeps its target together and prints one pattern/branch arm per line,
+  hanging multiline branch contents beneath the arm opener;
+- `if` keeps its condition together and prints one branch per following line;
+- `do` prints each expression one per indented line;
+- generic multiline lists retain child order and attach the closing delimiter
+  to the final rendered child;
 - top-level forms are separated by one blank line;
 - strings use only the specified escapes and otherwise preserve Unicode;
 - numeric literals are normalized without changing type or value;
 - comments remain attached to the following form when possible and are never
   synthesized;
-- declaration, field, arm, parameter, capture, and body order is preserved.
+- declaration, field, arm, parameter, capture, and body order is preserved;
+- formatting changes only whitespace and canonical token spelling; it never
+  adds, removes, or reorders CST nodes.
 
 Formatting is idempotent. There is no alternative flow/block style.
 
@@ -606,7 +609,7 @@ random authority.
 
 ```ebnf
 macro          = "(", "macro", symbol, macro-parameters, syntax-category,
-                 macro-body, { attribute }, ")" ;
+                 { attribute }, macro-expr+, ")" ;
 macro-parameters = "(", { "(", symbol, syntax-category, ")" }, ")" ;
 syntax-category = "@expr-syntax" | "@type-syntax" | "@pattern-syntax"
                 | "@definition-syntax" | "@module-syntax" ;
@@ -630,14 +633,12 @@ or definition positions:
   unless
   (condition @expr-syntax body @expr-syntax)
   @expr-syntax
-  (do
-    (quote @expr-syntax (if (not (unquote condition)) (do (unquote body)) (do)))
-  )
+  (quote @expr-syntax
+    (if (not (unquote condition)) (unquote body) (do)))
 )
 
 (defn main () void
-  (do
-    (unless ready (io.stdout.println "not ready"))))
+  (unless ready (io.stdout.println "not ready")))
 ```
 
 `quote` requires an explicit result category. `unquote` inserts exactly one
@@ -731,9 +732,9 @@ node fingerprints and applies the complete workspace transaction atomically.
 There is no partial application.
 
 The public CLI is `vibra rewrite rename <path>:<byte> <new-name> [--write]`;
-preview is the default. A future `vibra fix` may apply diagnostics already
-produced by the compiler, but it must use the same planner. LSP
-`textDocument/rename` and code actions use the planner and return ordinary LSP
+preview is the default. `vibra lint --fix` applies only typed safe edits,
+reparses the result, and writes only when `--fix` is explicit. LSP
+`textDocument/rename` and `textDocument/codeAction` return ordinary LSP
 workspace edits. Type applications, value calls, and macros with the same
 textual head are distinguished by their resolved `AstId` and kind.
 

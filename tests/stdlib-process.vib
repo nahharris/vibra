@@ -5,6 +5,8 @@
   "run-rejects-stream-stdio-without-spawning"
   (test.case
     "run-rejects-stream-stdio-without-spawning"
+    profile: @process
+    tags: (@stdlib @process)
     (let
       outcome
       (process.run
@@ -13,18 +15,7 @@
           (arguments (array "unused"))
           (environment (map ("VIBRA_PROCESS_TEST" "1")))
           (cwd "")
-          (stdio (process.stdio-policy.stream))
-        )
-      )
-    )
-    (match
-      outcome
-      (result.result.err (process.process-error.unsupported _))
-      (do (test.assert true))
-      _
-      (do (test.fail "run stream mode was not rejected as unsupported"))
-    )
-    profile: @process
-    tags: (@stdlib @process)
-  )
-)
+          (stdio (process.stdio-policy.stream)))))
+    (match outcome
+      (result.result.err (process.process-error.unsupported _)) (test.assert true)
+      _ (test.fail "run stream mode was not rejected as unsupported"))))

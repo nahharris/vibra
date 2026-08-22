@@ -30,12 +30,12 @@ change the stored declaration or inferred output.
 ```text
 (deffect read
   (defn open (path path) (result reader fs-error)
-    (intrinsic @fs-open-read path)
-    effects: ())
+    effects: ()
+    (intrinsic @fs-open-read path))
   (defn file (path path) (result str fs-error)
+    effects: (stream.read stream.manage)
     ; ordinary Vibra composition over read/open and stream operations
-    ...
-    effects: (stream.read stream.manage)))
+    ...))
 ```
 
 Inside the declaration, `file` is still the module-level symbol `fs.file`.

@@ -1,2 +1,3 @@
 (import greeting "@greeting/greet.vib")
-(defn main () void (greeting.greet))
+(defn main () void
+  (greeting.greet))

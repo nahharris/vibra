@@ -1339,7 +1339,7 @@ mod tests {
         let entry = module(
             r#"(import model "./model.vib")
 (def option (union t void) where: (t any))
-(defn unwrap (input (option int64)) int64 (do (return 0)) doc: "Typed signature.")"#,
+(defn unwrap (input (option int64)) int64 doc: "Typed signature." (do (return 0)) )"#,
             1,
         );
         let model = module("(def item (record (id int64)))", 2);
@@ -1386,7 +1386,7 @@ mod tests {
         let source = module(
             r#"(def comparable (interface))
 (def display (interface (show (fn-type (self self) str))) where: (t any))
-(defn show-box (value (box t)) str (do (return "box")) where: (t comparable))
+(defn show-box (value (box t)) str where: (t comparable) (do (return "box")) )
 (def box (record (value t))
   where: (t comparable)
   doc: "A box."
@@ -1395,7 +1395,7 @@ mod tests {
     types: (t)
     methods: ((method show show-box)))))
 (const limit int64 10 visibility: @private)
-(test.scenario "works" (test.case "works" unit tags: (@fast @typed)))"#,
+(test.scenario "works" (test.case "works" tags: (@fast @typed) unit ))"#,
             3,
         );
         let index = lower_typed_signatures([TypedModuleInput {
@@ -1417,7 +1417,7 @@ mod tests {
     #[test]
     fn rejects_ambiguous_generic_heads_and_impl_type_arguments() {
         let generic_head = module(
-            "(defn bad (value (t int64)) int64 (do (return 0)) where: (t any))",
+            "(defn bad (value (t int64)) int64 where: (t any) (do (return 0)))",
             4,
         );
         let error = lower_typed_signatures([TypedModuleInput {
@@ -1774,9 +1774,13 @@ mod tests {
     fn lowers_deffect_operations_with_owner_and_additive_effects() {
         let source = module(
             r#"(deffect now
-  (defn unix-millis () uint64
-    (return 1)
-    effects: (stream.read)))"#,
+  (defn
+    unix-millis
+    ()
+    uint64
+    effects:
+    (stream.read)
+    (return 1)))"#,
             101,
         );
         let index = lower_typed_signatures([TypedModuleInput {
