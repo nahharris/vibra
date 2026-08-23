@@ -70,8 +70,9 @@ status, and workspace revision. With no projection flags it returns the compact
 core metadata appropriate to that subject. `--include` accepts a comma-separated
 selection from `syntax`, `context`, `source`, `signature`, `type`, `effects`,
 `visibility`, `diagnostics`, and `diagnostic`. `--expand` requests potentially
-large relations: `references`, `members`, `calls`, `effect-witnesses`, or
-`declarations`.
+large relations: `references`, `members`, `calls`, `applications`,
+`effect-witnesses`, or `declarations`. `calls` contains function-call edges;
+`applications` also includes constructors, projections, and lookups.
 
 A source-position query resolves the smallest containing syntax node. Its
 available metadata includes the information needed to produce a valid
@@ -79,10 +80,13 @@ continuation:
 
 - grammar category and permitted child forms or labels;
 - expected and observed type;
+- for an application, its resolved kind, callee type or entity, operand
+  contract, selector when static, and exact result type;
 - allowed effect ceiling and currently computed performed row;
 - visible lexical names and imported module aliases;
 - resolved declaration candidates with canonical identities;
-- applicable enum constructors, fields, interface methods, and generic bounds;
+- applicable constructors, record-field atoms, tuple indices, collection
+  key/index expectations, interface methods, and generic bounds;
 - diagnostics and safe fixes at the location; and
 - the exact workspace revision used.
 
@@ -99,6 +103,16 @@ one normalized record per declaration: canonical source, signature, effect
 row, visibility, call edges, referenced types, error types, and source
 fingerprint. The exact checker remains the admission test for a retrieved
 candidate; workspace metadata is not a substitute type system.
+
+Every resolved application reports one of `@function`, `@constructor`,
+`@tuple-projection`, `@record-projection`, or `@collection-lookup`. Projection
+metadata includes the compile-time component or field identity; lookup
+metadata includes the required key or index type. Only `@function` carries a
+callee effect row or contributes a function-call edge. Completion after a
+tuple callee proposes valid literal indices, completion after a record callee
+proposes visible atom field selectors, and collection lookup proposes the
+required operand type. Pattern completion uses the same resolved field,
+component, and constructor identities.
 
 Diagnostic codes are built-in query subjects. For example,
 `vibra query @type.argument-mismatch --include diagnostic` returns the code's
@@ -135,10 +149,12 @@ affected module, format changed forms, and validate the requested postcondition.
 It then replaces all files atomically. Stale, overlapping, ambiguous, or
 ill-typed plans fail without partial writes.
 
-Rename rejects generated-only nodes, discards, keywords, visibility violations,
-name collisions, and shadowing. A rename may touch imports and qualified
-references across packages in the current workspace but never edits vendored
-dependencies.
+Rename rejects generated-only nodes, discards, keywords, visibility
+violations, name collisions, and shadowing. A record-selector atom in
+`(value @field)` is a rename reference only after application resolution binds
+it to that record's field identity; an ordinary equal atom value is untouched.
+A rename may touch imports and qualified references across packages in the
+current workspace but never edits vendored dependencies.
 
 ## MCP server
 

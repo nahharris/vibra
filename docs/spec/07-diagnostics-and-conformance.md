@@ -16,7 +16,11 @@ than its issuance order or severity:
 @syntax.invalid-numeric-literal
 @name.unknown-symbol
 @type.argument-mismatch
+@type.not-applicable
+@type.invalid-tuple-index
+@type.unknown-record-field
 @type.numeric-out-of-range
+@pattern.refutable-binding
 @effect.outside-ceiling
 @external.unknown-symbol
 @project.stale-lock
@@ -58,7 +62,7 @@ MUST NOT manufacture a typed node for an ambiguous recovery.
 Presentation that has one unambiguous semantic binding may parse with a style
 diagnostic and a safe formatter fix. Missing operands, duplicate labels,
 unknown labels on resolved forms, unmatched delimiters, invalid tokens, odd map
-key/value tails, and ambiguous calls remain errors.
+key/value tails, and ambiguous applications remain errors.
 
 Later phases operate on explicitly marked valid subtrees and suppress cascades
 that add no new information. A tool response identifies which facts are exact,
@@ -85,7 +89,7 @@ kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
 | --- | --- |
 | `V1-CHARTER` | v1 mission, boundary, commitments, and exclusions |
 | `V1-SRC-READER` | reader, tokens, names, and trivia |
-| `V1-SRC-CALLS` | flat parameters, labels, variadics, and binding |
+| `V1-SRC-CALLS` | general application, labels, variadics, and binding |
 | `V1-SRC-DECL` | declarations, nested methods and impls, and visibility |
 | `V1-SRC-EXPR` | expressions, patterns, collections, and control flow |
 | `V1-SRC-FMT` | canonical formatting |
@@ -116,6 +120,23 @@ names such as `_.x`, `a?.b`, `-.x`, and `@-.x`. Invalid character tokens use
 `@syntax.invalid-numeric-literal`; and a syntactically valid literal outside
 its suffixed type's range uses `@type.numeric-out-of-range`. All three have the
 fixed level `@error`.
+
+Application coverage includes arbitrary callee expressions, every closed
+applicable category, constructor applications, rejection of atom and numeric
+callees, tuple literal-index bounds, record selector resolution, optional
+collection lookup, and proof that pure projections and lookups add neither an
+effect nor a function-call edge. Collection construction covers heterogeneous
+`tuple.of`, homogeneous and expected-empty `array.of`, even and duplicate-key
+`map.of`, and rejection of source `(tuple ...)`, `(array ...)`, and `(map ...)`
+value construction.
+
+Pattern coverage includes direct bare-name binders, nested destructuring in
+`let`, `for`, positional parameters, lambdas, and `match`, duplicate-name and
+no-shadowing rejection, all three repeating discards, and irrefutability
+checking against the expected type. The removed `(bind name)` spelling MUST be
+rejected with no compatibility bridge. `@type.not-applicable`,
+`@type.invalid-tuple-index`, `@type.unknown-record-field`, and
+`@pattern.refutable-binding` all have fixed level `@error`.
 
 ## Conformance profiles
 

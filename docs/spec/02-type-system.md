@@ -49,17 +49,18 @@ V1 type constructors are:
 
 ```ebnf
 type-expr = primitive | symbol | "(", symbol, type-expr+, ")"
-          | "(", "record", field-type+, ")"
-          | "(", "enum", variant+, ")"
+          | record-type | enum-type
           | "(", "newtype", type-expr, ")"
           | "(", "tuple", type-expr*, ")"
           | "(", "array", type-expr, ")"
           | "(", "map", type-expr, type-expr, ")"
           | function-type ;
-field-type = "(", symbol, type-expr, ")" ;
-variant = "(", symbol, [ type-expr ], ")" ;
+record-type = "(", "record", local-name, type-expr,
+              { local-name, type-expr }, ")" ;
+enum-type = "(", "enum", local-name, type-expr,
+            { local-name, type-expr }, ")" ;
 function-type = "(", "fn", "(", type-expr*, ")", type-expr,
-                [ "labelled:", "(", { symbol, type-expr }, ")" ],
+                [ "labelled:", "(", { local-name, type-expr }, ")" ],
                 [ "variadic:", variadic-type ],
                 [ "effects:", effect-row ], ")" ;
 ```
@@ -71,16 +72,75 @@ effect row. Effect-row entries are atom entity references resolved to nominal
 effect roots. Defaults belong to the function value and are not repeated in
 its type. An omitted function-type `effects:` row is empty.
 
-Records have closed, named fields. Enums have closed, named variants with zero
-or one payload type. Tuples, arrays, and maps are immutable values. Map keys
-must implement the standard `hashable`, `equatable`, and `ordered` interfaces.
-Recursive types MUST pass a finite-size check; recursion through a
-variable-size container is permitted, while direct infinite expansion is
-rejected.
+Record and enum bodies are flat and contain at least one name/type pair.
+Records have closed, named fields. Every enum variant has one written payload
+slot; `void` in that slot declares a nullary, payloadless constructor, while
+any other type declares a unary constructor. Tuples, arrays, and maps are
+immutable values. Map keys must implement the standard `hashable`,
+`equatable`, and `ordered` interfaces. Recursive types MUST pass a finite-size
+check; recursion through a variable-size container is permitted, while direct
+infinite expansion is rejected.
 
 Newtypes have a distinct identity and exactly one representation type. Their
 constructor and unwrap operation are available only where visibility permits.
 There are no structural aliases or transparent public casts.
+
+## Application
+
+Every non-reserved executable list is an application whose behavior is fixed
+by the statically resolved callee. V1 has this closed set of applicable value
+categories:
+
+| Callee type | Required operand | Result | Application kind |
+| --- | --- | --- | --- |
+| `fn` | Its written positional, labelled, and variadic signature | Written result | `@function` |
+| `(tuple t0 ... tn)` | One tuple-index literal | Exact selected component | `@tuple-projection` |
+| Record type | One atom field selector | Exact selected field | `@record-projection` |
+| `(array t)` | One `u64` index | `(option t)` | `@collection-lookup` |
+| `(map k v)` | One value of exact type `k` | `(option v)` | `@collection-lookup` |
+| `str` | One `u64` scalar index | `(option char)` | `@collection-lookup` |
+| `bytes` | One `u64` byte index | `(option u8)` | `@collection-lookup` |
+
+A projection or lookup application accepts exactly one unlabelled operand and
+no labelled or variadic operands.
+
+A tuple index is an unsuffixed decimal integer literal written canonically
+without a leading zero except for `0`. It is checked at compile time, MUST be
+within the tuple arity, and cannot be supplied by a variable or computed
+expression. V1 has no `value.0` postfix spelling. A record selector is exactly
+one written unqualified atom such as `@name`; it is resolved contextually to a
+field identity and MUST name a visible field of the statically known record
+type. In this position the atom is a selector, not an entity reference or an
+applicable value.
+
+Array, map, string, and byte lookups accept a runtime operand and return the
+standard nominal `option`; absence and out-of-bounds access never trap, return
+an implicit default, or produce null. String indices count Unicode scalar
+values, not UTF-8 bytes. Projection and lookup are pure. Evaluating their
+callee or operand may perform effects, but the application itself contributes
+no effect and no function-call edge.
+
+An enum value, atom, number, or `void` is not applicable. A newtype value does
+not delegate applicability to its representation. A value whose static type is
+an unconstrained generic is not applicable; v1 has no callable interface or
+user-defined applicability bound. Tuples and records are not subtypes of `fn`;
+producing an accessor as a higher-order value requires an explicit `lambda`.
+
+Resolved nominal record types, enum variants, and newtype constructors are
+also applicable constructor entities. Record constructors accept their closed
+set of labelled fields, enum constructors accept zero operands for a `void`
+payload slot or one operand of the written payload type, and newtype
+constructors accept their representation value. Constructor application is
+pure and has kind `@constructor`.
+
+The closed native entities `tuple.of`, `array.of`, and `map.of` construct
+collection values and have application kind `@constructor`. `tuple.of` derives
+one heterogeneous tuple type from its operands. `array.of` requires every
+operand to have one exact element type, and `map.of` requires alternating
+operands of one exact key type and one exact value type. Empty array and map
+construction requires an expected type; an odd map arity is an error. The
+source forms `(tuple ...)`, `(array ...)`, and `(map ...)` are type or pattern
+forms, never collection value constructors.
 
 ## Namespaces and resolution
 
@@ -97,11 +157,13 @@ form in that module. Syntactic position selects the namespace. Tooling MUST
 return the resolved kind and canonical identity; it must never expose a dotted
 string as if textual coincidence were resolution.
 
-Name shadowing is forbidden. A named parameter, `let` binder, pattern binder,
-loop binder, or lambda parameter MUST NOT reuse any visible lexical name.
-`-`, `@-`, and `-:` are equivalent discards, create no binding, and may repeat
-in the same or nested scopes. Sibling scopes may reuse a named symbol when
-neither declaration is visible from the other.
+Name shadowing is forbidden. Every name introduced anywhere inside a
+positional-parameter, `let`, `for`, or `match` pattern MUST NOT reuse any
+visible lexical name. Labelled and variadic parameter names follow the same
+rule. A pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are
+equivalent discards, create no binding, and may repeat in the same or nested
+scopes. Sibling scopes may reuse a named symbol when neither declaration is
+visible from the other.
 
 ## Inference and checking
 
@@ -110,7 +172,7 @@ Inference is local:
 - unsuffixed numeric literal types may be constrained by their expression
   context, while character, boolean, string, atom, `void`, and suffixed numeric
   literals have fixed types;
-- generic arguments may be inferred from written argument and result types;
+- generic arguments may be inferred from written operand and result types;
 - effects performed by a function body are computed to check its written or
   default-empty ceiling; and
 - local expression types need not be annotated when the result is unique.
@@ -136,10 +198,11 @@ unconstrained.
   (array.first items))
 ```
 
-Generic arguments are invariant. Calls infer the complete argument list when
-unique; otherwise `types: (type...)` supplies every type argument in `where:`
-order. Partial application, named type arguments, specialization by value,
-multiple bounds on one parameter, and runtime type tests are not in v1.
+Generic arguments are invariant. Function and constructor applications infer
+the complete argument list when unique; otherwise `types: (type...)` supplies
+every type argument in `where:` order. Partial application, named type
+arguments, specialization by value, multiple bounds on one parameter, and
+runtime type tests are not in v1.
 
 Implementations may monomorphize, but specialization strategy is not
 observable except through deterministic program and build output.
@@ -175,14 +238,29 @@ Missing, extra, duplicate, or conflicting members are errors.
 
 There is no inheritance between concrete types. Interface values use explicit
 widening at a typed boundary and static, closed-world dispatch in v1. Operator
-overloading is absent. Arithmetic, comparison, indexing, and conversion use
-ordinary resolved functions or interface methods.
+overloading is absent. Arithmetic, comparison, and conversion use ordinary
+resolved functions or interface methods. Application-based tuple/record
+projection and array/map/string/byte lookup are the closed indexing surface
+defined above and cannot be overloaded.
 
 ## Control flow and failure
 
 `if` requires `bool` and both branches must have one common type. `match` is
 checked for exhaustiveness over booleans, atoms when statically closed, enums,
 and finite structural patterns. Unreachable arms are errors.
+
+The same exhaustiveness engine determines whether a binding pattern is
+irrefutable: the single pattern MUST cover every value of its expected type.
+`let`, `for`, and fixed positional function or lambda parameters require an
+irrefutable pattern; `match` permits refutable patterns and checks all arms
+together. Tuple patterns have exact arity and are irrefutable when every
+component is. Record patterns may omit fields and are irrefutable when every
+written field pattern is. A fixed-length array pattern is refutable for the
+variable-length array type. A newtype constructor pattern is irrefutable when
+its payload pattern is. An enum constructor pattern is refutable unless its
+expected enum has exactly that one variant and its payload pattern is
+irrefutable. A bare unqualified name always binds; it never pins or compares a
+visible value.
 
 `option t` and `result t e` are ordinary nominal standard-library enums with
 compiler recognition only for `try` and unhandled-value checking. A fallible

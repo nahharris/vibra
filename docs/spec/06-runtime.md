@@ -23,22 +23,37 @@ provider.
 
 Evaluation is strict and deterministic:
 
-- call arguments evaluate in resolved fixed-parameter order, labelled
-  declaration order, then variadic source order;
+- an application evaluates its callee exactly once before any runtime operand;
+- compile-time tuple-index and record-field selectors are not evaluated as
+  values;
+- function and constructor operands evaluate in resolved fixed-parameter
+  order, labelled declaration order, then variadic source order;
 - an array variadic tail builds one array from its values;
 - a map variadic tail builds one map from alternating key/value forms and an
   odd tail is rejected before execution;
 - function bodies and `do` forms evaluate from first to last;
 - `if` evaluates only the selected branch;
 - `match` evaluates its subject once and selects the first matching arm;
-- collection elements evaluate from left to right; and
+- `tuple.of`, `array.of`, and `map.of` operands evaluate from left to right;
+  and
 - `return`, `try`, `break`, and `continue` perform only their specified lexical
   control transfer.
 
-Map literals and map variadic tails share one construction rule. Every key and
+`map.of` and map variadic tails share one construction rule. Every key and
 value is evaluated even if a key repeats; the later pair replaces the earlier
 value. Map iteration order is canonical key order, not insertion or hash-table
 order.
+
+Nominal and closed native constructor applications assemble immutable values;
+they do not invoke a function body, add a function-call edge, or emit a host
+event. Effects from evaluating their operands remain observable.
+
+Tuple and record projection are lowered from their compile-time selector to a
+direct component read. Array, map, string, and byte application performs one
+bounds-checked or presence-checked lookup and returns `option.some` or
+`option.none`. A missing key or out-of-range index does not panic, trap, return
+null, or synthesize a default value. These projection and lookup operations are
+pure and generate no function-call edge or host event.
 
 String and byte indexing is bounds-checked. Strings are Unicode scalar
 sequences at the language level; each scalar is a `char`, and byte conversion

@@ -13,7 +13,8 @@ or interpolation.
 ```ebnf
 module         = trivia, { top-form, trivia }, EOF ;
 form           = atom | list ;
-list           = "(", trivia, symbol, { required-trivia, form }, trivia, ")" ;
+list           = "(", trivia,
+                 [ form, { required-trivia, form } ], trivia, ")" ;
 atom           = string | character | boolean | integer | float | void
                | atom-name
                | label | symbol ;
@@ -117,34 +118,61 @@ schema position that explicitly expects an entity reference resolves it as
 one. Imports and effect rows are such positions; writing `@std.io` elsewhere
 produces an atom value rather than loading or invoking code.
 
-## Labels and calls
+## Labels and applications
 
 A label consumes one following form. Required ordered input is positional;
-optional or named input is labelled. A call may contain fixed positional,
-labelled, and variadic operands.
+optional or named input is labelled. An application may contain fixed
+positional, labelled, and variadic operands.
+
+The reader permits any form, including another list, at the head of a list.
+After reserved-form recognition, every nonempty executable list is an
+application. The checker classifies it from the statically resolved callee;
+an application is not necessarily a function call. An empty list is valid
+only where a contextual grammar explicitly admits it, such as an empty
+parameter or effect list. It is never an executable application.
+
+```vibra
+((choose-function condition) argument)
+((make-tuple) 0)
+((tuple-of-functions 0) argument)
+```
+
+The first example calls the function selected by `choose-function`. The second
+projects component zero from the tuple returned by `make-tuple`. The third
+projects a function from a tuple and calls it. The callee expression is
+evaluated exactly once before any runtime operand; compile-time tuple and
+record selectors are not evaluated as values. The type chapter defines the
+closed set of applicable categories and their operand rules; v1 has no
+user-defined call operator or callable interface.
 
 The recovery parser accepts labelled operands interleaved with a variadic tail
-when every operand can be bound unambiguously to the resolved signature. The
-canonical formatter emits fixed positional operands first, labelled operands in
-declaration order, and the variadic tail last. Ambiguous or duplicate binding
-is an error. Noncanonical but unambiguous order is a style diagnostic, not a
-compile error.
+when every operand can be bound unambiguously to a resolved function or
+constructor signature. The canonical formatter emits fixed positional
+operands first, labelled operands in declaration order, and the variadic tail
+last. Ambiguous or duplicate binding is an error. Noncanonical but
+unambiguous order is a style diagnostic, not a compile error.
 
-Call arguments are evaluated in resolved fixed-parameter order, then labelled
-parameter declaration order, then variadic source order. Evaluation therefore
-does not change when the formatter normalizes operand order.
+Function and constructor operands are evaluated in resolved fixed-parameter
+order, then labelled-parameter declaration order, then variadic source order.
+Evaluation therefore does not change when the formatter normalizes operand
+order.
 
 ```vibra
 (log.write "build finished" level: @info "target" "app")
 ```
 
-Every executable list not reserved by the grammar is a call. A function value
-is `f`; a nullary call is `(f)`.
+A function value is `f`; its nullary application `(f)` is a function call.
+Atoms are ordinary values and are not applicable, so `(@some-atom value)` is a
+static error rather than an indirect lookup or call.
+The head spelling alone never turns an operand into a selector: `(value @name)`
+is a function call when `value` has a matching `fn` type and a record
+projection when `value` has a record type. `(value value)` is classified by the
+same static rule. A literal-headed form such as `(1 2)` is not applicable.
 
 An array variadic parameter receives every remaining unlabelled form as one
 array. A map variadic parameter receives alternating key and value forms. The
 call MUST contain an even number of remaining forms, and construction follows
-the ordinary map-literal rules.
+the ordinary `map.of` rules.
 
 ```vibra
 (collect-values v1 v2 v3)
@@ -183,9 +211,10 @@ effect-member = "(", "defn", symbol, parameters, type-expr,
                 { function-attribute }, { expr }, ")" ;
 
 discard              = "-" | "@-" | "-:" ;
-binding-name         = symbol | discard ;
-parameters           = "(", { binding-name, type-expr }, ")" ;
-labelled-parameters  = "(", { symbol, type-expr, literal }, ")" ;
+local-name           = kebab-name ;
+binding-name         = local-name | discard ;
+parameters           = "(", { pattern, type-expr }, ")" ;
+labelled-parameters  = "(", { local-name, type-expr, literal }, ")" ;
 variadic-parameter   = "(", binding-name, variadic-type, ")" ;
 variadic-type        = "(", "array", type-expr, ")"
                      | "(", "map", type-expr, type-expr, ")" ;
@@ -213,14 +242,14 @@ lambda-attribute = "labelled:", labelled-parameters
 `def` introduces an immutable module value. There is no separate `const` form
 in v1.
 
-Every required positional parameter is written directly as a name/type pair;
-there is no wrapper list around each parameter. `labelled:` is one flat list of
+Every required positional parameter is written directly as a pattern/type
+pair; there is no wrapper list around each parameter. The pattern MUST be
+irrefutable for the written type. `labelled:` is one flat list of
 name/type/default triples. Every labelled parameter MUST have a literal default
-value. `variadic:` contains exactly one name/type pair, and its type MUST be an
-`array` or `map`. A function has at most one variadic parameter. A positional
-or variadic parameter may use any discard spelling when its value is
-intentionally unused; labelled parameters require a real symbol because their
-name is part of the call contract.
+value and a real unqualified local name because its name is part of the call
+contract. `variadic:` contains exactly one name/type pair, and its type MUST be
+an `array` or `map`. A function has at most one variadic parameter. A variadic
+parameter may use any discard spelling when its value is intentionally unused.
 
 `where:` is a flat list of generic-name/bound pairs. It is the only declaration
 of generic names: every generic name used by a declaration MUST occur exactly
@@ -234,9 +263,9 @@ formatted canonically. Nested methods follow attributes.
 
 Every labelled argument or attribute follows all fixed positional forms of its
 enclosing form and precedes its variadic body or member forms. The parser MAY
-recover another unambiguous order for ordinary calls as described above, but
-the declaration grammar and formatter never use a label to interrupt a fixed
-header.
+recover another unambiguous order for function or constructor applications as
+described above, but the declaration grammar and formatter never use a label
+to interrupt a fixed header.
 
 All declarations are private unless they contain `visibility: @public`.
 Visibility is part of the declaration, not a wrapper form.
@@ -254,7 +283,7 @@ Visibility is part of the declaration, not a wrapper form.
   (text.concat "hello, " name))
 
 (deftype option
-  (enum (some t) (none))
+  (enum some t none void)
   where: (t any)
   visibility: @public)
 ```
@@ -304,10 +333,11 @@ cannot be external.
 
 The provider and string symbol are checked against closed, versioned toolchain
 registries. External declarations are accepted only in toolchain-signed
-standard-library modules; ordinary packages cannot declare them. Every call
-uses the declared Vibra name and ordinary call syntax—there is no `external`,
-`primitive`, or `host-op` call expression. V1 has no WebAssembly external
-provider and no source-level Wasm FFI.
+standard-library modules; ordinary packages cannot declare them. Every
+external function is applied through its declared Vibra name and ordinary
+function-application syntax—there is no `external`, `primitive`, or `host-op`
+expression. V1 has no WebAssembly external provider and no source-level Wasm
+FFI.
 
 ## Types, interfaces, and methods
 
@@ -322,13 +352,13 @@ the type-qualified name.
   (defn printable.render (value self) str))
 
 (deftype user
-  (record (name str) (id user-id))
+  (record name str id user-id)
   implements: (printable)
   visibility: @public
   (defn printable.render (value self) str
-    (field value name))
+    (value @name))
   (defn user.name-length (value self) u64
-    (text.length (field value name))))
+    (text.length (value @name))))
 ```
 
 The package that owns an interface may implement it for a type declared in
@@ -353,14 +383,15 @@ Qualified method definitions occur only inside their owning `deftype`,
 `defint`, nested `impl`, or `deffect`. A module-level `defn` name MUST be
 unqualified.
 
-Records are constructed by calling their nominal type with labelled fields.
-Enum tags are constructors qualified by the type name. `field` reads a
-statically known record field.
+Records are constructed by applying their nominal type to labelled fields.
+Enum tags and newtypes expose qualified constructors. A record value is
+applied to an atom selector to read one statically known field; there is no
+`field` form and no generated source accessor function.
 
 ```vibra
 (user name: "Ada" id: (user-id 1))
 (option.some "value")
-(field person name)
+(person @name)
 ```
 
 ## Functions and expressions
@@ -377,40 +408,75 @@ result, labelled, variadic, and effect syntax, but no name or visibility.
 ```
 
 ```ebnf
-expr = atom | call | lambda
+expr = atom | application | lambda
      | "(", "do", { expr }, ")"
-     | "(", "let", binding-name, expr, { expr }, ")"
+     | "(", "let", pattern, expr, { expr }, ")"
      | "(", "if", expr, expr, expr, ")"
      | "(", "match", expr, pattern, expr, { pattern, expr }, ")"
      | "(", "while", expr, expr, ")"
-     | "(", "for", binding-name, expr, expr, ")"
+     | "(", "for", pattern, expr, expr, ")"
      | "(", "break", ")" | "(", "continue", ")"
      | "(", "return", [ expr ], ")"
-     | "(", "try", expr, ")"
-     | "(", "field", expr, symbol, ")"
-     | collection ;
+     | "(", "try", expr, ")" ;
+application = "(", expr, { expr }, ")" ;
 lambda = "(", "lambda", parameters, type-expr,
          { lambda-attribute }, { expr }, ")" ;
-collection = "(", "tuple", { expr }, ")"
-           | "(", "array", { expr }, ")"
-           | "(", "map", { expr, expr }, ")" ;
-pattern = discard | literal | "(", "bind", binding-name, ")"
+pattern = binding-name | literal
         | "(", symbol, { pattern | label, pattern }, ")"
         | "(", "tuple", { pattern }, ")"
         | "(", "array", { pattern }, ")" ;
 ```
 
-`let` introduces an immutable name for the remainder of its form. There is no
-assignment or shared mutable state in v1. A binder MUST NOT shadow any visible
-name. A discard never binds and may be used as `(let - expression)`,
-`(let @- expression)`, or `(let -: expression)` to state that a result is
-intentionally ignored. Repeating a discard is always valid because it creates
-no declaration to redeclare or shadow.
+Reserved forms are recognized before the general application production. A
+list headed by `let`, for example, cannot be reinterpreted as application of a
+value named `let`.
+
+`let` introduces immutable bindings for the remainder of its form. There is no
+assignment or shared mutable state in v1. `let`, `for`, and positional
+function or lambda parameters accept patterns, but each such binding pattern
+MUST be irrefutable for its expected type. `match` accepts refutable patterns.
+
+A bare unqualified local name in a pattern always introduces a binding; it
+never compares against an existing value. A dotted symbol in a pattern names a
+constructor or other resolved entity and never introduces a local. Every named
+binder MUST NOT shadow a visible name, and the same pattern MUST NOT bind one
+name more than once. A discard never binds and may be used as
+`(let - expression)`, `(let @- expression)`, or `(let -: expression)` to state
+that a result is intentionally ignored. Repeating a discard is always valid
+because it creates no declaration to redeclare or shadow. There is no `bind`
+pattern form and no compatibility spelling for it.
+
+```vibra
+(let (tuple name id) pair
+  (text.concat name (integer.to-str id)))
+
+(for (tuple key value) entries
+  (visit key value))
+
+(lambda ((tuple left right) (tuple i32 i32)) i32
+  (integer.add left right))
+```
 
 `while` and `for` exist for local iteration; mutation needed by their library
 implementation is compiler/runtime internal. Collections have immutable value
-semantics. A `map` contains alternating key and value expressions directly;
-there is no `entry` wrapper.
+semantics. Source values use the closed, pure constructor entities `tuple.of`,
+`array.of`, and `map.of`; the unqualified `tuple`, `array`, and `map` forms are
+reserved for types and patterns. There is no source collection-literal form
+and no `entry` wrapper.
+
+```vibra
+(tuple.of "Ada" 42u64)
+(array.of 1i32 2i32 3i32)
+(map.of "name" "Ada" "role" "maintainer")
+```
+
+`tuple.of` may contain heterogeneous values. Every `array.of` element has one
+exact type. `map.of` contains alternating key and value expressions and MUST
+have even arity; its keys share one exact type and its values share one exact
+type. An empty `array.of` or `map.of` requires an expected collection type.
+All constructor operands are evaluated, and a later duplicate map key replaces
+the earlier value. These names are closed native constructor entities, not
+ordinary user declarations and not overloadable qualified functions.
 
 `match` contains alternating pattern/result forms directly; there is no `case`
 wrapper. Every arm has exactly one result expression, so `do` groups multiple
@@ -418,9 +484,17 @@ expressions. Arms are checked for reachability and exhaustiveness.
 
 ```vibra
 (match value
-  (option.some (bind text)) (text.length text)
+  (option.some text) (text.length text)
   (option.none) 0)
 ```
+
+A tuple pattern has exact arity. A named-record pattern uses labelled fields;
+omitted fields are ignored. Array patterns have exact length. Irrefutability is
+a type-system property: tuple and record patterns may be irrefutable when all
+of their subpatterns are, while a fixed-length array pattern is refutable for
+the variable-length array type. Enum constructors are normally refutable, but
+the exhaustiveness checker may prove a constructor pattern irrefutable for a
+single-variant type.
 
 `try` propagates the error of `result` or the absence of `option` through a
 function returning the same container and error type. There are no exceptions
@@ -441,7 +515,7 @@ returned, bound for later use, or explicitly ignored with a discard binding.
 - adjacent lowercase numeric suffixes, preserved exactly when written;
 - leaf lists on one line when they fit within 88 columns;
 - declaration headers before labelled attributes and bodies;
-- fixed, labelled, then variadic call operands;
+- fixed, labelled, then variadic function or constructor operands;
 - one pattern/result arm per line in a multiline `match`; and
 - preserved comments attached to the following form when possible.
 

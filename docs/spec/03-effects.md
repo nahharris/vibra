@@ -9,7 +9,8 @@ An effect answers “what may this code attempt?” during checking. V1 effects 
 static and erased; they are not runtime permissions, capability values, or a
 sandbox.
 
-- a call outside its enclosing effect ceiling is a type error;
+- a function application whose performed row exceeds its enclosing effect
+  ceiling is a type error;
 - every host operation belongs to one nominal effect root; and
 - a binary target's declared roots must contain the entry function's complete
   performed row before that target can run or build.
@@ -39,11 +40,11 @@ When this declaration belongs to module `fs`, its source root is `fs.read` and
 its operations are `fs.read.file` and `fs.read.text`. The defining package and
 module, not an import alias, form the canonical identity.
 
-Calling an operation always performs its owner root. `effects:` on an operation
-lists additive roots performed by its body; the owner root is implicit. An
-omitted additive row is empty. Effect roots and operation names are unique
-nominal declarations. Textually equal roots from different packages are
-unrelated.
+Applying an operation as a function always performs its owner root. `effects:`
+on an operation lists additive roots performed by its body; the owner root is
+implicit. An omitted additive row is empty. Effect roots and operation names
+are unique nominal declarations. Textually equal roots from different packages
+are unrelated.
 
 An `@host` external declaration binds an operation signature to the closed,
 versioned host registry. Its string symbol selects one registry entry, its
@@ -65,8 +66,8 @@ to nominal effect roots.
 - Every interface contract has a written or default-empty ceiling.
 - An effect operation declares only its additive ceiling; its owner is
   implicit.
-- The checker computes the least performed row over the resolved call graph,
-  but this computation never changes an omitted ceiling from `()`.
+- The checker computes the least performed row over the resolved function-call
+  graph, but this computation never changes an omitted ceiling from `()`.
 - For an ordinary body, the written or default-empty ceiling MUST contain the
   performed row. For an effect operation, its owner root plus its additive
   written or default-empty ceiling MUST contain the performed row.
@@ -77,6 +78,12 @@ Rows are order-insensitive semantically and sorted by canonical identity in
 formatter and machine output. A function type includes its closed effect row.
 Effect variables and polymorphic rows are excluded from v1; a higher-order
 function therefore declares the exact callback effect row it accepts.
+
+Nominal constructor application, tuple and record projection,
+array/map/string/byte lookup, and closed native collection construction are
+pure applications. They add no root and no edge to the function-call graph.
+Effects performed while evaluating their callee or operands still contribute
+normally.
 
 `main` follows the same rule as every other `defn`: omission means `()`, so an
 effectful `main` MUST declare `effects:`. The target record independently
@@ -141,15 +148,15 @@ service, not a dedicated query kind. A function or source-position query can
 include:
 
 - written-or-default ceilings and computed performed rows;
-- resolved callees;
+- resolved function callees and classified non-call applications;
 - effect-operation witnesses that introduced each root;
 - the public boundary that covers the row; and
 - the binary target or test ceiling checked for the selected entry.
 
 Reports use canonical identities rather than import aliases. The checker and
-query result MUST share one call graph and performed-row result. Compact
-queries may omit call witnesses; `--expand effect-witnesses` requests them
-without changing the underlying metadata or admission result.
+query result MUST share one function-call graph and performed-row result.
+Compact queries may omit call witnesses; `--expand effect-witnesses` requests
+them without changing the underlying metadata or admission result.
 
 ## Claims and limits
 
