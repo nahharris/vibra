@@ -14,11 +14,27 @@ or interpolation.
 module         = trivia, { top-form, trivia }, EOF ;
 form           = atom | list ;
 list           = "(", trivia, symbol, { required-trivia, form }, trivia, ")" ;
-atom           = string | boolean | integer | float | unit | atom-name
+atom           = string | character | boolean | integer | float | void
+               | atom-name
                | label | symbol ;
-literal        = string | boolean | integer | float | unit | atom-name ;
+literal        = string | character | boolean | integer | float | void
+               | atom-name ;
 boolean        = "true" | "false" ;
-unit           = "unit" ;
+void           = "void" ;
+character      = backslash,
+                 ( character-name | unicode-character | character-scalar ) ;
+character-name = "newline" | "return" | "space" | "tab" ;
+unicode-character = "u", hex-digit, hex-digit, hex-digit, hex-digit ;
+integer        = [ "-" ], digits, [ integer-suffix ] ;
+float          = [ "-" ],
+                 ( digits, ".", digits, [ exponent ], [ float-suffix ]
+                 | digits, exponent, [ float-suffix ]
+                 | digits, float-suffix ) ;
+integer-suffix = "i8" | "i16" | "i32" | "i64"
+               | "u8" | "u16" | "u32" | "u64" ;
+float-suffix   = "f32" | "f64" ;
+exponent       = ( "e" | "E" ), [ "+" | "-" ], digits ;
+digits         = digit, { digit } ;
 symbol         = "-" | ( kebab-name, { ".", kebab-name } ) ;
 atom-name      = "@", symbol ;
 label          = symbol, ":" ;
@@ -30,17 +46,45 @@ lowercase-letter = "a" | "b" | "c" | "d" | "e" | "f" | "g"
                  | "v" | "w" | "x" | "y" | "z" ;
 digit          = "0" | "1" | "2" | "3" | "4"
                | "5" | "6" | "7" | "8" | "9" ;
+hex-digit      = digit | "a" | "b" | "c" | "d" | "e" | "f"
+               | "A" | "B" | "C" | "D" | "E" | "F" ;
+backslash      = U+005C ;
+character-scalar = ? one Unicode scalar other than whitespace ? ;
 trivia         = { whitespace | line-comment } ;
 required-trivia = ( whitespace | line-comment ), trivia ;
 ```
 
 Strings are double quoted and support `\"`, `\\`, `\n`, `\r`, `\t`, and
-`\u{HEX}`. Integers are signed decimal. A float contains a decimal point or an
-exponent. Numeric range belongs to type checking, not lexing.
+`\u{HEX}`.
 
-`unit` is the single value of `void`. It is the result of a function or form
-that completes successfully but has no meaningful value to return. Empty `do`
-and an empty function body evaluate to `unit`.
+A character literal follows EDN spelling and denotes exactly one Unicode scalar
+value. A backslash may be followed by one non-whitespace scalar, one of
+`newline`, `return`, `space`, or `tab`, or `u` and exactly four hexadecimal
+digits. Thus `\c`, `\0`, `\newline`, and `\u0063` denote `c`, `0`, line feed,
+and `c`. A `u` escape whose value is a surrogate code point is invalid. The
+complete non-delimited token belongs to the character literal: `\newline-x`
+and `\ab` are invalid rather than a character followed by a symbol. A
+backslash followed by whitespace is invalid; whitespace characters use their
+named or Unicode spelling.
+
+Integers are signed decimal and floats contain a decimal point, an exponent, or
+an `f32`/`f64` suffix. An adjacent suffix is part of the numeric token. The
+integer suffixes are `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, and `u64`;
+the float suffixes are `f32` and `f64`. A suffix fixes the literal's exact type,
+so `1u8`, `25i32`, and `2.5f64` have types `u8`, `i32`, and `f64`. `2f64` is
+also a float. Unsuffixed literals receive a type from their expression context.
+An unknown suffix, an integer suffix on a float body, or trailing token text is
+an invalid numeric literal. Numeric range belongs to type checking, not lexing;
+for example, `-1u8` is lexically one `u8` literal and is rejected as out of
+range. V1 has no numeric separators, non-decimal bases, `isize`, or `usize`.
+Character and maximal numeric recognition take precedence over symbol
+recognition; `-` followed immediately by a digit starts a numeric token, while
+the standalone `-` remains the discard symbol.
+
+`void` is both the primitive type name in type position and its single value in
+expression or data position. It is the result of a function or form that
+completes successfully but has no meaningful value to return. Empty `do` and
+an empty function body evaluate to `void`. There is no `unit` literal.
 
 Every named symbol consists of one or more dot-separated segments, and every
 segment independently satisfies `kebab-name`. Its first character MUST be a
@@ -64,8 +108,8 @@ do not participate in redeclaration or shadowing checks. Despite being derived
 through the ordinary name grammar, a discard never denotes a value, label,
 atom, or reference and is rejected in every non-discard position.
 
-Keywords, booleans, `unit`, and atom names cannot be rebound.
-Boolean, `unit`, and reserved-form recognition takes precedence when their
+Keywords, booleans, `void`, and atom names cannot be rebound.
+Boolean, `void`, and reserved-form recognition takes precedence when their
 spelling also satisfies the symbol production.
 
 An atom is an ordinary value in expression position. Only a grammar or data
@@ -200,10 +244,10 @@ Visibility is part of the declaration, not a wrapper form.
 ```vibra
 (import io @std.io)
 
-(deftype user-id (newtype uint64)
+(deftype user-id (newtype u64)
   visibility: @public)
 
-(def default-retries uint8 3)
+(def default-retries u8 3u8)
 
 (defn greet (name str) str
   visibility: @public
@@ -283,7 +327,7 @@ the type-qualified name.
   visibility: @public
   (defn printable.render (value self) str
     (field value name))
-  (defn user.name-length (value self) uint64
+  (defn user.name-length (value self) u64
     (text.length (field value name))))
 ```
 
@@ -390,6 +434,11 @@ returned, bound for later use, or explicitly ignored with a discard binding.
 - UTF-8, LF endings, and one trailing newline;
 - two-space indentation and no trailing whitespace;
 - one blank line between top-level forms;
+- `\newline`, `\return`, `\space`, and `\tab` for their four characters,
+  uppercase four-digit `\uNNNN` spelling for every other control or whitespace
+  scalar in the Basic Multilingual Plane, and direct EDN character spelling for
+  every remaining scalar;
+- adjacent lowercase numeric suffixes, preserved exactly when written;
 - leaf lists on one line when they fit within 88 columns;
 - declaration headers before labelled attributes and bodies;
 - fixed, labelled, then variadic call operands;

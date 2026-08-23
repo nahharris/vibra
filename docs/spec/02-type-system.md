@@ -12,17 +12,33 @@ signatures; callers never need a callee body to type-check a call.
 The primitive types are:
 
 ```text
-bool void str bytes atom
-int8 int16 int32 int64
-uint8 uint16 uint32 uint64
-float32 float64
+bool void char str bytes atom
+i8 i16 i32 i64
+u8 u16 u32 u64
+f32 f64
 ```
 
-`void` has exactly one value, `unit`. A function returns `void` when successful
-completion carries no information. `atom` contains interned atom values such
-as `@ok`; every written atom also has a singleton type that can widen to
-`atom`. There is no null value, truthiness conversion, implicit numeric
-widening, or implicit string conversion.
+`void` has exactly one value, also spelled `void`. A function returns `void`
+when successful completion carries no information. `char` contains exactly the
+Unicode scalar values. `atom` contains interned atom values such as `@ok`;
+every written atom also has a singleton type that can widen to `atom`. There is
+no null value, truthiness conversion, implicit numeric widening, or implicit
+string conversion.
+
+A numeric suffix is a complete type annotation on its literal. Integer
+suffixes select one of `i8` through `i64` or `u8` through `u64`; float suffixes
+select `f32` or `f64`. A suffixed literal MUST fit the selected type. An
+unsuffixed integer or float is constrained by its local expected type and is an
+ambiguity error when no unique numeric type follows. Suffixes never request an
+implicit conversion, and platform-sized numeric types do not exist in v1.
+
+For width `N`, `iN` contains the integers from `-2^(N-1)` through
+`2^(N-1)-1`, and `uN` contains `0` through `2^N-1`. `f32` and `f64` are the
+IEEE 754 binary32 and binary64 formats. Decimal float literals are rounded to
+the selected format using round-to-nearest, ties-to-even; a finite source
+literal that overflows to infinity is out of range. V1 has no source spelling
+for infinity or NaN. Character equality and ordering use Unicode scalar value,
+and conversion between `char` and an integer is always explicit.
 
 ## Nominal declarations
 
@@ -91,7 +107,9 @@ neither declaration is visible from the other.
 
 Inference is local:
 
-- literal types may be constrained by their expression context;
+- unsuffixed numeric literal types may be constrained by their expression
+  context, while character, boolean, string, atom, `void`, and suffixed numeric
+  literals have fixed types;
 - generic arguments may be inferred from written argument and result types;
 - effects performed by a function body are computed to check its written or
   default-empty ceiling; and

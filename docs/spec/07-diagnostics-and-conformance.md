@@ -12,8 +12,11 @@ than its issuance order or severity:
 
 ```text
 @syntax.unmatched-delimiter
+@syntax.invalid-character-literal
+@syntax.invalid-numeric-literal
 @name.unknown-symbol
 @type.argument-mismatch
+@type.numeric-out-of-range
 @effect.outside-ceiling
 @external.unknown-symbol
 @project.stale-lock
@@ -106,8 +109,13 @@ marked illustrative. Every error rule has at least one focused negative case.
 The corpus includes Unicode spans, parser recovery, stale edit plans, forbidden
 shadowing, incomplete interface methods, static target-effect mismatch,
 host-error propagation, interpreter/Wasm parity, all three equivalent discard
-spellings, and rejection of malformed names such as `_.x`, `a?.b`, `-.x`, and
-`@-.x`.
+spellings, all character spellings, exact numeric suffix typing and range
+boundaries, rejection of the retired `unit` literal, and rejection of malformed
+names such as `_.x`, `a?.b`, `-.x`, and `@-.x`. Invalid character tokens use
+`@syntax.invalid-character-literal`; malformed or unknown numeric suffixes use
+`@syntax.invalid-numeric-literal`; and a syntactically valid literal outside
+its suffixed type's range uses `@type.numeric-out-of-range`. All three have the
+fixed level `@error`.
 
 ## Conformance profiles
 

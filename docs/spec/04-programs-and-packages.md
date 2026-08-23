@@ -9,7 +9,7 @@ Vibra uses its own reader to represent compiler-owned data. A data document is
 exactly one literal from this closed subset:
 
 ```ebnf
-data = string | boolean | integer | float | unit | atom-name
+data = string | character | boolean | integer | float | void | atom-name
      | "(", "record", { label, data }, ")"
      | "(", "array", { data }, ")"
      | "(", "tuple", { data }, ")"
@@ -20,6 +20,8 @@ Records contain unique labelled fields. Maps contain alternating key/value
 forms directly and require an even number of forms. Bare symbols, calls,
 imports, bindings, declarations, and host operations are not data and MUST be
 rejected in a data document. The data is parsed and validated, never executed.
+Characters, `void`, and suffixed numerics use the source reader's literal
+spelling and carry the same values and exact primitive types.
 
 Each compiler-owned format defines a closed record schema and a version atom.
 Unknown, duplicate, or missing fields are errors. Canonical output uses the

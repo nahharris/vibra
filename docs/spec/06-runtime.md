@@ -41,7 +41,14 @@ value. Map iteration order is canonical key order, not insertion or hash-table
 order.
 
 String and byte indexing is bounds-checked. Strings are Unicode scalar
-sequences at the language level; byte conversion is explicit UTF-8.
+sequences at the language level; each scalar is a `char`, and byte conversion
+is explicit UTF-8. A runtime MUST reject a character representation in the
+Unicode surrogate range or above U+10FFFF. `void` carries no runtime
+information and has one observable value, spelled `void` when serialized.
+
+Numeric suffixes are erased after fixing the literal's primitive type in typed
+IR. They do not alter the runtime representation or arithmetic semantics of
+that type. Literal range errors are rejected before execution.
 
 Floating-point operations follow IEEE 754. Serialization and equality
 canonicalize all NaN payloads to one quiet NaN per width and normalize negative
@@ -84,10 +91,11 @@ is not catchable by user code.
 
 The emitted module imports only compiler-generated `@host` entries from
 `vibra_v1`. There is no source-level Wasm FFI, dependency-selected import
-module, or user-declared import. The guest/host boundary is
-scalar-only: values crossing it are numeric scalars or checked opaque indices
-into an instance-owned value arena. Guest pointers, shared linear-memory
-pointers, and host internals do not cross the boundary.
+module, or user-declared import. The guest/host boundary is scalar-only: values
+crossing it are fixed-width primitive scalars or checked opaque indices into an
+instance-owned value arena. A `char` crosses as a validated Unicode scalar in
+an `i32` slot. Guest pointers, shared linear-memory pointers, and host internals
+do not cross the boundary.
 
 The host validates every opaque value index for instance, kind, and liveness.
 Index zero is invalid and IDs are not reused within an instance. The module
