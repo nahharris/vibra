@@ -149,7 +149,7 @@ jobs:
         run: |
           mkdir digests
           for image in ghcr.io/nahharris/vibra ghcr.io/nahharris/vibra-dev; do docker buildx imagetools inspect "$image:staging-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.suffix }}" --format '{{.Manifest.Digest}}' | xargs -I{} sh -c 'echo "$0@{}"' "$image" > "digests/$(basename "$image")-${{ matrix.suffix }}.txt"; done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: rebuild-digests-${{ matrix.suffix }}
           path: digests/
