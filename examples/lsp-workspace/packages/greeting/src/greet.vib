@@ -1,3 +1,0 @@
-(defn greet () void
-  doc: "Greets from a local package."
-  (let value 1))

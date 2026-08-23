@@ -1,8 +1,0 @@
-(import io "../stdlib/src/io.vib")
-(import result "../stdlib/src/result.vib")
-(defn main () void
-  (let _ (io.stdout.print "What is your name? "))
-  (let name-result (io.stdin.readln))
-  (match name-result
-    (result.result.ok (bind name)) (io.stdout.println name)
-    (result.result.err (bind _)) (io.stderr.println "failed to read stdin")))

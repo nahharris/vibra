@@ -1,3 +1,0 @@
-(project
-  (package "greeting" "0.1.0")
-  (target greeting kind: @lib root: "src" entry: "greet.vib"))

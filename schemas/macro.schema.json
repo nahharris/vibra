@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vibra.dev/schemas/macro.schema.json",
-  "title": "VibraMacro",
-  "description": "Transport representation of a complete `(macro ...)` S-expression. Typed macro syntax is validated by the Vibra reader and macro grammar.",
-  "type": "string",
-  "contentMediaType": "text/x-vibra"
-}

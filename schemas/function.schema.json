@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vibra.dev/schemas/function.schema.json",
-  "title": "VibraFunction",
-  "description": "Transport representation of a complete `(fn ...)` S-expression. Function structure is validated by the Vibra reader and typed grammar.",
-  "type": "string",
-  "contentMediaType": "text/x-vibra"
-}

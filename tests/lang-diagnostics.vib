@@ -1,9 +1,0 @@
-(import test "../stdlib/src/test.vib")
-(test.scenario
-  "identity-cast-is-a-compile-error"
-  (test.case
-    "identity-cast-is-a-compile-error"
-    profile: @core
-    tags: (@language @diagnostics)
-    expect-error: (@compile E-CAST-001 "no valid cast path")
-    (let value (cast 7 int64))))

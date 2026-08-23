@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vibra.dev/schemas/expression.schema.json",
-  "title": "VibraExpression",
-  "description": "Transport representation of one S-expression. Parse with the Vibra reader before applying contextual expression grammar.",
-  "type": "string",
-  "contentMediaType": "text/x-vibra"
-}
