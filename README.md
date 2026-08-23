@@ -20,7 +20,8 @@ CLI, schema, ABI, or package compatibility.
 
 Vibra v1 is defined by five inseparable surfaces:
 
-- one canonical `.vib` S-expression syntax;
+- canonical `.vib` source and non-executable `.vibon` data grammars over one
+  lexical S-expression reader;
 - a nominal static type system with explicit module boundaries;
 - nominal effects checked statically against explicit project-target ceilings;
 - versioned CLI and MCP contracts for projects, diagnostics, context, and

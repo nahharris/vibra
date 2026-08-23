@@ -13,7 +13,7 @@ language or maintain a second symbol index.
 Every machine response has a schema version and is deterministic for one
 workspace snapshot. JSON is the general CLI and MCP interchange format. Vibra
 owns no persistent JSON file: project, lock, and build data use the canonical
-`.vib` data subset. Human output is for terminals; program stdout from `run`
+`.vibon` data grammar. Human output is for terminals; program stdout from `run`
 remains program-owned.
 
 ## V1 CLI
@@ -46,6 +46,10 @@ plans. `project init` and `project sync` are inherently mutating and must print
 their planned destinations before mutation when run interactively; they reject
 nonempty destinations or conflicting vendor content rather than overwriting.
 
+`vibra fmt` selects the source or VIBON formatter from the `.vib` or `.vibon`
+extension before parsing. It never guesses from contents and rejects a
+document whose grammar does not match its extension.
+
 All commands accept `--format human|json` where their output is structured.
 JSON goes to stdout, diagnostics and operational logs go to stderr, and a
 nonzero exit is classified by a stable result atom. No command infers an output
@@ -53,14 +57,14 @@ format from a filename extension.
 
 ## Project operations
 
-Project tooling edits `project.vib` through its typed project-data AST. `add`
+Project tooling edits `project.vibon` through its typed project-data AST. `add`
 and `remove` produce the same transactional plan format as source edits. They
 preserve comments when possible and always finish with canonical formatting.
 
 `sync` is the only v1 command that performs dependency network access. It
 accepts only declared HTTPS Git sources and exact revisions, exports no Git
 metadata, executes no dependency code, and atomically replaces the vendor tree
-and `project-lock.vib` only after all hashes validate.
+and `project-lock.vibon` only after all hashes validate.
 
 ## Workspace queries
 
@@ -79,6 +83,8 @@ available metadata includes the information needed to produce a valid
 continuation:
 
 - grammar category and permitted child forms or labels;
+- token role, including `@atom-value`, `@entity-reference`, or
+  `@code-reference`, and the grammar or VIBON schema slot that selected it;
 - expected and observed type;
 - for an application, its resolved kind, callee type or entity, operand
   contract, selector when static, and exact result type;
@@ -118,6 +124,14 @@ Diagnostic codes are built-in query subjects. For example,
 `vibra query @type.argument-mismatch --include diagnostic` returns the code's
 fixed level, domain, summary, and fix capability from the compiler's diagnostic
 registry. It does not load or execute a Vibra declaration.
+
+Tooling MUST NOT infer reference role from atom shape. A query at `@std.io` in
+an ordinary expression reports `@atom-value`; the same token in the module
+locator of `(import io @std.io)` reports `@entity-reference` and the resolved
+module. `io.stdout` in a source effect row reports `@code-reference`, the
+lexical import alias, and the canonical nominal effect identity. An effect atom
+inside a `project.vibon` target reports `@entity-reference` because that typed
+schema slot requires one.
 
 ## Transactional edit plans
 
@@ -190,7 +204,7 @@ The v1 implementation publishes JSON Schemas for CLI and MCP project
 inspection, diagnostics, normalized query results and expansions, edit
 plans/results, test reports, command results, external-registry inspection, and
 MCP envelopes. Persistent project, lock, and build-data record schemas are
-defined as Vibra data contracts and tested through their typed decoders, not
+defined as VIBON data contracts and tested through their typed decoders, not
 duplicated as normative JSON files.
 
 Schema IDs and major versions are contracts. Unknown fields are rejected in

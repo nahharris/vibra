@@ -3,10 +3,13 @@
 Status: normative target
 Implementation status: not started
 
-## Vibra data documents
+## VIBON data documents
 
-Vibra uses its own reader to represent compiler-owned data. A data document is
-exactly one literal from this closed subset:
+Vibra Object Notation (VIBON) is the non-executable `.vibon` document grammar
+for compiler-owned persistent data. `.vib` source and `.vibon` data share the
+lexical reader and literal spellings, but the file extension selects one
+document grammar before parsing; contents are never used to guess the mode. A
+VIBON document is exactly one value from this closed subset:
 
 ```ebnf
 data = string | character | boolean | integer | float | void | atom-name
@@ -17,9 +20,9 @@ data = string | character | boolean | integer | float | void | atom-name
 ```
 
 Records contain unique labelled fields. Maps contain alternating key/value
-forms directly and require an even number of forms. Bare symbols, calls,
+forms directly and require an even number of forms. Bare symbols, applications,
 imports, bindings, declarations, and host operations are not data and MUST be
-rejected in a data document. The data is parsed and validated, never executed.
+rejected in a VIBON document. The data is parsed and validated, never executed.
 Characters, `void`, and suffixed numerics use the source reader's literal
 spelling and carry the same values and exact primitive types.
 
@@ -28,15 +31,29 @@ Unknown, duplicate, or missing fields are errors. Canonical output uses the
 source formatter's whitespace rules, schema field order for records, canonical
 key order for maps, LF endings, and one trailing newline.
 
+An atom parsed by the generic VIBON grammar is an atom value. A typed schema
+may declare a particular slot to be an entity reference; only then does the
+decoder resolve that atom to a canonical code identity. For example,
+`format: @project.v1` is a version atom, a dependency map key `@std` is an alias
+atom, and an entry in a target's `effects` array is an effect-entity reference.
+Every schema slot declares exactly one role. An atom-value slot never performs
+resolution; an entity-reference slot MUST resolve to the required entity kind
+or fail decoding. No decoder may infer the role from the atom's spelling.
+
+The source graph MUST reject `.vibon` as a module extension, and a persistent
+data loader MUST reject `.vib`. V1 has no extension fallback, content sniffing,
+or compatibility bridge between the two grammars. A document presented to the
+wrong loader emits `@data.invalid-extension` before its contents are parsed.
+
 This literal subset is Vibra's object notation. Project files, lock files, and
 build metadata use it instead of persistent JSON. JSON remains the machine
 interchange format for CLI and MCP responses.
 
 ## Project file
 
-A project is rooted by `project.vib`. It contains one `@project.v1` record:
+A project is rooted by `project.vibon`. It contains one `@project.v1` record:
 
-```vibra
+```vibon
 (record
   format: @project.v1
   package: (record
@@ -58,7 +75,8 @@ A project is rooted by `project.vib`. It contains one `@project.v1` record:
 
 Project tooling preserves comments when possible and rewrites changed data in
 canonical form. There is no executable `(project ...)` declaration and no
-legacy project format fallback.
+legacy project format fallback. `project.vib` is not searched or accepted as a
+project document.
 
 ## Packages and targets
 
@@ -86,7 +104,7 @@ The minimum initialized layout is:
 
 ```text
 hello/
-  project.vib
+  project.vibon
   src/
     hello/
       main.vib
@@ -131,11 +149,11 @@ V1 supports:
   full 40-hex `rev:`.
 
 `vibra project sync` exports exact Git revisions into `dep/<alias>/` without
-`.git` metadata. It writes `project-lock.vib`, a canonical generated data
+`.git` metadata. It writes `project-lock.vibon`, a canonical generated data
 record. The lock contains its format, project fingerprint, dependency edges,
 source identities, revisions, content hashes, and vendor paths:
 
-```vibra
+```vibon
 (record
   format: @project-lock.v1
   project: "sha256:..."
@@ -182,7 +200,7 @@ unrecorded dependency on a nondeterministic provider fails the test.
 `vibra build <target>` emits:
 
 - `<target>.wasm`, the deterministic program or library module;
-- `<target>.build.vib`, canonical `@build.v1` data containing toolchain,
+- `<target>.build.vibon`, canonical `@build.v1` data containing toolchain,
   project, dependency, source, required-effect, and module hashes; and
 - optional human-readable diagnostics on stderr.
 

@@ -113,10 +113,12 @@ Keywords, booleans, `void`, and atom names cannot be rebound.
 Boolean, `void`, and reserved-form recognition takes precedence when their
 spelling also satisfies the symbol production.
 
-An atom is an ordinary value in expression position. Only a grammar or data
-schema position that explicitly expects an entity reference resolves it as
-one. Imports and effect rows are such positions; writing `@std.io` elsewhere
-produces an atom value rather than loading or invoking code.
+An atom is an ordinary value by default. Only a source grammar or `.vibon`
+schema position that explicitly expects an entity reference resolves an atom
+as one. The module locator in `import` is such a source position; writing
+`@std.io` in an ordinary expression produces an atom value rather than loading
+or invoking code. Effect rows do not use atoms: they contain lexical symbols
+resolved through the source module's imports.
 
 ## Labels and applications
 
@@ -218,7 +220,8 @@ labelled-parameters  = "(", { local-name, type-expr, literal }, ")" ;
 variadic-parameter   = "(", binding-name, variadic-type, ")" ;
 variadic-type        = "(", "array", type-expr, ")"
                      | "(", "map", type-expr, type-expr, ")" ;
-effect-row            = "(", { atom-name }, ")" ;
+effect-row            = "(", { effect-reference }, ")" ;
+effect-reference      = symbol ;
 where-clause         = "(", { symbol, generic-bound }, ")" ;
 generic-bound        = "any" | symbol ;
 
@@ -288,14 +291,18 @@ Visibility is part of the declaration, not a wrapper form.
   visibility: @public)
 ```
 
-The following declaration has labelled defaults and an array variadic tail:
+The following declaration has labelled defaults, an array variadic tail, and
+an imported effect reference:
 
 ```vibra
+(import io @std.io)
+(import log @std.log)
+
 (defn write-log (message str) void
   labelled: (level atom @info)
   variadic: (fields (array (tuple str str)))
   visibility: @public
-  effects: (@std.io.stdout)
+  effects: (io.stdout)
   (log.write message level fields))
 ```
 
@@ -310,6 +317,14 @@ the operation performs no additional roots.
 `deftype`, `defint`, and `deffect` are native AST forms. They MUST NOT be
 parser desugarings into a generic definition node. A nested `impl` is likewise
 a native child of its `defint`, not a generic call or a method-list desugaring.
+
+An effect reference is a symbol resolved only in the effect namespace. An
+unqualified symbol names an effect root in the current module; a dotted symbol
+starts with an explicit import alias and names a root in that module. Thus
+`io.stdout` resolves through `(import io @std.io)`. The resolved AST stores the
+root's canonical nominal identity, not the alias spelling. An atom such as
+`@std.io.stdout` in a source `effects:` row is an error and is never accepted
+as an alternate reference syntax; it emits `@effect.invalid-reference`.
 
 ## External definitions
 

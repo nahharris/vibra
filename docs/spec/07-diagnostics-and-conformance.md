@@ -22,7 +22,9 @@ than its issuance order or severity:
 @type.numeric-out-of-range
 @pattern.refutable-binding
 @effect.outside-ceiling
+@effect.invalid-reference
 @external.unknown-symbol
+@data.invalid-extension
 @project.stale-lock
 @runtime.invalid-host-value
 @style.argument-order
@@ -40,7 +42,7 @@ project. `vibra query @type.argument-mismatch --include diagnostic` exposes the
 registry entry, and every emitted diagnostic carries the same level. A command
 may fail on warnings by policy without changing their registered level.
 
-V1 has no language form or `.vib` catalog for declaring diagnostics. The
+V1 has no language form or `.vibon` catalog for declaring diagnostics. The
 registry is compiler data: queryable and covered by schemas and conformance
 tests, but not loaded from or executed as Vibra source.
 
@@ -121,6 +123,17 @@ names such as `_.x`, `a?.b`, `-.x`, and `@-.x`. Invalid character tokens use
 its suffixed type's range uses `@type.numeric-out-of-range`. All three have the
 fixed level `@error`.
 
+Source/data separation coverage accepts `.vib` only as source and `.vibon`
+only as VIBON, rejects `project.vib`, `project-lock.vib`, and
+`<target>.build.vib` with no compatibility fallback, and canonically round
+trips `project.vibon`, `project-lock.vibon`, and `<target>.build.vibon`.
+Reference-role coverage proves that equal atom spellings remain values in
+ordinary expressions, resolve only in explicit import or VIBON schema slots,
+and never appear in source effect rows. Effect rows resolve lexical symbols
+through imports to the same canonical identities used by target metadata.
+`@effect.invalid-reference` and `@data.invalid-extension` have fixed level
+`@error`.
+
 Application coverage includes arbitrary callee expressions, every closed
 applicable category, constructor applications, rejection of atom and numeric
 callees, tuple literal-index bounds, record selector resolution, optional
@@ -166,7 +179,7 @@ The future implementation has two independent suites:
    interpreter, and Wasm behavior.
 
 Both run from a clean checkout without network access after dependencies are
-synced. Formatter idempotence, JSON-schema validation, `.vib` data-decoder
+synced. Formatter idempotence, JSON-schema validation, `.vibon` data-decoder
 validation, documentation examples, interpreter/Wasm differential tests, and
 deterministic rebuilds are mandatory CI jobs.
 
@@ -184,7 +197,7 @@ The `full-v1` claim requires:
 - all normative examples classified and tested;
 - all CLI and MCP JSON schemas versioned and validated by producer/consumer
   tests;
-- all persistent `.vib` data formats validated and canonically round-tripped;
+- all persistent `.vibon` data formats validated and canonically round-tripped;
 - both suites green on every supported platform;
 - reference interpreter and Wasm parity across the executable corpus;
 - byte-identical rebuilds across two clean environments;

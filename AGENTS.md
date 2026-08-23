@@ -27,8 +27,9 @@ implementing either interpretation.
 - Keep one canonical spelling and one canonical machine contract.
 - Update every affected specification chapter and roadmap gate together.
 - Record exclusions explicitly; do not leave design questions hidden in code.
-- Use `.vib`, kebab-case symbols, native language forms, nominal effects, and
-  explicit namespaces. Do not add a pre-v1 compatibility bridge.
+- Use `.vib` for source, `.vibon` for persistent data, kebab-case symbols,
+  native language forms, nominal effects, and explicit namespaces. Do not add
+  a pre-v1 compatibility bridge.
 
 ## Implementation changes
 

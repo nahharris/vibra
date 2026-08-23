@@ -53,15 +53,17 @@ conformance case or an explicit review-only invariant.
 
 ## V1 commitments
 
-- Source files use `.vib` and UTF-8 S-expressions.
+- Source files use `.vib`; compiler-owned persistent data uses `.vibon`. Both
+  are UTF-8 S-expression document grammars over one lexical reader and are
+  never inferred from contents.
 - Names use kebab-case and imports produce explicit aliases.
 - Public boundaries carry complete types and effect ceilings.
 - Types, interfaces, their explicit implementations, and effects are nominal.
 - Typed `option` and `result` replace null and exceptions.
 - Effects describe possible operations statically. A binary target's declared
   effect roots are its complete execution consent; v1 has no runtime grants.
-- Project and compiler-owned persistent data use canonical `.vib` literal data.
-  JSON is reserved for CLI and MCP interoperability.
+- Project and compiler-owned persistent data use canonical, non-executable
+  `.vibon` literal data. JSON is reserved for CLI and MCP interoperability.
 - Toolchain-owned external declarations use only the closed `@compiler` and
   `@host` providers; ordinary packages cannot add providers or registry symbols.
 - Diagnostic, query, edit-plan, test, and command results have versioned JSON

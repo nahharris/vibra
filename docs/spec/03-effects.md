@@ -56,8 +56,12 @@ FFI to bypass effect checking.
 
 ## Function effect rows
 
-An effect row is a finite, duplicate-free set of atom references that resolve
-to nominal effect roots.
+An effect row is a finite, duplicate-free set of source symbols that resolve
+in the effect namespace to nominal roots. An unqualified symbol resolves in
+the current module. A dotted symbol begins with an explicit import alias, so
+`io.stdout` resolves through `(import io @std.io)`. Source effect rows never
+contain atoms. An atom entry or a symbol that does not resolve to one nominal
+effect root emits `@effect.invalid-reference`.
 
 - Omitted `effects:` is the empty row on every `defn`, `lambda`, function type,
   and test. There is no visibility or nesting exception.
@@ -75,7 +79,9 @@ to nominal effect roots.
 - An interface method MUST remain within its contract ceiling.
 
 Rows are order-insensitive semantically and sorted by canonical identity in
-formatter and machine output. A function type includes its closed effect row.
+formatter and machine output. Source formatting preserves each lexical symbol
+reference required by its imports while ordering the resolved roots. A
+function type includes its closed effect row.
 Effect variables and polymorphic rows are excluded from v1; a higher-order
 function therefore declares the exact callback effect row it accepts.
 
@@ -91,9 +97,9 @@ supplies the project's execution consent ceiling.
 
 ## Target consent
 
-Every binary target in `project.vib` contains an `effects` array:
+Every binary target in `project.vibon` contains an `effects` array:
 
-```vibra
+```vibon
 (record
   name: @hello
   kind: @bin
@@ -104,7 +110,9 @@ Every binary target in `project.vib` contains an `effects` array:
 
 Project resolution maps each atom from its target/dependency alias to one
 canonical package/module effect identity. Unknown roots and duplicates are
-project errors. An empty array permits only an effect-free entry graph.
+project errors. These atoms are entity references because the typed
+`project.vibon` schema declares that role for this field; other atoms in VIBON
+remain data values. An empty array permits only an effect-free entry graph.
 
 Before `check`, `test`, `run`, or `build` accepts a binary target, the checker
 MUST prove that the performed effect row of `main` is a subset of the target

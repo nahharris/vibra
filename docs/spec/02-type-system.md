@@ -68,9 +68,9 @@ function-type = "(", "fn", "(", type-expr*, ")", type-expr,
 `fn` denotes a function type. `lambda`, not `fn`, declares an anonymous
 function. A function type records its required positional types, labelled
 names and types, optional array or map variadic type, result, and exact closed
-effect row. Effect-row entries are atom entity references resolved to nominal
-effect roots. Defaults belong to the function value and are not repeated in
-its type. An omitted function-type `effects:` row is empty.
+effect row. Effect-row entries are lexical symbols resolved in the effect
+namespace to nominal roots. Defaults belong to the function value and are not
+repeated in its type. An omitted function-type `effects:` row is empty.
 
 Record and enum bodies are flat and contain at least one name/type pair.
 Records have closed, named fields. Every enum variant has one written payload
@@ -150,6 +150,15 @@ reference. An atom is resolved only in a position whose grammar or data schema
 expects an entity reference; it remains an ordinary `atom` value in expression
 position. Wildcard imports, re-exports, open namespaces, implicit prelude
 names, and filesystem-dependent fallback resolution are forbidden.
+
+Token spelling never heuristically selects entity resolution. In source,
+symbols name lexical code entities and the surrounding grammar selects the
+type, value, interface, or effect namespace. Atoms are values unless a closed
+source grammar position, such as the module locator in `import`, explicitly
+requires an entity reference. In `.vibon`, the typed data schema makes the same
+choice field by field. Resolution converts an entity-reference token to one
+canonical identity before type checking; it does not turn atoms into
+first-class modules, effects, diagnostics, or declarations.
 
 A module has separate type, value, interface, and effect namespaces, but one
 top-level form may not reuse a spelling already declared by another top-level
