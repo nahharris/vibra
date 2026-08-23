@@ -1,0 +1,194 @@
+# Vibra
+
+Vibra is a vibe-coding-first, statically typed functional language with an
+S-expression surface that compiles to WebAssembly.
+
+- **Language contract:** [S-expression language design](docs/decisions/s-expression-language.md)
+- **Historical record:** [retired YAML draft](docs/archive/yaml-surface-draft.md)
+- **Documentation index:** [docs/index.md](docs/index.md)
+- **Project layout:** [docs/reference/project-layout.md](docs/reference/project-layout.md)
+- **Schemas and tooling contracts:** [schemas/](schemas/), including the
+  [normalized retrieval index schema](schemas/index.schema.json)
+- **Examples:** [examples/](examples/)
+- **Agent skills:** [skills/](skills/) and [usage notes](docs/reference/agent-skills.md)
+- [Container images](docs/reference/containers.md)
+
+## Quick start
+
+```sh
+cargo run -- run examples/hello.vib
+cargo run -- check examples/hello.vib
+cargo run -- fmt
+cargo run -- lint --deny-warnings
+cargo run -- lint --fix
+cargo run -- test
+```
+
+Conditional compilation values are supplied with repeatable `--ctx` options:
+
+```sh
+vibra run examples/hello.vib --ctx release
+vibra build . --output build/app.vapp --ctx release
+```
+
+Vibra source uses UTF-8 S-expressions. A module contains imports and
+definitions; calls support fixed positional, labelled, and variadic arguments.
+Operands are strict everywhere: fixed positional operands come first, followed
+by labelled operands, then variadic values. A label after the remainder is a
+syntax error (E-SYN-013); the formatter never reorders syntax nodes.
+
+```vibra
+(import io "../stdlib/src/io.vib")
+(import stream "../stdlib/src/stream.vib")
+
+(defn main () void
+  effects: (io.stdout stream.write)
+  (io.stdout.println "Hello, World!"))
+```
+
+Use `;` for reader comments. Persisted documentation belongs in a trailing
+`doc:` attribute, not in comments.
+
+```vibra
+(defn greet (name str) void
+  effects: (io.stdout stream.write)
+  doc: "Write a name followed by a newline."
+  (io.stdout.println name))
+```
+
+## Atoms
+
+An atom is a self-naming constant written `@name`, with lowercase kebab-case
+dot segments (`@ok`, `@http.not-found`). Atoms compare by identity, match in
+patterns, and key maps. Each atom also names a singleton type that widens to
+`atom`.
+
+```vibra
+(defn classify (value atom) bool
+  (match value
+    @ok (return true)
+    _ (return false)))
+
+(defn always-ok () @ok (return @ok))
+```
+
+Contextual keywords are atoms too: `visibility: @public`, `kind: @bin`,
+`format: @json`, `profile: @core`, `tags: (@language)`, `workspace: @temp`,
+`expect-error: (@compile E-OP-002 "overflow")`, and macro syntax categories
+such as `@expr-syntax`. A bare symbol in those positions is rejected with
+`E-ATOM-003`.
+
+`convert.format-atom` renders an atom back to its written form, sigil
+included.
+
+## Effects
+
+Native effects are nominal roots declared with `deffect`. An operation owns its
+root implicitly; `effects:` lists only additive roots. Calls use the exact
+declared union—there is no compound-root or dependency-closure mechanism.
+
+```vibra
+(deffect read
+  (defn open (path path) (result reader fs-error)
+    effects: ()
+    (intrinsic @fs-open-read path)))
+```
+
+`read.open` is the operation name; a module-level `file` remains `file`, not
+`read.file`. Host-backed endpoints are nominal `(newtype (handle @read))`
+values minted only by validated intrinsics. They may widen to a weaker generic
+stream capability, never be forged or cast, and retain their provider-specific
+identity.
+
+Ordinary functions and interface methods still declare a complete effect
+ceiling. The compiler checks the body against it and reports both declared and
+performed rows. `intrinsic` names are closed compiler-known operations: pure
+value operations may be used directly, while effectful transitions are owned
+by a `deffect`. Raw `wasm` is reserved for custom/dependency Wasm owned by an
+effect operation.
+
+```sh
+vibra effects examples/fs-roundtrip.vib
+```
+
+reports declared/performed surfaces, per-function and per-operation rows, call
+edges, and primitive capability witnesses — see
+[schemas/effects.schema.json](schemas/effects.schema.json).
+
+`vibra index [--format json] <entry>` emits one deterministic, normalized
+retrieval record per function, including private functions. It uses the same
+`vibra fmt` normalization for corpus text that consumers must apply to query
+text, while preserving comments and identifiers. Retrieval evaluation should
+measure rejection precision (how accurately candidates can be eliminated by
+the verifier), not top-k ranking; see
+[schemas/index.schema.json](schemas/index.schema.json).
+
+Effects remain statically checked, then lower into attenuated runtime scope
+requirements. A project's optional `project.vib` `(authority ...)` grants seed
+the root authority; omission is fail-closed for project execution. Host
+operations re-check their canonical effect grant and resource prefix at the
+operation boundary. Direct module embedding may configure grants explicitly.
+The optional `(limits fuel: ... memory: ...)` form separately declares
+execution ceilings: fuel is charged per call and loop iteration, and memory is
+tracked as deterministic logical high-water accounting for host-arena values.
+Child scopes can narrow either ceiling but cannot amplify it; these limits do
+not grant capabilities.
+
+## Projects
+
+`project.vib` is a Vibra source file whose `(project ...)` root describes the
+project; all source files use the `.vib` extension. Lockfiles and
+compiler-owned package metadata are canonical JSON.
+
+```vibra
+(project
+  (package "hello" "0.1.0")
+  (target hello kind: @bin root: "src" entry: "main.vib")
+  (dependency std path: "../stdlib")
+  (authority
+    (grant fs.read "/safe"))
+  (limits fuel: 100000 memory: 1048576))
+```
+
+## Tests
+
+Tests are first-class declarations. A bare `vibra test` selects the capability
+free `core` profile.
+
+```vibra
+(import test "@std/test.vib")
+
+(test.scenario "truth"
+  (test.case "is true"
+    tags: (@language)
+    (test.assert true)))
+```
+
+```sh
+cargo run -- test
+cargo run -- test --filter truth
+cargo run -- test --profile core --tag language
+cargo run -- test --deny-skips --deny-warnings
+```
+
+Profiles and tags select tests; they do not grant host permissions. See
+[tests/README.md](tests/README.md) for capability-gated test requirements.
+
+## Data interoperability
+
+YAML is not Vibra syntax, a manifest format, compiler output, or an `embed`
+format. Use `text`, `binary`, `json`, `toml`, or `xml` when embedding external
+data. YAML paths and `format: yaml` are rejected with `E-SYN-008`.
+
+## Build and validate
+
+Run both suites before a commit:
+
+```sh
+cargo test
+cargo run -- test
+```
+
+## License
+
+MIT OR Apache-2.0 (see [Cargo.toml](Cargo.toml)).
