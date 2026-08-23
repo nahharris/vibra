@@ -136,6 +136,7 @@ Implementation plans live in [`plans/`](plans/) and are execution aids rather
 than current contracts:
 
 - [Plan directory guide](plans/README.md)
+- [V1 spec reboot design](plans/2026-08-22-v1-spec-reboot-design.md)
 - [Secure compilation constraints plan](plans/2026-08-07-issue-252-secure-compilation.md)
 - [Type-system and ADT foundation plan](plans/2026-05-05-type-system-adt-foundation.md)
 - [Vib source extension and call argument order](plans/2026-08-02-vib-extension-and-call-order.md)
