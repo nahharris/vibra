@@ -12,17 +12,16 @@ or interpolation.
 
 ```ebnf
 module         = trivia, { top-form, trivia }, EOF ;
-form           = atom | discard | list ;
+form           = atom | list ;
 list           = "(", trivia, symbol, { required-trivia, form }, trivia, ")" ;
 atom           = string | boolean | integer | float | unit | atom-name
                | label | symbol ;
 literal        = string | boolean | integer | float | unit | atom-name ;
 boolean        = "true" | "false" ;
 unit           = "unit" ;
-symbol         = kebab-name, { ".", kebab-name } ;
+symbol         = "-" | ( kebab-name, { ".", kebab-name } ) ;
 atom-name      = "@", symbol ;
 label          = symbol, ":" ;
-discard        = "-" | "@-" | "-:" ;
 kebab-name     = lowercase-letter,
                  { lowercase-letter | digit | "-" } ;
 lowercase-letter = "a" | "b" | "c" | "d" | "e" | "f" | "g"
@@ -53,13 +52,17 @@ name, never field-access syntax. For example, `a`, `a1`, `a-`, `a--b`, and
 `a.b2-c` are symbols; `1a`, `-a`, `a..b`, and `a?` are not.
 
 Labels and atom names derive mechanically from symbols: `some.name:` is a
-label and `@some.name` is an atom name. `-`, `@-`, and `-:` are the three exact
-discard spellings. They cannot be namespaced or extended: `-.name`, `@-.name`,
-and `-:.name` are invalid. All three are semantically equivalent to Rust's `_`:
-in a binder or wildcard position they create no identity, may repeat, and do
-not participate in redeclaration or shadowing checks. A discard is not a value,
-label, atom name, or name reference and is rejected in every non-discard
-position.
+label and `@some.name` is an atom name. The `"-"` symbol alternative therefore
+also derives `@-` and `-:` without separate lexical rules. These three forms
+are the semantic `discard` subset. Discard classification takes precedence over
+the ordinary symbol, atom-name, or label role.
+
+The three discard spellings cannot be namespaced or extended: `-.name`,
+`@-.name`, and `-:.name` are invalid. All are semantically equivalent to Rust's
+`_`: in a binder or wildcard position they create no identity, may repeat, and
+do not participate in redeclaration or shadowing checks. Despite being derived
+through the ordinary name grammar, a discard never denotes a value, label,
+atom, or reference and is rejected in every non-discard position.
 
 Keywords, booleans, `unit`, and atom names cannot be rebound.
 Boolean, `unit`, and reserved-form recognition takes precedence when their
@@ -135,6 +138,7 @@ implementation-member = "(", "defn", symbol, parameters, type-expr,
 effect-member = "(", "defn", symbol, parameters, type-expr,
                 { function-attribute }, { expr }, ")" ;
 
+discard              = "-" | "@-" | "-:" ;
 binding-name         = symbol | discard ;
 parameters           = "(", { binding-name, type-expr }, ")" ;
 labelled-parameters  = "(", { symbol, type-expr, literal }, ")" ;
@@ -346,7 +350,7 @@ lambda = "(", "lambda", parameters, type-expr,
 collection = "(", "tuple", { expr }, ")"
            | "(", "array", { expr }, ")"
            | "(", "map", { expr, expr }, ")" ;
-pattern = literal | discard | "(", "bind", binding-name, ")"
+pattern = discard | literal | "(", "bind", binding-name, ")"
         | "(", symbol, { pattern | label, pattern }, ")"
         | "(", "tuple", { pattern }, ")"
         | "(", "array", { pattern }, ")" ;
