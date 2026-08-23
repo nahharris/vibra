@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vibra.dev/schemas/type-expr.schema.json",
-  "title": "VibraTypeExpr",
-  "description": "Transport representation of one Vibra S-expression in type position. The typed reader validates the grammar.",
-  "type": "string",
-  "contentMediaType": "text/x-vibra"
-}

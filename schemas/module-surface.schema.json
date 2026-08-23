@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vibra.dev/schemas/module-surface.schema.json",
-  "title": "VibraModuleSurface",
-  "description": "Transport representation of UTF-8 Vibra source. A module is zero or more S-expression top-level forms, validated by the native reader.",
-  "type": "string",
-  "contentMediaType": "text/x-vibra"
-}
