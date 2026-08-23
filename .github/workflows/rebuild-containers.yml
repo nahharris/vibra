@@ -189,12 +189,12 @@ jobs:
         run: |
           echo "runtime=$(docker buildx imagetools inspect ghcr.io/nahharris/vibra:${{ needs.select-release.outputs.revision }} --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
           echo "dev=$(docker buildx imagetools inspect ghcr.io/nahharris/vibra-dev:${{ needs.select-release.outputs.revision }} --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
-      - uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-name: ghcr.io/nahharris/vibra
           subject-digest: ${{ steps.promoted.outputs.runtime }}
           push-to-registry: true
-      - uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-name: ghcr.io/nahharris/vibra-dev
           subject-digest: ${{ steps.promoted.outputs.dev }}
