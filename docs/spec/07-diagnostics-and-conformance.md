@@ -105,7 +105,9 @@ Every accepted source example in `docs/spec/` becomes a corpus case or is
 marked illustrative. Every error rule has at least one focused negative case.
 The corpus includes Unicode spans, parser recovery, stale edit plans, forbidden
 shadowing, incomplete interface methods, static target-effect mismatch,
-host-error propagation, and interpreter/Wasm parity.
+host-error propagation, interpreter/Wasm parity, all three equivalent discard
+spellings, and rejection of malformed names such as `_.x`, `a?.b`, `-.x`, and
+`@-.x`.
 
 ## Conformance profiles
 

@@ -32,16 +32,18 @@ are different unless they are the same fully resolved declaration.
 V1 type constructors are:
 
 ```ebnf
-type = primitive | name | "(", name, type+, ")"
-     | "(", "record", field-type+, ")"
-     | "(", "enum", variant+, ")"
-     | "(", "newtype", type, ")"
-     | "(", "tuple", type*, ")"
-     | "(", "array", type, ")"
-     | "(", "map", type, type, ")"
-     | function-type ;
-function-type = "(", "fn", "(", type*, ")", type,
-                [ "labelled:", "(", { symbol, type }, ")" ],
+type-expr = primitive | symbol | "(", symbol, type-expr+, ")"
+          | "(", "record", field-type+, ")"
+          | "(", "enum", variant+, ")"
+          | "(", "newtype", type-expr, ")"
+          | "(", "tuple", type-expr*, ")"
+          | "(", "array", type-expr, ")"
+          | "(", "map", type-expr, type-expr, ")"
+          | function-type ;
+field-type = "(", symbol, type-expr, ")" ;
+variant = "(", symbol, [ type-expr ], ")" ;
+function-type = "(", "fn", "(", type-expr*, ")", type-expr,
+                [ "labelled:", "(", { symbol, type-expr }, ")" ],
                 [ "variadic:", variadic-type ],
                 [ "effects:", effect-row ], ")" ;
 ```
@@ -79,10 +81,11 @@ form in that module. Syntactic position selects the namespace. Tooling MUST
 return the resolved kind and canonical identity; it must never expose a dotted
 string as if textual coincidence were resolution.
 
-Name shadowing is forbidden. A parameter, `let` binder, pattern binder, loop
-binder, or lambda parameter MUST NOT reuse any visible lexical name. `_` is
-exempt because it never binds. Sibling scopes may reuse a name when neither is
-visible from the other.
+Name shadowing is forbidden. A named parameter, `let` binder, pattern binder,
+loop binder, or lambda parameter MUST NOT reuse any visible lexical name.
+`-`, `@-`, and `-:` are equivalent discards, create no binding, and may repeat
+in the same or nested scopes. Sibling scopes may reuse a named symbol when
+neither declaration is visible from the other.
 
 ## Inference and checking
 
@@ -166,8 +169,8 @@ and finite structural patterns. Unreachable arms are errors.
 `option t` and `result t e` are ordinary nominal standard-library enums with
 compiler recognition only for `try` and unhandled-value checking. A fallible
 value in an ignored position is an error unless intent is explicit as
-`(let _ expression)`. Tooling MAY still emit a contract warning when an
-explicitly ignored error carries a must-handle marker.
+`(let - expression)` or another discard spelling. Tooling MAY still emit a
+contract warning when an explicitly ignored error carries a must-handle marker.
 
 Arithmetic is checked. Overflow, division by zero, invalid shifts, and failed
 numeric conversions return typed results from their standard operations; they

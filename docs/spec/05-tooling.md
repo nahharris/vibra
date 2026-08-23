@@ -89,6 +89,8 @@ continuation:
 Entity metadata and expanded references operate on resolved identities, not
 token spelling. They distinguish type, value, interface, effect root, effect
 operation, field, variant, and lexical binder identities.
+Discards have no identity, definition, references, or rename target; a query at
+`-`, `@-`, or `-:` reports its discard role and enclosing context only.
 
 Function and source-position metadata can include written-or-default ceilings
 and performed rows. `--expand effect-witnesses` adds the call paths that
@@ -133,9 +135,10 @@ affected module, format changed forms, and validate the requested postcondition.
 It then replaces all files atomically. Stale, overlapping, ambiguous, or
 ill-typed plans fail without partial writes.
 
-Rename rejects generated-only nodes, keywords, visibility violations, name
-collisions, and shadowing. A rename may touch imports and qualified references
-across packages in the current workspace but never edits vendored dependencies.
+Rename rejects generated-only nodes, discards, keywords, visibility violations,
+name collisions, and shadowing. A rename may touch imports and qualified
+references across packages in the current workspace but never edits vendored
+dependencies.
 
 ## MCP server
 

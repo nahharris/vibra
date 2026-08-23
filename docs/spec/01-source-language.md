@@ -12,19 +12,27 @@ or interpolation.
 
 ```ebnf
 module         = trivia, { top-form, trivia }, EOF ;
-form           = atom | list ;
+form           = atom | discard | list ;
 list           = "(", trivia, symbol, { required-trivia, form }, trivia, ")" ;
 atom           = string | boolean | integer | float | unit | atom-name
                | label | symbol ;
 literal        = string | boolean | integer | float | unit | atom-name ;
 boolean        = "true" | "false" ;
 unit           = "unit" ;
-atom-name      = "@", kebab-name, { ".", kebab-name } ;
-label          = kebab-name, ":" ;
-symbol         = symbol-start, { symbol-rest } ;
-symbol-start   = lowercase-letter | "_" ;
-symbol-rest    = symbol-start | digit | "-" | "." | "?" | "!" ;
+symbol         = kebab-name, { ".", kebab-name } ;
+atom-name      = "@", symbol ;
+label          = symbol, ":" ;
+discard        = "-" | "@-" | "-:" ;
+kebab-name     = lowercase-letter,
+                 { lowercase-letter | digit | "-" } ;
+lowercase-letter = "a" | "b" | "c" | "d" | "e" | "f" | "g"
+                 | "h" | "i" | "j" | "k" | "l" | "m" | "n"
+                 | "o" | "p" | "q" | "r" | "s" | "t" | "u"
+                 | "v" | "w" | "x" | "y" | "z" ;
+digit          = "0" | "1" | "2" | "3" | "4"
+               | "5" | "6" | "7" | "8" | "9" ;
 trivia         = { whitespace | line-comment } ;
+required-trivia = ( whitespace | line-comment ), trivia ;
 ```
 
 Strings are double quoted and support `\"`, `\\`, `\n`, `\r`, `\t`, and
@@ -35,11 +43,27 @@ exponent. Numeric range belongs to type checking, not lexing.
 that completes successfully but has no meaningful value to return. Empty `do`
 and an empty function body evaluate to `unit`.
 
-User-defined names MUST be kebab-case. `_` is the wildcard. Dots separate
-explicit namespace components in symbols and atom names; a dotted symbol is
-never field-access syntax. `/` has no identifier role and appears only inside
-values such as path strings. Keywords, booleans, `unit`, and atom names cannot
-be rebound.
+Every named symbol consists of one or more dot-separated segments, and every
+segment independently satisfies `kebab-name`. Its first character MUST be a
+lowercase ASCII letter; every later character is a lowercase ASCII letter,
+digit, or hyphen. Consecutive and trailing hyphens are therefore valid, while a
+leading hyphen is not. `?`, `!`, `_`, `/`, an empty segment, and a segment that
+starts with a digit are invalid in a symbol. A dotted symbol is a qualified
+name, never field-access syntax. For example, `a`, `a1`, `a-`, `a--b`, and
+`a.b2-c` are symbols; `1a`, `-a`, `a..b`, and `a?` are not.
+
+Labels and atom names derive mechanically from symbols: `some.name:` is a
+label and `@some.name` is an atom name. `-`, `@-`, and `-:` are the three exact
+discard spellings. They cannot be namespaced or extended: `-.name`, `@-.name`,
+and `-:.name` are invalid. All three are semantically equivalent to Rust's `_`:
+in a binder or wildcard position they create no identity, may repeat, and do
+not participate in redeclaration or shadowing checks. A discard is not a value,
+label, atom name, or name reference and is rejected in every non-discard
+position.
+
+Keywords, booleans, `unit`, and atom names cannot be rebound.
+Boolean, `unit`, and reserved-form recognition takes precedence when their
+spelling also satisfies the symbol production.
 
 An atom is an ordinary value in expression position. Only a grammar or data
 schema position that explicitly expects an entity reference resolves it as
@@ -100,29 +124,30 @@ defn     = "(", "defn", symbol, parameters, type-expr,
            { function-attribute }, { expr }, ")" ;
 test     = "(", "test", string, [ "effects:", effect-row ], expr+, ")" ;
 
-nested-method = "(", "defn", qualified-symbol, parameters, type-expr,
+nested-method = "(", "defn", symbol, parameters, type-expr,
                 { function-attribute }, { expr }, ")" ;
-interface-member = "(", "defn", qualified-symbol, parameters, type-expr,
+interface-member = "(", "defn", symbol, parameters, type-expr,
                    { function-attribute }, ")" ;
 interface-implementation = "(", "impl", type-expr,
                            implementation-member+, ")" ;
-implementation-member = "(", "defn", qualified-symbol, parameters, type-expr,
+implementation-member = "(", "defn", symbol, parameters, type-expr,
                         { function-attribute }, { expr }, ")" ;
-effect-member = "(", "defn", qualified-symbol, parameters, type-expr,
+effect-member = "(", "defn", symbol, parameters, type-expr,
                 { function-attribute }, { expr }, ")" ;
 
-parameters           = "(", { symbol, type-expr }, ")" ;
+binding-name         = symbol | discard ;
+parameters           = "(", { binding-name, type-expr }, ")" ;
 labelled-parameters  = "(", { symbol, type-expr, literal }, ")" ;
-variadic-parameter   = "(", symbol, variadic-type, ")" ;
+variadic-parameter   = "(", binding-name, variadic-type, ")" ;
 variadic-type        = "(", "array", type-expr, ")"
                      | "(", "map", type-expr, type-expr, ")" ;
 effect-row            = "(", { atom-name }, ")" ;
 where-clause         = "(", { symbol, generic-bound }, ")" ;
-generic-bound        = "any" | interface-name ;
+generic-bound        = "any" | symbol ;
 
 declaration-attribute = "visibility:", atom-name | "doc:", string ;
 type-attribute = "where:", where-clause
-               | "implements:", "(", { interface-name }, ")"
+               | "implements:", "(", { symbol }, ")"
                | declaration-attribute ;
 function-attribute = "where:", where-clause
                    | "labelled:", labelled-parameters
@@ -144,7 +169,10 @@ Every required positional parameter is written directly as a name/type pair;
 there is no wrapper list around each parameter. `labelled:` is one flat list of
 name/type/default triples. Every labelled parameter MUST have a literal default
 value. `variadic:` contains exactly one name/type pair, and its type MUST be an
-`array` or `map`. A function has at most one variadic parameter.
+`array` or `map`. A function has at most one variadic parameter. A positional
+or variadic parameter may use any discard spelling when its value is
+intentionally unused; labelled parameters require a real symbol because their
+name is part of the call contract.
 
 `where:` is a flat list of generic-name/bound pairs. It is the only declaration
 of generic names: every generic name used by a declaration MUST occur exactly
@@ -303,11 +331,11 @@ result, labelled, variadic, and effect syntax, but no name or visibility.
 ```ebnf
 expr = atom | call | lambda
      | "(", "do", { expr }, ")"
-     | "(", "let", symbol, expr, { expr }, ")"
+     | "(", "let", binding-name, expr, { expr }, ")"
      | "(", "if", expr, expr, expr, ")"
      | "(", "match", expr, pattern, expr, { pattern, expr }, ")"
      | "(", "while", expr, expr, ")"
-     | "(", "for", symbol, expr, expr, ")"
+     | "(", "for", binding-name, expr, expr, ")"
      | "(", "break", ")" | "(", "continue", ")"
      | "(", "return", [ expr ], ")"
      | "(", "try", expr, ")"
@@ -318,16 +346,18 @@ lambda = "(", "lambda", parameters, type-expr,
 collection = "(", "tuple", { expr }, ")"
            | "(", "array", { expr }, ")"
            | "(", "map", { expr, expr }, ")" ;
-pattern = literal | "_" | "(", "bind", symbol, ")"
-        | "(", qualified-symbol, { pattern | label, pattern }, ")"
+pattern = literal | discard | "(", "bind", binding-name, ")"
+        | "(", symbol, { pattern | label, pattern }, ")"
         | "(", "tuple", { pattern }, ")"
         | "(", "array", { pattern }, ")" ;
 ```
 
 `let` introduces an immutable name for the remainder of its form. There is no
 assignment or shared mutable state in v1. A binder MUST NOT shadow any visible
-name. `_` never binds and may be used as `(let _ expression)` to state that a
-result is intentionally ignored.
+name. A discard never binds and may be used as `(let - expression)`,
+`(let @- expression)`, or `(let -: expression)` to state that a result is
+intentionally ignored. Repeating a discard is always valid because it creates
+no declaration to redeclare or shadow.
 
 `while` and `for` exist for local iteration; mutation needed by their library
 implementation is compiler/runtime internal. Collections have immutable value
@@ -347,7 +377,7 @@ expressions. Arms are checked for reachability and exhaustiveness.
 `try` propagates the error of `result` or the absence of `option` through a
 function returning the same container and error type. There are no exceptions
 or implicit error conversions. A fallible value MUST be matched, propagated,
-returned, bound for later use, or explicitly ignored with `let _`.
+returned, bound for later use, or explicitly ignored with a discard binding.
 
 ## Canonical format
 
