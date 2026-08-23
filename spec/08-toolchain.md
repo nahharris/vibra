@@ -19,6 +19,8 @@ v1 ships exactly these. Anything not listed is deferred.
 | `vibra build <path>` | Compile to a `.wasm` artifact. |
 | `vibra test [<path>]` | Run the in-language test suite. |
 | `vibra effects <path>` | Report declared and inferred effect rows. |
+| `vibra query context <path> <position>` | Report which names, types, labels and effect roots are valid at a position. |
+| `vibra mcp` | Serve the commands above to agent hosts over MCP. |
 
 `<path>` is a `.vib` file or a directory containing `project.vib`. Omitted, it
 means the current directory.
@@ -83,6 +85,27 @@ Builds are **deterministic**: the same source, the same toolchain version and
 the same target produce a byte-identical artifact. Timestamps, absolute paths
 and iteration order must not leak into output.
 
+### `query context` and `mcp`
+
+`vibra query context` answers the question an author with limited context asks
+most: **what is valid here?** Given a file and a byte position, it reports the
+names in scope, the expected type if one is constrained, the labels the
+enclosing form accepts, and the effect roots the enclosing boundary admits.
+The response validates against `query-context.schema.json` and is computed
+from the same workspace snapshot every other command uses.
+
+`vibra mcp` serves the v1 commands to agent hosts. Two rules make it safe to
+ship in v1:
+
+- **One engine.** An MCP tool result is the same data structure the CLI's
+  `--format json` emits for the same request, byte for byte. The server is an
+  adapter, never a second implementation.
+- **Actions are opt-in by class.** Read-only tools (check, query, effects,
+  fmt without `--write`) are always available. Mutating tools (`fmt --write`,
+  `lint --fix`) and executing tools (`run`, `test`) are separate capability
+  classes the host enables explicitly. A read-only session cannot mutate the
+  workspace or execute code.
+
 ## Diagnostics
 
 Every diagnostic carries:
@@ -118,6 +141,7 @@ schema has a stable `$id`. v1 ships:
 | `project.schema.json` | The resolved `project.vib` |
 | `effects.schema.json` | The `vibra effects` report |
 | `test-report.schema.json` | The `vibra test` report |
+| `query-context.schema.json` | The `vibra query context` response |
 
 Rules for every machine format:
 
@@ -142,12 +166,15 @@ one of those is remapped to 1 and a note is printed.
 
 ## What is not in the v1 toolchain
 
-`vibra index`, the LSP server, the MCP server, `vibra expand`, `vibra rewrite`,
-package publishing and dependency solving. See
+`vibra index`, the LSP server, `vibra expand`, `vibra rewrite`, package
+publishing and dependency solving. See
 [Deferred and rejected](10-deferred.md) for the wave that owns each.
 
-This is a real cost: agent integration was one of the original pillars, and v1
-ships without it. The reason is sequencing, not doubt — an index and a decoding
-service describe a type system, and building them against a type system that is
-still moving is what produced the last cycle's bridge layers. Wave 2 picks them
-up immediately after v1 freezes.
+The line between what ships and what waits is drawn by one question: does the
+tool *expose* answers the engine already computes, or does it *describe* the
+type system as an artifact? `query context` and the MCP server are the first
+kind — the checker already knows what is valid at a position, and serving that
+answer to an agent is an adapter. The index, typed rewrites, and the decoding
+service are the second kind: they are products *about* the type system, and
+building them against a type system that is still moving is what produced the
+last cycle's bridge layers. Wave 2 picks them up immediately after v1 freezes.

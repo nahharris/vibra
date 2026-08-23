@@ -32,16 +32,20 @@ boundary-crossing frequency and data volume, not the enforcement primitive.
 Closing this wave is what lets Vibra describe itself as capability-safe. Until
 then no document may.
 
-## Wave 2 — Agent surface
+## Wave 2 — Deep agent surface
 
 **The compiler's second product: the index.**
+
+v1 already ships the shallow agent surface — `vibra query context` and the MCP
+server, as adapters over the engine ([Toolchain](08-toolchain.md)). This wave
+adds the products that are *about* the type system and therefore need one that
+has stopped moving.
 
 | Item | Shape |
 | --- | --- |
 | `vibra index` | One deterministic record per function: `fmt`-normalized source, signature, effect row, outgoing call edges, error types, module path. JSON, schema'd, sorted keys. |
-| LSP server | Diagnostics, hover, go-to-definition, and a context query reporting which names, types and labels are valid at a position. |
-| MCP server | The same queries plus project management and structured code manipulation, for agent hosts. |
-| `vibra expand`, `vibra rewrite rename` | Structural code manipulation over the typed tree. |
+| LSP server | Diagnostics, hover, go-to-definition, and the context query, rendered for editors over the same engine the MCP server uses. |
+| `vibra expand`, `vibra rewrite rename` | Structural code manipulation over the typed tree, with transactional preview-and-apply plans exposed through CLI and MCP. |
 
 Two constraints on the index, both counter-intuitive and both worth writing
 down before anyone builds it:
