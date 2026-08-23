@@ -32,11 +32,11 @@ interchange format for CLI and MCP responses.
 
 ## Project file
 
-A project is rooted by `project.vib`. It contains one `@project-v1` record:
+A project is rooted by `project.vib`. It contains one `@project.v1` record:
 
 ```vibra
 (record
-  format: @project-v1
+  format: @project.v1
   package: (record
     name: "hello"
     version: "0.1.0")
@@ -46,7 +46,7 @@ A project is rooted by `project.vib`. It contains one `@project-v1` record:
       kind: @bin
       root: "src/hello"
       entry: "main.vib"
-      effects: (array @std/fs.read @std/io.stdout)))
+      effects: (array @std.fs.read @std.io.stdout)))
   dependencies: (map
     @std (record
       kind: @git
@@ -98,15 +98,22 @@ package-relative path without the extension. A source file does not redeclare
 that identity.
 
 ```vibra
-(import text "@std/text.vib")
-(import model "./model.vib")
+(import text @std.text)
+(import model @hello.model)
 ```
 
-Every import has one explicit alias and one literal path. `@alias/path.vib`
-resolves through a target or dependency name. Relative imports resolve from
-the importing file and cannot leave their package. Absolute filesystem paths,
-glob imports, implicit extension search, directory index fallback, re-exports,
-and import cycles are errors.
+Every import has one explicit lexical alias and one atom entity reference. The
+first atom component names a project target or dependency; the remaining
+components name a module beneath that target's source root. Thus `@hello.model`
+resolves to the local `hello` target's `model.vib`, while `@std.text` resolves
+through the `@std` dependency. The resolver never guesses from the importing
+file's directory.
+
+String paths, relative imports, absolute filesystem imports, glob imports,
+implicit extension search, directory index fallback, re-exports, and import
+cycles are errors. The atom is resolved only because the import grammar expects
+an entity reference; the same atom in expression position remains an ordinary
+value.
 
 An import makes only the target module alias visible. Public declarations are
 referenced as `alias.name`; nested effect operations use
@@ -128,7 +135,7 @@ source identities, revisions, content hashes, and vendor paths:
 
 ```vibra
 (record
-  format: @project-lock-v1
+  format: @project-lock.v1
   project: "sha256:..."
   dependencies: (map
     @std (record
@@ -153,7 +160,7 @@ dependency-provided executable in v1.
 Tests are declarations in `.vib` modules under `tests/`:
 
 ```vibra
-(import assert "@std/assert.vib")
+(import assert @std.assert)
 
 (test "greets by name"
   (assert.equal (greet "Ada") "hello, Ada"))
@@ -173,7 +180,7 @@ unrecorded dependency on a nondeterministic provider fails the test.
 `vibra build <target>` emits:
 
 - `<target>.wasm`, the deterministic program or library module;
-- `<target>.build.vib`, canonical `@build-v1` data containing toolchain,
+- `<target>.build.vib`, canonical `@build.v1` data containing toolchain,
   project, dependency, source, required-effect, and module hashes; and
 - optional human-readable diagnostics on stderr.
 

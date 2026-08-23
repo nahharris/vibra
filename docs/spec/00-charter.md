@@ -41,7 +41,8 @@ V1 is usable when a fresh installation can, without the pre-v1 tree:
   control flow;
 - perform console, filesystem, environment, clock, and random operations whose
   nominal effects are checked against the selected project target;
-- query expected types/effects and symbol context at a source position;
+- query normalized syntax, identity, type, effect, context, and diagnostic
+  metadata from a source position or entity;
 - preview and atomically apply supported semantic code changes through the CLI
   or MCP; and
 - produce the same observable result in the reference interpreter and the
@@ -61,6 +62,8 @@ conformance case or an explicit review-only invariant.
   effect roots are its complete execution consent; v1 has no runtime grants.
 - Project and compiler-owned persistent data use canonical `.vib` literal data.
   JSON is reserved for CLI and MCP interoperability.
+- Toolchain-owned external declarations use only the closed `@compiler` and
+  `@host` providers; ordinary packages cannot add providers or registry symbols.
 - Diagnostic, query, edit-plan, test, and command results have versioned JSON
   schemas.
 - The parser is recovery-oriented, while the formatter defines one canonical

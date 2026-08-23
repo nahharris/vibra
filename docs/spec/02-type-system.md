@@ -49,8 +49,9 @@ function-type = "(", "fn", "(", type*, ")", type,
 `fn` denotes a function type. `lambda`, not `fn`, declares an anonymous
 function. A function type records its required positional types, labelled
 names and types, optional array or map variadic type, result, and exact closed
-effect row. Defaults belong to the function value and are not repeated in its
-type. An omitted function-type `effects:` row is empty.
+effect row. Effect-row entries are atom entity references resolved to nominal
+effect roots. Defaults belong to the function value and are not repeated in
+its type. An omitted function-type `effects:` row is empty.
 
 Records have closed, named fields. Enums have closed, named variants with zero
 or one payload type. Tuples, arrays, and maps are immutable values. Map keys
@@ -66,9 +67,11 @@ There are no structural aliases or transparent public casts.
 ## Namespaces and resolution
 
 A declaration's identity is its package, module path, declaration kind, and
-name. Source imports bind one explicit module alias. Wildcard imports,
-re-exports, open namespaces, implicit prelude names, and filesystem-dependent
-fallback resolution are forbidden.
+name. Source imports bind one explicit module alias from an atom entity
+reference. An atom is resolved only in a position whose grammar or data schema
+expects an entity reference; it remains an ordinary `atom` value in expression
+position. Wildcard imports, re-exports, open namespaces, implicit prelude
+names, and filesystem-dependent fallback resolution are forbidden.
 
 A module has separate type, value, interface, and effect namespaces, but one
 top-level form may not reuse a spelling already declared by another top-level

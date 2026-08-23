@@ -19,11 +19,11 @@ atom           = string | boolean | integer | float | unit | atom-name
 literal        = string | boolean | integer | float | unit | atom-name ;
 boolean        = "true" | "false" ;
 unit           = "unit" ;
-atom-name      = "@", kebab-name, { ("." | "/"), kebab-name } ;
+atom-name      = "@", kebab-name, { ".", kebab-name } ;
 label          = kebab-name, ":" ;
 symbol         = symbol-start, { symbol-rest } ;
 symbol-start   = lowercase-letter | "_" ;
-symbol-rest    = symbol-start | digit | "-" | "." | "/" | "?" | "!" ;
+symbol-rest    = symbol-start | digit | "-" | "." | "?" | "!" ;
 trivia         = { whitespace | line-comment } ;
 ```
 
@@ -35,10 +35,16 @@ exponent. Numeric range belongs to type checking, not lexing.
 that completes successfully but has no meaningful value to return. Empty `do`
 and an empty function body evaluate to `unit`.
 
-User-defined names MUST be kebab-case. `_` is the wildcard. `/` is reserved in
-user declarations and separates compiler-owned or project-resolved name
-components. A dotted name is a qualified symbol, never field-access syntax.
-Keywords, booleans, `unit`, and atom names cannot be rebound.
+User-defined names MUST be kebab-case. `_` is the wildcard. Dots separate
+explicit namespace components in symbols and atom names; a dotted symbol is
+never field-access syntax. `/` has no identifier role and appears only inside
+values such as path strings. Keywords, booleans, `unit`, and atom names cannot
+be rebound.
+
+An atom is an ordinary value in expression position. Only a grammar or data
+schema position that explicitly expects an entity reference resolves it as
+one. Imports and effect rows are such positions; writing `@std.io` elsewhere
+produces an atom value rather than loading or invoking code.
 
 ## Labels and calls
 
@@ -80,7 +86,7 @@ V1 has exactly these user top-level forms:
 
 ```ebnf
 top-form = import | deftype | defint | deffect | def | defn | test ;
-import   = "(", "import", symbol, string, ")" ;
+import   = "(", "import", symbol, atom-name, ")" ;
 deftype  = "(", "deftype", symbol, type-expr,
            { type-attribute | nested-method }, ")" ;
 defint   = "(", "defint", symbol,
@@ -95,21 +101,22 @@ defn     = "(", "defn", symbol, parameters, type-expr,
 test     = "(", "test", string, [ "effects:", effect-row ], expr+, ")" ;
 
 nested-method = "(", "defn", qualified-symbol, parameters, type-expr,
-                { function-attribute }, expr+, ")" ;
+                { function-attribute }, { expr }, ")" ;
 interface-member = "(", "defn", qualified-symbol, parameters, type-expr,
                    { function-attribute }, ")" ;
 interface-implementation = "(", "impl", type-expr,
                            implementation-member+, ")" ;
 implementation-member = "(", "defn", qualified-symbol, parameters, type-expr,
-                        { function-attribute }, expr+, ")" ;
+                        { function-attribute }, { expr }, ")" ;
 effect-member = "(", "defn", qualified-symbol, parameters, type-expr,
-                { function-attribute }, expr+, ")" ;
+                { function-attribute }, { expr }, ")" ;
 
 parameters           = "(", { symbol, type-expr }, ")" ;
 labelled-parameters  = "(", { symbol, type-expr, literal }, ")" ;
 variadic-parameter   = "(", symbol, variadic-type, ")" ;
 variadic-type        = "(", "array", type-expr, ")"
                      | "(", "map", type-expr, type-expr, ")" ;
+effect-row            = "(", { atom-name }, ")" ;
 where-clause         = "(", { symbol, generic-bound }, ")" ;
 generic-bound        = "any" | interface-name ;
 
@@ -122,6 +129,8 @@ function-attribute = "where:", where-clause
                    | "variadic:", variadic-parameter
                    | "visibility:", atom-name
                    | "effects:", effect-row
+                   | "external:", atom-name
+                   | "symbol:", string
                    | "doc:", string ;
 lambda-attribute = "labelled:", labelled-parameters
                  | "variadic:", variadic-parameter
@@ -142,10 +151,10 @@ of generic names: every generic name used by a declaration MUST occur exactly
 once in its `where:` clause. `any` states that no interface bound is required.
 
 The canonical function-attribute order is `where:`, `labelled:`, `variadic:`,
-`visibility:`, `effects:`, then `doc:`. The canonical type-attribute order is
-`where:`, `implements:`, `visibility:`, then `doc:`. Attributes may be parsed
-in any unambiguous order, occur at most once, and are formatted canonically.
-Nested methods follow attributes.
+`visibility:`, `effects:`, `external:`, `symbol:`, then `doc:`. The canonical
+type-attribute order is `where:`, `implements:`, `visibility:`, then `doc:`.
+Attributes may be parsed in any unambiguous order, occur at most once, and are
+formatted canonically. Nested methods follow attributes.
 
 Every labelled argument or attribute follows all fixed positional forms of its
 enclosing form and precedes its variadic body or member forms. The parser MAY
@@ -157,7 +166,7 @@ All declarations are private unless they contain `visibility: @public`.
 Visibility is part of the declaration, not a wrapper form.
 
 ```vibra
-(import io "@std/io.vib")
+(import io @std.io)
 
 (deftype user-id (newtype uint64)
   visibility: @public)
@@ -181,7 +190,7 @@ The following declaration has labelled defaults and an array variadic tail:
   labelled: (level atom @info)
   variadic: (fields (array (tuple str str)))
   visibility: @public
-  effects: (io.stdout)
+  effects: (@std.io.stdout)
   (log.write message level fields))
 ```
 
@@ -196,6 +205,33 @@ the operation performs no additional roots.
 `deftype`, `defint`, and `deffect` are native AST forms. They MUST NOT be
 parser desugarings into a generic definition node. A nested `impl` is likewise
 a native child of its `defint`, not a generic call or a method-list desugaring.
+
+## External definitions
+
+Vibra code calls external behavior through ordinary typed functions. A
+toolchain-owned declaration binds a signature to one of exactly two providers.
+`external:` and `symbol:` MUST occur together, and such a declaration MUST omit
+its body:
+
+```vibra
+(defn add-checked (left i32 right i32) (result i32 overflow)
+  visibility: @public
+  external: @compiler
+  symbol: "integer.add-checked")
+```
+
+`@compiler` selects a pure compiler intrinsic. Such a declaration MUST have an
+empty effect ceiling. `@host` selects a typed host operation and is valid only
+on a member of the `deffect` that owns the operation's nominal effect root. A
+`@host` external member MUST have no additive effects. An interface contract
+cannot be external.
+
+The provider and string symbol are checked against closed, versioned toolchain
+registries. External declarations are accepted only in toolchain-signed
+standard-library modules; ordinary packages cannot declare them. Every call
+uses the declared Vibra name and ordinary call syntax—there is no `external`,
+`primitive`, or `host-op` call expression. V1 has no WebAssembly external
+provider and no source-level Wasm FFI.
 
 ## Types, interfaces, and methods
 
@@ -276,8 +312,6 @@ expr = atom | call | lambda
      | "(", "return", [ expr ], ")"
      | "(", "try", expr, ")"
      | "(", "field", expr, symbol, ")"
-     | "(", "primitive", atom-name, { expr }, ")"
-     | "(", "host-op", atom-name, { expr }, ")"
      | collection ;
 lambda = "(", "lambda", parameters, type-expr,
          { lambda-attribute }, { expr }, ")" ;
@@ -314,12 +348,6 @@ expressions. Arms are checked for reachability and exhaustiveness.
 function returning the same container and error type. There are no exceptions
 or implicit error conversions. A fallible value MUST be matched, propagated,
 returned, bound for later use, or explicitly ignored with `let _`.
-
-`primitive` and `host-op` are closed compiler forms accepted only in
-toolchain-signed standard-library modules. `primitive` selects a typed, pure
-operation such as checked integer addition. `host-op` selects a typed host
-registry entry and is governed by the effects chapter. A normal package that
-uses either form is rejected during name checking.
 
 ## Canonical format
 

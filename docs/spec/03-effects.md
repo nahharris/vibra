@@ -28,9 +28,11 @@ are qualified by that root:
 (deffect read
   visibility: @public
   (defn read.file (path path) (result bytes fs-error)
-    (host-op @fs/read-file path))
+    external: @host
+    symbol: "fs.read-file")
   (defn read.text (path path) (result str fs-error)
-    (host-op @fs/read-text path)))
+    external: @host
+    symbol: "fs.read-text"))
 ```
 
 When this declaration belongs to module `fs`, its source root is `fs.read` and
@@ -43,16 +45,18 @@ omitted additive row is empty. Effect roots and operation names are unique
 nominal declarations. Textually equal roots from different packages are
 unrelated.
 
-`host-op` is a closed compiler form available only to toolchain-signed standard
-library modules. Its atom selects an entry in the versioned host registry, its
-exact type is checked, and that entry's owning effect must match the enclosing
-operation. Pure low-level operations use the separate closed `primitive` form
-and perform no effect. User packages cannot declare registry entries, invoke
-unknown primitives, or use raw WebAssembly to bypass effect checking.
+An `@host` external declaration binds an operation signature to the closed,
+versioned host registry. Its string symbol selects one registry entry, its
+exact type is checked, and that entry's owning effect MUST match the enclosing
+operation. Pure low-level behavior uses an `@compiler` external declaration
+with an empty effect row. Both providers are toolchain-owned; user packages
+cannot declare external bindings, extend either registry, or use WebAssembly
+FFI to bypass effect checking.
 
 ## Function effect rows
 
-An effect row is a finite, duplicate-free set of resolved effect roots.
+An effect row is a finite, duplicate-free set of atom references that resolve
+to nominal effect roots.
 
 - Omitted `effects:` is the empty row on every `defn`, `lambda`, function type,
   and test. There is no visibility or nesting exception.
@@ -88,7 +92,7 @@ Every binary target in `project.vib` contains an `effects` array:
   kind: @bin
   root: "src/hello"
   entry: "main.vib"
-  effects: (array @std/fs.read @std/io.stdout))
+  effects: (array @std.fs.read @std.io.stdout))
 ```
 
 Project resolution maps each atom from its target/dependency alias to one
@@ -130,10 +134,11 @@ Time and random values come from injected host providers. Tests use
 deterministic providers unless a test harness deliberately supplies recorded
 responses.
 
-## Reporting
+## Query metadata
 
-`vibra query effects` uses the shared workspace query service and reports, for
-every selected function:
+Effects are part of the metadata returned by the shared workspace query
+service, not a dedicated query kind. A function or source-position query can
+include:
 
 - written-or-default ceilings and computed performed rows;
 - resolved callees;
@@ -142,8 +147,9 @@ every selected function:
 - the binary target or test ceiling checked for the selected entry.
 
 Reports use canonical identities rather than import aliases. The checker and
-report MUST share one call graph and performed-row result. Effects are a query
-kind, not a separate top-level command.
+query result MUST share one call graph and performed-row result. Compact
+queries may omit call witnesses; `--expand effect-witnesses` requests them
+without changing the underlying metadata or admission result.
 
 ## Claims and limits
 

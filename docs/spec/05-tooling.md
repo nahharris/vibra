@@ -28,13 +28,16 @@ vibra lint
 vibra test
 vibra run
 vibra build
-vibra query context|symbol|references|effects|index
+vibra query <subject> [--include <metadata>] [--expand <relations>]
 vibra edit fix|rename|organize-imports
 vibra mcp
 ```
 
-Effects and index data are query kinds because they use the same resolved
-workspace snapshot as context, symbols, and references. V1 has no separate
+Query subjects are a source position such as `src/main.vib:120`, an atom entity
+reference such as `@std.fs.read`, a built-in diagnostic code such as
+`@type.argument-mismatch`, or `@workspace`. Types, effects, context,
+diagnostics, references, and index records are metadata projections from that
+subject, not separate query kinds. V1 has no `query effects`, `query index`,
 `vibra effects`, `vibra index`, or generic `vibra code` command.
 
 Commands that can change files preview by default. `--write` is required to
@@ -61,8 +64,18 @@ and `project-lock.vib` only after all hashes validate.
 
 ## Workspace queries
 
-`vibra query context <path>:<byte>` returns the smallest containing syntax node
-and the information needed to produce a valid continuation:
+Every query returns one normalized envelope containing the subject, resolved
+kind and canonical identity where applicable, exact/recovered/unavailable fact
+status, and workspace revision. With no projection flags it returns the compact
+core metadata appropriate to that subject. `--include` accepts a comma-separated
+selection from `syntax`, `context`, `source`, `signature`, `type`, `effects`,
+`visibility`, `diagnostics`, and `diagnostic`. `--expand` requests potentially
+large relations: `references`, `members`, `calls`, `effect-witnesses`, or
+`declarations`.
+
+A source-position query resolves the smallest containing syntax node. Its
+available metadata includes the information needed to produce a valid
+continuation:
 
 - grammar category and permitted child forms or labels;
 - expected and observed type;
@@ -73,16 +86,22 @@ and the information needed to produce a valid continuation:
 - diagnostics and safe fixes at the location; and
 - the exact workspace revision used.
 
-`symbol` and `references` operate on resolved identities, not token spelling.
-They distinguish type, value, interface, effect root, effect operation, field,
-variant, and lexical binder identities.
+Entity metadata and expanded references operate on resolved identities, not
+token spelling. They distinguish type, value, interface, effect root, effect
+operation, field, variant, and lexical binder identities.
 
-`vibra query effects` reports written-or-default ceilings, performed rows, and
-their call witnesses as defined by the effects chapter. `vibra query index`
-emits one normalized record per declaration: canonical source, signature,
-effect row, visibility, call edges, referenced types, error types, and source
+Function and source-position metadata can include written-or-default ceilings
+and performed rows. `--expand effect-witnesses` adds the call paths that
+introduced those roots. `vibra query @workspace --expand declarations` emits
+one normalized record per declaration: canonical source, signature, effect
+row, visibility, call edges, referenced types, error types, and source
 fingerprint. The exact checker remains the admission test for a retrieved
-candidate; the index is not a substitute type system.
+candidate; workspace metadata is not a substitute type system.
+
+Diagnostic codes are built-in query subjects. For example,
+`vibra query @type.argument-mismatch --include diagnostic` returns the code's
+fixed level, domain, summary, and fix capability from the compiler's diagnostic
+registry. It does not load or execute a Vibra declaration.
 
 ## Transactional edit plans
 
@@ -121,8 +140,8 @@ across packages in the current workspace but never edits vendored dependencies.
 ## MCP server
 
 `vibra mcp --workspace <root>` exposes the shared services over a versioned MCP
-stdio server. Tool names mirror CLI concepts, for example
-`vibra.query.context`, `vibra.edit.rename-plan`, and
+stdio server. Tool names mirror CLI concepts, for example `vibra.query`,
+`vibra.edit.rename-plan`, and
 `vibra.edit.apply-plan`.
 
 The default server is read-only and does not execute project code. Independent
@@ -149,15 +168,15 @@ returned by a prior plan call.
 ## Schemas and errors
 
 The v1 implementation publishes JSON Schemas for CLI and MCP project
-inspection, diagnostics, context, symbols, references, effects, index, edit
-plans/results, test reports, command results, host-registry inspection, and MCP
-envelopes. Persistent project, lock, and build-data record schemas are defined
-as Vibra data contracts and tested through their typed decoders, not duplicated
-as normative JSON files.
+inspection, diagnostics, normalized query results and expansions, edit
+plans/results, test reports, command results, external-registry inspection, and
+MCP envelopes. Persistent project, lock, and build-data record schemas are
+defined as Vibra data contracts and tested through their typed decoders, not
+duplicated as normative JSON files.
 
 Schema IDs and major versions are contracts. Unknown fields are rejected in
 inputs and ignored only where an output schema explicitly permits forward
 extension. Diagnostic and result atoms are serialized to JSON with their exact
-spelling, for example `"@etype-0001"`. Errors distinguish invalid input,
+spelling, for example `"@type.argument-mismatch"`. Errors distinguish invalid input,
 diagnostics found, stale workspace, MCP action denied, dependency failure, host
 operation failure, runtime trap, and internal failure.

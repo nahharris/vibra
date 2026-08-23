@@ -6,32 +6,45 @@ Implementation status: not started
 ## Diagnostics are a language surface
 
 Every rejected or normalized construct has a structured diagnostic. A
-diagnostic code is a lowercase Vibra atom with a category and four digits:
+diagnostic code is a stable lowercase atom of the form `@<domain>.<thing>`.
+Both components are kebab-case and the thing describes the condition rather
+than its issuance order or severity:
 
 ```text
-@esyn-nnnn       reader and grammar errors
-@ename-nnnn      namespace and resolution errors
-@etype-nnnn      type errors
-@eeffect-nnnn    static effect errors
-@ehost-nnnn      host-registry and ABI errors
-@eproject-nnnn   project, lock, and dependency errors
-@eruntime-nnnn   runtime semantic failures
-@wstyle-nnnn     canonical presentation
-@wcontract-nnnn  suspicious but valid declarations
+@syntax.unmatched-delimiter
+@name.unknown-symbol
+@type.argument-mismatch
+@effect.outside-ceiling
+@external.unknown-symbol
+@project.stale-lock
+@runtime.invalid-host-value
+@style.argument-order
+@contract.unused-effect
 ```
 
-For example, the first type diagnostic may be `@etype-0001`. Codes are stable
-within the v1 line and are atoms in Vibra data. JSON output serializes the exact
-atom spelling as a string.
+Codes are stable within the v1 line and are atoms in Vibra data. JSON output
+serializes the exact atom spelling as a string. A code need not be renamed if
+its registered level changes in a future language version.
 
-A diagnostic contains schema version, code, severity, message, primary source
+The compiler owns a closed diagnostic registry that maps each code to one
+fixed level, `@error` or `@warning`, plus its domain, summary, and fix
+capability. The level is not encoded in the code and cannot be configured by a
+project. `vibra query @type.argument-mismatch --include diagnostic` exposes the
+registry entry, and every emitted diagnostic carries the same level. A command
+may fail on warnings by policy without changing their registered level.
+
+V1 has no language form or `.vib` catalog for declaring diagnostics. The
+registry is compiler data: queryable and covered by schemas and conformance
+tests, but not loaded from or executed as Vibra source.
+
+A diagnostic contains schema version, code, level, message, primary source
 span, related spans, notes, and zero or more fixes. Spans are half-open UTF-8
 byte ranges with one-based line and Unicode-scalar column as derived display
 data. Fixes declare whether they are safe and carry expected document
 revisions.
 
-Messages help people; codes and fields help tools. Tests assert codes, spans,
-related identities, and fix results, not incidental English punctuation.
+Messages help people; codes and fields help tools. Tests assert codes, levels,
+spans, related identities, and fix results, not incidental English punctuation.
 
 ## Recovery
 
@@ -103,7 +116,7 @@ called Vibra v1:
 | --- | --- |
 | `reader-v1` | Reader, recovery CST, formatter, syntax diagnostics |
 | `static-v1` | Reader plus names, types, effects, project checking |
-| `interpreter-v1` | Static profile plus reference execution and host registry |
+| `interpreter-v1` | Static profile plus reference execution and external registries |
 | `tooling-v1` | Static profile plus schemas, queries, plans, CLI, MCP |
 | `wasm-v1` | Static profile plus deterministic Wasm and runtime |
 | `full-v1` | All profiles, stdlib, projects, and release gates |
@@ -127,7 +140,7 @@ validation, documentation examples, interpreter/Wasm differential tests, and
 deterministic rebuilds are mandatory CI jobs.
 
 Fuzzing covers the reader, formatter round trips, project/lock/build data
-decoders, CLI/MCP schema decoders, host-registry boundary, and typed IR
+decoders, CLI/MCP schema decoders, external-registry boundary, and typed IR
 deserialization. A fuzz finding is not closed until reduced into a regression
 case.
 
@@ -145,6 +158,8 @@ The `full-v1` claim requires:
 - reference interpreter and Wasm parity across the executable corpus;
 - byte-identical rebuilds across two clean environments;
 - formatter idempotence across stdlib, examples, and conformance source;
+- every diagnostic code is unique and its queryable registered level matches
+  emitted results;
 - every compiler-generated host operation owned by the declared nominal effect
   in the closed registry; and
 - a release audit that states supported claims and exclusions without calling
