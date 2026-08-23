@@ -13,8 +13,8 @@ small, explicit programming language that gives an agent enough local,
 machine-readable constraint to produce correct changes reliably.
 
 The language is one product with five surfaces: syntax, static types, static
-effects plus runtime authority, agent-facing tooling, and runtime behavior. A
-feature is not part of v1 unless all affected surfaces agree.
+effects, agent-facing tooling, and runtime behavior. A feature is not part of
+v1 unless all affected surfaces agree.
 
 ## Decision order
 
@@ -22,7 +22,7 @@ When two designs conflict, prefer the design that:
 
 1. makes invalid programs unrepresentable or locally diagnosable;
 2. gives an agent one canonical way to express an idea;
-3. exposes type, effect, namespace, and authority boundaries explicitly;
+3. exposes type, effect, and namespace boundaries explicitly;
 4. permits precise context queries and transactional edits;
 5. is deterministic across checker, interpreter, and compiled runtime; and
 6. keeps the v1 implementation small enough to finish and verify.
@@ -39,8 +39,8 @@ V1 is usable when a fresh installation can, without the pre-v1 tree:
 - format, check, test, run, and build it;
 - express nominal data, interfaces, generics, typed failure, and exhaustive
   control flow;
-- perform approved console, filesystem, environment, clock, and random
-  operations through checked effects and fail-closed authority;
+- perform console, filesystem, environment, clock, and random operations whose
+  nominal effects are checked against the selected project target;
 - query expected types/effects and symbol context at a source position;
 - preview and atomically apply supported semantic code changes through the CLI
   or MCP; and
@@ -55,18 +55,18 @@ conformance case or an explicit review-only invariant.
 - Source files use `.vib` and UTF-8 S-expressions.
 - Names use kebab-case and imports produce explicit aliases.
 - Public boundaries carry complete types and effect ceilings.
-- Types, interfaces, implementations, and effects are nominal.
+- Types, interfaces, their explicit implementations, and effects are nominal.
 - Typed `option` and `result` replace null and exceptions.
-- Effects describe possible operations; runtime grants decide permitted
-  authority. Neither substitutes for the other.
-- Host resources are scoped and cannot escape their owning lexical resource
-  scope.
-- Project, diagnostic, query, edit-plan, test, and build outputs have versioned
-  JSON schemas.
+- Effects describe possible operations statically. A binary target's declared
+  effect roots are its complete execution consent; v1 has no runtime grants.
+- Project and compiler-owned persistent data use canonical `.vib` literal data.
+  JSON is reserved for CLI and MCP interoperability.
+- Diagnostic, query, edit-plan, test, and command results have versioned JSON
+  schemas.
 - The parser is recovery-oriented, while the formatter defines one canonical
   representation.
-- The runtime is deterministic for fixed source, inputs, grants, budgets, and
-  host responses.
+- The runtime is deterministic for fixed source, inputs, and ordered host
+  responses.
 
 ## Deliberate v1 exclusions
 
@@ -74,13 +74,15 @@ The following are not partially implemented in v1:
 
 - pre-v1 source, CLI, schema, package, or ABI compatibility;
 - macros, reader extensions, compiler plugins, and runtime plugins;
-- algebraic effect handlers, effect polymorphism, and user-defined runtime
-  authority providers;
+- algebraic effect handlers, effect polymorphism, runtime grants, permission
+  prompts, path-scoped capabilities, and user-defined host providers;
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;
 - arbitrary unions, inheritance, implicit interface conformance, dependent or
   refinement types, and a general ownership/borrowing system;
+- language-defined fuel, memory, or host-operation budgets and scoped host
+  resource or handle lifetimes;
 - network and child-process host APIs;
 - arbitrary syntax-tree patch languages or unauthenticated remote writes;
 - self-hosting, JIT compilation, optimization promises, or verified-compiler
@@ -97,6 +99,6 @@ There is no compatibility bridge from pre-v1. Migration tools may exist as
 separate, one-shot utilities; the compiler MUST NOT auto-detect or accept a
 retired surface.
 
-After 1.0, the source language, project format, machine schemas, artifact
+After 1.0, the source language, project-data format, machine schemas, artifact
 format, and host ABI are independently versioned. A reader MUST reject a newer
 major version it cannot interpret rather than guessing.

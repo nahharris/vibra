@@ -18,10 +18,11 @@ uint8 uint16 uint32 uint64
 float32 float64
 ```
 
-`void` has the sole value `unit`. `atom` contains interned atom values such as
-`@ok`; every written atom also has a singleton type that can widen to `atom`.
-There is no null value, truthiness conversion, implicit numeric widening, or
-implicit string conversion.
+`void` has exactly one value, `unit`. A function returns `void` when successful
+completion carries no information. `atom` contains interned atom values such
+as `@ok`; every written atom also has a singleton type that can widen to
+`atom`. There is no null value, truthiness conversion, implicit numeric
+widening, or implicit string conversion.
 
 ## Nominal declarations
 
@@ -38,15 +39,25 @@ type = primitive | name | "(", name, type+, ")"
      | "(", "tuple", type*, ")"
      | "(", "array", type, ")"
      | "(", "map", type, type, ")"
-     | "(", "resource", atom-name, ")"
-     | "(", "fn", "(", type*, ")", type, "effects:", effect-row, ")" ;
+     | function-type ;
+function-type = "(", "fn", "(", type*, ")", type,
+                [ "labelled:", "(", { symbol, type }, ")" ],
+                [ "variadic:", variadic-type ],
+                [ "effects:", effect-row ], ")" ;
 ```
+
+`fn` denotes a function type. `lambda`, not `fn`, declares an anonymous
+function. A function type records its required positional types, labelled
+names and types, optional array or map variadic type, result, and exact closed
+effect row. Defaults belong to the function value and are not repeated in its
+type. An omitted function-type `effects:` row is empty.
 
 Records have closed, named fields. Enums have closed, named variants with zero
 or one payload type. Tuples, arrays, and maps are immutable values. Map keys
 must implement the standard `hashable`, `equatable`, and `ordered` interfaces.
-Recursive types MUST pass a finite-size check; recursion through a variable-size
-container is permitted, while direct infinite expansion is rejected.
+Recursive types MUST pass a finite-size check; recursion through a
+variable-size container is permitted, while direct infinite expansion is
+rejected.
 
 Newtypes have a distinct identity and exactly one representation type. Their
 constructor and unwrap operation are available only where visibility permits.
@@ -65,9 +76,10 @@ form in that module. Syntactic position selects the namespace. Tooling MUST
 return the resolved kind and canonical identity; it must never expose a dotted
 string as if textual coincidence were resolution.
 
-Lexical shadowing is an error. A parameter, `let`, pattern binder, loop binder,
-or resource binder may not reuse a visible lexical name. `_` is exempt because
-it never binds. Sibling scopes may reuse a name.
+Name shadowing is forbidden. A parameter, `let` binder, pattern binder, loop
+binder, or lambda parameter MUST NOT reuse any visible lexical name. `_` is
+exempt because it never binds. Sibling scopes may reuse a name when neither is
+visible from the other.
 
 ## Inference and checking
 
@@ -75,100 +87,103 @@ Inference is local:
 
 - literal types may be constrained by their expression context;
 - generic arguments may be inferred from written argument and result types;
-- private function effect rows may be inferred as specified by the effect
-  chapter; and
+- effects performed by a function body are computed to check its written or
+  default-empty ceiling; and
 - local expression types need not be annotated when the result is unique.
 
-Inference MUST NOT invent a public parameter, result, generic bound, interface
+Inference MUST NOT invent a parameter, result, generic bound, interface
 implementation, numeric conversion, effect ceiling, or error conversion.
 Ambiguous inference is an error with candidate explanations, not a default.
 
-Every public function, constant, type parameter, interface member, and effect
+Every public function, `def`, type parameter, interface member, and effect
 operation has a complete written type. The checker validates a body against
 that contract and never rewrites the contract from observed implementation.
 
 ## Generics
 
-Type parameters are explicit on declarations and may have nominal interface
-bounds:
+Every generic name is declared by one flat `where:` entry. The value paired
+with the name is one nominal interface bound or `any` when the parameter is
+unconstrained.
 
 ```vibra
-(defn first ((items (array t))) (option t)
-  params: ((t type))
-  where: ((t storable))
+(defn first (items (array t)) (option t)
+  where: (t storable)
   visibility: @public
-  effects: ()
   (array.first items))
 ```
 
 Generic arguments are invariant. Calls infer the complete argument list when
-unique; otherwise `types: (type...)` supplies every type argument in declaration
-order. Partial application, named type arguments, specialization by value, and
-runtime type tests are not in v1.
+unique; otherwise `types: (type...)` supplies every type argument in `where:`
+order. Partial application, named type arguments, specialization by value,
+multiple bounds on one parameter, and runtime type tests are not in v1.
 
-Implementations may monomorphize, but specialization strategy is not observable
-except for deterministic output and resource budgets.
+Implementations may monomorphize, but specialization strategy is not
+observable except through deterministic program and build output.
 
-## Interfaces
+## Interfaces and methods
 
-`defint` declares a nominal set of method signatures over `self`. Conformance
-exists only through an explicit `impl`. Matching method names and shapes are
-insufficient. An interface implementation MUST provide every member exactly
-once, preserve parameter and result types, and perform no effect outside the
-member's declared ceiling.
+`defint` declares a nominal set of interface-qualified method signatures over
+`self`. Conformance is always explicit. Matching method names and shapes are
+insufficient.
+
+A type declared in the current package lists its interfaces in the enclosing
+`deftype` `implements:` attribute and supplies each interface-qualified method
+inside that `deftype`. A regular method in the same declaration is qualified
+by the type name. The checker rejects a method with the wrong qualifier.
+
+The package that owns an interface may implement it for a foreign type by
+placing `(impl foreign-type ...)` inside the owning `defint`. The `impl` target
+is positional, and its method definitions are its variadic members; `for:` is
+not part of implementation syntax. These two locations encode the orphan rule
+directly: an implementation can be written only where the package owns the
+type or owns the interface. There is no top-level implementation form.
+
+Within an interface contract, a `deftype` method, or a nested `impl`, `self`
+resolves to the applicable receiver type. In a `deftype`, that is the declared
+type. In an `impl`, it is the positional target type. `self` is not visible in
+module-level functions.
+
+For each interface/type pair, the checker MUST find every contract member
+exactly once, substitute the concrete type for `self`, preserve parameter and
+result types, preserve labelled names and defaults and variadic shape, and
+verify that the method performs no effect outside the contract ceiling.
+Missing, extra, duplicate, or conflicting members are errors.
 
 There is no inheritance between concrete types. Interface values use explicit
-widening at a typed boundary and static, closed-world dispatch in v1. An
-implementation conflict for the same interface/type pair is an error; orphan
-implementations are forbidden unless the package owns the interface or type.
-
-Operator overloading is absent. Arithmetic, comparison, indexing, and
-conversion use ordinary, resolved functions or interface methods.
+widening at a typed boundary and static, closed-world dispatch in v1. Operator
+overloading is absent. Arithmetic, comparison, indexing, and conversion use
+ordinary resolved functions or interface methods.
 
 ## Control flow and failure
 
 `if` requires `bool` and both branches must have one common type. `match` is
 checked for exhaustiveness over booleans, atoms when statically closed, enums,
-and finite structural patterns. Unreachable cases are errors.
+and finite structural patterns. Unreachable arms are errors.
 
 `option t` and `result t e` are ordinary nominal standard-library enums with
 compiler recognition only for `try` and unhandled-value checking. A fallible
-value in discarded position is an error. `discard` is explicit intent and is
-allowed, but lint may still warn when the discarded error carries a
-must-handle marker.
+value in an ignored position is an error unless intent is explicit as
+`(let _ expression)`. Tooling MAY still emit a contract warning when an
+explicitly ignored error carries a must-handle marker.
 
 Arithmetic is checked. Overflow, division by zero, invalid shifts, and failed
 numeric conversions return typed results from their standard operations; they
 do not wrap or trap implicitly. Floating-point behavior follows IEEE 754 with
 canonical serialization rules defined by the runtime chapter.
 
-## Resources
+## Host values
 
-Host resources have nominal types whose `deftype` representation is
-`(resource @registry-kind)`. Only a toolchain-signed standard-library module
-may use this representation, and the kind must exist in the closed host
-registry. A resource value:
-
-- is introduced only by `with-resource`;
-- may be passed by temporary immutable borrow to operations in that lexical
-  scope;
-- cannot be copied, compared, hashed, stored in another value, returned,
-  captured, or bound outside the scope; and
-- is closed by the runtime on all normal, propagated-error, budget, and trap
-  exits.
-
-This is a restricted lexical resource system, not general ownership or
-borrowing. The checker needs only prove non-escape and scope membership. It
-MUST reject use after the lexical scope and any operation on a resource owned
-by a different runtime instance.
+V1 host operations accept and return ordinary Vibra values. The language has
+no `resource` type constructor, lexical host-handle scope, user-visible close
+protocol, or ownership rule for host objects. APIs that would require a
+long-lived file, socket, or stream handle are deferred; the v1 filesystem and
+console APIs are value-in/value-out operations.
 
 ## Value semantics
 
 Bindings and ordinary values are immutable. Passing a value preserves the
 logical value for the caller. An implementation may share immutable storage or
-apply copy-on-write as long as identity is not observable and budgets are
-charged according to the runtime contract.
+apply copy-on-write as long as identity is not observable.
 
 V1 has no user-visible references, pointers, object identity, destructors, or
-shared mutable cells. Host resource identity is observable only through the
-operations explicitly provided by its nominal resource type.
+shared mutable cells.

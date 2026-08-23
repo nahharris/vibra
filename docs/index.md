@@ -11,7 +11,7 @@ Read the chapters in order:
 1. [Charter and v1 boundary](spec/00-charter.md)
 2. [Source language](spec/01-source-language.md)
 3. [Type system](spec/02-type-system.md)
-4. [Effects and authority](spec/03-effects-and-authority.md)
+4. [Effects](spec/03-effects.md)
 5. [Programs and packages](spec/04-programs-and-packages.md)
 6. [CLI, MCP, and code tooling](spec/05-tooling.md)
 7. [Runtime and WebAssembly](spec/06-runtime.md)

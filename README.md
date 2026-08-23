@@ -22,10 +22,10 @@ Vibra v1 is defined by five inseparable surfaces:
 
 - one canonical `.vib` S-expression syntax;
 - a nominal static type system with explicit module boundaries;
-- nominal effects checked statically and enforced by runtime authority grants;
+- nominal effects checked statically against explicit project-target ceilings;
 - versioned CLI and MCP contracts for projects, diagnostics, context, and
   transactional code changes; and
-- a deterministic, resource-bounded reference runtime with a WebAssembly
+- a deterministic reference runtime with a closed host ABI and a WebAssembly
   production backend.
 
 The complete source-of-truth map starts at [`docs/index.md`](docs/index.md).
