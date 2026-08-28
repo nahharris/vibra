@@ -40,11 +40,19 @@ When this declaration belongs to module `fs`, its source root is `fs.read` and
 its operations are `fs.read.file` and `fs.read.text`. The defining package and
 module, not an import alias, form the canonical identity.
 
-Applying an operation as a function always performs its owner root. `effects:`
-on an operation lists additive roots performed by its body; the owner root is
-implicit. An omitted additive row is empty. Effect roots and operation names
-are unique nominal declarations. Textually equal roots from different packages
-are unrelated.
+`effects:` on an operation lists additive roots performed by its body; the
+owner root is implicit. An omitted additive row is empty. An operation's
+complete row is its owner root together with its additive row, and applying
+that operation as a function performs the complete row rather than the owner
+root alone. A `@host` external operation has no additive row, so its complete
+row is exactly its owner root.
+
+`deffect` itself takes no `effects:` attribute. A root is a name, not a row,
+and additive effects are declared per operation because different operations
+of one root may reach different roots.
+
+Effect roots and operation names are unique nominal declarations. Textually
+equal roots from different packages are unrelated.
 
 An `@host` external declaration binds an operation signature to the closed,
 versioned host registry. Its string symbol selects one registry entry, its
@@ -70,8 +78,9 @@ effect root emits `@effect.invalid-reference`.
 - Every interface contract has a written or default-empty ceiling.
 - An effect operation declares only its additive ceiling; its owner is
   implicit.
-- The checker computes the least performed row over the resolved function-call
-  graph, but this computation never changes an omitted ceiling from `()`.
+- The checker computes the least transitively closed performed row over the
+  resolved function-call graph, but this computation never changes an omitted
+  ceiling from `()`.
 - For an ordinary body, the written or default-empty ceiling MUST contain the
   performed row. For an effect operation, its owner root plus its additive
   written or default-empty ceiling MUST contain the performed row.
@@ -95,6 +104,49 @@ normally.
 effectful `main` MUST declare `effects:`. The target record independently
 supplies the project's execution consent ceiling.
 
+## Performed rows are transitively closed
+
+The performed row of a body is the union of the complete rows of everything it
+reaches through the function-call graph. An effect operation is an ordinary
+node in that graph and contributes its complete row, so an additive root
+declared on an operation appears in the performed row of every transitive
+caller and MUST appear in each of their written ceilings.
+
+Effect roots do not hide effects. There is no containment, dominance, or
+sub-effect relation between two nominal roots, so naming an owner root never
+discharges an additive root. Given module `app` with `(import fs @std.fs)`:
+
+```vibra
+(deffect audit
+  visibility: @public
+  (defn audit.record (target path event str) void
+    effects: (fs.write)
+    (fs.write.text target event)))
+
+(defn handle-request (target path summary str) void
+  effects: (audit fs.write)
+  (audit.record target summary))
+```
+
+Writing `effects: (audit)` alone on `handle-request` is
+`@effect.outside-ceiling`, because its performed row contains `fs.write`. Row
+containment is a plain subset test over canonical identities and is decided
+without consulting any effect declaration.
+
+This is deliberate. A row answers “what may this code attempt?”, so a root
+that absorbed the roots of its own operations would let any package launder
+`fs.write` or `io.stdout` behind a local name, and would let a target consent
+array admit roots that appear in no source row of the program. An author who
+needs to vary an implementation without exposing its row uses an interface
+contract ceiling, which bounds every implementation while staying visible to
+callers.
+
+Because a caller's row grows when a library adds an additive root, widening an
+operation's additive row is a breaking change for consumers. That cost is
+accepted: it is the same observable break as adding a failure mode to a
+declared result type, and v1 resolves dependencies from local paths or exact
+Git revisions, so it can only surface on a deliberate revision bump.
+
 ## Target consent
 
 Every binary target in `project.vibon` contains an `effects` array:
@@ -113,6 +165,14 @@ canonical package/module effect identity. Unknown roots and duplicates are
 project errors. These atoms are entity references because the typed
 `project.vibon` schema declares that role for this field; other atoms in VIBON
 remain data values. An empty array permits only an effect-free entry graph.
+
+Because performed rows are transitively closed, this array is the closure of
+the entry graph. It MUST list every root that graph reaches, including a root
+introduced only by the additive row of an effect operation and never written
+in `main`. Source effect rows and the target array therefore range over one
+vocabulary of canonical identities: when `main` declares no unused root, the
+array is exactly `main`'s row rewritten from import aliases to canonical
+package/module atoms, and the toolchain derives both from one computed result.
 
 Before `check`, `test`, `run`, or `build` accepts a binary target, the checker
 MUST prove that the performed effect row of `main` is a subset of the target
@@ -157,7 +217,8 @@ include:
 
 - written-or-default ceilings and computed performed rows;
 - resolved function callees and classified non-call applications;
-- effect-operation witnesses that introduced each root;
+- effect-operation witnesses that introduced each root, including a root that
+  reached the queried function only through an operation's additive row;
 - the public boundary that covers the row; and
 - the binary target or test ceiling checked for the selected entry.
 
@@ -169,9 +230,12 @@ them without changing the underlying metadata or admission result.
 ## Claims and limits
 
 V1 effects are not exceptions, algebraic handlers, resumptions, runtime values,
-permission prompts, path filters, or security capabilities. Ordinary host
-failures remain the typed errors declared by operations; an ABI or runtime
-invariant failure is a trap.
+permission prompts, path filters, or security capabilities. Sealed effect
+roots and a declared dominance or sub-effect relation between roots are
+excluded and require a post-v1 specification; flat rows are that design with
+an empty relation, so adding one later relaxes existing programs rather than
+breaking them. Ordinary host failures remain the typed errors declared by
+operations; an ABI or runtime invariant failure is a trap.
 
 The effect system guarantees static containment of performed roots in written
 ceilings for source accepted by a conforming compiler. It does not make the
