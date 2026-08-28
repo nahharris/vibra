@@ -1,12 +1,12 @@
-/target/
-/tmp/
+/target
+.worktrees/
 /.agents/
-/.worktrees/
+/tmp/
 skills-lock.json
 *.rs.bk
-*.log
 .DS_Store
 Thumbs.db
 .env
 .idea/
 .vscode/
+*.log

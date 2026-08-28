@@ -1,0 +1,300 @@
+# Vibra v1 type system
+
+Status: normative target
+Implementation status: not started
+
+## Model
+
+Vibra is statically typed, nominal, and value-oriented. Every expression has
+one type before execution. Public declarations are checked from their written
+signatures; callers never need a callee body to type-check a call.
+
+The primitive types are:
+
+```text
+bool void char str bytes atom
+i8 i16 i32 i64
+u8 u16 u32 u64
+f32 f64
+```
+
+`void` has exactly one value, also spelled `void`. A function returns `void`
+when successful completion carries no information. `char` contains exactly the
+Unicode scalar values. `atom` contains interned atom values such as `@ok`;
+every written atom also has a singleton type that can widen to `atom`. There is
+no null value, truthiness conversion, implicit numeric widening, or implicit
+string conversion.
+
+A numeric suffix is a complete type annotation on its literal. Integer
+suffixes select one of `i8` through `i64` or `u8` through `u64`; float suffixes
+select `f32` or `f64`. A suffixed literal MUST fit the selected type. An
+unsuffixed integer or float is constrained by its local expected type and is an
+ambiguity error when no unique numeric type follows. Suffixes never request an
+implicit conversion, and platform-sized numeric types do not exist in v1.
+
+For width `N`, `iN` contains the integers from `-2^(N-1)` through
+`2^(N-1)-1`, and `uN` contains `0` through `2^N-1`. `f32` and `f64` are the
+IEEE 754 binary32 and binary64 formats. Decimal float literals are rounded to
+the selected format using round-to-nearest, ties-to-even; a finite source
+literal that overflows to infinity is out of range. V1 has no source spelling
+for infinity or NaN. Character equality and ordering use Unicode scalar value,
+and conversion between `char` and an integer is always explicit.
+
+## Nominal declarations
+
+Every `deftype` introduces a new identity. Two types with identical structure
+are different unless they are the same fully resolved declaration.
+
+V1 type constructors are:
+
+```ebnf
+type-expr = primitive | symbol | "(", symbol, type-expr+, ")"
+          | record-type | enum-type
+          | "(", "newtype", type-expr, ")"
+          | "(", "tuple", type-expr*, ")"
+          | "(", "array", type-expr, ")"
+          | "(", "map", type-expr, type-expr, ")"
+          | function-type ;
+record-type = "(", "record", local-name, type-expr,
+              { local-name, type-expr }, ")" ;
+enum-type = "(", "enum", local-name, type-expr,
+            { local-name, type-expr }, ")" ;
+function-type = "(", "fn", "(", type-expr*, ")", type-expr,
+                [ "labelled:", "(", { local-name, type-expr }, ")" ],
+                [ "variadic:", variadic-type ],
+                [ "effects:", effect-row ], ")" ;
+```
+
+`fn` denotes a function type. `lambda`, not `fn`, declares an anonymous
+function. A function type records its required positional types, labelled
+names and types, optional array or map variadic type, result, and exact closed
+effect row. Effect-row entries are lexical symbols resolved in the effect
+namespace to nominal roots. Defaults belong to the function value and are not
+repeated in its type. An omitted function-type `effects:` row is empty.
+
+Record and enum bodies are flat and contain at least one name/type pair.
+Records have closed, named fields. Every enum variant has one written payload
+slot; `void` in that slot declares a nullary, payloadless constructor, while
+any other type declares a unary constructor. Tuples, arrays, and maps are
+immutable values. Map keys must implement the standard `hashable`,
+`equatable`, and `ordered` interfaces. Recursive types MUST pass a finite-size
+check; recursion through a variable-size container is permitted, while direct
+infinite expansion is rejected.
+
+Newtypes have a distinct identity and exactly one representation type. Their
+constructor and unwrap operation are available only where visibility permits.
+There are no structural aliases or transparent public casts.
+
+## Application
+
+Every non-reserved executable list is an application whose behavior is fixed
+by the statically resolved callee. V1 has this closed set of applicable value
+categories:
+
+| Callee type | Required operand | Result | Application kind |
+| --- | --- | --- | --- |
+| `fn` | Its written positional, labelled, and variadic signature | Written result | `@function` |
+| `(tuple t0 ... tn)` | One tuple-index literal | Exact selected component | `@tuple-projection` |
+| Record type | One atom field selector | Exact selected field | `@record-projection` |
+| `(array t)` | One `u64` index | `(option t)` | `@collection-lookup` |
+| `(map k v)` | One value of exact type `k` | `(option v)` | `@collection-lookup` |
+| `str` | One `u64` scalar index | `(option char)` | `@collection-lookup` |
+| `bytes` | One `u64` byte index | `(option u8)` | `@collection-lookup` |
+
+A projection or lookup application accepts exactly one unlabelled operand and
+no labelled or variadic operands.
+
+A tuple index is an unsuffixed decimal integer literal written canonically
+without a leading zero except for `0`. It is checked at compile time, MUST be
+within the tuple arity, and cannot be supplied by a variable or computed
+expression. V1 has no `value.0` postfix spelling. A record selector is exactly
+one written unqualified atom such as `@name`; it is resolved contextually to a
+field identity and MUST name a visible field of the statically known record
+type. In this position the atom is a selector, not an entity reference or an
+applicable value.
+
+Array, map, string, and byte lookups accept a runtime operand and return the
+standard nominal `option`; absence and out-of-bounds access never trap, return
+an implicit default, or produce null. String indices count Unicode scalar
+values, not UTF-8 bytes. Projection and lookup are pure. Evaluating their
+callee or operand may perform effects, but the application itself contributes
+no effect and no function-call edge.
+
+An enum value, atom, number, or `void` is not applicable. A newtype value does
+not delegate applicability to its representation. A value whose static type is
+an unconstrained generic is not applicable; v1 has no callable interface or
+user-defined applicability bound. Tuples and records are not subtypes of `fn`;
+producing an accessor as a higher-order value requires an explicit `lambda`.
+
+Resolved nominal record types, enum variants, and newtype constructors are
+also applicable constructor entities. Record constructors accept their closed
+set of labelled fields, enum constructors accept zero operands for a `void`
+payload slot or one operand of the written payload type, and newtype
+constructors accept their representation value. Constructor application is
+pure and has kind `@constructor`.
+
+The closed native entities `tuple.of`, `array.of`, and `map.of` construct
+collection values and have application kind `@constructor`. `tuple.of` derives
+one heterogeneous tuple type from its operands. `array.of` requires every
+operand to have one exact element type, and `map.of` requires alternating
+operands of one exact key type and one exact value type. Empty array and map
+construction requires an expected type; an odd map arity is an error. The
+source forms `(tuple ...)`, `(array ...)`, and `(map ...)` are type or pattern
+forms, never collection value constructors.
+
+## Namespaces and resolution
+
+A declaration's identity is its package, module path, declaration kind, and
+name. Source imports bind one explicit module alias from an atom entity
+reference. An atom is resolved only in a position whose grammar or data schema
+expects an entity reference; it remains an ordinary `atom` value in expression
+position. Wildcard imports, re-exports, open namespaces, implicit prelude
+names, and filesystem-dependent fallback resolution are forbidden.
+
+Token spelling never heuristically selects entity resolution. In source,
+symbols name lexical code entities and the surrounding grammar selects the
+type, value, interface, or effect namespace. Atoms are values unless a closed
+source grammar position, such as the module locator in `import`, explicitly
+requires an entity reference. In `.vibon`, the typed data schema makes the same
+choice field by field. Resolution converts an entity-reference token to one
+canonical identity before type checking; it does not turn atoms into
+first-class modules, effects, diagnostics, or declarations.
+
+A module has separate type, value, interface, and effect namespaces, but one
+top-level form may not reuse a spelling already declared by another top-level
+form in that module. Syntactic position selects the namespace. Tooling MUST
+return the resolved kind and canonical identity; it must never expose a dotted
+string as if textual coincidence were resolution.
+
+Name shadowing is forbidden. Every name introduced anywhere inside a
+positional-parameter, `let`, `for`, or `match` pattern MUST NOT reuse any
+visible lexical name. Labelled and variadic parameter names follow the same
+rule. A pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are
+equivalent discards, create no binding, and may repeat in the same or nested
+scopes. Sibling scopes may reuse a named symbol when neither declaration is
+visible from the other.
+
+## Inference and checking
+
+Inference is local:
+
+- unsuffixed numeric literal types may be constrained by their expression
+  context, while character, boolean, string, atom, `void`, and suffixed numeric
+  literals have fixed types;
+- generic arguments may be inferred from written operand and result types;
+- effects performed by a function body are computed to check its written or
+  default-empty ceiling; and
+- local expression types need not be annotated when the result is unique.
+
+Inference MUST NOT invent a parameter, result, generic bound, interface
+implementation, numeric conversion, effect ceiling, or error conversion.
+Ambiguous inference is an error with candidate explanations, not a default.
+
+Every public function, `def`, type parameter, interface member, and effect
+operation has a complete written type. The checker validates a body against
+that contract and never rewrites the contract from observed implementation.
+
+## Generics
+
+Every generic name is declared by one flat `where:` entry. The value paired
+with the name is one nominal interface bound or `any` when the parameter is
+unconstrained.
+
+```vibra
+(defn first (items (array t)) (option t)
+  where: (t storable)
+  visibility: @public
+  (array.first items))
+```
+
+Generic arguments are invariant. Function and constructor applications infer
+the complete argument list when unique; otherwise `types: (type...)` supplies
+every type argument in `where:` order. Partial application, named type
+arguments, specialization by value, multiple bounds on one parameter, and
+runtime type tests are not in v1.
+
+Implementations may monomorphize, but specialization strategy is not
+observable except through deterministic program and build output.
+
+## Interfaces and methods
+
+`defint` declares a nominal set of interface-qualified method signatures over
+`self`. Conformance is always explicit. Matching method names and shapes are
+insufficient.
+
+A type declared in the current package lists its interfaces in the enclosing
+`deftype` `implements:` attribute and supplies each interface-qualified method
+inside that `deftype`. A regular method in the same declaration is qualified
+by the type name. The checker rejects a method with the wrong qualifier.
+
+The package that owns an interface may implement it for a foreign type by
+placing `(impl foreign-type ...)` inside the owning `defint`. The `impl` target
+is positional, and its method definitions are its variadic members; `for:` is
+not part of implementation syntax. These two locations encode the orphan rule
+directly: an implementation can be written only where the package owns the
+type or owns the interface. There is no top-level implementation form.
+
+Within an interface contract, a `deftype` method, or a nested `impl`, `self`
+resolves to the applicable receiver type. In a `deftype`, that is the declared
+type. In an `impl`, it is the positional target type. `self` is not visible in
+module-level functions.
+
+For each interface/type pair, the checker MUST find every contract member
+exactly once, substitute the concrete type for `self`, preserve parameter and
+result types, preserve labelled names and defaults and variadic shape, and
+verify that the method performs no effect outside the contract ceiling.
+Missing, extra, duplicate, or conflicting members are errors.
+
+There is no inheritance between concrete types. Interface values use explicit
+widening at a typed boundary and static, closed-world dispatch in v1. Operator
+overloading is absent. Arithmetic, comparison, and conversion use ordinary
+resolved functions or interface methods. Application-based tuple/record
+projection and array/map/string/byte lookup are the closed indexing surface
+defined above and cannot be overloaded.
+
+## Control flow and failure
+
+`if` requires `bool` and both branches must have one common type. `match` is
+checked for exhaustiveness over booleans, atoms when statically closed, enums,
+and finite structural patterns. Unreachable arms are errors.
+
+The same exhaustiveness engine determines whether a binding pattern is
+irrefutable: the single pattern MUST cover every value of its expected type.
+`let`, `for`, and fixed positional function or lambda parameters require an
+irrefutable pattern; `match` permits refutable patterns and checks all arms
+together. Tuple patterns have exact arity and are irrefutable when every
+component is. Record patterns may omit fields and are irrefutable when every
+written field pattern is. A fixed-length array pattern is refutable for the
+variable-length array type. A newtype constructor pattern is irrefutable when
+its payload pattern is. An enum constructor pattern is refutable unless its
+expected enum has exactly that one variant and its payload pattern is
+irrefutable. A bare unqualified name always binds; it never pins or compares a
+visible value.
+
+`option t` and `result t e` are ordinary nominal standard-library enums with
+compiler recognition only for `try` and unhandled-value checking. A fallible
+value in an ignored position is an error unless intent is explicit as
+`(let - expression)` or another discard spelling. Tooling MAY still emit a
+contract warning when an explicitly ignored error carries a must-handle marker.
+
+Arithmetic is checked. Overflow, division by zero, invalid shifts, and failed
+numeric conversions return typed results from their standard operations; they
+do not wrap or trap implicitly. Floating-point behavior follows IEEE 754 with
+canonical serialization rules defined by the runtime chapter.
+
+## Host values
+
+V1 host operations accept and return ordinary Vibra values. The language has
+no `resource` type constructor, lexical host-handle scope, user-visible close
+protocol, or ownership rule for host objects. APIs that would require a
+long-lived file, socket, or stream handle are deferred; the v1 filesystem and
+console APIs are value-in/value-out operations.
+
+## Value semantics
+
+Bindings and ordinary values are immutable. Passing a value preserves the
+logical value for the caller. An implementation may share immutable storage or
+apply copy-on-write as long as identity is not observable.
+
+V1 has no user-visible references, pointers, object identity, destructors, or
+shared mutable cells.
