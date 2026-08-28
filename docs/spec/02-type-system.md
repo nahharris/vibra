@@ -162,9 +162,28 @@ first-class modules, effects, diagnostics, or declarations.
 
 A module has separate type, value, interface, and effect namespaces, but one
 top-level form may not reuse a spelling already declared by another top-level
-form in that module. Syntactic position selects the namespace. Tooling MUST
+form in that module. Syntactic position selects the namespace for a symbol
+reference. An atom path needs no such selection: because that top-level spelling
+space is flat, each component resolves to at most one declaration. Tooling MUST
 return the resolved kind and canonical identity; it must never expose a dotted
 string as if textual coincidence were resolution.
+
+Every code entity has exactly one canonical atom path, and every atom path
+resolves to at most one entity. A path is `@unit.c1...cn`: its first component
+names a unit, the programs-and-packages chapter defines the walk from that
+unit's root to one module, and the components remaining after that module are
+resolved against its declarations. A module-level form takes one component. A
+member of a module-level form takes its own name, preceded by its qualifier
+whenever that qualifier is not the enclosing form itself. Thus
+`@app.m.user.name-length` is a `user` method, while
+`@app.m.user.printable.render` is `user`'s implementation of the `printable`
+contract member.
+
+A slot that expects an entity reference decides only whether an atom is a
+reference and which entity kind the resolved entity must have. It never decides
+how the path is read, so one spelling denotes one entity in every position. A
+path resolving to an entity of the wrong kind emits `@name.wrong-entity-kind`
+and names the entity it found, rather than reporting the path as unknown.
 
 Name shadowing is forbidden. Every name introduced anywhere inside a
 positional-parameter, `let`, `for`, or `match` pattern MUST NOT reuse any
@@ -233,6 +252,33 @@ is positional, and its method definitions are its variadic members; `for:` is
 not part of implementation syntax. These two locations encode the orphan rule
 directly: an implementation can be written only where the package owns the
 type or owns the interface. There is no top-level implementation form.
+
+An `impl` block MUST NOT target a type declared in the same module as its
+`defint`, and a same-module target emits `@type.redundant-implementation`.
+Within one module a type and an interface always see each other without an
+import, so the `deftype` placement is always available there and the `impl` form
+would be a second spelling of one implementation. Across modules both placements
+remain legal, because requiring the `deftype` placement there could demand an
+import that completes a cycle and leave the implementation unwritable.
+
+Two qualifier collisions are errors, each decided inside one declaration:
+
+- a `deftype` member name MUST NOT equal any name in its `implements:` list; and
+- a `defint` member name MUST NOT equal the simple name of any type targeted by
+  one of its `impl` blocks.
+
+Both emit `@name.member-qualifier-collision`. Without them a qualifier and a
+member name can spell one path prefix, so `@app.m.some-int.some-type` would
+denote both a contract member and an implementation.
+
+A member written inside a `deftype` has a canonical atom path, because its
+qualifier is either the enclosing type or an interface named in `implements:`. A
+member written inside an `impl` block has none: its position is keyed by a type
+expression rather than by a name, and that expression is spelled through
+module-local import aliases, so no dotted path over it would be canonical. Such
+a member is identified by the pair of its contract member identity and its
+receiver type identity, exactly as an effect operation is identified by its root
+and operation. This is the only v1 entity kind that no single atom addresses.
 
 Within an interface contract, a `deftype` method, or a nested `impl`, `self`
 resolves to the applicable receiver type. In a `deftype`, that is the declared

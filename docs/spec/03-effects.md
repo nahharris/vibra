@@ -100,9 +100,9 @@ pure applications. They add no root and no edge to the function-call graph.
 Effects performed while evaluating their callee or operands still contribute
 normally.
 
-`main` follows the same rule as every other `defn`: omission means `()`, so an
-effectful `main` MUST declare `effects:`. The target record independently
-supplies the project's execution consent ceiling.
+A target's entry declaration follows the same rule as every other `defn`:
+omission means `()`, so an effectful entry MUST declare `effects:`. The target
+record independently supplies the project's execution consent ceiling.
 
 ## Performed rows are transitively closed
 
@@ -156,7 +156,7 @@ Every binary target in `project.vibon` contains an `effects` array:
   name: @hello
   kind: @bin
   root: "src/hello"
-  entry: "main.vib"
+  entry: @hello.main.main
   effects: (array @std.fs.read @std.io.stdout))
 ```
 
@@ -169,19 +169,19 @@ remain data values. An empty array permits only an effect-free entry graph.
 Because performed rows are transitively closed, this array is the closure of
 the entry graph. It MUST list every root that graph reaches, including a root
 introduced only by the additive row of an effect operation and never written
-in `main`. Source effect rows and the target array therefore range over one
-vocabulary of canonical identities: when `main` declares no unused root, the
-array is exactly `main`'s row rewritten from import aliases to canonical
+in the entry. Source effect rows and the target array therefore range over one
+vocabulary of canonical identities: when the entry declares no unused root, the
+array is exactly the entry's row rewritten from import aliases to canonical
 package/module atoms, and the toolchain derives both from one computed result.
 
 Before `check`, `test`, `run`, or `build` accepts a binary target, the checker
-MUST prove that the performed effect row of `main` is a subset of the target
-array. It MUST also prove that the performed row fits the `main` declaration's
-written or default-empty ceiling. These are static admission rules and the
-target array is the user's blanket consent for the selected run. It does not
-constrain paths, environment keys, output destinations, invocation counts, or
-data volume within a declared root. V1 has no runtime narrowing, prompt, denial
-result, or embedding API that silently adds roots.
+MUST prove that the performed effect row of its entry declaration is a subset of
+the target array. It MUST also prove that the performed row fits that
+declaration's written or default-empty ceiling. These are static admission
+rules and the target array is the user's blanket consent for the selected run.
+It does not constrain paths, environment keys, output destinations, invocation
+counts, or data volume within a declared root. V1 has no runtime narrowing,
+prompt, denial result, or embedding API that silently adds roots.
 
 An effectful test writes its complete `effects:` row. Selecting and running
 that test is consent to those roots under the same blanket semantics. A pure

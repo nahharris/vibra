@@ -120,6 +120,11 @@ as one. The module locator in `import` is such a source position; writing
 or invoking code. Effect rows do not use atoms: they contain lexical symbols
 resolved through the source module's imports.
 
+A position that does expect an entity reference declares the entity kind it
+requires; it never changes how the atom's path is read. The type-system chapter
+defines that one reading, under which each path denotes at most one code entity
+in every position.
+
 ## Labels and applications
 
 A label consumes one following form. Required ordered input is positional;
