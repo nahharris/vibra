@@ -114,6 +114,7 @@ Every accepted source example in `docs/spec/` becomes a corpus case or is
 marked illustrative. Every error rule has at least one focused negative case.
 The corpus includes Unicode spans, parser recovery, stale edit plans, forbidden
 shadowing, incomplete interface methods, static target-effect mismatch,
+transitively closed performed rows through effect-operation additive rows,
 host-error propagation, interpreter/Wasm parity, all three equivalent discard
 spellings, all character spellings, exact numeric suffix typing and range
 boundaries, rejection of the retired `unit` literal, and rejection of malformed
@@ -133,6 +134,15 @@ and never appear in source effect rows. Effect rows resolve lexical symbols
 through imports to the same canonical identities used by target metadata.
 `@effect.invalid-reference` and `@data.invalid-extension` have fixed level
 `@error`.
+
+Effect-propagation coverage includes an effect operation with a non-empty
+additive row implemented in Vibra, and proves that the additive root appears
+in the performed row of a transitive caller, that a caller naming only the
+owner root is rejected with `@effect.outside-ceiling`, and that the root
+appears in the binary target array even though no source row of the entry
+module writes it. `@effect.outside-ceiling` MUST report, for every root missing
+from the offending ceiling, the call witness path that introduced it whenever
+that root is not written at the reported position.
 
 Application coverage includes arbitrary callee expressions, every closed
 applicable category, constructor applications, rejection of atom and numeric

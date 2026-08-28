@@ -79,8 +79,9 @@ The following are not partially implemented in v1:
 
 - pre-v1 source, CLI, schema, package, or ABI compatibility;
 - macros, reader extensions, compiler plugins, and runtime plugins;
-- algebraic effect handlers, effect polymorphism, runtime grants, permission
-  prompts, path-scoped capabilities, and user-defined host providers;
+- algebraic effect handlers, effect polymorphism, sealed effect roots, declared
+  effect dominance or sub-effect relations, runtime grants, permission prompts,
+  path-scoped capabilities, and user-defined host providers;
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;

@@ -312,7 +312,10 @@ inference. The checker computes the effects performed by a body and requires
 them to fit within its written or default-empty ceiling. An ordinary effectful
 `defn`, `lambda`, or test MUST therefore write `effects:` explicitly. For a
 `deffect` member, the owner root remains implicit and `effects: ()` means that
-the operation performs no additional roots.
+the operation performs no additional roots. `deffect` itself accepts no
+`effects:` attribute. An operation's owner root and additive row together form
+the row performed by each of its callers, so a caller writes both; the effects
+chapter defines that propagation.
 
 `deftype`, `defint`, and `deffect` are native AST forms. They MUST NOT be
 parser desugarings into a generic definition node. A nested `impl` is likewise
