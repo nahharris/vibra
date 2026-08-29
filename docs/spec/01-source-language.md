@@ -200,7 +200,7 @@ deftype  = "(", "deftype", symbol, type-expr,
            { type-attribute | nested-method
            | interface-implementation }, ")" ;
 defint   = "(", "defint", symbol,
-           { declaration-attribute | interface-member
+           { type-attribute | declaration-attribute | interface-member
            | interface-implementation }, ")" ;
 deffect  = "(", "deffect", symbol,
            { declaration-attribute | effect-member }, ")" ;
@@ -213,7 +213,7 @@ test     = "(", "test", string, [ "effects:", effect-row ], expr+, ")" ;
 nested-method = "(", "defn", local-name, parameters, type-expr,
                 { function-attribute }, { expr }, ")" ;
 interface-member = "(", "defn", local-name, parameters, type-expr,
-                   { function-attribute }, ")" ;
+                   { function-attribute }, [ expr, { expr } ], ")" ;
 interface-implementation = "(", "impl", type-expr,
                            implementation-member+, ")" ;
 implementation-member = "(", "defn", local-name, parameters, type-expr,
@@ -392,6 +392,12 @@ does not.
       (value @name))))
 ```
 
+The standard `iter` interface is generic over an item type and declares abstract
+`next` plus default methods `map`, `filter`, `skip`, `take`, and `collect`. The
+type chapter gives the canonical contract, semantics, and closed builtin
+conformance rules. Default bodies live in the standard library and MUST NOT be
+redeclared in user `impl` blocks.
+
 The package that owns an interface may implement it for a type declared in
 another module by placing an `impl` block in the owning `defint`:
 
@@ -405,10 +411,13 @@ another module by placing an `impl` block in the owning `defint`:
 
 `impl` is valid only as a direct child of the `deftype` that owns the type or
 the `defint` that owns the interface; there is no top-level `impl` and no `for:`
-implementation attribute. A contract member has no body. A method implementing
-an interface has a body and MUST match its contract after substituting the
-receiver type for `self`. The type chapter defines completeness, conflict, and
-ownership rules.
+implementation attribute. An interface member without a body is abstract. A
+member whose optional body is present MUST contain at least one expression; that
+body is a default method. The type chapter defines which members an
+implementation must supply and forbids overriding a default. A method
+implementing an interface has a body and MUST match its contract after
+substituting the receiver type for `self`. The type chapter defines
+completeness, conflict, and ownership rules.
 
 A declaration name and a reference are distinct. A name is always one segment
 in its owner's scope; a reference is a dotted path through owners, so
@@ -425,6 +434,16 @@ applied to an atom selector to read one statically known field; there is no
 (option.some "value")
 (person @name)
 ```
+
+A module-level `defn` name or nested method path in expression position
+denotes a `fn` value. Application is `(f …)` when `f` has a function type.
+Constructors, projections, and lookups are not `fn` values; reifying one as a
+higher-order value requires an explicit `lambda`.
+
+A module-level `def`, `defn`, or import alias MUST NOT be spelled `map`,
+`array`, or `tuple`. Those spellings are reserved for type and pattern forms.
+A nested method named `map` on some other owner is allowed; the associative
+`map` type MUST NOT declare a method named `map`.
 
 ## Functions and expressions
 
@@ -445,10 +464,6 @@ expr = atom | application | lambda
      | "(", "let", pattern, expr, { expr }, ")"
      | "(", "if", expr, expr, expr, ")"
      | "(", "match", expr, pattern, expr, { pattern, expr }, ")"
-     | "(", "while", expr, expr, ")"
-     | "(", "for", pattern, expr, expr, ")"
-     | "(", "break", ")" | "(", "continue", ")"
-     | "(", "return", [ expr ], ")"
      | "(", "try", expr, ")" ;
 application = "(", expr, { expr }, ")" ;
 lambda = "(", "lambda", parameters, type-expr,
@@ -459,14 +474,18 @@ pattern = binding-name | literal
         | "(", "array", { pattern }, ")" ;
 ```
 
+V1 has no `while`, `for`, `break`, `continue`, `return`, or assignment form.
+The last expression in a function body, `lambda`, `let`, or `do` is the result.
+`try` is the only early-exit form.
+
 Reserved forms are recognized before the general application production. A
 list headed by `let`, for example, cannot be reinterpreted as application of a
 value named `let`.
 
 `let` introduces immutable bindings for the remainder of its form. There is no
-assignment or shared mutable state in v1. `let`, `for`, and positional
-function or lambda parameters accept patterns, but each such binding pattern
-MUST be irrefutable for its expected type. `match` accepts refutable patterns.
+assignment or shared mutable state in v1. `let` and positional function or
+lambda parameters accept patterns, but each such binding pattern MUST be
+irrefutable for its expected type. `match` accepts refutable patterns.
 
 A bare unqualified local name in a pattern always introduces a binding; it
 never compares against an existing value. A dotted symbol in a pattern names a
@@ -482,19 +501,17 @@ pattern form and no compatibility spelling for it.
 (let (tuple name id) pair
   (text.concat name (integer.to-str id)))
 
-(for (tuple key value) entries
-  (visit key value))
-
 (lambda ((tuple left right) (tuple i32 i32)) i32
   (integer.add left right))
 ```
 
-`while` and `for` exist for local iteration; mutation needed by their library
-implementation is compiler/runtime internal. Collections have immutable value
-semantics. Source values use the closed, pure constructor entities `tuple.of`,
-`array.of`, and `map.of`; the unqualified `tuple`, `array`, and `map` forms are
-reserved for types and patterns. There is no source collection-literal form
-and no `entry` wrapper.
+Collections have immutable value semantics. Pure iteration uses the standard
+`iter` interface; the type chapter defines `iter.next` and its default methods.
+Effectful walks are recursive functions over `iter.next` with an explicit
+written effect ceiling. Source values use the closed, pure constructor entities
+`tuple.of`, `array.of`, and `map.of`; the unqualified `tuple`, `array`, and
+`map` forms are reserved for types and patterns. There is no source
+collection-literal form and no `entry` wrapper.
 
 ```vibra
 (tuple.of "Ada" 42u64)

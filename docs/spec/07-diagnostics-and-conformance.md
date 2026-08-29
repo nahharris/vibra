@@ -14,17 +14,22 @@ than its issuance order or severity:
 @syntax.unmatched-delimiter
 @syntax.invalid-character-literal
 @syntax.invalid-numeric-literal
+@syntax.retired-form
 @name.unknown-symbol
 @name.wrong-entity-kind
 @name.member-collision
 @name.generic-redeclaration
 @name.reserved-label
 @name.reserved-declaration
+@name.reserved-value-spelling
 @module.file-directory-collision
 @module.unknown-path
 @type.argument-mismatch
 @type.type-argument-mismatch
 @type.redundant-implementation
+@type.default-override
+@type.missing-abstract-member
+@type.function-not-equatable
 @type.not-applicable
 @type.invalid-tuple-index
 @type.unknown-record-field
@@ -113,8 +118,8 @@ kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
 | `V1-TYPE-NAMES` | namespaces, imports, and forbidden shadowing |
 | `V1-TYPE-INFER` | inference and public checking |
 | `V1-TYPE-GENERIC` | flat generic bounds |
-| `V1-TYPE-INTERFACE` | interfaces and nested implementations |
-| `V1-TYPE-CONTROL` | control flow, failure, and checked operations |
+| `V1-TYPE-INTERFACE` | interfaces, default methods, nested implementations, and `iter` |
+| `V1-TYPE-CONTROL` | control flow, failure, recursion, tail calls, and checked operations |
 | `V1-EFFECT` | declarations, rows, target ceilings, and reports |
 | `V1-PROJECT` | data forms, targets, modules, dependencies, and tests |
 | `V1-TOOL` | CLI, workspace queries, edit plans, schemas, and MCP |
@@ -168,12 +173,24 @@ effect nor a function-call edge. Collection construction covers heterogeneous
 value construction.
 
 Pattern coverage includes direct bare-name binders, nested destructuring in
-`let`, `for`, positional parameters, lambdas, and `match`, duplicate-name and
+`let`, positional parameters, lambdas, and `match`, duplicate-name and
 no-shadowing rejection, all three repeating discards, and irrefutability
 checking against the expected type. The removed `(bind name)` spelling MUST be
-rejected with no compatibility bridge. `@type.not-applicable`,
+rejected with no compatibility bridge. Retired loop and return forms MUST be
+rejected with `@syntax.retired-form`. `@type.not-applicable`,
 `@type.invalid-tuple-index`, `@type.unknown-record-field`, and
 `@pattern.refutable-binding` all have fixed level `@error`.
+
+Interface coverage includes abstract and default contract members, rejection of
+`@type.default-override` and `@type.missing-abstract-member`, the canonical
+`iter` contract and default-method semantics, closed registry `iter`
+conformance for `(array t)`, `(map k v)`, `str`, and `(option t)`, explicit
+`impl (iter item)` on `mapped-iter`, `filtered-iter`, `skipped-iter`, and
+`taken-iter`, pure `iter` default methods with `effects: ()` callbacks only,
+and effectful walks written as tail-recursive module-level functions over
+`iter.next`.
+Tail-call cases belong to `V1-RUNTIME`. `@name.reserved-value-spelling` and
+`@type.function-not-equatable` have fixed level `@error`.
 
 ## Conformance profiles
 

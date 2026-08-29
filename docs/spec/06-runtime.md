@@ -31,13 +31,14 @@ Evaluation is strict and deterministic:
 - an array variadic tail builds one array from its values;
 - a map variadic tail builds one map from alternating key/value forms and an
   odd tail is rejected before execution;
-- function bodies and `do` forms evaluate from first to last;
+- function bodies and `do` forms evaluate from first to last; the value of a
+  `do` is its last expression, or `void` if empty;
 - `if` evaluates only the selected branch;
 - `match` evaluates its subject once and selects the first matching arm;
 - `tuple.of`, `array.of`, and `map.of` operands evaluate from left to right;
-  and
-- `return`, `try`, `break`, and `continue` perform only their specified lexical
-  control transfer.
+- `try` performs only its specified early-exit propagation; and
+- a tail-position call to a function in the same recursive group reuses the
+  current activation instead of growing language-level stack.
 
 `map.of` and map variadic tails share one construction rule. Every key and
 value is evaluated even if a key repeats; the later pair replaces the earlier
@@ -68,6 +69,46 @@ that type. Literal range errors are rejected before execution.
 Floating-point operations follow IEEE 754. Serialization and equality
 canonicalize all NaN payloads to one quiet NaN per width and normalize negative
 zero only where the relevant standard operation explicitly says so.
+
+## Tail calls
+
+Tail position is defined inductively relative to an enclosing activation
+(`defn`, `lambda`, or nested body form). An expression is in tail position when
+its value is returned directly to that activation's caller without further
+computation.
+
+The final expression of a module-level `defn` body or `lambda` body is in tail
+position. For every other form, tail status propagates inward only when the form
+itself is in tail position:
+
+- in `(do e1 … en)`, only `en` may be in tail position, and only when the `do`
+  is in tail position;
+- in `(let p v e1 … en)`, only `en` may be in tail position, and only when the
+  `let` is in tail position;
+- in `(if c t e)`, `t` and `e` may be in tail position only when the `if` is
+  in tail position;
+- in `(match s …)`, each arm's result expression may be in tail position only
+  when the `match` is in tail position; and
+- the operand of `try` is never in tail position, because `try` inspects that
+  value before continuing.
+
+Every other position is non-tail, including operands of applications (even when
+they are the final expression inside a `do` that is itself an operand),
+`let`/`match` bindings and subjects, `if` conditions, and `try` operands.
+
+The **recursive group** of a module-level `defn` is the set of module-level
+`defn`s in that module reachable from it through static function-call edges,
+including mutual recursion. Calls in tail position whose callee resolves to a
+member of the current function's recursive group MUST reuse the current
+activation. The interpreter and WebAssembly backend MAY implement this with
+explicit tail-call instructions or an internal trampoline; the strategy is not
+observable except that conforming programs do not overflow language-level stack
+on such tail recursion.
+
+V1 defines no portable stack-depth limit. Non-tail recursion and non-tail calls
+that exhaust an embedding host's stack are host events, not portable semantic
+results, and are outside interpreter/Wasm parity. Default `iter` method bodies
+MAY lower to internal loops; that mutation is not a source feature.
 
 ## External providers
 

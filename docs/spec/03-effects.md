@@ -93,7 +93,13 @@ formatter and machine output. Source formatting preserves each lexical symbol
 reference required by its imports while ordering the resolved roots. A
 function type includes its closed effect row.
 Effect variables and polymorphic rows are excluded from v1; a higher-order
-function therefore declares the exact callback effect row it accepts.
+function therefore declares the exact callback effect row it accepts. The
+standard `iter` default methods `map` and `filter` accept callbacks with
+`effects: ()` only.
+
+Effectful iteration is written as a recursive module-level function that calls
+`(iter.next it)` and declares its complete host ceiling explicitly. There is no
+effectful higher-order iterator combinator in v1.
 
 Nominal constructor application, tuple and record projection,
 array/map/string/byte lookup, and closed native collection construction are

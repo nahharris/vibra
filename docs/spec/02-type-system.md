@@ -5,9 +5,10 @@ Implementation status: not started
 
 ## Model
 
-Vibra is statically typed, nominal, and value-oriented. Every expression has
-one type before execution. Public declarations are checked from their written
-signatures; callers never need a callee body to type-check a call.
+Vibra is statically typed, nominal, value-oriented, and expression-oriented.
+Every expression has one type before execution. Public declarations are checked
+from their written signatures; callers never need a callee body to type-check
+a call.
 
 The primitive types are:
 
@@ -198,12 +199,36 @@ path resolving to an entity of the wrong kind emits `@name.wrong-entity-kind`
 and names the entity it found, rather than reporting the path as unknown.
 
 Name shadowing is forbidden. Every name introduced anywhere inside a
-positional-parameter, `let`, `for`, or `match` pattern MUST NOT reuse any
-visible lexical name. Labelled and variadic parameter names follow the same
-rule. A pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are
+positional-parameter, `let`, or `match` pattern MUST NOT reuse any visible
+lexical name. Labelled and variadic parameter names follow the same rule. A
+pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are
 equivalent discards, create no binding, and may repeat in the same or nested
 scopes. Sibling scopes may reuse a named symbol when neither declaration is
 visible from the other.
+
+A module-level `def`, `defn`, or import alias MUST NOT be spelled `map`,
+`array`, or `tuple`. A top-level use of one of those spellings as a value or
+alias emits `@name.reserved-value-spelling`.
+
+## Functions as values
+
+A resolved module-level `defn` path or nested method path in expression position
+has a `fn` type and is a first-class function value. Application is `(path …)`
+with the receiver or operands required by that signature. Constructors,
+projections, lookups, and enum tags are not `fn` values.
+
+`fn` values are not `equatable` and MUST NOT be used as a `(map k v)` key. Using
+one as a key emits `@type.function-not-equatable`.
+
+A module-level `defn` MAY refer to itself and to other module-level `defn`s in
+the same module by name. Same-module mutual recursion among module-level
+`defn`s is valid, and forward reference within a module is permitted. A
+`lambda` has no self-name and MUST NOT refer to itself; it MAY appear in mutual
+recursion only as the callee of a named module-level `defn`. A call in tail
+position to a function in the same module's recursive group MUST NOT consume
+additional language-level stack; the runtime chapter defines tail position and
+the recursive group. Exhaustion of a host stack limit on non-tail recursion is
+not a portable Vibra semantic result.
 
 ## Inference and checking
 
@@ -227,9 +252,10 @@ that contract and never rewrites the contract from observed implementation.
 
 ## Generics
 
-Every generic name is declared by one flat `where:` entry. The value paired
-with the name is one nominal interface bound; the predeclared empty interface
-`any` is the bound that constrains nothing.
+Every generic name is declared by one flat `where:` entry on a `deftype`,
+`defint`, `defn`, or nested method. The value paired with the name is one
+nominal interface bound; the predeclared empty interface `any` is the bound
+that constrains nothing.
 
 ```vibra
 (defn first (items (array t)) (option t)
@@ -328,6 +354,14 @@ acquires an implementation implicitly, and the exception is fixed to this one
 predeclared name rather than extended to any empty interface a package might
 declare.
 
+The second exception is closed toolchain `iter` conformance for the builtin
+constructor types `(array t)`, `(map k v)`, `str`, and `(option t)` named in
+the iteration section. Those implementations are keyed by constructor identity
+in a closed registry; they are not user `impl` blocks and not generic `defint`
+implementations. Standard-library iterator adapters are ordinary `deftype`s
+with explicit nested `impl (iter item)` blocks instead. Every other interface
+still requires an explicit `impl`.
+
 The exception needs no rule barring a written implementation for `any`, because
 `interface-implementation` requires at least one member and an empty contract
 admits none: every candidate member is an extra member, which is already an
@@ -393,11 +427,20 @@ contract member, with dispatch selecting the implementation from the receiver.
 Vibra has no method-call operator and no implicit receiver; a method application
 is an ordinary application whose callee is a resolved path.
 
-For each interface/type pair, the checker MUST find every contract member
-exactly once, substitute the concrete type for `self`, preserve parameter and
-result types, preserve labelled names and defaults and variadic shape, and
-verify that the method performs no effect outside the contract ceiling.
-Missing, extra, duplicate, or conflicting members are errors.
+For each interface/type pair, the checker MUST find every **abstract** contract
+member exactly once, substitute the concrete type for `self`, preserve
+parameter and result types, preserve labelled names and defaults and variadic
+shape, and verify that the method performs no effect outside the contract
+ceiling. A contract member with a body is a **default method**. An
+implementation MUST supply every abstract member and MUST NOT redeclare a
+default member; doing so emits `@type.default-override`. A missing abstract
+member emits `@type.missing-abstract-member`. Extra, duplicate, or conflicting
+members are errors.
+
+Default methods are checked against the interface contract ceiling. Their bodies
+are available to every conforming type without being written again in each
+`impl`. The compiler MAY specialize a default body when `self` is known; that
+specialization is not a second source method and is not overridable.
 
 There is no inheritance between concrete types. Interface values use explicit
 widening at a typed boundary and static, closed-world dispatch in v1. Operator
@@ -405,6 +448,122 @@ overloading is absent. Arithmetic, comparison, and conversion use ordinary
 resolved functions or interface methods. Application-based tuple/record
 projection and array/map/string/byte lookup are the closed indexing surface
 defined above and cannot be overloaded.
+
+## Iteration
+
+Pure collection iteration uses the standard `iter` interface. Effectful walks
+use recursive module-level functions over `(iter.next it)` with an explicit
+written effect ceiling. There is no separate loop or foreach form.
+
+### Canonical `iter` contract
+
+`iter` is a generic interface over one item type:
+
+```vibra
+(defint iter
+  where: (item any)
+  visibility: @public
+  (defn next (value self) (option (tuple item self))))
+```
+
+In the contract, the second `self` component is the remaining iterator value and
+has the same static type as the receiver. At a concrete implementation site the
+checker substitutes the concrete iterator type; for adapter values it substitutes
+the adapter `deftype` or `(iter item)` after widening.
+
+The standard-library declaration adds these default members, each with a body
+that MUST match the semantics below:
+
+| Member | Signature |
+| --- | --- |
+| `map` | `(value self f (fn (item) item) (iter item))` |
+| `filter` | `(value self pred (fn (item) bool) (iter item))` |
+| `skip` | `(value self n u64) (iter item)` |
+| `take` | `(value self n u64) (iter item)` |
+| `collect` | `(value self) (array item)` |
+
+`next` is abstract. Default bodies MUST NOT be redeclared in user `impl` blocks.
+At an implementation site, `self` is the concrete iterator type and `item` is that
+implementation's element type. `next` returns `(option (tuple item self))`:
+the second component is the remaining iterator and has the same static type as
+the receiver. There is no mutating cursor.
+
+An `(iter item)` in type position is the interface value for one element type;
+it is reached by explicit widening at a typed boundary and MUST NOT be written
+bare as `iter`.
+
+Default-method semantics:
+
+- `map` returns a `mapped-iter` value seen as `(iter item)`. Each `next` on the
+  adapter calls `next` on the underlying iterator and, when an element is
+  present, yields `(tuple (f x) remaining)` with `remaining` typed as
+  `(iter item)`.
+- `filter` returns a `filtered-iter` value seen as `(iter item)` that yields
+  only elements for which `pred` returns `true`.
+- `skip` returns a `skipped-iter` value seen as `(iter item)` that discards the
+  first `n` elements, then forwards the rest.
+- `take` returns a `taken-iter` value seen as `(iter item)` that yields at most
+  `n` elements and then stops.
+- `collect` eagerly drains the receiver through `next` and returns `(array item)`.
+
+The static result type of `map`, `filter`, `skip`, and `take` is always
+`(iter item)`, never the concrete receiver type.
+
+### Standard-library adapter types
+
+Default methods construct these public stdlib `deftype`s. Each declares
+`where: (item any)` and implements `(iter item)` through a nested
+`(impl (iter item) …)` block supplying only `next`. They are **not** part of the
+closed registry exception above:
+
+| Type | Role |
+| --- | --- |
+| `mapped-iter` | Holds `(iter item)` source and `(fn (item) item)`; lazy `map` |
+| `filtered-iter` | Holds `(iter item)` source and `(fn (item) bool)`; lazy `filter` |
+| `skipped-iter` | Holds `(iter item)` source and remaining skip count; lazy `skip` |
+| `taken-iter` | Holds `(iter item)` source and remaining take count; lazy `take` |
+
+Each adapter's `next` returns `(option (tuple item self))` with `self` equal to
+the adapter type `(mapped-iter item)`, `(filtered-iter item)`, and so on.
+Widening to `(iter item)` happens at the default-method result boundary.
+
+All defaults are pure and their callback parameters MUST have `effects: ()`.
+
+Call shape matches every other method: receiver first.
+
+```vibra
+(iter.map xs f)
+(iter.filter xs pred)
+(iter.skip xs n)
+(iter.take xs n)
+(iter.collect xs)
+```
+
+### Closed builtin conformance
+
+The following types receive closed toolchain `iter` conformance from the registry
+keyed by constructor identity:
+
+| Type | `item` | `next` behavior |
+| --- | --- | --- |
+| `(array t)` | `t` | Index order from `0`; remaining is the suffix not yet yielded |
+| `(map k v)` | `(tuple k v)` | Canonical key order; each step yields one entry |
+| `str` | `char` | Unicode scalar order |
+| `(option t)` | `t` | On `none`, `next` returns `none`; on `some v`, one step yields `(tuple v none)` where the remaining iterator is the exhausted `none` value |
+
+`(result t e)` does not implement `iter` in v1. Iterating a fallible value
+requires an explicit `match` or conversion to `(option t)` first.
+
+Heterogeneous tuples do not implement `iter` in v1. Users cannot add methods or
+`impl` blocks to `array` or `map`. The associative `map` type MUST NOT declare a
+method named `map`.
+
+User `deftype`s MAY implement `(iter item)` with a nested `(impl (iter item) …)`
+block supplying only `next`. The owner MUST declare `item` in its `where:`
+clause, and the `impl` target MUST spell the full application `(iter item)`;
+bare `iter` is invalid. The `next` member MUST name that same `item` in its
+result type. Generic `impl` targets such as `(array t)` inside a `defint`
+remain post-v1.
 
 ## Control flow and failure
 
@@ -414,9 +573,8 @@ and finite structural patterns. Unreachable arms are errors.
 
 The same exhaustiveness engine determines whether a binding pattern is
 irrefutable: the single pattern MUST cover every value of its expected type.
-`let`, `for`, and fixed positional function or lambda parameters require an
-irrefutable pattern; `match` permits refutable patterns and checks all arms
-together. Tuple patterns have exact arity and are irrefutable when every
+`let` and fixed positional function or lambda parameters require an irrefutable
+pattern; `match` permits refutable patterns and checks all arms together. Tuple patterns have exact arity and are irrefutable when every
 component is. Record patterns may omit fields and are irrefutable when every
 written field pattern is. A fixed-length array pattern is refutable for the
 variable-length array type. A newtype constructor pattern is irrefutable when
