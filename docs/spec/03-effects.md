@@ -22,16 +22,17 @@ and failures still apply, but they are not Vibra effect grants.
 
 ## Nominal effects
 
-`deffect` introduces a nominal root and interface-like operations whose names
-are qualified by that root:
+`deffect` introduces a nominal root and interface-like operations. Each
+operation is declared with an unqualified name and is referenced through the
+root that owns it:
 
 ```vibra
 (deffect read
   visibility: @public
-  (defn read.file (path path) (result bytes fs-error)
+  (defn file (path path) (result bytes fs-error)
     external: @host
     symbol: "fs.read-file")
-  (defn read.text (path path) (result str fs-error)
+  (defn text (path path) (result str fs-error)
     external: @host
     symbol: "fs.read-text"))
 ```
@@ -119,7 +120,7 @@ discharges an additive root. Given module `app` with `(import fs @std.fs)`:
 ```vibra
 (deffect audit
   visibility: @public
-  (defn audit.record (target path event str) void
+  (defn record (target path event str) void
     effects: (fs.write)
     (fs.write.text target event)))
 

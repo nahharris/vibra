@@ -95,7 +95,8 @@ they are strings rather than atoms.
 
 A target has a unique atom name, kind `@bin` or `@lib`, and a source root. Every
 root MUST remain inside the project after canonical path resolution, and roots
-MUST be pairwise non-nested, so every module belongs to exactly one target.
+MUST be pairwise disjoint: no root may equal or contain another. Every module
+therefore belongs to exactly one target and has exactly one canonical path.
 Overlapping roots emit `@project.overlapping-target-roots`. Target and
 dependency names share one project namespace and cannot collide.
 
@@ -112,16 +113,23 @@ execution consent as defined by the effects chapter.
 
 `entry` is a declaration reference. Its first component MUST be the target's own
 name, so an entry always resolves inside its own target's root; any other unit
-is `@project.entry-outside-target`. It MUST resolve to a module-level `defn`
-with no parameters whose result is either `void` or `result void e` for a
-nominal error type `e`, and otherwise emits `@project.unresolved-entry` or
-`@project.invalid-entry-signature`. Returning an error produces a structured
-nonzero program result; traps remain distinct.
+is `@project.entry-outside-target`. Because roots are disjoint, no declaration
+is nameable by the entry of more than one target.
+
+Three failures are distinguished. A path that resolves to nothing emits the
+ordinary resolution diagnostic, `@module.unknown-path` or
+`@name.unknown-symbol`. A path that resolves to an entity that is not a
+module-level `defn` emits `@name.wrong-entity-kind` and names the entity it
+found. A path that resolves to such a `defn` whose signature is not an entry
+signature emits `@project.invalid-entry-signature`.
+
+An entry signature has no parameters and a result of either `void` or
+`result void e` for a nominal error type `e`. Returning an error produces a
+structured nonzero program result; traps remain distinct.
 
 The entry declaration need not be public and need not be named `main`. The
 project document is a privileged referrer: naming a declaration in `entry`
-creates no import edge and does not widen its visibility. Two binary targets MAY
-name one entry declaration, and two binary targets MAY share one root.
+creates no import edge and does not widen its visibility.
 
 An omitted entry `effects:` is `()`. An effectful entry writes its ceiling, and
 project checking compares its computed performed row with both that ceiling and

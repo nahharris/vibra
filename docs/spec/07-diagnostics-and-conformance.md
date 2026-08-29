@@ -16,7 +16,7 @@ than its issuance order or severity:
 @syntax.invalid-numeric-literal
 @name.unknown-symbol
 @name.wrong-entity-kind
-@name.member-qualifier-collision
+@name.member-collision
 @module.file-directory-collision
 @module.unknown-path
 @type.argument-mismatch
@@ -32,8 +32,10 @@ than its issuance order or severity:
 @data.invalid-extension
 @project.stale-lock
 @project.entry-outside-target
-@project.unresolved-entry
+@project.entry-on-library
 @project.invalid-entry-signature
+@project.ambiguous-dependency-target
+@project.overlapping-target-roots
 @runtime.invalid-host-value
 @style.argument-order
 @contract.unused-effect

@@ -99,9 +99,9 @@ continuation:
 Entity metadata and expanded references operate on resolved identities, not
 token spelling. They distinguish module, type, value, function, method,
 interface, effect root, effect operation, field, variant, and lexical binder
-identities. A member written inside an `impl` block has no single-atom identity
-and is reported as the contract-member/receiver-type pair defined by the
-type-system chapter.
+identities. An interface implementation and its members have no single-atom
+identity and are reported as the contract-member/receiver-type pair defined by
+the type-system chapter.
 Discards have no identity, definition, references, or rename target; a query at
 `-`, `@-`, or `-:` reports its discard role and enclosing context only.
 

@@ -168,16 +168,25 @@ space is flat, each component resolves to at most one declaration. Tooling MUST
 return the resolved kind and canonical identity; it must never expose a dotted
 string as if textual coincidence were resolution.
 
-Every code entity has exactly one canonical atom path, and every atom path
-resolves to at most one entity. A path is `@unit.c1...cn`: its first component
-names a unit, the programs-and-packages chapter defines the walk from that
-unit's root to one module, and the components remaining after that module are
-resolved against its declarations. A module-level form takes one component. A
-member of a module-level form takes its own name, preceded by its qualifier
-whenever that qualifier is not the enclosing form itself. Thus
-`@app.m.user.name-length` is a `user` method, while
-`@app.m.user.printable.render` is `user`'s implementation of the `printable`
-contract member.
+Every code entity named in a module's declaration tree has exactly one canonical
+atom path, and every atom path resolves to at most one entity. A path is
+`@unit.c1...cn`: its first component names a unit, the programs-and-packages
+chapter defines the walk from that unit's root to one module, and the components
+remaining after that module resolve against its declarations. A module-level
+form takes one component, and a member of one takes one further component. Thus
+`@app.m.user` is a type, `@app.m.user.name-length` is one of its methods, and
+`@app.m.fs.read.file` is an effect operation.
+
+Paths are built from the ownership tree, never from a declaration's spelling,
+because every declaration name is one unqualified segment. One entity kind is
+not named in that tree at all: the interfaces section defines the pair identity
+of an implementation and its members.
+
+The addressable members of one owner form a single flat namespace covering
+record fields, enum variants, methods, and effect operations. Their names MUST
+be pairwise distinct within that owner, so a field and a method cannot share a
+spelling; a collision emits `@name.member-collision`. Interface implementations
+contribute no name to this namespace.
 
 A slot that expects an entity reference decides only whether an atom is a
 reference and which entity kind the resolved entity must have. It never decides
@@ -237,53 +246,52 @@ observable except through deterministic program and build output.
 
 ## Interfaces and methods
 
-`defint` declares a nominal set of interface-qualified method signatures over
-`self`. Conformance is always explicit. Matching method names and shapes are
-insufficient.
+`defint` declares a nominal set of method signatures over `self`. Conformance is
+always explicit. Matching method names and shapes are insufficient.
 
-A type declared in the current package lists its interfaces in the enclosing
-`deftype` `implements:` attribute and supplies each interface-qualified method
-inside that `deftype`. A regular method in the same declaration is qualified
-by the type name. The checker rejects a method with the wrong qualifier.
+Every `defn` name is one unqualified segment in its owner's scope, because the
+enclosing form already names that owner. A declaration therefore never spells
+its own path prefix, and no import alias can enter a declaration name.
 
-The package that owns an interface may implement it for a foreign type by
-placing `(impl foreign-type ...)` inside the owning `defint`. The `impl` target
-is positional, and its method definitions are its variadic members; `for:` is
-not part of implementation syntax. These two locations encode the orphan rule
-directly: an implementation can be written only where the package owns the
-type or owns the interface. There is no top-level implementation form.
+An implementation is written as an `impl` block whose positional target supplies
+whichever half of the interface/type pair its parent does not: inside a
+`deftype` the target is the interface, and inside a `defint` it is the receiver
+type. Its members are unqualified and its target is resolved to a canonical
+identity, so an implementation is never spelled through an alias. `for:` is not
+part of implementation syntax, there is no top-level implementation form, and
+there is no `implements:` attribute — the `impl` blocks of a `deftype` are the
+list of interfaces it implements.
 
-An `impl` block MUST NOT target a type declared in the same module as its
-`defint`, and a same-module target emits `@type.redundant-implementation`.
-Within one module a type and an interface always see each other without an
-import, so the `deftype` placement is always available there and the `impl` form
+These two locations encode the orphan rule directly: an implementation can be
+written only where the package owns the type or owns the interface.
+
+An `impl` block inside a `defint` MUST NOT target a type declared in the same
+module, and a same-module target emits `@type.redundant-implementation`. Within
+one module a type and an interface always see each other without an import, so
+the `deftype` placement is always available there and the `defint` placement
 would be a second spelling of one implementation. Across modules both placements
 remain legal, because requiring the `deftype` placement there could demand an
 import that completes a cycle and leave the implementation unwritable.
 
-Two qualifier collisions are errors, each decided inside one declaration:
+An implementation has no name in any declaration tree: it is keyed by an
+interface and a receiver type rather than by a spelling. Its identity, and the
+identity of each of its members, is therefore the pair of the corresponding
+contract member and the receiver type, exactly as an effect operation is
+identified by its root and operation. This is the only v1 entity kind that no
+single atom addresses, and it needs no atom: an implementation is never named at
+a use site, because dispatch selects it from the receiver.
 
-- a `deftype` member name MUST NOT equal any name in its `implements:` list; and
-- a `defint` member name MUST NOT equal the simple name of any type targeted by
-  one of its `impl` blocks.
+Within an interface contract, a `deftype` method, or an `impl` block, `self`
+resolves to the applicable receiver type. In a `deftype` and in an `impl` nested
+in one, that is the declared type. In an `impl` nested in a `defint`, it is the
+positional target type. `self` is not visible in module-level functions.
 
-Both emit `@name.member-qualifier-collision`. Without them a qualifier and a
-member name can spell one path prefix, so `@app.m.some-int.some-type` would
-denote both a contract member and an implementation.
-
-A member written inside a `deftype` has a canonical atom path, because its
-qualifier is either the enclosing type or an interface named in `implements:`. A
-member written inside an `impl` block has none: its position is keyed by a type
-expression rather than by a name, and that expression is spelled through
-module-local import aliases, so no dotted path over it would be canonical. Such
-a member is identified by the pair of its contract member identity and its
-receiver type identity, exactly as an effect operation is identified by its root
-and operation. This is the only v1 entity kind that no single atom addresses.
-
-Within an interface contract, a `deftype` method, or a nested `impl`, `self`
-resolves to the applicable receiver type. In a `deftype`, that is the declared
-type. In an `impl`, it is the positional target type. `self` is not visible in
-module-level functions.
+A method is called through a dotted path naming the entity, never through a
+receiver-first syntax: `(user.name-length value)` applies the `name-length`
+method of type `user`, and `(printable.render value)` applies the `printable`
+contract member, with dispatch selecting the implementation from the receiver.
+Vibra has no method-call operator and no implicit receiver; a method application
+is an ordinary application whose callee is a resolved path.
 
 For each interface/type pair, the checker MUST find every contract member
 exactly once, substitute the concrete type for `self`, preserve parameter and
