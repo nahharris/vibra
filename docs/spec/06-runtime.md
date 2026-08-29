@@ -72,22 +72,33 @@ zero only where the relevant standard operation explicitly says so.
 
 ## Tail calls
 
-An expression is in **tail position** when its value is returned directly to the
-caller without further computation in the current activation. Tail position is
-defined structurally:
+Tail position is defined inductively relative to an enclosing activation
+(`defn`, `lambda`, or nested body form). An expression is in tail position when
+its value is returned directly to that activation's caller without further
+computation.
 
-- the final expression of a module-level `defn` body, `lambda` body, or `do`;
-- the final expression of a `let` form;
-- the selected branch of an `if`;
-- the result expression of the selected `match` arm; and
-- the operand of `try`.
+The final expression of a module-level `defn` body or `lambda` body is in tail
+position. For every other form, tail status propagates inward only when the form
+itself is in tail position:
 
-Every other expression position is non-tail, including operands of applications,
-`let` bindings, `if` conditions, and `match` subjects.
+- in `(do e1 … en)`, only `en` may be in tail position, and only when the `do`
+  is in tail position;
+- in `(let p v e1 … en)`, only `en` may be in tail position, and only when the
+  `let` is in tail position;
+- in `(if c t e)`, `t` and `e` may be in tail position only when the `if` is
+  in tail position;
+- in `(match s …)`, each arm's result expression may be in tail position only
+  when the `match` is in tail position; and
+- the operand of `try` is never in tail position, because `try` inspects that
+  value before continuing.
+
+Every other position is non-tail, including operands of applications (even when
+they are the final expression inside a `do` that is itself an operand),
+`let`/`match` bindings and subjects, `if` conditions, and `try` operands.
 
 The **recursive group** of a module-level `defn` is the set of module-level
 `defn`s in that module reachable from it through static function-call edges,
-including mutual recursion. Tail-position calls whose callee resolves to a
+including mutual recursion. Calls in tail position whose callee resolves to a
 member of the current function's recursive group MUST reuse the current
 activation. The interpreter and WebAssembly backend MAY implement this with
 explicit tail-call instructions or an internal trampoline; the strategy is not

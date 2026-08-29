@@ -464,35 +464,46 @@ written effect ceiling. There is no separate loop or foreach form.
   (defn next (value self) (option (tuple item self))))
 ```
 
+In the contract, the second `self` component is the remaining iterator value and
+has the same static type as the receiver. At a concrete implementation site the
+checker substitutes the concrete iterator type; for adapter values returned by
+default methods it substitutes `iter`.
+
 The standard-library declaration adds these default members, each with a body
 that MUST match the semantics below:
 
 | Member | Signature |
 | --- | --- |
-| `map` | `(value self f (fn x item) item) self` |
-| `filter` | `(value self pred (fn x item) bool) self` |
-| `skip` | `(value self n u64) self` |
-| `take` | `(value self n u64) self` |
+| `map` | `(value self f (fn (item) item) iter)` |
+| `filter` | `(value self pred (fn (item) bool) iter)` |
+| `skip` | `(value self n u64) iter` |
+| `take` | `(value self n u64) iter` |
 | `collect` | `(value self) (array item)` |
 
 `next` is abstract. Default bodies MUST NOT be redeclared in user `impl` blocks.
-At an
-implementation site, `self` is the concrete iterator type and `item` is that
+At an implementation site, `self` is the concrete iterator type and `item` is that
 implementation's element type. `next` returns `(option (tuple item self))`:
-`item` is the yielded element and `self` is the remaining iterator value. There
-is no mutating cursor.
+the second component is the remaining iterator and has the same static type as
+the receiver. There is no mutating cursor.
 
 Default-method semantics:
 
-- `map` returns a lazy adapter. Each `next` on the adapter calls `next` on the
-  receiver and, when an element is present, yields `(tuple (f x) remaining)`.
-- `filter` returns a lazy adapter that yields only elements for which `pred`
-  returns `true`, calling `next` on the receiver as needed.
-- `skip` returns a lazy adapter that discards the first `n` elements of the
-  receiver, then forwards subsequent elements unchanged.
-- `take` returns a lazy adapter that yields at most `n` elements and then
-  returns `none` on further `next` calls even if the receiver continues.
+- `map` returns a lazy `iter` adapter. Each `next` on the adapter calls `next`
+  on the underlying iterator and, when an element is present, yields
+  `(tuple (f x) remaining)` with `remaining` typed as `iter`.
+- `filter` returns a lazy `iter` adapter that yields only elements for which
+  `pred` returns `true`, calling `next` on the underlying iterator as needed.
+- `skip` returns a lazy `iter` adapter that discards the first `n` elements of
+  the underlying iterator, then forwards subsequent elements unchanged.
+- `take` returns a lazy `iter` adapter that yields at most `n` elements and then
+  returns `none` on further `next` calls even if the underlying iterator
+  continues.
 - `collect` eagerly drains the receiver through `next` and returns `(array item)`.
+
+The static result type of `map`, `filter`, `skip`, and `take` is always `iter`,
+never the concrete receiver type. Standard-library adapter values implement
+`iter` through closed toolchain conformance keyed by adapter identity, using
+the same `item` type as their source iterator.
 
 All defaults are pure and their callback parameters MUST have `effects: ()`.
 
@@ -516,8 +527,10 @@ keyed by constructor identity:
 | `(array t)` | `t` | Index order from `0`; remaining is the suffix not yet yielded |
 | `(map k v)` | `(tuple k v)` | Canonical key order; each step yields one entry |
 | `str` | `char` | Unicode scalar order |
-| `(option t)` | `t` | `none` yields `none`; `some v` yields one `(tuple v none)` |
-| `(result t e)` | `t` | `err _` yields `none`; `ok v` yields one `(tuple v none)` |
+| `(option t)` | `t` | On `none`, `next` returns `none`; on `some v`, one step yields `(tuple v none)` where the remaining iterator is the exhausted `none` value |
+
+`(result t e)` does not implement `iter` in v1. Iterating a fallible value
+requires an explicit `match` or conversion to `(option t)` first.
 
 Heterogeneous tuples do not implement `iter` in v1. Users cannot add methods or
 `impl` blocks to `array` or `map`. The associative `map` type MUST NOT declare a
