@@ -50,7 +50,7 @@ V1 type constructors are:
 
 ```ebnf
 type-expr = primitive | symbol | "(", symbol, type-expr+, ")"
-          | record-type | enum-type | union-type
+          | record-type | enum-type
           | "(", "newtype", type-expr, ")"
           | "(", "tuple", type-expr*, ")"
           | "(", "array", type-expr, ")"
@@ -61,6 +61,7 @@ record-type = "(", "record", local-name, type-expr,
 enum-type = "(", "enum", local-name, type-expr,
             { local-name, type-expr }, ")" ;
 union-type = "(", "union", type-expr, type-expr+, ")" ;
+deftype-body = type-expr | union-type ;
 function-type = "(", "fn", "(", type-expr*, ")", type-expr,
                 [ "labelled:", "(", { local-name, type-expr }, ")" ],
                 [ "variadic:", variadic-type ],
@@ -86,6 +87,13 @@ infinite expansion is rejected.
 Newtypes have a distinct identity and exactly one representation type. Their
 constructor and unwrap operation are available only where visibility permits.
 There are no structural aliases or transparent public casts.
+
+`union-type` is admissible only as a `deftype` body, which is why the grammar
+gives that position its own `deftype-body` production. A `(union ...)` form in
+any other type position — a parameter, a result, a record field, a `def`
+annotation, an `as` type, an `impl` target, or a `types:` argument — emits
+`@type.anonymous-union`. V1 has no anonymous or structural union, so a union is
+reachable only through the name its `deftype` introduces.
 
 A union body lists at least two member types and declares no member names. The
 `deftype` supplies the union's identity, and each member type's identity is its
@@ -462,8 +470,12 @@ a use site, because dispatch selects it from the receiver.
 
 A generic interface is keyed by its applied type, so one receiver MAY implement
 `(from i16)` and `(from i8)` as two implementations of one `defint`. The
-applications MUST be pairwise distinct. Selection uses the written operand types
-and the written expected type; when two implementations of one interface remain
+applied targets MUST be pairwise non-unifiable, on the same terms as union
+members: `(from t)` and `(from i32)` on one generic receiver are written
+distinctly but collide at `t` = `i32`, and the pair emits
+`@type.overlapping-implementation` at the declaration rather than producing two
+candidates after instantiation. Selection uses the written operand types and the
+written expected type; when two implementations of one interface remain
 candidates at a call site, that site emits `@type.ambiguous-implementation`
 rather than picking an order.
 
@@ -475,11 +487,14 @@ type at the call site with the member's written result type and takes `self`
 from that unification. The expected type is therefore not required to be `self`
 itself; an expected `(result u32 conversion-error)` against a written result
 `(result self conversion-error)` yields `self` = `u32`. When no written expected
-type reaches the application, the site emits
-`@type.ambiguous-conversion-target` and lists the candidate receivers; `as` is
-always available to supply one. This selects a written implementation from a
-written type and never synthesizes one, so the inference prohibition above is
-untouched.
+type reaches the application, the site emits `@type.ambiguous-destination` and
+lists the candidate receivers; `as` is always available to supply one. This
+selects a written implementation from a written type and never synthesizes one,
+so the inference prohibition above is untouched.
+
+The rule is general and is not limited to conversion. A contract member such as
+`(defn empty () self)` is a factory of the same shape and is selected the same
+way, from the expected type at its call site.
 
 Within an interface contract, a `deftype` method, or an `impl` block, `self`
 resolves to the applicable receiver type. In a `deftype` and in an `impl` nested
@@ -640,9 +655,9 @@ type means one written or already-identical type; the checker MUST NOT search
 for a union or interface that covers two differing branch types.
 
 An `(as type-expr pattern)` pattern narrows a union. Its scrutinee MUST have a
-union type, and a scrutinee of any other type emits `.narrowing-non-union`.
+union type, and a scrutinee of any other type emits `@type.narrowing-non-union`.
 Its written type MUST be one member of that union under the same identity used
-for the discriminant; any other type emits `.not-a-union-member`. The arm
+for the discriminant; any other type emits `@type.not-a-union-member`. The arm
 binds the payload at the member type, not at the union type. A union `match` is
 exhaustive when every member has an arm or when a binder or discard covers the
 remainder.
@@ -650,7 +665,7 @@ remainder.
 Because a union has at least two members, an `as` pattern can never cover every
 value of its expected type and is therefore always refutable. It is valid in
 `match` and invalid in `let`, in a fixed positional function parameter, and in a
-lambda parameter, where it emits the existing `.refutable-binding`.
+lambda parameter, where it emits the existing `@pattern.refutable-binding`.
 
 The same exhaustiveness engine determines whether a binding pattern is
 irrefutable: the single pattern MUST cover every value of its expected type.
@@ -678,11 +693,16 @@ canonical serialization rules defined by the runtime chapter.
 ## Type ascription and widening
 
 V1 has exactly two widening relations. A concrete type widens to an interface it
-explicitly implements, and a member type widens to a union that lists it. Both
-are declared, and neither is subtyping: they apply at a boundary, not
-structurally and not through a container. Generic arguments remain invariant, so
-`(array i32)` does not widen to `(array number)` and `(option i32)` does not
-widen to `(option number)`.
+conforms to, and a member type widens to a union that lists it. Conformance here
+is exactly the conformance defined earlier in this chapter, so widening is
+available through all three of its sources: a written `impl` block, the
+predeclared empty interface `any` that every type satisfies without one, and the
+closed toolchain `iter` registry for `(array t)`, `(map k v)`, `str`, and
+`(option t)`. Neither relation is subtyping: they apply at a boundary, not
+structurally and not through a container, and neither is ever inferred from a
+type's shape. Generic arguments remain invariant, so `(array i32)` does not
+widen to `(array number)` and `(option i32)` does not widen to
+`(option number)`.
 
 Widening fires only against a **written expected type**. The complete set of
 written expected types is:
@@ -756,7 +776,8 @@ over the source type and both implemented on the destination:
 ```
 
 `self` is the destination in both contracts and occurs only in the result type,
-so both members are destination-dispatched under the interfaces section: the
+so both members are destination-dispatched under the general rule in the
+interfaces section: the
 call site's written expected type unifies with that result type and fixes the
 destination. Both contracts declare `effects: ()`, so every conversion is pure.
 

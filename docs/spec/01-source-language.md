@@ -196,7 +196,7 @@ V1 has exactly these user top-level forms:
 ```ebnf
 top-form = import | deftype | defint | deffect | def | defn | test ;
 import   = "(", "import", symbol, atom-name, ")" ;
-deftype  = "(", "deftype", symbol, type-expr,
+deftype  = "(", "deftype", symbol, deftype-body,
            { type-attribute | nested-method
            | interface-implementation }, ")" ;
 defint   = "(", "defint", symbol,
@@ -249,6 +249,10 @@ lambda-attribute = "labelled:", labelled-parameters
                  | "variadic:", variadic-parameter
                  | "effects:", effect-row ;
 ```
+
+`deftype-body` is the type chapter's production for a declaration body. It is
+`type-expr` plus the `union` form, and it is the only position in the grammar
+that admits `(union ...)`.
 
 `def` introduces an immutable module value. There is no separate `const` form
 in v1.

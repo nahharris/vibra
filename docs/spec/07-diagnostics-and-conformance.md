@@ -34,6 +34,17 @@ than its issuance order or severity:
 @type.invalid-tuple-index
 @type.unknown-record-field
 @type.numeric-out-of-range
+@type.anonymous-union
+@type.union-too-few-members
+@type.union-member-overlap
+@type.union-member-not-concrete
+@type.overlapping-implementation
+@type.ambiguous-implementation
+@type.ambiguous-destination
+@type.invalid-ascription
+@type.narrowing-non-union
+@type.not-a-union-member
+@type.redundant-conversion
 @pattern.refutable-binding
 @effect.outside-ceiling
 @effect.invalid-reference
@@ -198,7 +209,9 @@ body, rejection of a union, interface, and bare generic member, and rejection of
 `(union (array t) (array i32))` as overlapping under instantiation. It proves
 that no member method or implementation is lifted to the union, and that a union
 used as a `(map k v)` key without explicit `hashable`, `equatable`, and
-`ordered` implementations is rejected.
+`ordered` implementations is rejected. A `(union ...)` form written in a
+parameter, a result, a record field, a `def` annotation, an `as` type, and an
+`impl` target is rejected in each position with `@type.anonymous-union`.
 
 Widening coverage proves that each written expected type in the type chapter's
 list admits a member-to-union and a concrete-to-interface widening, that no
@@ -220,15 +233,22 @@ an `as` pattern in `let` and in a positional parameter rejected with
 Conversion coverage includes a `from` implementation on a destination `deftype`,
 a `try-from` implementation returning `conversion-error`, destination selection
 through a written parameter and result type, destination selection through `as`,
-a bare call with no expected type rejected with
-`@type.ambiguous-conversion-target`, one receiver implementing `(from i16)` and
-`(from i8)` together, and a `from`/`try-from` pair on one source rejected with
-`@type.redundant-conversion`.
+a bare call with no expected type rejected with `@type.ambiguous-destination`,
+one receiver implementing `(from i16)` and `(from i8)` together, `(from t)` and
+`(from i32)` on one generic receiver rejected with
+`@type.overlapping-implementation`, and a `from`/`try-from` pair on one source
+rejected with `@type.redundant-conversion`.
 
-`@type.union-too-few-members`, `@type.union-member-overlap`,
-`@type.union-member-not-concrete`, `@type.narrowing-non-union`,
-`@type.not-a-union-member`, `@type.invalid-ascription`,
-`@type.ambiguous-conversion-target`, `@type.ambiguous-implementation`, and
+Destination dispatch is covered beyond conversion by a non-conversion contract
+member of the same shape, such as a `(defn empty () self)` factory, selected
+from a written expected type and rejected with `@type.ambiguous-destination`
+where none is written.
+
+`@type.anonymous-union`, `@type.union-too-few-members`,
+`@type.union-member-overlap`, `@type.union-member-not-concrete`,
+`@type.overlapping-implementation`, `@type.ambiguous-implementation`,
+`@type.ambiguous-destination`, `@type.invalid-ascription`,
+`@type.narrowing-non-union`, `@type.not-a-union-member`, and
 `@type.redundant-conversion` all have fixed level `@error`. Union declaration
 cases belong to `V1-TYPE-NOMINAL`; ascription, widening, narrowing, and
 conversion cases belong to `V1-TYPE-CONVERT`.
