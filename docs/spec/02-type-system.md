@@ -496,30 +496,37 @@ parameter. A variadic parameter does not qualify: an `(array self)` or
 receiver value to select from. A labelled parameter does not qualify either,
 since every labelled parameter requires a literal default.
 
-A contract member whose `self` occurs **only** in its result type has no
-receiver value and is instead **destination-dispatched**: the checker unifies
-the written expected type at the call site with the member's written result
-type and takes `self` from that unification. The expected type is therefore not
-required to be `self` itself; an expected `(result u32 conversion-error)`
-against a written result `(result self conversion-error)` yields `self` = `u32`.
-When no written expected type reaches the application, the site emits
-`@type.ambiguous-destination` and lists the candidate receivers; `as` is always
-available to supply one. This selects a written implementation from a written
-type and never synthesizes one, so the inference prohibition above is untouched.
+A contract member with no fixed positional `self` parameter but with `self`
+somewhere in its result type has no receiver value and is instead
+**destination-dispatched**. The classification turns on the absence of a fixed
+receiver rather than on `self` appearing nowhere else, so a member naming `self`
+in both its result and a variadic tail is destination-dispatched too, and the
+tail is an ordinary operand.
+
+The checker unifies the written expected type at the call site with the member's
+written result type and takes `self` from that unification. The expected type is
+therefore not required to be `self` itself; an expected
+`(result u32 conversion-error)` against a written result
+`(result self conversion-error)` yields `self` = `u32`. When no written expected
+type reaches the application, the site emits `@type.ambiguous-destination` and
+lists the candidate receivers; `as` is always available to supply one. This
+selects a written implementation from a written type and never synthesizes one,
+so the inference prohibition above is untouched.
 
 The rule is general and is not limited to conversion. A contract member such as
 `(defn empty () self)` is a factory of the same shape and is selected the same
 way, from the expected type at its call site.
 
-These two rules are exhaustive because every contract member MUST name `self` as
-the type of a fixed positional parameter or within its result type. A member
-doing neither is selectable by nothing and emits
-`@type.contract-member-without-self` at its declaration. That covers both
-`(defn version () str)`, which never mentions `self`, and
-`(defn count-all () u64 variadic: (rest (array self)))`, which mentions it only
-in a tail that may arrive empty. This is what `defint` declaring method
-signatures **over `self`** already means; v1 adds no third selection rule and no
-interface-level static member.
+The two rules partition every contract member, because each member either has a
+fixed positional `self` parameter or does not. A member with no such parameter
+and no `self` in its result is selectable by neither rule and emits
+`@type.undispatchable-contract-member` at its declaration. The code names the
+condition rather than the absence of the spelling, because a rejected member may
+still contain `self`: it covers `(defn version () str)`, which never mentions
+`self`, and equally `(defn count-all () u64 variadic: (rest (array self)))`,
+which mentions it only in a tail that may arrive empty. This is what `defint`
+declaring method signatures **over `self`** already means; v1 adds no third
+selection rule and no interface-level static member.
 
 Within an interface contract, a `deftype` method, or an `impl` block, `self`
 resolves to the applicable receiver type. In a `deftype` and in an `impl` nested
@@ -533,15 +540,19 @@ contract member, with dispatch selecting the implementation from the receiver.
 Vibra has no method-call operator and no implicit receiver; a method application
 is an ordinary application whose callee is a resolved path.
 
-For each interface/type pair, the checker MUST find every **abstract** contract
-member exactly once, substitute the concrete type for `self`, preserve
-parameter and result types, preserve labelled names and defaults and variadic
-shape, and verify that the method performs no effect outside the contract
-ceiling. A contract member with a body is a **default method**. An
-implementation MUST supply every abstract member and MUST NOT redeclare a
-default member; doing so emits `@type.default-override`. A missing abstract
-member emits `@type.missing-abstract-member`. Extra, duplicate, or conflicting
-members are errors.
+Completeness is checked once per block identity, not once per nominal interface,
+so `(from i16)` and `(from i8)` on one receiver are checked separately. For each
+applied-interface-target and receiver-type pair, the checker MUST find every
+**abstract** contract member exactly once, substitute the concrete type for
+`self`, preserve parameter and result types, preserve labelled names and
+defaults and variadic shape, and verify that the method performs no effect
+outside the contract ceiling.
+
+A contract member with a body is a **default method**. An implementation MUST
+supply every abstract member and MUST NOT redeclare a default member; doing so
+emits `@type.default-override`. A missing abstract member emits
+`@type.missing-abstract-member`. Extra, duplicate, or conflicting members are
+errors.
 
 Default methods are checked against the interface contract ceiling. Their bodies
 are available to every conforming type without being written again in each
@@ -765,7 +776,8 @@ way to write a typed boundary where no declaration supplies one. It admits
 exactly three outcomes:
 
 - the operand already has that exact type, which is a legal no-op;
-- the operand widens to that type by one of the two relations above; or
+- the operand widens to that type by one of the three relations above, so
+  `(as atom @ok)` is admitted; or
 - the type constrains an otherwise ambiguous inference, such as an unsuffixed
   numeric literal, an empty `array.of` or `map.of`, or a generic result.
 

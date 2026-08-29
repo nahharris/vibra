@@ -35,7 +35,7 @@ than its issuance order or severity:
 @type.unknown-record-field
 @type.numeric-out-of-range
 @type.anonymous-union
-@type.contract-member-without-self
+@type.undispatchable-contract-member
 @type.union-too-few-members
 @type.union-member-overlap
 @type.union-member-not-concrete
@@ -225,6 +225,12 @@ under invariance. Atom widening is covered on both sides of its boundary rule:
 `(array.of @ok @err)` is rejected for having no single element type, and
 `(as (array atom) (array.of @ok @err))` is accepted.
 
+The no-chaining rule has its own focused rejections, so widening cannot silently
+become transitive: a member value written where an interface implemented by its
+union but not by the member is expected, and an atom singleton written where
+`any` is expected, are both rejected even though each step would be legal alone.
+Reaching the far type requires two written boundaries.
+
 Ascription coverage includes the legal no-op, the empty-collection and
 generic-result constraints, and the two rejected forms written in the type
 chapter's example block: `(as i64 3i32)` for implicit numeric widening and
@@ -245,22 +251,28 @@ through a written parameter and result type, destination selection through `as`,
 a bare call with no expected type rejected with `@type.ambiguous-destination`,
 one receiver implementing `(from i16)` and `(from i8)` together, and a
 `from`/`try-from` pair on one source rejected with
-`@type.redundant-conversion`. That two-target receiver is also called with an
+`@type.redundant-conversion`. The two-target receiver is an identity case as
+well as a dispatch case: query and index output for it MUST contain two distinct
+block identities and two distinct `convert` member identities, differing only in
+applied target, and completeness MUST be checked once per block rather than once
+per nominal interface. That two-target receiver is also called with an
 unsuffixed integer literal, whose source type both implementations satisfy, and
 the call is rejected with `@type.ambiguous-implementation`. `(from t)` and
 `(from i32)` on one generic receiver are rejected at the declaration with
 `@type.overlapping-implementation`, and `(from t)` with `(try-from i32)` on one
 generic receiver is rejected with `@type.redundant-conversion` alongside the
 same-written-source pair. Two contract members are rejected with
-`@type.contract-member-without-self`: one never naming `self`, and one naming it
-only in a variadic tail that may arrive empty.
+`@type.undispatchable-contract-member`: one never naming `self`, and one naming
+it only in a variadic tail that may arrive empty. A third member, naming `self`
+in both its result and a variadic tail, is accepted and shown to be
+destination-dispatched rather than rejected as a mixed shape.
 
 Destination dispatch is covered beyond conversion by a non-conversion contract
 member of the same shape, such as a `(defn empty () self)` factory, selected
 from a written expected type and rejected with `@type.ambiguous-destination`
 where none is written.
 
-`@type.anonymous-union`, `@type.contract-member-without-self`,
+`@type.anonymous-union`, `@type.undispatchable-contract-member`,
 `@type.union-too-few-members`,
 `@type.union-member-overlap`, `@type.union-member-not-concrete`,
 `@type.overlapping-implementation`, `@type.ambiguous-implementation`,
