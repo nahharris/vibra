@@ -99,9 +99,11 @@ The following are not partially implemented in v1:
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;
-- anonymous and structural unions, union subtyping, and computed least upper
-  bounds; only a nominal `deftype` union over a closed, written member set
-  exists, and it is never inferred;
+- anonymous and structural `record`, `enum`, `union`, and `newtype` types; all
+  four are declaration bodies only, so an identity is always reachable through
+  the `deftype` that introduces it;
+- union subtyping and computed least upper bounds; a union is only ever the one
+  an author wrote over a closed, written member set, and it is never inferred;
 - narrowing an interface value to a concrete type, runtime type tests, and
   interface-typed `match` arms;
 - associated types on an interface contract, and therefore per-implementation

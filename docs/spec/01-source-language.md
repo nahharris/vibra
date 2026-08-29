@@ -251,8 +251,9 @@ lambda-attribute = "labelled:", labelled-parameters
 ```
 
 `deftype-body` is the type chapter's production for a declaration body. It is
-`type-expr` plus the `union` form, and it is the only position in the grammar
-that admits `(union ...)`.
+`type-expr` plus the four identity-introducing forms `record`, `enum`, `union`,
+and `newtype`, and it is the only position in the grammar that admits any of
+them.
 
 `def` introduces an immutable module value. There is no separate `const` form
 in v1.

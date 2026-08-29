@@ -34,7 +34,7 @@ than its issuance order or severity:
 @type.invalid-tuple-index
 @type.unknown-record-field
 @type.numeric-out-of-range
-@type.anonymous-union
+@type.anonymous-type-body
 @type.undispatchable-contract-member
 @type.union-too-few-members
 @type.union-member-overlap
@@ -210,11 +210,15 @@ body, rejection of a union, interface, and bare generic member, and rejection of
 `(union (array t) (array i32))` as overlapping under instantiation. It proves
 that no member method or implementation is lifted to the union, and that a union
 used as a `(map k v)` key without explicit `hashable`, `equatable`, and
-`ordered` implementations is rejected. A `(union ...)` form written in a
-parameter, a result, a record field, a `def` annotation, an `as` type, an `impl`
-target, and a `types:` argument is rejected in each of those seven positions
-with `@type.anonymous-union`. The `types:` case is written separately so the
-call-site type-argument parsing and binding path is covered rather than assumed.
+`ordered` implementations is rejected.
+
+Declaration-body coverage rejects each of `record`, `enum`, `union`, and
+`newtype` written in a parameter, a result, a record field, a `def` annotation,
+an `as` type, an `impl` target, and a `types:` argument, with
+`@type.anonymous-type-body` naming the form it found. The `types:` case is
+written separately for each form so the call-site type-argument parsing and
+binding path is covered rather than assumed. Positive cases confirm that
+`tuple`, `array`, `map`, and `fn` remain admissible in all seven positions.
 
 Widening coverage proves that each written expected type in the type chapter's
 list admits all three relations — member-to-union, concrete-to-interface, and
@@ -272,7 +276,7 @@ member of the same shape, such as a `(defn empty () self)` factory, selected
 from a written expected type and rejected with `@type.ambiguous-destination`
 where none is written.
 
-`@type.anonymous-union`, `@type.undispatchable-contract-member`,
+`@type.anonymous-type-body`, `@type.undispatchable-contract-member`,
 `@type.union-too-few-members`,
 `@type.union-member-overlap`, `@type.union-member-not-concrete`,
 `@type.overlapping-implementation`, `@type.ambiguous-implementation`,

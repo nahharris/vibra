@@ -41,6 +41,24 @@ literal that overflows to infinity is out of range. V1 has no source spelling
 for infinity or NaN. Character equality and ordering use Unicode scalar value,
 and conversion between `char` and an integer is always explicit.
 
+## Overlap and non-unifiability
+
+Several rules in this chapter require a written set of types to be free of
+overlap. Written distinctness never satisfies them, because a generic name can
+make two written types equal at some instantiation: `(array t)` and
+`(array i32)` are different spellings of one type when `t` is `i32`.
+
+Two type expressions are **unifiable** when some substitution of the generic
+names in scope makes them the same fully resolved type. A set is **pairwise
+non-unifiable** when no two of its members are unifiable.
+
+Every rule below that forbids overlap requires pairwise non-unifiability, and
+each reports it at the declaration rather than after monomorphization, so an
+accepted set is unambiguous at every instantiation. Three rules use it: union
+members, the applied interface targets of one receiver, and the source targets
+of one receiver's `from` and `try-from` implementations taken together. Each
+names its own diagnostic.
+
 ## Nominal declarations
 
 Every `deftype` introduces a new identity. Two types with identical structure
@@ -50,18 +68,17 @@ V1 type constructors are:
 
 ```ebnf
 type-expr = primitive | symbol | "(", symbol, type-expr+, ")"
-          | record-type | enum-type
-          | "(", "newtype", type-expr, ")"
           | "(", "tuple", type-expr*, ")"
           | "(", "array", type-expr, ")"
           | "(", "map", type-expr, type-expr, ")"
           | function-type ;
+deftype-body = type-expr | record-type | enum-type | union-type | newtype-type ;
 record-type = "(", "record", local-name, type-expr,
               { local-name, type-expr }, ")" ;
 enum-type = "(", "enum", local-name, type-expr,
             { local-name, type-expr }, ")" ;
 union-type = "(", "union", type-expr, type-expr+, ")" ;
-deftype-body = type-expr | union-type ;
+newtype-type = "(", "newtype", type-expr, ")" ;
 function-type = "(", "fn", "(", type-expr*, ")", type-expr,
                 [ "labelled:", "(", { local-name, type-expr }, ")" ],
                 [ "variadic:", variadic-type ],
@@ -88,23 +105,28 @@ Newtypes have a distinct identity and exactly one representation type. Their
 constructor and unwrap operation are available only where visibility permits.
 There are no structural aliases or transparent public casts.
 
-`union-type` is admissible only as a `deftype` body, which is why the grammar
-gives that position its own `deftype-body` production. A `(union ...)` form in
-any other type position — a parameter, a result, a record field, a `def`
-annotation, an `as` type, an `impl` target, or a `types:` argument — emits
-`@type.anonymous-union`. V1 has no anonymous or structural union, so a union is
-reachable only through the name its `deftype` introduces.
+The four declaration-body forms — `record`, `enum`, `union`, and `newtype` —
+are admissible only as a `deftype` body, which is why that position has its own
+`deftype-body` production and `type-expr` does not list them. Any of the four
+written in another type position — a parameter, a result, a record field, a
+`def` annotation, an `as` type, an `impl` target, or a `types:` argument —
+emits `@type.anonymous-type-body` and names the form it found.
+
+This is what nominality means at the level of the grammar: each of the four
+introduces an identity, and an identity needs the `deftype` that declares it. V1
+has no anonymous or structural record, enum, union, or newtype, so each is
+reachable only through the name its `deftype` introduces. `tuple`, `array`,
+`map`, and `fn` remain ordinary `type-expr` constructors, because they build
+values from existing types rather than introducing an identity.
 
 A union body lists at least two member types and declares no member names. The
 `deftype` supplies the union's identity, and each member type's identity is its
 discriminant, so a union is an enum whose variant names are its member types. A
 member list shorter than two entries emits `@type.union-too-few-members`.
 
-Members MUST be pairwise non-unifiable. Written distinctness is insufficient,
-because `(union (array t) (array i32))` collides at `t = i32` and would leave
-injection ambiguous after instantiation; overlap emits
-`@type.union-member-overlap` at the declaration rather than after
-monomorphization.
+Members MUST be pairwise non-unifiable, as the overlap section defines.
+Otherwise `(union (array t) (array i32))` would leave injection ambiguous at
+`t` = `i32`. Overlap emits `@type.union-member-overlap`.
 
 A member MUST be a concrete type expression. Another union, an interface, and a
 bare generic parameter each emit `@type.union-member-not-concrete`. Unions do
@@ -480,11 +502,10 @@ selects it from the receiver or from a written expected type.
 
 A generic interface is keyed by its applied type, so one receiver MAY implement
 `(from i16)` and `(from i8)` as two implementations of one `defint`. The
-applied targets MUST be pairwise non-unifiable, on the same terms as union
-members: `(from t)` and `(from i32)` on one generic receiver are written
-distinctly but collide at `t` = `i32`, and the pair emits
-`@type.overlapping-implementation` at the declaration rather than producing two
-candidates after instantiation. Selection uses the written operand types and the
+applied targets MUST be pairwise non-unifiable, as the overlap section defines.
+Otherwise `(from t)` and `(from i32)` on one generic receiver would produce two
+candidates at `t` = `i32`. Overlap emits `@type.overlapping-implementation`.
+Selection uses the written operand types and the
 written expected type; when two implementations of one interface remain
 candidates at a call site, that site emits `@type.ambiguous-implementation`
 rather than picking an order.
@@ -868,11 +889,10 @@ is an ordinary `defn` returning `(result t e)`, which requires no new machinery.
 Per-implementation error types are a post-v1 concern recorded in the roadmap.
 
 Across `from` and `try-from` together, a receiver's source targets MUST be
-pairwise non-unifiable, on the same terms as its applied targets within one
-interface. The same written source in both is the obvious case, and `(from t)`
-with `(try-from i32)` is the same defect deferred to `t` = `i32`, where the
-conversion would be both total and partial. Either pair emits
-`@type.redundant-conversion` at the declaration. A conversion is one or the
+pairwise non-unifiable, as the overlap section defines. The same written source
+in both is the obvious case; `(from t)` with `(try-from i32)` is the same defect
+at `t` = `i32`, where the conversion would be both total and partial. Either
+pair emits `@type.redundant-conversion`. A conversion is one or the
 other, and offering both spellings would give one idea two canonical forms.
 
 ## Host values
