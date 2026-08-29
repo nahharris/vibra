@@ -144,8 +144,17 @@ spellings. This is the grammar's only use of exception notation.
 Reserved type forms are recognized before the applied-type production, exactly
 as reserved expression forms are recognized before application, so
 `(union i32 f32)` outside a `deftype` body is `@type.anonymous-type-body` and
-never a type application. No declaration may be spelled with a reserved type
-head, which emits `@name.reserved-declaration`.
+never a type application.
+
+The reservation reaches exactly the declarations that must be usable as a bare
+`type-name` head: a `deftype`, a `defint`, and a generic name in a `where:`
+clause. One of those spelled with a reserved type head emits
+`@name.reserved-declaration`. It reaches no other namespace and no member,
+because a member is only ever reached through a qualified path and is never a
+bare type head. A nested method named `map` therefore stays legal exactly as the
+source-language chapter states, which the `iter` contract's own default `map`
+member depends on. The separate value-namespace rule on `map`, `array`, and
+`tuple` is unchanged and keeps its own `@name.reserved-value-spelling`.
 
 A union body lists at least two member types and declares no member names. The
 `deftype` supplies the union's identity, and each member type's identity is its

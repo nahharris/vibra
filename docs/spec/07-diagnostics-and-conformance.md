@@ -224,9 +224,16 @@ The applied-type head is covered separately, because removing the four forms
 from `type-expr` does not by itself stop them returning as applications. Each of
 `(record ...)`, `(enum ...)`, `(union ...)`, and `(newtype ...)` outside a
 `deftype` body is rejected as `@type.anonymous-type-body` and MUST NOT be
-reported as an unknown type application, a declaration spelled with a reserved
-type head is rejected as `@name.reserved-declaration`, and an ordinary applied
-type such as `(option t)` is accepted in the same position.
+reported as an unknown type application, and an ordinary applied type such as
+`(option t)` is accepted in the same position.
+
+The reserved-head reservation is covered on both sides. A `deftype`, a `defint`,
+and a `where:` generic name spelled with a reserved type head are each rejected
+with `@name.reserved-declaration`. A nested method named `map` on an owner other
+than the associative `map` type is accepted, together with the `iter` contract's
+own default `map` member, proving the reservation does not reach members; the
+existing `@name.reserved-value-spelling` cases for module-level `map`, `array`,
+and `tuple` values are unaffected.
 
 Unification coverage fixes the bound-agnostic reading: a union whose members are
 `(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not
