@@ -119,6 +119,7 @@ kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
 | `V1-TYPE-INFER` | inference and public checking |
 | `V1-TYPE-GENERIC` | flat generic bounds |
 | `V1-TYPE-INTERFACE` | interfaces, default methods, nested implementations, and `iter` |
+| `V1-TYPE-CONVERT` | ascription, widening, narrowing, and conversion |
 | `V1-TYPE-CONTROL` | control flow, failure, recursion, tail calls, and checked operations |
 | `V1-EFFECT` | declarations, rows, target ceilings, and reports |
 | `V1-PROJECT` | data forms, targets, modules, dependencies, and tests |
@@ -191,6 +192,46 @@ and effectful walks written as tail-recursive module-level functions over
 `iter.next`.
 Tail-call cases belong to `V1-RUNTIME`. `@name.reserved-value-spelling` and
 `@type.function-not-equatable` have fixed level `@error`.
+
+Union coverage includes a two-member declaration, rejection of a one-member
+body, rejection of a union, interface, and bare generic member, and rejection of
+`(union (array t) (array i32))` as overlapping under instantiation. It proves
+that no member method or implementation is lifted to the union, and that a union
+used as a `(map k v)` key without explicit `hashable`, `equatable`, and
+`ordered` implementations is rejected.
+
+Widening coverage proves that each written expected type in the type chapter's
+list admits a member-to-union and a concrete-to-interface widening, that no
+widening occurs where no expected type is written, that `if` branches typed
+`i32` and `f32` are rejected rather than unified into a union, and that
+`(array i32)` does not widen to `(array number)` under invariance.
+
+Ascription coverage includes the legal no-op, the empty-collection and
+generic-result constraints, and the two rejected forms written in the type
+chapter's example block: `(as i64 3i32)` for implicit numeric widening and
+`(as i32 some-number)` for narrowing, both `@type.invalid-ascription`. It proves
+that `as` reaches the typed IR as its operand alone and adds no runtime check.
+
+Narrowing coverage includes an exhaustive union `match`, a binder-covered
+remainder, a rejected non-exhaustive arm set, an unreachable duplicate arm, and
+an `as` pattern in `let` and in a positional parameter rejected with
+`@pattern.refutable-binding`.
+
+Conversion coverage includes a `from` implementation on a destination `deftype`,
+a `try-from` implementation returning `conversion-error`, destination selection
+through a written parameter and result type, destination selection through `as`,
+a bare call with no expected type rejected with
+`@type.ambiguous-conversion-target`, one receiver implementing `(from i16)` and
+`(from i8)` together, and a `from`/`try-from` pair on one source rejected with
+`@type.redundant-conversion`.
+
+`@type.union-too-few-members`, `@type.union-member-overlap`,
+`@type.union-member-not-concrete`, `@type.narrowing-non-union`,
+`@type.not-a-union-member`, `@type.invalid-ascription`,
+`@type.ambiguous-conversion-target`, `@type.ambiguous-implementation`, and
+`@type.redundant-conversion` all have fixed level `@error`. Union declaration
+cases belong to `V1-TYPE-NOMINAL`; ascription, widening, narrowing, and
+conversion cases belong to `V1-TYPE-CONVERT`.
 
 ## Conformance profiles
 

@@ -34,7 +34,8 @@ Evaluation is strict and deterministic:
 - function bodies and `do` forms evaluate from first to last; the value of a
   `do` is its last expression, or `void` if empty;
 - `if` evaluates only the selected branch;
-- `match` evaluates its subject once and selects the first matching arm;
+- `match` evaluates its subject once and selects the first matching arm, and an
+  `as` arm tests only the union discriminant;
 - `tuple.of`, `array.of`, and `map.of` operands evaluate from left to right;
 - `try` performs only its specified early-exit propagation; and
 - a tail-position call to a function in the same recursive group reuses the
@@ -55,6 +56,23 @@ bounds-checked or presence-checked lookup and returns `option.some` or
 `option.none`. A missing key or out-of-range index does not panic, trap, return
 null, or synthesize a default value. These projection and lookup operations are
 pure and generate no function-call edge or host event.
+
+A union value carries one discriminant selecting the member type it holds,
+together with that member's value. The discriminant set is closed and fixed at
+declaration, and both backends MUST assign discriminants in written member
+order so that build output and serialization are deterministic. Widening a
+member value to a union attaches the discriminant, and an `as` pattern compares
+it and yields the payload at the member type. Both are pure, add no
+function-call edge, and emit no host event, exactly as a nominal constructor and
+a projection do. A union carries no method table: dispatch on a union value
+selects an implementation written for the union type itself, never one written
+for a member.
+
+`as` in expression position is erased. It fixes types during checking and lowers
+to its operand, so it emits no typed-IR node, performs no runtime check, and can
+never fail at run time. A destination-dispatched conversion is an ordinary
+static call to the implementation the checker selected; the interfaces it
+implements add no runtime type information to any value.
 
 String and byte indexing is bounds-checked. Strings are Unicode scalar
 sequences at the language level; each scalar is a `char`, and byte conversion

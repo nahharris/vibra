@@ -50,7 +50,7 @@ V1 type constructors are:
 
 ```ebnf
 type-expr = primitive | symbol | "(", symbol, type-expr+, ")"
-          | record-type | enum-type
+          | record-type | enum-type | union-type
           | "(", "newtype", type-expr, ")"
           | "(", "tuple", type-expr*, ")"
           | "(", "array", type-expr, ")"
@@ -60,6 +60,7 @@ record-type = "(", "record", local-name, type-expr,
               { local-name, type-expr }, ")" ;
 enum-type = "(", "enum", local-name, type-expr,
             { local-name, type-expr }, ")" ;
+union-type = "(", "union", type-expr, type-expr+, ")" ;
 function-type = "(", "fn", "(", type-expr*, ")", type-expr,
                 [ "labelled:", "(", { local-name, type-expr }, ")" ],
                 [ "variadic:", variadic-type ],
@@ -85,6 +86,43 @@ infinite expansion is rejected.
 Newtypes have a distinct identity and exactly one representation type. Their
 constructor and unwrap operation are available only where visibility permits.
 There are no structural aliases or transparent public casts.
+
+A union body lists at least two member types and declares no member names. The
+`deftype` supplies the union's identity, and each member type's identity is its
+discriminant, so a union is an enum whose variant names are its member types. A
+member list shorter than two entries emits `@type.union-too-few-members`.
+
+Members MUST be pairwise non-unifiable. Written distinctness is insufficient,
+because `(union (array t) (array i32))` collides at `t = i32` and would leave
+injection ambiguous after instantiation; overlap emits
+`@type.union-member-overlap` at the declaration rather than after
+monomorphization.
+
+A member MUST be a concrete type expression. Another union, an interface, and a
+bare generic parameter each emit `@type.union-member-not-concrete`. Unions do
+not flatten: without this rule a three-way choice would have two spellings,
+which the charter's decision order forbids. An interface member would likewise
+leave injection ambiguous, because a member type that also implements that
+interface could inject under either discriminant.
+
+Unions widen in and narrow out through the two written forms defined later in
+this chapter: a value of a member type widens to the union at a written typed
+boundary, and `match` narrows a union through `as` patterns. There is no
+subtyping between unions, no subset relation, and no computed least upper
+bound.
+
+A union `deftype` MAY declare nested methods and `impl` blocks exactly as any
+other `deftype` does. Nothing is lifted from its members: a method, field, or
+implementation common to every member is not thereby a member of the union, and
+a union conforms to an interface only by writing that implementation. A union is
+a valid `(map k v)` key only when it explicitly implements `hashable`,
+`equatable`, and `ordered`. Unions participate in the finite-size check on the
+same terms as records and enums.
+
+```vibra
+(deftype number (union i32 f32)
+  visibility: @public)
+```
 
 ## Application
 
@@ -121,8 +159,11 @@ values, not UTF-8 bytes. Projection and lookup are pure. Evaluating their
 callee or operand may perform effects, but the application itself contributes
 no effect and no function-call edge.
 
-An enum value, atom, number, or `void` is not applicable. A newtype value does
-not delegate applicability to its representation. A value whose static type is
+An enum value, union value, atom, number, or `void` is not applicable. A newtype
+value does not delegate applicability to its representation, and a union value
+does not delegate applicability to the member it holds. A union type is not a
+constructor entity either: a member value reaches its union by widening at a
+written boundary, never by applying the union. A value whose static type is
 an unconstrained generic is not applicable; v1 has no callable interface or
 user-defined applicability bound. Tuples and records are not subtypes of `fn`;
 producing an accessor as a higher-order value requires an explicit `lambda`.
@@ -244,6 +285,10 @@ Inference is local:
 
 Inference MUST NOT invent a parameter, result, generic bound, interface
 implementation, numeric conversion, effect ceiling, or error conversion.
+Selecting a written implementation from a written type is not invention: a
+destination-dispatched contract member, defined in the interfaces section,
+resolves its receiver from an expected type that the author wrote. Inference
+MUST NOT synthesize an implementation that no package declared.
 Ambiguous inference is an error with candidate explanations, not a default.
 
 Every public function, `def`, type parameter, interface member, and effect
@@ -415,6 +460,27 @@ identified by its root and operation. This is the only v1 entity kind that no
 single atom addresses, and it needs no atom: an implementation is never named at
 a use site, because dispatch selects it from the receiver.
 
+A generic interface is keyed by its applied type, so one receiver MAY implement
+`(from i16)` and `(from i8)` as two implementations of one `defint`. The
+applications MUST be pairwise distinct. Selection uses the written operand types
+and the written expected type; when two implementations of one interface remain
+candidates at a call site, that site emits `@type.ambiguous-implementation`
+rather than picking an order.
+
+Dispatch normally selects an implementation from the receiver value, which every
+contract member carrying `self` in a parameter position supplies. A contract
+member whose `self` occurs **only** in its result type has no receiver value and
+is instead **destination-dispatched**: the checker unifies the written expected
+type at the call site with the member's written result type and takes `self`
+from that unification. The expected type is therefore not required to be `self`
+itself; an expected `(result u32 conversion-error)` against a written result
+`(result self conversion-error)` yields `self` = `u32`. When no written expected
+type reaches the application, the site emits
+`@type.ambiguous-conversion-target` and lists the candidate receivers; `as` is
+always available to supply one. This selects a written implementation from a
+written type and never synthesizes one, so the inference prohibition above is
+untouched.
+
 Within an interface contract, a `deftype` method, or an `impl` block, `self`
 resolves to the applicable receiver type. In a `deftype` and in an `impl` nested
 in one, that is the declared type. In an `impl` nested in a `defint`, it is the
@@ -569,7 +635,22 @@ remain post-v1.
 
 `if` requires `bool` and both branches must have one common type. `match` is
 checked for exhaustiveness over booleans, atoms when statically closed, enums,
-and finite structural patterns. Unreachable arms are errors.
+unions, and finite structural patterns. Unreachable arms are errors. One common
+type means one written or already-identical type; the checker MUST NOT search
+for a union or interface that covers two differing branch types.
+
+An `(as type-expr pattern)` pattern narrows a union. Its scrutinee MUST have a
+union type, and a scrutinee of any other type emits `.narrowing-non-union`.
+Its written type MUST be one member of that union under the same identity used
+for the discriminant; any other type emits `.not-a-union-member`. The arm
+binds the payload at the member type, not at the union type. A union `match` is
+exhaustive when every member has an arm or when a binder or discard covers the
+remainder.
+
+Because a union has at least two members, an `as` pattern can never cover every
+value of its expected type and is therefore always refutable. It is valid in
+`match` and invalid in `let`, in a fixed positional function parameter, and in a
+lambda parameter, where it emits the existing `.refutable-binding`.
 
 The same exhaustiveness engine determines whether a binding pattern is
 irrefutable: the single pattern MUST cover every value of its expected type.
@@ -593,6 +674,138 @@ Arithmetic is checked. Overflow, division by zero, invalid shifts, and failed
 numeric conversions return typed results from their standard operations; they
 do not wrap or trap implicitly. Floating-point behavior follows IEEE 754 with
 canonical serialization rules defined by the runtime chapter.
+
+## Type ascription and widening
+
+V1 has exactly two widening relations. A concrete type widens to an interface it
+explicitly implements, and a member type widens to a union that lists it. Both
+are declared, and neither is subtyping: they apply at a boundary, not
+structurally and not through a container. Generic arguments remain invariant, so
+`(array i32)` does not widen to `(array number)` and `(option i32)` does not
+widen to `(option number)`.
+
+Widening fires only against a **written expected type**. The complete set of
+written expected types is:
+
+- a fixed positional, labelled, or variadic parameter type;
+- a written result type;
+- a `def` type annotation;
+- a record constructor field type, or an enum or newtype constructor payload
+  type;
+- a type supplied through `types:`; and
+- the type written in an `as` expression.
+
+Where no expected type is written, no widening occurs. The checker MUST NOT
+compute a least upper bound: two `if` or `match` branches typed `i32` and `f32`
+are an error unless an enclosing boundary writes a union containing both. This
+preserves the rule that inference invents nothing, because a union is only ever
+the type an author wrote.
+
+Widening applies at most once at a boundary and does not chain. Reaching an
+interface from a union member requires the union itself to implement that
+interface. Widening is pure: it contributes no effect and no function-call edge,
+exactly as projection and lookup do.
+
+### Ascription
+
+`(as type-expr expr)` checks its operand at the written type and is the general
+way to write a typed boundary where no declaration supplies one. It admits
+exactly three outcomes:
+
+- the operand already has that exact type, which is a legal no-op;
+- the operand widens to that type by one of the two relations above; or
+- the type constrains an otherwise ambiguous inference, such as an unsuffixed
+  numeric literal, an empty `array.of` or `map.of`, or a generic result.
+
+Anything else emits `@type.invalid-ascription`. In particular, ascription never
+requests a conversion and never narrows:
+
+```vibra
+(as number 1i32)          ; widening: i32 is a member of number
+(as (array u32) (array.of))  ; constrains an empty collection
+(as u32 (from.convert 42u8))  ; names a conversion destination
+(as str "Hello world")    ; legal no-op
+
+(as i64 3i32)             ; error: no implicit numeric widening
+(as i32 some-number)      ; error: as never narrows a union
+```
+
+Ascription is static. It has no runtime representation, performs no check, and
+carries no cost; the runtime chapter defines it as an erased form. A redundant
+ascription is valid and MUST NOT emit a style diagnostic, because writing the
+expected type is a legitimate way to state intent locally.
+
+## Conversion
+
+Conversion between unrelated types is always an ordinary call and never a
+widening. The standard library declares two nominal interfaces, both generic
+over the source type and both implemented on the destination:
+
+```vibra
+(defint from
+  where: (source any)
+  visibility: @public
+  (defn convert (value source) self
+    effects: ()))
+
+(defint try-from
+  where: (source any)
+  visibility: @public
+  (defn convert (value source) (result self conversion-error)
+    effects: ()))
+```
+
+`self` is the destination in both contracts and occurs only in the result type,
+so both members are destination-dispatched under the interfaces section: the
+call site's written expected type unifies with that result type and fixes the
+destination. Both contracts declare `effects: ()`, so every conversion is pure.
+
+```vibra
+(deftype celsius (newtype f64)
+  visibility: @public
+  (impl (from f64)
+    (defn convert (value f64) self
+      (celsius value))))
+
+(as celsius (from.convert 21.5f64))
+```
+
+A written result type supplies the destination just as well, which is the usual
+spelling for `try-from`:
+
+```vibra
+(defn parse-port (text str) (result u32 conversion-error)
+  visibility: @public
+  (try-from.convert text))
+```
+
+Placing the implementation on the destination is what makes the orphan rule
+work. Because the receiver is the destination, a package converting a foreign
+type into its own type owns the receiver and may write the `impl` in its own
+`deftype`. The reverse spelling, an `into` interface dispatching on the source,
+would leave exactly that case unwritable, and v1 has no blanket implementations
+with which to derive one direction from the other. V1 therefore declares `from`
+and `try-from` only; there is no `into`.
+
+`conversion-error` is a public standard-library enum with a closed variant set:
+
+```vibra
+(deftype conversion-error
+  (enum out-of-range void
+        invalid-format void
+        unrepresentable void)
+  visibility: @public)
+```
+
+The error type is fixed rather than chosen per implementation, because v1 has no
+associated types on an interface contract. A conversion needing a richer error
+is an ordinary `defn` returning `(result t e)`, which requires no new machinery.
+Per-implementation error types are a post-v1 concern recorded in the roadmap.
+
+A receiver MUST NOT implement both `from` and `try-from` for the same source
+type; the pair emits `@type.redundant-conversion`. A conversion is either
+total or partial, and offering both spellings would give one idea two canonical
+forms.
 
 ## Host values
 

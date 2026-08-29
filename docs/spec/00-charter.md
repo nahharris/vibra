@@ -68,6 +68,10 @@ conformance case or an explicit review-only invariant.
 - Names use kebab-case and imports produce explicit aliases.
 - Public boundaries carry complete types and effect ceilings.
 - Types, interfaces, their explicit implementations, and effects are nominal.
+- Every widening relation is declared and every narrowing is written. A
+  `deftype` union widens to a closed member set, `as` ascribes a type at any
+  expression, `match` narrows, and the `from` and `try-from` interfaces convert.
+  No conversion is implicit.
 - Typed `option` and `result` replace null and exceptions.
 - Effects describe possible operations statically. A binary target's declared
   effect roots are its complete execution consent; v1 has no runtime grants.
@@ -95,9 +99,16 @@ The following are not partially implemented in v1:
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;
-- arbitrary unions, inheritance, implicit interface conformance apart from the
-  predeclared empty interface `any`, dependent or refinement types, and a
-  general ownership/borrowing system;
+- anonymous and structural unions, union subtyping, and computed least upper
+  bounds; only a nominal `deftype` union over a closed, written member set
+  exists, and it is never inferred;
+- narrowing an interface value to a concrete type, runtime type tests, and
+  interface-typed `match` arms;
+- associated types on an interface contract, and therefore per-implementation
+  error types on `try-from`;
+- inheritance, implicit interface conformance apart from the predeclared empty
+  interface `any`, dependent or refinement types, and a general
+  ownership/borrowing system;
 - language-defined fuel, memory, or host-operation budgets and scoped host
   resource or handle lifetimes;
 - network and child-process host APIs;
