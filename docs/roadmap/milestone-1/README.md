@@ -59,7 +59,15 @@ Milestone 2. Milestone 1 delivers library crates, the published JSON schemas,
 and an internal conformance runner. Nothing is advertised on a command surface
 that Milestone 2 has not built, as roadmap rule 3 requires.
 
-### D5 — The dependency direction is a test, not a convention
+### D5 — Published JSON schemas are identified by URN
+
+Schema identifiers are contracts, so they must be stable and must not depend
+on where a file happens to be served. Vibra has no schema-hosting domain and
+should not promise one, so schemas are identified as
+`urn:vibra:schema:v1:<name>`. Every `$ref` is internal, so validating a
+document needs no resolution.
+
+### D6 — The dependency direction is a test, not a convention
 
 `vibra-conformance` carries a host-language test that reads every workspace
 manifest and fails when a crate depends on something the architecture boundary
@@ -77,7 +85,7 @@ and conformance cases in the same change.
 | # | Step | Kind | Status |
 | --- | --- | --- | --- |
 | 1 | Workspace, pinned toolchain, CI, and crate skeleton | infrastructure | landed |
-| 2 | Spans, line index, diagnostic model, closed code and level registry, and their JSON contract | vertical | not started |
+| 2 | Spans, line index, diagnostic model, closed code and level registry, and their JSON contract | vertical | landed |
 | 3 | Conformance corpus layout, manifest decoding, profile dispatch, and runner | infrastructure | not started |
 | 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | not started |
 | 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | not started |
@@ -114,5 +122,5 @@ across steps is complete only when its last step lands.
 | Reader positive/negative/recovery corpus passes | 4–9, verified in 11 | pending |
 | Every syntax example is classified and exercised | 11 | pending |
 | Formatter round-trip and idempotence, including tolerant labelled/variadic normalization | 4–9, verified in 11 | pending |
-| Unicode byte and display spans pass | 2, verified in 11 | pending |
+| Unicode byte and display spans pass | 2, verified in 11 | `LineIndex` derives one-based scalar columns; covered for astral scalars, combining marks, interior offsets, and CRLF, plus a property over a multiline Unicode document. Full verification in step 11. |
 | Fuzz campaign finds no panic or non-idempotent accepted input | 11 | pending |
