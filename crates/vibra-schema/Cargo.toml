@@ -11,5 +11,11 @@ publish.workspace = true
 [dependencies]
 vibra-diagnostics.workspace = true
 
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+jsonschema.workspace = true
+
 [lints]
 workspace = true
