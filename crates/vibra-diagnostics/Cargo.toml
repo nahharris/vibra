@@ -1,0 +1,14 @@
+[package]
+name = "vibra-diagnostics"
+description = "Spans, diagnostic codes, levels, and the one Vibra diagnostic model."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

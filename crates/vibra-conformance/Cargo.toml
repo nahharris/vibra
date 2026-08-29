@@ -1,0 +1,21 @@
+[package]
+name = "vibra-conformance"
+description = "The spec-rule-addressed conformance corpus runner and workspace invariants."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-diagnostics.workspace = true
+vibra-fmt.workspace = true
+vibra-schema.workspace = true
+vibra-syntax.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+
+[lints]
+workspace = true

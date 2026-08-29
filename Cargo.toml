@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+exclude = ["archive"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nahharris/vibra"
+publish = false
+
+[workspace.dependencies]
+vibra-conformance = { path = "crates/vibra-conformance" }
+vibra-diagnostics = { path = "crates/vibra-diagnostics" }
+vibra-fmt = { path = "crates/vibra-fmt" }
+vibra-schema = { path = "crates/vibra-schema" }
+vibra-syntax = { path = "crates/vibra-syntax" }
+
+toml = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# The reader runs on untrusted, incomplete input. A panic there is a defect,
+# and the milestone 1 exit gate fuzzes for exactly this.
+indexing_slicing = "warn"
+panic = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+todo = "warn"
+unimplemented = "warn"
+
+[profile.release]
+overflow-checks = true
