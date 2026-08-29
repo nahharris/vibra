@@ -313,12 +313,12 @@ never both. It is the one position whose grammar admits two namespaces, and it
 admits them because interface values would otherwise be unspellable. A symbol
 resolving there to a value or an effect root remains `@name.wrong-entity-kind`.
 
-`any` is the predeclared empty interface. It declares no contract member and no
-package may declare, extend, or shadow it; a declaration that reuses the
-spelling emits `@name.reserved-declaration`. It is otherwise an ordinary
-interface name, so it needs no special case in the grammar: it is a generic
-bound wherever a bound is written and a type expression wherever a type is
-written.
+`any` is the predeclared empty interface. It declares no contract member, and no
+package may declare or shadow the spelling, which emits
+`@name.reserved-declaration`. It is an interface in every other respect and
+takes no special case in the grammar: it is a generic bound wherever a bound is
+written and a type expression wherever a type is written, exactly as any
+declared interface is.
 
 Every type satisfies `any` without writing an implementation. This is the single
 exception to explicit conformance, and it is vacuous rather than structural: the
@@ -327,6 +327,12 @@ that matching names and shapes are insufficient is untouched. No other interface
 acquires an implementation implicitly, and the exception is fixed to this one
 predeclared name rather than extended to any empty interface a package might
 declare.
+
+The exception needs no rule barring a written implementation for `any`, because
+`interface-implementation` requires at least one member and an empty contract
+admits none: every candidate member is an extra member, which is already an
+error. `(impl any ...)` is therefore unwritable by construction rather than by
+prohibition.
 
 The two positions carry opposite information and are not interchangeable. A
 generic parameter bound by `any` keeps its concrete type at every instantiation.
@@ -347,6 +353,14 @@ identity, so an implementation is never spelled through an alias. `for:` is not
 part of implementation syntax, there is no top-level implementation form, and
 there is no `implements:` attribute — the `impl` blocks of a `deftype` are the
 list of interfaces it implements.
+
+Each target slot requires exactly one entity kind, which the grammar's shared
+`type-expr` does not enforce now that a type expression may name an interface. A
+`deftype` target MUST resolve to an interface and a `defint` target MUST resolve
+to a concrete type; the other kind emits `@name.wrong-entity-kind`. A receiver
+is therefore never an interface value, so an implementation is always selected
+from a concrete type at a widening boundary rather than layered on another
+interface.
 
 These two locations encode the orphan rule directly: an implementation can be
 written only where the package owns the type or owns the interface.
