@@ -1,0 +1,5 @@
+{
+  "name": "Vibra",
+  "install": "sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev pkg-config && git submodule update --init --recursive && cargo build --locked",
+  "repositoryDependencies": ["github.com/nahharris/vibra-stdlib"]
+}
