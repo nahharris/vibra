@@ -5,9 +5,13 @@ name: CI
 # host-language suite so far; the conformance job arrives with the corpus
 # runner in step 3.
 
+# Checks run on pull requests. A milestone integration branch keeps a standing
+# draft pull request into main, so pushes to it are already covered and need no
+# branch trigger of their own. The push trigger is kept for main alone, which
+# has no pull request of its own to be checked by.
 on:
   push:
-    branches: [main, "m[0-9]"]
+    branches: [main]
   pull_request:
 
 concurrency:

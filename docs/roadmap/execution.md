@@ -58,13 +58,22 @@ starts.
 
 - Every step is developed on its own short-lived branch and merged into the
   integration branch through one pull request.
-- The integration branch merges into `main` exactly once, when the milestone
-  exit gate is evidenced.
+- The integration branch has one **draft pull request into `main`**, opened as
+  soon as the first step lands and left in draft for the life of the
+  milestone. It is the milestone's running view: the cumulative diff, the
+  cumulative CI result, and the place the exit-gate evidence is recorded.
+- That draft is marked ready for review only when the exit gate is evidenced,
+  and it is the single merge of the milestone into `main`.
 - `main` therefore never carries a partially implemented milestone, which is
   what roadmap rule 3 requires.
 
-CI runs on every step pull request and on the integration branch. A step
-pull request is not merged with red CI.
+Checks run on pull requests. Every step pull request is checked against the
+integration branch, and every push to the integration branch re-checks the
+cumulative milestone through its standing draft. No branch-level trigger is
+needed for the integration branch, and none is configured: the draft pull
+request already covers it, and a second trigger would only duplicate runs.
+
+A step pull request is not merged with red CI.
 
 ## Progress tracking
 
