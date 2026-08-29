@@ -97,8 +97,11 @@ continuation:
 - the exact workspace revision used.
 
 Entity metadata and expanded references operate on resolved identities, not
-token spelling. They distinguish type, value, interface, effect root, effect
-operation, field, variant, and lexical binder identities.
+token spelling. They distinguish module, type, value, function, method,
+interface, effect root, effect operation, field, variant, and lexical binder
+identities. An interface implementation and its members have no single-atom
+identity and are reported as the contract-member/receiver-type pair defined by
+the type-system chapter.
 Discards have no identity, definition, references, or rename target; a query at
 `-`, `@-`, or `-:` reports its discard role and enclosing context only.
 
@@ -131,7 +134,9 @@ locator of `(import io @std.io)` reports `@entity-reference` and the resolved
 module. `io.stdout` in a source effect row reports `@code-reference`, the
 lexical import alias, and the canonical nominal effect identity. An effect atom
 inside a `project.vibon` target reports `@entity-reference` because that typed
-schema slot requires one.
+schema slot requires one, as does its `entry` declaration reference. A slot
+decides whether a token is a reference and which entity kind it must denote; the
+code graph alone decides which entity its path denotes.
 
 ## Transactional edit plans
 

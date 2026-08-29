@@ -32,13 +32,20 @@ source formatter's whitespace rules, schema field order for records, canonical
 key order for maps, LF endings, and one trailing newline.
 
 An atom parsed by the generic VIBON grammar is an atom value. A typed schema
-may declare a particular slot to be an entity reference; only then does the
-decoder resolve that atom to a canonical code identity. For example,
-`format: @project.v1` is a version atom, a dependency map key `@std` is an alias
-atom, and an entry in a target's `effects` array is an effect-entity reference.
-Every schema slot declares exactly one role. An atom-value slot never performs
-resolution; an entity-reference slot MUST resolve to the required entity kind
-or fail decoding. No decoder may infer the role from the atom's spelling.
+may declare a particular slot to be an entity reference; only then is that atom
+resolved to a canonical code identity. For example, `format: @project.v1` is a
+version atom, a dependency map key `@std` is an alias atom, and an entry in a
+target's `effects` array is an effect-entity reference. Every schema slot
+declares exactly one role, and an entity-reference slot additionally declares
+the one entity kind it requires. No decoder may infer the role from the atom's
+spelling.
+
+Decoding and resolution are separate phases. Decoding validates document
+grammar, schema shape, and the syntactic form of every atom, and never consults
+the source graph. An entity-reference slot is resolved during project checking,
+once the lock, vendored dependencies, and source graph are available; the
+resolved entity MUST exist and MUST have the kind its slot requires. An
+atom-value slot is never resolved in either phase.
 
 The source graph MUST reject `.vibon` as a module extension, and a persistent
 data loader MUST reject `.vib`. V1 has no extension fallback, content sniffing,
@@ -64,13 +71,14 @@ A project is rooted by `project.vibon`. It contains one `@project.v1` record:
       name: @hello
       kind: @bin
       root: "src/hello"
-      entry: "main.vib"
+      entry: @hello.main.main
       effects: (array @std.fs.read @std.io.stdout)))
   dependencies: (map
     @std (record
       kind: @git
       git: "https://github.com/nahharris/vibra-stdlib.git"
-      rev: "0123456789abcdef0123456789abcdef01234567")))
+      rev: "0123456789abcdef0123456789abcdef01234567"
+      target: @core)))
 ```
 
 Project tooling preserves comments when possible and rewrites changed data in
@@ -81,24 +89,51 @@ project document.
 ## Packages and targets
 
 A package has a kebab-case name and semantic version used as source identity.
-V1 does not solve version ranges; dependency selection is exact.
+V1 does not solve version ranges; dependency selection is exact. The package
+name and version are provenance and never appear in a reference position, so
+they are strings rather than atoms.
 
-A target has a unique atom name, kind `@bin` or `@lib`, source root, and entry
-file. The root and entry must remain inside the project after canonical path
-resolution. Binary entries export `main`; library entries expose their public
-module declarations. Target and dependency names share one project namespace
-and cannot collide.
+A target has a unique atom name, kind `@bin` or `@lib`, and a source root. Every
+root MUST remain inside the project after canonical path resolution, and roots
+MUST be pairwise disjoint: no root may equal or contain another. Every module
+therefore belongs to exactly one target and has exactly one canonical path.
+Overlapping roots emit `@project.overlapping-target-roots`. Target and
+dependency names share one project namespace and cannot collide.
 
-A binary target record MUST contain `effects`; a library target record MUST
-omit it. The binary array is the entry's complete static effect ceiling and
+A *unit* is one local target or one dependency alias. The unit is the root of
+code reference: the first component of every code-reference atom names a unit,
+and the remaining components address an entity beneath it.
+
+A binary target record MUST contain `entry` and `effects`; a library target
+record MUST omit both. A library has no execution entry and no index module: its
+surface is every public declaration of every module under its root, reached by
+import. An `entry` on a library target is `@project.entry-on-library`. The
+binary `effects` array is the entry's complete static effect ceiling and
 execution consent as defined by the effects chapter.
 
-A binary entry module defines one private `main` with no parameters. Its result
-is either `void` or `result void e` for a nominal error type `e`. Returning an
-error produces a structured nonzero program result; traps remain distinct.
-An omitted `main` `effects:` is `()`. An effectful `main` writes its ceiling,
-and project checking compares its computed performed row with both that ceiling
-and the target record.
+`entry` is a declaration reference. Its first component MUST be the target's own
+name, so an entry always resolves inside its own target's root; any other unit
+is `@project.entry-outside-target`. Because roots are disjoint, no declaration
+is nameable by the entry of more than one target.
+
+Three failures are distinguished. A path that resolves to nothing emits the
+ordinary resolution diagnostic, `@module.unknown-path` or
+`@name.unknown-symbol`. A path that resolves to an entity that is not a
+module-level `defn` emits `@name.wrong-entity-kind` and names the entity it
+found. A path that resolves to such a `defn` whose signature is not an entry
+signature emits `@project.invalid-entry-signature`.
+
+An entry signature has no parameters and a result of either `void` or
+`result void e` for a nominal error type `e`. Returning an error produces a
+structured nonzero program result; traps remain distinct.
+
+The entry declaration need not be public and need not be named `main`. The
+project document is a privileged referrer: naming a declaration in `entry`
+creates no import edge and does not widen its visibility.
+
+An omitted entry `effects:` is `()`. An effectful entry writes its ceiling, and
+project checking compares its computed performed row with both that ceiling and
+the target record.
 
 The minimum initialized layout is:
 
@@ -114,20 +149,40 @@ hello/
 ## Modules and imports
 
 Every `.vib` source file is one module. Its canonical module identity is its
-package-relative path without the extension. A source file does not redeclare
+target-relative path without the extension. A source file does not redeclare
 that identity.
+
+Every path segment under a target root MUST be a `kebab-name`, and `.vib` is the
+only module extension, so every module is addressable as a dotted atom path. A
+module file and a module directory of the same name MUST NOT both exist: a
+module is a leaf or an interior node, never both. `text.vib` and `text/`
+therefore cannot coexist under one root, and a root containing both emits
+`@module.file-directory-collision` before any module is parsed.
+
+Resolving `@unit.c1...cn` walks the components from that unit's root, descending
+while a component names a directory and stopping at the first component that
+names a `.vib` file. The layout rule above guarantees no step has a choice, so
+the walk needs no content inspection, extension search, or directory index
+fallback. Components remaining after that file are resolved against the module's
+declarations as the type-system chapter defines. A path whose walk reaches no
+module emits `@module.unknown-path`.
 
 ```vibra
 (import text @std.text)
 (import model @hello.model)
 ```
 
-Every import has one explicit lexical alias and one atom entity reference. The
-first atom component names a project target or dependency; the remaining
-components name a module beneath that target's source root. Thus `@hello.model`
-resolves to the local `hello` target's `model.vib`, while `@std.text` resolves
-through the `@std` dependency. The resolver never guesses from the importing
-file's directory.
+Every import has one explicit lexical alias and one atom entity reference whose
+resolved entity MUST be a module. The first atom component names a unit; the
+remaining components name a module beneath that unit's source root. Thus
+`@hello.model` resolves to the local `hello` target's `model.vib`, while
+`@std.text` resolves through the `@std` dependency alias. The resolver never
+guesses from the importing file's directory.
+
+Resolution is total, but access is not. An atom path resolves to a private
+declaration exactly as it resolves to a public one, and each referring position
+then applies its own visibility rule: an import exposes only public
+declarations, while the `entry` slot may name a private one.
 
 String paths, relative imports, absolute filesystem imports, glob imports,
 implicit extension search, directory index fallback, re-exports, and import
@@ -148,6 +203,15 @@ V1 supports:
 - Git dependencies whose record has `kind: @git`, an HTTPS `git:` URL, and a
   full 40-hex `rev:`.
 
+A dependency alias binds one `@lib` target of the dependency package, named by
+the optional `target:` field, and never binds a package as a whole. An omitted
+`target:` selects the package's only `@lib` target; a package exposing more than
+one requires the field and otherwise emits
+`@project.ambiguous-dependency-target`. A dependency alias MUST NOT bind a
+`@bin` target, though a local `@bin` target remains a unit importable inside its
+own project. One package MAY therefore be bound under several aliases, one per
+library target.
+
 `vibra project sync` exports exact Git revisions into `dep/<alias>/` without
 `.git` metadata. It writes `project-lock.vibon`, a canonical generated data
 record. The lock contains its format, project fingerprint, dependency edges,
@@ -162,6 +226,7 @@ source identities, revisions, content hashes, and vendor paths:
       kind: @git
       source: "https://github.com/nahharris/vibra-stdlib.git"
       rev: "0123456789abcdef0123456789abcdef01234567"
+      target: @core
       content: "sha256:..."
       vendor: "dep/std"
       dependencies: (array))))

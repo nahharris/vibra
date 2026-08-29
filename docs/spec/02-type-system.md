@@ -162,9 +162,37 @@ first-class modules, effects, diagnostics, or declarations.
 
 A module has separate type, value, interface, and effect namespaces, but one
 top-level form may not reuse a spelling already declared by another top-level
-form in that module. Syntactic position selects the namespace. Tooling MUST
+form in that module. Syntactic position selects the namespace for a symbol
+reference. An atom path needs no such selection: because that top-level spelling
+space is flat, each component resolves to at most one declaration. Tooling MUST
 return the resolved kind and canonical identity; it must never expose a dotted
 string as if textual coincidence were resolution.
+
+Every code entity named in a module's declaration tree has exactly one canonical
+atom path, and every atom path resolves to at most one entity. A path is
+`@unit.c1...cn`: its first component names a unit, the programs-and-packages
+chapter defines the walk from that unit's root to one module, and the components
+remaining after that module resolve against its declarations. A module-level
+form takes one component, and a member of one takes one further component. Thus
+`@app.m.user` is a type, `@app.m.user.name-length` is one of its methods, and
+`@app.m.fs.read.file` is an effect operation.
+
+Paths are built from the ownership tree, never from a declaration's spelling,
+because every declaration name is one unqualified segment. One entity kind is
+not named in that tree at all: the interfaces section defines the pair identity
+of an implementation and its members.
+
+The addressable members of one owner form a single flat namespace covering
+record fields, enum variants, methods, and effect operations. Their names MUST
+be pairwise distinct within that owner, so a field and a method cannot share a
+spelling; a collision emits `@name.member-collision`. Interface implementations
+contribute no name to this namespace.
+
+A slot that expects an entity reference decides only whether an atom is a
+reference and which entity kind the resolved entity must have. It never decides
+how the path is read, so one spelling denotes one entity in every position. A
+path resolving to an entity of the wrong kind emits `@name.wrong-entity-kind`
+and names the entity it found, rather than reporting the path as unknown.
 
 Name shadowing is forbidden. Every name introduced anywhere inside a
 positional-parameter, `let`, `for`, or `match` pattern MUST NOT reuse any
@@ -218,26 +246,52 @@ observable except through deterministic program and build output.
 
 ## Interfaces and methods
 
-`defint` declares a nominal set of interface-qualified method signatures over
-`self`. Conformance is always explicit. Matching method names and shapes are
-insufficient.
+`defint` declares a nominal set of method signatures over `self`. Conformance is
+always explicit. Matching method names and shapes are insufficient.
 
-A type declared in the current package lists its interfaces in the enclosing
-`deftype` `implements:` attribute and supplies each interface-qualified method
-inside that `deftype`. A regular method in the same declaration is qualified
-by the type name. The checker rejects a method with the wrong qualifier.
+Every `defn` name is one unqualified segment in its owner's scope, because the
+enclosing form already names that owner. A declaration therefore never spells
+its own path prefix, and no import alias can enter a declaration name.
 
-The package that owns an interface may implement it for a foreign type by
-placing `(impl foreign-type ...)` inside the owning `defint`. The `impl` target
-is positional, and its method definitions are its variadic members; `for:` is
-not part of implementation syntax. These two locations encode the orphan rule
-directly: an implementation can be written only where the package owns the
-type or owns the interface. There is no top-level implementation form.
+An implementation is written as an `impl` block whose positional target supplies
+whichever half of the interface/type pair its parent does not: inside a
+`deftype` the target is the interface, and inside a `defint` it is the receiver
+type. Its members are unqualified and its target is resolved to a canonical
+identity, so an implementation is never spelled through an alias. `for:` is not
+part of implementation syntax, there is no top-level implementation form, and
+there is no `implements:` attribute — the `impl` blocks of a `deftype` are the
+list of interfaces it implements.
 
-Within an interface contract, a `deftype` method, or a nested `impl`, `self`
-resolves to the applicable receiver type. In a `deftype`, that is the declared
-type. In an `impl`, it is the positional target type. `self` is not visible in
-module-level functions.
+These two locations encode the orphan rule directly: an implementation can be
+written only where the package owns the type or owns the interface.
+
+An `impl` block inside a `defint` MUST NOT target a type declared in the same
+module, and a same-module target emits `@type.redundant-implementation`. Within
+one module a type and an interface always see each other without an import, so
+the `deftype` placement is always available there and the `defint` placement
+would be a second spelling of one implementation. Across modules both placements
+remain legal, because requiring the `deftype` placement there could demand an
+import that completes a cycle and leave the implementation unwritable.
+
+An implementation has no name in any declaration tree: it is keyed by an
+interface and a receiver type rather than by a spelling. Its identity, and the
+identity of each of its members, is therefore the pair of the corresponding
+contract member and the receiver type, exactly as an effect operation is
+identified by its root and operation. This is the only v1 entity kind that no
+single atom addresses, and it needs no atom: an implementation is never named at
+a use site, because dispatch selects it from the receiver.
+
+Within an interface contract, a `deftype` method, or an `impl` block, `self`
+resolves to the applicable receiver type. In a `deftype` and in an `impl` nested
+in one, that is the declared type. In an `impl` nested in a `defint`, it is the
+positional target type. `self` is not visible in module-level functions.
+
+A method is called through a dotted path naming the entity, never through a
+receiver-first syntax: `(user.name-length value)` applies the `name-length`
+method of type `user`, and `(printable.render value)` applies the `printable`
+contract member, with dispatch selecting the implementation from the receiver.
+Vibra has no method-call operator and no implicit receiver; a method application
+is an ordinary application whose callee is a resolved path.
 
 For each interface/type pair, the checker MUST find every contract member
 exactly once, substitute the concrete type for `self`, preserve parameter and

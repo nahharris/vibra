@@ -120,6 +120,12 @@ as one. The module locator in `import` is such a source position; writing
 or invoking code. Effect rows do not use atoms: they contain lexical symbols
 resolved through the source module's imports.
 
+A position that does expect an entity reference declares the entity kind it
+requires; it never changes how the atom's path is read. The type-system chapter
+defines that one reading, under which each path denotes at most one code entity
+in every position, and names the one entity kind that carries a pair identity
+rather than a path.
+
 ## Labels and applications
 
 A label consumes one following form. Required ordered input is positional;
@@ -189,7 +195,8 @@ V1 has exactly these user top-level forms:
 top-form = import | deftype | defint | deffect | def | defn | test ;
 import   = "(", "import", symbol, atom-name, ")" ;
 deftype  = "(", "deftype", symbol, type-expr,
-           { type-attribute | nested-method }, ")" ;
+           { type-attribute | nested-method
+           | interface-implementation }, ")" ;
 defint   = "(", "defint", symbol,
            { declaration-attribute | interface-member
            | interface-implementation }, ")" ;
@@ -201,15 +208,15 @@ defn     = "(", "defn", symbol, parameters, type-expr,
            { function-attribute }, { expr }, ")" ;
 test     = "(", "test", string, [ "effects:", effect-row ], expr+, ")" ;
 
-nested-method = "(", "defn", symbol, parameters, type-expr,
+nested-method = "(", "defn", local-name, parameters, type-expr,
                 { function-attribute }, { expr }, ")" ;
-interface-member = "(", "defn", symbol, parameters, type-expr,
+interface-member = "(", "defn", local-name, parameters, type-expr,
                    { function-attribute }, ")" ;
 interface-implementation = "(", "impl", type-expr,
                            implementation-member+, ")" ;
-implementation-member = "(", "defn", symbol, parameters, type-expr,
+implementation-member = "(", "defn", local-name, parameters, type-expr,
                         { function-attribute }, { expr }, ")" ;
-effect-member = "(", "defn", symbol, parameters, type-expr,
+effect-member = "(", "defn", local-name, parameters, type-expr,
                 { function-attribute }, { expr }, ")" ;
 
 discard              = "-" | "@-" | "-:" ;
@@ -227,7 +234,6 @@ generic-bound        = "any" | symbol ;
 
 declaration-attribute = "visibility:", atom-name | "doc:", string ;
 type-attribute = "where:", where-clause
-               | "implements:", "(", { symbol }, ")"
                | declaration-attribute ;
 function-attribute = "where:", where-clause
                    | "labelled:", labelled-parameters
@@ -260,9 +266,9 @@ once in its `where:` clause. `any` states that no interface bound is required.
 
 The canonical function-attribute order is `where:`, `labelled:`, `variadic:`,
 `visibility:`, `effects:`, `external:`, `symbol:`, then `doc:`. The canonical
-type-attribute order is `where:`, `implements:`, `visibility:`, then `doc:`.
-Attributes may be parsed in any unambiguous order, occur at most once, and are
-formatted canonically. Nested methods follow attributes.
+type-attribute order is `where:`, `visibility:`, then `doc:`. Attributes may be
+parsed in any unambiguous order, occur at most once, and are formatted
+canonically. Nested methods follow attributes, and `impl` blocks follow methods.
 
 Every labelled argument or attribute follows all fixed positional forms of its
 enclosing form and precedes its variadic body or member forms. The parser MAY
@@ -359,47 +365,49 @@ FFI.
 
 ## Types, interfaces, and methods
 
-An interface contract method is qualified by its interface name. A `deftype`
-lists every interface it implements in `implements:` and defines those methods
-with the interface-qualified name. A regular method nested in a `deftype` uses
-the type-qualified name.
+Every `defn` name is one unqualified `local-name`, whether the declaration is
+module-level or nested. The enclosing form names the owner, so a nested name
+never repeats it. An implementation is written as an `impl` block whose
+positional target supplies whichever half of the interface/type pair its parent
+does not.
 
 ```vibra
 (defint printable
   visibility: @public
-  (defn printable.render (value self) str))
+  (defn render (value self) str))
 
 (deftype user
   (record name str id user-id)
-  implements: (printable)
   visibility: @public
-  (defn printable.render (value self) str
-    (value @name))
-  (defn user.name-length (value self) u64
-    (text.length (value @name))))
+  (defn name-length (value self) u64
+    (text.length (value @name)))
+  (impl printable
+    (defn render (value self) str
+      (value @name))))
 ```
 
 The package that owns an interface may implement it for a type declared in
-another package by placing an `impl` block in the owning `defint`:
+another module by placing an `impl` block in the owning `defint`:
 
 ```vibra
 (defint printable
-  (defn printable.render (value self) str)
+  (defn render (value self) str)
   (impl i32
-    (defn printable.render (value self) str
+    (defn render (value self) str
       (integer.to-str value))))
 ```
 
-`impl` is valid only as a direct child of the `defint` that owns the interface;
-there is no top-level `impl` and no `for:` implementation attribute. A contract
-member has no body. A method implementing an interface has a body and MUST
-match its contract after substituting the enclosing `deftype` or `impl` target
-for `self`. The type chapter defines completeness, conflict, and ownership
-rules.
+`impl` is valid only as a direct child of the `deftype` that owns the type or
+the `defint` that owns the interface; there is no top-level `impl` and no `for:`
+implementation attribute. A contract member has no body. A method implementing
+an interface has a body and MUST match its contract after substituting the
+receiver type for `self`. The type chapter defines completeness, conflict, and
+ownership rules.
 
-Qualified method definitions occur only inside their owning `deftype`,
-`defint`, nested `impl`, or `deffect`. A module-level `defn` name MUST be
-unqualified.
+A declaration name and a reference are distinct. A name is always one segment
+in its owner's scope; a reference is a dotted path through owners, so
+`user.name-length` and `printable.render` are resolved paths at a use site and
+never the spelling of a declaration.
 
 Records are constructed by applying their nominal type to labelled fields.
 Enum tags and newtypes expose qualified constructors. A record value is
