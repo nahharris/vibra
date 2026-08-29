@@ -184,9 +184,11 @@ rejected with `@syntax.retired-form`. `@type.not-applicable`,
 Interface coverage includes abstract and default contract members, rejection of
 `@type.default-override` and `@type.missing-abstract-member`, the canonical
 `iter` contract and default-method semantics, closed registry `iter`
-conformance for `(array t)`, `(map k v)`, `str`, and `(option t)`,
-pure `iter` default methods with `effects: ()` callbacks only, and effectful
-walks written as tail-recursive module-level functions over `iter.next`.
+conformance for `(array t)`, `(map k v)`, `str`, and `(option t)`, explicit
+`impl iter` on `mapped-iter`, `filtered-iter`, `skipped-iter`, and
+`taken-iter`, pure `iter` default methods with `effects: ()` callbacks only,
+and effectful walks written as tail-recursive module-level functions over
+`iter.next`.
 Tail-call cases belong to `V1-RUNTIME`. `@name.reserved-value-spelling` and
 `@type.function-not-equatable` have fixed level `@error`.
 

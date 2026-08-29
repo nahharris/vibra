@@ -355,10 +355,12 @@ predeclared name rather than extended to any empty interface a package might
 declare.
 
 The second exception is closed toolchain `iter` conformance for the builtin
-constructor and standard-library types named in the iteration section. Those
-implementations are keyed by constructor identity in a closed registry; they are
-not user `impl` blocks and not generic `defint` implementations. Every other
-interface still requires an explicit `impl`.
+constructor types `(array t)`, `(map k v)`, `str`, and `(option t)` named in
+the iteration section. Those implementations are keyed by constructor identity
+in a closed registry; they are not user `impl` blocks and not generic `defint`
+implementations. Standard-library iterator adapters are ordinary `deftype`s
+with explicit nested `impl iter` blocks instead. Every other interface still
+requires an explicit `impl`.
 
 The exception needs no rule barring a written implementation for `any`, because
 `interface-implementation` requires at least one member and an empty contract
@@ -466,18 +468,18 @@ written effect ceiling. There is no separate loop or foreach form.
 
 In the contract, the second `self` component is the remaining iterator value and
 has the same static type as the receiver. At a concrete implementation site the
-checker substitutes the concrete iterator type; for adapter values returned by
-default methods it substitutes `iter`.
+checker substitutes the concrete iterator type; for adapter values it substitutes
+the adapter `deftype` or `(iter item)` after widening.
 
 The standard-library declaration adds these default members, each with a body
 that MUST match the semantics below:
 
 | Member | Signature |
 | --- | --- |
-| `map` | `(value self f (fn (item) item) iter)` |
-| `filter` | `(value self pred (fn (item) bool) iter)` |
-| `skip` | `(value self n u64) iter` |
-| `take` | `(value self n u64) iter` |
+| `map` | `(value self f (fn (item) item) (iter item))` |
+| `filter` | `(value self pred (fn (item) bool) (iter item))` |
+| `skip` | `(value self n u64) (iter item)` |
+| `take` | `(value self n u64) (iter item)` |
 | `collect` | `(value self) (array item)` |
 
 `next` is abstract. Default bodies MUST NOT be redeclared in user `impl` blocks.
@@ -486,24 +488,43 @@ implementation's element type. `next` returns `(option (tuple item self))`:
 the second component is the remaining iterator and has the same static type as
 the receiver. There is no mutating cursor.
 
+An `(iter item)` in type position is the interface value for one element type;
+it is reached by explicit widening at a typed boundary and MUST NOT be written
+bare as `iter`.
+
 Default-method semantics:
 
-- `map` returns a lazy `iter` adapter. Each `next` on the adapter calls `next`
-  on the underlying iterator and, when an element is present, yields
-  `(tuple (f x) remaining)` with `remaining` typed as `iter`.
-- `filter` returns a lazy `iter` adapter that yields only elements for which
-  `pred` returns `true`, calling `next` on the underlying iterator as needed.
-- `skip` returns a lazy `iter` adapter that discards the first `n` elements of
-  the underlying iterator, then forwards subsequent elements unchanged.
-- `take` returns a lazy `iter` adapter that yields at most `n` elements and then
-  returns `none` on further `next` calls even if the underlying iterator
-  continues.
+- `map` returns a `mapped-iter` value seen as `(iter item)`. Each `next` on the
+  adapter calls `next` on the underlying iterator and, when an element is
+  present, yields `(tuple (f x) remaining)` with `remaining` typed as
+  `(iter item)`.
+- `filter` returns a `filtered-iter` value seen as `(iter item)` that yields
+  only elements for which `pred` returns `true`.
+- `skip` returns a `skipped-iter` value seen as `(iter item)` that discards the
+  first `n` elements, then forwards the rest.
+- `take` returns a `taken-iter` value seen as `(iter item)` that yields at most
+  `n` elements and then stops.
 - `collect` eagerly drains the receiver through `next` and returns `(array item)`.
 
-The static result type of `map`, `filter`, `skip`, and `take` is always `iter`,
-never the concrete receiver type. Standard-library adapter values implement
-`iter` through closed toolchain conformance keyed by adapter identity, using
-the same `item` type as their source iterator.
+The static result type of `map`, `filter`, `skip`, and `take` is always
+`(iter item)`, never the concrete receiver type.
+
+### Standard-library adapter types
+
+Default methods construct these public stdlib `deftype`s. Each is generic over
+`item`, implements `iter` through a nested `impl iter` block supplying only
+`next`, and is **not** part of the closed registry exception above:
+
+| Type | Role |
+| --- | --- |
+| `mapped-iter` | Holds `(iter item)` source and `(fn (item) item)`; lazy `map` |
+| `filtered-iter` | Holds `(iter item)` source and `(fn (item) bool)`; lazy `filter` |
+| `skipped-iter` | Holds `(iter item)` source and remaining skip count; lazy `skip` |
+| `taken-iter` | Holds `(iter item)` source and remaining take count; lazy `take` |
+
+Each adapter's `next` returns `(option (tuple item self))` with `self` equal to
+the adapter type `(mapped-iter item)`, `(filtered-iter item)`, and so on.
+Widening to `(iter item)` happens at the default-method result boundary.
 
 All defaults are pure and their callback parameters MUST have `effects: ()`.
 
