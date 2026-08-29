@@ -359,8 +359,8 @@ constructor types `(array t)`, `(map k v)`, `str`, and `(option t)` named in
 the iteration section. Those implementations are keyed by constructor identity
 in a closed registry; they are not user `impl` blocks and not generic `defint`
 implementations. Standard-library iterator adapters are ordinary `deftype`s
-with explicit nested `impl iter` blocks instead. Every other interface still
-requires an explicit `impl`.
+with explicit nested `impl (iter item)` blocks instead. Every other interface
+still requires an explicit `impl`.
 
 The exception needs no rule barring a written implementation for `any`, because
 `interface-implementation` requires at least one member and an empty contract
@@ -511,9 +511,10 @@ The static result type of `map`, `filter`, `skip`, and `take` is always
 
 ### Standard-library adapter types
 
-Default methods construct these public stdlib `deftype`s. Each is generic over
-`item`, implements `iter` through a nested `impl iter` block supplying only
-`next`, and is **not** part of the closed registry exception above:
+Default methods construct these public stdlib `deftype`s. Each declares
+`where: (item any)` and implements `(iter item)` through a nested
+`(impl (iter item) …)` block supplying only `next`. They are **not** part of the
+closed registry exception above:
 
 | Type | Role |
 | --- | --- |
@@ -557,9 +558,12 @@ Heterogeneous tuples do not implement `iter` in v1. Users cannot add methods or
 `impl` blocks to `array` or `map`. The associative `map` type MUST NOT declare a
 method named `map`.
 
-User `deftype`s MAY implement `iter` with a nested `impl iter` block supplying
-only `next`. The checker infers `item` from that member's result type. Generic
-`impl` targets such as `(array t)` inside a `defint` remain post-v1.
+User `deftype`s MAY implement `(iter item)` with a nested `(impl (iter item) …)`
+block supplying only `next`. The owner MUST declare `item` in its `where:`
+clause, and the `impl` target MUST spell the full application `(iter item)`;
+bare `iter` is invalid. The `next` member MUST name that same `item` in its
+result type. Generic `impl` targets such as `(array t)` inside a `defint`
+remain post-v1.
 
 ## Control flow and failure
 
