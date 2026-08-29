@@ -225,8 +225,8 @@ that contract and never rewrites the contract from observed implementation.
 ## Generics
 
 Every generic name is declared by one flat `where:` entry. The value paired
-with the name is one nominal interface bound or `any` when the parameter is
-unconstrained.
+with the name is one nominal interface bound; the predeclared empty interface
+`any` is the bound that constrains nothing.
 
 ```vibra
 (defn first (items (array t)) (option t)
@@ -279,6 +279,23 @@ observable except through deterministic program and build output.
 
 `defint` declares a nominal set of method signatures over `self`. Conformance is
 always explicit. Matching method names and shapes are insufficient.
+
+An interface name is a valid type expression, where it denotes an interface
+value reached by explicit widening at a typed boundary.
+
+`any` is the predeclared empty interface. It declares no contract member, every
+type implements it without writing an implementation, and no package may
+declare, extend, or shadow it; a declaration that reuses the spelling emits
+`@name.reserved-declaration`. It is otherwise an ordinary interface name, so it
+needs no special case in the grammar: it is a generic bound wherever a bound is
+written and a type expression wherever a type is written.
+
+The two positions carry opposite information and are not interchangeable. A
+generic parameter bound by `any` keeps its concrete type at every instantiation.
+An `any` in type position is an interface value that erases which type it holds,
+and because the contract is empty and v1 has no runtime type test, such a value
+can only be passed along, never inspected. A signature that needs the concrete
+type MUST use a generic parameter.
 
 Every `defn` name is one unqualified segment in its owner's scope, because the
 enclosing form already names that owner. A declaration therefore never spells

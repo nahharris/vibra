@@ -19,6 +19,7 @@ than its issuance order or severity:
 @name.member-collision
 @name.generic-redeclaration
 @name.reserved-label
+@name.reserved-declaration
 @module.file-directory-collision
 @module.unknown-path
 @type.argument-mismatch
