@@ -122,7 +122,10 @@ bound.
 A union `deftype` MAY declare nested methods and `impl` blocks exactly as any
 other `deftype` does. Nothing is lifted from its members: a method, field, or
 implementation common to every member is not thereby a member of the union, and
-a union conforms to an interface only by writing that implementation. A union is
+a union conforms to an interface other than `any` only by writing that
+implementation. `any` is satisfied by every type without one, and the closed
+`iter` registry is keyed by builtin constructor identity and so never covers a
+union. A union is
 a valid `(map k v)` key only when it explicitly implements `hashable`,
 `equatable`, and `ordered`. Unions participate in the finite-size check on the
 same terms as records and enums.
@@ -462,11 +465,14 @@ import that completes a cycle and leave the implementation unwritable.
 
 An implementation has no name in any declaration tree: it is keyed by an
 interface and a receiver type rather than by a spelling. Its identity, and the
-identity of each of its members, is therefore the pair of the corresponding
-contract member and the receiver type, exactly as an effect operation is
-identified by its root and operation. This is the only v1 entity kind that no
-single atom addresses, and it needs no atom: an implementation is never named at
-a use site, because dispatch selects it from the receiver.
+identity of each of its members, is therefore the corresponding contract member,
+the applied interface target, and the receiver type, much as an effect operation
+is identified by its root and operation. The applied target is part of that key
+rather than a detail of it: a receiver carrying both `(from i16)` and
+`(from i8)` has two `convert` members, and without the target both would share
+one identity. This is the only v1 entity kind that no single atom addresses, and
+it needs no atom: an implementation is never named at a use site, because
+dispatch selects it from the receiver.
 
 A generic interface is keyed by its applied type, so one receiver MAY implement
 `(from i16)` and `(from i8)` as two implementations of one `defint`. The
@@ -495,6 +501,13 @@ so the inference prohibition above is untouched.
 The rule is general and is not limited to conversion. A contract member such as
 `(defn empty () self)` is a factory of the same shape and is selected the same
 way, from the expected type at its call site.
+
+These two rules are exhaustive because every contract member MUST mention `self`
+in a parameter type or in its result type. A member naming `self` in neither,
+such as `(defn version () str)`, is selectable by nothing and emits
+`@type.contract-member-without-self` at its declaration. This is what `defint`
+declaring method signatures **over `self`** already means; v1 adds no third
+selection rule and has no interface-level static member.
 
 Within an interface contract, a `deftype` method, or an `impl` block, `self`
 resolves to the applicable receiver type. In a `deftype` and in an `impl` nested

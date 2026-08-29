@@ -100,8 +100,10 @@ Entity metadata and expanded references operate on resolved identities, not
 token spelling. They distinguish module, type, value, function, method,
 interface, effect root, effect operation, field, variant, and lexical binder
 identities. An interface implementation and its members have no single-atom
-identity and are reported as the contract-member/receiver-type pair defined by
-the type-system chapter.
+identity and are reported as the contract member, applied interface target, and
+receiver type together, as the type-system chapter defines. The applied target
+is required: one receiver may implement a generic interface at several targets,
+and omitting it would report two distinct members under one identity.
 Discards have no identity, definition, references, or rename target; a query at
 `-`, `@-`, or `-:` reports its discard role and enclosing context only.
 

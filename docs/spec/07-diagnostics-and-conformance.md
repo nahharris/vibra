@@ -35,6 +35,7 @@ than its issuance order or severity:
 @type.unknown-record-field
 @type.numeric-out-of-range
 @type.anonymous-union
+@type.contract-member-without-self
 @type.union-too-few-members
 @type.union-member-overlap
 @type.union-member-not-concrete
@@ -210,8 +211,10 @@ body, rejection of a union, interface, and bare generic member, and rejection of
 that no member method or implementation is lifted to the union, and that a union
 used as a `(map k v)` key without explicit `hashable`, `equatable`, and
 `ordered` implementations is rejected. A `(union ...)` form written in a
-parameter, a result, a record field, a `def` annotation, an `as` type, and an
-`impl` target is rejected in each position with `@type.anonymous-union`.
+parameter, a result, a record field, a `def` annotation, an `as` type, an `impl`
+target, and a `types:` argument is rejected in each of those seven positions
+with `@type.anonymous-union`. The `types:` case is written separately so the
+call-site type-argument parsing and binding path is covered rather than assumed.
 
 Widening coverage proves that each written expected type in the type chapter's
 list admits a member-to-union and a concrete-to-interface widening, that no
@@ -228,23 +231,32 @@ that `as` reaches the typed IR as its operand alone and adds no runtime check.
 Narrowing coverage includes an exhaustive union `match`, a binder-covered
 remainder, a rejected non-exhaustive arm set, an unreachable duplicate arm, and
 an `as` pattern in `let` and in a positional parameter rejected with
-`@pattern.refutable-binding`.
+`@pattern.refutable-binding`. It also includes one `as` pattern over a
+non-union scrutinee rejected with `@type.narrowing-non-union` and one naming a
+type outside the union's member set rejected with
+`@type.not-a-union-member`.
 
 Conversion coverage includes a `from` implementation on a destination `deftype`,
 a `try-from` implementation returning `conversion-error`, destination selection
 through a written parameter and result type, destination selection through `as`,
 a bare call with no expected type rejected with `@type.ambiguous-destination`,
-one receiver implementing `(from i16)` and `(from i8)` together, `(from t)` and
-`(from i32)` on one generic receiver rejected with
-`@type.overlapping-implementation`, and a `from`/`try-from` pair on one source
-rejected with `@type.redundant-conversion`.
+one receiver implementing `(from i16)` and `(from i8)` together, and a
+`from`/`try-from` pair on one source rejected with
+`@type.redundant-conversion`. That two-target receiver is also called with an
+unsuffixed integer literal, whose source type both implementations satisfy, and
+the call is rejected with `@type.ambiguous-implementation`. `(from t)` and
+`(from i32)` on one generic receiver are rejected at the declaration with
+`@type.overlapping-implementation`, and a contract member naming `self` in
+neither a parameter nor its result is rejected with
+`@type.contract-member-without-self`.
 
 Destination dispatch is covered beyond conversion by a non-conversion contract
 member of the same shape, such as a `(defn empty () self)` factory, selected
 from a written expected type and rejected with `@type.ambiguous-destination`
 where none is written.
 
-`@type.anonymous-union`, `@type.union-too-few-members`,
+`@type.anonymous-union`, `@type.contract-member-without-self`,
+`@type.union-too-few-members`,
 `@type.union-member-overlap`, `@type.union-member-not-concrete`,
 `@type.overlapping-implementation`, `@type.ambiguous-implementation`,
 `@type.ambiguous-destination`, `@type.invalid-ascription`,

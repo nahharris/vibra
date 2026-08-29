@@ -68,10 +68,10 @@ conformance case or an explicit review-only invariant.
 - Names use kebab-case and imports produce explicit aliases.
 - Public boundaries carry complete types and effect ceilings.
 - Types, interfaces, their explicit implementations, and effects are nominal.
-- Every widening relation is declared and every narrowing is written. A
-  `deftype` union widens to a closed member set, `as` ascribes a type at any
-  expression, `match` narrows, and the `from` and `try-from` interfaces convert.
-  No conversion is implicit.
+- Every widening relation is declared and every narrowing is written. A value
+  of a member type widens into the `deftype` union that lists it, `match`
+  narrows that union back to one member, `as` ascribes a type at any expression,
+  and the `from` and `try-from` interfaces convert. No conversion is implicit.
 - Typed `option` and `result` replace null and exceptions.
 - Effects describe possible operations statically. A binary target's declared
   effect roots are its complete execution consent; v1 has no runtime grants.
