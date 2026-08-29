@@ -23,6 +23,7 @@ than its issuance order or severity:
 @module.file-directory-collision
 @module.unknown-path
 @type.argument-mismatch
+@type.type-argument-mismatch
 @type.redundant-implementation
 @type.not-applicable
 @type.invalid-tuple-index

@@ -85,8 +85,9 @@ The following are not partially implemented in v1:
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;
-- arbitrary unions, inheritance, implicit interface conformance, dependent or
-  refinement types, and a general ownership/borrowing system;
+- arbitrary unions, inheritance, implicit interface conformance apart from the
+  predeclared empty interface `any`, dependent or refinement types, and a
+  general ownership/borrowing system;
 - language-defined fuel, memory, or host-operation budgets and scoped host
   resource or handle lifetimes;
 - network and child-process host APIs;

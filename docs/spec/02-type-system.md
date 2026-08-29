@@ -153,7 +153,9 @@ names, and filesystem-dependent fallback resolution are forbidden.
 
 Token spelling never heuristically selects entity resolution. In source,
 symbols name lexical code entities and the surrounding grammar selects the
-type, value, interface, or effect namespace. Atoms are values unless a closed
+type, value, interface, or effect namespace. Type position is the one exception
+and selects the type and interface namespaces together, as the interfaces
+section defines. Atoms are values unless a closed
 source grammar position, such as the module locator in `import`, explicitly
 requires an entity reference. In `.vibon`, the typed data schema makes the same
 choice field by field. Resolution converts an entity-reference token to one
@@ -163,8 +165,9 @@ first-class modules, effects, diagnostics, or declarations.
 A module has separate type, value, interface, and effect namespaces, but one
 top-level form may not reuse a spelling already declared by another top-level
 form in that module. Syntactic position selects the namespace for a symbol
-reference. An atom path needs no such selection: because that top-level spelling
-space is flat, each component resolves to at most one declaration. Tooling MUST
+reference, and that flat top-level spelling space is what keeps the one
+two-namespace position deterministic. An atom path needs no such selection:
+each component likewise resolves to at most one declaration. Tooling MUST
 return the resolved kind and canonical identity; it must never expose a dotted
 string as if textual coincidence were resolution.
 
@@ -241,12 +244,18 @@ every type argument in `where:` order. Partial application, named type
 arguments, specialization by value, multiple bounds on one parameter, and
 runtime type tests are not in v1.
 
-A nested method sees the generic names of its enclosing `deftype` or `impl`
-target and declares only additional ones in its own `where:`. Redeclaring an
-inherited name is `@name.generic-redeclaration`, so each generic name still has
-exactly one declaration site. The complete type-argument list of such a method
-is its owner's parameters in declaration order followed by its own, and
-`types:` supplies that whole list:
+A nested method sees the generic names of its enclosing `deftype` and declares
+only additional ones in its own `where:`. Redeclaring an inherited name is
+`@name.generic-redeclaration`, so each generic name still has exactly one
+declaration site. An `impl` block is not a binding site: it has no `where:`
+clause, so an `impl` nested in a `deftype` passes that type's names through
+unchanged, and the target of an `impl` nested in a `defint` MUST be a closed
+type expression. A free generic name in an `impl` target is
+`@name.unknown-symbol`, and generic implementations are a post-v1 concern.
+
+The complete type-argument list of a `deftype` method is its type's parameters
+in declaration order followed by the method's own, and `types:` supplies that
+whole list:
 
 ```vibra
 (deftype ring (record items (array t) head u64)
@@ -266,11 +275,26 @@ labelled parameter named `types`, which would otherwise make the label
 ambiguous between a type-argument list and an ordinary labelled operand; such a
 declaration emits `@name.reserved-label`.
 
-`types:` is written where an application's labelled operands are written, and
-it is neither an operand of the callee nor visible to its body. A `types:` list
-whose length differs from the complete parameter list is an error rather than a
-partial application, and supplying `types:` where inference already succeeds is
-permitted and checked for agreement.
+`types:` is always defined by the entity the call site addresses, never by the
+entity dispatch selects. A call through an interface contract member therefore
+supplies the contract's parameters, and the receiver's own generic names stay
+lexical: they scope an implementation body and are fixed by unification with the
+receiver, never written at a call site. Implementations of one contract may
+belong to owners of different generic arity, so an implementation member has no
+`types:` contract of its own.
+
+`types:` is written among an application's labelled operands but is not one: it
+is neither an operand of the callee nor visible to its body, and it has no
+declaration-order slot. Canonical form places it before every ordinary labelled
+operand. The recovery parser accepts it in any unambiguous position, the
+formatter moves it, and a noncanonical position is `@style.argument-order`
+rather than a compile error.
+
+A `types:` list whose length differs from the complete parameter list is
+`@type.type-argument-mismatch` rather than a partial application. Supplying
+`types:` where inference already succeeds is permitted and checked for
+agreement; a supplied argument that contradicts the inferred one emits the same
+code.
 
 Implementations may monomorphize, but specialization strategy is not
 observable except through deterministic program and build output.
@@ -280,15 +304,29 @@ observable except through deterministic program and build output.
 `defint` declares a nominal set of method signatures over `self`. Conformance is
 always explicit. Matching method names and shapes are insufficient.
 
-An interface name is a valid type expression, where it denotes an interface
-value reached by explicit widening at a typed boundary.
+A symbol in type position resolves across the type and interface namespaces
+together, and resolving to an interface denotes an interface value reached by
+explicit widening at a typed boundary. This union is deterministic rather than a
+namespace ambiguity: one top-level form may not reuse a spelling already
+declared by another in the same module, so a name is a type or an interface and
+never both. It is the one position whose grammar admits two namespaces, and it
+admits them because interface values would otherwise be unspellable. A symbol
+resolving there to a value or an effect root remains `@name.wrong-entity-kind`.
 
-`any` is the predeclared empty interface. It declares no contract member, every
-type implements it without writing an implementation, and no package may
-declare, extend, or shadow it; a declaration that reuses the spelling emits
-`@name.reserved-declaration`. It is otherwise an ordinary interface name, so it
-needs no special case in the grammar: it is a generic bound wherever a bound is
-written and a type expression wherever a type is written.
+`any` is the predeclared empty interface. It declares no contract member and no
+package may declare, extend, or shadow it; a declaration that reuses the
+spelling emits `@name.reserved-declaration`. It is otherwise an ordinary
+interface name, so it needs no special case in the grammar: it is a generic
+bound wherever a bound is written and a type expression wherever a type is
+written.
+
+Every type satisfies `any` without writing an implementation. This is the single
+exception to explicit conformance, and it is vacuous rather than structural: the
+contract has no member, so nothing is inferred from a type's shape and the rule
+that matching names and shapes are insufficient is untouched. No other interface
+acquires an implementation implicitly, and the exception is fixed to this one
+predeclared name rather than extended to any empty interface a package might
+declare.
 
 The two positions carry opposite information and are not interchangeable. A
 generic parameter bound by `any` keeps its concrete type at every instantiation.
