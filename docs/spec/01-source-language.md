@@ -125,8 +125,8 @@ resolved through the source module's imports.
 A position that does expect an entity reference declares the entity kind it
 requires; it never changes how the atom's path is read. The type-system chapter
 defines that one reading, under which each path denotes at most one code entity
-in every position, and names the one entity kind that carries a pair identity
-rather than a path.
+in every position, and names the two entity kinds that carry a type-keyed
+identity rather than a path.
 
 ## Labels and applications
 

@@ -217,10 +217,13 @@ with `@type.anonymous-union`. The `types:` case is written separately so the
 call-site type-argument parsing and binding path is covered rather than assumed.
 
 Widening coverage proves that each written expected type in the type chapter's
-list admits a member-to-union and a concrete-to-interface widening, that no
-widening occurs where no expected type is written, that `if` branches typed
-`i32` and `f32` are rejected rather than unified into a union, and that
-`(array i32)` does not widen to `(array number)` under invariance.
+list admits all three relations — member-to-union, concrete-to-interface, and
+atom-singleton-to-`atom` — that no widening occurs where no expected type is
+written, that `if` branches typed `i32` and `f32` are rejected rather than
+unified into a union, and that `(array i32)` does not widen to `(array number)`
+under invariance. Atom widening is covered on both sides of its boundary rule:
+`(array.of @ok @err)` is rejected for having no single element type, and
+`(as (array atom) (array.of @ok @err))` is accepted.
 
 Ascription coverage includes the legal no-op, the empty-collection and
 generic-result constraints, and the two rejected forms written in the type
@@ -246,9 +249,11 @@ one receiver implementing `(from i16)` and `(from i8)` together, and a
 unsuffixed integer literal, whose source type both implementations satisfy, and
 the call is rejected with `@type.ambiguous-implementation`. `(from t)` and
 `(from i32)` on one generic receiver are rejected at the declaration with
-`@type.overlapping-implementation`, and a contract member naming `self` in
-neither a parameter nor its result is rejected with
-`@type.contract-member-without-self`.
+`@type.overlapping-implementation`, and `(from t)` with `(try-from i32)` on one
+generic receiver is rejected with `@type.redundant-conversion` alongside the
+same-written-source pair. Two contract members are rejected with
+`@type.contract-member-without-self`: one never naming `self`, and one naming it
+only in a variadic tail that may arrive empty.
 
 Destination dispatch is covered beyond conversion by a non-conversion contract
 member of the same shape, such as a `(defn empty () self)` factory, selected

@@ -234,9 +234,9 @@ form takes one component, and a member of one takes one further component. Thus
 `@app.m.fs.read.file` is an effect operation.
 
 Paths are built from the ownership tree, never from a declaration's spelling,
-because every declaration name is one unqualified segment. One entity kind is
-not named in that tree at all: the interfaces section defines the pair identity
-of an implementation and its members.
+because every declaration name is one unqualified segment. Two entity kinds are
+not named in that tree at all: the interfaces section defines the type-keyed
+identity of an `impl` block and of each of its members.
 
 The addressable members of one owner form a single flat namespace covering
 record fields, enum variants, methods, and effect operations. Their names MUST
@@ -463,16 +463,20 @@ would be a second spelling of one implementation. Across modules both placements
 remain legal, because requiring the `deftype` placement there could demand an
 import that completes a cycle and leave the implementation unwritable.
 
-An implementation has no name in any declaration tree: it is keyed by an
-interface and a receiver type rather than by a spelling. Its identity, and the
-identity of each of its members, is therefore the corresponding contract member,
-the applied interface target, and the receiver type, much as an effect operation
-is identified by its root and operation. The applied target is part of that key
-rather than a detail of it: a receiver carrying both `(from i16)` and
-`(from i8)` has two `convert` members, and without the target both would share
-one identity. This is the only v1 entity kind that no single atom addresses, and
-it needs no atom: an implementation is never named at a use site, because
-dispatch selects it from the receiver.
+An implementation has no name in any declaration tree: it is keyed by types
+rather than by a spelling, and a block and a member are keyed differently. An
+`impl` **block**'s identity is the pair of its applied interface target and its
+receiver type; the block has no corresponding contract member, so no member
+belongs in its key. An implementation **member**'s identity is the triple of the
+corresponding contract member, that applied target, and that receiver type, much
+as an effect operation is identified by its root and operation.
+
+The applied target belongs in both keys rather than being a detail of either. A
+receiver carrying both `(from i16)` and `(from i8)` has two blocks and two
+`convert` members; without the target each pair would collapse to one identity.
+These are the only v1 entity kinds that no single atom addresses, and they need
+no atom: an implementation is never named at a use site, because dispatch
+selects it from the receiver or from a written expected type.
 
 A generic interface is keyed by its applied type, so one receiver MAY implement
 `(from i16)` and `(from i8)` as two implementations of one `defint`. The
@@ -485,11 +489,16 @@ written expected type; when two implementations of one interface remain
 candidates at a call site, that site emits `@type.ambiguous-implementation`
 rather than picking an order.
 
-Dispatch normally selects an implementation from the receiver value, which every
-contract member carrying `self` in a parameter position supplies. A contract
-member whose `self` occurs **only** in its result type has no receiver value and
-is instead **destination-dispatched**: the checker unifies the written expected
-type at the call site with the member's written result type and takes `self`
+Dispatch normally selects an implementation from the receiver value, which a
+contract member supplies by naming `self` as the type of a **fixed positional**
+parameter. A variadic parameter does not qualify: an `(array self)` or
+`(map k self)` tail may receive no operands at all, leaving a call with no
+receiver value to select from. A labelled parameter does not qualify either,
+since every labelled parameter requires a literal default.
+
+A contract member whose `self` occurs **only** in its result type has no
+receiver value and is instead **destination-dispatched**: the checker unifies
+the written expected type at the call site with the member's written result type and takes `self`
 from that unification. The expected type is therefore not required to be `self`
 itself; an expected `(result u32 conversion-error)` against a written result
 `(result self conversion-error)` yields `self` = `u32`. When no written expected
@@ -502,12 +511,15 @@ The rule is general and is not limited to conversion. A contract member such as
 `(defn empty () self)` is a factory of the same shape and is selected the same
 way, from the expected type at its call site.
 
-These two rules are exhaustive because every contract member MUST mention `self`
-in a parameter type or in its result type. A member naming `self` in neither,
-such as `(defn version () str)`, is selectable by nothing and emits
-`@type.contract-member-without-self` at its declaration. This is what `defint`
-declaring method signatures **over `self`** already means; v1 adds no third
-selection rule and has no interface-level static member.
+These two rules are exhaustive because every contract member MUST name `self` as
+the type of a fixed positional parameter or within its result type. A member
+doing neither is selectable by nothing and emits
+`@type.contract-member-without-self` at its declaration. That covers both
+`(defn version () str)`, which never mentions `self`, and
+`(defn count-all () u64 variadic: (rest (array self)))`, which mentions it only
+in a tail that may arrive empty. This is what `defint` declaring method
+signatures **over `self`** already means; v1 adds no third selection rule and no
+interface-level static member.
 
 Within an interface contract, a `deftype` method, or an `impl` block, `self`
 resolves to the applicable receiver type. In a `deftype` and in an `impl` nested
@@ -705,17 +717,24 @@ canonical serialization rules defined by the runtime chapter.
 
 ## Type ascription and widening
 
-V1 has exactly two widening relations. A concrete type widens to an interface it
-conforms to, and a member type widens to a union that lists it. Conformance here
-is exactly the conformance defined earlier in this chapter, so widening is
-available through all three of its sources: a written `impl` block, the
-predeclared empty interface `any` that every type satisfies without one, and the
-closed toolchain `iter` registry for `(array t)`, `(map k v)`, `str`, and
-`(option t)`. Neither relation is subtyping: they apply at a boundary, not
-structurally and not through a container, and neither is ever inferred from a
-type's shape. Generic arguments remain invariant, so `(array i32)` does not
-widen to `(array number)` and `(option i32)` does not widen to
-`(option number)`.
+V1 has exactly three widening relations. A concrete type widens to an interface
+it conforms to, a member type widens to a union that lists it, and the singleton
+type of a written atom widens to `atom`.
+
+Conformance in the first relation is exactly the conformance defined earlier in
+this chapter, so widening is available through each of its sources: a written
+`impl` block, the predeclared empty interface `any` that every type satisfies
+without one, and the closed toolchain `iter` registry for `(array t)`,
+`(map k v)`, `str`, and `(option t)`. Atom widening needs no declaration at all,
+because the singleton types and `atom` are builtin, but it obeys the same
+boundary rule as the other two: `(array.of @ok @err)` has no single element
+type and is an error, while `(as (array atom) (array.of @ok @err))` supplies
+one.
+
+No relation is subtyping: each applies at a boundary, not structurally and not
+through a container, and none is ever inferred from a type's shape. Generic
+arguments remain invariant, so `(array i32)` does not widen to `(array number)`
+and `(option i32)` does not widen to `(option number)`.
 
 Widening fires only against a **written expected type**. The complete set of
 written expected types is:
@@ -836,10 +855,13 @@ associated types on an interface contract. A conversion needing a richer error
 is an ordinary `defn` returning `(result t e)`, which requires no new machinery.
 Per-implementation error types are a post-v1 concern recorded in the roadmap.
 
-A receiver MUST NOT implement both `from` and `try-from` for the same source
-type; the pair emits `@type.redundant-conversion`. A conversion is either
-total or partial, and offering both spellings would give one idea two canonical
-forms.
+Across `from` and `try-from` together, a receiver's source targets MUST be
+pairwise non-unifiable, on the same terms as its applied targets within one
+interface. The same written source in both is the obvious case, and `(from t)`
+with `(try-from i32)` is the same defect deferred to `t` = `i32`, where the
+conversion would be both total and partial. Either pair emits
+`@type.redundant-conversion` at the declaration. A conversion is one or the
+other, and offering both spellings would give one idea two canonical forms.
 
 ## Host values
 
