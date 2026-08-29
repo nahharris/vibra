@@ -17,6 +17,8 @@ than its issuance order or severity:
 @name.unknown-symbol
 @name.wrong-entity-kind
 @name.member-collision
+@name.generic-redeclaration
+@name.reserved-label
 @module.file-directory-collision
 @module.unknown-path
 @type.argument-mismatch

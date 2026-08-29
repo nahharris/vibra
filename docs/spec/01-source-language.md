@@ -262,7 +262,10 @@ parameter may use any discard spelling when its value is intentionally unused.
 
 `where:` is a flat list of generic-name/bound pairs. It is the only declaration
 of generic names: every generic name used by a declaration MUST occur exactly
-once in its `where:` clause. `any` states that no interface bound is required.
+once in its `where:` clause, unless an enclosing declaration already binds it.
+`any` states that no interface bound is required. A nested method inherits its
+owner's generic names and MUST NOT redeclare one; the type chapter defines that
+inheritance and the call-site `types:` list built from it.
 
 The canonical function-attribute order is `where:`, `labelled:`, `variadic:`,
 `visibility:`, `effects:`, `external:`, `symbol:`, then `doc:`. The canonical

@@ -241,6 +241,37 @@ every type argument in `where:` order. Partial application, named type
 arguments, specialization by value, multiple bounds on one parameter, and
 runtime type tests are not in v1.
 
+A nested method sees the generic names of its enclosing `deftype` or `impl`
+target and declares only additional ones in its own `where:`. Redeclaring an
+inherited name is `@name.generic-redeclaration`, so each generic name still has
+exactly one declaration site. The complete type-argument list of such a method
+is its owner's parameters in declaration order followed by its own, and
+`types:` supplies that whole list:
+
+```vibra
+(deftype ring (record items (array t) head u64)
+  where: (t any)
+  visibility: @public
+  (defn empty () (ring t)
+    visibility: @public
+    (ring items: (array.of) head: 0u64)))
+```
+
+```vibra
+(ring.empty types: (str))
+```
+
+`types:` is a reserved call-site label. A declaration MUST NOT introduce a
+labelled parameter named `types`, which would otherwise make the label
+ambiguous between a type-argument list and an ordinary labelled operand; such a
+declaration emits `@name.reserved-label`.
+
+`types:` is written where an application's labelled operands are written, and
+it is neither an operand of the callee nor visible to its body. A `types:` list
+whose length differs from the complete parameter list is an error rather than a
+partial application, and supplying `types:` where inference already succeeds is
+permitted and checked for agreement.
+
 Implementations may monomorphize, but specialization strategy is not
 observable except through deterministic program and build output.
 
