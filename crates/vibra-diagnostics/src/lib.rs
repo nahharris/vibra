@@ -13,5 +13,12 @@
 //!
 //! # Status
 //!
-//! Milestone 1 step 1 created this crate. Its contents arrive in step 2; see
+//! Milestone 1 step 2 is in progress. Spans and display-position derivation
+//! are complete; the code registry and diagnostic record follow. See
 //! `docs/roadmap/milestone-1/README.md`.
+
+mod line_index;
+mod span;
+
+pub use line_index::{LineIndex, Position};
+pub use span::ByteSpan;
