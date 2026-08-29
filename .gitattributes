@@ -1,0 +1,18 @@
+# Line endings are a correctness concern here, not a preference.
+#
+# The specification requires LF for canonical `.vib` and `.vibon` output, and
+# the conformance corpus compares formatter results byte for byte. Without
+# these rules a Windows checkout rewrites every file on the way in and the
+# formatter check fails, or worse, a fixture is silently altered.
+
+# Normalize on commit and check out LF on every platform.
+* text=auto eol=lf
+
+# Conformance fixtures are the exception: their bytes are the test. Some
+# reader cases deliberately carry CRLF, a missing trailing newline, or other
+# byte-exact shapes, so Git must never normalize them. `eol` must be
+# unspecified as well as `text` unset, because a set `eol` converts on its own
+# and would otherwise be inherited from the rule above. `diff` keeps these
+# files readable in review despite `-text`.
+*.vib -text !eol diff
+*.vibon -text !eol diff
