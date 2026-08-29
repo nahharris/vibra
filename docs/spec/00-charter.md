@@ -53,6 +53,15 @@ conformance case or an explicit review-only invariant.
 
 ## V1 commitments
 
+- Vibra is expression-oriented and functional: bindings and values are
+  immutable, functions are first-class values, and there is no assignment or
+  user-visible mutation.
+- Pure collection transforms use the standard `iter` interface. Effectful walks
+  are recursive functions over `iter.next` with an explicit written effect
+  ceiling. There is no separate loop or foreach form.
+- Tail-position recursive calls MUST NOT consume additional language-level
+  stack; the interpreter and WebAssembly backend MUST implement this
+  obligation.
 - Source files use `.vib`; compiler-owned persistent data uses `.vibon`. Both
   are UTF-8 S-expression document grammars over one lexical reader and are
   never inferred from contents.
@@ -82,6 +91,7 @@ The following are not partially implemented in v1:
 - algebraic effect handlers, effect polymorphism, sealed effect roots, declared
   effect dominance or sub-effect relations, runtime grants, permission prompts,
   path-scoped capabilities, and user-defined host providers;
+- assignment, `while`, `for`, `break`, `continue`, and `return` forms;
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;

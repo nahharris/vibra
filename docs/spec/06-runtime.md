@@ -31,13 +31,14 @@ Evaluation is strict and deterministic:
 - an array variadic tail builds one array from its values;
 - a map variadic tail builds one map from alternating key/value forms and an
   odd tail is rejected before execution;
-- function bodies and `do` forms evaluate from first to last;
+- function bodies and `do` forms evaluate from first to last; the value of a
+  `do` is its last expression, or `void` if empty;
 - `if` evaluates only the selected branch;
 - `match` evaluates its subject once and selects the first matching arm;
 - `tuple.of`, `array.of`, and `map.of` operands evaluate from left to right;
-  and
-- `return`, `try`, `break`, and `continue` perform only their specified lexical
-  control transfer.
+- `try` performs only its specified early-exit propagation; and
+- a tail-position call to a function in the same recursive group reuses the
+  current activation instead of growing language-level stack.
 
 `map.of` and map variadic tails share one construction rule. Every key and
 value is evaluated even if a key repeats; the later pair replaces the earlier
@@ -68,6 +69,20 @@ that type. Literal range errors are rejected before execution.
 Floating-point operations follow IEEE 754. Serialization and equality
 canonicalize all NaN payloads to one quiet NaN per width and normalize negative
 zero only where the relevant standard operation explicitly says so.
+
+## Tail calls
+
+A call is in tail position when its result is returned directly to the caller
+without further computation in the current function, `lambda`, or `let` body.
+Tail-position calls to functions in the same module's recursive group MUST reuse
+the current activation. The interpreter and WebAssembly backend MAY implement
+this with explicit tail-call instructions or an internal trampoline; the
+strategy is not observable except that conforming programs do not overflow
+language-level stack on tail recursion.
+
+A non-tail recursive call that exhausts the implementation limit is a trap with
+a stable code and source origin. Default `iter` method bodies MAY lower to
+internal loops; that mutation is not a source feature.
 
 ## External providers
 
