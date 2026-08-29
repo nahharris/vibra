@@ -1,0 +1,69 @@
+name: CI
+
+# The roadmap requires both suites to run from a clean checkout without
+# network access after dependencies are synced. Milestone 1 has only the
+# host-language suite so far; the conformance job arrives with the corpus
+# runner in step 3.
+
+on:
+  push:
+    branches: [main, "m[0-9]"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the version; this action honours it.
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Lints
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --all-targets --all-features
+
+      - name: Documentation
+        run: cargo doc --workspace --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  archive-isolation:
+    name: archive stays out of the build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      # `archive/pre-v1` is evidence, not an input. If it ever entered the
+      # workspace, its packages would appear in the resolved metadata.
+      - name: No archived package resolves into the workspace
+        run: |
+          cargo metadata --format-version 1 --no-deps > metadata.json
+          if grep -q '"archive/pre-v1' metadata.json; then
+            echo "an archived package resolved into the active workspace" >&2
+            exit 1
+          fi

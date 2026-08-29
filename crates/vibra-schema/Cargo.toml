@@ -1,0 +1,15 @@
+[package]
+name = "vibra-schema"
+description = "Versioned JSON contracts for the Vibra CLI and MCP surfaces."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-diagnostics.workspace = true
+
+[lints]
+workspace = true
