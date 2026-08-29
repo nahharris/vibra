@@ -59,13 +59,27 @@ Milestone 2. Milestone 1 delivers library crates, the published JSON schemas,
 and an internal conformance runner. Nothing is advertised on a command surface
 that Milestone 2 has not built, as roadmap rule 3 requires.
 
-### D5 — Published JSON schemas are identified by URN
+### D5 — Published JSON schemas are identified by URN, provisionally
 
-Schema identifiers are contracts, so they must be stable and must not depend
-on where a file happens to be served. Vibra has no schema-hosting domain and
-should not promise one, so schemas are identified as
-`urn:vibra:schema:v1:<name>`. Every `$ref` is internal, so validating a
-document needs no resolution.
+Schemas are identified as `urn:vibra:schema:v1:<name>`. Every `$ref` is
+internal, so validating a document needs no resolution and no identifier has
+to be fetchable.
+
+This is deliberately provisional. The conventional choice is an HTTPS
+identifier under a domain the project controls, and the intended home is
+`vibra.harrisonn.dev`. Until that subdomain exists, an HTTPS identifier would
+name a location nothing serves, so the URN states only what is true today.
+
+Switching to HTTPS later is a contract break, not a refactor. It must happen
+in one change across every published schema, and it must happen before v1 is
+released, while the only consumers are inside this repository. A session that
+finds the subdomain live should make that change rather than adding a schema
+under the old scheme.
+
+The `v1` in an identifier is the **schema's** major version, not the
+language's. The charter versions machine schemas independently of the source
+language after 1.0, so a schema `v2` can exist under language v1 and the two
+must not be assumed to move together.
 
 ### D6 — The dependency direction is a test, not a convention
 

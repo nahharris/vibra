@@ -10,8 +10,17 @@
 //! Published schemas are identified by URN, for example
 //! `urn:vibra:schema:v1:diagnostic`. A URN names the contract without
 //! asserting that a URL resolves to it, and Vibra has no schema-hosting domain
-//! to promise. Every `$ref` is internal, so no resolution is required to
-//! validate a document.
+//! yet. Every `$ref` is internal, so no resolution is required to validate a
+//! document.
+//!
+//! This is provisional: the intended home is an HTTPS identifier once the
+//! project's domain exists. Because identifiers are contracts, that switch
+//! must be made across every published schema at once and before v1 is
+//! released. See design decision D5 in `docs/roadmap/milestone-1/README.md`.
+//!
+//! The `v1` in an identifier and in [`SCHEMA_VERSION`] is the schema's major
+//! version, not the language's. The charter versions machine schemas
+//! independently of the source language after 1.0.
 //!
 //! # Position in the architecture
 //!
