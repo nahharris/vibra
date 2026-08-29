@@ -34,6 +34,18 @@ than its issuance order or severity:
 @type.invalid-tuple-index
 @type.unknown-record-field
 @type.numeric-out-of-range
+@type.anonymous-type-body
+@type.undispatchable-contract-member
+@type.union-too-few-members
+@type.union-member-overlap
+@type.union-member-not-concrete
+@type.overlapping-implementation
+@type.ambiguous-implementation
+@type.ambiguous-destination
+@type.invalid-ascription
+@type.narrowing-non-union
+@type.not-a-union-member
+@type.redundant-conversion
 @pattern.refutable-binding
 @effect.outside-ceiling
 @effect.invalid-reference
@@ -119,6 +131,7 @@ kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
 | `V1-TYPE-INFER` | inference and public checking |
 | `V1-TYPE-GENERIC` | flat generic bounds |
 | `V1-TYPE-INTERFACE` | interfaces, default methods, nested implementations, and `iter` |
+| `V1-TYPE-CONVERT` | ascription, widening, narrowing, and conversion |
 | `V1-TYPE-CONTROL` | control flow, failure, recursion, tail calls, and checked operations |
 | `V1-EFFECT` | declarations, rows, target ceilings, and reports |
 | `V1-PROJECT` | data forms, targets, modules, dependencies, and tests |
@@ -191,6 +204,107 @@ and effectful walks written as tail-recursive module-level functions over
 `iter.next`.
 Tail-call cases belong to `V1-RUNTIME`. `@name.reserved-value-spelling` and
 `@type.function-not-equatable` have fixed level `@error`.
+
+Union coverage includes a two-member declaration, rejection of a one-member
+body, rejection of a union, interface, and bare generic member, and rejection of
+`(union (array t) (array i32))` as overlapping under instantiation. It proves
+that no member method or implementation is lifted to the union, and that a union
+used as a `(map k v)` key without explicit `hashable`, `equatable`, and
+`ordered` implementations is rejected.
+
+Declaration-body coverage rejects each of `record`, `enum`, `union`, and
+`newtype` written in a parameter, a result, a record field, a `def` annotation,
+an `as` type, an `impl` target, and a `types:` argument, with
+`@type.anonymous-type-body` naming the form it found. The `types:` case is
+written separately for each form so the call-site type-argument parsing and
+binding path is covered rather than assumed. Positive cases confirm that
+`tuple`, `array`, `map`, and `fn` remain admissible in all seven positions.
+
+The applied-type head is covered separately, because removing the four forms
+from `type-expr` does not by itself stop them returning as applications. Each of
+`(record ...)`, `(enum ...)`, `(union ...)`, and `(newtype ...)` outside a
+`deftype` body is rejected as `@type.anonymous-type-body` and MUST NOT be
+reported as an unknown type application, and an ordinary applied type such as
+`(option t)` is accepted in the same position.
+
+The reserved-head reservation is covered on both sides. A `deftype`, a `defint`,
+and a `where:` generic name spelled with a reserved type head are each rejected
+with `@name.reserved-declaration`. A nested method named `map` on an owner other
+than the associative `map` type is accepted, together with the `iter` contract's
+own default `map` member, proving the reservation does not reach members; the
+existing `@name.reserved-value-spelling` cases for module-level `map`, `array`,
+and `tuple` values are unaffected.
+
+Unification coverage fixes the bound-agnostic reading: a union whose members are
+`(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not
+implement is still rejected with `@type.union-member-overlap`, proving that a
+declared bound does not make two members disjoint.
+
+Widening coverage proves that each written expected type in the type chapter's
+list admits all three relations — member-to-union, concrete-to-interface, and
+atom-singleton-to-`atom` — that no widening occurs where no expected type is
+written, that `if` branches typed `i32` and `f32` are rejected rather than
+unified into a union, and that `(array i32)` does not widen to `(array number)`
+under invariance. Atom widening is covered on both sides of its boundary rule:
+`(array.of @ok @err)` is rejected for having no single element type, and
+`(as (array atom) (array.of @ok @err))` is accepted.
+
+The no-chaining rule has its own focused rejections, so widening cannot silently
+become transitive: a member value written where an interface implemented by its
+union but not by the member is expected, and an atom singleton written where
+`any` is expected, are both rejected even though each step would be legal alone.
+Reaching the far type requires two written boundaries.
+
+Ascription coverage includes the legal no-op, the empty-collection and
+generic-result constraints, and the two rejected forms written in the type
+chapter's example block: `(as i64 3i32)` for implicit numeric widening and
+`(as i32 some-number)` for narrowing, both `@type.invalid-ascription`. It proves
+that `as` reaches the typed IR as its operand alone and adds no runtime check.
+
+Narrowing coverage includes an exhaustive union `match`, a binder-covered
+remainder, a rejected non-exhaustive arm set, an unreachable duplicate arm, and
+an `as` pattern in `let` and in a positional parameter rejected with
+`@pattern.refutable-binding`. It also includes one `as` pattern over a
+non-union scrutinee rejected with `@type.narrowing-non-union` and one naming a
+type outside the union's member set rejected with
+`@type.not-a-union-member`.
+
+Conversion coverage includes a `from` implementation on a destination `deftype`,
+a `try-from` implementation returning `conversion-error`, destination selection
+through a written parameter and result type, destination selection through `as`,
+a bare call with no expected type rejected with `@type.ambiguous-destination`,
+one receiver implementing `(from i16)` and `(from i8)` together, and a
+`from`/`try-from` pair on one source rejected with
+`@type.redundant-conversion`. The two-target receiver is an identity case as
+well as a dispatch case: query and index output for it MUST contain two distinct
+block identities and two distinct `convert` member identities, differing only in
+applied target, and completeness MUST be checked once per block rather than once
+per nominal interface. That two-target receiver is also called with an
+unsuffixed integer literal, whose source type both implementations satisfy, and
+the call is rejected with `@type.ambiguous-implementation`. `(from t)` and
+`(from i32)` on one generic receiver are rejected at the declaration with
+`@type.overlapping-implementation`, and `(from t)` with `(try-from i32)` on one
+generic receiver is rejected with `@type.redundant-conversion` alongside the
+same-written-source pair. Two contract members are rejected with
+`@type.undispatchable-contract-member`: one never naming `self`, and one naming
+it only in a variadic tail that may arrive empty. A third member, naming `self`
+in both its result and a variadic tail, is accepted and shown to be
+destination-dispatched rather than rejected as a mixed shape.
+
+Destination dispatch is covered beyond conversion by a non-conversion contract
+member of the same shape, such as a `(defn empty () self)` factory, selected
+from a written expected type and rejected with `@type.ambiguous-destination`
+where none is written.
+
+`@type.anonymous-type-body`, `@type.undispatchable-contract-member`,
+`@type.union-too-few-members`,
+`@type.union-member-overlap`, `@type.union-member-not-concrete`,
+`@type.overlapping-implementation`, `@type.ambiguous-implementation`,
+`@type.ambiguous-destination`, `@type.invalid-ascription`,
+`@type.narrowing-non-union`, `@type.not-a-union-member`, and
+`@type.redundant-conversion` all have fixed level `@error`. Union declaration
+cases belong to `V1-TYPE-NOMINAL`; ascription, widening, narrowing, and
+conversion cases belong to `V1-TYPE-CONVERT`.
 
 ## Conformance profiles
 

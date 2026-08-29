@@ -125,8 +125,8 @@ resolved through the source module's imports.
 A position that does expect an entity reference declares the entity kind it
 requires; it never changes how the atom's path is read. The type-system chapter
 defines that one reading, under which each path denotes at most one code entity
-in every position, and names the one entity kind that carries a pair identity
-rather than a path.
+in every position, and names the two entity kinds that carry a type-keyed
+identity rather than a path.
 
 ## Labels and applications
 
@@ -196,7 +196,7 @@ V1 has exactly these user top-level forms:
 ```ebnf
 top-form = import | deftype | defint | deffect | def | defn | test ;
 import   = "(", "import", symbol, atom-name, ")" ;
-deftype  = "(", "deftype", symbol, type-expr,
+deftype  = "(", "deftype", symbol, deftype-body,
            { type-attribute | nested-method
            | interface-implementation }, ")" ;
 defint   = "(", "defint", symbol,
@@ -249,6 +249,11 @@ lambda-attribute = "labelled:", labelled-parameters
                  | "variadic:", variadic-parameter
                  | "effects:", effect-row ;
 ```
+
+`deftype-body` is the type chapter's production for a declaration body. It is
+`type-expr` plus the four identity-introducing forms `record`, `enum`, `union`,
+and `newtype`, and it is the only position in the grammar that admits any of
+them.
 
 `def` introduces an immutable module value. There is no separate `const` form
 in v1.
@@ -464,6 +469,7 @@ expr = atom | application | lambda
      | "(", "let", pattern, expr, { expr }, ")"
      | "(", "if", expr, expr, expr, ")"
      | "(", "match", expr, pattern, expr, { pattern, expr }, ")"
+     | "(", "as", type-expr, expr, ")"
      | "(", "try", expr, ")" ;
 application = "(", expr, { expr }, ")" ;
 lambda = "(", "lambda", parameters, type-expr,
@@ -471,7 +477,8 @@ lambda = "(", "lambda", parameters, type-expr,
 pattern = binding-name | literal
         | "(", symbol, { pattern | label, pattern }, ")"
         | "(", "tuple", { pattern }, ")"
-        | "(", "array", { pattern }, ")" ;
+        | "(", "array", { pattern }, ")"
+        | "(", "as", type-expr, pattern, ")" ;
 ```
 
 V1 has no `while`, `for`, `break`, `continue`, `return`, or assignment form.
@@ -549,6 +556,49 @@ single-variant type.
 function returning the same container and error type. There are no exceptions
 or implicit error conversions. A fallible value MUST be matched, propagated,
 returned, bound for later use, or explicitly ignored with a discard binding.
+
+## Type ascription and narrowing
+
+`as` writes a type at one position. It is a reserved form in both expression
+and pattern head position and is recognized before the general application and
+constructor-pattern productions, so a list headed by `as` is never the
+application of a value named `as`.
+
+In expression position, `(as type-expr expr)` states the type the operand is
+checked at. It is the general way to write a typed boundary where no
+declaration already supplies one, and its three uses are one rule: it admits a
+widening, it fixes an otherwise ambiguous inference, and it names the
+destination of a conversion.
+
+```vibra
+(as number 1i32)
+(as (array u32) (array.of))
+(as u32 (from.convert 42u8))
+(as str "Hello world")
+```
+
+Ascription is static. It never inserts a conversion, never narrows, and has no
+runtime representation. The type chapter defines what it admits.
+
+In pattern position, `(as type-expr pattern)` matches one member of a union
+value and binds its payload at that member type. It takes a full type
+expression because a member such as `(array i32)` is not spellable as a path
+segment.
+
+```vibra
+(deftype number (union i32 f32)
+  visibility: @public)
+
+(defn render (value number) str
+  visibility: @public
+  (match value
+    (as i32 n) (integer.to-str n)
+    (as f32 x) (float.to-str x)))
+```
+
+The two positions mirror each other: an expression `as` widens to a written
+type, and a pattern `as` narrows from one. Neither performs a conversion, and
+`as` in expression position MUST NOT be used to narrow.
 
 ## Canonical format
 
