@@ -220,6 +220,19 @@ written separately for each form so the call-site type-argument parsing and
 binding path is covered rather than assumed. Positive cases confirm that
 `tuple`, `array`, `map`, and `fn` remain admissible in all seven positions.
 
+The applied-type head is covered separately, because removing the four forms
+from `type-expr` does not by itself stop them returning as applications. Each of
+`(record ...)`, `(enum ...)`, `(union ...)`, and `(newtype ...)` outside a
+`deftype` body is rejected as `@type.anonymous-type-body` and MUST NOT be
+reported as an unknown type application, a declaration spelled with a reserved
+type head is rejected as `@name.reserved-declaration`, and an ordinary applied
+type such as `(option t)` is accepted in the same position.
+
+Unification coverage fixes the bound-agnostic reading: a union whose members are
+`(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not
+implement is still rejected with `@type.union-member-overlap`, proving that a
+declared bound does not make two members disjoint.
+
 Widening coverage proves that each written expected type in the type chapter's
 list admits all three relations — member-to-union, concrete-to-interface, and
 atom-singleton-to-`atom` — that no widening occurs where no expected type is

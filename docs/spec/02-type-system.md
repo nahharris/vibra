@@ -52,6 +52,18 @@ Two type expressions are **unifiable** when some substitution of the generic
 names in scope makes them the same fully resolved type. A set is **pairwise
 non-unifiable** when no two of its members are unifiable.
 
+Unification is **bound-agnostic**: a substitution need not satisfy the generic's
+declared interface bound. Where `t` is bound by `printable`, `(array t)` and
+`(array i32)` overlap even if `i32` does not implement `printable` today. This
+is deliberately the conservative reading. Under the bound-respecting
+alternative, a package that later writes `(impl i32 ...)` inside `printable`
+would turn a distant, already-accepted declaration into an overlapping one, so
+whether a union or an implementation set is legal would depend on implementation
+decisions made in packages its author cannot see. Bound-agnostic unification
+keeps every overlap decision local to the declaration that makes it, at the cost
+of rejecting some sets that are provably disjoint under today's bounds; those
+are written with distinct types instead.
+
 Every rule below that forbids overlap requires pairwise non-unifiability, and
 each reports it at the declaration rather than after monomorphization, so an
 accepted set is unambiguous at every instantiation. Three rules use it: union
@@ -67,7 +79,7 @@ are different unless they are the same fully resolved declaration.
 V1 type constructors are:
 
 ```ebnf
-type-expr = primitive | symbol | "(", symbol, type-expr+, ")"
+type-expr = primitive | type-name | "(", type-name, type-expr+, ")"
           | "(", "tuple", type-expr*, ")"
           | "(", "array", type-expr, ")"
           | "(", "map", type-expr, type-expr, ")"
@@ -79,6 +91,9 @@ enum-type = "(", "enum", local-name, type-expr,
             { local-name, type-expr }, ")" ;
 union-type = "(", "union", type-expr, type-expr+, ")" ;
 newtype-type = "(", "newtype", type-expr, ")" ;
+type-name = symbol - reserved-type-head ;
+reserved-type-head = "record" | "enum" | "union" | "newtype"
+                   | "tuple" | "array" | "map" | "fn" ;
 function-type = "(", "fn", "(", type-expr*, ")", type-expr,
                 [ "labelled:", "(", { local-name, type-expr }, ")" ],
                 [ "variadic:", variadic-type ],
@@ -118,6 +133,19 @@ has no anonymous or structural record, enum, union, or newtype, so each is
 reachable only through the name its `deftype` introduces. `tuple`, `array`,
 `map`, and `fn` remain ordinary `type-expr` constructors, because they build
 values from existing types rather than introducing an identity.
+
+Removing the four from `type-expr` is not by itself enough, because the applied
+form `(symbol type-expr+)` would otherwise readmit each of them as the
+application of a type named `record`, `enum`, `union`, or `newtype`. The head of
+an applied type is therefore `type-name`, written as the exception
+`symbol - reserved-type-head`: any symbol that is not one of those eight
+spellings. This is the grammar's only use of exception notation.
+
+Reserved type forms are recognized before the applied-type production, exactly
+as reserved expression forms are recognized before application, so
+`(union i32 f32)` outside a `deftype` body is `@type.anonymous-type-body` and
+never a type application. No declaration may be spelled with a reserved type
+head, which emits `@name.reserved-declaration`.
 
 A union body lists at least two member types and declares no member names. The
 `deftype` supplies the union's identity, and each member type's identity is its
