@@ -97,9 +97,9 @@ function therefore declares the exact callback effect row it accepts. The
 standard `iter` default methods `map` and `filter` accept callbacks with
 `effects: ()` only.
 
-Effectful iteration is written as a recursive function that calls `(iter.next it)`
-and declares its complete host ceiling explicitly. There is no effectful
-higher-order iterator combinator in v1.
+Effectful iteration is written as a recursive module-level function that calls
+`(iter.next it)` and declares its complete host ceiling explicitly. There is no
+effectful higher-order iterator combinator in v1.
 
 Nominal constructor application, tuple and record projection,
 array/map/string/byte lookup, and closed native collection construction are

@@ -200,7 +200,7 @@ deftype  = "(", "deftype", symbol, type-expr,
            { type-attribute | nested-method
            | interface-implementation }, ")" ;
 defint   = "(", "defint", symbol,
-           { declaration-attribute | interface-member
+           { type-attribute | declaration-attribute | interface-member
            | interface-implementation }, ")" ;
 deffect  = "(", "deffect", symbol,
            { declaration-attribute | effect-member }, ")" ;
@@ -213,7 +213,7 @@ test     = "(", "test", string, [ "effects:", effect-row ], expr+, ")" ;
 nested-method = "(", "defn", local-name, parameters, type-expr,
                 { function-attribute }, { expr }, ")" ;
 interface-member = "(", "defn", local-name, parameters, type-expr,
-                   { function-attribute }, [ { expr } ], ")" ;
+                   { function-attribute }, [ expr, { expr } ], ")" ;
 interface-implementation = "(", "impl", type-expr,
                            implementation-member+, ")" ;
 implementation-member = "(", "defn", local-name, parameters, type-expr,
@@ -392,10 +392,11 @@ does not.
       (value @name))))
 ```
 
-The standard `iter` interface declares abstract `next` and default methods
-`map`, `filter`, `skip`, `take`, and `collect`. Default bodies live in the
-standard library and MUST NOT be redeclared in user `impl` blocks; the type
-chapter defines completeness and `@type.default-override`.
+The standard `iter` interface is generic over an item type and declares abstract
+`next` plus default methods `map`, `filter`, `skip`, `take`, and `collect`. The
+type chapter gives the canonical contract, semantics, and closed builtin
+conformance rules. Default bodies live in the standard library and MUST NOT be
+redeclared in user `impl` blocks.
 
 The package that owns an interface may implement it for a type declared in
 another module by placing an `impl` block in the owning `defint`:
@@ -411,8 +412,9 @@ another module by placing an `impl` block in the owning `defint`:
 `impl` is valid only as a direct child of the `deftype` that owns the type or
 the `defint` that owns the interface; there is no top-level `impl` and no `for:`
 implementation attribute. An interface member without a body is abstract. A
-member with a body is a default method; the type chapter defines which members
-an implementation must supply and forbids overriding a default. A method
+member whose optional body is present MUST contain at least one expression; that
+body is a default method. The type chapter defines which members an
+implementation must supply and forbids overriding a default. A method
 implementing an interface has a body and MUST match its contract after
 substituting the receiver type for `self`. The type chapter defines
 completeness, conflict, and ownership rules.

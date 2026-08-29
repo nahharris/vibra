@@ -220,11 +220,15 @@ projections, lookups, and enum tags are not `fn` values.
 `fn` values are not `equatable` and MUST NOT be used as a `(map k v)` key. Using
 one as a key emits `@type.function-not-equatable`.
 
-A `defn` or `lambda` MAY refer to itself by name. Same-module mutual recursion
-is valid, and forward reference within a module is permitted. A call in
-tail position to itself or to a mutually recursive function in the same module
-MUST NOT consume additional language-level stack; the runtime chapter defines
-this obligation. Non-tail recursive overflow is a trap with a stable code.
+A module-level `defn` MAY refer to itself and to other module-level `defn`s in
+the same module by name. Same-module mutual recursion among module-level
+`defn`s is valid, and forward reference within a module is permitted. A
+`lambda` has no self-name and MUST NOT refer to itself; it MAY appear in mutual
+recursion only as the callee of a named module-level `defn`. A call in tail
+position to a function in the same module's recursive group MUST NOT consume
+additional language-level stack; the runtime chapter defines tail position and
+the recursive group. Exhaustion of a host stack limit on non-tail recursion is
+not a portable Vibra semantic result.
 
 ## Inference and checking
 
@@ -248,9 +252,10 @@ that contract and never rewrites the contract from observed implementation.
 
 ## Generics
 
-Every generic name is declared by one flat `where:` entry. The value paired
-with the name is one nominal interface bound; the predeclared empty interface
-`any` is the bound that constrains nothing.
+Every generic name is declared by one flat `where:` entry on a `deftype`,
+`defint`, `defn`, or nested method. The value paired with the name is one
+nominal interface bound; the predeclared empty interface `any` is the bound
+that constrains nothing.
 
 ```vibra
 (defn first (items (array t)) (option t)
@@ -349,6 +354,12 @@ acquires an implementation implicitly, and the exception is fixed to this one
 predeclared name rather than extended to any empty interface a package might
 declare.
 
+The second exception is closed toolchain `iter` conformance for the builtin
+constructor and standard-library types named in the iteration section. Those
+implementations are keyed by constructor identity in a closed registry; they are
+not user `impl` blocks and not generic `defint` implementations. Every other
+interface still requires an explicit `impl`.
+
 The exception needs no rule barring a written implementation for `any`, because
 `interface-implementation` requires at least one member and an empty contract
 admits none: every candidate member is an extra member, which is already an
@@ -439,17 +450,51 @@ defined above and cannot be overloaded.
 ## Iteration
 
 Pure collection iteration uses the standard `iter` interface. Effectful walks
-use recursive functions over `(iter.next it)` with an explicit written effect
-ceiling. There is no separate loop or foreach form.
+use recursive module-level functions over `(iter.next it)` with an explicit
+written effect ceiling. There is no separate loop or foreach form.
 
-`iter.next` is abstract. It is pure and returns `(option (tuple item remaining))`.
-There is no mutating cursor. `remaining` is a new immutable iterator value.
+### Canonical `iter` contract
 
-`map`, `filter`, `skip`, `take`, and `collect` are default methods on `iter`.
-They are pure and accept callback parameters with `effects: ()` only. An
-`impl` MUST NOT redeclare them. Adapters produced by `map`, `filter`, `skip`,
-or `take` are immutable values that implement `iter` and are usually seen as
-the interface type. `collect` materializes to `(array t)`.
+`iter` is a generic interface over one item type:
+
+```vibra
+(defint iter
+  where: (item any)
+  visibility: @public
+  (defn next (value self) (option (tuple item self))))
+```
+
+The standard-library declaration adds these default members, each with a body
+that MUST match the semantics below:
+
+| Member | Signature |
+| --- | --- |
+| `map` | `(value self f (fn x item) item) self` |
+| `filter` | `(value self pred (fn x item) bool) self` |
+| `skip` | `(value self n u64) self` |
+| `take` | `(value self n u64) self` |
+| `collect` | `(value self) (array item)` |
+
+`next` is abstract. Default bodies MUST NOT be redeclared in user `impl` blocks.
+At an
+implementation site, `self` is the concrete iterator type and `item` is that
+implementation's element type. `next` returns `(option (tuple item self))`:
+`item` is the yielded element and `self` is the remaining iterator value. There
+is no mutating cursor.
+
+Default-method semantics:
+
+- `map` returns a lazy adapter. Each `next` on the adapter calls `next` on the
+  receiver and, when an element is present, yields `(tuple (f x) remaining)`.
+- `filter` returns a lazy adapter that yields only elements for which `pred`
+  returns `true`, calling `next` on the receiver as needed.
+- `skip` returns a lazy adapter that discards the first `n` elements of the
+  receiver, then forwards subsequent elements unchanged.
+- `take` returns a lazy adapter that yields at most `n` elements and then
+  returns `none` on further `next` calls even if the receiver continues.
+- `collect` eagerly drains the receiver through `next` and returns `(array item)`.
+
+All defaults are pure and their callback parameters MUST have `effects: ()`.
 
 Call shape matches every other method: receiver first.
 
@@ -461,15 +506,26 @@ Call shape matches every other method: receiver first.
 (iter.collect xs)
 ```
 
-The builtin constructors `array`, `tuple`, and `map`, the standard-library
-`option` and `result` types, and `str` implement `iter` through toolchain-closed
-implementations. Users cannot add methods or `impl` blocks to `array`, `tuple`,
-or `map`. The associative `map` type iterates `(tuple k v)` entries and MUST
-NOT declare a method named `map`.
+### Closed builtin conformance
+
+The following types receive closed toolchain `iter` conformance from the registry
+keyed by constructor identity:
+
+| Type | `item` | `next` behavior |
+| --- | --- | --- |
+| `(array t)` | `t` | Index order from `0`; remaining is the suffix not yet yielded |
+| `(map k v)` | `(tuple k v)` | Canonical key order; each step yields one entry |
+| `str` | `char` | Unicode scalar order |
+| `(option t)` | `t` | `none` yields `none`; `some v` yields one `(tuple v none)` |
+| `(result t e)` | `t` | `err _` yields `none`; `ok v` yields one `(tuple v none)` |
+
+Heterogeneous tuples do not implement `iter` in v1. Users cannot add methods or
+`impl` blocks to `array` or `map`. The associative `map` type MUST NOT declare a
+method named `map`.
 
 User `deftype`s MAY implement `iter` with a nested `impl iter` block supplying
-only `next`. Generic `impl` targets such as `(array t)` inside a `defint`
-remain post-v1.
+only `next`. The checker infers `item` from that member's result type. Generic
+`impl` targets such as `(array t)` inside a `defint` remain post-v1.
 
 ## Control flow and failure
 

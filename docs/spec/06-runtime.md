@@ -72,17 +72,32 @@ zero only where the relevant standard operation explicitly says so.
 
 ## Tail calls
 
-A call is in tail position when its result is returned directly to the caller
-without further computation in the current function, `lambda`, or `let` body.
-Tail-position calls to functions in the same module's recursive group MUST reuse
-the current activation. The interpreter and WebAssembly backend MAY implement
-this with explicit tail-call instructions or an internal trampoline; the
-strategy is not observable except that conforming programs do not overflow
-language-level stack on tail recursion.
+An expression is in **tail position** when its value is returned directly to the
+caller without further computation in the current activation. Tail position is
+defined structurally:
 
-A non-tail recursive call that exhausts the implementation limit is a trap with
-a stable code and source origin. Default `iter` method bodies MAY lower to
-internal loops; that mutation is not a source feature.
+- the final expression of a module-level `defn` body, `lambda` body, or `do`;
+- the final expression of a `let` form;
+- the selected branch of an `if`;
+- the result expression of the selected `match` arm; and
+- the operand of `try`.
+
+Every other expression position is non-tail, including operands of applications,
+`let` bindings, `if` conditions, and `match` subjects.
+
+The **recursive group** of a module-level `defn` is the set of module-level
+`defn`s in that module reachable from it through static function-call edges,
+including mutual recursion. Tail-position calls whose callee resolves to a
+member of the current function's recursive group MUST reuse the current
+activation. The interpreter and WebAssembly backend MAY implement this with
+explicit tail-call instructions or an internal trampoline; the strategy is not
+observable except that conforming programs do not overflow language-level stack
+on such tail recursion.
+
+V1 defines no portable stack-depth limit. Non-tail recursion and non-tail calls
+that exhaust an embedding host's stack are host events, not portable semantic
+results, and are outside interpreter/Wasm parity. Default `iter` method bodies
+MAY lower to internal loops; that mutation is not a source feature.
 
 ## External providers
 
