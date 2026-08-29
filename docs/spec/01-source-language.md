@@ -109,9 +109,11 @@ do not participate in redeclaration or shadowing checks. Despite being derived
 through the ordinary name grammar, a discard never denotes a value, label,
 atom, or reference and is rejected in every non-discard position.
 
-Keywords, booleans, `void`, and atom names cannot be rebound.
-Boolean, `void`, and reserved-form recognition takes precedence when their
-spelling also satisfies the symbol production.
+Keywords, booleans, `void`, primitive type names, `any`, and atom names cannot
+be rebound. Boolean, `void`, and reserved-form recognition takes precedence when
+their spelling also satisfies the symbol production. `any` and the primitive
+type names are ordinary symbols to the reader and are reserved by resolution,
+not by lexing.
 
 An atom is an ordinary value by default. Only a source grammar or `.vibon`
 schema position that explicitly expects an entity reference resolves an atom
@@ -230,7 +232,7 @@ variadic-type        = "(", "array", type-expr, ")"
 effect-row            = "(", { effect-reference }, ")" ;
 effect-reference      = symbol ;
 where-clause         = "(", { symbol, generic-bound }, ")" ;
-generic-bound        = "any" | symbol ;
+generic-bound        = symbol ;
 
 declaration-attribute = "visibility:", atom-name | "doc:", string ;
 type-attribute = "where:", where-clause
@@ -262,7 +264,11 @@ parameter may use any discard spelling when its value is intentionally unused.
 
 `where:` is a flat list of generic-name/bound pairs. It is the only declaration
 of generic names: every generic name used by a declaration MUST occur exactly
-once in its `where:` clause. `any` states that no interface bound is required.
+once in its `where:` clause, unless an enclosing declaration already binds it.
+A bound is an ordinary interface name; `any` is the predeclared empty interface
+and is the bound that requires nothing. A nested method inherits its
+owner's generic names and MUST NOT redeclare one; the type chapter defines that
+inheritance and the call-site `types:` list built from it.
 
 The canonical function-attribute order is `where:`, `labelled:`, `variadic:`,
 `visibility:`, `effects:`, `external:`, `symbol:`, then `doc:`. The canonical

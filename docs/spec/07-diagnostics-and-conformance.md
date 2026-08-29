@@ -17,9 +17,13 @@ than its issuance order or severity:
 @name.unknown-symbol
 @name.wrong-entity-kind
 @name.member-collision
+@name.generic-redeclaration
+@name.reserved-label
+@name.reserved-declaration
 @module.file-directory-collision
 @module.unknown-path
 @type.argument-mismatch
+@type.type-argument-mismatch
 @type.redundant-implementation
 @type.not-applicable
 @type.invalid-tuple-index
