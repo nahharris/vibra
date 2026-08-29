@@ -498,14 +498,14 @@ since every labelled parameter requires a literal default.
 
 A contract member whose `self` occurs **only** in its result type has no
 receiver value and is instead **destination-dispatched**: the checker unifies
-the written expected type at the call site with the member's written result type and takes `self`
-from that unification. The expected type is therefore not required to be `self`
-itself; an expected `(result u32 conversion-error)` against a written result
-`(result self conversion-error)` yields `self` = `u32`. When no written expected
-type reaches the application, the site emits `@type.ambiguous-destination` and
-lists the candidate receivers; `as` is always available to supply one. This
-selects a written implementation from a written type and never synthesizes one,
-so the inference prohibition above is untouched.
+the written expected type at the call site with the member's written result
+type and takes `self` from that unification. The expected type is therefore not
+required to be `self` itself; an expected `(result u32 conversion-error)`
+against a written result `(result self conversion-error)` yields `self` = `u32`.
+When no written expected type reaches the application, the site emits
+`@type.ambiguous-destination` and lists the candidate receivers; `as` is always
+available to supply one. This selects a written implementation from a written
+type and never synthesizes one, so the inference prohibition above is untouched.
 
 The rule is general and is not limited to conversion. A contract member such as
 `(defn empty () self)` is a factory of the same shape and is selected the same
