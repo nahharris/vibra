@@ -78,9 +78,11 @@ fn formatter_indents_a_long_list_and_nested_long_list_by_two_spaces() {
     let formatted =
         format_source(Path::new("main.vib"), source).expect("format source");
 
+    // A comment-free multiline list shares both delimiters with its inline
+    // edge forms. A hanging `(` above `outer` is not canonical.
     assert_eq!(
         formatted,
-        "(\n  outer\n  alpha\n  bravo\n  charlie\n  delta\n  echo\n  foxtrot\n  golf\n  hotel\n  india\n  juliet\n  kilo\n  (inner lima mike november oscar)\n)\n"
+        "(outer\n  alpha\n  bravo\n  charlie\n  delta\n  echo\n  foxtrot\n  golf\n  hotel\n  india\n  juliet\n  kilo\n  (inner lima mike november oscar))\n"
     );
 }
 
@@ -90,9 +92,13 @@ fn formatter_does_not_double_indent_a_nested_multiline_list() {
     let formatted =
         format_source(Path::new("main.vib"), source).expect("format source");
 
+    // Each end is decided on its own: both lists open beside their inline
+    // first form, the inner list closes beside `november`, and the outer
+    // list's closing delimiter stands alone because its last form is
+    // multiline.
     assert_eq!(
         formatted,
-        "(\n  outer\n  (\n    inner\n    alpha\n    bravo\n    charlie\n    delta\n    echo\n    foxtrot\n    golf\n    hotel\n    india\n    juliet\n    kilo\n    lima\n    mike\n    november\n  )\n)\n"
+        "(outer\n  (inner\n    alpha\n    bravo\n    charlie\n    delta\n    echo\n    foxtrot\n    golf\n    hotel\n    india\n    juliet\n    kilo\n    lima\n    mike\n    november)\n)\n"
     );
 }
 
