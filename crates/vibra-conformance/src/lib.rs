@@ -15,6 +15,23 @@
 //!
 //! # Status
 //!
-//! Milestone 1 step 1 created this crate and its dependency-direction test.
-//! The corpus layout and runner arrive in step 3; see
-//! `docs/roadmap/milestone-1/README.md`.
+//! Milestone 1 step 3 supplies the corpus layout, neutral manifest decoder,
+//! profile dispatcher, and internal runner. Language backends are registered
+//! by later milestones; an unregistered profile is reported as unavailable.
+
+mod corpus;
+mod manifest;
+mod profile;
+mod runner;
+
+pub use corpus::{Case, Corpus, CorpusError};
+pub use manifest::{
+    CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic, ExpectedExecution,
+    ExpectedFix, ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError,
+    NORMATIVE_SECTION_IDS,
+};
+pub use profile::{ConformanceProfile, UnknownProfile};
+pub use runner::{
+    CaseObservation, CaseReport, CaseStatus, ConformanceRunner, DispatchResult,
+    ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler, RunReport,
+};
