@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-vibon-canonical-layout"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Data documents take the same canonical layout as source documents."
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+accepted = true
+formatted = "formatted.vibon"

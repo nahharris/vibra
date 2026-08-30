@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-trailing-file-comment"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A comment after the last form keeps its own line and loses trailing whitespace."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-multiline-first-form"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A multiline first form blocks the opening delimiter from sharing its line."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

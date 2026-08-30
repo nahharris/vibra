@@ -1,0 +1,6 @@
+(
+  (inner
+    ; child comment
+    value)
+  ; before beta
+  beta)
