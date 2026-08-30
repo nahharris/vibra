@@ -22,11 +22,47 @@ fn formatter_is_idempotent_and_preserves_comments() {
     let twice =
         format_source(Path::new("main.vib"), &once).expect("format canonical source");
 
+    assert_eq!(
+        once,
+        "; heading\n(alpha\n  ; before beta\n  beta)\n\n(gamma)\n"
+    );
     assert_eq!(once, twice);
-    assert!(once.contains("; heading"));
-    assert!(once.contains("; before beta"));
-    assert!(once.ends_with('\n'));
-    assert!(!once.ends_with("\n\n"));
+}
+
+#[test]
+fn formatter_keeps_delimiters_blocked_around_multiline_comment_neighbors() {
+    let source = "((inner\n; child comment\nvalue)\n; before beta\nbeta)\n";
+    let formatted =
+        format_source(Path::new("main.vib"), source).expect("format source");
+
+    assert_eq!(
+        formatted,
+        "(\n  (inner\n    ; child comment\n    value)\n  ; before beta\n  beta)\n"
+    );
+}
+
+#[test]
+fn formatter_keeps_delimiters_separate_from_leading_or_trailing_comments() {
+    let leading = format_source(Path::new("main.vib"), "(; leading\nalpha)\n")
+        .expect("format leading comment");
+    let trailing = format_source(Path::new("main.vib"), "(alpha\n; trailing\n)\n")
+        .expect("format trailing comment");
+    let only = format_source(Path::new("main.vib"), "(; only\n)\n")
+        .expect("format comment-only list");
+
+    assert_eq!(leading, "(\n  ; leading\n  alpha)\n");
+    assert_eq!(trailing, "(alpha\n  ; trailing\n)\n");
+    assert_eq!(only, "(\n  ; only\n)\n");
+}
+
+#[test]
+fn formatter_keeps_a_closing_delimiter_within_the_column_limit() {
+    let last = "x".repeat(86);
+    let source = format!("(first\n; before last\n{last})\n");
+    let formatted =
+        format_source(Path::new("main.vib"), &source).expect("format source");
+
+    assert_eq!(formatted, format!("(first\n  ; before last\n  {last}\n)\n"));
 }
 
 #[test]

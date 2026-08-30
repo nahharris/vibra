@@ -624,6 +624,11 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   every remaining scalar;
 - adjacent lowercase numeric suffixes, preserved exactly when written;
 - leaf lists on one line when they fit within 88 columns;
+- multiline lists with line comments keep comments on their own indented lines;
+  the opening delimiter shares the first form's line when that form is inline
+  and fits, and the closing delimiter shares the last form's line when that
+  form is inline and fits with the delimiter; otherwise each delimiter is
+  standalone;
 - declaration headers before labelled attributes and bodies;
 - fixed, labelled, then variadic function or constructor operands;
 - one pattern/result arm per line in a multiline `match`; and
