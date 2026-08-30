@@ -365,14 +365,25 @@ fn render_node(
                                     LineComponent::Node(child) => layouts
                                         .get(&node_key(child))
                                         .is_some_and(|child_layout| {
-                                            child_layout.inline
-                                                && indent
+                                            if child_layout.inline {
+                                                // The delimiter has to fit
+                                                // beside the form it joins.
+                                                indent
                                                     .saturating_add(2)
                                                     .saturating_add(
                                                         child_layout.inline_width,
                                                     )
                                                     .saturating_add(1)
                                                     <= 88
+                                            } else {
+                                                // A multiline last form
+                                                // already ends on its own
+                                                // closing delimiter, so this
+                                                // one stacks onto that line
+                                                // instead of orphaning itself
+                                                // below it.
+                                                true
+                                            }
                                         }),
                                     LineComponent::Comment(_) => false,
                                 },
