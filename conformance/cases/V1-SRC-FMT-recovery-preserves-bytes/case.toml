@@ -1,0 +1,19 @@
+id = "V1-SRC-FMT-recovery-preserves-bytes"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Canonical whitespace rules stay off once recovery inserts an error marker."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+
+[expect.diagnostics.span]
+start = 17
+end = 17

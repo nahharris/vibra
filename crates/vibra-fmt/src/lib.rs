@@ -172,7 +172,6 @@ fn root_groups(root: &CstNode) -> Option<Vec<RootGroup<'_>>> {
 struct NodeLayout {
     inline: bool,
     inline_width: usize,
-    has_comment: bool,
 }
 
 fn node_key(node: &CstNode) -> *const CstNode {
@@ -215,7 +214,6 @@ fn build_layouts(root: &CstNode) -> HashMap<*const CstNode, NodeLayout> {
             _ => NodeLayout {
                 inline: false,
                 inline_width: 0,
-                has_comment: false,
             },
         };
         layouts.insert(node_key(node), layout);
@@ -228,7 +226,6 @@ fn leaf_layout(text: &str) -> NodeLayout {
     NodeLayout {
         inline: !has_newline,
         inline_width,
-        has_comment: false,
     }
 }
 
@@ -272,7 +269,6 @@ fn list_layout(
                         .unwrap_or(NodeLayout {
                             inline: false,
                             inline_width: 0,
-                            has_comment: false,
                         });
                 if item_count != 0 {
                     inline_width = inline_width.saturating_add(1);
@@ -287,7 +283,6 @@ fn list_layout(
     NodeLayout {
         inline: !has_comment && all_inline && indent.saturating_add(inline_width) <= 88,
         inline_width,
-        has_comment,
     }
 }
 
@@ -321,7 +316,6 @@ fn render_node(
                         layouts.get(&node_key(node)).copied().unwrap_or(NodeLayout {
                             inline: false,
                             inline_width: 0,
-                            has_comment: false,
                         });
                     if layout.inline {
                         output.push('(');
@@ -346,37 +340,50 @@ fn render_node(
                     } else {
                         output.push('(');
                         let components = multiline_components(node);
-                        let first_is_node = layout.has_comment
-                            && components.first().is_some_and(|component| {
-                                match component {
-                                    LineComponent::Node(child) => layouts
-                                        .get(&node_key(child))
-                                        .is_some_and(|child_layout| {
-                                            child_layout.inline
-                                                && indent
-                                                    .saturating_add(1)
-                                                    .saturating_add(
-                                                        child_layout.inline_width,
-                                                    )
-                                                    <= 88
-                                        }),
-                                    LineComponent::Comment(_) => false,
-                                }
-                            });
-                        let last_is_node = layout.has_comment
-                            && components.last().is_some_and(
+                        // Delimiter placement is a property of every
+                        // multiline list, not only of a commented one. A
+                        // hanging `(` or an orphaned `)` is not canonical
+                        // Vibra, so a delimiter stands alone only when its
+                        // neighbour is a comment, is itself multiline, or
+                        // does not fit beside it.
+                        let first_is_node = components.first().is_some_and(
+                            |component| match component {
+                                LineComponent::Node(child) => layouts
+                                    .get(&node_key(child))
+                                    .is_some_and(|child_layout| {
+                                        child_layout.inline
+                                            && indent.saturating_add(1).saturating_add(
+                                                child_layout.inline_width,
+                                            ) <= 88
+                                    }),
+                                LineComponent::Comment(_) => false,
+                            },
+                        );
+                        let last_is_node =
+                            components.last().is_some_and(
                                 |component| match component {
                                     LineComponent::Node(child) => layouts
                                         .get(&node_key(child))
                                         .is_some_and(|child_layout| {
-                                            child_layout.inline
-                                                && indent
+                                            if child_layout.inline {
+                                                // The delimiter has to fit
+                                                // beside the form it joins.
+                                                indent
                                                     .saturating_add(2)
                                                     .saturating_add(
                                                         child_layout.inline_width,
                                                     )
                                                     .saturating_add(1)
                                                     <= 88
+                                            } else {
+                                                // A multiline last form
+                                                // already ends on its own
+                                                // closing delimiter, so this
+                                                // one stacks onto that line
+                                                // instead of orphaning itself
+                                                // below it.
+                                                true
+                                            }
                                         }),
                                     LineComponent::Comment(_) => false,
                                 },

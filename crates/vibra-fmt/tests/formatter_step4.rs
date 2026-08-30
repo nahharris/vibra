@@ -58,11 +58,18 @@ fn formatter_keeps_delimiters_separate_from_leading_or_trailing_comments() {
 #[test]
 fn formatter_keeps_a_closing_delimiter_within_the_column_limit() {
     let last = "x".repeat(86);
-    let source = format!("(first\n; before last\n{last})\n");
+    let commented = format!("(first\n; before last\n{last})\n");
+    let bare = format!("(first {last})\n");
+
     let formatted =
-        format_source(Path::new("main.vib"), &source).expect("format source");
+        format_source(Path::new("main.vib"), &commented).expect("format source");
+    let uncommented =
+        format_source(Path::new("main.vib"), &bare).expect("format source");
 
     assert_eq!(formatted, format!("(first\n  ; before last\n  {last}\n)\n"));
+    // The guard is about columns, not comments: `{last})` would end at
+    // column 89.
+    assert_eq!(uncommented, format!("(first\n  {last}\n)\n"));
 }
 
 #[test]
@@ -78,9 +85,11 @@ fn formatter_indents_a_long_list_and_nested_long_list_by_two_spaces() {
     let formatted =
         format_source(Path::new("main.vib"), source).expect("format source");
 
+    // A comment-free multiline list shares both delimiters with its inline
+    // edge forms. A hanging `(` above `outer` is not canonical.
     assert_eq!(
         formatted,
-        "(\n  outer\n  alpha\n  bravo\n  charlie\n  delta\n  echo\n  foxtrot\n  golf\n  hotel\n  india\n  juliet\n  kilo\n  (inner lima mike november oscar)\n)\n"
+        "(outer\n  alpha\n  bravo\n  charlie\n  delta\n  echo\n  foxtrot\n  golf\n  hotel\n  india\n  juliet\n  kilo\n  (inner lima mike november oscar))\n"
     );
 }
 
@@ -90,9 +99,12 @@ fn formatter_does_not_double_indent_a_nested_multiline_list() {
     let formatted =
         format_source(Path::new("main.vib"), source).expect("format source");
 
+    // Both lists open beside their inline first form, and the outer closing
+    // delimiter stacks onto the inner list's closing line rather than
+    // orphaning itself below it.
     assert_eq!(
         formatted,
-        "(\n  outer\n  (\n    inner\n    alpha\n    bravo\n    charlie\n    delta\n    echo\n    foxtrot\n    golf\n    hotel\n    india\n    juliet\n    kilo\n    lima\n    mike\n    november\n  )\n)\n"
+        "(outer\n  (inner\n    alpha\n    bravo\n    charlie\n    delta\n    echo\n    foxtrot\n    golf\n    hotel\n    india\n    juliet\n    kilo\n    lima\n    mike\n    november))\n"
     );
 }
 
