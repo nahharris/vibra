@@ -88,6 +88,27 @@ manifest and fails when a crate depends on something the architecture boundary
 does not permit. `vibra-conformance` is the crate that legitimately depends on
 everything, so workspace-wide structural invariants live there.
 
+### D7 — The Step 3 manifest is neutral TOML with explicit snapshots
+
+Cases live below `conformance/cases/` in directories named by their stable
+case IDs. Each directory contains `case.toml`, any declared source/project/data
+inputs, and optional expected-output snapshots. The manifest records `id`, a
+normative `rule`, and one of the closed profiles from the diagnostics chapter.
+Inputs and snapshots are case-relative paths; the loader rejects traversal,
+absolute paths, missing files, symlink escapes, and directory/manifest ID
+mismatches.
+
+`[expect]` records acceptance, ordered diagnostics, and optional formatting,
+resolved-identity, type, effect, interpreter, Wasm, and artifact observations.
+Expected diagnostics use the closed registry's atom code and fixed level plus
+an explicit half-open byte span. This keeps the corpus oracle independent of
+both the VIBON decoder and future execution backends.
+
+The internal runner dispatches cases to the closest registered capable profile.
+An absent capable handler is an `unavailable` result, not a silently skipped
+case. Later backend milestones register handlers through the public
+`ProfileHandler` interface; this step adds no language behavior.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the
@@ -100,7 +121,7 @@ and conformance cases in the same change.
 | --- | --- | --- | --- |
 | 1 | Workspace, pinned toolchain, CI, and crate skeleton | infrastructure | landed |
 | 2 | Spans, line index, diagnostic model, closed code and level registry, and their JSON contract | vertical | landed |
-| 3 | Conformance corpus layout, manifest decoding, profile dispatch, and runner | infrastructure | not started |
+| 3 | Conformance corpus layout, manifest decoding, profile dispatch, and runner | infrastructure | landed |
 | 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | not started |
 | 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | not started |
 | 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | not started |
