@@ -1,6 +1,9 @@
-(package
+(record
 
-  name:   "vibra"
+  name:   "hello"
 
-  targets: (   )
+  tags:   (   array   @fast   @small   )
+
+  span:   (  tuple   1i32   2i32  )
+
 )

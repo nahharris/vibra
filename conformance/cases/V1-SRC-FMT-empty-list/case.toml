@@ -1,7 +1,7 @@
 id = "V1-SRC-FMT-empty-list"
 rule = "V1-SRC-FMT"
 profile = "reader-v1"
-description = "An empty list collapses to adjacent delimiters at every depth."
+description = "An empty parameter list collapses to adjacent delimiters."
 
 [inputs]
 source = "input.vib"

@@ -1,7 +1,7 @@
 id = "V1-SRC-FMT-vibon-canonical-layout"
 rule = "V1-SRC-FMT"
 profile = "reader-v1"
-description = "Data documents take the same canonical layout as source documents."
+description = "A VIBON record takes the same canonical layout as a source document."
 
 [inputs]
 data = ["input.vibon"]

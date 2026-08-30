@@ -1,1 +1,1 @@
-(scale (factor 2.5f64) step: -1i32 mode: @linear float.mul)
+(scale float.mul (factor 2.5f64) step: -1i32 mode: @linear)
