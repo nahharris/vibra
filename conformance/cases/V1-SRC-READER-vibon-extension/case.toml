@@ -1,7 +1,7 @@
 id = "V1-SRC-READER-vibon-extension"
 rule = "V1-SRC-READER"
 profile = "reader-v1"
-description = "The reader selects data mode from .vibon without content sniffing."
+description = "The data loader accepts a .vibon document on its extension alone."
 
 [inputs]
 data = ["input.vibon"]

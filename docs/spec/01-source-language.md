@@ -625,14 +625,19 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
 - adjacent lowercase numeric suffixes, preserved exactly when written;
 - leaf lists on one line when they fit within 88 columns;
 - multiline lists keep their line comments on their own indented lines;
-- delimiter placement in every multiline list, commented or not: the opening
-  delimiter shares the first form's line when that form is inline and fits.
-  The closing delimiter shares the last form's line unless that form is a line
-  comment, which would swallow it, or is inline and leaves no room for the
-  delimiter within 88 columns; a multiline last form ends on its own closing
-  delimiter, and this one stacks onto that same line. Each end is decided on
-  its own. A hanging opening delimiter above an inline first form and a
-  closing delimiter orphaned below a multiline last form are never canonical;
+- delimiter placement in every multiline list, commented or not. The opening
+  delimiter shares the first form's line when that form is inline and fits
+  beside it; a hanging opening delimiter above an inline first form is never
+  canonical. It stands alone above a line comment, which keeps its own line,
+  and above a multiline first form, because a form that started beside the
+  delimiter would have to indent its body under its own opening column
+  instead of at the enclosing list's two-space step. The closing delimiter
+  shares the last form's line unless that form is a line comment, which would
+  swallow it, or is inline and leaves no room for the delimiter within 88
+  columns; a multiline last form ends on its own closing delimiter, and this
+  one stacks onto that same line rather than being orphaned below it. Closing
+  delimiters carry no indentation of their own, so the asymmetry between the
+  two ends is deliberate. Each end is decided on its own;
 - declaration headers before labelled attributes and bodies;
 - fixed, labelled, then variadic function or constructor operands;
 - one pattern/result arm per line in a multiline `match`; and
