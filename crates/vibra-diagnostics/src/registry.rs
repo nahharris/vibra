@@ -209,7 +209,9 @@ macro_rules! diagnostic_registry {
 
 diagnostic_registry! {
     SyntaxUnmatchedDelimiter => "@syntax.unmatched-delimiter", Syntax, Error, None,
-        "a list is not closed before the end of the document";
+        "a list or quoted leaf has an unmatched delimiter";
+    SyntaxMissingSeparator => "@syntax.missing-separator", Syntax, Error, None,
+        "sibling forms in a list are not separated by required trivia";
     SyntaxInvalidCharacterLiteral => "@syntax.invalid-character-literal", Syntax, Error, None,
         "a character literal is not one valid EDN character spelling";
     SyntaxInvalidNumericLiteral => "@syntax.invalid-numeric-literal", Syntax, Error, None,
@@ -320,7 +322,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 49;
+    const REGISTERED_CODES: usize = 50;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -393,6 +395,14 @@ mod tests {
                 code.as_atom()
             );
         }
+    }
+
+    #[test]
+    fn unmatched_delimiter_summary_covers_lists_and_quoted_leaves() {
+        assert_eq!(
+            DiagnosticCode::SyntaxUnmatchedDelimiter.summary(),
+            "a list or quoted leaf has an unmatched delimiter"
+        );
     }
 
     #[test]

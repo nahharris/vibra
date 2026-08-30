@@ -1,0 +1,11 @@
+id = "V1-SRC-READER-vibon-extension"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "The reader selects data mode from .vibon without content sniffing."
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+accepted = true
+formatted = "formatted.vibon"

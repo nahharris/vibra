@@ -109,6 +109,19 @@ An absent capable handler is an `unavailable` result, not a silently skipped
 case. Later backend milestones register handlers through the public
 `ProfileHandler` interface; this step adds no language behavior.
 
+### D8 — Reader conformance runs through a dedicated internal entrypoint
+
+Step 4 registers the real syntax/formatter handler for `reader-v1` and exposes
+it through the `vibra-conformance` crate's internal runner binary. CI invokes
+that binary as a separate conformance job, so checked-in cases are executed
+independently of the Rust host-language test suite. The binary is an internal
+CI adapter and does not add a user-facing `vibra` command; any failed or
+unavailable case returns a nonzero exit status. The handler maps the manifest's
+`source`, `project`, and `data` roles to their respective loaders, and the
+entrypoint rejects an empty corpus or one with no `reader-v1` cases. Host
+language tests use synthetic temporary corpora, so the checked-in cases are
+loaded only by this entrypoint and its CI job.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the
@@ -122,7 +135,7 @@ and conformance cases in the same change.
 | 1 | Workspace, pinned toolchain, CI, and crate skeleton | infrastructure | landed |
 | 2 | Spans, line index, diagnostic model, closed code and level registry, and their JSON contract | vertical | landed |
 | 3 | Conformance corpus layout, manifest decoding, profile dispatch, and runner | infrastructure | landed |
-| 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | not started |
+| 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | in progress |
 | 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | not started |
 | 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | not started |
 | 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | not started |

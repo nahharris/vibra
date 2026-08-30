@@ -1,9 +1,8 @@
 name: CI
 
 # The roadmap requires both suites to run from a clean checkout without
-# network access after dependencies are synced. Milestone 1 has only the
-# host-language suite so far; the conformance job arrives with the corpus
-# runner in step 3.
+# network access after dependencies are synced. The conformance job below is
+# an internal corpus entrypoint, independent of the Rust host-language tests.
 
 # Checks run on pull requests. A milestone integration branch keeps a standing
 # draft pull request into main, so pushes to it are already covered and need no
@@ -39,19 +38,42 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
       - name: Formatting
         run: cargo fmt --all --check
 
       - name: Lints
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --all-targets --all-features
+        run: cargo test --locked --offline --workspace --all-targets --all-features
 
       - name: Documentation
-        run: cargo doc --workspace --no-deps --all-features
+        run: cargo doc --locked --offline --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
+
+  conformance:
+    name: reader-v1 conformance corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      # This is the internal runner, not a user-facing `vibra` binary. It
+      # executes the checked-in cases through the real reader-v1 handler and
+      # exits nonzero on a failed or unavailable case.
+      - name: Run reader-v1 corpus
+        run: cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
 
   archive-isolation:
     name: archive stays out of the build

@@ -16,6 +16,10 @@ vibra-fmt.workspace = true
 vibra-schema.workspace = true
 vibra-syntax.workspace = true
 
+[[bin]]
+name = "vibra-conformance"
+path = "src/bin/conformance.rs"
+
 [dev-dependencies]
 [lints]
 workspace = true

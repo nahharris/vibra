@@ -1,7 +1,7 @@
 # Vibra v1 diagnostics and conformance
 
 Status: normative target
-Implementation status: not started
+Implementation status: milestone 1 step 4 in progress (reader-v1 profile only)
 
 ## Diagnostics are a language surface
 
@@ -17,6 +17,7 @@ table governs.
 | Code | Level |
 | --- | --- |
 | `@syntax.unmatched-delimiter` | `@error` |
+| `@syntax.missing-separator` | `@error` |
 | `@syntax.invalid-character-literal` | `@error` |
 | `@syntax.invalid-numeric-literal` | `@error` |
 | `@syntax.retired-form` | `@error` |
@@ -105,8 +106,9 @@ MUST NOT manufacture a typed node for an ambiguous recovery.
 
 Presentation that has one unambiguous semantic binding may parse with a style
 diagnostic and a safe formatter fix. Missing operands, duplicate labels,
-unknown labels on resolved forms, unmatched delimiters, invalid tokens, odd map
-key/value tails, and ambiguous applications remain errors.
+unknown labels on resolved forms, missing required trivia between sibling
+forms, unmatched delimiters, invalid tokens, odd map key/value tails, and
+ambiguous applications remain errors.
 
 Later phases operate on explicitly marked valid subtrees and suppress cascades
 that add no new information. A tool response identifies which facts are exact,
@@ -166,6 +168,9 @@ names such as `_.x`, `a?.b`, `-.x`, and `@-.x`. Invalid character tokens use
 `@syntax.invalid-numeric-literal`; and a syntactically valid literal outside
 its suffixed type's range uses `@type.numeric-out-of-range`. All three have the
 fixed level `@error`.
+
+Reader recovery cases also cover a missing required separator between sibling
+forms with `@syntax.missing-separator`, whose fixed level is `@error`.
 
 Registry coverage proves that the queryable registry and the canonical table
 above agree. Every code in the table has exactly one registry entry, every
@@ -349,6 +354,14 @@ The future implementation has two independent suites:
    safety, runtime adapters, and failure paths; and
 2. Vibra conformance tests for observable source, project, tooling,
    interpreter, and Wasm behavior.
+
+The reader-v1 slice runs its checked-in corpus through the real syntax and
+formatter handler using the internal `vibra-conformance` entrypoint. CI invokes
+that entrypoint as a separate job from the host-language test suite; it exits
+nonzero for a failed or unavailable case. No user-facing `vibra` binary is
+introduced by milestone 1. Host-language integration tests use synthetic
+temporary corpora for the runner and handler; checked-in cases are loaded only
+by this dedicated entrypoint in CI (or when invoked directly).
 
 Both run from a clean checkout without network access after dependencies are
 synced. Formatter idempotence, JSON-schema validation, `.vibon` data-decoder

@@ -1,7 +1,7 @@
 # Vibra v1 source language
 
 Status: normative target
-Implementation status: not started
+Implementation status: milestone 1 step 4 in progress (reader spine only)
 
 ## Reader
 
@@ -54,6 +54,17 @@ character-scalar = ? one Unicode scalar other than whitespace ? ;
 trivia         = { whitespace | line-comment } ;
 required-trivia = ( whitespace | line-comment ), trivia ;
 ```
+
+The step 4 reader implements the shared UTF-8 tokenization, delimiter
+structure, trivia retention, and recovery boundary described above. Leaf text
+is intentionally opaque at this stage: literal classification, qualified
+names, labels, declarations, and semantic AST nodes are added by later
+milestone steps. A recovered or incomplete tree remains lossless and carries
+an explicit error marker rather than being assigned an ambiguous typed node.
+When a double-quoted leaf reaches end of file without a closing quote, the
+reader emits `@syntax.unmatched-delimiter`, marks the subtree recovered, and
+preserves the original bytes. Escape decoding and string-value validation are
+deferred to step 5; step 4 only keeps the quoted leaf together for recovery.
 
 Strings are double quoted and support `\"`, `\\`, `\n`, `\r`, `\t`, and
 `\u{HEX}`.
@@ -621,3 +632,8 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
 Formatting MUST be idempotent and semantics-preserving. The formatter MAY
 normalize recoverable presentation but MUST NOT guess through a syntax,
 binding, or type ambiguity.
+
+If recovery inserted an error marker, the formatter MUST preserve the original
+UTF-8 document bytes exactly. Canonical whitespace and line-ending rules apply
+only when the tree has no recovery error; rewriting an incomplete or opaque
+leaf would be a semantic guess.

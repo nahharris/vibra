@@ -1,0 +1,18 @@
+id = "V1-SRC-READER-missing-separator"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "Sibling forms inside a list require trivia between them."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.missing-separator"
+level = "@error"
+
+[expect.diagnostics.span]
+start = 2
+end = 2
