@@ -1,7 +1,7 @@
 # Vibra v1 source language
 
 Status: normative target
-Implementation status: milestone 1 step 5 in progress (reader and literal surface)
+Implementation status: milestone 1 step 6 in progress (reader, literal, and name surface)
 
 ## Reader
 
@@ -55,17 +55,18 @@ trivia         = { whitespace | line-comment } ;
 required-trivia = ( whitespace | line-comment ), trivia ;
 ```
 
-The step 4/5 reader implements the shared UTF-8 tokenization, delimiter
-structure, trivia retention, recovery boundary, and literal classification
-described above. Qualified names, labels, declarations, and semantic AST
+The step 4–6 reader implements the shared UTF-8 tokenization, delimiter
+structure, trivia retention, recovery boundary, literal classification, and
+lexical name classification described above. Declarations and semantic AST
 nodes are added by later milestone steps. A recovered or incomplete tree
 remains lossless and carries an explicit error marker rather than being
 assigned an ambiguous typed node. When a double-quoted leaf reaches end of
 file without a closing quote, the reader emits
 `@syntax.unmatched-delimiter`, marks the subtree recovered, and preserves the
 original bytes. Terminated strings, characters, booleans, `void`, and decimal
-numeric spellings are classified by step 5; the formatter canonicalizes valid
-character spellings while preserving raw string and numeric spellings.
+numeric spellings are classified by step 5; nonliteral leaves are classified
+as names by step 6. The formatter canonicalizes valid character spellings
+while preserving raw string, numeric, and name spellings.
 Opaque leaves and literal leaves retain interior CR and CRLF bytes. LF
 normalization applies to trivia, not to quoted leaf contents.
 
@@ -116,6 +117,13 @@ leading hyphen is not. `?`, `!`, `_`, `/`, an empty segment, and a segment that
 starts with a digit are invalid in a symbol. A dotted symbol is a qualified
 name, never field-access syntax. For example, `a`, `a1`, `a-`, `a--b`, and
 `a.b2-c` are symbols; `1a`, `-a`, `a..b`, and `a?` are not.
+
+A nonliteral leaf that fails the shared symbol, label, atom, or discard
+production emits `@syntax.invalid-name` over its complete token span. Literal
+classification takes precedence, so malformed numeric, character, and
+terminated string leaves keep their dedicated diagnostics. This is lexical
+validation only; contextual role rejection and resolution remain later
+milestone work.
 
 Labels and atom names derive mechanically from symbols: `some.name:` is a
 label and `@some.name` is an atom name. The `"-"` symbol alternative therefore

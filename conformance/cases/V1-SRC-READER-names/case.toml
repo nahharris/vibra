@@ -1,0 +1,11 @@
+id = "V1-SRC-READER-names"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "Qualified kebab names, labels, atoms, and discard spellings share one lexical classifier."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

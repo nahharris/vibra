@@ -44,9 +44,9 @@ and resolution**; lexical validity and permitted binding roles are different.
 | Formatting | Decode/format/decode value equivalence, suffix retained, canonical character bytes, idempotence, 87/88/89-column boundaries with nested indentation |
 
 Use `@syntax.invalid-character-literal`,
-`@syntax.invalid-string-literal`, and `@syntax.invalid-numeric-literal` with
-their fixed levels. Do not emit `@type.numeric-out-of-range` from lexical
-validation.
+`@syntax.invalid-string-literal`, `@syntax.invalid-numeric-literal`, and
+`@syntax.invalid-name` with their fixed levels. Do not emit
+`@type.numeric-out-of-range` from lexical validation.
 
 ## Step 6 implementation sequence
 

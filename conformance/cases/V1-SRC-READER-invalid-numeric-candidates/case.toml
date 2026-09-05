@@ -14,61 +14,61 @@ formatted = "formatted.vib"
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 7
-end = 12
+start = 6
+end = 11
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 13
-end = 19
+start = 12
+end = 18
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 20
-end = 23
+start = 19
+end = 22
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 24
-end = 26
+start = 23
+end = 25
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 27
-end = 31
+start = 26
+end = 30
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 32
-end = 37
+start = 31
+end = 36
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 38
-end = 43
+start = 37
+end = 42
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 44
-end = 46
+start = 43
+end = 45
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-numeric-literal"
 level = "@error"
 [expect.diagnostics.span]
-start = 47
-end = 49
+start = 46
+end = 48

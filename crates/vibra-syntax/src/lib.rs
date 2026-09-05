@@ -14,12 +14,13 @@
 //!
 //! # Status
 //!
-//! Milestone 1 step 4 supplies the reader spine: a shared UTF-8 lexer, a
-//! hand-rolled lossless recovery CST, extension-selected document modes, and
-//! the opaque leaf boundary used by later literal/name/AST steps. See
-//! `docs/roadmap/milestone-1/README.md`.
+//! Milestone 1 steps 4–6 supply the shared UTF-8 lexer, literal and name
+//! classification, hand-rolled lossless recovery CST, and
+//! extension-selected document modes. Contextual AST and resolution remain
+//! later-step concerns; see `docs/roadmap/milestone-1/README.md`.
 
 mod literal;
+mod name;
 mod reader;
 
 pub use literal::{
@@ -28,6 +29,7 @@ pub use literal::{
     StringLiteral, VoidLiteral, canonical_character_spelling, classify,
     classify_literal,
 };
+pub use name::{Name, NameClassification, NameKind, classify_name};
 pub use reader::{
     CstNode, Document, DocumentMode, DocumentModeError, Lexed, Lexer, SyntaxKind,
     Token, TokenKind, lex, lex_bytes, parse, parse_data, parse_document, parse_source,

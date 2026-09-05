@@ -1,0 +1,12 @@
+id = "V1-SRC-READER-name-source-data-parity"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "The shared name classifier gives source and VIBON loaders the same Step 6 surface."
+
+[inputs]
+source = "input.vib"
+data = ["input.vibon"]
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

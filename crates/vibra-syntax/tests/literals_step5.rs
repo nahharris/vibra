@@ -59,7 +59,7 @@ fn character_tokens_keep_delimiters_quotes_and_comments_attached() {
 
 #[test]
 fn malformed_character_literals_report_the_complete_token() {
-    let source = r##"🌱 (\ab \newline-x \uD800 \u12 \u12345) next"##;
+    let source = r##"seed (\ab \newline-x \uD800 \u12 \u12345) next"##;
     let document =
         parse_source(Path::new("characters.vib"), source).expect("source mode");
 
@@ -94,7 +94,7 @@ fn malformed_character_literals_report_the_complete_token() {
 
 #[test]
 fn malformed_numeric_candidates_report_the_complete_token() {
-    let source = r##"🌱 (1u128 1.0i32 1e+ 1a 0x10 1_000 2f64x 3.) -1u8 2f64"##;
+    let source = r##"seed (1u128 1.0i32 1e+ 1a 0x10 1_000 2f64x 3.) -1u8 2f64"##;
     let document = parse_source(Path::new("numbers.vib"), source).expect("source mode");
 
     assert!(!document.accepted());
@@ -119,7 +119,7 @@ fn malformed_numeric_candidates_report_the_complete_token() {
 
 #[test]
 fn terminated_malformed_strings_report_the_complete_quoted_leaf() {
-    let source = r###"🌱 ("bad\q" "bad\u{}" "bad\u{D800}" "bad\u{110000}" "bad\u{1234567}") true"###;
+    let source = r###"seed ("bad\q" "bad\u{}" "bad\u{D800}" "bad\u{110000}" "bad\u{1234567}") true"###;
     let document = parse_source(Path::new("strings.vib"), source).expect("source mode");
 
     assert!(!document.accepted());
@@ -145,7 +145,7 @@ fn terminated_malformed_strings_report_the_complete_quoted_leaf() {
 
 #[test]
 fn an_unterminated_string_with_an_unfinished_escape_has_only_recovery() {
-    let source = r#"🌱 "unfinished\"#;
+    let source = r#"seed "unfinished\"#;
     let document = parse_source(Path::new("strings.vib"), source).expect("source mode");
 
     assert!(!document.accepted());
@@ -172,7 +172,7 @@ fn an_unterminated_string_with_an_unfinished_escape_has_only_recovery() {
 #[test]
 fn the_literal_surface_is_identical_in_source_and_data_modes() {
     let source =
-        r###"🌱 (true false void \newline \u0061 1u8 25i32 2.5f64 2f64 "ok\n")"###;
+        r###"seed (true false void \newline \u0061 1u8 25i32 2.5f64 2f64 "ok\n")"###;
 
     let source_document =
         parse_source(Path::new("input.vib"), source).expect("source loader");
