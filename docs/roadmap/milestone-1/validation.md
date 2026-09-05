@@ -1,7 +1,7 @@
 # Milestone 1 validation and handoff
 
 Run commands from the repository root with the pinned `rust-toolchain.toml`.
-These commands exist at baseline `aec8a3d6048a43936612a412b2bb794d3335e31b`;
+These commands exist at baseline `d1955ed36ed080c57aea0a543637fa41cb3176b1`;
 proposed future tests and fuzz
 targets must be added before anyone records them as executed.
 
