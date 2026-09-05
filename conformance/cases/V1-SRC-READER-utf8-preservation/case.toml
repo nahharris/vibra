@@ -1,0 +1,11 @@
+id = "V1-SRC-READER-utf8-preservation"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "UTF-8 leaf bytes survive lexical reading and canonical formatting."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

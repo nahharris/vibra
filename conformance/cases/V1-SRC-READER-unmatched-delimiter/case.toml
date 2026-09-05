@@ -1,0 +1,18 @@
+id = "V1-SRC-READER-unmatched-delimiter"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "An incomplete list recovers with a lossless error marker."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+
+[expect.diagnostics.span]
+start = 7
+end = 7

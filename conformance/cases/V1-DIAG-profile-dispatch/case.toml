@@ -1,0 +1,10 @@
+id = "V1-DIAG-profile-dispatch"
+rule = "V1-DIAG"
+profile = "reader-v1"
+description = "The step 3 corpus proves neutral manifest discovery and profile dispatch."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

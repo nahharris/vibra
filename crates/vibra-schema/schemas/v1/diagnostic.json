@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vibra:schema:v1:diagnostic",
+  "title": "Vibra diagnostic",
+  "description": "One structured diagnostic as rendered to JSON by the CLI and MCP surfaces. Spans are half-open UTF-8 byte ranges; line and column are derived display data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "code",
+    "level",
+    "message",
+    "primarySpan",
+    "related",
+    "notes",
+    "fixes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Major version of this contract. A reader must reject a newer major version it cannot interpret rather than guessing.",
+      "const": 1
+    },
+    "code": {
+      "$ref": "#/$defs/diagnosticCode"
+    },
+    "level": {
+      "description": "The level registered for this code. Fixed by the specification and not configurable by a project.",
+      "enum": ["@error", "@warning"]
+    },
+    "message": {
+      "description": "Human-facing text. Tests assert codes, levels, and spans rather than this wording.",
+      "type": "string"
+    },
+    "primarySpan": {
+      "$ref": "#/$defs/span"
+    },
+    "related": {
+      "description": "Additional spans that explain the diagnostic.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/relatedSpan" }
+    },
+    "notes": {
+      "description": "Additional explanation carrying no span.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "fixes": {
+      "description": "Fixes offered for this diagnostic. Present only for a code whose registered fix capability is @safe.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/fix" }
+    }
+  },
+  "$defs": {
+    "diagnosticCode": {
+      "description": "A stable lowercase atom of the form @<domain>.<thing>, both components kebab-case.",
+      "type": "string",
+      "pattern": "^@[a-z][a-z0-9-]*\\.[a-z][a-z0-9-]*$"
+    },
+    "position": {
+      "description": "A one-based display position. The column counts Unicode scalar values.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "column"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "span": {
+      "description": "A half-open UTF-8 byte range, with its endpoints also given as derived display positions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "startPosition", "endPosition"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "startPosition": { "$ref": "#/$defs/position" },
+        "endPosition": { "$ref": "#/$defs/position" }
+      }
+    },
+    "relatedSpan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["span", "message"],
+      "properties": {
+        "span": { "$ref": "#/$defs/span" },
+        "message": { "type": "string" }
+      }
+    },
+    "fix": {
+      "description": "A fix descriptor. Edits belong to a transactional edit plan, not to a diagnostic.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "safe", "expectedRevision"],
+      "properties": {
+        "description": { "type": "string" },
+        "safe": {
+          "description": "Whether the fix may be applied without review. Only a safe fix is applied by `vibra edit fix`.",
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "description": "The document revision the fix was computed against. An apply against a different revision is rejected.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

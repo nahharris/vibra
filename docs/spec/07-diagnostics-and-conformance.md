@@ -1,66 +1,71 @@
 # Vibra v1 diagnostics and conformance
 
 Status: normative target
-Implementation status: not started
+Implementation status: milestone 1 step 4 in progress (reader-v1 profile only)
 
 ## Diagnostics are a language surface
 
 Every rejected or normalized construct has a structured diagnostic. A
 diagnostic code is a stable lowercase atom of the form `@<domain>.<thing>`.
 Both components are kebab-case and the thing describes the condition rather
-than its issuance order or severity:
+than its issuance order or severity.
 
-```text
-@syntax.unmatched-delimiter
-@syntax.invalid-character-literal
-@syntax.invalid-numeric-literal
-@syntax.retired-form
-@name.unknown-symbol
-@name.wrong-entity-kind
-@name.member-collision
-@name.generic-redeclaration
-@name.reserved-label
-@name.reserved-declaration
-@name.reserved-value-spelling
-@module.file-directory-collision
-@module.unknown-path
-@type.argument-mismatch
-@type.type-argument-mismatch
-@type.redundant-implementation
-@type.default-override
-@type.missing-abstract-member
-@type.function-not-equatable
-@type.not-applicable
-@type.invalid-tuple-index
-@type.unknown-record-field
-@type.numeric-out-of-range
-@type.anonymous-type-body
-@type.undispatchable-contract-member
-@type.union-too-few-members
-@type.union-member-overlap
-@type.union-member-not-concrete
-@type.overlapping-implementation
-@type.ambiguous-implementation
-@type.ambiguous-destination
-@type.invalid-ascription
-@type.narrowing-non-union
-@type.not-a-union-member
-@type.redundant-conversion
-@pattern.refutable-binding
-@effect.outside-ceiling
-@effect.invalid-reference
-@external.unknown-symbol
-@data.invalid-extension
-@project.stale-lock
-@project.entry-outside-target
-@project.entry-on-library
-@project.invalid-entry-signature
-@project.ambiguous-dependency-target
-@project.overlapping-target-roots
-@runtime.invalid-host-value
-@style.argument-order
-@contract.unused-effect
-```
+The following table is the canonical registry of codes and their fixed levels.
+Where a later paragraph restates a level it agrees with this table, and the
+table governs.
+
+| Code | Level |
+| --- | --- |
+| `@syntax.unmatched-delimiter` | `@error` |
+| `@syntax.missing-separator` | `@error` |
+| `@syntax.invalid-character-literal` | `@error` |
+| `@syntax.invalid-numeric-literal` | `@error` |
+| `@syntax.retired-form` | `@error` |
+| `@name.unknown-symbol` | `@error` |
+| `@name.wrong-entity-kind` | `@error` |
+| `@name.member-collision` | `@error` |
+| `@name.generic-redeclaration` | `@error` |
+| `@name.reserved-label` | `@error` |
+| `@name.reserved-declaration` | `@error` |
+| `@name.reserved-value-spelling` | `@error` |
+| `@module.file-directory-collision` | `@error` |
+| `@module.unknown-path` | `@error` |
+| `@type.argument-mismatch` | `@error` |
+| `@type.type-argument-mismatch` | `@error` |
+| `@type.redundant-implementation` | `@error` |
+| `@type.default-override` | `@error` |
+| `@type.missing-abstract-member` | `@error` |
+| `@type.function-not-equatable` | `@error` |
+| `@type.not-applicable` | `@error` |
+| `@type.invalid-tuple-index` | `@error` |
+| `@type.unknown-record-field` | `@error` |
+| `@type.numeric-out-of-range` | `@error` |
+| `@type.anonymous-type-body` | `@error` |
+| `@type.undispatchable-contract-member` | `@error` |
+| `@type.union-too-few-members` | `@error` |
+| `@type.union-member-overlap` | `@error` |
+| `@type.union-member-not-concrete` | `@error` |
+| `@type.overlapping-implementation` | `@error` |
+| `@type.ambiguous-implementation` | `@error` |
+| `@type.ambiguous-destination` | `@error` |
+| `@type.invalid-ascription` | `@error` |
+| `@type.narrowing-non-union` | `@error` |
+| `@type.not-a-union-member` | `@error` |
+| `@type.redundant-conversion` | `@error` |
+| `@pattern.refutable-binding` | `@error` |
+| `@effect.outside-ceiling` | `@error` |
+| `@effect.invalid-reference` | `@error` |
+| `@external.unknown-symbol` | `@error` |
+| `@data.invalid-extension` | `@error` |
+| `@project.stale-lock` | `@error` |
+| `@project.entry-outside-target` | `@error` |
+| `@project.entry-on-library` | `@error` |
+| `@project.invalid-entry-signature` | `@error` |
+| `@project.ambiguous-dependency-target` | `@error` |
+| `@project.overlapping-target-roots` | `@error` |
+| `@runtime.invalid-host-value` | `@error` |
+| `@style.argument-order` | `@warning` |
+| `@contract.unused-effect` | `@warning` |
 
 Codes are stable within the v1 line and are atoms in Vibra data. JSON output
 serializes the exact atom spelling as a string. A code need not be renamed if
@@ -72,6 +77,13 @@ capability. The level is not encoded in the code and cannot be configured by a
 project. `vibra query @type.argument-mismatch --include diagnostic` exposes the
 registry entry, and every emitted diagnostic carries the same level. A command
 may fail on warnings by policy without changing their registered level.
+
+A code's domain is the first component of its spelling. Its fix capability is
+one of exactly two atoms: `@safe`, meaning the compiler can offer a fix that
+`vibra edit fix` may apply, and `@none`, meaning it never offers one. V1 has
+no capability for a fix that requires human review, because it has no command
+that would apply one. A code's summary is compiler data and is not fixed by
+this chapter.
 
 V1 has no language form or `.vibon` catalog for declaring diagnostics. The
 registry is compiler data: queryable and covered by schemas and conformance
@@ -94,8 +106,9 @@ MUST NOT manufacture a typed node for an ambiguous recovery.
 
 Presentation that has one unambiguous semantic binding may parse with a style
 diagnostic and a safe formatter fix. Missing operands, duplicate labels,
-unknown labels on resolved forms, unmatched delimiters, invalid tokens, odd map
-key/value tails, and ambiguous applications remain errors.
+unknown labels on resolved forms, missing required trivia between sibling
+forms, unmatched delimiters, invalid tokens, odd map key/value tails, and
+ambiguous applications remain errors.
 
 Later phases operate on explicitly marked valid subtrees and suppress cascades
 that add no new information. A tool response identifies which facts are exact,
@@ -155,6 +168,18 @@ names such as `_.x`, `a?.b`, `-.x`, and `@-.x`. Invalid character tokens use
 `@syntax.invalid-numeric-literal`; and a syntactically valid literal outside
 its suffixed type's range uses `@type.numeric-out-of-range`. All three have the
 fixed level `@error`.
+
+Reader recovery cases also cover a missing required separator between sibling
+forms with `@syntax.missing-separator`, whose fixed level is `@error`.
+Within one reader document, lexer and parser diagnostics MUST be combined in
+ascending primary byte-span order (start, then end). Equal spans MUST retain
+their emission order, with lexer diagnostics preceding parser diagnostics.
+
+Registry coverage proves that the queryable registry and the canonical table
+above agree. Every code in the table has exactly one registry entry, every
+registry entry appears in the table, each entry's level equals the table's,
+each entry's domain equals the first component of its code, and each entry's
+fix capability is `@safe` or `@none`. These cases belong to `V1-DIAG`.
 
 Source/data separation coverage accepts `.vib` only as source and `.vibon`
 only as VIBON, rejects `project.vib`, `project-lock.vib`, and
@@ -332,6 +357,14 @@ The future implementation has two independent suites:
    safety, runtime adapters, and failure paths; and
 2. Vibra conformance tests for observable source, project, tooling,
    interpreter, and Wasm behavior.
+
+The reader-v1 slice runs its checked-in corpus through the real syntax and
+formatter handler using the internal `vibra-conformance` entrypoint. CI invokes
+that entrypoint as a separate job from the host-language test suite; it exits
+nonzero for a failed or unavailable case. No user-facing `vibra` binary is
+introduced by milestone 1. Host-language integration tests use synthetic
+temporary corpora for the runner and handler; checked-in cases are loaded only
+by this dedicated entrypoint in CI (or when invoked directly).
 
 Both run from a clean checkout without network access after dependencies are
 synced. Formatter idempotence, JSON-schema validation, `.vibon` data-decoder
