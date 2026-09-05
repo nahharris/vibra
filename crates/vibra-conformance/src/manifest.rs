@@ -142,6 +142,17 @@ pub struct ExpectedExecution {
     pub audit_trace: Option<String>,
 }
 
+/// One expected structural source-position query snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExpectedQuery {
+    /// The case-relative input document to query.
+    pub input: String,
+    /// The UTF-8 byte offset sent to the syntax query API.
+    pub offset: usize,
+    /// A case-relative JSON snapshot rendered by the schema adapter.
+    pub snapshot: String,
+}
+
 /// Expected execution-independent outputs of a case.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CaseExpectations {
@@ -157,6 +168,8 @@ pub struct CaseExpectations {
     pub types: Option<String>,
     /// A relative path to effect output.
     pub effects: Option<String>,
+    /// Structural source-position query snapshots.
+    pub queries: Vec<ExpectedQuery>,
     /// Expected reference-interpreter output.
     pub interpreter: Option<ExpectedExecution>,
     /// Expected Wasm output.
@@ -261,6 +274,23 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         };
 
         let expectations = decode_expectations(raw.expect)?;
+        for query in &expectations.queries {
+            let declared = inputs
+                .source
+                .as_ref()
+                .is_some_and(|input| input == &query.input)
+                || inputs
+                    .project
+                    .as_ref()
+                    .is_some_and(|input| input == &query.input)
+                || inputs.data.iter().any(|input| input == &query.input);
+            if !declared {
+                return Err(ManifestError::Invalid(format!(
+                    "query expectation input `{}` is not declared by case `{}`",
+                    query.input, raw.id
+                )));
+            }
+        }
 
         Ok(Self {
             id: raw.id,
@@ -351,6 +381,15 @@ fn decode_expectations(
         resolved: raw.resolved,
         types: raw.types,
         effects: raw.effects,
+        queries: raw
+            .queries
+            .into_iter()
+            .map(|query| ExpectedQuery {
+                input: query.input,
+                offset: query.offset,
+                snapshot: query.snapshot,
+            })
+            .collect(),
         interpreter,
         wasm,
         artifact_hashes,
@@ -486,6 +525,8 @@ pub(crate) struct RawExpectations {
     #[serde(default)]
     pub(crate) effects: Option<String>,
     #[serde(default)]
+    pub(crate) queries: Vec<RawQuery>,
+    #[serde(default)]
     pub(crate) interpreter: Option<RawExecution>,
     #[serde(default)]
     pub(crate) wasm: Option<RawExecution>,
@@ -549,4 +590,12 @@ pub(crate) struct RawExecution {
 pub(crate) struct RawArtifact {
     #[serde(default)]
     pub(crate) hashes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawQuery {
+    pub(crate) input: String,
+    pub(crate) offset: usize,
+    pub(crate) snapshot: String,
 }

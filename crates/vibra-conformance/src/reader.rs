@@ -1,10 +1,12 @@
 //! The real `reader-v1` corpus adapter used by the internal entrypoint.
 
+use vibra_diagnostics::LineIndex;
 use vibra_fmt::format_document;
+use vibra_schema::SourcePositionQueryDocument;
 use vibra_syntax::{DocumentMode, parse_data, parse_source};
 
 use crate::corpus::Case;
-use crate::runner::{CaseObservation, HandlerError, ProfileHandler};
+use crate::runner::{CaseObservation, HandlerError, ProfileHandler, QueryObservation};
 
 /// A syntax/formatter handler for the `reader-v1` conformance profile.
 ///
@@ -35,6 +37,7 @@ impl ProfileHandler for ReaderV1Handler {
         let mut accepted = true;
         let mut diagnostics = Vec::new();
         let mut formatted = None;
+        let mut query_results = Vec::new();
         let format_relative = inputs
             .source
             .as_ref()
@@ -54,6 +57,31 @@ impl ProfileHandler for ReaderV1Handler {
             .map_err(|error| HandlerError::new(error.to_string()))?;
             accepted &= document.accepted();
             diagnostics.extend_from_slice(document.diagnostics());
+            for (query_order, expected) in case
+                .manifest()
+                .expectations
+                .queries
+                .iter()
+                .enumerate()
+                .filter(|(_, expected)| expected.input == *relative)
+            {
+                let query = document
+                    .query_position(expected.offset)
+                    .map_err(|error| HandlerError::new(error.to_string()))?;
+                let index = LineIndex::new(&source);
+                let rendered = SourcePositionQueryDocument::render(&query, &index);
+                let result = serde_json::to_string_pretty(&rendered)
+                    .map(|json| format!("{json}\n"))
+                    .map_err(|error| HandlerError::new(error.to_string()))?;
+                query_results.push((
+                    query_order,
+                    QueryObservation {
+                        input: expected.input.clone(),
+                        offset: expected.offset,
+                        result,
+                    },
+                ));
+            }
             // Run the formatter through every declared loader. This matters
             // for parity cases: a data input must exercise the data formatter
             // even when the manifest snapshot belongs to the source input.
@@ -76,10 +104,14 @@ impl ProfileHandler for ReaderV1Handler {
             }
         }
 
+        query_results.sort_by_key(|(order, _)| *order);
+        let queries = query_results.into_iter().map(|(_, query)| query).collect();
+
         Ok(CaseObservation {
             accepted,
             diagnostics,
             formatted,
+            queries,
             ..CaseObservation::default()
         })
     }

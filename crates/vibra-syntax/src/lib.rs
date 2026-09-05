@@ -25,6 +25,7 @@ mod ast;
 mod data;
 mod literal;
 mod name;
+mod query;
 mod reader;
 
 pub use ast::{
@@ -49,6 +50,9 @@ pub use literal::{
     classify_literal,
 };
 pub use name::{Name, NameClassification, NameKind, classify_name};
+pub use query::{
+    FactStatus, GrammarCategory, QueryError, StructuralQuery, query_position,
+};
 pub use reader::{
     CstNode, Document, DocumentMode, DocumentModeError, Lexed, Lexer, SyntaxKind,
     Token, TokenKind, lex, lex_bytes, parse, parse_data, parse_document, parse_source,

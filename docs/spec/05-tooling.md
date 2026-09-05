@@ -1,7 +1,9 @@
 # Vibra v1 CLI, MCP, and code tooling
 
 Status: normative target
-Implementation status: not started
+Implementation status: Milestone 1 step 10 provides the structural
+source-position query library and schema adapter; CLI and MCP surfaces remain
+unimplemented.
 
 ## One workspace engine
 
@@ -95,6 +97,27 @@ continuation:
   key/index expectations, interface methods, and generic bounds;
 - diagnostics and safe fixes at the location; and
 - the exact workspace revision used.
+
+Milestone 1's structural library contract is the foundation under this query
+surface. `vibra-syntax::query_position` accepts a UTF-8 byte offset at a
+character boundary, including EOF, and selects the smallest non-empty
+lossless CST node containing it. A zero-width recovery node at the caret wins
+over a non-empty node; ties are resolved by deeper nesting and then source
+order. An offset beyond the document or inside a UTF-8 scalar is rejected
+without slicing or panicking. Trivia is reported as `trivia` with
+`unavailable` facts, while recovery markers are reported as `recovery` with
+`recovered` facts; a valid neighboring node remains `exact` even when another
+part of the file needs recovery.
+
+The published `source-position-query` schema carries `schemaVersion`, the
+queried `offset`, a byte/display `span`, `mode`, `syntaxKind`, `category`,
+`status`, `permittedForms`, and `permittedLabels`. Categories are the closed
+v1 vocabulary `module`, `declaration`, `type`, `pattern`, `expression`,
+`declaration-attribute`, `effect-row`, `data-field`, `trivia`, and `recovery`.
+An empty array means the slot is known and has no entries; JSON `null` means
+the fact is unavailable. This milestone publishes structural grammar facts
+only: it does not add resolution, type inference, effect inference, CLI, or
+MCP behavior.
 
 Entity metadata and expanded references operate on resolved identities, not
 token spelling. They distinguish module, type, value, function, method,

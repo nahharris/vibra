@@ -17,8 +17,9 @@
 //!
 //! Milestone 1 step 3 supplies the corpus layout, neutral manifest decoder,
 //! profile dispatcher, and backend-independent runner. Step 4 registers the
-//! real syntax/formatter handler and internal reader-v1 entrypoint; later
-//! language backends remain unavailable until their milestones land.
+//! real syntax/formatter handler and internal reader-v1 entrypoint; step 10
+//! adds structural query snapshots to that same neutral path. Later language
+//! backends remain unavailable until their milestones land.
 
 mod corpus;
 mod manifest;
@@ -29,12 +30,13 @@ mod runner;
 pub use corpus::{Case, Corpus, CorpusError};
 pub use manifest::{
     CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic, ExpectedExecution,
-    ExpectedFix, ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError,
+    ExpectedFix, ExpectedQuery, ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError,
     NORMATIVE_SECTION_IDS,
 };
 pub use profile::{ConformanceProfile, UnknownProfile};
 pub use reader::ReaderV1Handler;
 pub use runner::{
     CaseObservation, CaseReport, CaseStatus, ConformanceRunner, DispatchResult,
-    ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler, RunReport,
+    ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler,
+    QueryObservation, RunReport,
 };

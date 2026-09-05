@@ -795,6 +795,7 @@ name = "vibra-conformance"
 version = "0.0.0"
 dependencies = [
  "serde",
+ "serde_json",
  "toml",
  "vibra-diagnostics",
  "vibra-fmt",
@@ -822,6 +823,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vibra-diagnostics",
+ "vibra-syntax",
 ]
 
 [[package]]

@@ -55,7 +55,13 @@ examples, registry/schema updates, and affected roadmap guidance first.
 | Declaration/type contextual structure | Step 8 | The internal source AST is an owned view over the lossless CST for recognized native declaration roots. It preserves raw body/pattern nodes alongside contextual views, validates declaration/type context and fixed arities, maps errors to the closed registry, and adds no public JSON AST schema. Arbitrary nondeclaration reader fragments retain syntax-only acceptance. |
 | Expression/pattern contextual structure | Step 9 | Recognized declarations expose written literals, names, applications, control forms, patterns, and flat match arms with half-open source spans. Reserved heads dispatch before generic fallback; retired forms use the closed diagnostic; semantic resolution and type checking remain later work. |
 | Signature-dependent operand normalization | Step 9 | `BindingFacts` supplies fixed positional count, declaration-order labels, and an optional array/map variadic tail through `ApplicationBinding`. The formatter reorders only with an exact application span and authoritative facts, emits `@style.argument-order` when written order changes, and returns a binding error for duplicate/unknown/missing/extra operands. Without facts it preserves written order and never infers a signature from a callee spelling. |
-| Structural metadata wire representation and boundary behavior | Step 10 | Align the initial schema with the tooling contract, including EOF, trivia, invalid offsets, and exact/recovered/unavailable facts. Do not publish guessed future semantic fields. |
+| Structural metadata wire representation and boundary behavior | Step 10 | Closed by the `source-position-query` contract: EOF and UTF-8 boundary errors are explicit, recovery/trivia status is distinct, and `permittedForms`/`permittedLabels` use null for unavailable versus an empty array for a known empty set. No future semantic fields are published. |
+
+Step 10 implements that decision with a syntax-owned iterative CST query and a
+one-way schema adapter. The adapter publishes the fixed fields and vocabularies
+in `crates/vibra-schema/schemas/v1/source-position-query.json`; the conformance
+manifest accepts ordered `[[expect.queries]]` snapshots so the real reader-v1
+handler checks the producer output independently of host-language tests.
 
 Unblocked work can proceed while a separate contract is unresolved. Record the
 blocked checklist rows explicitly; do not mark their containing step complete.
