@@ -1,0 +1,5 @@
+(defn run (value (tuple i32 i32)) i32
+  (let (tuple left right) value
+    (match left
+      (as i32 n) (if true n right)
+      (option.none) (try right))))

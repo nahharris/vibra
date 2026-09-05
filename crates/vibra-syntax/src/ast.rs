@@ -1,8 +1,9 @@
-//! Contextual declaration and type structure for the Step 8 source surface.
+//! Contextual declaration, type, expression, and pattern structure for the
+//! Step 8–9 source surface.
 //!
 //! This layer consumes the lossless reader CST without lowering declarations
-//! to applications. Expressions and patterns remain lossless [`RawNode`]s;
-//! Step 9 gives those positions their own grammar.
+//! to applications or resolving names. Raw CST slices remain alongside the
+//! owned contextual views where callers still need source-preserving access.
 
 use std::collections::BTreeSet;
 
@@ -16,13 +17,500 @@ const RESERVED_TYPE_HEADS: &[&str] = &[
     "record", "enum", "union", "newtype", "tuple", "array", "map", "fn",
 ];
 const RESERVED_VALUE_SPELLINGS: &[&str] = &["map", "array", "tuple"];
+const RETIRED_EXPRESSION_HEADS: &[&str] = &[
+    "while", "for", "break", "continue", "return", "bind", "case",
+];
+const MAX_CONTEXTUAL_DEPTH: usize = 256;
 
-/// A lossless CST slice retained for a grammar position implemented later.
+/// A lossless CST slice retained alongside a contextual grammar view.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RawNode {
     span: ByteSpan,
     source: String,
 }
+
+/// One expression parsed in a source expression position.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Expression {
+    kind: ExpressionKind,
+    span: ByteSpan,
+}
+
+impl Expression {
+    /// The contextual expression variant.
+    #[must_use]
+    pub const fn kind(&self) -> &ExpressionKind {
+        &self.kind
+    }
+
+    /// The half-open source span of the expression.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+}
+
+/// Contextual expression variants implemented by Step 9.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExpressionKind {
+    /// A decoded literal value.
+    Literal(Literal),
+    /// A symbol or atom value; resolution is later work.
+    Name(Name),
+    /// A nonempty executable application.
+    Application(Application),
+    /// An anonymous function expression.
+    Lambda(LambdaExpression),
+    /// A direct expression sequence.
+    Do(Vec<Expression>),
+    /// An immutable binding form.
+    Let {
+        /// The binding pattern.
+        pattern: Pattern,
+        /// The expression producing the bound value.
+        value: Box<Expression>,
+        /// Expressions evaluated after the binding.
+        body: Vec<Expression>,
+    },
+    /// A three-operand conditional.
+    If {
+        /// The condition.
+        condition: Box<Expression>,
+        /// The true branch.
+        then_branch: Box<Expression>,
+        /// The false branch.
+        else_branch: Box<Expression>,
+    },
+    /// A flat pattern/result match.
+    Match {
+        /// The value being matched.
+        scrutinee: Box<Expression>,
+        /// Pattern/result arms in written order.
+        arms: Vec<MatchArm>,
+    },
+    /// A static expression ascription.
+    As {
+        /// The written expected type.
+        value_type: TypeExpr,
+        /// The operand expression.
+        operand: Box<Expression>,
+    },
+    /// The single early-exit form.
+    Try(Box<Expression>),
+}
+
+/// A nonempty application and its written operand groups.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Application {
+    callee: Box<Expression>,
+    type_arguments: Option<Vec<TypeExpr>>,
+    type_arguments_span: Option<ByteSpan>,
+    type_arguments_after_operands: bool,
+    arguments: Vec<CallArgument>,
+    span: ByteSpan,
+}
+
+impl Application {
+    /// The arbitrary expression in the callee position.
+    #[must_use]
+    pub const fn callee(&self) -> &Expression {
+        &self.callee
+    }
+
+    /// The optional reserved `types:` argument, in written type order.
+    #[must_use]
+    pub fn type_arguments(&self) -> Option<&[TypeExpr]> {
+        self.type_arguments.as_deref()
+    }
+
+    /// The source span of the complete `types:` group, when present.
+    #[must_use]
+    pub const fn type_arguments_span(&self) -> Option<ByteSpan> {
+        self.type_arguments_span
+    }
+
+    /// Whether the written `types:` group followed an ordinary operand.
+    ///
+    /// Canonical format places the group before every ordinary operand, but
+    /// the reader accepts it in any unambiguous position.
+    #[must_use]
+    pub const fn type_arguments_after_operands(&self) -> bool {
+        self.type_arguments_after_operands
+    }
+
+    /// Operands in their original written order.
+    #[must_use]
+    pub fn arguments(&self) -> &[CallArgument] {
+        &self.arguments
+    }
+
+    /// The application span, including its delimiters.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// Returns operands in canonical binding order using supplied facts.
+    ///
+    /// The syntax reader never infers these facts from a callee spelling.
+    /// Callers provide the fixed positional count, declared labelled names,
+    /// and optional variadic shape from a resolver or another authoritative
+    /// signature source.
+    pub fn ordered_arguments<'a>(
+        &'a self,
+        facts: &BindingFacts,
+    ) -> Result<Vec<&'a CallArgument>, BindingError> {
+        let mut positional = Vec::new();
+        let mut labelled = Vec::new();
+        let mut variadic = Vec::new();
+        let mut seen_labels = BTreeSet::new();
+
+        for argument in &self.arguments {
+            if let Some(label) = argument.label() {
+                if !seen_labels.insert(label.value().to_owned()) {
+                    return Err(BindingError::DuplicateLabel(label.value().to_owned()));
+                }
+                let Some(order) = facts
+                    .labelled()
+                    .iter()
+                    .position(|declared| declared == label.value())
+                else {
+                    return Err(BindingError::UnknownLabel(label.value().to_owned()));
+                };
+                labelled.push((order, argument));
+            } else {
+                positional.push(argument);
+            }
+        }
+
+        if positional.len() < facts.positional_count() {
+            return Err(BindingError::MissingPositional {
+                expected: facts.positional_count(),
+                actual: positional.len(),
+            });
+        }
+        let fixed = positional
+            .drain(..facts.positional_count())
+            .collect::<Vec<_>>();
+        variadic.extend(positional);
+        match facts.variadic() {
+            Some(VariadicBinding::Array) => {}
+            Some(VariadicBinding::Map) if !variadic.len().is_multiple_of(2) => {
+                return Err(BindingError::OddMapVariadic(variadic.len()));
+            }
+            Some(VariadicBinding::Map) => {}
+            None if !variadic.is_empty() => {
+                return Err(BindingError::UnexpectedPositional(variadic.len()));
+            }
+            None => {}
+        }
+
+        labelled.sort_by_key(|(order, _)| *order);
+        let mut ordered = fixed;
+        ordered.extend(labelled.into_iter().map(|(_, argument)| argument));
+        ordered.extend(variadic);
+        Ok(ordered)
+    }
+}
+
+/// One application operand, with an optional written label.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallArgument {
+    label: Option<Name>,
+    value: Expression,
+    span: ByteSpan,
+}
+
+impl CallArgument {
+    /// The optional label, including its lexical label category.
+    #[must_use]
+    pub const fn label(&self) -> Option<&Name> {
+        self.label.as_ref()
+    }
+
+    /// The operand expression.
+    #[must_use]
+    pub const fn value(&self) -> &Expression {
+        &self.value
+    }
+
+    /// The operand group span, including its label when present.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+}
+
+/// An anonymous function expression.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LambdaExpression {
+    parameters: Vec<Parameter>,
+    result: TypeExpr,
+    attributes: FunctionAttributes,
+    body: Vec<Expression>,
+    span: ByteSpan,
+}
+
+impl LambdaExpression {
+    /// Flat pattern/type parameter pairs.
+    #[must_use]
+    pub fn parameters(&self) -> &[Parameter] {
+        &self.parameters
+    }
+
+    /// The result type.
+    #[must_use]
+    pub const fn result(&self) -> &TypeExpr {
+        &self.result
+    }
+
+    /// Lambda-only attributes in source order.
+    #[must_use]
+    pub const fn attributes(&self) -> &FunctionAttributes {
+        &self.attributes
+    }
+
+    /// Body expressions in source order.
+    #[must_use]
+    pub fn body(&self) -> &[Expression] {
+        &self.body
+    }
+
+    /// The lambda span.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+}
+
+/// One pattern/result arm in a match expression.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MatchArm {
+    pattern: Pattern,
+    result: Expression,
+    span: ByteSpan,
+}
+
+impl MatchArm {
+    /// The arm pattern.
+    #[must_use]
+    pub const fn pattern(&self) -> &Pattern {
+        &self.pattern
+    }
+
+    /// The arm result expression.
+    #[must_use]
+    pub const fn result(&self) -> &Expression {
+        &self.result
+    }
+
+    /// The arm span from pattern start through result end.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+}
+
+/// One pattern parsed in a binding or match position.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pattern {
+    kind: PatternKind,
+    span: ByteSpan,
+}
+
+impl Pattern {
+    /// The contextual pattern variant.
+    #[must_use]
+    pub const fn kind(&self) -> &PatternKind {
+        &self.kind
+    }
+
+    /// The half-open source span of the pattern.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+}
+
+/// Contextual pattern variants implemented by Step 9.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PatternKind {
+    /// A local binding or discard.
+    Binding(Name),
+    /// A literal pattern.
+    Literal(Literal),
+    /// A qualified or named constructor pattern.
+    Constructor {
+        /// The written constructor path.
+        head: Name,
+        /// Positional and labelled subpatterns in written order.
+        arguments: Vec<PatternArgument>,
+    },
+    /// A tuple pattern.
+    Tuple(Vec<Pattern>),
+    /// A fixed-length array pattern.
+    Array(Vec<Pattern>),
+    /// A union-narrowing pattern ascription.
+    As {
+        /// The member type selected by the pattern.
+        value_type: TypeExpr,
+        /// The payload pattern.
+        pattern: Box<Pattern>,
+    },
+}
+
+/// One constructor-pattern operand.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatternArgument {
+    label: Option<Name>,
+    pattern: Pattern,
+    span: ByteSpan,
+}
+
+impl PatternArgument {
+    /// The optional field label.
+    #[must_use]
+    pub const fn label(&self) -> Option<&Name> {
+        self.label.as_ref()
+    }
+
+    /// The nested pattern.
+    #[must_use]
+    pub const fn pattern(&self) -> &Pattern {
+        &self.pattern
+    }
+
+    /// The argument span.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+}
+
+/// The shape of a supplied variadic binding contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VariadicBinding {
+    /// Remaining operands are independent array elements.
+    Array,
+    /// Remaining operands are alternating key/value pairs.
+    Map,
+}
+
+/// Authoritative call-site binding facts supplied by a resolver or test.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BindingFacts {
+    positional_count: usize,
+    labelled: Vec<String>,
+    variadic: Option<VariadicBinding>,
+}
+
+/// A binding-facts entry associated with one application span.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationBinding {
+    span: ByteSpan,
+    facts: BindingFacts,
+}
+
+impl ApplicationBinding {
+    /// Associates authoritative facts with an application span.
+    #[must_use]
+    pub const fn new(span: ByteSpan, facts: BindingFacts) -> Self {
+        Self { span, facts }
+    }
+
+    /// The application span selected by this entry.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The authoritative binding facts.
+    #[must_use]
+    pub const fn facts(&self) -> &BindingFacts {
+        &self.facts
+    }
+}
+
+impl BindingFacts {
+    /// Creates binding facts without inferring anything from a callee name.
+    #[must_use]
+    pub fn new(
+        positional_count: usize,
+        labelled: Vec<String>,
+        variadic: Option<VariadicBinding>,
+    ) -> Self {
+        Self {
+            positional_count,
+            labelled,
+            variadic,
+        }
+    }
+
+    /// Number of fixed positional operands.
+    #[must_use]
+    pub const fn positional_count(&self) -> usize {
+        self.positional_count
+    }
+
+    /// Label names in declaration order, without `:`.
+    #[must_use]
+    pub fn labelled(&self) -> &[String] {
+        &self.labelled
+    }
+
+    /// The optional variadic tail shape.
+    #[must_use]
+    pub const fn variadic(&self) -> Option<VariadicBinding> {
+        self.variadic
+    }
+}
+
+/// A structural failure while applying supplied binding facts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BindingError {
+    /// A supplied label is not in the authoritative signature.
+    UnknownLabel(String),
+    /// A label occurs more than once.
+    DuplicateLabel(String),
+    /// Too few fixed positional operands were supplied.
+    MissingPositional {
+        /// Required fixed positional count.
+        expected: usize,
+        /// Supplied fixed positional count.
+        actual: usize,
+    },
+    /// Positional operands remain without a variadic tail.
+    UnexpectedPositional(usize),
+    /// A map variadic tail has an odd number of operands.
+    OddMapVariadic(usize),
+}
+
+impl std::fmt::Display for BindingError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownLabel(label) => {
+                write!(formatter, "unknown labelled operand `{label}`")
+            }
+            Self::DuplicateLabel(label) => {
+                write!(formatter, "duplicate labelled operand `{label}`")
+            }
+            Self::MissingPositional { expected, actual } => {
+                write!(
+                    formatter,
+                    "expected {expected} positional operands, got {actual}"
+                )
+            }
+            Self::UnexpectedPositional(count) => {
+                write!(formatter, "{count} unexpected positional operands")
+            }
+            Self::OddMapVariadic(count) => {
+                write!(formatter, "map variadic tail has odd operand count {count}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for BindingError {}
 
 impl RawNode {
     fn from_cst(node: &CstNode) -> Self {
@@ -75,7 +563,11 @@ pub struct SourceDecode {
 }
 
 impl SourceDecode {
-    /// The typed source AST when every declaration is valid.
+    /// The contextual source AST for a recognized root.
+    ///
+    /// When diagnostics contain errors, malformed declarations are omitted but
+    /// intact sibling declarations remain available. Consumers that require a
+    /// complete AST must also check the document's acceptance state.
     #[must_use]
     pub const fn ast(&self) -> Option<&SourceAst> {
         self.ast.as_ref()
@@ -275,6 +767,7 @@ pub struct DefDeclaration {
     name: Name,
     value_type: TypeExpr,
     value: RawNode,
+    expression: Expression,
     attributes: DeclarationAttributes,
     span: ByteSpan,
 }
@@ -298,6 +791,12 @@ impl DefDeclaration {
         &self.value
     }
 
+    /// The parsed value expression.
+    #[must_use]
+    pub const fn expression(&self) -> &Expression {
+        &self.expression
+    }
+
     /// Declaration attributes in source order.
     #[must_use]
     pub const fn attributes(&self) -> &DeclarationAttributes {
@@ -319,6 +818,7 @@ pub struct FunctionDeclaration {
     result: TypeExpr,
     attributes: FunctionAttributes,
     body: Vec<RawNode>,
+    expressions: Vec<Expression>,
     span: ByteSpan,
 }
 
@@ -347,10 +847,16 @@ impl FunctionDeclaration {
         &self.attributes
     }
 
-    /// Body expressions retained for Step 9.
+    /// Raw body subtrees retained alongside the contextual expressions.
     #[must_use]
     pub fn body(&self) -> &[RawNode] {
         &self.body
+    }
+
+    /// Parsed body expressions in source order.
+    #[must_use]
+    pub fn expressions(&self) -> &[Expression] {
+        &self.expressions
     }
 
     /// The source span.
@@ -366,6 +872,7 @@ pub struct TestDeclaration {
     name: Literal,
     effects: Option<EffectRow>,
     body: Vec<RawNode>,
+    expressions: Vec<Expression>,
     span: ByteSpan,
 }
 
@@ -382,10 +889,16 @@ impl TestDeclaration {
         self.effects.as_ref()
     }
 
-    /// Test body expressions retained for Step 9.
+    /// Raw test body subtrees retained alongside the contextual expressions.
     #[must_use]
     pub fn body(&self) -> &[RawNode] {
         &self.body
+    }
+
+    /// Parsed body expressions in source order.
+    #[must_use]
+    pub fn expressions(&self) -> &[Expression] {
+        &self.expressions
     }
 
     /// The source span.
@@ -432,10 +945,11 @@ impl ImplDeclaration {
     }
 }
 
-/// A flat positional parameter whose pattern remains a Step 9 raw node.
+/// A flat positional parameter retaining both raw and contextual pattern views.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Parameter {
     pattern: RawNode,
+    parsed_pattern: Pattern,
     value_type: TypeExpr,
     span: ByteSpan,
 }
@@ -445,6 +959,12 @@ impl Parameter {
     #[must_use]
     pub const fn pattern(&self) -> &RawNode {
         &self.pattern
+    }
+
+    /// The contextual pattern parsed from the retained source node.
+    #[must_use]
+    pub const fn parsed_pattern(&self) -> &Pattern {
+        &self.parsed_pattern
     }
 
     /// The parameter type.
@@ -813,12 +1333,14 @@ pub fn decode_source_root(root: &CstNode) -> SourceDecode {
     let mut parser = AstParser {
         diagnostics: Vec::new(),
         recognized: false,
+        context_depth: 0,
+        context_depth_exceeded: false,
     };
     let declarations = forms
         .iter()
         .filter_map(|form| parser.parse_top_form(form))
         .collect::<Vec<_>>();
-    let ast = parser.diagnostics.is_empty().then(|| SourceAst {
+    let ast = parser.recognized.then(|| SourceAst {
         declarations,
         span: root.span(),
     });
@@ -855,6 +1377,8 @@ pub fn contains_declaration_head(root: &CstNode) -> bool {
 struct AstParser {
     diagnostics: Vec<Diagnostic>,
     recognized: bool,
+    context_depth: usize,
+    context_depth_exceeded: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -876,6 +1400,7 @@ enum AttributeContext {
     Type,
     Declaration,
     Function,
+    Lambda,
 }
 
 // Arity checks immediately precede the indexed accesses in this parser. The
@@ -889,6 +1414,25 @@ impl AstParser {
 
     fn invalid_form(&mut self, node: &CstNode, message: &'static str) {
         self.error(DiagnosticCode::SyntaxInvalidForm, node.span(), message);
+    }
+
+    fn enter_context(&mut self, node: &CstNode) -> bool {
+        if self.context_depth >= MAX_CONTEXTUAL_DEPTH {
+            if !self.context_depth_exceeded {
+                self.invalid_form(
+                    node,
+                    "contextual AST nesting exceeds the safe depth",
+                );
+                self.context_depth_exceeded = true;
+            }
+            return false;
+        }
+        self.context_depth += 1;
+        true
+    }
+
+    fn leave_context(&mut self) {
+        self.context_depth = self.context_depth.saturating_sub(1);
     }
 
     fn parse_top_form(&mut self, node: &CstNode) -> Option<Declaration> {
@@ -1093,6 +1637,7 @@ impl AstParser {
         }
         let name = self.value_declaration_name(forms[1])?;
         let value_type = self.parse_type_expr(forms[2])?;
+        let expression = self.parse_expression(forms[3])?;
         let parsed =
             self.parse_attributes(&forms[4..], AttributeContext::Declaration, &[]);
         if forms.len() > 4 + parsed.next {
@@ -1105,6 +1650,7 @@ impl AstParser {
             name,
             value_type,
             value: RawNode::from_cst(forms[3]),
+            expression,
             attributes: DeclarationAttributes {
                 items: parsed.items,
             },
@@ -1148,6 +1694,16 @@ impl AstParser {
                 "test attributes must precede the body",
             );
         }
+        let expressions = forms[index..]
+            .iter()
+            .map(|form| {
+                if is_declaration_attribute_label(form) {
+                    None
+                } else {
+                    self.parse_expression(form)
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
         Some(Declaration::Test(TestDeclaration {
             name,
             effects,
@@ -1155,6 +1711,7 @@ impl AstParser {
                 .iter()
                 .map(|form| RawNode::from_cst(form))
                 .collect(),
+            expressions,
             span: node.span(),
         }))
     }
@@ -1189,20 +1746,30 @@ impl AstParser {
         let context = AttributeContext::Function;
         let parsed = self.parse_attributes(&forms[4..], context, inherited_generics);
         let body_start = 4 + parsed.next;
-        let body = forms[body_start..]
+        let trailing_attribute = forms[body_start..]
             .iter()
-            .map(|form| RawNode::from_cst(form))
-            .collect::<Vec<_>>();
-        if let Some(attribute) = forms[body_start..]
-            .iter()
-            .find(|form| is_declaration_attribute_label(form))
-        {
+            .find(|form| is_declaration_attribute_label(form));
+        if let Some(attribute) = trailing_attribute {
             self.error(
                 DiagnosticCode::SyntaxInvalidAttribute,
                 attribute.span(),
                 "function attributes must precede the body",
             );
         }
+        let body = forms[body_start..]
+            .iter()
+            .map(|form| RawNode::from_cst(form))
+            .collect::<Vec<_>>();
+        let expressions = forms[body_start..]
+            .iter()
+            .map(|form| {
+                if is_declaration_attribute_label(form) {
+                    None
+                } else {
+                    self.parse_expression(form)
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
         let has_external = parsed
             .items
             .iter()
@@ -1282,6 +1849,7 @@ impl AstParser {
                 items: parsed.items,
             },
             body,
+            expressions,
             span: node.span(),
         }))
     }
@@ -1329,14 +1897,511 @@ impl AstParser {
         }
         let mut parameters = Vec::with_capacity(forms.len() / 2);
         for pair in forms.chunks_exact(2) {
+            let parsed_pattern = self.parse_pattern(pair[0])?;
             let value_type = self.parse_type_expr(pair[1])?;
             parameters.push(Parameter {
                 pattern: RawNode::from_cst(pair[0]),
+                parsed_pattern,
                 value_type,
                 span: ByteSpan::new(pair[0].span().start(), pair[1].span().end()),
             });
         }
         Some(parameters)
+    }
+
+    fn parse_expression(&mut self, node: &CstNode) -> Option<Expression> {
+        if !self.enter_context(node) {
+            return None;
+        }
+        let result = self.parse_expression_inner(node);
+        self.leave_context();
+        result
+    }
+
+    fn parse_expression_inner(&mut self, node: &CstNode) -> Option<Expression> {
+        if node.kind() != SyntaxKind::List {
+            if let Some(classification) = node.literal() {
+                match classification {
+                    LiteralClassification::Literal(literal) => {
+                        return Some(Expression {
+                            kind: ExpressionKind::Literal(literal),
+                            span: node.span(),
+                        });
+                    }
+                    LiteralClassification::Invalid(_) => return None,
+                    LiteralClassification::Opaque => {}
+                }
+            }
+            return match node.name() {
+                Some(NameClassification::Name(name))
+                    if matches!(name.kind(), NameKind::Symbol | NameKind::Atom) =>
+                {
+                    Some(Expression {
+                        kind: ExpressionKind::Name(name.clone()),
+                        span: node.span(),
+                    })
+                }
+                Some(NameClassification::Name(_)) => {
+                    self.invalid_form(node, "labels and discards are not expressions");
+                    None
+                }
+                Some(NameClassification::Invalid) => None,
+                None => {
+                    self.invalid_form(node, "expression must be a literal or name");
+                    None
+                }
+            };
+        }
+
+        let forms = meaningful_children(node);
+        let Some(head_node) = forms.first() else {
+            self.invalid_form(node, "an executable application cannot be empty");
+            return None;
+        };
+        match head_node.leaf_text() {
+            Some("lambda") => self.parse_lambda(node, &forms),
+            Some("do") => self.parse_do(node, &forms),
+            Some("let") => self.parse_let(node, &forms),
+            Some("if") => self.parse_if(node, &forms),
+            Some("match") => self.parse_match(node, &forms),
+            Some("as") => self.parse_expression_as(node, &forms),
+            Some("try") => self.parse_try(node, &forms),
+            Some(head) if RETIRED_EXPRESSION_HEADS.contains(&head) => {
+                self.error(
+                    DiagnosticCode::SyntaxRetiredForm,
+                    head_node.span(),
+                    "this expression form was retired from v1",
+                );
+                None
+            }
+            Some(
+                "tuple" | "array" | "map" | "record" | "enum" | "union" | "newtype"
+                | "fn",
+            ) => {
+                self.invalid_form(
+                    node,
+                    "a reserved type or pattern head is not an expression",
+                );
+                None
+            }
+            _ => self.parse_application(node, &forms),
+        }
+    }
+
+    fn parse_application(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        let callee = self.parse_expression(forms[0])?;
+        let mut arguments = Vec::new();
+        let mut type_arguments = None;
+        let mut type_arguments_span = None;
+        let mut type_arguments_after_operands = false;
+        let mut index = 1;
+        while index < forms.len() {
+            if let Some(label) = self.label_name(forms[index]) {
+                let Some(value) = forms.get(index + 1) else {
+                    self.invalid_form(
+                        forms[index],
+                        "an application label requires an operand",
+                    );
+                    return None;
+                };
+                if label.value() == "types" {
+                    if type_arguments.is_some() {
+                        self.error(
+                            DiagnosticCode::SyntaxDuplicateAttribute,
+                            forms[index].span(),
+                            "an application repeats its types argument",
+                        );
+                        return None;
+                    }
+                    type_arguments_after_operands = !arguments.is_empty();
+                    type_arguments = Some(self.parse_type_argument_list(value)?);
+                    type_arguments_span = Some(ByteSpan::new(
+                        forms[index].span().start(),
+                        value.span().end(),
+                    ));
+                } else {
+                    let expression = self.parse_expression(value)?;
+                    arguments.push(CallArgument {
+                        label: Some(label),
+                        value: expression,
+                        span: ByteSpan::new(
+                            forms[index].span().start(),
+                            value.span().end(),
+                        ),
+                    });
+                }
+                index += 2;
+            } else {
+                let expression = self.parse_expression(forms[index])?;
+                arguments.push(CallArgument {
+                    label: None,
+                    span: expression.span(),
+                    value: expression,
+                });
+                index += 1;
+            }
+        }
+        Some(Expression {
+            kind: ExpressionKind::Application(Application {
+                callee: Box::new(callee),
+                type_arguments,
+                type_arguments_span,
+                type_arguments_after_operands,
+                arguments,
+                span: node.span(),
+            }),
+            span: node.span(),
+        })
+    }
+
+    fn parse_type_argument_list(&mut self, node: &CstNode) -> Option<Vec<TypeExpr>> {
+        let Some(forms) = list_items(node) else {
+            self.invalid_form(node, "types requires a list of type arguments");
+            return None;
+        };
+        forms
+            .iter()
+            .map(|form| self.parse_type_expr(form))
+            .collect()
+    }
+
+    fn parse_lambda(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        if forms.len() < 3 {
+            self.invalid_form(node, "lambda requires parameters and a result type");
+            return None;
+        }
+        let parameters = self.parse_parameters(forms[1])?;
+        let result = self.parse_type_expr(forms[2])?;
+        let parsed = self.parse_attributes(&forms[3..], AttributeContext::Lambda, &[]);
+        let body_start = 3 + parsed.next;
+        if let Some(attribute) = forms[body_start..]
+            .iter()
+            .find(|form| is_lambda_attribute_label(form))
+        {
+            self.error(
+                DiagnosticCode::SyntaxInvalidAttribute,
+                attribute.span(),
+                "lambda attributes must precede the body",
+            );
+        }
+        let body = forms[body_start..]
+            .iter()
+            .map(|form| {
+                if is_lambda_attribute_label(form) {
+                    None
+                } else {
+                    self.parse_expression(form)
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Expression {
+            kind: ExpressionKind::Lambda(LambdaExpression {
+                parameters,
+                result,
+                attributes: FunctionAttributes {
+                    items: parsed.items,
+                },
+                body,
+                span: node.span(),
+            }),
+            span: node.span(),
+        })
+    }
+
+    fn parse_do(&mut self, node: &CstNode, forms: &[&CstNode]) -> Option<Expression> {
+        Some(Expression {
+            kind: ExpressionKind::Do(
+                forms[1..]
+                    .iter()
+                    .map(|form| self.parse_expression(form))
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            span: node.span(),
+        })
+    }
+
+    fn parse_let(&mut self, node: &CstNode, forms: &[&CstNode]) -> Option<Expression> {
+        if forms.len() < 3 {
+            self.invalid_form(node, "let requires a pattern, value, and body");
+            return None;
+        }
+        let pattern = self.parse_pattern(forms[1])?;
+        let value = self.parse_expression(forms[2])?;
+        let body = forms[3..]
+            .iter()
+            .map(|form| self.parse_expression(form))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Expression {
+            kind: ExpressionKind::Let {
+                pattern,
+                value: Box::new(value),
+                body,
+            },
+            span: node.span(),
+        })
+    }
+
+    fn parse_if(&mut self, node: &CstNode, forms: &[&CstNode]) -> Option<Expression> {
+        if forms.len() != 4 {
+            self.invalid_form(
+                node,
+                "if requires condition, then, and else expressions",
+            );
+            return None;
+        }
+        let condition = self.parse_expression(forms[1])?;
+        let then_branch = self.parse_expression(forms[2])?;
+        let else_branch = self.parse_expression(forms[3])?;
+        Some(Expression {
+            kind: ExpressionKind::If {
+                condition: Box::new(condition),
+                then_branch: Box::new(then_branch),
+                else_branch: Box::new(else_branch),
+            },
+            span: node.span(),
+        })
+    }
+
+    fn parse_match(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        if forms.len() < 4 || !(forms.len() - 2).is_multiple_of(2) {
+            self.invalid_form(
+                node,
+                "match requires a scrutinee and pattern/result pairs",
+            );
+            return None;
+        }
+        let scrutinee = self.parse_expression(forms[1])?;
+        let mut arms = Vec::with_capacity((forms.len() - 2) / 2);
+        for pair in forms[2..].chunks_exact(2) {
+            let pattern = self.parse_pattern(pair[0])?;
+            let result = self.parse_expression(pair[1])?;
+            arms.push(MatchArm {
+                pattern,
+                result,
+                span: ByteSpan::new(pair[0].span().start(), pair[1].span().end()),
+            });
+        }
+        Some(Expression {
+            kind: ExpressionKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            span: node.span(),
+        })
+    }
+
+    fn parse_expression_as(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        if forms.len() != 3 {
+            self.invalid_form(node, "as requires one type and one expression");
+            return None;
+        }
+        let value_type = self.parse_type_expr(forms[1])?;
+        let operand = self.parse_expression(forms[2])?;
+        Some(Expression {
+            kind: ExpressionKind::As {
+                value_type,
+                operand: Box::new(operand),
+            },
+            span: node.span(),
+        })
+    }
+
+    fn parse_try(&mut self, node: &CstNode, forms: &[&CstNode]) -> Option<Expression> {
+        if forms.len() != 2 {
+            self.invalid_form(node, "try requires exactly one expression");
+            return None;
+        }
+        Some(Expression {
+            kind: ExpressionKind::Try(Box::new(self.parse_expression(forms[1])?)),
+            span: node.span(),
+        })
+    }
+
+    fn parse_pattern(&mut self, node: &CstNode) -> Option<Pattern> {
+        if !self.enter_context(node) {
+            return None;
+        }
+        let result = self.parse_pattern_inner(node);
+        self.leave_context();
+        result
+    }
+
+    fn parse_pattern_inner(&mut self, node: &CstNode) -> Option<Pattern> {
+        if node.kind() != SyntaxKind::List {
+            if let Some(classification) = node.literal() {
+                match classification {
+                    LiteralClassification::Literal(literal) => {
+                        return Some(Pattern {
+                            kind: PatternKind::Literal(literal),
+                            span: node.span(),
+                        });
+                    }
+                    LiteralClassification::Invalid(_) => return None,
+                    LiteralClassification::Opaque => {}
+                }
+            }
+            return match node.name() {
+                Some(NameClassification::Name(name)) => match name.kind() {
+                    NameKind::Symbol if name.segments().len() == 1 => Some(Pattern {
+                        kind: PatternKind::Binding(name.clone()),
+                        span: node.span(),
+                    }),
+                    NameKind::Symbol => Some(Pattern {
+                        kind: PatternKind::Constructor {
+                            head: name.clone(),
+                            arguments: Vec::new(),
+                        },
+                        span: node.span(),
+                    }),
+                    NameKind::Atom => {
+                        self.invalid_form(node, "atoms are not patterns");
+                        None
+                    }
+                    NameKind::Discard => Some(Pattern {
+                        kind: PatternKind::Binding(name.clone()),
+                        span: node.span(),
+                    }),
+                    NameKind::Label => {
+                        self.invalid_form(
+                            node,
+                            "a pattern label requires a constructor value",
+                        );
+                        None
+                    }
+                },
+                Some(NameClassification::Invalid) => None,
+                None => {
+                    self.invalid_form(
+                        node,
+                        "pattern must be a literal, binding, or list",
+                    );
+                    None
+                }
+            };
+        }
+
+        let forms = meaningful_children(node);
+        let Some(head) = forms.first() else {
+            self.invalid_form(node, "a pattern list cannot be empty");
+            return None;
+        };
+        match head.leaf_text() {
+            Some("tuple") => Some(Pattern {
+                kind: PatternKind::Tuple(
+                    forms[1..]
+                        .iter()
+                        .map(|form| self.parse_pattern(form))
+                        .collect::<Option<Vec<_>>>()?,
+                ),
+                span: node.span(),
+            }),
+            Some("array") => Some(Pattern {
+                kind: PatternKind::Array(
+                    forms[1..]
+                        .iter()
+                        .map(|form| self.parse_pattern(form))
+                        .collect::<Option<Vec<_>>>()?,
+                ),
+                span: node.span(),
+            }),
+            Some("as") => {
+                if forms.len() != 3 {
+                    self.invalid_form(
+                        node,
+                        "as pattern requires one type and one pattern",
+                    );
+                    return None;
+                }
+                let value_type = self.parse_type_expr(forms[1])?;
+                let pattern = self.parse_pattern(forms[2])?;
+                Some(Pattern {
+                    kind: PatternKind::As {
+                        value_type,
+                        pattern: Box::new(pattern),
+                    },
+                    span: node.span(),
+                })
+            }
+            Some(head) if RETIRED_EXPRESSION_HEADS.contains(&head) => {
+                self.error(
+                    DiagnosticCode::SyntaxRetiredForm,
+                    forms[0].span(),
+                    "this pattern form was retired from v1",
+                );
+                None
+            }
+            _ => {
+                let head = self.type_name(head)?;
+                let arguments = self.parse_pattern_arguments(&forms[1..])?;
+                Some(Pattern {
+                    kind: PatternKind::Constructor { head, arguments },
+                    span: node.span(),
+                })
+            }
+        }
+    }
+
+    fn parse_pattern_arguments(
+        &mut self,
+        forms: &[&CstNode],
+    ) -> Option<Vec<PatternArgument>> {
+        let mut arguments = Vec::new();
+        let mut index = 0;
+        while index < forms.len() {
+            if let Some(label) = self.label_name(forms[index]) {
+                let Some(value) = forms.get(index + 1) else {
+                    self.invalid_form(
+                        forms[index],
+                        "a pattern label requires a pattern",
+                    );
+                    return None;
+                };
+                let pattern = self.parse_pattern(value)?;
+                arguments.push(PatternArgument {
+                    label: Some(label),
+                    span: ByteSpan::new(
+                        forms[index].span().start(),
+                        value.span().end(),
+                    ),
+                    pattern,
+                });
+                index += 2;
+            } else {
+                let pattern = self.parse_pattern(forms[index])?;
+                arguments.push(PatternArgument {
+                    label: None,
+                    span: pattern.span(),
+                    pattern,
+                });
+                index += 1;
+            }
+        }
+        Some(arguments)
+    }
+
+    fn label_name(&self, node: &CstNode) -> Option<Name> {
+        match node.name() {
+            Some(NameClassification::Name(name)) if name.kind() == NameKind::Label => {
+                Some(name.clone())
+            }
+            _ => None,
+        }
     }
 
     fn parse_deftype_body(&mut self, node: &CstNode) -> Option<DeftypeBody> {
@@ -1427,6 +2492,15 @@ impl AstParser {
     }
 
     fn parse_type_expr(&mut self, node: &CstNode) -> Option<TypeExpr> {
+        if !self.enter_context(node) {
+            return None;
+        }
+        let result = self.parse_type_expr_inner(node);
+        self.leave_context();
+        result
+    }
+
+    fn parse_type_expr_inner(&mut self, node: &CstNode) -> Option<TypeExpr> {
         if node.kind() == SyntaxKind::List {
             let forms = meaningful_children(node);
             let Some(head_node) = forms.first() else {
@@ -1689,6 +2763,7 @@ impl AstParser {
                 "symbol",
                 "doc",
             ][..],
+            AttributeContext::Lambda => &["labelled", "variadic", "effects"][..],
         };
         let mut items = Vec::new();
         let mut seen = BTreeSet::new();
@@ -2097,6 +3172,12 @@ fn is_declaration_attribute_label(node: &CstNode) -> bool {
     ]
     .iter()
     .any(|label| is_label(node, label))
+}
+
+fn is_lambda_attribute_label(node: &CstNode) -> bool {
+    ["labelled", "variadic", "effects"]
+        .iter()
+        .any(|label| is_label(node, label))
 }
 
 fn generic_names(attributes: &[Attribute]) -> Vec<String> {

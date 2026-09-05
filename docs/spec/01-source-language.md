@@ -1,7 +1,7 @@
 # Vibra v1 source language
 
 Status: normative target
-Implementation status: milestone 1 step 8 complete for declaration/type structure over the lossless reader; expression and pattern interiors remain Step 9
+Implementation status: milestone 1 step 9 complete for written declaration, type, expression, and pattern structure over the lossless reader; resolution and semantic checking remain later work
 
 ## Reader
 
