@@ -9,6 +9,18 @@ Milestone 1 makes an incomplete `.vib` file parseable, diagnosable,
 formattable, and structurally queryable. This document records how that work
 is cut into steps and what has landed.
 
+## Start here
+
+The implementation baseline was refreshed on 2026-09-05 at `origin/m1`
+commit `50aa40a` (merge of PR #286). Steps 1–4 are present there; the next
+implementation step is 5. Re-fetch and verify this baseline in future sessions.
+This documentation update does not claim the milestone exit gate has passed.
+
+Read [the implementation guides](implementation.md) and
+[validation and evidence requirements](validation.md) before choosing work.
+The guides distinguish grammar validation from resolution/type checking and
+identify contracts that need specification work before dependent code.
+
 ## Fixed design decisions
 
 These constrain every later step in the milestone. Each was taken
@@ -141,7 +153,7 @@ and conformance cases in the same change.
 | 1 | Workspace, pinned toolchain, CI, and crate skeleton | infrastructure | landed |
 | 2 | Spans, line index, diagnostic model, closed code and level registry, and their JSON contract | vertical | landed |
 | 3 | Conformance corpus layout, manifest decoding, profile dispatch, and runner | infrastructure | landed |
-| 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | in progress |
+| 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | landed (PR #286, `50aa40a`) |
 | 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | not started |
 | 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | not started |
 | 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | not started |
@@ -149,6 +161,17 @@ and conformance cases in the same change.
 | 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | not started |
 | 10 | Structural source-position query metadata | vertical | not started |
 | 11 | Fuzz campaign, specification-example classification, and exit-gate evidence | evidence | not started |
+
+Detailed guides: [5–6: literals and names](05-06-leaves.md),
+[7: VIBON](07-vibon.md), [8–9: contextual AST](08-09-ast.md),
+[10: structural queries](10-queries.md), and
+[11: exit-gate audit](11-evidence.md).
+
+Steps 5 and 6 can be developed as separate complete slices using their shared
+guide. Steps 8 and 9 share grammar infrastructure, but remain separate steps:
+Step 8 exposes declaration structure with lossless body/pattern references;
+Step 9 validates and exposes their expression and pattern interiors. Neither
+step claims resolved or typed facts.
 
 ## Deliverable coverage
 

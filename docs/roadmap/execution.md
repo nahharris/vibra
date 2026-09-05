@@ -12,6 +12,63 @@ contains, the roadmap wins and this document is corrected.
 Future sessions picking up an active milestone should read this document
 first, then that milestone's step plan.
 
+## Start every implementation session here
+
+1. Read `AGENTS.md`, the charter, the active milestone row in `v1.md`, and the
+   milestone README. Read the topic specification sections named by the chosen
+   step before editing code. Archived code is not an implementation template.
+2. Inspect the working tree; preserve unrelated work. Fetch the integration
+   branch and create a short-lived branch from its refreshed remote head.
+   Milestone 1 starts from `origin/m1`, not `main` or an old local `m1`.
+3. Select the earliest unfinished step whose prerequisites are satisfied.
+   Verify the prerequisite code and merge history; a status row alone is not
+   evidence. Run the existing focused tests and the independent corpus runner.
+4. Write a small behavior checklist: normative rule, input, expected result,
+   diagnostic code/level/span, formatter result, host test, and corpus case.
+   List semantic checks deferred to later milestones separately.
+5. Resolve any missing observable contract in the specification before coding
+   that behavior. Do not invent diagnostic codes, ordering, recovery policy,
+   or schema fields in a test and then treat the test as authority.
+
+## Implementation loop
+
+Implement one row of the behavior checklist at a time. First add a focused
+host test and an independently authored corpus expectation; confirm that the
+failure is the missing behavior, not a broken fixture. Implement the smallest
+complete path through syntax, formatting, diagnostics, and the real profile
+handler. Re-run that row, then the existing neighboring regressions.
+
+Prefer explicit grammar-context dispatch and small checked helpers over one
+large parser with boolean mode flags. Every malformed-input path must either
+consume input or return to its caller; retain source spans and error markers.
+Do not turn malformed reserved syntax into a successful generic application.
+Keep lossless source storage separate from normalized values and typed views.
+
+An internal subtask may be narrow, but the merge unit remains the complete
+vertical step. If a step is too large, revise its plan into smaller conforming
+slices with explicit coverage before splitting delivery. Do not silently move
+its formatter, negative cases, or machine contract into a follow-up.
+
+## Required contents of an implementation guide
+
+Each unfinished step has a linked guide containing:
+
+- prerequisites and exact specification sections to read;
+- existing entry points and proposed module responsibilities (new names are
+  proposals, not claims that those APIs already exist);
+- ordered implementation tasks and the invariants preserved by each;
+- positive, negative, recovery, boundary, and formatter test matrices;
+- diagnostic and schema changes or an explicit reason none are needed;
+- executable validation commands and the required interpretation of results;
+- excluded work, unresolved contract decisions, and completion evidence.
+
+A guide is instructions for producing evidence, not the evidence itself.
+Generated expected output must be reviewed against the specification before
+being committed. Never fix a regression by accepting new snapshots wholesale,
+removing failing cases, downgrading their profile, or treating unavailable as
+passed. Host tests should inspect structure and failure paths; corpus cases
+should assert externally observable behavior through the real handler.
+
 ## Decomposition rule
 
 A roadmap milestone is too large to implement as one change. Each milestone is
@@ -99,6 +156,12 @@ Each step row carries a status:
 | `in progress` | A branch exists; the step is not merged. |
 | `landed` | Merged into the milestone integration branch. |
 
+Record the PR and merge commit beside landed work. A step may have open
+prerequisites while still `not started`; identify those in its guide rather
+than suggesting implementation may choose the missing contract. In a pending
+PR, a proposed `landed` row is conditional on that PR merging, not a claim that
+the remote integration branch already contains it.
+
 The pull request that completes a step sets that row to `landed`, so the table
 is true on the integration branch the moment the merge happens. A session that
 finishes a step and leaves the table stale has not finished the step.
@@ -121,3 +184,18 @@ records the evidence in the milestone `README.md`. Only then does the
 integration branch merge to `main`, together with the status updates to
 `v1.md`, `README.md`, and any other active document whose claims the milestone
 changed.
+
+## Review and handoff evidence
+
+Before publishing, inspect the complete diff against the refreshed integration
+base. Check every promised behavior against its test and case, including a
+nearby invalid input and recovery with a valid following form. Verify that no
+later milestone behavior or archive dependency entered the change. Check local
+documentation links and all commands against the actual workspace.
+
+The handoff records base and tested commit, changed behavior, exact commands
+and exit results, corpus passed/failed/unavailable counts, remaining scope,
+and PR state. A command not run is recorded as not run; a dependency-download
+failure is not a passing test. CI must validate the final PR head. If the head
+changes, review the new diff and re-run affected checks. Verify the actual merge
+before reporting delivery to the integration branch.
