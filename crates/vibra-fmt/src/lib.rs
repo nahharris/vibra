@@ -309,8 +309,9 @@ fn render_node(
     while let Some(task) = tasks.pop() {
         match task {
             RenderTask::Node(node, indent) => match node.kind() {
-                SyntaxKind::Atom => output
-                    .push_str(&normalize_leaf(node.leaf_text().unwrap_or_default())),
+                SyntaxKind::Atom => {
+                    output.push_str(node.leaf_text().unwrap_or_default());
+                }
                 SyntaxKind::List => {
                     let layout =
                         layouts.get(&node_key(node)).copied().unwrap_or(NodeLayout {

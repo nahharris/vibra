@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-vib-quoted-line-endings"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Opaque quoted leaf line endings are preserved while surrounding trivia is normalized."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

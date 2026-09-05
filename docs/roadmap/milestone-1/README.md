@@ -122,6 +122,12 @@ entrypoint rejects an empty corpus or one with no `reader-v1` cases. Host
 language tests use synthetic temporary corpora, so the checked-in cases are
 loaded only by this entrypoint and its CI job.
 
+Step 4 regression coverage MUST include mixed lexer/parser diagnostic ordering
+and byte-preserving formatting of opaque quoted leaves with CR/CRLF interiors
+in both document modes. Literal validation and canonical escaping remain in
+step 5; canonical VIBON values remain in step 7. These cases contribute to the
+reader and formatter exit gates, whose complete evidence remains in step 11.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the

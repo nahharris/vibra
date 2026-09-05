@@ -11,6 +11,28 @@ use vibra_syntax::{
 };
 
 #[test]
+fn reader_orders_lexer_and_parser_diagnostics_by_source_span() {
+    let document = parse_document("main.vib", ") (a(b) \"open")
+        .expect("parse mixed recovery errors");
+    let spans: Vec<_> = document
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| diagnostic.primary_span())
+        .collect();
+    assert_eq!(
+        spans,
+        vec![
+            ByteSpan::new(0, 1),
+            ByteSpan::empty_at(4),
+            ByteSpan::empty_at(13),
+            ByteSpan::empty_at(13)
+        ]
+    );
+    assert!(document.recovered());
+    assert_eq!(document.root().to_source(), document.source());
+}
+
+#[test]
 fn lexer_preserves_utf8_tokens_trivia_and_half_open_byte_spans() {
     let source = "(α ; note\r\n  β)";
     let lexed = vibra_syntax::lex(source);

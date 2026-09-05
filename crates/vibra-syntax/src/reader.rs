@@ -651,6 +651,12 @@ fn parse_selected(path: &Path, mode: DocumentMode, source: &str) -> Document {
     let tokens = lexed.tokens.clone();
     let mut parser = Parser::new(&tokens, source, lexed.diagnostics.clone());
     let root = parser.parse_root();
+    // Lexer errors are collected before parsing, but consumers see one
+    // source-ordered stream. Stable sorting preserves emission order at EOF.
+    parser.diagnostics.sort_by_key(|diagnostic| {
+        let span = diagnostic.primary_span();
+        (span.start(), span.end())
+    });
     Document {
         path: path.to_path_buf(),
         mode,

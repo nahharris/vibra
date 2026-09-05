@@ -65,6 +65,9 @@ When a double-quoted leaf reaches end of file without a closing quote, the
 reader emits `@syntax.unmatched-delimiter`, marks the subtree recovered, and
 preserves the original bytes. Escape decoding and string-value validation are
 deferred to step 5; step 4 only keeps the quoted leaf together for recovery.
+Until literal validation and canonical escaping land, the syntax-only
+formatter MUST preserve opaque leaf bytes, including interior CR and CRLF.
+Its LF normalization applies to trivia, not to quoted leaf contents.
 
 Strings are double quoted and support `\"`, `\\`, `\n`, `\r`, `\t`, and
 `\u{HEX}`.

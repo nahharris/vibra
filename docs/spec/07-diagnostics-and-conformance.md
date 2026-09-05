@@ -171,6 +171,9 @@ fixed level `@error`.
 
 Reader recovery cases also cover a missing required separator between sibling
 forms with `@syntax.missing-separator`, whose fixed level is `@error`.
+Within one reader document, lexer and parser diagnostics MUST be combined in
+ascending primary byte-span order (start, then end). Equal spans MUST retain
+their emission order, with lexer diagnostics preceding parser diagnostics.
 
 Registry coverage proves that the queryable registry and the canonical table
 above agree. Every code in the table has exactly one registry entry, every

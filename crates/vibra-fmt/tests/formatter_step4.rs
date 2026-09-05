@@ -7,6 +7,17 @@ use std::path::Path;
 use vibra_fmt::format_source;
 
 #[test]
+fn formatter_preserves_line_endings_inside_opaque_quoted_leaves() {
+    for extension in ["vib", "vibon"] {
+        let path = format!("input.{extension}");
+        let source = "  \"first\r\nsecond\rthird  \"  \r\n";
+        let once = format_source(&path, source).expect("format quoted leaf");
+        assert_eq!(once, "\"first\r\nsecond\rthird  \"\n");
+        assert_eq!(format_source(&path, &once).expect("format again"), once);
+    }
+}
+
+#[test]
 fn formatter_normalizes_trivia_line_endings_and_top_level_spacing() {
     let source = "(one   two)\r\n(foo (bar))  \r\n\r\n";
     let formatted = format_source(Path::new("main.vib"), source)
