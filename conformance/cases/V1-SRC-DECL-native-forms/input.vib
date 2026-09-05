@@ -1,0 +1,11 @@
+(import io @std.io)
+(deftype user (record name str)
+  visibility: @public
+  (defn map (value self) self value))
+(defint printable
+  (defn render (value self) str))
+(deffect read
+  (defn file (path str) str external: @host symbol: "fs.read"))
+(def answer u64 1u64)
+(defn main (value i32) i32 visibility: @public 0i32)
+(test "smoke" 0i32)

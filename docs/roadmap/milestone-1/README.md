@@ -12,8 +12,8 @@ is cut into steps and what has landed.
 ## Start here
 
 The implementation baseline was refreshed on 2026-09-05 at `origin/m1`
-commit `80a13ca` (merge of PR #289). Steps 1–6 are present there; the next
-implementation step is 7. Re-fetch and verify this baseline in future sessions.
+commit `aec8a3d` (merge of PR #290). Steps 1–7 are present there; the next
+implementation step is 8. Re-fetch and verify this baseline in future sessions.
 This documentation update does not claim the milestone exit gate has passed.
 
 Read [the implementation guides](implementation.md) and
@@ -166,6 +166,15 @@ duplicate record label emits `@data.duplicate-field`; a duplicate map key emits
 `@data.duplicate-key`. Typed adapters may supply explicit record order and atom
 roles without resolving references.
 
+### D12 — Declaration structure is an internal contextual view
+
+Step 8 adds an owned `SourceAst` view over the lossless source CST. It is
+constructed only for a source root containing a recognized native declaration
+head; arbitrary reader fragments remain accepted by the syntax-only reader.
+Declaration/type errors are appended to document diagnostics for those
+recognized roots. Function bodies and patterns remain owned raw CST slices for
+Step 9, and no public JSON AST schema is added.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the
@@ -182,8 +191,8 @@ and conformance cases in the same change.
 | 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | landed (PR #286, `50aa40a`) |
 | 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | landed (PR #288, `af73e22`) |
 | 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | landed (PR #289, `80a13ca`) |
-| 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | in progress |
-| 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | not started |
+| 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | landed (PR #290, `aec8a3d`) |
+| 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | in progress (branch `codex/m1-step-8`) |
 | 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | not started |
 | 10 | Structural source-position query metadata | vertical | not started |
 | 11 | Fuzz campaign, specification-example classification, and exit-gate evidence | evidence | not started |

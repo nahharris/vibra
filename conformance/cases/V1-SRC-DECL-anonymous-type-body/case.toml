@@ -1,0 +1,18 @@
+id = "V1-SRC-DECL-anonymous-type-body"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Nominal record and enum bodies are rejected outside deftype bodies."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@type.anonymous-type-body"
+level = "@error"
+[expect.diagnostics.span]
+start = 17
+end = 34

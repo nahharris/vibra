@@ -1,0 +1,17 @@
+id = "V1-SRC-DECL-duplicate-attribute"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "A declaration cannot repeat an attribute label."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.duplicate-attribute"
+level = "@error"
+[expect.diagnostics.span]
+start = 35
+end = 46

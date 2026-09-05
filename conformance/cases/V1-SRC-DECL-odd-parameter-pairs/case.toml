@@ -1,0 +1,17 @@
+id = "V1-SRC-DECL-odd-parameter-pairs"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Function parameters require flat pattern/type pairs."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 8
+end = 15

@@ -14,17 +14,27 @@
 //!
 //! # Status
 //!
-//! Milestone 1 steps 4–7 supply the shared UTF-8 lexer, literal/name
-//! classification, generic VIBON data decoding, hand-rolled lossless recovery
-//! CST, and extension-selected document modes. Contextual AST, project schemas,
-//! and resolution remain later-step concerns; see
+//! Milestone 1 steps 4–8 supply the shared UTF-8 lexer, literal/name
+//! classification, contextual declaration/type views, generic VIBON data
+//! decoding, hand-rolled lossless recovery CST, and extension-selected document
+//! modes. Expression/pattern AST, project schemas, and resolution remain
+//! later-step concerns; see
 //! `docs/roadmap/milestone-1/README.md`.
 
+mod ast;
 mod data;
 mod literal;
 mod name;
 mod reader;
 
+pub use ast::{
+    Attribute, Declaration, DeclarationAttributes, DefDeclaration, DeffectDeclaration,
+    DefintDeclaration, DeftypeBody, DeftypeDeclaration, EffectRow, FunctionAttributes,
+    FunctionDeclaration, FunctionType, GenericBinding, ImplDeclaration,
+    ImportDeclaration, LabelledParameter, Parameter, RawNode, SourceAst, SourceDecode,
+    TestDeclaration, TypeAttributes, TypeExpr, TypeField, TypeMember, TypeSlot,
+    VariadicParameter, VariadicType, contains_declaration_head, decode_source_root,
+};
 pub use data::{
     AtomRole, DataDecode, DataField, DataNode, DataValue, TypedDataSchema,
     canonical_data, decode_data_root,

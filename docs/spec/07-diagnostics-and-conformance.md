@@ -1,7 +1,7 @@
 # Vibra v1 diagnostics and conformance
 
 Status: normative target
-Implementation status: milestone 1 step 7 in progress (reader-v1 VIBON data surface)
+Implementation status: milestone 1 step 8 in progress (declaration/type diagnostics and reader-v1 corpus)
 
 ## Diagnostics are a language surface
 
@@ -23,6 +23,10 @@ table governs.
 | `@syntax.invalid-numeric-literal` | `@error` |
 | `@syntax.invalid-name` | `@error` |
 | `@syntax.retired-form` | `@error` |
+| `@syntax.invalid-form` | `@error` |
+| `@syntax.duplicate-attribute` | `@error` |
+| `@syntax.unknown-attribute` | `@error` |
+| `@syntax.invalid-attribute` | `@error` |
 | `@name.unknown-symbol` | `@error` |
 | `@name.wrong-entity-kind` | `@error` |
 | `@name.member-collision` | `@error` |

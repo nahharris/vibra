@@ -1,0 +1,17 @@
+id = "V1-SRC-DECL-unknown-attribute"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Only attributes allowed by the declaration context are accepted."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.unknown-attribute"
+level = "@error"
+[expect.diagnostics.span]
+start = 15
+end = 23

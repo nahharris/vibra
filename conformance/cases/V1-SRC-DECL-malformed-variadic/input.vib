@@ -1,0 +1,1 @@
+(defn f () i32 variadic: (rest (array i32) extra))
