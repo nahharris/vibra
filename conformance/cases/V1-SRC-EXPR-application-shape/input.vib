@@ -1,0 +1,3 @@
+(defn calls () i32
+  ((choose-function true) 1i32 label: 2i32 types: (i32))
+  (f))

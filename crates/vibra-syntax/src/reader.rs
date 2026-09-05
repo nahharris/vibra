@@ -1,9 +1,9 @@
-//! The Step 4–8 UTF-8 reader spine, literal/name surface, and contextual
-//! declaration/type view.
+//! The Step 4–9 UTF-8 reader spine, literal/name surface, and contextual
+//! declaration/type/expression/pattern view.
 //!
 //! This module keeps one lossless, delimiter-aware tree. Step 5 literal, Step 6
-//! name, and Step 8 contextual classification are layered over retained leaf
-//! text without changing source bytes; expression and pattern structure remain
+//! name, and Step 8–9 contextual classification are layered over retained leaf
+//! text without changing source bytes. Resolution and semantic checking remain
 //! later-step concerns.
 
 use std::fmt;

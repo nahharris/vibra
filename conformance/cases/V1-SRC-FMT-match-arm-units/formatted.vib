@@ -1,0 +1,8 @@
+(defn
+  choose
+  (value i32)
+  i32
+  (match
+    value
+    (constructor.with.a.long.name (tuple first second third fourth fifth sixth)) (if true first second)
+    (another.constructor.with.a.long.name (array first second third fourth fifth sixth)) (try value)))

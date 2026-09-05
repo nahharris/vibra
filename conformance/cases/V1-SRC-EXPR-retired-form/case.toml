@@ -1,0 +1,17 @@
+id = "V1-SRC-EXPR-retired-form"
+rule = "V1-SRC-EXPR"
+profile = "reader-v1"
+description = "Retired executable wrappers emit the explicit retired-form diagnostic."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.retired-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 19
+end = 24

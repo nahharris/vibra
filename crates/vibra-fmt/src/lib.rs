@@ -12,7 +12,7 @@
 //!
 //! # Status
 //!
-//! Milestone 1 steps 4–8 supply the syntax-only formatter. It canonicalizes
+//! Milestone 1 steps 4–9 supply the syntax-only formatter. It canonicalizes
 //! whitespace, delimiters, comments, line endings, list layout, and valid
 //! character spellings while leaving literal and valid or invalid name
 //! spellings untouched. Valid source declarations use the contextual AST to
@@ -24,14 +24,17 @@
 //! A recovered document is returned byte-for-byte unchanged because applying
 //! canonical whitespace to incomplete or opaque leaf text would be a guess.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::path::Path;
 
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_syntax::{
-    Attribute, CstNode, Declaration, DeftypeBody, Document, DocumentMode,
-    DocumentModeError, FunctionDeclaration, FunctionType, ImplDeclaration, Literal,
-    LiteralClassification, Parameter, SourceAst, SyntaxKind, TypeExpr, TypeField,
+    Application, ApplicationBinding, Attribute, BindingError, BindingFacts,
+    CallArgument, CstNode, Declaration, DeftypeBody, Document, DocumentMode,
+    DocumentModeError, Expression, ExpressionKind, FunctionDeclaration, FunctionType,
+    ImplDeclaration, LambdaExpression, Literal, LiteralClassification, Parameter,
+    Pattern, PatternArgument, PatternKind, SourceAst, SyntaxKind, TypeExpr, TypeField,
     TypeMember, TypeSlot, VariadicType, canonical_character_spelling, canonical_data,
     classify, parse_document,
 };
@@ -41,12 +44,17 @@ use vibra_syntax::{
 pub enum FormatError {
     /// The filename does not select `.vib` or `.vibon`.
     UnsupportedExtension(DocumentModeError),
+    /// Supplied application binding facts contradict the written operands.
+    Binding(BindingError),
 }
 
 impl fmt::Display for FormatError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedExtension(error) => error.fmt(formatter),
+            Self::Binding(error) => {
+                write!(formatter, "invalid application binding facts: {error}")
+            }
         }
     }
 }
@@ -55,6 +63,7 @@ impl std::error::Error for FormatError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::UnsupportedExtension(error) => Some(error),
+            Self::Binding(error) => Some(error),
         }
     }
 }
@@ -62,6 +71,111 @@ impl std::error::Error for FormatError {
 impl From<DocumentModeError> for FormatError {
     fn from(error: DocumentModeError) -> Self {
         Self::UnsupportedExtension(error)
+    }
+}
+
+impl From<BindingError> for FormatError {
+    fn from(error: BindingError) -> Self {
+        Self::Binding(error)
+    }
+}
+
+/// Formatter output plus diagnostics produced by an authoritative binding
+/// normalization pass.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BoundFormat {
+    text: String,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl BoundFormat {
+    /// Canonical formatted source bytes.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Style diagnostics produced while applying supplied binding facts.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+}
+
+struct RenderContext<'a> {
+    bindings: &'a [ApplicationBinding],
+    diagnostics: Vec<Diagnostic>,
+    error: Option<BindingError>,
+}
+
+impl<'a> RenderContext<'a> {
+    fn new(bindings: &'a [ApplicationBinding]) -> Self {
+        Self {
+            bindings,
+            diagnostics: Vec::new(),
+            error: None,
+        }
+    }
+
+    fn arguments<'expression>(
+        &mut self,
+        application: &'expression Application,
+    ) -> Vec<&'expression CallArgument> {
+        let mut changed = application.type_arguments_after_operands();
+        let Some(binding) = self
+            .bindings
+            .iter()
+            .find(|binding| binding.span() == application.span())
+        else {
+            if changed {
+                self.argument_order_diagnostic(application);
+            }
+            return application.arguments().iter().collect();
+        };
+        match application.ordered_arguments(binding.facts()) {
+            Ok(arguments) => {
+                changed |= arguments.len() == application.arguments().len()
+                    && arguments
+                        .iter()
+                        .zip(application.arguments())
+                        .any(|(left, right)| !std::ptr::eq(*left, right));
+                if changed {
+                    self.argument_order_diagnostic(application);
+                }
+                arguments
+            }
+            Err(error) => {
+                if self.error.is_none() {
+                    self.error = Some(error);
+                }
+                application.arguments().iter().collect()
+            }
+        }
+    }
+
+    fn argument_order_diagnostic(&mut self, application: &Application) {
+        self.argument_order_diagnostic_span(application.span());
+    }
+
+    fn argument_order_diagnostic_span(&mut self, span: ByteSpan) {
+        self.diagnostics.push(Diagnostic::new(
+            DiagnosticCode::StyleArgumentOrder,
+            span,
+            "application groups were normalized using canonical or supplied binding order",
+        ));
+    }
+
+    fn binding_facts(&self, span: ByteSpan) -> Option<BindingFacts> {
+        self.bindings
+            .iter()
+            .find(|binding| binding.span() == span)
+            .map(|binding| binding.facts().clone())
+    }
+
+    fn record_error(&mut self, error: BindingError) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
     }
 }
 
@@ -84,16 +198,55 @@ impl Formatter {
     ) -> Result<String, FormatError> {
         format_source(path, source)
     }
+
+    /// Selects the mode from `path`, parses, and formats with binding facts.
+    pub fn format_source_with_bindings(
+        self,
+        path: impl AsRef<Path>,
+        source: &str,
+        bindings: &[ApplicationBinding],
+    ) -> Result<BoundFormat, FormatError> {
+        format_source_with_bindings(path, source, bindings)
+    }
 }
 
 /// Formats a document that has already been parsed by the shared reader.
 #[must_use]
 pub fn format_document(document: &Document) -> String {
+    match format_document_with_bindings(document, &[]) {
+        Ok(formatted) => formatted.text,
+        Err(_) => document.source().to_owned(),
+    }
+}
+
+/// Formats a document with optional authoritative application binding facts.
+///
+/// Without an entry for an application, written operand order is preserved.
+/// The formatter never infers a signature from a callee spelling.
+pub fn format_document_with_bindings(
+    document: &Document,
+    bindings: &[ApplicationBinding],
+) -> Result<BoundFormat, FormatError> {
+    let mut context = RenderContext::new(bindings);
+    let text = format_document_inner(document, &mut context)?;
+    if let Some(error) = context.error {
+        return Err(error.into());
+    }
+    Ok(BoundFormat {
+        text,
+        diagnostics: context.diagnostics,
+    })
+}
+
+fn format_document_inner(
+    document: &Document,
+    context: &mut RenderContext<'_>,
+) -> Result<String, FormatError> {
     if document.recovered() {
         // A recovered tree contains an explicit error marker. In that state a
         // syntax-only formatter cannot safely choose a semantic layout, and
         // must not rewrite opaque or incomplete leaf text.
-        return document.source().to_owned();
+        return Ok(document.source().to_owned());
     }
 
     if document.mode() == DocumentMode::Data {
@@ -101,40 +254,51 @@ pub fn format_document(document: &Document) -> String {
         // lossless CST formatter for commented data so comments remain tied
         // to their neighbouring entries instead of being silently dropped.
         if document.source().contains(';') {
-            return format_syntax_document(document);
+            return Ok(format_syntax_document(document));
         }
-        return document.data().map_or_else(
+        return Ok(document.data().map_or_else(
             || document.source().to_owned(),
             |data| format!("{}\n", canonical_data(data)),
-        );
+        ));
     }
 
     if let Some(ast) = document.ast() {
         if contains_line_comment(document.root()) {
-            return format_source_with_comments(document);
+            return Ok(format_source_with_comments(document, context));
         }
-        return format_source_ast(document.path(), ast);
+        return format_source_ast(document.path(), ast, context);
     }
 
-    format_syntax_document(document)
+    Ok(format_syntax_document(document))
 }
 
-fn format_source_ast(path: &Path, ast: &SourceAst) -> String {
+fn format_source_ast(
+    path: &Path,
+    ast: &SourceAst,
+    context: &mut RenderContext<'_>,
+) -> Result<String, FormatError> {
     let mut output = String::new();
     for (index, declaration) in ast.declarations().iter().enumerate() {
         if index != 0 {
             output.push_str("\n\n");
         }
-        render_declaration(declaration, &mut output);
+        render_declaration(declaration, &mut output, context);
     }
     output.push('\n');
+    if let Some(error) = context.error.take() {
+        return Err(error.into());
+    }
     match parse_document(path, &output) {
-        Ok(document) if !document.recovered() => format_syntax_document(&document),
-        _ => output,
+        Ok(document) if !document.recovered() => Ok(format_syntax_document(&document)),
+        _ => Ok(output),
     }
 }
 
-fn render_declaration(declaration: &Declaration, output: &mut String) {
+fn render_declaration(
+    declaration: &Declaration,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
     match declaration {
         Declaration::Import(value) => {
             output.push_str("(import ");
@@ -149,14 +313,14 @@ fn render_declaration(declaration: &Declaration, output: &mut String) {
             output.push(' ');
             render_deftype_body(value.body(), output);
             render_attributes(value.attributes().items(), output);
-            render_type_members(value.members(), output);
+            render_type_members(value.members(), output, context);
             output.push(')');
         }
         Declaration::Defint(value) => {
             output.push_str("(defint ");
             output.push_str(value.name().raw());
             render_attributes(value.attributes().items(), output);
-            render_type_members(value.members(), output);
+            render_type_members(value.members(), output, context);
             output.push(')');
         }
         Declaration::Deffect(value) => {
@@ -165,7 +329,7 @@ fn render_declaration(declaration: &Declaration, output: &mut String) {
             render_attributes(value.attributes().items(), output);
             for member in value.members() {
                 output.push(' ');
-                render_function("defn", member, output);
+                render_function("defn", member, output, context);
             }
             output.push(')');
         }
@@ -175,11 +339,11 @@ fn render_declaration(declaration: &Declaration, output: &mut String) {
             output.push(' ');
             render_type(value.value_type(), output);
             output.push(' ');
-            push_raw(output, value.value().source());
+            render_expression(value.expression(), output, context);
             render_attributes(value.attributes().items(), output);
             output.push(')');
         }
-        Declaration::Defn(value) => render_function("defn", value, output),
+        Declaration::Defn(value) => render_function("defn", value, output, context),
         Declaration::Test(value) => {
             output.push_str("(test ");
             output.push_str(&format_leaf(value.name().raw()));
@@ -187,79 +351,276 @@ fn render_declaration(declaration: &Declaration, output: &mut String) {
                 output.push_str(" effects: ");
                 render_effect_row(effects.references(), output);
             }
-            for body in value.body() {
+            for body in value.expressions() {
                 output.push(' ');
-                push_raw(output, body.source());
+                render_expression(body, output, context);
             }
             output.push(')');
         }
     }
 }
 
-fn render_type_member(member: &TypeMember, output: &mut String) {
+fn render_type_member(
+    member: &TypeMember,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
     match member {
-        TypeMember::Method(method) => render_function("defn", method, output),
+        TypeMember::Method(method) => render_function("defn", method, output, context),
         TypeMember::Implementation(implementation) => {
-            render_impl(implementation, output)
+            render_impl(implementation, output, context)
         }
     }
 }
 
-fn render_type_members(members: &[TypeMember], output: &mut String) {
+fn render_type_members(
+    members: &[TypeMember],
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
     for member in members
         .iter()
         .filter(|member| matches!(member, TypeMember::Method(_)))
     {
         output.push(' ');
-        render_type_member(member, output);
+        render_type_member(member, output, context);
     }
     for member in members
         .iter()
         .filter(|member| matches!(member, TypeMember::Implementation(_)))
     {
         output.push(' ');
-        render_type_member(member, output);
+        render_type_member(member, output, context);
     }
 }
 
-fn render_impl(implementation: &ImplDeclaration, output: &mut String) {
+fn render_impl(
+    implementation: &ImplDeclaration,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
     output.push_str("(impl ");
     render_type(implementation.target(), output);
     for member in implementation.members() {
         output.push(' ');
-        render_function("defn", member, output);
+        render_function("defn", member, output, context);
     }
     output.push(')');
 }
 
-fn render_function(head: &str, function: &FunctionDeclaration, output: &mut String) {
+fn render_function(
+    head: &str,
+    function: &FunctionDeclaration,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
     output.push('(');
     output.push_str(head);
     output.push(' ');
     output.push_str(function.name().raw());
     output.push(' ');
-    render_parameters(function.parameters(), output);
+    render_parameters(function.parameters(), output, context);
     output.push(' ');
     render_type(function.result(), output);
     render_attributes(function.attributes().items(), output);
-    for body in function.body() {
+    for body in function.expressions() {
         output.push(' ');
-        push_raw(output, body.source());
+        render_expression(body, output, context);
     }
     output.push(')');
 }
 
-fn render_parameters(parameters: &[Parameter], output: &mut String) {
+fn render_parameters(
+    parameters: &[Parameter],
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
     output.push('(');
     for (index, parameter) in parameters.iter().enumerate() {
         if index != 0 {
             output.push(' ');
         }
-        push_raw(output, parameter.pattern().source());
+        render_pattern(parameter.parsed_pattern(), output, context);
         output.push(' ');
         render_type(parameter.value_type(), output);
     }
     output.push(')');
+}
+
+fn render_expression(
+    expression: &Expression,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
+    match expression.kind() {
+        ExpressionKind::Literal(literal) => {
+            output.push_str(&format_leaf(literal.raw()))
+        }
+        ExpressionKind::Name(name) => output.push_str(name.raw()),
+        ExpressionKind::Application(application) => {
+            output.push('(');
+            render_expression(application.callee(), output, context);
+            if let Some(type_arguments) = application.type_arguments() {
+                output.push_str(" types: (");
+                for (index, value) in type_arguments.iter().enumerate() {
+                    if index != 0 {
+                        output.push(' ');
+                    }
+                    render_type(value, output);
+                }
+                output.push(')');
+            }
+            for argument in context.arguments(application) {
+                output.push(' ');
+                if let Some(label) = argument.label() {
+                    output.push_str(label.raw());
+                    output.push(' ');
+                }
+                render_expression(argument.value(), output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::Lambda(lambda) => render_lambda(lambda, output, context),
+        ExpressionKind::Do(body) => {
+            output.push_str("(do");
+            for expression in body {
+                output.push(' ');
+                render_expression(expression, output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::Let {
+            pattern,
+            value,
+            body,
+        } => {
+            output.push_str("(let ");
+            render_pattern(pattern, output, context);
+            output.push(' ');
+            render_expression(value, output, context);
+            for expression in body {
+                output.push(' ');
+                render_expression(expression, output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            output.push_str("(if ");
+            render_expression(condition, output, context);
+            output.push(' ');
+            render_expression(then_branch, output, context);
+            output.push(' ');
+            render_expression(else_branch, output, context);
+            output.push(')');
+        }
+        ExpressionKind::Match { scrutinee, arms } => {
+            output.push_str("(match ");
+            render_expression(scrutinee, output, context);
+            for arm in arms {
+                output.push(' ');
+                render_pattern(arm.pattern(), output, context);
+                output.push(' ');
+                render_expression(arm.result(), output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::As {
+            value_type,
+            operand,
+        } => {
+            output.push_str("(as ");
+            render_type(value_type, output);
+            output.push(' ');
+            render_expression(operand, output, context);
+            output.push(')');
+        }
+        ExpressionKind::Try(operand) => {
+            output.push_str("(try ");
+            render_expression(operand, output, context);
+            output.push(')');
+        }
+    }
+}
+
+fn render_lambda(
+    lambda: &LambdaExpression,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
+    output.push_str("(lambda ");
+    render_parameters(lambda.parameters(), output, context);
+    output.push(' ');
+    render_type(lambda.result(), output);
+    render_attributes(lambda.attributes().items(), output);
+    for expression in lambda.body() {
+        output.push(' ');
+        render_expression(expression, output, context);
+    }
+    output.push(')');
+}
+
+fn render_pattern(
+    pattern: &Pattern,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
+    match pattern.kind() {
+        PatternKind::Binding(name) | PatternKind::Atom(name) => {
+            output.push_str(name.raw())
+        }
+        PatternKind::Literal(literal) => output.push_str(&format_leaf(literal.raw())),
+        PatternKind::Constructor { head, arguments } => {
+            output.push('(');
+            output.push_str(head.raw());
+            for argument in arguments {
+                output.push(' ');
+                render_pattern_argument(argument, output, context);
+            }
+            output.push(')');
+        }
+        PatternKind::Tuple(values) => {
+            output.push_str("(tuple");
+            for value in values {
+                output.push(' ');
+                render_pattern(value, output, context);
+            }
+            output.push(')');
+        }
+        PatternKind::Array(values) => {
+            output.push_str("(array");
+            for value in values {
+                output.push(' ');
+                render_pattern(value, output, context);
+            }
+            output.push(')');
+        }
+        PatternKind::As {
+            value_type,
+            pattern,
+        } => {
+            output.push_str("(as ");
+            render_type(value_type, output);
+            output.push(' ');
+            render_pattern(pattern, output, context);
+            output.push(')');
+        }
+    }
+}
+
+fn render_pattern_argument(
+    argument: &PatternArgument,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
+    if let Some(label) = argument.label() {
+        output.push_str(label.raw());
+        output.push(' ');
+    }
+    render_pattern(argument.pattern(), output, context);
 }
 
 fn render_deftype_body(body: &DeftypeBody, output: &mut String) {
@@ -449,17 +810,16 @@ fn render_effect_row(references: &[vibra_syntax::Name], output: &mut String) {
     output.push(')');
 }
 
-fn push_raw(output: &mut String, source: &str) {
-    output.push_str(source.trim());
-}
-
 struct CstItem<'source> {
     node: &'source CstNode,
     leading: Vec<&'source CstNode>,
     trailing: Vec<&'source CstNode>,
 }
 
-fn format_source_with_comments(document: &Document) -> String {
+fn format_source_with_comments(
+    document: &Document,
+    context: &mut RenderContext<'_>,
+) -> String {
     let Some(groups) = root_groups(document.root()) else {
         return normalize_recovery(&document.root().to_source());
     };
@@ -489,9 +849,17 @@ fn format_source_with_comments(document: &Document) -> String {
                     0,
                     &layouts,
                     &mut output,
+                    context,
                 );
             } else {
-                render_node(form, 0, &layouts, &mut output);
+                render_node(
+                    form,
+                    0,
+                    &layouts,
+                    &mut output,
+                    document.source(),
+                    Some(context),
+                );
             }
         }
     }
@@ -505,15 +873,16 @@ fn render_declaration_with_comments(
     indent: usize,
     layouts: &HashMap<*const CstNode, NodeLayout>,
     output: &mut String,
+    context: &mut RenderContext<'_>,
 ) {
     let items = cst_items(node, source);
     let Some(head) = items.first().and_then(|item| item.node.leaf_text()) else {
-        render_node(node, indent, layouts, output);
+        render_node(node, indent, layouts, output, source, Some(context));
         return;
     };
     let header_count = declaration_header_count(head);
     if items.len() < header_count {
-        render_node(node, indent, layouts, output);
+        render_node(node, indent, layouts, output, source, Some(context));
         return;
     }
 
@@ -538,6 +907,7 @@ fn render_declaration_with_comments(
             layouts,
             output,
             false,
+            context,
         );
     }
     for (_, label, value) in attribute_groups {
@@ -548,6 +918,7 @@ fn render_declaration_with_comments(
             layouts,
             output,
             false,
+            context,
         );
         render_cst_item(
             value,
@@ -556,6 +927,7 @@ fn render_declaration_with_comments(
             layouts,
             output,
             false,
+            context,
         );
     }
     let body = items.iter().skip(cursor);
@@ -570,6 +942,7 @@ fn render_declaration_with_comments(
                         layouts,
                         output,
                         true,
+                        context,
                     );
                 }
             }
@@ -583,6 +956,7 @@ fn render_declaration_with_comments(
                     layouts,
                     output,
                     is_native_declaration(item.node),
+                    context,
                 );
             }
         }
@@ -595,6 +969,7 @@ fn render_declaration_with_comments(
                 layouts,
                 output,
                 is_native_declaration(item.node),
+                context,
             );
         }
     }
@@ -610,6 +985,7 @@ fn render_cst_item(
     layouts: &HashMap<*const CstNode, NodeLayout>,
     output: &mut String,
     recurse_declaration: bool,
+    context: &mut RenderContext<'_>,
 ) {
     for comment in &item.leading {
         output.push('\n');
@@ -619,9 +995,11 @@ fn render_cst_item(
     output.push('\n');
     output.push_str(&" ".repeat(indent));
     if recurse_declaration {
-        render_declaration_with_comments(item.node, source, indent, layouts, output);
+        render_declaration_with_comments(
+            item.node, source, indent, layouts, output, context,
+        );
     } else {
-        render_node(item.node, indent, layouts, output);
+        render_node(item.node, indent, layouts, output, source, Some(context));
     }
     for comment in &item.trailing {
         output.push('\n');
@@ -774,7 +1152,7 @@ fn format_syntax_document(document: &Document) -> String {
             if !group.comments.is_empty() {
                 output.push('\n');
             }
-            render_node(form, 0, &layouts, &mut output);
+            render_node(form, 0, &layouts, &mut output, document.source(), None);
         }
     }
     output.push('\n');
@@ -786,8 +1164,18 @@ pub fn format_source(
     path: impl AsRef<Path>,
     source: &str,
 ) -> Result<String, FormatError> {
+    Ok(format_source_with_bindings(path, source, &[])?.text)
+}
+
+/// Selects a document mode from `path`, parses, and formats with authoritative
+/// application binding facts.
+pub fn format_source_with_bindings(
+    path: impl AsRef<Path>,
+    source: &str,
+    bindings: &[ApplicationBinding],
+) -> Result<BoundFormat, FormatError> {
     let document = parse_document(path, source)?;
-    Ok(format_document(&document))
+    format_document_with_bindings(&document, bindings)
 }
 
 /// Alias for [`format_source`] for callers that use the shorter operation name.
@@ -957,11 +1345,52 @@ enum LineComponent<'source> {
     Comment(&'source CstNode),
 }
 
+struct MatchArmLayout<'source> {
+    leading: Vec<&'source CstNode>,
+    pattern: &'source CstNode,
+    between: Vec<&'source CstNode>,
+    result: &'source CstNode,
+    trailing: Vec<&'source CstNode>,
+}
+
+struct MatchLayout<'source> {
+    head: &'source CstNode,
+    scrutinee: &'source CstNode,
+    arms: Vec<MatchArmLayout<'source>>,
+}
+
+struct CstOperand<'source> {
+    label: Option<&'source CstNode>,
+    value: &'source CstNode,
+}
+
 enum RenderTask<'source> {
     Node(&'source CstNode, usize),
     Raw(&'static str),
     LineNode(&'source CstNode, usize),
     LineComment(&'source CstNode, usize),
+    LineGroup {
+        items: Vec<&'source CstNode>,
+        indent: usize,
+    },
+    MatchArm {
+        leading: Vec<&'source CstNode>,
+        pattern: &'source CstNode,
+        between: Vec<&'source CstNode>,
+        result: &'source CstNode,
+        trailing: Vec<&'source CstNode>,
+        indent: usize,
+    },
+    MatchAfterPattern {
+        between: Vec<&'source CstNode>,
+        result: &'source CstNode,
+        trailing: Vec<&'source CstNode>,
+        indent: usize,
+    },
+    MatchAfterResult {
+        trailing: Vec<&'source CstNode>,
+        indent: usize,
+    },
     CloseList(usize),
 }
 
@@ -970,7 +1399,10 @@ fn render_node(
     indent: usize,
     layouts: &HashMap<*const CstNode, NodeLayout>,
     output: &mut String,
+    source: &str,
+    context: Option<&mut RenderContext<'_>>,
 ) {
+    let mut context = context;
     let mut tasks = vec![RenderTask::Node(node, indent)];
     while let Some(task) = tasks.pop() {
         match task {
@@ -984,6 +1416,84 @@ fn render_node(
                             inline: false,
                             inline_width: 0,
                         });
+                    if !contains_line_comment(node)
+                        && let Some(facts) = context
+                            .as_deref_mut()
+                            .and_then(|context| context.binding_facts(node.span()))
+                    {
+                        match bound_application_groups(node, &facts) {
+                            Ok((mut groups, changed)) => {
+                                if changed && let Some(context) = context.as_deref_mut()
+                                {
+                                    context.argument_order_diagnostic_span(node.span());
+                                }
+                                output.push('(');
+                                if layout.inline {
+                                    tasks.push(RenderTask::Raw(")"));
+                                    let items = groups
+                                        .into_iter()
+                                        .flatten()
+                                        .collect::<Vec<_>>();
+                                    for (index, item) in
+                                        items.into_iter().enumerate().rev()
+                                    {
+                                        tasks.push(RenderTask::Node(
+                                            item,
+                                            indent.saturating_add(2),
+                                        ));
+                                        if index != 0 {
+                                            tasks.push(RenderTask::Raw(" "));
+                                        }
+                                    }
+                                } else {
+                                    let head_group = groups.remove(0);
+                                    let Some(head) = head_group.into_iter().next()
+                                    else {
+                                        continue;
+                                    };
+                                    let last = groups
+                                        .last()
+                                        .and_then(|group| group.last())
+                                        .copied();
+                                    let last_is_node = last.is_some_and(|last| {
+                                        layouts.get(&node_key(last)).is_some_and(
+                                            |child_layout| {
+                                                if child_layout.inline {
+                                                    indent
+                                                        .saturating_add(2)
+                                                        .saturating_add(
+                                                            child_layout.inline_width,
+                                                        )
+                                                        .saturating_add(1)
+                                                        <= 88
+                                                } else {
+                                                    true
+                                                }
+                                            },
+                                        )
+                                    });
+                                    if last_is_node {
+                                        tasks.push(RenderTask::Raw(")"));
+                                    } else {
+                                        tasks.push(RenderTask::CloseList(indent));
+                                    }
+                                    for group in groups.into_iter().rev() {
+                                        tasks.push(RenderTask::LineGroup {
+                                            items: group,
+                                            indent: indent.saturating_add(2),
+                                        });
+                                    }
+                                    tasks.push(RenderTask::Node(head, indent));
+                                }
+                                continue;
+                            }
+                            Err(error) => {
+                                if let Some(context) = context.as_deref_mut() {
+                                    context.record_error(error);
+                                }
+                            }
+                        }
+                    }
                     if layout.inline {
                         output.push('(');
                         let items = node
@@ -1005,6 +1515,51 @@ fn render_node(
                             }
                         }
                     } else {
+                        if let Some(match_layout) = match_layout(node, source) {
+                            output.push('(');
+                            let last_arm = match_layout.arms.last();
+                            let last_is_node = last_arm.is_some_and(|arm| {
+                                if !arm.trailing.is_empty() {
+                                    return false;
+                                }
+                                layouts.get(&node_key(arm.result)).is_some_and(
+                                    |child_layout| {
+                                        if child_layout.inline {
+                                            indent
+                                                .saturating_add(2)
+                                                .saturating_add(
+                                                    child_layout.inline_width,
+                                                )
+                                                .saturating_add(1)
+                                                <= 88
+                                        } else {
+                                            true
+                                        }
+                                    },
+                                )
+                            });
+                            if last_is_node {
+                                tasks.push(RenderTask::Raw(")"));
+                            } else {
+                                tasks.push(RenderTask::CloseList(indent));
+                            }
+                            for arm in match_layout.arms.into_iter().rev() {
+                                tasks.push(RenderTask::MatchArm {
+                                    leading: arm.leading,
+                                    pattern: arm.pattern,
+                                    between: arm.between,
+                                    result: arm.result,
+                                    trailing: arm.trailing,
+                                    indent: indent.saturating_add(2),
+                                });
+                            }
+                            tasks.push(RenderTask::LineNode(
+                                match_layout.scrutinee,
+                                indent.saturating_add(2),
+                            ));
+                            tasks.push(RenderTask::Node(match_layout.head, indent));
+                            continue;
+                        }
                         output.push('(');
                         let components = multiline_components(node);
                         // Delimiter placement is a property of every
@@ -1107,6 +1662,68 @@ fn render_node(
                 output.push_str(&" ".repeat(indent));
                 output.push_str(&comment_text(node));
             }
+            RenderTask::LineGroup { items, indent } => {
+                output.push('\n');
+                output.push_str(&" ".repeat(indent));
+                for (index, item) in items.into_iter().enumerate().rev() {
+                    tasks.push(RenderTask::Node(item, indent));
+                    if index != 0 {
+                        tasks.push(RenderTask::Raw(" "));
+                    }
+                }
+            }
+            RenderTask::MatchArm {
+                leading,
+                pattern,
+                between,
+                result,
+                trailing,
+                indent,
+            } => {
+                for comment in leading {
+                    output.push('\n');
+                    output.push_str(&" ".repeat(indent));
+                    output.push_str(&comment_text(comment));
+                }
+                output.push('\n');
+                output.push_str(&" ".repeat(indent));
+                tasks.push(RenderTask::MatchAfterPattern {
+                    between,
+                    result,
+                    trailing,
+                    indent,
+                });
+                tasks.push(RenderTask::Node(pattern, indent));
+            }
+            RenderTask::MatchAfterPattern {
+                between,
+                result,
+                trailing,
+                indent,
+            } => {
+                if between.is_empty() {
+                    tasks.push(RenderTask::MatchAfterResult { trailing, indent });
+                    tasks.push(RenderTask::Node(result, indent));
+                    tasks.push(RenderTask::Raw(" "));
+                } else {
+                    for comment in between {
+                        output.push('\n');
+                        output.push_str(&" ".repeat(indent));
+                        output.push_str(&comment_text(comment));
+                    }
+                    output.push('\n');
+                    output.push_str(&" ".repeat(indent));
+                    tasks.push(RenderTask::MatchAfterResult { trailing, indent });
+                    tasks.push(RenderTask::Node(result, indent));
+                }
+            }
+            RenderTask::MatchAfterResult { trailing, indent } => {
+                for comment in trailing {
+                    output.push('\n');
+                    output.push_str(&" ".repeat(indent));
+                    output.push_str(&comment_text(comment));
+                }
+            }
             RenderTask::CloseList(indent) => {
                 output.push('\n');
                 output.push_str(&" ".repeat(indent));
@@ -1133,6 +1750,229 @@ fn multiline_components(node: &CstNode) -> Vec<LineComponent<'_>> {
     }
     components.extend(comments.into_iter().map(LineComponent::Comment));
     components
+}
+
+fn bound_application_groups<'source>(
+    node: &'source CstNode,
+    facts: &BindingFacts,
+) -> Result<(Vec<Vec<&'source CstNode>>, bool), BindingError> {
+    let forms = node
+        .children()
+        .iter()
+        .filter(|child| matches!(child.kind(), SyntaxKind::Atom | SyntaxKind::List))
+        .collect::<Vec<_>>();
+    let head = forms
+        .first()
+        .copied()
+        .ok_or(BindingError::MissingPositional {
+            expected: 1,
+            actual: 0,
+        })?;
+    let mut original_groups = vec![vec![head]];
+    let mut ordinary = Vec::new();
+    let mut type_group = None;
+    let mut index = 1;
+    while index < forms.len() {
+        let Some(current) = forms.get(index).copied() else {
+            break;
+        };
+        if let Some(label) = cst_label(current) {
+            let Some(value) = forms.get(index + 1).copied() else {
+                return Err(BindingError::UnknownLabel(label.to_owned()));
+            };
+            let group = vec![current, value];
+            original_groups.push(group.clone());
+            if label == "types" {
+                if type_group.replace(group).is_some() {
+                    return Err(BindingError::DuplicateLabel(label.to_owned()));
+                }
+            } else {
+                ordinary.push(CstOperand {
+                    label: Some(current),
+                    value,
+                });
+            }
+            index += 2;
+        } else {
+            let value = current;
+            original_groups.push(vec![value]);
+            ordinary.push(CstOperand { label: None, value });
+            index += 1;
+        }
+    }
+
+    let mut positional = Vec::new();
+    let mut labelled = Vec::new();
+    let mut variadic = Vec::new();
+    let mut seen_labels = BTreeSet::new();
+    for operand in ordinary {
+        if let Some(label_node) = operand.label {
+            let label = cst_label(label_node).unwrap_or_default();
+            if !seen_labels.insert(label.to_owned()) {
+                return Err(BindingError::DuplicateLabel(label.to_owned()));
+            }
+            let Some(order) = facts
+                .labelled()
+                .iter()
+                .position(|declared| declared == label)
+            else {
+                return Err(BindingError::UnknownLabel(label.to_owned()));
+            };
+            labelled.push((order, operand));
+        } else {
+            positional.push(operand);
+        }
+    }
+    if positional.len() < facts.positional_count() {
+        return Err(BindingError::MissingPositional {
+            expected: facts.positional_count(),
+            actual: positional.len(),
+        });
+    }
+    let fixed = positional
+        .drain(..facts.positional_count())
+        .collect::<Vec<_>>();
+    variadic.extend(positional);
+    match facts.variadic() {
+        Some(vibra_syntax::VariadicBinding::Array) => {}
+        Some(vibra_syntax::VariadicBinding::Map)
+            if !variadic.len().is_multiple_of(2) =>
+        {
+            return Err(BindingError::OddMapVariadic(variadic.len()));
+        }
+        Some(vibra_syntax::VariadicBinding::Map) => {}
+        None if !variadic.is_empty() => {
+            return Err(BindingError::UnexpectedPositional(variadic.len()));
+        }
+        None => {}
+    }
+
+    let mut groups = vec![vec![head]];
+    if let Some(type_group) = type_group {
+        groups.push(type_group);
+    }
+    groups.extend(fixed.into_iter().map(|operand| {
+        operand
+            .label
+            .map_or_else(|| vec![operand.value], |label| vec![label, operand.value])
+    }));
+    labelled.sort_by_key(|(order, _)| *order);
+    groups.extend(labelled.into_iter().map(|(_, operand)| {
+        operand
+            .label
+            .map_or_else(|| vec![operand.value], |label| vec![label, operand.value])
+    }));
+    groups.extend(variadic.into_iter().map(|operand| vec![operand.value]));
+
+    let original = original_groups.iter().flatten().copied();
+    let ordered = groups.iter().flatten().copied();
+    let changed = original
+        .zip(ordered)
+        .any(|(left, right)| !std::ptr::eq(left, right));
+    Ok((groups, changed))
+}
+
+fn cst_label(node: &CstNode) -> Option<&str> {
+    node.leaf_text().and_then(|text| text.strip_suffix(':'))
+}
+
+fn match_layout<'source>(
+    node: &'source CstNode,
+    source: &str,
+) -> Option<MatchLayout<'source>> {
+    let components = multiline_components(node);
+    let LineComponent::Node(head) = components.first()? else {
+        return None;
+    };
+    if head.leaf_text() != Some("match") {
+        return None;
+    }
+    let LineComponent::Node(scrutinee) = components.get(1)? else {
+        return None;
+    };
+
+    let mut index = 2;
+    let mut pending = Vec::new();
+    let mut arms = Vec::new();
+    while index < components.len() {
+        let mut leading = std::mem::take(&mut pending);
+        while let Some(component) = components.get(index) {
+            match component {
+                LineComponent::Comment(comment) => {
+                    leading.push(*comment);
+                    index += 1;
+                }
+                LineComponent::Node(_) => break,
+            }
+        }
+        let pattern = match components.get(index)? {
+            LineComponent::Node(pattern) => {
+                index += 1;
+                *pattern
+            }
+            LineComponent::Comment(_) => return None,
+        };
+        let mut between = Vec::new();
+        while let Some(component) = components.get(index) {
+            match component {
+                LineComponent::Comment(comment) => {
+                    between.push(*comment);
+                    index += 1;
+                }
+                LineComponent::Node(_) => break,
+            }
+        }
+        let result = match components.get(index)? {
+            LineComponent::Node(result) => {
+                index += 1;
+                *result
+            }
+            LineComponent::Comment(_) => return None,
+        };
+        let mut after_result = Vec::new();
+        while let Some(component) = components.get(index) {
+            match component {
+                LineComponent::Comment(comment) => {
+                    after_result.push(*comment);
+                    index += 1;
+                }
+                LineComponent::Node(_) => break,
+            }
+        }
+        let has_next_arm = components.get(index).is_some();
+        let mut trailing = Vec::new();
+        let mut next_leading = Vec::new();
+        if has_next_arm {
+            for comment in after_result {
+                if has_line_break(source, result.span().end(), comment.span().start()) {
+                    next_leading.push(comment);
+                } else {
+                    trailing.push(comment);
+                }
+            }
+        } else {
+            trailing = after_result;
+        }
+        arms.push(MatchArmLayout {
+            leading,
+            pattern,
+            between,
+            result,
+            trailing,
+        });
+        pending = next_leading;
+    }
+    if arms.is_empty() {
+        return None;
+    }
+    if let Some(last) = arms.last_mut() {
+        last.trailing = pending;
+    }
+    Some(MatchLayout {
+        head,
+        scrutinee,
+        arms,
+    })
 }
 
 fn comment_text(node: &CstNode) -> String {

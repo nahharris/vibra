@@ -1,0 +1,17 @@
+id = "V1-SRC-EXPR-empty-executable-list"
+rule = "V1-SRC-EXPR"
+profile = "reader-v1"
+description = "An empty executable list is rejected rather than confused with an empty parameter or effect list."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 17
+end = 19

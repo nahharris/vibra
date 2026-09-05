@@ -11,11 +11,12 @@ is cut into steps and what has landed.
 
 ## Start here
 
-The implementation baseline used for Step 8 was refreshed on 2026-09-05 at
-`origin/m1` commit `aec8a3d` (merge of PR #290). Steps 1–7 were present there;
-the Step 8 landing is recorded in the step table below. Re-fetch and verify the
-current integration head in future sessions. This documentation update does
-not claim the milestone exit gate has passed.
+The implementation baseline used for Step 9 was refreshed on 2026-09-05 at
+`origin/m1` commit `3057737d8c595409fe977a3eafb37436e4c7dfd7` (merge of PR
+#291). Steps 1–8 were present there; the Step 9 landing is recorded in the step
+table below. Re-fetch and verify the current integration head in future
+sessions. This documentation update does not claim the milestone exit gate has
+passed.
 
 Read [the implementation guides](implementation.md) and
 [validation and evidence requirements](validation.md) before choosing work.
@@ -167,14 +168,15 @@ duplicate record label emits `@data.duplicate-field`; a duplicate map key emits
 `@data.duplicate-key`. Typed adapters may supply explicit record order and atom
 roles without resolving references.
 
-### D12 — Declaration structure is an internal contextual view
+### D12 — Declaration and expression structure is an internal contextual view
 
-Step 8 adds an owned `SourceAst` view over the lossless source CST. It is
+Steps 8–9 add an owned `SourceAst` view over the lossless source CST. It is
 constructed only for a source root containing a recognized native declaration
 head; arbitrary reader fragments remain accepted by the syntax-only reader.
-Declaration/type errors are appended to document diagnostics for those
-recognized roots. Function bodies and patterns remain owned raw CST slices for
-Step 9, and no public JSON AST schema is added.
+Declaration, type, expression, pattern, and application-shape errors are
+appended to document diagnostics for those recognized roots. Written
+applications retain raw spans and accept optional authoritative binding facts;
+no semantic resolution or public JSON AST schema is added.
 
 ## Steps
 
@@ -193,8 +195,8 @@ and conformance cases in the same change.
 | 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | landed (PR #288, `af73e22`) |
 | 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | landed (PR #289, `80a13ca`) |
 | 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | landed (PR #290, `aec8a3d`) |
-| 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | landed in PR #291 (merge SHA recorded in PR #283) |
-| 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | not started |
+| 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | landed in PR #291 (merge `3057737d8c595409fe977a3eafb37436e4c7dfd7`) |
+| 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | implemented in current Step 9 PR; merge verification pending |
 | 10 | Structural source-position query metadata | vertical | not started |
 | 11 | Fuzz campaign, specification-example classification, and exit-gate evidence | evidence | not started |
 

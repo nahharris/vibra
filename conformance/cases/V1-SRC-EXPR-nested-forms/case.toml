@@ -1,0 +1,11 @@
+id = "V1-SRC-EXPR-nested-forms"
+rule = "V1-SRC-EXPR"
+profile = "reader-v1"
+description = "Step 9 preserves nested let, match, ascription, conditional, constructor, and try structure."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"
