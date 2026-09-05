@@ -1,0 +1,17 @@
+id = "V1-SRC-DECL-qualified-declaration-name"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Native declaration names are local symbols, not qualified names."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 6
+end = 20

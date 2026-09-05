@@ -1,0 +1,7 @@
+(deftype empty void)
+
+(deftype packet (record tag str) (impl packet (defn encode () str "ok")))
+
+(defint inspectable (impl packet (defn inspect (value packet) str)))
+
+(deffect none)

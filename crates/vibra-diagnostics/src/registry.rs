@@ -222,6 +222,14 @@ diagnostic_registry! {
         "a nonliteral leaf is not a valid symbol, label, atom, or discard spelling";
     SyntaxRetiredForm => "@syntax.retired-form", Syntax, Error, None,
         "a form retired from v1, such as `while` or `return`, was written";
+    SyntaxInvalidForm => "@syntax.invalid-form", Syntax, Error, None,
+        "a source form has an invalid head, arity, or grammar position";
+    SyntaxDuplicateAttribute => "@syntax.duplicate-attribute", Syntax, Error, None,
+        "a declaration repeats one attribute";
+    SyntaxUnknownAttribute => "@syntax.unknown-attribute", Syntax, Error, None,
+        "a declaration uses an attribute not allowed in its context";
+    SyntaxInvalidAttribute => "@syntax.invalid-attribute", Syntax, Error, None,
+        "a declaration attribute has the wrong value or placement";
     NameUnknownSymbol => "@name.unknown-symbol", Name, Error, None,
         "a symbol does not resolve to a visible entity";
     NameWrongEntityKind => "@name.wrong-entity-kind", Name, Error, None,
@@ -334,7 +342,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 56;
+    const REGISTERED_CODES: usize = 60;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -419,7 +427,7 @@ mod tests {
 
     #[test]
     fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 54 errors and 2 warnings. Pinning
+        // The specification's table fixes 58 errors and 2 warnings. Pinning
         // the split catches a level silently flipping in either direction.
         let warnings: Vec<&str> = DiagnosticCode::ALL
             .iter()

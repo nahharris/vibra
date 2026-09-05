@@ -1,0 +1,11 @@
+id = "V1-SRC-DECL-native-forms"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "The seven top forms and nested declaration owners have native syntax."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

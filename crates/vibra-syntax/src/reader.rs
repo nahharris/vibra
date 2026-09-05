@@ -1,15 +1,17 @@
-//! The Step 4–6 UTF-8 reader spine, literal surface, and name surface.
+//! The Step 4–8 UTF-8 reader spine, literal/name surface, and contextual
+//! declaration/type view.
 //!
-//! This module keeps one lossless, delimiter-aware tree. Declaration AST nodes
-//! belong to later milestone steps; Step 5 literal and Step 6 name
-//! classification are layered over retained leaf text without changing source
-//! bytes.
+//! This module keeps one lossless, delimiter-aware tree. Step 5 literal, Step 6
+//! name, and Step 8 contextual classification are layered over retained leaf
+//! text without changing source bytes; expression and pattern structure remain
+//! later-step concerns.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 
+use crate::ast::{SourceAst, decode_source_root};
 use crate::data::{DataNode, decode_data_root};
 use crate::literal::{LiteralClassification, classify};
 use crate::name::{NameClassification, classify_name};
@@ -627,6 +629,7 @@ pub struct Document {
     root: CstNode,
     diagnostics: Vec<Diagnostic>,
     data: Option<DataNode>,
+    ast: Option<SourceAst>,
 }
 
 impl fmt::Debug for Document {
@@ -717,6 +720,12 @@ impl Document {
     pub const fn data(&self) -> Option<&DataNode> {
         self.data.as_ref()
     }
+
+    /// The native declaration/type AST for a recognized source module.
+    #[must_use]
+    pub const fn ast(&self) -> Option<&SourceAst> {
+        self.ast.as_ref()
+    }
 }
 
 /// Parses a document using the exact mode selected by its extension.
@@ -785,11 +794,21 @@ fn parse_selected(path: &Path, mode: DocumentMode, source: &str) -> Document {
     let tokens = lexed.tokens.clone();
     let mut parser = Parser::new(&tokens, source, lexed.diagnostics.clone());
     let root = parser.parse_root();
+    let source_decode =
+        (mode == DocumentMode::Source).then(|| decode_source_root(&root));
+    let ast = source_decode
+        .as_ref()
+        .and_then(|decoded| decoded.ast().cloned());
     let data_decode = (mode == DocumentMode::Data).then(|| decode_data_root(&root));
     let data = data_decode
         .as_ref()
         .and_then(|decoded| decoded.value().cloned());
     if let Some(decoded) = &data_decode {
+        parser.diagnostics.extend_from_slice(decoded.diagnostics());
+    }
+    if let Some(decoded) = &source_decode
+        && decoded.recognized()
+    {
         parser.diagnostics.extend_from_slice(decoded.diagnostics());
     }
     // Lexer errors are collected before parsing, but consumers see one
@@ -806,6 +825,7 @@ fn parse_selected(path: &Path, mode: DocumentMode, source: &str) -> Document {
         root,
         diagnostics: parser.diagnostics,
         data,
+        ast,
     }
 }
 
@@ -835,6 +855,7 @@ fn invalid_extension_document(
         root,
         diagnostics: vec![diagnostic],
         data: None,
+        ast: None,
     }
 }
 
@@ -1071,6 +1092,7 @@ mod tests {
                 "operands are in a noncanonical order",
             )],
             data: None,
+            ast: None,
         };
 
         assert!(document.accepted());

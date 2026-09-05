@@ -1,0 +1,17 @@
+id = "V1-SRC-DECL-wrong-attribute-position"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Declaration attributes must precede function body forms."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-attribute"
+level = "@error"
+[expect.diagnostics.span]
+start = 20
+end = 31
