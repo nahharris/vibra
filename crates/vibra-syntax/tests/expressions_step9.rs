@@ -92,6 +92,12 @@ fn applications_accept_arbitrary_callees_and_contextual_type_arguments() {
         application.type_arguments(),
         Some([TypeExpr::Name(_)])
     ));
+    let type_arguments_span =
+        application.type_arguments_span().expect("types group span");
+    assert_eq!(
+        &source[type_arguments_span.start()..type_arguments_span.end()],
+        "types: (i32)"
+    );
     assert!(application.type_arguments_after_operands());
     assert_eq!(application.arguments().len(), 2);
     assert_eq!(application.arguments()[0].label(), None);
@@ -205,6 +211,14 @@ fn malformed_step9_forms_report_existing_syntax_diagnostics() {
         ),
         ("(defn bad () i32 -)", DiagnosticCode::SyntaxInvalidForm),
         (
+            "(defn bad (value i32) i32 (let @info value value))",
+            DiagnosticCode::SyntaxInvalidForm,
+        ),
+        (
+            "(defn bad (value i32) i32 (let (bind x) value value))",
+            DiagnosticCode::SyntaxRetiredForm,
+        ),
+        (
             "(defn bad () i32 (tuple i32))",
             DiagnosticCode::SyntaxInvalidForm,
         ),
@@ -229,6 +243,39 @@ fn malformed_step9_forms_report_existing_syntax_diagnostics() {
 }
 
 #[test]
+fn malformed_expression_members_do_not_hide_valid_sibling_declarations() {
+    let source = "(defn bad () i32 ())\n(defn good () i32 0i32)";
+    let document =
+        parse_source(Path::new("partial.vib"), source).expect("source loader");
+    assert!(!document.accepted());
+    let ast = document.ast().expect("partial declaration AST");
+    assert_eq!(ast.declarations().len(), 1);
+    let Declaration::Defn(function) = &ast.declarations()[0] else {
+        panic!("expected good sibling")
+    };
+    assert_eq!(function.name().value(), "good");
+}
+
+#[test]
+fn trailing_lambda_and_test_attributes_use_the_attribute_diagnostic() {
+    for source in [
+        "(defn bad () i32 (lambda () i32 0i32 labelled: (x i32 0i32)))",
+        "(test \"bad\" 0i32 visibility: @public)",
+    ] {
+        let document = parse_source(Path::new("trailing-attributes.vib"), source)
+            .expect("source loader");
+        assert!(!document.accepted(), "accepted malformed source: {source}");
+        assert!(document.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::SyntaxInvalidAttribute
+        }));
+        assert!(!document.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::SyntaxInvalidForm
+                && diagnostic.primary_span().start() > 0
+        }));
+    }
+}
+
+#[test]
 fn retired_expression_forms_have_explicit_diagnostics() {
     for head in [
         "while", "for", "break", "continue", "return", "bind", "case",
@@ -245,4 +292,25 @@ fn retired_expression_forms_have_explicit_diagnostics() {
             document.diagnostics()
         );
     }
+}
+
+#[test]
+fn deeply_nested_contextual_forms_are_rejected_without_stack_overflow() {
+    let depth = 1024;
+    let mut source = String::from("(defn deep () void ");
+    for _ in 0..depth {
+        source.push_str("(do ");
+    }
+    source.push_str("0i32");
+    for _ in 0..depth {
+        source.push(')');
+    }
+    source.push(')');
+
+    let document = parse_source(Path::new("deep.vib"), &source).expect("source loader");
+    assert!(!document.accepted());
+    assert!(document.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::SyntaxInvalidForm
+            && diagnostic.message().contains("safe depth")
+    }));
 }

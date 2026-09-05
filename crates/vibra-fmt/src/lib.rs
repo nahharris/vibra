@@ -262,7 +262,9 @@ fn format_document_inner(
         ));
     }
 
-    if let Some(ast) = document.ast() {
+    if document.accepted()
+        && let Some(ast) = document.ast()
+    {
         if contains_line_comment(document.root()) {
             return Ok(format_source_with_comments(document, context));
         }
@@ -569,9 +571,7 @@ fn render_pattern(
     context: &mut RenderContext<'_>,
 ) {
     match pattern.kind() {
-        PatternKind::Binding(name) | PatternKind::Atom(name) => {
-            output.push_str(name.raw())
-        }
+        PatternKind::Binding(name) => output.push_str(name.raw()),
         PatternKind::Literal(literal) => output.push_str(&format_leaf(literal.raw())),
         PatternKind::Constructor { head, arguments } => {
             output.push('(');
@@ -1364,14 +1364,26 @@ struct CstOperand<'source> {
     value: &'source CstNode,
 }
 
+struct BoundGroup<'source> {
+    nodes: Vec<&'source CstNode>,
+    items: Vec<LineComponent<'source>>,
+}
+
+struct BoundNode<'source> {
+    node: &'source CstNode,
+    leading: Vec<&'source CstNode>,
+    trailing: Vec<&'source CstNode>,
+}
+
 enum RenderTask<'source> {
     Node(&'source CstNode, usize),
     Raw(&'static str),
     LineNode(&'source CstNode, usize),
     LineComment(&'source CstNode, usize),
-    LineGroup {
-        items: Vec<&'source CstNode>,
+    BoundGroup {
+        items: Vec<LineComponent<'source>>,
         indent: usize,
+        first: bool,
     },
     MatchArm {
         leading: Vec<&'source CstNode>,
@@ -1416,23 +1428,27 @@ fn render_node(
                             inline: false,
                             inline_width: 0,
                         });
-                    if !contains_line_comment(node)
-                        && let Some(facts) = context
-                            .as_deref_mut()
-                            .and_then(|context| context.binding_facts(node.span()))
+                    if let Some(facts) = context
+                        .as_deref_mut()
+                        .and_then(|context| context.binding_facts(node.span()))
                     {
-                        match bound_application_groups(node, &facts) {
+                        match bound_application_groups(node, source, &facts) {
                             Ok((mut groups, changed)) => {
                                 if changed && let Some(context) = context.as_deref_mut()
                                 {
                                     context.argument_order_diagnostic_span(node.span());
                                 }
                                 output.push('(');
-                                if layout.inline {
+                                let has_comments = groups.iter().any(|group| {
+                                    group.items.iter().any(|item| {
+                                        matches!(item, LineComponent::Comment(_))
+                                    })
+                                });
+                                if layout.inline && !has_comments {
                                     tasks.push(RenderTask::Raw(")"));
                                     let items = groups
                                         .into_iter()
-                                        .flatten()
+                                        .flat_map(|group| group.nodes)
                                         .collect::<Vec<_>>();
                                     for (index, item) in
                                         items.into_iter().enumerate().rev()
@@ -1447,14 +1463,13 @@ fn render_node(
                                     }
                                 } else {
                                     let head_group = groups.remove(0);
-                                    let Some(head) = head_group.into_iter().next()
-                                    else {
-                                        continue;
-                                    };
                                     let last = groups
                                         .last()
-                                        .and_then(|group| group.last())
-                                        .copied();
+                                        .and_then(|group| group.items.last())
+                                        .and_then(|item| match item {
+                                            LineComponent::Node(node) => Some(node),
+                                            LineComponent::Comment(_) => None,
+                                        });
                                     let last_is_node = last.is_some_and(|last| {
                                         layouts.get(&node_key(last)).is_some_and(
                                             |child_layout| {
@@ -1478,12 +1493,17 @@ fn render_node(
                                         tasks.push(RenderTask::CloseList(indent));
                                     }
                                     for group in groups.into_iter().rev() {
-                                        tasks.push(RenderTask::LineGroup {
-                                            items: group,
+                                        tasks.push(RenderTask::BoundGroup {
+                                            items: group.items,
                                             indent: indent.saturating_add(2),
+                                            first: false,
                                         });
                                     }
-                                    tasks.push(RenderTask::Node(head, indent));
+                                    tasks.push(RenderTask::BoundGroup {
+                                        items: head_group.items,
+                                        indent,
+                                        first: true,
+                                    });
                                 }
                                 continue;
                             }
@@ -1662,14 +1682,38 @@ fn render_node(
                 output.push_str(&" ".repeat(indent));
                 output.push_str(&comment_text(node));
             }
-            RenderTask::LineGroup { items, indent } => {
-                output.push('\n');
-                output.push_str(&" ".repeat(indent));
-                for (index, item) in items.into_iter().enumerate().rev() {
-                    tasks.push(RenderTask::Node(item, indent));
-                    if index != 0 {
-                        tasks.push(RenderTask::Raw(" "));
+            RenderTask::BoundGroup {
+                items,
+                indent,
+                first,
+            } => {
+                let mut group_tasks = Vec::new();
+                let mut output_started = false;
+                let mut node_on_line = false;
+                for item in items {
+                    match item {
+                        LineComponent::Node(node) => {
+                            let task = if node_on_line {
+                                group_tasks.push(RenderTask::Raw(" "));
+                                RenderTask::Node(node, indent)
+                            } else if output_started || !first {
+                                RenderTask::LineNode(node, indent)
+                            } else {
+                                RenderTask::Node(node, indent)
+                            };
+                            group_tasks.push(task);
+                            output_started = true;
+                            node_on_line = true;
+                        }
+                        LineComponent::Comment(comment) => {
+                            group_tasks.push(RenderTask::LineComment(comment, indent));
+                            output_started = true;
+                            node_on_line = false;
+                        }
                     }
+                }
+                for task in group_tasks.into_iter().rev() {
+                    tasks.push(task);
                 }
             }
             RenderTask::MatchArm {
@@ -1754,12 +1798,13 @@ fn multiline_components(node: &CstNode) -> Vec<LineComponent<'_>> {
 
 fn bound_application_groups<'source>(
     node: &'source CstNode,
+    source: &str,
     facts: &BindingFacts,
-) -> Result<(Vec<Vec<&'source CstNode>>, bool), BindingError> {
-    let forms = node
-        .children()
+) -> Result<(Vec<BoundGroup<'source>>, bool), BindingError> {
+    let bound_nodes = bound_nodes(node, source);
+    let forms = bound_nodes
         .iter()
-        .filter(|child| matches!(child.kind(), SyntaxKind::Atom | SyntaxKind::List))
+        .map(|bound| bound.node)
         .collect::<Vec<_>>();
     let head = forms
         .first()
@@ -1847,29 +1892,121 @@ fn bound_application_groups<'source>(
         None => {}
     }
 
-    let mut groups = vec![vec![head]];
+    let mut group_nodes = vec![vec![head]];
     if let Some(type_group) = type_group {
-        groups.push(type_group);
+        group_nodes.push(type_group);
     }
-    groups.extend(fixed.into_iter().map(|operand| {
+    group_nodes.extend(fixed.into_iter().map(|operand| {
         operand
             .label
             .map_or_else(|| vec![operand.value], |label| vec![label, operand.value])
     }));
     labelled.sort_by_key(|(order, _)| *order);
-    groups.extend(labelled.into_iter().map(|(_, operand)| {
+    group_nodes.extend(labelled.into_iter().map(|(_, operand)| {
         operand
             .label
             .map_or_else(|| vec![operand.value], |label| vec![label, operand.value])
     }));
-    groups.extend(variadic.into_iter().map(|operand| vec![operand.value]));
+    group_nodes.extend(variadic.into_iter().map(|operand| vec![operand.value]));
 
     let original = original_groups.iter().flatten().copied();
-    let ordered = groups.iter().flatten().copied();
+    let ordered = group_nodes.iter().flatten().copied();
     let changed = original
         .zip(ordered)
         .any(|(left, right)| !std::ptr::eq(left, right));
+
+    let groups = group_nodes
+        .into_iter()
+        .map(|nodes| {
+            let mut items = Vec::new();
+            for node in &nodes {
+                if let Some(bound) = bound_nodes
+                    .iter()
+                    .find(|bound| std::ptr::eq(bound.node, *node))
+                {
+                    items.extend(
+                        bound.leading.iter().copied().map(LineComponent::Comment),
+                    );
+                    items.push(LineComponent::Node(node));
+                    items.extend(
+                        bound.trailing.iter().copied().map(LineComponent::Comment),
+                    );
+                }
+            }
+            BoundGroup { nodes, items }
+        })
+        .collect();
     Ok((groups, changed))
+}
+
+fn bound_nodes<'source>(
+    node: &'source CstNode,
+    source: &str,
+) -> Vec<BoundNode<'source>> {
+    let components = multiline_components(node);
+    let mut node_count = 0;
+    let node_indices = components
+        .iter()
+        .map(|component| match component {
+            LineComponent::Node(_) => {
+                let index = node_count;
+                node_count += 1;
+                Some(index)
+            }
+            LineComponent::Comment(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let mut bound_nodes = components
+        .iter()
+        .filter_map(|component| match component {
+            LineComponent::Node(node) => Some(BoundNode {
+                node,
+                leading: Vec::new(),
+                trailing: Vec::new(),
+            }),
+            LineComponent::Comment(_) => None,
+        })
+        .collect::<Vec<_>>();
+
+    for (position, component) in components.iter().enumerate() {
+        let LineComponent::Comment(comment) = component else {
+            continue;
+        };
+        let previous = node_indices
+            .iter()
+            .take(position)
+            .rev()
+            .flatten()
+            .next()
+            .copied();
+        let next = node_indices
+            .iter()
+            .skip(position.saturating_add(1))
+            .flatten()
+            .next()
+            .copied();
+        let Some(target) = next.or(previous) else {
+            continue;
+        };
+        let attach_to_previous = previous.is_some_and(|previous| {
+            next.is_none()
+                || bound_nodes.get(previous).is_some_and(|bound| {
+                    !has_line_break(
+                        source,
+                        bound.node.span().end(),
+                        comment.span().start(),
+                    )
+                })
+        });
+        if let Some(bound) = bound_nodes.get_mut(target) {
+            if attach_to_previous {
+                bound.trailing.push(comment);
+            } else {
+                bound.leading.push(comment);
+            }
+        }
+    }
+    bound_nodes
 }
 
 fn cst_label(node: &CstNode) -> Option<&str> {

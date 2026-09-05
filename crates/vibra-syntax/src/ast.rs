@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
 use crate::literal::{Literal, LiteralClassification};
 use crate::name::{Name, NameClassification, NameKind};
@@ -20,6 +20,7 @@ const RESERVED_VALUE_SPELLINGS: &[&str] = &["map", "array", "tuple"];
 const RETIRED_EXPRESSION_HEADS: &[&str] = &[
     "while", "for", "break", "continue", "return", "bind", "case",
 ];
+const MAX_CONTEXTUAL_DEPTH: usize = 256;
 
 /// A lossless CST slice retained alongside a contextual grammar view.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,6 +104,7 @@ pub enum ExpressionKind {
 pub struct Application {
     callee: Box<Expression>,
     type_arguments: Option<Vec<TypeExpr>>,
+    type_arguments_span: Option<ByteSpan>,
     type_arguments_after_operands: bool,
     arguments: Vec<CallArgument>,
     span: ByteSpan,
@@ -119,6 +121,12 @@ impl Application {
     #[must_use]
     pub fn type_arguments(&self) -> Option<&[TypeExpr]> {
         self.type_arguments.as_deref()
+    }
+
+    /// The source span of the complete `types:` group, when present.
+    #[must_use]
+    pub const fn type_arguments_span(&self) -> Option<ByteSpan> {
+        self.type_arguments_span
     }
 
     /// Whether the written `types:` group followed an ordinary operand.
@@ -331,8 +339,6 @@ pub enum PatternKind {
     Binding(Name),
     /// A literal pattern.
     Literal(Literal),
-    /// An atom singleton pattern.
-    Atom(Name),
     /// A qualified or named constructor pattern.
     Constructor {
         /// The written constructor path.
@@ -557,7 +563,11 @@ pub struct SourceDecode {
 }
 
 impl SourceDecode {
-    /// The typed source AST when every declaration is valid.
+    /// The contextual source AST for a recognized root.
+    ///
+    /// When diagnostics contain errors, malformed declarations are omitted but
+    /// intact sibling declarations remain available. Consumers that require a
+    /// complete AST must also check the document's acceptance state.
     #[must_use]
     pub const fn ast(&self) -> Option<&SourceAst> {
         self.ast.as_ref()
@@ -1323,16 +1333,14 @@ pub fn decode_source_root(root: &CstNode) -> SourceDecode {
     let mut parser = AstParser {
         diagnostics: Vec::new(),
         recognized: false,
+        context_depth: 0,
+        context_depth_exceeded: false,
     };
     let declarations = forms
         .iter()
         .filter_map(|form| parser.parse_top_form(form))
         .collect::<Vec<_>>();
-    let ast = (!parser
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.level() == Level::Error))
-    .then(|| SourceAst {
+    let ast = parser.recognized.then(|| SourceAst {
         declarations,
         span: root.span(),
     });
@@ -1369,6 +1377,8 @@ pub fn contains_declaration_head(root: &CstNode) -> bool {
 struct AstParser {
     diagnostics: Vec<Diagnostic>,
     recognized: bool,
+    context_depth: usize,
+    context_depth_exceeded: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1404,6 +1414,25 @@ impl AstParser {
 
     fn invalid_form(&mut self, node: &CstNode, message: &'static str) {
         self.error(DiagnosticCode::SyntaxInvalidForm, node.span(), message);
+    }
+
+    fn enter_context(&mut self, node: &CstNode) -> bool {
+        if self.context_depth >= MAX_CONTEXTUAL_DEPTH {
+            if !self.context_depth_exceeded {
+                self.invalid_form(
+                    node,
+                    "contextual AST nesting exceeds the safe depth",
+                );
+                self.context_depth_exceeded = true;
+            }
+            return false;
+        }
+        self.context_depth += 1;
+        true
+    }
+
+    fn leave_context(&mut self) {
+        self.context_depth = self.context_depth.saturating_sub(1);
     }
 
     fn parse_top_form(&mut self, node: &CstNode) -> Option<Declaration> {
@@ -1667,7 +1696,13 @@ impl AstParser {
         }
         let expressions = forms[index..]
             .iter()
-            .map(|form| self.parse_expression(form))
+            .map(|form| {
+                if is_declaration_attribute_label(form) {
+                    None
+                } else {
+                    self.parse_expression(form)
+                }
+            })
             .collect::<Option<Vec<_>>>()?;
         Some(Declaration::Test(TestDeclaration {
             name,
@@ -1875,6 +1910,15 @@ impl AstParser {
     }
 
     fn parse_expression(&mut self, node: &CstNode) -> Option<Expression> {
+        if !self.enter_context(node) {
+            return None;
+        }
+        let result = self.parse_expression_inner(node);
+        self.leave_context();
+        result
+    }
+
+    fn parse_expression_inner(&mut self, node: &CstNode) -> Option<Expression> {
         if node.kind() != SyntaxKind::List {
             if let Some(classification) = node.literal() {
                 match classification {
@@ -1952,6 +1996,7 @@ impl AstParser {
         let callee = self.parse_expression(forms[0])?;
         let mut arguments = Vec::new();
         let mut type_arguments = None;
+        let mut type_arguments_span = None;
         let mut type_arguments_after_operands = false;
         let mut index = 1;
         while index < forms.len() {
@@ -1974,6 +2019,10 @@ impl AstParser {
                     }
                     type_arguments_after_operands = !arguments.is_empty();
                     type_arguments = Some(self.parse_type_argument_list(value)?);
+                    type_arguments_span = Some(ByteSpan::new(
+                        forms[index].span().start(),
+                        value.span().end(),
+                    ));
                 } else {
                     let expression = self.parse_expression(value)?;
                     arguments.push(CallArgument {
@@ -2000,6 +2049,7 @@ impl AstParser {
             kind: ExpressionKind::Application(Application {
                 callee: Box::new(callee),
                 type_arguments,
+                type_arguments_span,
                 type_arguments_after_operands,
                 arguments,
                 span: node.span(),
@@ -2032,9 +2082,25 @@ impl AstParser {
         let result = self.parse_type_expr(forms[2])?;
         let parsed = self.parse_attributes(&forms[3..], AttributeContext::Lambda, &[]);
         let body_start = 3 + parsed.next;
+        if let Some(attribute) = forms[body_start..]
+            .iter()
+            .find(|form| is_lambda_attribute_label(form))
+        {
+            self.error(
+                DiagnosticCode::SyntaxInvalidAttribute,
+                attribute.span(),
+                "lambda attributes must precede the body",
+            );
+        }
         let body = forms[body_start..]
             .iter()
-            .map(|form| self.parse_expression(form))
+            .map(|form| {
+                if is_lambda_attribute_label(form) {
+                    None
+                } else {
+                    self.parse_expression(form)
+                }
+            })
             .collect::<Option<Vec<_>>>()?;
         Some(Expression {
             kind: ExpressionKind::Lambda(LambdaExpression {
@@ -2168,6 +2234,15 @@ impl AstParser {
     }
 
     fn parse_pattern(&mut self, node: &CstNode) -> Option<Pattern> {
+        if !self.enter_context(node) {
+            return None;
+        }
+        let result = self.parse_pattern_inner(node);
+        self.leave_context();
+        result
+    }
+
+    fn parse_pattern_inner(&mut self, node: &CstNode) -> Option<Pattern> {
         if node.kind() != SyntaxKind::List {
             if let Some(classification) = node.literal() {
                 match classification {
@@ -2194,10 +2269,10 @@ impl AstParser {
                         },
                         span: node.span(),
                     }),
-                    NameKind::Atom => Some(Pattern {
-                        kind: PatternKind::Atom(name.clone()),
-                        span: node.span(),
-                    }),
+                    NameKind::Atom => {
+                        self.invalid_form(node, "atoms are not patterns");
+                        None
+                    }
                     NameKind::Discard => Some(Pattern {
                         kind: PatternKind::Binding(name.clone()),
                         span: node.span(),
@@ -2262,6 +2337,14 @@ impl AstParser {
                     },
                     span: node.span(),
                 })
+            }
+            Some(head) if RETIRED_EXPRESSION_HEADS.contains(&head) => {
+                self.error(
+                    DiagnosticCode::SyntaxRetiredForm,
+                    forms[0].span(),
+                    "this pattern form was retired from v1",
+                );
+                None
             }
             _ => {
                 let head = self.type_name(head)?;
@@ -2409,6 +2492,15 @@ impl AstParser {
     }
 
     fn parse_type_expr(&mut self, node: &CstNode) -> Option<TypeExpr> {
+        if !self.enter_context(node) {
+            return None;
+        }
+        let result = self.parse_type_expr_inner(node);
+        self.leave_context();
+        result
+    }
+
+    fn parse_type_expr_inner(&mut self, node: &CstNode) -> Option<TypeExpr> {
         if node.kind() == SyntaxKind::List {
             let forms = meaningful_children(node);
             let Some(head_node) = forms.first() else {
@@ -3080,6 +3172,12 @@ fn is_declaration_attribute_label(node: &CstNode) -> bool {
     ]
     .iter()
     .any(|label| is_label(node, label))
+}
+
+fn is_lambda_attribute_label(node: &CstNode) -> bool {
+    ["labelled", "variadic", "effects"]
+        .iter()
+        .any(|label| is_label(node, label))
 }
 
 fn generic_names(attributes: &[Attribute]) -> Vec<String> {

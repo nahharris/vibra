@@ -238,6 +238,54 @@ fn binding_facts_apply_through_the_comment_preserving_path() {
 }
 
 #[test]
+fn binding_facts_move_groups_with_comments_inside_the_application() {
+    let source = r#"
+(defn call () i32
+  (call b: 2i32 ; labelled operand
+        1i32 ; positional operand
+  ))
+"#;
+    let document = parse_source(Path::new("bindings-inner-comments.vib"), source)
+        .expect("source loader");
+    assert!(document.accepted(), "{:?}", document.diagnostics());
+    let ast = document.ast().expect("declaration AST");
+    let Declaration::Defn(function) = &ast.declarations()[0] else {
+        panic!("expected defn")
+    };
+    let [expression] = function.expressions() else {
+        panic!("expected one expression")
+    };
+    let ExpressionKind::Application(application) = expression.kind() else {
+        panic!("expected application")
+    };
+    let binding = ApplicationBinding::new(
+        application.span(),
+        BindingFacts::new(1, vec!["b".to_owned()], None),
+    );
+    let formatted = format_source_with_bindings(
+        Path::new("bindings-inner-comments.vib"),
+        source,
+        &[binding],
+    )
+    .expect("binding facts");
+    let text = formatted.text();
+    assert!(text.contains("; labelled operand"));
+    assert!(text.contains("; positional operand"));
+    assert!(
+        text.find("1i32").expect("positional operand")
+            < text.find("b: 2i32").expect("labelled operand"),
+        "{text}\n{:?}",
+        formatted.diagnostics()
+    );
+    assert!(
+        formatted
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::StyleArgumentOrder)
+    );
+}
+
+#[test]
 fn formatter_rejects_contradictory_binding_facts() {
     let cases = [
         (
