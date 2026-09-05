@@ -167,12 +167,21 @@ fn literal_diagnostics_take_precedence_over_name_validation() {
 #[test]
 fn the_name_surface_is_identical_in_source_and_data_modes() {
     let source = "(alpha some.name: @some.name - @- -: valid-name)";
+    let data = "(record some.name: @some.name version: @some.name)";
     let source_document =
         parse_source(Path::new("names.vib"), source).expect("source mode");
-    let data_document =
-        parse_data(Path::new("names.vibon"), source).expect("data mode");
+    let data_document = parse_data(Path::new("names.vibon"), data).expect("data mode");
 
     assert!(source_document.accepted());
     assert!(data_document.accepted());
-    assert_eq!(name_tokens(&source_document), name_tokens(&data_document));
+    assert_eq!(
+        name_tokens(&data_document),
+        vec![
+            ("record", NameKind::Symbol),
+            ("some.name:", NameKind::Label),
+            ("@some.name", NameKind::Atom),
+            ("version:", NameKind::Label),
+            ("@some.name", NameKind::Atom),
+        ]
+    );
 }

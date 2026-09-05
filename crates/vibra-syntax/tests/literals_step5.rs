@@ -173,11 +173,13 @@ fn an_unterminated_string_with_an_unfinished_escape_has_only_recovery() {
 fn the_literal_surface_is_identical_in_source_and_data_modes() {
     let source =
         r###"seed (true false void \newline \u0061 1u8 25i32 2.5f64 2f64 "ok\n")"###;
+    let data =
+        r###"(array true false void \newline \u0061 1u8 25i32 2.5f64 2f64 "ok\n")"###;
 
     let source_document =
         parse_source(Path::new("input.vib"), source).expect("source loader");
     let data_document =
-        parse_data(Path::new("input.vibon"), source).expect("data loader");
+        parse_data(Path::new("input.vibon"), data).expect("data loader");
     assert!(
         source_document.accepted(),
         "source: {:?}",

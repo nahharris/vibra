@@ -1,1 +1,1 @@
-(alpha some.name: @some.name - @- -: valid-name)
+(record name: @some.name qualified: @some.name)

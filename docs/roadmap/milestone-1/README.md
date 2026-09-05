@@ -12,8 +12,8 @@ is cut into steps and what has landed.
 ## Start here
 
 The implementation baseline was refreshed on 2026-09-05 at `origin/m1`
-commit `af73e22` (merge of PR #288). Steps 1–5 are present there; the next
-implementation step is 6. Re-fetch and verify this baseline in future sessions.
+commit `80a13ca` (merge of PR #289). Steps 1–6 are present there; the next
+implementation step is 7. Re-fetch and verify this baseline in future sessions.
 This documentation update does not claim the milestone exit gate has passed.
 
 Read [the implementation guides](implementation.md) and
@@ -157,6 +157,15 @@ token span; literal-family diagnostics take precedence. The validator does not
 assign contextual roles or resolve names, and valid names retain their exact
 source spelling.
 
+### D11 — Generic VIBON ordering is deterministic and schema-independent
+
+Generic records retain source field order because no schema supplies a field
+order. Generic maps sort keys by the canonical encoded value produced by the
+data formatter, using the complete canonical bytes as the tie-breaker. A
+duplicate record label emits `@data.duplicate-field`; a duplicate map key emits
+`@data.duplicate-key`. Typed adapters may supply explicit record order and atom
+roles without resolving references.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the
@@ -172,8 +181,8 @@ and conformance cases in the same change.
 | 3 | Conformance corpus layout, manifest decoding, profile dispatch, and runner | infrastructure | landed |
 | 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | landed (PR #286, `50aa40a`) |
 | 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | landed (PR #288, `af73e22`) |
-| 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | in progress |
-| 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | not started |
+| 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | landed (PR #289, `80a13ca`) |
+| 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | in progress |
 | 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | not started |
 | 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | not started |
 | 10 | Structural source-position query metadata | vertical | not started |

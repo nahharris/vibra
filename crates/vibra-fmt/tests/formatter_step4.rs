@@ -85,9 +85,9 @@ fn formatter_keeps_a_closing_delimiter_within_the_column_limit() {
 
 #[test]
 fn formatter_uses_the_extension_selected_document_mode() {
-    let formatted = format_source(Path::new("project.vibon"), "(record   value)\n")
+    let formatted = format_source(Path::new("project.vibon"), "(array   @value)\n")
         .expect(".vibon is a supported data document");
-    assert_eq!(formatted, "(record value)\n");
+    assert_eq!(formatted, "(array @value)\n");
 }
 
 #[test]
