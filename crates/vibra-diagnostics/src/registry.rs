@@ -214,6 +214,8 @@ diagnostic_registry! {
         "sibling forms in a list are not separated by required trivia";
     SyntaxInvalidCharacterLiteral => "@syntax.invalid-character-literal", Syntax, Error, None,
         "a character literal is not one valid EDN character spelling";
+    SyntaxInvalidStringLiteral => "@syntax.invalid-string-literal", Syntax, Error, None,
+        "a terminated string literal contains an invalid escape or Unicode scalar";
     SyntaxInvalidNumericLiteral => "@syntax.invalid-numeric-literal", Syntax, Error, None,
         "a numeric literal has a malformed or unknown suffix, or trailing text";
     SyntaxRetiredForm => "@syntax.retired-form", Syntax, Error, None,
@@ -322,7 +324,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 50;
+    const REGISTERED_CODES: usize = 51;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -407,7 +409,7 @@ mod tests {
 
     #[test]
     fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 47 errors and 2 warnings. Pinning
+        // The specification's table fixes 49 errors and 2 warnings. Pinning
         // the split catches a level silently flipping in either direction.
         let warnings: Vec<&str> = DiagnosticCode::ALL
             .iter()
@@ -426,6 +428,7 @@ mod tests {
         // canonical table. The table governs, so the two must agree.
         for atom in [
             "@syntax.invalid-character-literal",
+            "@syntax.invalid-string-literal",
             "@syntax.invalid-numeric-literal",
             "@type.numeric-out-of-range",
             "@effect.invalid-reference",

@@ -12,10 +12,11 @@
 //!
 //! # Status
 //!
-//! Milestone 1 step 4 supplies the syntax-only formatter. It canonicalizes
-//! whitespace, delimiters, comments, line endings, and list layout while
-//! leaving opaque leaf text untouched. Literal, name, declaration, and VIBON
-//! schema rules arrive in later steps; see
+//! Milestone 1 steps 4 and 5 supply the syntax-only formatter. It canonicalizes
+//! whitespace, delimiters, comments, line endings, list layout, and valid
+//! character spellings while leaving other literal and opaque leaf text
+//! untouched. Name, declaration, and VIBON schema rules arrive in later steps;
+//! see
 //! `docs/roadmap/milestone-1/README.md`.
 //!
 //! A recovered document is returned byte-for-byte unchanged because applying
@@ -25,7 +26,10 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-use vibra_syntax::{CstNode, Document, DocumentModeError, SyntaxKind, parse_document};
+use vibra_syntax::{
+    CstNode, Document, DocumentModeError, Literal, LiteralClassification, SyntaxKind,
+    canonical_character_spelling, classify, parse_document,
+};
 
 /// An error selecting or formatting a document.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,7 +226,8 @@ fn build_layouts(root: &CstNode) -> HashMap<*const CstNode, NodeLayout> {
 }
 
 fn leaf_layout(text: &str) -> NodeLayout {
-    let (has_newline, inline_width) = normalized_leaf_shape(text);
+    let formatted = format_leaf(text);
+    let (has_newline, inline_width) = normalized_leaf_shape(&formatted);
     NodeLayout {
         inline: !has_newline,
         inline_width,
@@ -310,7 +315,7 @@ fn render_node(
         match task {
             RenderTask::Node(node, indent) => match node.kind() {
                 SyntaxKind::Atom => {
-                    output.push_str(node.leaf_text().unwrap_or_default());
+                    output.push_str(&format_leaf(node.leaf_text().unwrap_or_default()));
                 }
                 SyntaxKind::List => {
                     let layout =
@@ -477,6 +482,17 @@ fn comment_text(node: &CstNode) -> String {
 
 fn normalize_leaf(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn format_leaf(text: &str) -> String {
+    match classify(text) {
+        LiteralClassification::Literal(Literal::Character(character)) => {
+            canonical_character_spelling(character.value())
+        }
+        LiteralClassification::Literal(_)
+        | LiteralClassification::Invalid(_)
+        | LiteralClassification::Opaque => text.to_owned(),
+    }
 }
 
 fn normalize_recovery(source: &str) -> String {

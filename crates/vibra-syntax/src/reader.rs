@@ -1,15 +1,15 @@
-//! The Step 4 UTF-8 reader spine.
+//! The Step 4/5 UTF-8 reader spine and literal surface.
 //!
-//! This module intentionally stops at a lossless, delimiter-aware tree. Leaf
-//! text remains opaque: literal classification, names, and declaration AST
-//! nodes belong to later milestone steps. Keeping that boundary explicit lets
-//! the reader recover useful structure from incomplete source without making
-//! semantic guesses.
+//! This module keeps one lossless, delimiter-aware tree. Names and declaration
+//! AST nodes belong to later milestone steps; Step 5 literal classification is
+//! layered over the retained leaf text without changing its source bytes.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
+
+use crate::literal::{LiteralClassification, classify};
 
 /// The grammar selected for a document by its filename extension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -149,12 +149,29 @@ impl Token {
         &self.text
     }
 
+    /// Classifies this atom as a Step 5 literal without losing its raw text.
+    ///
+    /// Trivia, delimiters, EOF, and an unterminated quoted leaf do not expose
+    /// a literal classification because they are not complete leaves.
+    #[must_use]
+    pub fn literal(&self) -> Option<LiteralClassification> {
+        if self.kind != TokenKind::Atom || self.unterminated_quote {
+            return None;
+        }
+        Some(classify(&self.text))
+    }
+
     fn is_unterminated_quote(&self) -> bool {
         self.unterminated_quote
     }
 
     fn as_node(&self, kind: SyntaxKind) -> CstNode {
-        CstNode::leaf(kind, self.span, &self.text)
+        CstNode::leaf_with_quote_state(
+            kind,
+            self.span,
+            &self.text,
+            self.unterminated_quote,
+        )
     }
 }
 
@@ -310,6 +327,14 @@ pub fn lex(source: &str) -> Lexed {
                 }
                 TokenKind::Atom
             }
+            '\\' => {
+                // A character literal owns a direct delimiter or quote after
+                // its backslash. This branch must run before generic
+                // delimiter/comment handling so `\)`, `\;`, and `\"` stay
+                // one lossless token.
+                offset = scan_character_token(source, start);
+                TokenKind::Atom
+            }
             _ => {
                 offset = advance_one(source, offset);
                 while offset < source.len() {
@@ -327,6 +352,16 @@ pub fn lex(source: &str) -> Lexed {
         let mut token =
             Token::new(kind, ByteSpan::new(start, offset), &source[start..offset]);
         token.unterminated_quote = unterminated_quote;
+        if !unterminated_quote
+            && token.kind() == TokenKind::Atom
+            && let LiteralClassification::Invalid(kind) = classify(token.text())
+        {
+            diagnostics.push(Diagnostic::new(
+                kind.diagnostic_code(),
+                token.span(),
+                kind.message(),
+            ));
+        }
         tokens.push(token);
     }
 
@@ -348,6 +383,33 @@ fn advance_one(source: &str, offset: usize) -> usize {
         .chars()
         .next()
         .map_or(source.len(), |character| offset + character.len_utf8())
+}
+
+fn scan_character_token(source: &str, start: usize) -> usize {
+    let mut offset = start.saturating_add(1);
+    let Some(character) = source.get(offset..).and_then(|text| text.chars().next())
+    else {
+        return offset.min(source.len());
+    };
+
+    if character.is_whitespace() {
+        return offset;
+    }
+    if matches!(character, ';' | '(' | ')' | '"') {
+        return advance_one(source, offset);
+    }
+
+    offset = advance_one(source, offset);
+    while offset < source.len() {
+        let Some(next) = source[offset..].chars().next() else {
+            break;
+        };
+        if next.is_whitespace() || matches!(next, ';' | '(' | ')' | '"') {
+            break;
+        }
+        offset = advance_one(source, offset);
+    }
+    offset
 }
 
 /// The kinds of nodes in the hand-rolled lossless recovery tree.
@@ -377,6 +439,7 @@ pub struct CstNode {
     span: ByteSpan,
     text: String,
     children: Vec<CstNode>,
+    unterminated_quote: bool,
 }
 
 impl fmt::Debug for CstNode {
@@ -405,11 +468,21 @@ impl Drop for CstNode {
 
 impl CstNode {
     fn leaf(kind: SyntaxKind, span: ByteSpan, text: &str) -> Self {
+        Self::leaf_with_quote_state(kind, span, text, false)
+    }
+
+    fn leaf_with_quote_state(
+        kind: SyntaxKind,
+        span: ByteSpan,
+        text: &str,
+        unterminated_quote: bool,
+    ) -> Self {
         Self {
             kind,
             span,
             text: text.to_owned(),
             children: Vec::new(),
+            unterminated_quote,
         }
     }
 
@@ -421,6 +494,7 @@ impl CstNode {
             // here made construction quadratic for deeply nested input.
             text: String::new(),
             children,
+            unterminated_quote: false,
         }
     }
 
@@ -445,6 +519,14 @@ impl CstNode {
     pub fn leaf_text(&self) -> Option<&str> {
         (!matches!(self.kind, SyntaxKind::Root | SyntaxKind::List))
             .then_some(&self.text)
+    }
+
+    /// Classifies an atom leaf as a Step 5 literal without changing its raw
+    /// source spelling.
+    #[must_use]
+    pub fn literal(&self) -> Option<LiteralClassification> {
+        (self.kind == SyntaxKind::Atom && !self.unterminated_quote)
+            .then(|| classify(&self.text))
     }
 
     /// Child nodes in source order. Trivia and delimiters are retained.

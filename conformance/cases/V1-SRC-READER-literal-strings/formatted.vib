@@ -1,0 +1,1 @@
+("plain" "quote\"" "slash\\" "lf\n" "cr\r" "tab\t" "astral\u{1F600}")
