@@ -196,7 +196,7 @@ and conformance cases in the same change.
 | 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | landed (PR #289, `80a13ca`) |
 | 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | landed (PR #290, `aec8a3d`) |
 | 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | landed in PR #291 (merge `3057737d8c595409fe977a3eafb37436e4c7dfd7`) |
-| 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | implemented in current Step 9 PR; merge verification pending |
+| 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | implemented in PR #292; merge verification pending |
 | 10 | Structural source-position query metadata | vertical | not started |
 | 11 | Fuzz campaign, specification-example classification, and exit-gate evidence | evidence | not started |
 
