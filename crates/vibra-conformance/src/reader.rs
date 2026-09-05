@@ -54,21 +54,24 @@ impl ProfileHandler for ReaderV1Handler {
             .map_err(|error| HandlerError::new(error.to_string()))?;
             accepted &= document.accepted();
             diagnostics.extend_from_slice(document.diagnostics());
+            // Run the formatter through every declared loader. This matters
+            // for parity cases: a data input must exercise the data formatter
+            // even when the manifest snapshot belongs to the source input.
+            let output = format_document(&document);
+            // Prove canonical output is stable through the same loader
+            // selected for the manifest role.
+            let reparsed = match mode {
+                DocumentMode::Source => parse_source(&path, &output),
+                DocumentMode::Data => parse_data(&path, &output),
+            }
+            .map_err(|error| HandlerError::new(error.to_string()))?;
+            let reformatted = format_document(&reparsed);
+            if reformatted != output {
+                return Err(HandlerError::new(
+                    "formatter output is not idempotent for the selected loader",
+                ));
+            }
             if format_relative.is_some_and(|candidate| candidate == relative) {
-                let output = format_document(&document);
-                // Prove canonical output is stable through the same loader
-                // selected for the manifest role.
-                let reparsed = match mode {
-                    DocumentMode::Source => parse_source(&path, &output),
-                    DocumentMode::Data => parse_data(&path, &output),
-                }
-                .map_err(|error| HandlerError::new(error.to_string()))?;
-                let reformatted = format_document(&reparsed);
-                if reformatted != output {
-                    return Err(HandlerError::new(
-                        "formatter output is not idempotent for the selected loader",
-                    ));
-                }
                 formatted = Some(output);
             }
         }

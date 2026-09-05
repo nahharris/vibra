@@ -1,7 +1,7 @@
 # Vibra v1 diagnostics and conformance
 
 Status: normative target
-Implementation status: milestone 1 step 4 in progress (reader-v1 profile only)
+Implementation status: milestone 1 step 5 in progress (reader-v1 literal surface)
 
 ## Diagnostics are a language surface
 
@@ -19,6 +19,7 @@ table governs.
 | `@syntax.unmatched-delimiter` | `@error` |
 | `@syntax.missing-separator` | `@error` |
 | `@syntax.invalid-character-literal` | `@error` |
+| `@syntax.invalid-string-literal` | `@error` |
 | `@syntax.invalid-numeric-literal` | `@error` |
 | `@syntax.retired-form` | `@error` |
 | `@name.unknown-symbol` | `@error` |
@@ -164,10 +165,13 @@ host-error propagation, interpreter/Wasm parity, all three equivalent discard
 spellings, all character spellings, exact numeric suffix typing and range
 boundaries, rejection of the retired `unit` literal, and rejection of malformed
 names such as `_.x`, `a?.b`, `-.x`, and `@-.x`. Invalid character tokens use
-`@syntax.invalid-character-literal`; malformed or unknown numeric suffixes use
-`@syntax.invalid-numeric-literal`; and a syntactically valid literal outside
-its suffixed type's range uses `@type.numeric-out-of-range`. All three have the
-fixed level `@error`.
+`@syntax.invalid-character-literal`; malformed escapes or Unicode scalar
+values in a terminated string use `@syntax.invalid-string-literal`; malformed
+or unknown numeric suffixes use `@syntax.invalid-numeric-literal`; and a
+syntactically valid literal outside its suffixed type's range uses
+`@type.numeric-out-of-range`. All four have the fixed level `@error`. An
+unterminated quoted leaf remains the recovery case for
+`@syntax.unmatched-delimiter` and is not also an invalid-string case.
 
 Reader recovery cases also cover a missing required separator between sibling
 forms with `@syntax.missing-separator`, whose fixed level is `@error`.

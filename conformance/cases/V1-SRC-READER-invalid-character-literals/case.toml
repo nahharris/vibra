@@ -1,0 +1,53 @@
+id = "V1-SRC-READER-invalid-character-literals"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "Malformed EDN character spellings report complete token spans and recover to valid siblings."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 7
+end = 10
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 11
+end = 21
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 22
+end = 28
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 29
+end = 33
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 34
+end = 41
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 42
+end = 43

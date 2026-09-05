@@ -23,8 +23,11 @@ and resolution**; lexical validity and permitted binding roles are different.
    candidate, including exponent and suffix. Recognize booleans and `void`
    before generic names, but retain context so `void` can appear as a type.
 5. Decode supported string escapes and exactly one Unicode scalar per character.
-   Validate scalar boundaries and reject surrogate escapes. Retain raw source
-   independently of decoded values for lossless CST and recovered formatting.
+   Validate scalar boundaries and reject surrogate escapes. A terminated
+   malformed string emits `@syntax.invalid-string-literal` over its complete
+   leaf; an unterminated quoted leaf remains the recovery
+   `@syntax.unmatched-delimiter` case. Retain raw source independently of
+   decoded values for lossless CST and recovered formatting.
 6. Extend formatting only where canonical spelling is specified. Add canonical
    character rendering and suffix preservation. Do not invent numeric rounding
    or an unspecified string-escape preference. Preserve entire recovered
@@ -40,9 +43,10 @@ and resolution**; lexical validity and permitted binding roles are different.
 | Strings | Each supported escape; embedded escaped quote/backslash; astral scalar; invalid escape/scalar; unfinished escape and quote; Unicode before diagnostic span |
 | Formatting | Decode/format/decode value equivalence, suffix retained, canonical character bytes, idempotence, 87/88/89-column boundaries with nested indentation |
 
-Use `@syntax.invalid-character-literal` and
-`@syntax.invalid-numeric-literal` with their fixed levels. Do not emit
-`@type.numeric-out-of-range` from lexical validation.
+Use `@syntax.invalid-character-literal`,
+`@syntax.invalid-string-literal`, and `@syntax.invalid-numeric-literal` with
+their fixed levels. Do not emit `@type.numeric-out-of-range` from lexical
+validation.
 
 ## Step 6 implementation sequence
 

@@ -12,7 +12,7 @@ is cut into steps and what has landed.
 ## Start here
 
 The implementation baseline was refreshed on 2026-09-05 at `origin/m1`
-commit `50aa40a` (merge of PR #286). Steps 1–4 are present there; the next
+commit `a99ca56` (merge of PR #287). Steps 1–4 are present there; the next
 implementation step is 5. Re-fetch and verify this baseline in future sessions.
 This documentation update does not claim the milestone exit gate has passed.
 
@@ -140,6 +140,15 @@ in both document modes. Literal validation and canonical escaping remain in
 step 5; canonical VIBON values remain in step 7. These cases contribute to the
 reader and formatter exit gates, whose complete evidence remains in step 11.
 
+### D9 — Terminated malformed strings have a distinct reader diagnostic
+
+Step 5 uses `@syntax.invalid-string-literal` for an invalid escape or Unicode
+scalar in a terminated quoted leaf, reporting the complete leaf span. An
+unterminated quoted leaf, including one ending in an unfinished escape, keeps
+the existing `@syntax.unmatched-delimiter` recovery diagnostic only. This
+distinction prevents a recovery marker from being mistaken for a second
+lexical failure and preserves the Step 4 byte-preserving contract.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the
@@ -154,7 +163,7 @@ and conformance cases in the same change.
 | 2 | Spans, line index, diagnostic model, closed code and level registry, and their JSON contract | vertical | landed |
 | 3 | Conformance corpus layout, manifest decoding, profile dispatch, and runner | infrastructure | landed |
 | 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | landed (PR #286, `50aa40a`) |
-| 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | not started |
+| 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | in progress |
 | 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | not started |
 | 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | not started |
 | 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | not started |

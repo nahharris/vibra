@@ -19,8 +19,15 @@
 //! the opaque leaf boundary used by later literal/name/AST steps. See
 //! `docs/roadmap/milestone-1/README.md`.
 
+mod literal;
 mod reader;
 
+pub use literal::{
+    BooleanLiteral, CharacterLiteral, FloatLiteral, FloatSuffix, IntegerLiteral,
+    IntegerSuffix, InvalidLiteralKind, Literal, LiteralClassification, LiteralKind,
+    StringLiteral, VoidLiteral, canonical_character_spelling, classify,
+    classify_literal,
+};
 pub use reader::{
     CstNode, Document, DocumentMode, DocumentModeError, Lexed, Lexer, SyntaxKind,
     Token, TokenKind, lex, lex_bytes, parse, parse_data, parse_document, parse_source,

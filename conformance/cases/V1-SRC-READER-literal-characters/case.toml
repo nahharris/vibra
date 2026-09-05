@@ -1,0 +1,11 @@
+id = "V1-SRC-READER-literal-characters"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "Character names, Unicode escapes, direct scalars, and delimiter characters share one literal surface."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

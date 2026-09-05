@@ -1,7 +1,7 @@
 # Vibra v1 source language
 
 Status: normative target
-Implementation status: milestone 1 step 4 in progress (reader spine only)
+Implementation status: milestone 1 step 5 in progress (reader and literal surface)
 
 ## Reader
 
@@ -55,22 +55,29 @@ trivia         = { whitespace | line-comment } ;
 required-trivia = ( whitespace | line-comment ), trivia ;
 ```
 
-The step 4 reader implements the shared UTF-8 tokenization, delimiter
-structure, trivia retention, and recovery boundary described above. Leaf text
-is intentionally opaque at this stage: literal classification, qualified
-names, labels, declarations, and semantic AST nodes are added by later
-milestone steps. A recovered or incomplete tree remains lossless and carries
-an explicit error marker rather than being assigned an ambiguous typed node.
-When a double-quoted leaf reaches end of file without a closing quote, the
-reader emits `@syntax.unmatched-delimiter`, marks the subtree recovered, and
-preserves the original bytes. Escape decoding and string-value validation are
-deferred to step 5; step 4 only keeps the quoted leaf together for recovery.
-Until literal validation and canonical escaping land, the syntax-only
-formatter MUST preserve opaque leaf bytes, including interior CR and CRLF.
-Its LF normalization applies to trivia, not to quoted leaf contents.
+The step 4/5 reader implements the shared UTF-8 tokenization, delimiter
+structure, trivia retention, recovery boundary, and literal classification
+described above. Qualified names, labels, declarations, and semantic AST
+nodes are added by later milestone steps. A recovered or incomplete tree
+remains lossless and carries an explicit error marker rather than being
+assigned an ambiguous typed node. When a double-quoted leaf reaches end of
+file without a closing quote, the reader emits
+`@syntax.unmatched-delimiter`, marks the subtree recovered, and preserves the
+original bytes. Terminated strings, characters, booleans, `void`, and decimal
+numeric spellings are classified by step 5; the formatter canonicalizes valid
+character spellings while preserving raw string and numeric spellings.
+Opaque leaves and literal leaves retain interior CR and CRLF bytes. LF
+normalization applies to trivia, not to quoted leaf contents.
 
 Strings are double quoted and support `\"`, `\\`, `\n`, `\r`, `\t`, and
-`\u{HEX}`.
+`\u{HEX}`. A terminated quoted leaf containing an unsupported escape, a
+malformed braced Unicode escape, or a value that is not one Unicode scalar
+emits `@syntax.invalid-string-literal` over the complete quoted-leaf span.
+An unterminated quoted leaf, including one that ends in an unfinished escape,
+instead emits `@syntax.unmatched-delimiter`, is recovered, and retains its
+original bytes; it does not emit both diagnostics. `\u{HEX}` uses one to six
+hexadecimal digits, rejects surrogate values, and rejects values above
+U+10FFFF.
 
 A character literal follows EDN spelling and denotes exactly one Unicode scalar
 value. A backslash may be followed by one non-whitespace scalar, one of

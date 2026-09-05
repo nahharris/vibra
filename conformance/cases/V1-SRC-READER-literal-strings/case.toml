@@ -1,0 +1,11 @@
+id = "V1-SRC-READER-literal-strings"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "Supported string escapes decode while raw source spellings remain lossless."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

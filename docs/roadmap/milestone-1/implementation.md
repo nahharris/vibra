@@ -50,7 +50,7 @@ examples, registry/schema updates, and affected roadmap guidance first.
 
 | Decision | Owner | Required resolution |
 | --- | --- | --- |
-| Malformed strings, invalid names, wrong arities, duplicate attributes, invalid data shapes | Steps 5–9, before each affected slice | Audit the closed diagnostic table: several rejection rules have no dedicated code or precise span policy. Specify the mapping; do not reuse unmatched-delimiter for unrelated errors. |
+| Malformed strings, invalid names, wrong arities, duplicate attributes, invalid data shapes | Steps 5–9, before each affected slice | Step 5 closes terminated malformed strings with `@syntax.invalid-string-literal` over the complete leaf and keeps unterminated leaves on `@syntax.unmatched-delimiter`; later slices must close their remaining mappings before implementation. Do not reuse unmatched-delimiter for unrelated errors. |
 | Generic VIBON canonical ordering | Step 7 | Define ordering across permitted map keys, duplicate-key treatment, and record ordering when no typed schema supplies field order. Do not silently use Rust hash iteration, lexicographic source text, or source collection semantics. |
 | Signature-dependent operand normalization | Step 9 | M1 has no resolver, but its gate includes labelled/variadic normalization. Define the formatter input contract for supplied binding facts and how the reader profile exercises it, or revise the normative delivery allocation explicitly. Never infer a signature from a callee's spelling. |
 | Structural metadata wire representation and boundary behavior | Step 10 | Align the initial schema with the tooling contract, including EOF, trivia, invalid offsets, and exact/recovered/unavailable facts. Do not publish guessed future semantic fields. |
