@@ -1,10 +1,11 @@
-//! The Step 4–9 UTF-8 reader spine, literal/name surface, and contextual
-//! declaration/type/expression/pattern view.
+//! The Step 4–10 UTF-8 reader spine, literal/name surface, contextual
+//! declaration/type/expression/pattern view, and structural query surface.
 //!
 //! This module keeps one lossless, delimiter-aware tree. Step 5 literal, Step 6
 //! name, and Step 8–9 contextual classification are layered over retained leaf
 //! text without changing source bytes. Resolution and semantic checking remain
-//! later-step concerns.
+//! later-step concerns. Step 10 queries remain structural: they do not resolve
+//! names or infer types.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -725,6 +726,15 @@ impl Document {
     #[must_use]
     pub const fn ast(&self) -> Option<&SourceAst> {
         self.ast.as_ref()
+    }
+
+    /// Returns structural facts for the smallest CST node at a UTF-8 byte
+    /// offset.
+    pub fn query_position(
+        &self,
+        offset: usize,
+    ) -> Result<crate::query::StructuralQuery, crate::query::QueryError> {
+        crate::query::query_position(self, offset)
     }
 }
 

@@ -370,6 +370,9 @@ fn validate_declared_files(
     {
         let _ = resolve_file(directory, snapshot, &manifest.id)?;
     }
+    for query in &expectations.queries {
+        let _ = resolve_file(directory, &query.snapshot, &manifest.id)?;
+    }
     for execution in [
         expectations.interpreter.as_ref(),
         expectations.wasm.as_ref(),

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vibra:schema:v1:source-position-query",
+  "title": "Vibra structural source-position query",
+  "description": "Structural facts for the smallest deterministic lossless CST node at a UTF-8 byte offset. This contract does not contain resolution, typing, or semantic identity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "offset",
+    "span",
+    "mode",
+    "syntaxKind",
+    "category",
+    "status",
+    "permittedForms",
+    "permittedLabels"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Major version of this contract.",
+      "const": 1
+    },
+    "offset": {
+      "description": "The queried UTF-8 byte offset. It may equal the source byte length for EOF.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "span": { "$ref": "#/$defs/span" },
+    "mode": {
+      "description": "The extension-selected document grammar.",
+      "enum": ["source", "data"]
+    },
+    "syntaxKind": {
+      "enum": [
+        "root",
+        "list",
+        "atom",
+        "whitespace",
+        "line-comment",
+        "open-paren",
+        "close-paren",
+        "error"
+      ]
+    },
+    "category": {
+      "enum": [
+        "module",
+        "declaration",
+        "type",
+        "pattern",
+        "expression",
+        "declaration-attribute",
+        "effect-row",
+        "data-field",
+        "trivia",
+        "recovery"
+      ]
+    },
+    "status": {
+      "enum": ["exact", "recovered", "unavailable"]
+    },
+    "permittedForms": {
+      "description": "An ordered closed vocabulary. An empty array means the slot is known and has no named forms; null means unavailable.",
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "permittedLabels": {
+      "description": "An ordered closed vocabulary. An empty array means the slot is known and has no labels; null means unavailable.",
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "column"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "startPosition", "endPosition"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "startPosition": { "$ref": "#/$defs/position" },
+        "endPosition": { "$ref": "#/$defs/position" }
+      }
+    }
+  }
+}

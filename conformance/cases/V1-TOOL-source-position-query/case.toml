@@ -1,0 +1,15 @@
+id = "V1-TOOL-source-position-query"
+rule = "V1-TOOL-source-position-query"
+profile = "reader-v1"
+description = "The reader-v1 handler publishes an exact structural query with a Unicode prefix."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+
+[[expect.queries]]
+input = "input.vib"
+offset = 16
+snapshot = "query.json"

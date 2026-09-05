@@ -18,6 +18,17 @@ pub struct ExecutionObservation {
     pub audit_trace: Vec<String>,
 }
 
+/// One structural query result returned by a profile handler.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QueryObservation {
+    /// The case-relative input document that was queried.
+    pub input: String,
+    /// The queried UTF-8 byte offset.
+    pub offset: usize,
+    /// The canonical serialized schema result.
+    pub result: String,
+}
+
 /// The backend-neutral facts a profile handler returns for one case.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CaseObservation {
@@ -33,6 +44,8 @@ pub struct CaseObservation {
     pub types: Option<String>,
     /// Effect output, if the handler provides it.
     pub effects: Option<String>,
+    /// Structural source-position query observations.
+    pub queries: Vec<QueryObservation>,
     /// Reference-interpreter observation.
     pub interpreter: Option<ExecutionObservation>,
     /// Wasm observation.
@@ -494,6 +507,35 @@ impl CaseExpectations {
             self.effects.as_deref(),
             observation.effects.as_deref(),
         )?;
+        if self.queries.len() != observation.queries.len() {
+            return Err(format!(
+                "query observation count mismatch: expected {}, got {}",
+                self.queries.len(),
+                observation.queries.len()
+            ));
+        }
+        for (index, (expected, actual)) in
+            self.queries.iter().zip(&observation.queries).enumerate()
+        {
+            if expected.input != actual.input || expected.offset != actual.offset {
+                return Err(format!(
+                    "query {index} subject mismatch: expected {} at {}, got {} at {}",
+                    expected.input, expected.offset, actual.input, actual.offset
+                ));
+            }
+            let snapshot = case.read_file(&expected.snapshot).map_err(|error| {
+                format!(
+                    "query snapshot `{}` cannot be read: {error}",
+                    expected.snapshot
+                )
+            })?;
+            if actual.result != snapshot {
+                return Err(format!(
+                    "query snapshot mismatch (`{}`)",
+                    expected.snapshot
+                ));
+            }
+        }
         compare_execution(
             case,
             "interpreter",

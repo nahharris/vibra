@@ -42,3 +42,31 @@ or canonical identities are invented in M1. Later milestones fill those facts.
 Run [validation](validation.md), adding schema contract tests and real corpus
 coverage for this surface. Shipping a library and schema is completion of this
 step; shipping a query CLI or MCP server is not part of M1.
+
+## Step 10 implementation record
+
+The syntax-owned API is `vibra_syntax::query_position(&Document, usize)`. It
+walks the existing lossless CST iteratively and returns `StructuralQuery` with
+the queried offset, selected half-open `ByteSpan`, document mode, `SyntaxKind`,
+`GrammarCategory`, `FactStatus`, and optional ordered form/label vectors. The
+reader rejects offsets beyond the source or inside a UTF-8 scalar, accepts
+character-boundary EOF, prefers a zero-width `Error` marker at the caret, and
+then chooses the shortest containing node with deterministic depth/source-order
+ties. Trivia is unavailable; recovery is recovered; valid siblings remain
+exact in a recovered document.
+
+The reviewed v1 wire contract is published as
+`urn:vibra:schema:v1:source-position-query` with these camel-case fields:
+`schemaVersion`, `offset`, `span`, `mode`, `syntaxKind`, `category`, `status`,
+`permittedForms`, and `permittedLabels`. The category vocabulary is
+`module`, `declaration`, `type`, `pattern`, `expression`,
+`declaration-attribute`, `effect-row`, `data-field`, `trivia`, and `recovery`;
+the status vocabulary is `exact`, `recovered`, and `unavailable`. A known empty
+continuation is `[]`; an unavailable continuation is JSON `null`.
+
+`vibra-schema` deliberately depends on `vibra-syntax` only to adapt the
+syntax-owned result; syntax never depends on serde or schema. Producer,
+consumer, serialization-determinism, UTF-8-boundary, recovery, source/data,
+and neutral-runner snapshot tests cover the contract. The real reader-v1 corpus
+case `V1-TOOL-source-position-query` provides an independently authored
+Unicode-prefixed source snapshot. No CLI or MCP query surface is included.

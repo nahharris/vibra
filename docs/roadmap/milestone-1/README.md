@@ -11,10 +11,10 @@ is cut into steps and what has landed.
 
 ## Start here
 
-The implementation baseline used for Step 9 was refreshed on 2026-09-05 at
-`origin/m1` commit `3057737d8c595409fe977a3eafb37436e4c7dfd7` (merge of PR
-#291). Steps 1–8 were present there; the Step 9 landing is recorded in the step
-table below. Re-fetch and verify the current integration head in future
+The implementation baseline used for Step 10 was refreshed on 2026-09-05 at
+`origin/m1` commit `b7f94f85f74de20f4a4a48aeb30a54b823bc72b1` (merge of PR
+#292). Steps 1–9 were present there; the Step 10 landing is recorded in the
+step table below. Re-fetch and verify the current integration head in future
 sessions. This documentation update does not claim the milestone exit gate has
 passed.
 
@@ -178,6 +178,17 @@ appended to document diagnostics for those recognized roots. Written
 applications retain raw spans and accept optional authoritative binding facts;
 no semantic resolution or public JSON AST schema is added.
 
+### D13 — Structural queries own the source facts and schemas adapt them
+
+Step 10 exposes `query_position` from `vibra-syntax` over the existing
+lossless CST. The result owns the selected span, CST kind, grammar category,
+fact status, and ordered permitted forms/labels; it never resolves an atom or
+reparses source text. `vibra-schema` adds the deliberate one-way dependency on
+`vibra-syntax` and publishes `source-position-query` with explicit
+exact/recovered/unavailable status and null-versus-empty continuation facts.
+The internal reader-v1 corpus observes these results through dedicated query
+snapshots. No CLI or MCP surface is added.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the
@@ -196,8 +207,8 @@ and conformance cases in the same change.
 | 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | landed (PR #289, `80a13ca`) |
 | 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | landed (PR #290, `aec8a3d`) |
 | 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | landed in PR #291 (merge `3057737d8c595409fe977a3eafb37436e4c7dfd7`) |
-| 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | implemented in PR #292; merge verification pending |
-| 10 | Structural source-position query metadata | vertical | not started |
+| 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | landed in PR #292 (merge `b7f94f85f74de20f4a4a48aeb30a54b823bc72b1`) |
+| 10 | Structural source-position query metadata | vertical | in progress on `codex/m1-step-10` |
 | 11 | Fuzz campaign, specification-example classification, and exit-gate evidence | evidence | not started |
 
 Detailed guides: [5–6: literals and names](05-06-leaves.md),

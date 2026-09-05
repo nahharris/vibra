@@ -31,8 +31,9 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-syntax", &["vibra-diagnostics"]),
     // Consumes the reader's tree; nothing in the language depends on it.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
-    // The wire format. Depends on language facts; no phase depends on it.
-    ("vibra-schema", &["vibra-diagnostics"]),
+    // The wire format. The Step 10 adapter consumes syntax facts; no phase
+    // depends on the wire crate.
+    ("vibra-schema", &["vibra-diagnostics", "vibra-syntax"]),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",

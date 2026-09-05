@@ -26,13 +26,16 @@
 //!
 //! This crate translates language facts into a wire format, so the arrow
 //! points one way only: it may depend on the language crates, and no compiler
-//! phase may depend on it. The milestone 2 exit gate states that rule
+//! phase may depend on it. Step 10 deliberately adds the one-way
+//! `vibra-schema` -> `vibra-syntax` edge for structural queries; the syntax
+//! crate remains schema-free. The milestone 2 exit gate states that rule
 //! directly.
 //!
 //! # Status
 //!
-//! Milestone 1 step 2 published the diagnostic contracts. Query, edit-plan,
-//! test-report, and command-result contracts follow in later milestones; see
+//! Milestone 1 step 2 published the diagnostic contracts and step 10 adds the
+//! structural source-position query contract. Edit-plan, test-report, and
+//! command-result contracts follow in later milestones; see
 //! `docs/roadmap/milestone-1/README.md`.
 
 // Tests assert by panicking and index fixtures they just built. The library
@@ -49,9 +52,14 @@
 )]
 
 mod diagnostic;
+mod query;
 
 pub use diagnostic::{
     DIAGNOSTIC_SCHEMA, DiagnosticDocument, FixDocument, PositionDocument,
     REGISTRY_ENTRY_SCHEMA, RegistryEntryDocument, RelatedSpanDocument, SCHEMA_VERSION,
     SpanDocument,
+};
+pub use query::{
+    SOURCE_POSITION_QUERY_SCHEMA, SourcePositionQueryDocument, category_name,
+    status_name,
 };

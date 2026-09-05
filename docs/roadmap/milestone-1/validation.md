@@ -60,6 +60,12 @@ span tests. Omitted optional expectations mean not asserted, not empty output.
 If adding new observation fields, prove the runner fails on a deliberately
 wrong expectation and that the real handler produces the observed value.
 
+Structural query observations use ordered `[[expect.queries]]` entries with an
+input path, UTF-8 byte offset, and case-relative JSON snapshot. The reader-v1
+handler serializes the syntax result through `vibra-schema`; a Step 10
+synthetic test also changes a snapshot to prove the neutral runner reports the
+mismatch.
+
 For every accepted formatter case, assert successful reparse, structural/value
 equivalence at the implemented layer, and `format(format(input)) == format(input)`.
 Idempotence alone could pass after silently deleting content. For recovered
