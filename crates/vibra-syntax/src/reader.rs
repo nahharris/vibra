@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 
+use crate::data::{DataNode, decode_data_root};
 use crate::literal::{LiteralClassification, classify};
 use crate::name::{NameClassification, classify_name};
 
@@ -625,6 +626,7 @@ pub struct Document {
     lexed: Lexed,
     root: CstNode,
     diagnostics: Vec<Diagnostic>,
+    data: Option<DataNode>,
 }
 
 impl fmt::Debug for Document {
@@ -709,6 +711,12 @@ impl Document {
     pub fn recovered(&self) -> bool {
         self.root.contains_error()
     }
+
+    /// The decoded generic VIBON root, when this is a valid data document.
+    #[must_use]
+    pub const fn data(&self) -> Option<&DataNode> {
+        self.data.as_ref()
+    }
 }
 
 /// Parses a document using the exact mode selected by its extension.
@@ -777,6 +785,13 @@ fn parse_selected(path: &Path, mode: DocumentMode, source: &str) -> Document {
     let tokens = lexed.tokens.clone();
     let mut parser = Parser::new(&tokens, source, lexed.diagnostics.clone());
     let root = parser.parse_root();
+    let data_decode = (mode == DocumentMode::Data).then(|| decode_data_root(&root));
+    let data = data_decode
+        .as_ref()
+        .and_then(|decoded| decoded.value().cloned());
+    if let Some(decoded) = &data_decode {
+        parser.diagnostics.extend_from_slice(decoded.diagnostics());
+    }
     // Lexer errors are collected before parsing, but consumers see one
     // source-ordered stream. Stable sorting preserves emission order at EOF.
     parser.diagnostics.sort_by_key(|diagnostic| {
@@ -790,6 +805,7 @@ fn parse_selected(path: &Path, mode: DocumentMode, source: &str) -> Document {
         lexed,
         root,
         diagnostics: parser.diagnostics,
+        data,
     }
 }
 
@@ -818,6 +834,7 @@ fn invalid_extension_document(
         lexed,
         root,
         diagnostics: vec![diagnostic],
+        data: None,
     }
 }
 
@@ -1053,6 +1070,7 @@ mod tests {
                 ByteSpan::empty_at(0),
                 "operands are in a noncanonical order",
             )],
+            data: None,
         };
 
         assert!(document.accepted());

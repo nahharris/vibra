@@ -14,15 +14,21 @@
 //!
 //! # Status
 //!
-//! Milestone 1 steps 4–6 supply the shared UTF-8 lexer, literal and name
-//! classification, hand-rolled lossless recovery CST, and
-//! extension-selected document modes. Contextual AST and resolution remain
-//! later-step concerns; see `docs/roadmap/milestone-1/README.md`.
+//! Milestone 1 steps 4–7 supply the shared UTF-8 lexer, literal/name
+//! classification, generic VIBON data decoding, hand-rolled lossless recovery
+//! CST, and extension-selected document modes. Contextual AST, project schemas,
+//! and resolution remain later-step concerns; see
+//! `docs/roadmap/milestone-1/README.md`.
 
+mod data;
 mod literal;
 mod name;
 mod reader;
 
+pub use data::{
+    AtomRole, DataDecode, DataField, DataNode, DataValue, TypedDataSchema,
+    canonical_data, decode_data_root,
+};
 pub use literal::{
     BooleanLiteral, CharacterLiteral, FloatLiteral, FloatSuffix, IntegerLiteral,
     IntegerSuffix, InvalidLiteralKind, Literal, LiteralClassification, LiteralKind,

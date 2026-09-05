@@ -19,10 +19,13 @@ documents**, source **Reader/Canonical format**, and diagnostics **Recovery**.
    cannot know a project record's fields. Provide a way for a typed schema to
    supply field order and atom-slot roles without loading source or resolving
    identities. The actual `@project.v1` decoder remains Milestone 2 work.
-5. Implement canonical output from the specified value/order contract. Preserve
-   comments with their associated entries when reordering; retain complete
-   original bytes on recovery. Test generic data and a small synthetic typed
-   schema separately; do not claim project checking from a synthetic schema.
+5. Implement canonical output from the specified value/order contract. Generic
+   records retain source field order; generic maps sort by complete canonical
+   encoded key bytes. A typed adapter may supply explicit record field order
+   and atom roles. Preserve comments with their associated entries when
+   reordering; retain complete original bytes on recovery. Test generic data
+   and a small synthetic typed schema separately; do not claim project checking
+   from a synthetic schema.
 6. Update `ReaderV1Handler` to exercise real data validation/formatting through
    its existing project/data roles. Add assertions of decoded structure in host
    tests; snapshots alone cannot prove correct decoding.
@@ -44,3 +47,9 @@ the case description identifies the specific VIBON clause. Do not create an
 unregistered rule prefix. Run [validation](validation.md), including existing
 loader-mismatch and quoted-leaf regressions. Record the resolved canonical-order
 contract and new diagnostic mappings before marking Step 7 landed.
+
+Step 7 uses `@data.invalid-shape` for root/container arity and slot-shape
+errors, `@data.invalid-value` for source-only forms and forbidden atoms,
+`@data.duplicate-field` for repeated record labels, and
+`@data.duplicate-key` for repeated map keys. All four are fixed `@error`
+diagnostics; lexical literal/name failures retain their Step 5/6 codes.

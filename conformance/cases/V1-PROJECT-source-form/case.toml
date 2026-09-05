@@ -1,0 +1,18 @@
+id = "V1-PROJECT-source-form"
+rule = "V1-PROJECT"
+profile = "reader-v1"
+description = "Executable source lists are not generic VIBON values."
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+accepted = false
+formatted = "formatted.vibon"
+
+[[expect.diagnostics]]
+code = "@data.invalid-value"
+level = "@error"
+[expect.diagnostics.span]
+start = 1
+end = 5

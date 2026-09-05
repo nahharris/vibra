@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-vibon-comments"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "VIBON comments survive canonical formatting around one value."
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+accepted = true
+formatted = "formatted.vibon"

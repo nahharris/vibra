@@ -156,7 +156,7 @@ fn empty_root_is_composite_and_has_no_leaf_text() {
 
 #[test]
 fn extension_selects_mode_without_content_sniffing_or_fallback() {
-    let source = "(looks-like-source)";
+    let source = "(array @looks-like-source)";
     let source_document = parse_document(Path::new("project.vibon"), source)
         .expect(".vibon selects data mode even for source-shaped text");
     assert_eq!(source_document.mode(), DocumentMode::Data);

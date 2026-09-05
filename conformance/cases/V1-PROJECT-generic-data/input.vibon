@@ -1,0 +1,1 @@
+(record name: "hello" items: (array @a 1) coords: (tuple \a false) metadata: (map @z 2 @a 1))

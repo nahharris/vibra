@@ -12,11 +12,11 @@
 //!
 //! # Status
 //!
-//! Milestone 1 steps 4–6 supply the syntax-only formatter. It canonicalizes
+//! Milestone 1 steps 4–7 supply the syntax-only formatter. It canonicalizes
 //! whitespace, delimiters, comments, line endings, list layout, and valid
 //! character spellings while leaving literal and valid or invalid name
-//! spellings untouched. Declaration and VIBON schema rules arrive in later
-//! steps; see
+//! spellings untouched. Declaration and project-specific VIBON schemas arrive
+//! in later steps; see
 //! `docs/roadmap/milestone-1/README.md`.
 //!
 //! A recovered document is returned byte-for-byte unchanged because applying
@@ -27,8 +27,8 @@ use std::fmt;
 use std::path::Path;
 
 use vibra_syntax::{
-    CstNode, Document, DocumentModeError, Literal, LiteralClassification, SyntaxKind,
-    canonical_character_spelling, classify, parse_document,
+    CstNode, Document, DocumentMode, DocumentModeError, Literal, LiteralClassification,
+    SyntaxKind, canonical_character_spelling, canonical_data, classify, parse_document,
 };
 
 /// An error selecting or formatting a document.
@@ -91,6 +91,23 @@ pub fn format_document(document: &Document) -> String {
         return document.source().to_owned();
     }
 
+    if document.mode() == DocumentMode::Data {
+        // The generic data AST intentionally excludes trivia. Keep the
+        // lossless CST formatter for commented data so comments remain tied
+        // to their neighbouring entries instead of being silently dropped.
+        if document.source().contains(';') {
+            return format_syntax_document(document);
+        }
+        return document.data().map_or_else(
+            || document.source().to_owned(),
+            |data| format!("{}\n", canonical_data(data)),
+        );
+    }
+
+    format_syntax_document(document)
+}
+
+fn format_syntax_document(document: &Document) -> String {
     let Some(groups) = root_groups(document.root()) else {
         return normalize_recovery(&document.root().to_source());
     };

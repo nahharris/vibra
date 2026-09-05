@@ -294,6 +294,14 @@ diagnostic_registry! {
         "an external declaration names no symbol in its provider registry";
     DataInvalidExtension => "@data.invalid-extension", Data, Error, None,
         "a document was presented to the loader for the other grammar";
+    DataInvalidShape => "@data.invalid-shape", Data, Error, None,
+        "a VIBON value has an invalid root or container shape";
+    DataInvalidValue => "@data.invalid-value", Data, Error, None,
+        "a VIBON value contains a source-only or otherwise forbidden form";
+    DataDuplicateField => "@data.duplicate-field", Data, Error, None,
+        "a VIBON record repeats a label";
+    DataDuplicateKey => "@data.duplicate-key", Data, Error, None,
+        "a VIBON map repeats a key";
     ProjectStaleLock => "@project.stale-lock", Project, Error, None,
         "the lock does not match the declared dependencies";
     ProjectEntryOutsideTarget => "@project.entry-outside-target", Project, Error, None,
@@ -326,7 +334,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 52;
+    const REGISTERED_CODES: usize = 56;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -411,7 +419,7 @@ mod tests {
 
     #[test]
     fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 50 errors and 2 warnings. Pinning
+        // The specification's table fixes 54 errors and 2 warnings. Pinning
         // the split catches a level silently flipping in either direction.
         let warnings: Vec<&str> = DiagnosticCode::ALL
             .iter()
