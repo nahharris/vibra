@@ -34,7 +34,7 @@ fn reader_orders_lexer_and_parser_diagnostics_by_source_span() {
 
 #[test]
 fn lexer_preserves_utf8_tokens_trivia_and_half_open_byte_spans() {
-    let source = "(α ; note\r\n  β)";
+    let source = "(alpha ; note 🌱\r\n  beta)";
     let lexed = vibra_syntax::lex(source);
     let tokens = lexed.tokens();
 
@@ -42,16 +42,16 @@ fn lexer_preserves_utf8_tokens_trivia_and_half_open_byte_spans() {
     assert_eq!(tokens[0].text(), "(");
     assert_eq!(tokens[0].span(), ByteSpan::new(0, 1));
     assert_eq!(tokens[1].kind(), TokenKind::Atom);
-    assert_eq!(tokens[1].text(), "α");
-    assert_eq!(tokens[1].span(), ByteSpan::new(1, 3));
+    assert_eq!(tokens[1].text(), "alpha");
+    assert_eq!(tokens[1].span(), ByteSpan::new(1, 6));
     assert_eq!(tokens[2].kind(), TokenKind::Whitespace);
     assert_eq!(tokens[2].text(), " ");
     assert_eq!(tokens[3].kind(), TokenKind::LineComment);
-    assert_eq!(tokens[3].text(), "; note");
+    assert_eq!(tokens[3].text(), "; note 🌱");
     assert_eq!(tokens[4].kind(), TokenKind::Whitespace);
     assert_eq!(tokens[4].text(), "\r\n  ");
-    assert_eq!(tokens[5].text(), "β");
-    assert_eq!(tokens[5].span(), ByteSpan::new(14, 16));
+    assert_eq!(tokens[5].text(), "beta");
+    assert_eq!(tokens[5].span(), ByteSpan::new(22, 26));
     assert_eq!(tokens.last().expect("EOF token").kind(), TokenKind::Eof);
     assert!(lexed.diagnostics().is_empty());
 }

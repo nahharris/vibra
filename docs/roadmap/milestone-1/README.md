@@ -12,8 +12,8 @@ is cut into steps and what has landed.
 ## Start here
 
 The implementation baseline was refreshed on 2026-09-05 at `origin/m1`
-commit `a99ca56` (merge of PR #287). Steps 1–4 are present there; the next
-implementation step is 5. Re-fetch and verify this baseline in future sessions.
+commit `af73e22` (merge of PR #288). Steps 1–5 are present there; the next
+implementation step is 6. Re-fetch and verify this baseline in future sessions.
 This documentation update does not claim the milestone exit gate has passed.
 
 Read [the implementation guides](implementation.md) and
@@ -149,6 +149,14 @@ the existing `@syntax.unmatched-delimiter` recovery diagnostic only. This
 distinction prevents a recovery marker from being mistaken for a second
 lexical failure and preserves the Step 4 byte-preserving contract.
 
+### D10 — Malformed name candidates have a lexical diagnostic
+
+Step 6 validates nonliteral leaves with one shared symbol/label/atom/discard
+grammar. A malformed candidate emits `@syntax.invalid-name` over its complete
+token span; literal-family diagnostics take precedence. The validator does not
+assign contextual roles or resolve names, and valid names retain their exact
+source spelling.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the
@@ -163,8 +171,8 @@ and conformance cases in the same change.
 | 2 | Spans, line index, diagnostic model, closed code and level registry, and their JSON contract | vertical | landed |
 | 3 | Conformance corpus layout, manifest decoding, profile dispatch, and runner | infrastructure | landed |
 | 4 | Reader spine: minimal lexer, lossless recovery CST, document-mode selection, minimal formatter | vertical | landed (PR #286, `50aa40a`) |
-| 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | in progress |
-| 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | not started |
+| 5 | Literal surface: EDN characters, numeric suffixes, floats, `void`, booleans, string escapes | vertical | landed (PR #288, `af73e22`) |
+| 6 | Name surface: qualified kebab symbols, labels, atom names, discards | vertical | in progress |
 | 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | not started |
 | 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | not started |
 | 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | not started |

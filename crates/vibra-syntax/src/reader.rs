@@ -1,8 +1,9 @@
-//! The Step 4/5 UTF-8 reader spine and literal surface.
+//! The Step 4–6 UTF-8 reader spine, literal surface, and name surface.
 //!
-//! This module keeps one lossless, delimiter-aware tree. Names and declaration
-//! AST nodes belong to later milestone steps; Step 5 literal classification is
-//! layered over the retained leaf text without changing its source bytes.
+//! This module keeps one lossless, delimiter-aware tree. Declaration AST nodes
+//! belong to later milestone steps; Step 5 literal and Step 6 name
+//! classification are layered over retained leaf text without changing source
+//! bytes.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,7 @@ use std::path::{Path, PathBuf};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 
 use crate::literal::{LiteralClassification, classify};
+use crate::name::{NameClassification, classify_name};
 
 /// The grammar selected for a document by its filename extension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -159,6 +161,20 @@ impl Token {
             return None;
         }
         Some(classify(&self.text))
+    }
+
+    /// Classifies this complete nonliteral atom as a Step 6 name.
+    #[must_use]
+    pub fn name(&self) -> Option<NameClassification> {
+        if self.kind != TokenKind::Atom || self.unterminated_quote {
+            return None;
+        }
+        match classify(&self.text) {
+            LiteralClassification::Literal(_) | LiteralClassification::Invalid(_) => {
+                None
+            }
+            LiteralClassification::Opaque => Some(classify_name(&self.text)),
+        }
     }
 
     fn is_unterminated_quote(&self) -> bool {
@@ -352,15 +368,29 @@ pub fn lex(source: &str) -> Lexed {
         let mut token =
             Token::new(kind, ByteSpan::new(start, offset), &source[start..offset]);
         token.unterminated_quote = unterminated_quote;
-        if !unterminated_quote
-            && token.kind() == TokenKind::Atom
-            && let LiteralClassification::Invalid(kind) = classify(token.text())
-        {
-            diagnostics.push(Diagnostic::new(
-                kind.diagnostic_code(),
-                token.span(),
-                kind.message(),
-            ));
+        if !unterminated_quote && token.kind() == TokenKind::Atom {
+            match classify(token.text()) {
+                LiteralClassification::Invalid(kind) => {
+                    diagnostics.push(Diagnostic::new(
+                        kind.diagnostic_code(),
+                        token.span(),
+                        kind.message(),
+                    ));
+                }
+                LiteralClassification::Opaque
+                    if matches!(
+                        classify_name(token.text()),
+                        NameClassification::Invalid
+                    ) =>
+                {
+                    diagnostics.push(Diagnostic::new(
+                        DiagnosticCode::SyntaxInvalidName,
+                        token.span(),
+                        "invalid name spelling",
+                    ));
+                }
+                LiteralClassification::Literal(_) | LiteralClassification::Opaque => {}
+            }
         }
         tokens.push(token);
     }
@@ -527,6 +557,20 @@ impl CstNode {
     pub fn literal(&self) -> Option<LiteralClassification> {
         (self.kind == SyntaxKind::Atom && !self.unterminated_quote)
             .then(|| classify(&self.text))
+    }
+
+    /// Classifies a complete nonliteral atom as a Step 6 name.
+    #[must_use]
+    pub fn name(&self) -> Option<NameClassification> {
+        if self.kind != SyntaxKind::Atom || self.unterminated_quote {
+            return None;
+        }
+        match classify(&self.text) {
+            LiteralClassification::Literal(_) | LiteralClassification::Invalid(_) => {
+                None
+            }
+            LiteralClassification::Opaque => Some(classify_name(&self.text)),
+        }
     }
 
     /// Child nodes in source order. Trivia and delimiters are retained.

@@ -12,11 +12,11 @@
 //!
 //! # Status
 //!
-//! Milestone 1 steps 4 and 5 supply the syntax-only formatter. It canonicalizes
+//! Milestone 1 steps 4–6 supply the syntax-only formatter. It canonicalizes
 //! whitespace, delimiters, comments, line endings, list layout, and valid
-//! character spellings while leaving other literal and opaque leaf text
-//! untouched. Name, declaration, and VIBON schema rules arrive in later steps;
-//! see
+//! character spellings while leaving literal and valid or invalid name
+//! spellings untouched. Declaration and VIBON schema rules arrive in later
+//! steps; see
 //! `docs/roadmap/milestone-1/README.md`.
 //!
 //! A recovered document is returned byte-for-byte unchanged because applying

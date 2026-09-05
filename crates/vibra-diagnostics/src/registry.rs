@@ -218,6 +218,8 @@ diagnostic_registry! {
         "a terminated string literal contains an invalid escape or Unicode scalar";
     SyntaxInvalidNumericLiteral => "@syntax.invalid-numeric-literal", Syntax, Error, None,
         "a numeric literal has a malformed or unknown suffix, or trailing text";
+    SyntaxInvalidName => "@syntax.invalid-name", Syntax, Error, None,
+        "a nonliteral leaf is not a valid symbol, label, atom, or discard spelling";
     SyntaxRetiredForm => "@syntax.retired-form", Syntax, Error, None,
         "a form retired from v1, such as `while` or `return`, was written";
     NameUnknownSymbol => "@name.unknown-symbol", Name, Error, None,
@@ -324,7 +326,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 51;
+    const REGISTERED_CODES: usize = 52;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -409,7 +411,7 @@ mod tests {
 
     #[test]
     fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 49 errors and 2 warnings. Pinning
+        // The specification's table fixes 50 errors and 2 warnings. Pinning
         // the split catches a level silently flipping in either direction.
         let warnings: Vec<&str> = DiagnosticCode::ALL
             .iter()
@@ -430,6 +432,7 @@ mod tests {
             "@syntax.invalid-character-literal",
             "@syntax.invalid-string-literal",
             "@syntax.invalid-numeric-literal",
+            "@syntax.invalid-name",
             "@type.numeric-out-of-range",
             "@effect.invalid-reference",
             "@data.invalid-extension",

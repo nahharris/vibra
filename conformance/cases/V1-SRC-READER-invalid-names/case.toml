@@ -1,0 +1,88 @@
+id = "V1-SRC-READER-invalid-names"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "Malformed name candidates report complete spans and preserve following siblings."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 6
+end = 8
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 9
+end = 13
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 14
+end = 18
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 19
+end = 24
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 25
+end = 27
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 28
+end = 31
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 32
+end = 34
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 35
+end = 37
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 38
+end = 44
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 45
+end = 52
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+[expect.diagnostics.span]
+start = 53
+end = 60
