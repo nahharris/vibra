@@ -1,0 +1,1 @@
+(defn tick () i32 0i32)

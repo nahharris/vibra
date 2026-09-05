@@ -1,7 +1,7 @@
 # Vibra v1 source language
 
 Status: normative target
-Implementation status: not started
+Implementation status: milestone 1 step 4 in progress (reader spine only)
 
 ## Reader
 
@@ -54,6 +54,20 @@ character-scalar = ? one Unicode scalar other than whitespace ? ;
 trivia         = { whitespace | line-comment } ;
 required-trivia = ( whitespace | line-comment ), trivia ;
 ```
+
+The step 4 reader implements the shared UTF-8 tokenization, delimiter
+structure, trivia retention, and recovery boundary described above. Leaf text
+is intentionally opaque at this stage: literal classification, qualified
+names, labels, declarations, and semantic AST nodes are added by later
+milestone steps. A recovered or incomplete tree remains lossless and carries
+an explicit error marker rather than being assigned an ambiguous typed node.
+When a double-quoted leaf reaches end of file without a closing quote, the
+reader emits `@syntax.unmatched-delimiter`, marks the subtree recovered, and
+preserves the original bytes. Escape decoding and string-value validation are
+deferred to step 5; step 4 only keeps the quoted leaf together for recovery.
+Until literal validation and canonical escaping land, the syntax-only
+formatter MUST preserve opaque leaf bytes, including interior CR and CRLF.
+Its LF normalization applies to trivia, not to quoted leaf contents.
 
 Strings are double quoted and support `\"`, `\\`, `\n`, `\r`, `\t`, and
 `\u{HEX}`.
@@ -613,6 +627,20 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   every remaining scalar;
 - adjacent lowercase numeric suffixes, preserved exactly when written;
 - leaf lists on one line when they fit within 88 columns;
+- multiline lists keep their line comments on their own indented lines;
+- delimiter placement in every multiline list, commented or not. The opening
+  delimiter shares the first form's line when that form is inline and fits
+  beside it; a hanging opening delimiter above an inline first form is never
+  canonical. It stands alone above a line comment, which keeps its own line,
+  and above a multiline first form, because a form that started beside the
+  delimiter would have to indent its body under its own opening column
+  instead of at the enclosing list's two-space step. The closing delimiter
+  shares the last form's line unless that form is a line comment, which would
+  swallow it, or is inline and leaves no room for the delimiter within 88
+  columns; a multiline last form ends on its own closing delimiter, and this
+  one stacks onto that same line rather than being orphaned below it. Closing
+  delimiters carry no indentation of their own, so the asymmetry between the
+  two ends is deliberate. Each end is decided on its own;
 - declaration headers before labelled attributes and bodies;
 - fixed, labelled, then variadic function or constructor operands;
 - one pattern/result arm per line in a multiline `match`; and
@@ -621,3 +649,8 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
 Formatting MUST be idempotent and semantics-preserving. The formatter MAY
 normalize recoverable presentation but MUST NOT guess through a syntax,
 binding, or type ambiguity.
+
+If recovery inserted an error marker, the formatter MUST preserve the original
+UTF-8 document bytes exactly. Canonical whitespace and line-ending rules apply
+only when the tree has no recovery error; rewriting an incomplete or opaque
+leaf would be a semantic guess.

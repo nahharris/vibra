@@ -16,12 +16,14 @@
 //! # Status
 //!
 //! Milestone 1 step 3 supplies the corpus layout, neutral manifest decoder,
-//! profile dispatcher, and internal runner. Language backends are registered
-//! by later milestones; an unregistered profile is reported as unavailable.
+//! profile dispatcher, and backend-independent runner. Step 4 registers the
+//! real syntax/formatter handler and internal reader-v1 entrypoint; later
+//! language backends remain unavailable until their milestones land.
 
 mod corpus;
 mod manifest;
 mod profile;
+mod reader;
 mod runner;
 
 pub use corpus::{Case, Corpus, CorpusError};
@@ -31,6 +33,7 @@ pub use manifest::{
     NORMATIVE_SECTION_IDS,
 };
 pub use profile::{ConformanceProfile, UnknownProfile};
+pub use reader::ReaderV1Handler;
 pub use runner::{
     CaseObservation, CaseReport, CaseStatus, ConformanceRunner, DispatchResult,
     ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler, RunReport,

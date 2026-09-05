@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-88-column-boundary"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A leaf list at exactly 88 columns remains on one line."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

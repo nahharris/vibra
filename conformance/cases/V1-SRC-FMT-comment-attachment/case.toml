@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-comment-attachment"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Comments remain attached to the following form or list item."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

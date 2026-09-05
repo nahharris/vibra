@@ -191,9 +191,12 @@ source = "../outside.vib"
 }
 
 #[test]
-fn corpus_discovers_and_runs_the_checked_in_fixture() {
-    let corpus = Corpus::discover(workspace_root().join("conformance/cases"))
-        .expect("checked-in corpus is valid");
+fn corpus_discovers_and_runs_a_synthetic_fixture() {
+    let case = TempCase::new(
+        "V1-DIAG-profile-dispatch",
+        &valid_manifest("V1-DIAG-profile-dispatch", "reader-v1"),
+    );
+    let corpus = case.corpus();
     assert_eq!(corpus.len(), 1);
     assert_eq!(
         corpus.cases()[0].manifest().id(),

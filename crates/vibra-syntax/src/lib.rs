@@ -14,6 +14,15 @@
 //!
 //! # Status
 //!
-//! Milestone 1 step 1 created this crate. The reader spine arrives in step 4
-//! and the language surface widens through step 9; see
+//! Milestone 1 step 4 supplies the reader spine: a shared UTF-8 lexer, a
+//! hand-rolled lossless recovery CST, extension-selected document modes, and
+//! the opaque leaf boundary used by later literal/name/AST steps. See
 //! `docs/roadmap/milestone-1/README.md`.
+
+mod reader;
+
+pub use reader::{
+    CstNode, Document, DocumentMode, DocumentModeError, Lexed, Lexer, SyntaxKind,
+    Token, TokenKind, lex, lex_bytes, parse, parse_data, parse_document, parse_source,
+    parse_with_mode,
+};

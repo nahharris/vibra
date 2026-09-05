@@ -39,12 +39,12 @@ The delivery sequence and measurable release gates are in
 | --- | --- |
 | v1 specification | Normative target, open to deliberate revision |
 | v1 roadmap | Defined |
-| v1 implementation | Not started |
+| v1 implementation | Milestone 1 in progress; reader spine step 4 in progress |
 | pre-v1 implementation | Archived; unsupported |
 
-No build or install instructions are published while the active tree has no
-implementation. That is intentional: a command belongs here only after its
-specified behavior and conformance tests exist.
+No user-facing build or install instructions are published while the active
+tree has no supported compiler or CLI. Milestone 1's internal conformance
+entrypoint is a CI adapter, not a public command.
 
 ## License
 

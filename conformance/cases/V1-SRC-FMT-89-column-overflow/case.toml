@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-89-column-overflow"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A leaf list one column past 88 breaks to one form per line with standalone delimiters."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"
