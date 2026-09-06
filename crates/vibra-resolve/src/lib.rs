@@ -1649,6 +1649,25 @@ impl Resolution {
                 unit: unit.name.clone(),
                 segments: module_segments.to_vec(),
             };
+            if declaration_segments.is_empty() {
+                let mut diagnostic = Diagnostic::new(
+                    DiagnosticCode::NameWrongEntityKind,
+                    entry.span,
+                    "entry reference names a module, not a module-level function",
+                )
+                .with_source_id(entry.source_id.clone());
+                if let Some(module_index) = self.module_indexes.get(&module).copied()
+                    && let Some(parsed) = self.modules.get(module_index)
+                {
+                    diagnostic = diagnostic.with_related_source(
+                        parsed.module.source_id.clone(),
+                        ByteSpan::empty_at(0),
+                        "the referenced module is here",
+                    );
+                }
+                self.diagnostics.push(diagnostic);
+                continue;
+            }
             let declaration_path = declaration_segments.to_vec();
             let Some(index) = self
                 .declaration_indexes

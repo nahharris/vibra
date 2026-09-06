@@ -159,6 +159,39 @@ fn entry_uses_the_own_target_rule_and_classifies_the_found_entity() {
 }
 
 #[test]
+fn entry_naming_a_module_reports_wrong_entity_kind_with_module_provenance() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            Some("app.main"),
+            vec![vibra_resolve::SourceModule::new(
+                "app",
+                ["main"],
+                "src/main.vib",
+                b"(defn run () void (do))",
+            )],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(snapshot.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::NameWrongEntityKind
+            && diagnostic
+                .related()
+                .iter()
+                .any(|related| related.source_id.as_deref() == Some("src/main.vib"))
+    }));
+    assert!(
+        !snapshot
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::NameUnknownSymbol)
+    );
+}
+
+#[test]
 fn duplicate_top_level_names_and_lexical_bindings_have_distinct_contracts() {
     let input = ResolveInput::single_module(
         "demo",
