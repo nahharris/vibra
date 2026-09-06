@@ -39,7 +39,7 @@ The delivery sequence and measurable release gates are in
 | --- | --- |
 | v1 specification | Normative target, open to deliberate revision |
 | v1 roadmap | Defined |
-| v1 implementation | Milestone 1 in progress; reader spine step 4 in progress |
+| v1 implementation | Milestone 1 merged; [Milestone 2 planned](docs/roadmap/milestone-2/README.md) on `m2`, implementation not started |
 | pre-v1 implementation | Archived; unsupported |
 
 No user-facing build or install instructions are published while the active
