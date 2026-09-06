@@ -35,6 +35,19 @@ as values**, source **Declarations**, and diagnostics **Recovery**:
 | Expression atoms remain literal values | Dotted string coincidence must not produce a resolved identity |
 | Valid sibling facts beside a damaged declaration | Stable ordering and origins; no cascaded invented identities |
 
+The independent corpus names each boundary explicitly: `V1-TYPE-NAMES-resolve-unknown-path`,
+`V1-TYPE-NAMES-resolve-declaration-as-module`, `V1-PROJECT-resolve-entry-outside-target`,
+`V1-PROJECT-resolve-entry-module`, `V1-TYPE-NAMES-resolve-cross-namespace`,
+`V1-TYPE-NAMES-resolve-duplicate-alias`, and `V1-TYPE-NAMES-resolve-reserved-value`
+cover path, entity-kind, entry, and collision diagnostics. `V1-TYPE-NAMES-resolve-alias-differs`,
+`V1-PROJECT-resolve-identical-basenames`, `V1-TYPE-NAMES-resolve-literals`, and
+`V1-TYPE-NAMES-resolve-index-fallback` cover alias/root identity and literal/index boundaries.
+`V1-TYPE-NAMES-resolve-relative-import`, `V1-TYPE-NAMES-resolve-string-import`,
+`V1-TYPE-NAMES-resolve-glob-import`, and `V1-TYPE-NAMES-resolve-root-guessing` cover
+forbidden import forms. `V1-TYPE-NAMES-resolve-cycle-three`,
+`V1-TYPE-NAMES-resolve-visible-shadow`, and `V1-TYPE-NAMES-resolve-damaged-sibling`
+cover longer-cycle provenance, visible-binding shadowing, and sibling recovery.
+
 Keep `@module.unknown-path`, `@module.import-cycle`,
 `@name.unknown-symbol`, `@name.wrong-entity-kind`, `@name.private-access`,
 `@name.redeclaration`, `@name.member-collision`, and

@@ -72,7 +72,7 @@ path named `std` cannot confer external-declaration authority.
 | 1 | [Freeze M2 contracts and corpus observations](01-contracts.md) — specification/infrastructure prerequisite | M1 merge and exit evidence | in progress | — |
 | 2 | [Decode typed project data](02-project.md) | 1 | not started | — |
 | 3 | [Build the confined source graph](03-source-graph.md) | 2 | landed | `origin/m2` head `d6368ac` |
-| 4 | [Resolve module declarations and references](04-resolution.md) | 3 | landed conditionally | tested head `58eb4d3`; pending integration merge |
+| 4 | [Resolve module declarations and references](04-resolution.md) | 3 | landed conditionally | tested head `d86cc3e`; pending integration merge |
 | 5 | [Execute typed primitive functions](05-primitives.md) | 4 | not started | — |
 | 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | not started | — |
 | 7 | [Execute function values and labelled calls](07-functions.md) | 6 | not started | — |
@@ -157,7 +157,7 @@ inspection, and CLI behavior remain later-step work.
 
 ## Step 4 handoff (conditional on integration merge)
 
-Step 4's tested local implementation head is `58eb4d3`. It adds the
+Step 4's tested local implementation head is `d86cc3e`. It adds the
 filesystem-free `vibra-resolve` crate, package/unit/module/declaration
 identities, header-first declaration collection, shared unit-rooted import and
 entry walking, visibility and alias rules, import-cycle diagnostics, lexical
@@ -165,9 +165,9 @@ scope facts, and canonical `@resolved.v1` VIBON artifacts. The workspace and
 conformance adapters preserve the Step 3 graph boundary and do not rescan or
 resolve dependencies.
 
-Focused evidence includes 8 resolver host tests, 2 resolver conformance
-contract tests, 4 independent resolve cases, and the full corpus at 73
-reader plus 24 static cases with zero failed or unavailable. The wrong-resolved
+Focused evidence includes 14 resolver host tests, 2 resolver conformance
+contract tests, 22 independent resolve cases, and the full corpus at 73
+reader plus 42 static cases with zero failed or unavailable. The wrong-resolved
 snapshot oracle, architecture boundary, formatting, locked/offline Clippy,
 and graph/resolution validation pass locally. Step 4 does not perform type
 checking, entry-signature validation, runtime execution, effects, nested
