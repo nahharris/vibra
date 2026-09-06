@@ -71,7 +71,7 @@ path named `std` cannot confer external-declaration authority.
 | --- | --- | --- | --- | --- |
 | 1 | [Freeze M2 contracts and corpus observations](01-contracts.md) — specification/infrastructure prerequisite | M1 merge and exit evidence | in progress | — |
 | 2 | [Decode typed project data](02-project.md) | 1 | not started | — |
-| 3 | [Build the confined source graph](03-source-graph.md) | 2 | landed conditionally | local Step 3 implementation and repair commits; pending integration merge |
+| 3 | [Build the confined source graph](03-source-graph.md) | 2 | landed conditionally | tested head `05ceb55`; pending integration merge |
 | 4 | [Resolve module declarations and references](04-resolution.md) | 3 | not started | — |
 | 5 | [Execute typed primitive functions](05-primitives.md) | 4 | not started | — |
 | 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | not started | — |
@@ -131,8 +131,8 @@ runner capability status and from malformed syntax.
 
 ## Step 3 handoff (conditional on integration merge)
 
-Step 3's local implementation head is `d46ef9ebde5f36710a930d07b62079bb05a8324f`
-before the follow-up confinement repair. It owns exact `project.vibon`
+Step 3's tested local implementation head is
+`05ceb55dc78bd2d18b04ec61e242777d31f556f6`. It owns exact `project.vibon`
 discovery, canonical target-root/layout validation, immutable source IDs and
 bytes, unresolved dependency edges, and the static-v1 graph handler. The
 conformance handler binds every graph case to `<tree>/project.vibon`, loads the
@@ -143,10 +143,14 @@ Host evidence covers nested directory/file starts, missing and legacy markers,
 malformed nearest markers, confined-root I/O, invalid and dotted paths,
 same-basename units, sibling/equal/reversed roots, no implicit index modules,
 provenance mismatches, layout collisions, and in-root/escaping link behavior.
-Symlink-dependent tests are ignored with an explicit privilege reason on the
-ordinary Windows host and are required on a privileged Unix/CI host. The
-full corpus reports reader/static profile counts separately with zero failed or
-unavailable cases.
+The workspace suite passes 14 Step 3 tests; five symlink-dependent tests are
+explicitly ignored with a privilege reason on the ordinary Windows host and
+require equivalent privileged Unix/CI evidence. The source-graph corpus tests
+pass 21 cases, and the full corpus reports 73 reader plus 20 static cases,
+with zero failed or unavailable cases. Local validation also passes formatting,
+locked/offline Clippy with warnings denied, evidence-step checks, and the
+graph wrong-snapshot oracle. No remote PR or CI head is claimed until the
+branch is published and re-queried.
 
 Resolution, declaration parsing, type checking, execution, dependency sync,
 network access, cache/lock inspection, and CLI behavior remain later-step
