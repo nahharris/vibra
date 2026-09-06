@@ -69,10 +69,10 @@ path named `std` cannot confer external-declaration authority.
 
 | Step | One-PR slice and guide | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
-| 1 | [Freeze M2 contracts and corpus observations](01-contracts.md) — specification/infrastructure prerequisite | M1 merge and exit evidence | in progress | — |
-| 2 | [Decode typed project data](02-project.md) | 1 | not started | — |
-| 3 | [Build the confined source graph](03-source-graph.md) | 2 | landed | `origin/m2` head `d6368ac` |
-| 4 | [Resolve module declarations and references](04-resolution.md) | 3 | landed conditionally | tested head `21a4d06`; pending integration merge |
+| 1 | [Freeze M2 contracts and corpus observations](01-contracts.md) — specification/infrastructure prerequisite | M1 merge and exit evidence | landed | `m2` ancestor `4fd3494` |
+| 2 | [Decode typed project data](02-project.md) | 1 | landed | `m2` ancestor `3ad4951` |
+| 3 | [Build the confined source graph](03-source-graph.md) | 2 | landed | `m2` history through `d6368ac` |
+| 4 | [Resolve module declarations and references](04-resolution.md) | 3 | landed | `origin/m2` head `afcce59` |
 | 5 | [Execute typed primitive functions](05-primitives.md) | 4 | not started | — |
 | 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | not started | — |
 | 7 | [Execute function values and labelled calls](07-functions.md) | 6 | not started | — |
@@ -129,7 +129,7 @@ The `@tool.unavailable` diagnostic is the canonical result for a valid v1
 surface outside the selected M2 implementation profile. It is separate from a
 runner capability status and from malformed syntax.
 
-## Step 3 handoff (conditional on integration merge)
+## Step 3 handoff (integrated on `m2`)
 
 Step 3's tested local implementation head is
 `05ceb55dc78bd2d18b04ec61e242777d31f556f6`. It owns exact `project.vibon`
@@ -149,13 +149,13 @@ require equivalent privileged Unix/CI evidence. The source-graph corpus tests
 pass 21 cases, and the full corpus reports 73 reader plus 20 static cases,
 with zero failed or unavailable cases. Local validation also passes formatting,
 locked/offline Clippy with warnings denied, evidence-step checks, and the
-graph wrong-snapshot oracle. No remote PR or CI head is claimed until the
-branch is published and re-queried.
+graph wrong-snapshot oracle. The step is integrated into `m2`; the later Step
+4 head is verified separately.
 
 Type checking, execution, dependency sync, network access, cache/lock
 inspection, and CLI behavior remain later-step work.
 
-## Step 4 handoff (conditional on integration merge)
+## Step 4 handoff (integrated on `m2`)
 
 Step 4's tested local implementation head is `21a4d06`. It adds the
 filesystem-free `vibra-resolve` crate, package/unit/module/declaration
@@ -171,8 +171,8 @@ reader plus 45 static cases with zero failed or unavailable. The wrong-resolved
 snapshot oracle, architecture boundary, formatting, locked/offline Clippy,
 and graph/resolution validation pass locally. Step 4 does not perform type
 checking, entry-signature validation, runtime execution, effects, nested
-implementation semantics, or the complete M3 index. Remote PR/CI evidence is
-pending publication and re-query of the `m2` head.
+implementation semantics, or the complete M3 index. `origin/m2` is verified at
+`afcce59`; no separate PR or CI result is claimed here.
 
 ## Exit evidence
 
