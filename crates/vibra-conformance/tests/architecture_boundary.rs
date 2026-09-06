@@ -29,6 +29,20 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-diagnostics", &[]),
     // The reader. Emits diagnostics; must not reach the formatter or schemas.
     ("vibra-syntax", &["vibra-diagnostics"]),
+    // Checked semantic IR is independent of syntax and wire formats.
+    ("vibra-ir", &["vibra-diagnostics"]),
+    // The checker lowers syntax and resolved identities to checked IR.
+    (
+        "vibra-types",
+        &[
+            "vibra-diagnostics",
+            "vibra-ir",
+            "vibra-resolve",
+            "vibra-syntax",
+        ],
+    ),
+    // The interpreter consumes checked IR and has no frontend dependency.
+    ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
     // Consumes the reader's tree; nothing in the language depends on it.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
     // The wire format. The Step 10 adapter consumes syntax facts; no phase
@@ -53,6 +67,9 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-resolve",
             "vibra-syntax",
             "vibra-workspace",
+            "vibra-interp",
+            "vibra-ir",
+            "vibra-types",
         ],
     ),
 ];

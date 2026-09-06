@@ -182,8 +182,8 @@ The implementation will maintain a backend-independent corpus organized by
 specification rule, not compiler module. Each case records:
 
 - normative rule ID;
-- a closed operation selector (`reader`, `project-decode`, `source-graph`, or
-  `resolve`);
+- a closed operation selector (`reader`, `project-decode`, `source-graph`,
+  `resolve`, `type-check`, or `interpret`);
   `project-decode` requires exactly one project input, and a
   `source-graph` case requires one confined `tree` directory and a `project`
   input whose path is exactly `<tree>/project.vibon`; the corpus loader MUST

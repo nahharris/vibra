@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-literal"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "The interpreter executes a checked primitive literal and emits no audit events."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.txt" }

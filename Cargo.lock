@@ -799,9 +799,12 @@ dependencies = [
  "toml",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-interp",
+ "vibra-ir",
  "vibra-resolve",
  "vibra-schema",
  "vibra-syntax",
+ "vibra-types",
  "vibra-workspace",
 ]
 
@@ -815,6 +818,21 @@ version = "0.0.0"
 dependencies = [
  "vibra-diagnostics",
  "vibra-syntax",
+]
+
+[[package]]
+name = "vibra-interp"
+version = "0.0.0"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-ir",
+]
+
+[[package]]
+name = "vibra-ir"
+version = "0.0.0"
+dependencies = [
+ "vibra-diagnostics",
 ]
 
 [[package]]
@@ -841,6 +859,16 @@ name = "vibra-syntax"
 version = "0.0.0"
 dependencies = [
  "vibra-diagnostics",
+]
+
+[[package]]
+name = "vibra-types"
+version = "0.0.0"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-ir",
+ "vibra-resolve",
+ "vibra-syntax",
 ]
 
 [[package]]

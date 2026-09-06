@@ -31,6 +31,7 @@ mod project;
 mod reader;
 mod resolve;
 mod runner;
+mod types;
 
 pub use corpus::{Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError};
 pub use graph::StaticV1SourceGraphHandler;
@@ -48,3 +49,4 @@ pub use runner::{
     ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler,
     QueryObservation, RunReport,
 };
+pub use types::{InterpreterV1Handler, StaticV1TypeHandler};

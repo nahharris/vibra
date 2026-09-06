@@ -1,0 +1,14 @@
+(record
+  format: @types.v1
+  functions: (array
+    (record name: @bool-value params: (array ) result: @bool body: (do true))
+    (record name: @void-value params: (array ) result: @void body: void)
+    (record name: @char-value params: (array ) result: @char body: (do \Ω))
+    (record name: @str-value params: (array ) result: @str body: (do "hello"))
+    (record name: @atom-value params: (array ) result: @atom body: (do @ok))
+    (record name: @i8-value params: (array ) result: @i8 body: (do -128i8))
+    (record name: @u64-value params: (array ) result: @u64 body: (do 18446744073709551615u64))
+    (record name: @f32-value params: (array ) result: @f32 body: (do 1.5f32))
+    (record name: @f64-value params: (array ) result: @f64 body: (do 2.5f64))
+  )
+)

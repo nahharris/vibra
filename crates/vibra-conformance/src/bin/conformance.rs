@@ -8,8 +8,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use vibra_conformance::{
-    ConformanceProfile, ConformanceRunner, Corpus, ProfileDispatcher, ReaderV1Handler,
-    StaticV1ProjectHandler, StaticV1ResolveHandler, StaticV1SourceGraphHandler,
+    ConformanceProfile, ConformanceRunner, Corpus, InterpreterV1Handler,
+    ProfileDispatcher, ReaderV1Handler, StaticV1ProjectHandler, StaticV1ResolveHandler,
+    StaticV1SourceGraphHandler, StaticV1TypeHandler,
 };
 
 fn main() -> ExitCode {
@@ -43,7 +44,9 @@ fn run() -> Result<(), String> {
             ConformanceProfile::StaticV1,
             StaticV1SourceGraphHandler,
         )
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler);
+        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
+        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler)
+        .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler);
     let report = ConformanceRunner::new(dispatcher).run(&corpus);
 
     for case in report.cases() {

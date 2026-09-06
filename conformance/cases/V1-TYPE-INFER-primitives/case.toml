@@ -1,0 +1,12 @@
+id = "V1-TYPE-INFER-primitives"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "Every Step 5 primitive literal family lowers with its written primitive result type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"

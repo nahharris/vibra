@@ -1,0 +1,7 @@
+(record
+  format: @types.v1
+  functions: (array
+    (record name: @small params: (array ) result: @i16 body: (do 32767i16))
+    (record name: @ratio params: (array ) result: @f32 body: (do 1.0000001f32))
+  )
+)

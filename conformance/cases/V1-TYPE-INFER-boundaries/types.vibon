@@ -1,0 +1,17 @@
+(record
+  format: @types.v1
+  functions: (array
+    (record name: @i8-min params: (array ) result: @i8 body: (do -128i8))
+    (record name: @i8-max params: (array ) result: @i8 body: (do 127i8))
+    (record name: @i16-min params: (array ) result: @i16 body: (do -32768i16))
+    (record name: @i16-max params: (array ) result: @i16 body: (do 32767i16))
+    (record name: @i32-min params: (array ) result: @i32 body: (do -2147483648i32))
+    (record name: @i32-max params: (array ) result: @i32 body: (do 2147483647i32))
+    (record name: @i64-min params: (array ) result: @i64 body: (do -9223372036854775808i64))
+    (record name: @i64-max params: (array ) result: @i64 body: (do 9223372036854775807i64))
+    (record name: @u8-max params: (array ) result: @u8 body: (do 255u8))
+    (record name: @u16-max params: (array ) result: @u16 body: (do 65535u16))
+    (record name: @u32-max params: (array ) result: @u32 body: (do 4294967295u32))
+    (record name: @u64-max params: (array ) result: @u64 body: (do 18446744073709551615u64))
+  )
+)

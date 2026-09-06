@@ -41,3 +41,32 @@ parity. Run [common validation](validation.md) plus
 `cargo test --locked --offline -p vibra-types -p vibra-ir -p vibra-interp`.
 Done requires independent `V1-TYPE-INFER-*` and `V1-RUNTIME-*` observations,
 including proof a bad expected value/trace causes a corpus failure.
+
+## Step 5 implementation evidence
+
+The landed slice adds three backend-independent nodes:
+
+- `vibra-ir` owns primitive types, exact primitive values, signatures, source
+  origins, literal/sequence expressions, and the checked-program boundary.
+- `vibra-types` checks source through the shared M1 AST and lowers only
+  nullary module-level `defn` declarations with primitive result types to that
+  IR. Integer ranges are checked from decimal magnitudes, and decimal `f32`
+  literals are parsed directly as `f32`.
+- `vibra-interp` evaluates checked literal and sequence IR from left to right.
+  It returns the final value (or `void` for an empty sequence) and an explicit
+  empty audit trace.
+
+The conformance adapter exposes `type-check` through `static-v1` and
+`interpret` through `interpreter-v1`. The independent cases are
+`V1-TYPE-INFER-primitives`, `V1-TYPE-INFER-context-numeric`,
+`V1-TYPE-INFER-boundaries`, `V1-TYPE-INFER-out-of-range`,
+`V1-TYPE-INFER-mismatch`, `V1-RUNTIME-literal`,
+`V1-RUNTIME-sequence`, `V1-RUNTIME-void`, `V1-RUNTIME-unicode`,
+`V1-RUNTIME-rejected`, and `V1-RUNTIME-wrong-trace`. Host tests also use
+intentionally incorrect type and trace expectations to prove the runner does
+not compare an observation with itself.
+
+The slice deliberately excludes calls, bindings, effects, host providers,
+collections, CLI/Wasm paths, and later declaration forms. Valid syntax outside
+the admitted subset receives `@tool.unavailable`; rejected input never crosses
+the checked-program boundary.

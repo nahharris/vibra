@@ -109,6 +109,10 @@ pub enum ConformanceOperation {
     SourceGraph,
     /// Resolve declarations/imports from a confined source graph.
     Resolve,
+    /// Check one source document into typed IR.
+    TypeCheck,
+    /// Execute one checked source document through the reference interpreter.
+    Interpret,
 }
 
 impl ConformanceOperation {
@@ -120,6 +124,8 @@ impl ConformanceOperation {
             Self::ProjectDecode => "project-decode",
             Self::SourceGraph => "source-graph",
             Self::Resolve => "resolve",
+            Self::TypeCheck => "type-check",
+            Self::Interpret => "interpret",
         }
     }
 }
@@ -389,6 +395,8 @@ fn decode_operation(
         Some("project-decode") => ConformanceOperation::ProjectDecode,
         Some("source-graph") => ConformanceOperation::SourceGraph,
         Some("resolve") => ConformanceOperation::Resolve,
+        Some("type-check") => ConformanceOperation::TypeCheck,
+        Some("interpret") => ConformanceOperation::Interpret,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
@@ -413,6 +421,18 @@ fn decode_operation(
     {
         return Err(ManifestError::Invalid(
             "project-decode requires exactly one project input".to_owned(),
+        ));
+    }
+    if matches!(
+        operation,
+        ConformanceOperation::TypeCheck | ConformanceOperation::Interpret
+    ) && (inputs.source.is_none()
+        || inputs.project.is_some()
+        || !inputs.data.is_empty()
+        || inputs.tree.is_some())
+    {
+        return Err(ManifestError::Invalid(
+            "type-check and interpret require exactly one source input".to_owned(),
         ));
     }
     if matches!(

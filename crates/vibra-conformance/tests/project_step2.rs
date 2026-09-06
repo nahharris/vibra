@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 
 use vibra_conformance::{
     Case, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus,
-    DispatchResult, HandlerError, ProfileDispatcher, ProfileHandler, ReaderV1Handler,
-    StaticV1ProjectHandler, StaticV1ResolveHandler, StaticV1SourceGraphHandler,
+    DispatchResult, HandlerError, InterpreterV1Handler, ProfileDispatcher,
+    ProfileHandler, ReaderV1Handler, StaticV1ProjectHandler, StaticV1ResolveHandler,
+    StaticV1SourceGraphHandler, StaticV1TypeHandler,
 };
 
 fn workspace_root() -> PathBuf {
@@ -37,7 +38,10 @@ fn static_project_cases_are_executed_by_the_real_handler() {
             StaticV1SourceGraphHandler,
         );
     let dispatcher = dispatcher
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler);
+        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
+        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler);
+    let dispatcher = dispatcher
+        .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler);
     let report = ConformanceRunner::new(dispatcher).run(&corpus);
     assert_eq!(report.failed(), 0, "static project cases must pass");
     assert_eq!(report.unavailable(), 0);

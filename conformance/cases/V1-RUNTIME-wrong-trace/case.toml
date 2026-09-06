@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-wrong-trace"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "The runtime observation contract records a deliberately empty pure audit trace."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.txt" }

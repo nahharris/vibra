@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-void"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An empty checked function body has the one void value and an empty trace."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.txt" }
