@@ -1,7 +1,7 @@
 # Vibra v1 source language
 
 Status: normative target
-Implementation status: milestone 1 step 9 complete for written declaration, type, expression, and pattern structure over the lossless reader; resolution and semantic checking remain later work
+Implementation status: milestone 1 steps 9–10 complete for written declaration, type, expression, pattern, and structural position metadata over the lossless reader; resolution and semantic checking remain later work
 
 ## Reader
 
@@ -55,10 +55,10 @@ trivia         = { whitespace | line-comment } ;
 required-trivia = ( whitespace | line-comment ), trivia ;
 ```
 
-The step 4–6 reader implements the shared UTF-8 tokenization, delimiter
+The step 4–10 reader implements the shared UTF-8 tokenization, delimiter
 structure, trivia retention, recovery boundary, literal classification, and
 lexical name classification described above. Declarations and semantic AST
-nodes are added by later milestone steps. A recovered or incomplete tree
+nodes are available as contextual M1 views; resolution and semantic checking remain later milestone work. A recovered or incomplete tree
 remains lossless and carries an explicit error marker rather than being
 assigned an ambiguous typed node. When a double-quoted leaf reaches end of
 file without a closing quote, the reader emits

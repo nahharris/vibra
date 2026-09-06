@@ -2,8 +2,9 @@
 
 Run commands from the repository root with the pinned `rust-toolchain.toml`.
 These commands exist at the refreshed M1 baseline
-`3057737d8c595409fe977a3eafb37436e4c7dfd7` (the Step 8 merge); proposed future
-tests and fuzz targets must be added before anyone records them as executed.
+`9d3759f9da98c7349b7b861cf1c92a90afb9709f` (the Step 10 merge); Step 11's
+inventory and fuzz targets are now part of the proposed evidence change and
+must be run before they are recorded as executed.
 
 ## Baseline and focused iteration
 
@@ -13,6 +14,8 @@ git rev-parse HEAD
 cargo fetch --locked
 cargo test --locked --offline -p vibra-syntax -p vibra-fmt
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
+cargo test --locked --offline -p vibra-conformance --test evidence_step11
+cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
 ```
 
 Fetch is the dependency preparation step; validation then runs offline. If the
@@ -36,6 +39,8 @@ cargo test --locked --offline --workspace --all-targets --all-features
 $env:RUSTDOCFLAGS = '-D warnings'
 cargo doc --locked --offline --workspace --no-deps --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
+cargo test --locked --offline -p vibra-conformance --test evidence_step11
+cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
 git diff --check
 ```
 

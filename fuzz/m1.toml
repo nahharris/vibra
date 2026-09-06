@@ -1,0 +1,44 @@
+# Reproducible Milestone 1 exit-gate campaign.
+# This is an in-tree bounded harness, so no network-installed fuzz runner is
+# required. The CI profile is intentionally shorter than this gate campaign.
+
+tool = "crates/vibra-conformance/src/bin/m1-fuzz.rs"
+toolchain = "rust-toolchain.toml channel 1.94.1"
+seed = "0x004d315f76315f11"
+platform = "the invoking host; CI smoke runs on Linux, Windows, and macOS"
+workers = 1
+resource_limit = "one process; 128 iterations per target; generated nesting depth at most 20000; no network"
+seed_corpus = ["fuzz/corpus", "conformance/cases/**/*.vib", "conformance/cases/**/*.vibon"]
+log_location = "target/step11/m1-fuzz-campaign.log"
+smoke_command = "cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke"
+campaign_command = "cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --target all --iterations 128 --seed 0x004d315f76315f11 --deep-limit 20000"
+
+[[targets]]
+name = "raw-bytes"
+property = "invalid UTF-8 returns an error; valid bytes remain lossless"
+budget = "128 iterations"
+
+[[targets]]
+name = "utf8-source"
+property = "source parsing never panics and retains raw CST bytes"
+budget = "128 iterations"
+
+[[targets]]
+name = "utf8-data"
+property = "VIBON parsing never panics and retains raw CST bytes"
+budget = "128 iterations"
+
+[[targets]]
+name = "roundtrip"
+property = "accepted format output reparses, is structurally equivalent, and is idempotent; recovery preserves bytes"
+budget = "128 iterations"
+
+[[targets]]
+name = "queries"
+property = "arbitrary UTF-8-boundary offsets never panic and returned spans are valid"
+budget = "128 iterations"
+
+[[targets]]
+name = "corpus-mutation"
+property = "mutated checked-in source/data inputs remain lossless and query-safe"
+budget = "128 iterations"
