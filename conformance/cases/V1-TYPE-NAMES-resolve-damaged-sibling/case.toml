@@ -1,0 +1,45 @@
+id = "V1-TYPE-NAMES-resolve-damaged-sibling"
+rule = "V1-TYPE-NAMES-resolution"
+profile = "static-v1"
+operation = "resolve"
+description = "Step 4 forbidden or recovery boundary: V1-TYPE-NAMES-resolve-damaged-sibling."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "project.vibon"
+span = [141, 154]
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+source = "src/main.vib"
+span = [0, 41]
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+source = "src/main.vib"
+span = [14, 16]
+[[expect.diagnostics]]
+code = "@syntax.missing-separator"
+level = "@error"
+source = "src/main.vib"
+span = [16, 16]
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+source = "src/main.vib"
+span = [41, 41]
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+source = "src/main.vib"
+span = [41, 41]
+

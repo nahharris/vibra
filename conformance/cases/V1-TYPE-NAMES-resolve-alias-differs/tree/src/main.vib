@@ -1,0 +1,2 @@
+(import renamed @app.lib)
+(defn run () void (renamed.greet))

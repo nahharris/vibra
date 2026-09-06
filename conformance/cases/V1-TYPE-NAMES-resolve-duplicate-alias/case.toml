@@ -1,0 +1,25 @@
+id = "V1-TYPE-NAMES-resolve-duplicate-alias"
+rule = "V1-TYPE-NAMES-resolution"
+profile = "static-v1"
+operation = "resolve"
+description = "Step 4 resolution matrix case: V1-TYPE-NAMES-resolve-duplicate-alias."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/main.vib"
+span = [24, 48]
+
+
+
+  [[expect.diagnostics.related]]
+  source = "src/main.vib"
+  span = [0, 23]
+
+

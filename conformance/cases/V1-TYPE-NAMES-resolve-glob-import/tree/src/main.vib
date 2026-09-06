@@ -1,0 +1,1 @@
+(import lib @app.*)`n(defn run () void (do))
