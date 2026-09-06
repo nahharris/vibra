@@ -636,3 +636,9 @@ impl VoidLiteral {
         &self.raw
     }
 }
+
+pub(crate) fn canonical_void_literal() -> Literal {
+    Literal::Void(VoidLiteral {
+        raw: "void".to_owned(),
+    })
+}

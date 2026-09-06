@@ -75,6 +75,11 @@ jobs:
       - name: Run reader-v1 corpus
         run: cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
 
+      - name: Run specification inventory and fuzz smoke
+        run: |
+          cargo test --locked --offline -p vibra-conformance --test evidence_step11
+          cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
+
   archive-isolation:
     name: archive stays out of the build
     runs-on: ubuntu-latest

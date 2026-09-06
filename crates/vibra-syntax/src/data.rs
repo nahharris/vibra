@@ -20,6 +20,57 @@ pub struct DataNode {
     raw: String,
 }
 
+impl Drop for DataNode {
+    fn drop(&mut self) {
+        // A deeply nested VIBON value is a recursive Rust data shape even
+        // though decoding is iterative. Detach every child before its parent
+        // is dropped so destruction follows the same explicit worklist
+        // discipline as decoding and never consumes the host call stack.
+        let value = std::mem::replace(&mut self.value, placeholder_value());
+        let mut pending = vec![value];
+        while let Some(value) = pending.pop() {
+            match value {
+                DataValue::Literal(_) | DataValue::Atom(_) => {}
+                DataValue::Record(fields) => {
+                    for DataField {
+                        value: mut child, ..
+                    } in fields
+                    {
+                        pending.push(std::mem::replace(
+                            &mut child.value,
+                            placeholder_value(),
+                        ));
+                    }
+                }
+                DataValue::Array(children) | DataValue::Tuple(children) => {
+                    for mut child in children {
+                        pending.push(std::mem::replace(
+                            &mut child.value,
+                            placeholder_value(),
+                        ));
+                    }
+                }
+                DataValue::Map(entries) => {
+                    for (mut key, mut value) in entries {
+                        pending.push(std::mem::replace(
+                            &mut key.value,
+                            placeholder_value(),
+                        ));
+                        pending.push(std::mem::replace(
+                            &mut value.value,
+                            placeholder_value(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn placeholder_value() -> DataValue {
+    DataValue::Literal(crate::literal::canonical_void_literal())
+}
+
 impl DataNode {
     /// The decoded value.
     #[must_use]
@@ -97,6 +148,11 @@ impl DataDecode {
     #[must_use]
     pub const fn value(&self) -> Option<&DataNode> {
         self.value.as_ref()
+    }
+
+    /// Moves the decoded value out without recursively cloning nested data.
+    pub fn take_value(&mut self) -> Option<DataNode> {
+        self.value.take()
     }
 
     /// Diagnostics produced by generic data validation.

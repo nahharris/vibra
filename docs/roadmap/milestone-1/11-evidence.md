@@ -44,15 +44,40 @@ host regressions and corpus cases where representable. Re-run the affected
 target and full validation after repair. No targets currently exist at the
 baseline; this guide is not evidence of a completed campaign.
 
-## Gate evidence table to fill on completion
+## Implemented evidence harness
+
+The tracked inventory is [`syntax-examples.tsv`](syntax-examples.tsv). The
+`evidence_step11` host test scans all active `docs/spec/*.md` chapters, checks
+42 fenced fragments and 1,408 inline code spans against stable section
+digests, rejects missing or stale rows, and losslessly exercises source and
+VIBON fragments. Source examples retain their exact text; the inventory marks
+type, effect, runtime, and resolution claims as deferred rather than silently
+repairing them. Grammar, schema, CLI, and diagnostic-code illustrations carry
+an explicit non-source review-only classification.
+
+The configured harness is [`fuzz/m1.toml`](../../../fuzz/m1.toml), implemented
+by the in-tree `m1-fuzz` binary. Its six targets cover raw bytes, source,
+VIBON, formatting round trips, structural queries, and mutations of checked-in
+inputs. The deterministic campaign uses seed `0x004d315f76315f11`, one worker,
+128 iterations per target, and a generated depth limit of 20,000. The CI smoke
+profile is 16 iterations per target and is not substituted for the gate
+campaign.
+
+The first repaired-head campaign exposed a stack overflow while cloning and
+destroying deeply nested VIBON values. The owning slice was repaired by moving
+the decoded value into `Document` instead of recursively cloning it and by
+draining `DataNode` children iteratively during drop. The focused deep
+regression and the complete six-target campaign were rerun after that repair.
+
+## Gate evidence table
 
 | Normative gate | Required evidence |
 | --- | --- |
-| Reader positive/negative/recovery corpus | Tested commit, exact runner command and counts; zero failed/unavailable |
-| Every syntax example classified and exercised | Inventory path, checker command/result, no unclassified or stale entries |
-| Formatter round-trip/idempotence including labelled/variadic normalization | Host/property tests, corpus IDs, signature-input contract, successful results |
-| Unicode byte and display spans | Scalar/astral/combining/CRLF/interior-offset/EOF tests and results |
-| Configured fuzz campaign | Configuration and log locations, target budgets completed, failure disposition, repaired-head rerun |
+| Reader positive/negative/recovery corpus | Repaired local head: `cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases`; 73 passed, 0 failed, 0 unavailable. Final PR CI pending. |
+| Every syntax example classified and exercised | `cargo test --locked --offline -p vibra-conformance --test evidence_step11`; 2 tests passed, including 42 fences and 1,408 inline spans. Final PR CI pending. |
+| Formatter round-trip/idempotence including labelled/variadic normalization | Existing formatter host/conformance suites plus `m1-fuzz` roundtrip target: 128/128 passed. Final PR CI pending. |
+| Unicode byte and display spans | Existing scalar/astral/combining/CRLF/interior-offset/EOF tests plus query target: 128/128 passed. Final PR CI pending. |
+| Configured fuzz campaign | `target/step11/m1-fuzz-campaign.log`; `m1.toml` campaign command; six targets × 128 = 768 passed after the deep-data repair. Final PR CI pending. |
 
 Run the full [validation sequence](validation.md) on the final head and obtain
 CI results for that head. Record environment and logs sufficient to reproduce

@@ -809,10 +809,10 @@ fn parse_selected(path: &Path, mode: DocumentMode, source: &str) -> Document {
     let ast = source_decode
         .as_ref()
         .and_then(|decoded| decoded.ast().cloned());
-    let data_decode = (mode == DocumentMode::Data).then(|| decode_data_root(&root));
+    let mut data_decode = (mode == DocumentMode::Data).then(|| decode_data_root(&root));
     let data = data_decode
-        .as_ref()
-        .and_then(|decoded| decoded.value().cloned());
+        .as_mut()
+        .and_then(|decoded| decoded.take_value());
     if let Some(decoded) = &data_decode {
         parser.diagnostics.extend_from_slice(decoded.diagnostics());
     }

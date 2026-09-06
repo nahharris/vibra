@@ -1,7 +1,7 @@
 # Vibra v1 programs and packages
 
 Status: normative target
-Implementation status: milestone 1 step 7 in progress (VIBON grammar and canonical data)
+Implementation status: milestone 1 steps 7 and 10 complete for generic VIBON grammar, canonical data, and structural query metadata; project schemas and resolution remain later work
 
 ## VIBON data documents
 
@@ -58,7 +58,7 @@ This literal subset is Vibra's object notation. Project files, lock files, and
 build metadata use it instead of persistent JSON. JSON remains the machine
 interchange format for CLI and MCP responses.
 
-The step 4–7 reader supplies the extension-selected shared lexical/document
+The step 4–10 reader supplies the extension-selected shared lexical/document
 mode boundary, the shared literal/name surface, and generic VIBON value
 validation with canonical data formatting. Project-specific record schemas and
 source-graph resolution remain later milestone work.

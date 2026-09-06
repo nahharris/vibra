@@ -11,12 +11,12 @@ is cut into steps and what has landed.
 
 ## Start here
 
-The implementation baseline used for Step 10 was refreshed on 2026-09-05 at
-`origin/m1` commit `b7f94f85f74de20f4a4a48aeb30a54b823bc72b1` (merge of PR
-#292). Steps 1–9 were present there; the Step 10 landing is recorded in the
-step table below. Re-fetch and verify the current integration head in future
-sessions. This documentation update does not claim the milestone exit gate has
-passed.
+The implementation baseline used for Step 11 was refreshed on 2026-09-05 at
+`origin/m1` commit `9d3759f9da98c7349b7b861cf1c92a90afb9709f` (merge of PR
+#293). Steps 1–10 were present there; Step 11 is the executable exit-gate
+audit on top of that head. Re-fetch and verify the current integration head in
+future sessions. This documentation update does not claim the milestone exit
+gate has passed until the final PR CI is recorded.
 
 Read [the implementation guides](implementation.md) and
 [validation and evidence requirements](validation.md) before choosing work.
@@ -189,6 +189,16 @@ exact/recovered/unavailable status and null-versus-empty continuation facts.
 The internal reader-v1 corpus observes these results through dedicated query
 snapshots. No CLI or MCP surface is added.
 
+### D14 — Exit evidence is executable and bounded
+
+Step 11 keeps the specification-example inventory in
+`syntax-examples.tsv`, with a host test that checks stable fence and inline
+digests, rejects stale rows, and losslessly exercises source/data fragments.
+The fuzz campaign is an in-tree deterministic harness configured by
+`fuzz/m1.toml`; CI runs a short smoke profile while the gate records the
+separate six-target campaign. Harness budgets and generated-input limits are
+test limits only and do not change the language contract.
+
 ## Steps
 
 Steps 1, 3, and 11 carry no language behavior and are exempt from the
@@ -208,8 +218,8 @@ and conformance cases in the same change.
 | 7 | VIBON document grammar, decoder, and canonical VIBON formatting | vertical | landed (PR #290, `aec8a3d`) |
 | 8 | Declaration AST: native top-forms, nested methods, nested `impl`, attributes, flat parameters | vertical | landed in PR #291 (merge `3057737d8c595409fe977a3eafb37436e4c7dfd7`) |
 | 9 | Expression and pattern AST: general application, `as` in both head positions, control forms, retired-form rejection | vertical | landed in PR #292 (merge `b7f94f85f74de20f4a4a48aeb30a54b823bc72b1`) |
-| 10 | Structural source-position query metadata | vertical | in progress on `codex/m1-step-10` |
-| 11 | Fuzz campaign, specification-example classification, and exit-gate evidence | evidence | not started |
+| 10 | Structural source-position query metadata | vertical | landed in PR #293 (merge `9d3759f9da98c7349b7b861cf1c92a90afb9709f`) |
+| 11 | Fuzz campaign, specification-example classification, and exit-gate evidence | evidence | in progress on `codex/m1-step-11` |
 
 Detailed guides: [5–6: literals and names](05-06-leaves.md),
 [7: VIBON](07-vibon.md), [8–9: contextual AST](08-09-ast.md),
@@ -240,13 +250,14 @@ across steps is complete only when its last step lands.
 | Named atom diagnostic data model, level registry, initial JSON schemas | 2 |
 | Spec-rule-addressed conformance runner | 3 |
 | Structural source-position query metadata | 10 |
+| Executable Milestone 1 exit-gate evidence | 11 |
 
 ## Exit-gate coverage
 
 | Exit-gate clause | Steps | Evidence |
 | --- | --- | --- |
-| Reader positive/negative/recovery corpus passes | 4–9, verified in 11 | pending |
-| Every syntax example is classified and exercised | 11 | pending |
-| Formatter round-trip and idempotence, including tolerant labelled/variadic normalization | 4–9, verified in 11 | pending |
+| Reader positive/negative/recovery corpus passes | 4–9, verified in 11 | local repaired-head evidence: 73 passed, 0 failed, 0 unavailable; final CI pending |
+| Every syntax example is classified and exercised | 11 | `syntax-examples.tsv`; inventory host test passes for 42 fences and 1,408 inline spans; final CI pending |
+| Formatter round-trip and idempotence, including tolerant labelled/variadic normalization | 4–9, verified in 11 | existing formatter suite plus six-target roundtrip property; final CI pending |
 | Unicode byte and display spans pass | 2, verified in 11 | `LineIndex` derives one-based scalar columns; covered for astral scalars, combining marks, interior offsets, and CRLF, plus a property over a multiline Unicode document. Full verification in step 11. |
-| Fuzz campaign finds no panic or non-idempotent accepted input | 11 | pending |
+| Fuzz campaign finds no panic or non-idempotent accepted input | 11 | `fuzz/m1.toml`: 6 targets × 128 iterations = 768 passed after the deep-data repair; final CI pending |
