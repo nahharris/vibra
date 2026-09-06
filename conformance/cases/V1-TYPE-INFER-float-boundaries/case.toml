@@ -9,3 +9,4 @@ source = "input.vib"
 
 [expect]
 accepted = true
+types = "types.vibon"
