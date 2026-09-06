@@ -265,8 +265,11 @@ forms, never collection value constructors.
 
 ## Namespaces and resolution
 
-A declaration's identity is its package, module path, declaration kind, and
-name. Source imports bind one explicit module alias from an atom entity
+A declaration's identity is its package provenance, unit, module path, owner
+path, declaration kind, and name. Package provenance is the package name and
+exact version from the project record. A resolver MUST preserve those fields
+in the identity; source order, a vector position, and spelling alone are not
+identities. Source imports bind one explicit module alias from an atom entity
 reference. An atom is resolved only in a position whose grammar or data schema
 expects an entity reference; it remains an ordinary `atom` value in expression
 position. Wildcard imports, re-exports, open namespaces, implicit prelude
@@ -318,7 +321,10 @@ how the path is read, so one spelling denotes one entity in every position. A
 path resolving to an entity of the wrong kind emits `@name.wrong-entity-kind`
 and names the entity it found, rather than reporting the path as unknown.
 
-Name shadowing is forbidden. Every name introduced anywhere inside a
+Name shadowing is forbidden. A repeated top-level declaration, import alias,
+or lexical binding emits `@name.redeclaration` at the later introduction and
+relates the earlier introduction. Members of one owner's flat namespace use
+`@name.member-collision` instead. Every name introduced anywhere inside a
 positional-parameter, `let`, or `match` pattern MUST NOT reuse any visible
 lexical name. Labelled and variadic parameter names follow the same rule. A
 pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are

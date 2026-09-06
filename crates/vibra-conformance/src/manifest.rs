@@ -107,6 +107,8 @@ pub enum ConformanceOperation {
     ProjectDecode,
     /// Acquire a confined project tree and build its immutable source graph.
     SourceGraph,
+    /// Resolve declarations/imports from a confined source graph.
+    Resolve,
 }
 
 impl ConformanceOperation {
@@ -117,6 +119,7 @@ impl ConformanceOperation {
             Self::Reader => "reader",
             Self::ProjectDecode => "project-decode",
             Self::SourceGraph => "source-graph",
+            Self::Resolve => "resolve",
         }
     }
 }
@@ -385,6 +388,7 @@ fn decode_operation(
         Some("reader") => ConformanceOperation::Reader,
         Some("project-decode") => ConformanceOperation::ProjectDecode,
         Some("source-graph") => ConformanceOperation::SourceGraph,
+        Some("resolve") => ConformanceOperation::Resolve,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
@@ -411,15 +415,18 @@ fn decode_operation(
             "project-decode requires exactly one project input".to_owned(),
         ));
     }
-    if operation == ConformanceOperation::SourceGraph {
+    if matches!(
+        operation,
+        ConformanceOperation::SourceGraph | ConformanceOperation::Resolve
+    ) {
         let Some(tree) = inputs.tree.as_deref() else {
             return Err(ManifestError::Invalid(
-                "source-graph requires one confined tree input".to_owned(),
+                "source-graph and resolve require one confined tree input".to_owned(),
             ));
         };
         let Some(project) = inputs.project.as_deref() else {
             return Err(ManifestError::Invalid(
-                "source-graph requires one project input".to_owned(),
+                "source-graph and resolve require one project input".to_owned(),
             ));
         };
         let expected_project = format!("{tree}/project.vibon");

@@ -35,10 +35,30 @@ as values**, source **Declarations**, and diagnostics **Recovery**:
 | Expression atoms remain literal values | Dotted string coincidence must not produce a resolved identity |
 | Valid sibling facts beside a damaged declaration | Stable ordering and origins; no cascaded invented identities |
 
-Keep `@module.unknown-path`, `@name.unknown-symbol`,
-`@name.wrong-entity-kind`, and `@project.entry-outside-target` distinct.
-Use Step 1's codes for access/collision/cycle conditions. No types, runtime,
-effect resolution, nested implementation semantics, or complete M3 index.
+Keep `@module.unknown-path`, `@module.import-cycle`,
+`@name.unknown-symbol`, `@name.wrong-entity-kind`, `@name.private-access`,
+`@name.redeclaration`, `@name.member-collision`, and
+`@project.entry-outside-target` distinct. Top-level declarations, import
+aliases, and lexical bindings use `@name.redeclaration`; members in one flat
+owner namespace use `@name.member-collision`; import back edges use
+`@module.import-cycle`. Each diagnostic is anchored at the referring or
+introducing span and carries a related declaration or edge span when one
+exists. No types, runtime, effect resolution, nested implementation
+semantics, or complete M3 index is included.
+
+The resolver consumes an explicit immutable graph value owned by
+`vibra-resolve`. Workspace and conformance adapters construct that value from
+the Step 3 snapshot and project record; the resolver performs no filesystem,
+dependency, lock, cache, network, or ambient project discovery. A declaration
+identity contains package name and version, unit, module segments, owner path,
+and entity kind. It never uses a source-order vector index as identity.
+
+The static resolved artifact is canonical VIBON data with format atom
+`@resolved.v1`. It records the package identity, sorted modules, declaration
+IDs with source IDs/spans/visibility, imports, and body reference edges. Exact
+module bytes remain in the Step 3 source graph artifact; the resolved artifact
+records each module's source ID and does not re-read or normalize those bytes.
+Expected artifacts are compared as canonical text snapshots.
 
 Run [common validation](validation.md) and
 `cargo test --locked --offline -p vibra-resolve -p vibra-workspace`.

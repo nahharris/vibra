@@ -237,6 +237,10 @@ diagnostic_registry! {
         "a symbol does not resolve to a visible entity";
     NameWrongEntityKind => "@name.wrong-entity-kind", Name, Error, None,
         "a resolved entity is not the kind this position requires";
+    NamePrivateAccess => "@name.private-access", Name, Error, None,
+        "a reference resolves to a declaration that is private from this position";
+    NameRedeclaration => "@name.redeclaration", Name, Error, None,
+        "a lexical name or top-level declaration is introduced more than once";
     NameMemberCollision => "@name.member-collision", Name, Error, None,
         "two members of one owner share a name in its flat member namespace";
     NameGenericRedeclaration => "@name.generic-redeclaration", Name, Error, None,
@@ -251,6 +255,8 @@ diagnostic_registry! {
         "a module path is claimed by both a file and a directory";
     ModuleUnknownPath => "@module.unknown-path", Module, Error, None,
         "a module path does not resolve to a source unit";
+    ModuleImportCycle => "@module.import-cycle", Module, Error, None,
+        "module imports form a cycle";
     ModuleInvalidSegment => "@module.invalid-segment", Module, Error, None,
         "a source path segment is not one kebab-name component";
     ModulePathEscape => "@module.path-escape", Module, Error, None,
@@ -444,7 +450,7 @@ mod tests {
 
     #[test]
     fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 58 errors and 2 warnings. Pinning
+        // The specification's table fixes 61 errors and 2 warnings. Pinning
         // the split catches a level silently flipping in either direction.
         let warnings: Vec<&str> = DiagnosticCode::ALL
             .iter()

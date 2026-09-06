@@ -799,6 +799,7 @@ dependencies = [
  "toml",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-resolve",
  "vibra-schema",
  "vibra-syntax",
  "vibra-workspace",
@@ -810,6 +811,14 @@ version = "0.0.0"
 
 [[package]]
 name = "vibra-fmt"
+version = "0.0.0"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-syntax",
+]
+
+[[package]]
+name = "vibra-resolve"
 version = "0.0.0"
 dependencies = [
  "vibra-diagnostics",

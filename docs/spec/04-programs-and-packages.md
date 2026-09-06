@@ -301,7 +301,12 @@ guesses from the importing file's directory.
 Resolution is total, but access is not. An atom path resolves to a private
 declaration exactly as it resolves to a public one, and each referring position
 then applies its own visibility rule: an import exposes only public
-declarations, while the `entry` slot may name a private one.
+declarations, while the `entry` slot may name a private one. A private
+declaration reached from an import emits `@name.private-access` at the
+referring path and relates the declaration span. Duplicate aliases and
+top-level declarations use `@name.redeclaration`; duplicate members under one
+owner retain `@name.member-collision`. An import back edge emits
+`@module.import-cycle` at the later edge and relates the earlier edge.
 
 String paths, relative imports, absolute filesystem imports, glob imports,
 implicit extension search, directory index fallback, re-exports, and import

@@ -40,6 +40,9 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-workspace",
         &["vibra-diagnostics", "vibra-fmt", "vibra-syntax"],
     ),
+    // Resolution owns its neutral graph input and depends only on language
+    // structure; workspace and conformance adapt filesystem snapshots into it.
+    ("vibra-resolve", &["vibra-diagnostics", "vibra-syntax"]),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -47,6 +50,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-diagnostics",
             "vibra-fmt",
             "vibra-schema",
+            "vibra-resolve",
             "vibra-syntax",
             "vibra-workspace",
         ],

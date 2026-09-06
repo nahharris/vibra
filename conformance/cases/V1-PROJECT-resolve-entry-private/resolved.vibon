@@ -1,0 +1,14 @@
+(record
+  format: @resolved.v1
+  package: (record name: "demo" version: "1.0.0")
+  modules: (array
+    (record unit: @app path: "main" source: "src/main.vib")
+  )
+  declarations: (array
+    (record id: "@demo@1.0.0/app.main.start" kind: @function visibility: @private source: "src/main.vib" span: (array 0u64 25u64))
+  )
+  imports: (array
+  )
+  references: (array
+  )
+)

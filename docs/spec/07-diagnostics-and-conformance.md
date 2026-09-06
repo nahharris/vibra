@@ -29,6 +29,8 @@ table governs.
 | `@syntax.invalid-attribute` | `@error` |
 | `@name.unknown-symbol` | `@error` |
 | `@name.wrong-entity-kind` | `@error` |
+| `@name.private-access` | `@error` |
+| `@name.redeclaration` | `@error` |
 | `@name.member-collision` | `@error` |
 | `@name.generic-redeclaration` | `@error` |
 | `@name.reserved-label` | `@error` |
@@ -36,6 +38,7 @@ table governs.
 | `@name.reserved-value-spelling` | `@error` |
 | `@module.file-directory-collision` | `@error` |
 | `@module.unknown-path` | `@error` |
+| `@module.import-cycle` | `@error` |
 | `@module.invalid-segment` | `@error` |
 | `@module.path-escape` | `@error` |
 | `@module.io-error` | `@error` |
@@ -147,6 +150,16 @@ failure, with the same path-span rule. These diagnostics are emitted before
 module parsing; their messages are explanatory and are not a machine
 contract. All filesystem diagnostics are errors with no fixes.
 
+Resolution diagnostics retain the referring source ID and half-open span. A
+private imported declaration is `@name.private-access`; a repeated top-level,
+import-alias, or lexical binding name is `@name.redeclaration`; a repeated
+member in one owner's flat namespace is `@name.member-collision`; and an
+import back edge is `@module.import-cycle`. The later span is primary and the
+earlier declaration or edge is a related span when available. Resolver output
+is deterministic by source ID, primary span, and registry order. Resolution
+consumes only an explicit immutable source graph and performs no filesystem,
+dependency, lock, cache, or network access.
+
 ## Recovery
 
 The parser retains a lossless concrete syntax tree and recovers after malformed
@@ -169,24 +182,54 @@ The implementation will maintain a backend-independent corpus organized by
 specification rule, not compiler module. Each case records:
 
 - normative rule ID;
-- a closed operation selector (`reader`, `project-decode`, or `source-graph`);
+- a closed operation selector (`reader`, `project-decode`, `source-graph`, or
+  `resolve`);
   `project-decode` requires exactly one project input, and a
   `source-graph` case requires one confined `tree` directory and a `project`
   input whose path is exactly `<tree>/project.vibon`; the corpus loader MUST
   acquire that tree before graph building and the handler MUST load only that
   exact marker, never an ancestor or sibling;
+  `resolve` has the same confined `tree`/`project` binding and consumes the
+  already acquired graph through the filesystem-free `vibra-resolve` input;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
 - an optional `graph` snapshot path for source-graph cases; when present it
-  records canonical units, modules, source IDs, exact source bytes, and
-  unresolved dependency edges, so acceptance alone cannot hide a wrong
-  snapshot;
+  records the canonical `@source-graph.v1` observation, so acceptance alone
+  cannot hide a wrong snapshot. Its VIBON shape is one top-level `record`
+  with `format: @source-graph.v1`, a `units` array, and a `dependencies`
+  array. Each unit record has `name`, `kind`, and a `modules` array; each
+  module record has target-relative `path`, project-relative `source`, and
+  `bytes-hex`. `bytes-hex` is the lowercase, two-digit-per-byte encoding of
+  the exact immutable source bytes. Each dependency record has its `alias`,
+  `kind`, declared `source`, optional `target`, delivery `status`, owning
+  `source-id`, and half-open `span`. Arrays are sorted by their canonical
+  identity and source identity. The graph record contains no parsed or
+  resolved declarations;
+- an optional `resolved` snapshot path for `resolve` cases; when present it is
+  canonical VIBON with format `@resolved.v1` and records package provenance,
+  sorted source modules, declaration IDs with source IDs/spans/visibility,
+  import edges, and body-reference edges. Exact source bytes remain in the
+  `@source-graph.v1` observation, so resolution never rereads or normalizes
+  source input. Its top-level record has `format`, `package`, `modules`,
+  `declarations`, `imports`, and `references`; declaration records carry
+  canonical package-qualified IDs, entity kind, visibility, source ID, and
+  span; import and reference records carry their written edge and source/span
+  provenance. Both snapshot formats are compared as canonical text by the
+  runner; expected text is never reparsed by the implementation under test;
 - expected acceptance or diagnostics;
 - expected canonical formatting;
 - expected resolved identities, types, and effects where relevant;
 - interpreter result and ordered audit trace where executable;
 - Wasm result and ordered audit trace where executable; and
 - deterministic build hashes for artifact cases.
+
+The Step 3 graph handler retains the already-landed `graph.txt` snapshots as
+a compatibility adapter for the existing source-graph corpus. Those text
+snapshots are an observation of the same logical graph and are not a second
+semantic contract. New graph consumers and new resolver cases use the
+structured `@source-graph.v1` and `@resolved.v1` VIBON records; migrating the
+remaining Step 3 fixtures is a format-only change and MUST preserve the exact
+source IDs, bytes, spans, and dependency edges above.
 
 Cases use the following stable section IDs, followed by a descriptive
 kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:

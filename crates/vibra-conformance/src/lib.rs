@@ -18,7 +18,9 @@
 //! Milestone 1 step 3 supplies the corpus layout, neutral manifest decoder,
 //! profile dispatcher, and backend-independent runner. Step 4 registers the
 //! real syntax/formatter handler and internal reader-v1 entrypoint; step 10
-//! adds structural query snapshots to that same neutral path. Later language
+//! adds structural query snapshots to that same neutral path. M2 Step 3 adds
+//! confined source-graph observations, and M2 Step 4 adds the filesystem-free
+//! resolver observation and its `@resolved.v1` artifact. Later language
 //! backends remain unavailable until their milestones land.
 
 mod corpus;
@@ -27,6 +29,7 @@ mod manifest;
 mod profile;
 mod project;
 mod reader;
+mod resolve;
 mod runner;
 
 pub use corpus::{Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError};
@@ -39,6 +42,7 @@ pub use manifest::{
 pub use profile::{ConformanceProfile, UnknownProfile};
 pub use project::StaticV1ProjectHandler;
 pub use reader::ReaderV1Handler;
+pub use resolve::StaticV1ResolveHandler;
 pub use runner::{
     CaseObservation, CaseReport, CaseStatus, ConformanceRunner, DispatchResult,
     ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler,

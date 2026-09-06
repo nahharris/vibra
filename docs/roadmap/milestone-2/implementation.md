@@ -32,7 +32,7 @@ contracts. Do not fork the neutral manifest into a second M2 test framework.
 
 | Node | Responsibility | May consume |
 | --- | --- | --- |
-| `vibra-resolve` | Explicit module graph, declarations, scopes, canonical identities | syntax, diagnostics |
+| `vibra-resolve` | Explicit immutable source-graph input, declarations, scopes, canonical identities | syntax, diagnostics |
 | `vibra-ir` | Semantic type/value IDs, immutable checked program representation, source origins | diagnostics |
 | `vibra-types` | Expected-type checking, call contracts, lowering to checked IR, registry signature admission | resolve, syntax, ir, diagnostics |
 | `vibra-interp` | Values, closures, activations, evaluation and intrinsic semantics | ir, diagnostics |
@@ -47,6 +47,8 @@ in a backend-neutral module (proposed `vibra-ir::external`); the interpreter
 owns execution of admitted operations. No checker dependency on interpreter.
 Add only needed arrows, including dev-dependencies, to the architecture test.
 Workspace may use filesystem APIs; resolver input is already an explicit graph.
+The Step 4 resolver owns the neutral graph-input types so the semantic crate
+does not depend on workspace acquisition or conformance adapters.
 
 ## Phase pipeline and invariants
 
