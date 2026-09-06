@@ -1500,9 +1500,9 @@ impl Resolution {
                     } else {
                         self.diagnostics.push(
                             Diagnostic::new(
-                                DiagnosticCode::ModuleUnknownPath,
+                                DiagnosticCode::NameUnknownSymbol,
                                 target_span,
-                                "import target does not resolve to a source module",
+                                "import member does not resolve to a declaration",
                             )
                             .with_source_id(parsed.module.source_id.clone()),
                         );

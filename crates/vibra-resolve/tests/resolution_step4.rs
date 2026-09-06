@@ -293,6 +293,91 @@ fn importing_a_declaration_reports_wrong_entity_kind_before_unknown_path() {
 }
 
 #[test]
+fn importing_a_missing_member_reports_unknown_symbol_at_the_referring_import() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            None,
+            vec![
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["main"],
+                    "src/main.vib",
+                    b"(import lib @app.lib.missing)\n(defn run () void (do))",
+                ),
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["lib"],
+                    "src/lib.vib",
+                    b"(defn present () void visibility: @public (do))",
+                ),
+            ],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    let diagnostic = snapshot
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameUnknownSymbol)
+        .expect("missing imported member diagnostic");
+    assert_eq!(diagnostic.source_id(), Some("src/main.vib"));
+    assert_eq!(
+        diagnostic.primary_span(),
+        vibra_diagnostics::ByteSpan::new(0, 29)
+    );
+    assert!(
+        !snapshot
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ModuleUnknownPath)
+    );
+}
+
+#[test]
+fn entry_missing_member_reports_unknown_symbol_at_the_project_reference() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::new(
+            "app",
+            vibra_resolve::TargetKind::Bin,
+            Some(vibra_resolve::ReferencePath::new(
+                ["app", "main", "missing"],
+                "project.vibon",
+                vibra_diagnostics::ByteSpan::new(141, 158),
+            )),
+            vec![vibra_resolve::SourceModule::new(
+                "app",
+                ["main"],
+                "src/main.vib",
+                b"(defn run () void (do))",
+            )],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    let diagnostic = snapshot
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameUnknownSymbol)
+        .expect("missing entry member diagnostic");
+    assert_eq!(diagnostic.source_id(), Some("project.vibon"));
+    assert_eq!(
+        diagnostic.primary_span(),
+        vibra_diagnostics::ByteSpan::new(141, 158)
+    );
+    assert!(
+        !snapshot
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ModuleUnknownPath)
+    );
+}
+
+#[test]
 fn entries_accept_only_module_level_functions() {
     let input = ResolveInput::new(
         "demo",
