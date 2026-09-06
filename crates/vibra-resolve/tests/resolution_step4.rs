@@ -64,6 +64,60 @@ fn imported_private_declaration_reports_access_with_stable_span() {
 }
 
 #[test]
+fn bare_imported_module_alias_reports_wrong_entity_kind_in_a_body() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            None,
+            vec![
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["main"],
+                    "src/main.vib",
+                    b"(import lib @app.lib)\n(defn run () void lib)",
+                ),
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["lib"],
+                    "src/lib.vib",
+                    b"(defn present () void visibility: @public (do))",
+                ),
+            ],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    let diagnostic = snapshot
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameWrongEntityKind)
+        .expect("bare imported module alias diagnostic");
+    assert_eq!(diagnostic.source_id(), Some("src/main.vib"));
+    assert_eq!(
+        diagnostic.primary_span(),
+        vibra_diagnostics::ByteSpan::new(40, 43)
+    );
+    assert!(diagnostic.related().iter().any(|related| {
+        related.source_id.as_deref() == Some("src/lib.vib")
+            && related.span == vibra_diagnostics::ByteSpan::empty_at(0)
+    }));
+    let target = snapshot.references()[0]
+        .target()
+        .expect("resolved imported module target");
+    assert_eq!(target.kind(), EntityKind::Module);
+    assert_eq!(target.module(), ["lib"]);
+    assert!(target.path().is_empty());
+    assert!(
+        !snapshot
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::NameUnknownSymbol)
+    );
+}
+
+#[test]
 fn declaration_identity_includes_owner_and_package_provenance() {
     let id = DeclarationId::new(
         "demo",

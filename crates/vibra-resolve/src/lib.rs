@@ -2024,6 +2024,41 @@ impl Resolution {
             } else {
                 (Some(module.clone()), Vec::new(), false)
             };
+        if imported
+            && declaration_path.is_empty()
+            && let Some(target_module) = target_module.as_ref()
+            && let Some(module_index) = self.module_indexes.get(target_module).copied()
+        {
+            let target = DeclarationId::with_package(
+                &self.input.package,
+                target_module.unit.clone(),
+                target_module.segments.iter().cloned(),
+                std::iter::empty::<String>(),
+                EntityKind::Module,
+            );
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::NameWrongEntityKind,
+                span,
+                "a module is not a body value",
+            )
+            .with_source_id(source_id);
+            if let Some(parsed) = self.modules.get(module_index) {
+                diagnostic = diagnostic.with_related_source(
+                    parsed.module.source_id.clone(),
+                    ByteSpan::empty_at(0),
+                    "the referenced module is here",
+                );
+            }
+            self.diagnostics.push(diagnostic);
+            self.references.push(ResolvedReference {
+                from: from.clone(),
+                written: name.value().to_owned(),
+                target: Some(target),
+                source_id: source_id.to_owned(),
+                span,
+            });
+            return;
+        }
         let target = target_module
             .as_ref()
             .and_then(|target_module| {
