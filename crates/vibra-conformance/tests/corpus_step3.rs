@@ -165,6 +165,53 @@ accepted = true
 }
 
 #[test]
+fn source_graph_binds_the_project_marker_to_the_declared_tree() {
+    let outside = CaseManifest::from_str(
+        r#"
+id = "V1-PROJECT-source-graph-outside"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "input.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+"#,
+    )
+    .expect_err("source graph must reject an outside project input");
+    assert!(
+        outside
+            .to_string()
+            .contains("must be exactly `tree/project.vibon`")
+    );
+
+    let sibling = CaseManifest::from_str(
+        r#"
+id = "V1-PROJECT-source-graph-sibling"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "tree/sibling.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+"#,
+    )
+    .expect_err("source graph must reject an undeclared sibling marker");
+    assert!(
+        sibling
+            .to_string()
+            .contains("must be exactly `tree/project.vibon`")
+    );
+}
+
+#[test]
 fn input_documents_keep_roles_and_source_identity_without_concatenation() {
     let case = TempCase::new(
         "V1-DIAG-input-documents",
@@ -524,6 +571,48 @@ fn artifact_expectations_are_compared_only_when_declared() {
     .run(&case.corpus());
 
     assert!(report.is_success());
+}
+
+#[test]
+fn runner_rejects_a_wrong_source_graph_snapshot() {
+    let case = TempCase::new(
+        "V1-PROJECT-graph-oracle",
+        r#"
+id = "V1-PROJECT-graph-oracle"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+graph = "graph.txt"
+"#,
+    );
+    let directory = case.root.join("V1-PROJECT-graph-oracle");
+    std::fs::create_dir(directory.join("tree")).expect("create declared tree");
+    std::fs::write(directory.join("tree/project.vibon"), "project")
+        .expect("write declared project");
+    std::fs::write(directory.join("graph.txt"), "expected graph\n")
+        .expect("write graph oracle");
+
+    let report = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
+        ConformanceProfile::StaticV1,
+        FixedHandler {
+            observation: CaseObservation {
+                accepted: true,
+                graph: Some("wrong graph\n".to_owned()),
+                ..CaseObservation::default()
+            },
+        },
+    ))
+    .run(&case.corpus());
+
+    assert!(!report.is_success());
+    assert!(format!("{:?}", report.cases()).contains("graph snapshot mismatch"));
 }
 
 #[test]

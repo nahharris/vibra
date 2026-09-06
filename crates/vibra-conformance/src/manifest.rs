@@ -200,6 +200,8 @@ pub struct CaseExpectations {
     pub diagnostics: Vec<ExpectedDiagnostic>,
     /// A relative path to the canonical formatting snapshot.
     pub formatted: Option<String>,
+    /// A relative path to the canonical source-graph snapshot.
+    pub graph: Option<String>,
     /// A relative path to resolved-identity output.
     pub resolved: Option<String>,
     /// A relative path to type output.
@@ -409,10 +411,23 @@ fn decode_operation(
             "project-decode requires exactly one project input".to_owned(),
         ));
     }
-    if operation == ConformanceOperation::SourceGraph && inputs.project.is_none() {
-        return Err(ManifestError::Invalid(
-            "source-graph requires one project input".to_owned(),
-        ));
+    if operation == ConformanceOperation::SourceGraph {
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "source-graph requires one confined tree input".to_owned(),
+            ));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "source-graph requires one project input".to_owned(),
+            ));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "source-graph project input must be exactly `{expected_project}`"
+            )));
+        }
     }
     Ok(operation)
 }
@@ -513,6 +528,7 @@ fn decode_expectations(
         accepted,
         diagnostics,
         formatted,
+        graph: raw.graph,
         resolved: raw.resolved,
         types: raw.types,
         effects: raw.effects,
@@ -659,6 +675,8 @@ pub(crate) struct RawExpectations {
     pub(crate) diagnostics: Vec<RawExpectedDiagnostic>,
     #[serde(default)]
     pub(crate) formatted: Option<String>,
+    #[serde(default)]
+    pub(crate) graph: Option<String>,
     #[serde(default)]
     pub(crate) resolved: Option<String>,
     #[serde(default)]

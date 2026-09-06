@@ -107,10 +107,10 @@ impl Case {
     /// must stay inside both the tree and case directory; canonical directory
     /// identities suppress aliases and cycles.
     pub fn tree_files(&self) -> Result<Vec<CaseTreeFile>, CorpusError> {
-        let Some(relative) = self.manifest.inputs.tree.as_deref() else {
+        if self.manifest.inputs.tree.is_none() {
             return Ok(Vec::new());
-        };
-        let tree = resolve_directory(&self.directory, relative, &self.manifest.id)?;
+        }
+        let tree = self.tree_path()?;
         let case_root = std::fs::canonicalize(&self.directory).map_err(|source| {
             CorpusError::Io {
                 path: self.directory.clone(),
@@ -136,6 +136,17 @@ impl Case {
                 Ok(CaseTreeFile { source_id, bytes })
             })
             .collect()
+    }
+
+    /// Resolves the manifest-declared tree root as a canonical directory.
+    pub(crate) fn tree_path(&self) -> Result<PathBuf, CorpusError> {
+        let Some(relative) = self.manifest.inputs.tree.as_deref() else {
+            return Err(CorpusError::InvalidCase {
+                path: self.directory.clone(),
+                message: "source-graph case has no declared tree input".to_owned(),
+            });
+        };
+        resolve_directory(&self.directory, relative, &self.manifest.id)
     }
 
     fn load_input(
@@ -458,6 +469,7 @@ fn validate_declared_files(
     let expectations = &manifest.expectations;
     for snapshot in [
         expectations.formatted.as_ref(),
+        expectations.graph.as_ref(),
         expectations.resolved.as_ref(),
         expectations.types.as_ref(),
         expectations.effects.as_ref(),

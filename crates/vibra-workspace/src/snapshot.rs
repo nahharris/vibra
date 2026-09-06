@@ -8,7 +8,7 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
 use crate::WorkspaceError;
 use crate::discovery::DiscoveredProject;
-use crate::project::{Target, TargetKind};
+use crate::project::{Project, Target, TargetKind};
 
 /// One validated local target root.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,6 +148,7 @@ impl SourceUnitSnapshot {
 pub struct SourceSnapshot {
     project_root: PathBuf,
     project_path: PathBuf,
+    project: Project,
     units: Vec<SourceUnitSnapshot>,
 }
 
@@ -169,6 +170,7 @@ impl SourceSnapshot {
         Ok(Self {
             project_root: project.root().to_path_buf(),
             project_path: project.project_path().to_path_buf(),
+            project: project.project().clone(),
             units,
         })
     }
@@ -183,6 +185,12 @@ impl SourceSnapshot {
     #[must_use]
     pub fn project_path(&self) -> &Path {
         &self.project_path
+    }
+
+    /// The exact typed project value that authorized this snapshot.
+    #[must_use]
+    pub const fn project(&self) -> &Project {
+        &self.project
     }
 
     /// Local target units in project source order.
@@ -262,6 +270,7 @@ fn validate_target_root(
     let path = Path::new(value);
     if value.is_empty()
         || path.is_absolute()
+        || has_dot_component(value)
         || path.components().any(|component| {
             matches!(
                 component,
@@ -371,6 +380,7 @@ struct ModuleCollector<'a> {
     project_root: &'a Path,
     target_root: &'a TargetRoot,
     files: BTreeMap<PathBuf, CandidateFile>,
+    file_claims: BTreeMap<Vec<String>, String>,
     directories: BTreeMap<Vec<String>, String>,
     visited_directories: BTreeSet<PathBuf>,
     active_directories: Vec<PathBuf>,
@@ -384,6 +394,7 @@ fn collect_modules(
         project_root,
         target_root,
         files: BTreeMap::new(),
+        file_claims: BTreeMap::new(),
         directories: BTreeMap::new(),
         visited_directories: BTreeSet::new(),
         active_directories: Vec::new(),
@@ -391,17 +402,15 @@ fn collect_modules(
     collector.walk(&target_root.path, Vec::new())?;
 
     let mut diagnostics = Vec::new();
-    for candidate in collector.files.values() {
-        if let Some(directory_source_id) =
-            collector.directories.get(&candidate.module_segments)
-        {
+    for (module_segments, source_id) in &collector.file_claims {
+        if let Some(directory_source_id) = collector.directories.get(module_segments) {
             diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::ModuleFileDirectoryCollision,
                     ByteSpan::empty_at(0),
                     "a module path is claimed by both a file and a directory",
                 )
-                .with_source_id(candidate.source_id.clone())
+                .with_source_id(source_id.clone())
                 .with_related_source(
                     directory_source_id.clone(),
                     ByteSpan::empty_at(0),
@@ -625,6 +634,9 @@ impl ModuleCollector<'_> {
         let mut segments = parent_segments.to_vec();
         segments.push(stem.to_owned());
         let source_id = relative_id(self.project_root, path);
+        self.file_claims
+            .entry(segments.clone())
+            .or_insert_with(|| source_id.clone());
         let candidate = CandidateFile {
             canonical,
             source_id: source_id.clone(),
@@ -673,6 +685,12 @@ fn is_kebab_component(segment: &str) -> bool {
                 || character.is_ascii_digit()
                 || character == '-'
         })
+}
+
+fn has_dot_component(value: &str) -> bool {
+    value
+        .split(['/', '\\'])
+        .any(|component| component == "." || component == "..")
 }
 
 fn relative_id(root: &Path, path: &Path) -> String {

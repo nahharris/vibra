@@ -171,11 +171,16 @@ specification rule, not compiler module. Each case records:
 - normative rule ID;
 - a closed operation selector (`reader`, `project-decode`, or `source-graph`);
   `project-decode` requires exactly one project input, and a
-  `source-graph` case requires one project input and MAY declare source/data
-  inputs plus one confined `tree` directory that the corpus loader must acquire
-  before graph building;
+  `source-graph` case requires one confined `tree` directory and a `project`
+  input whose path is exactly `<tree>/project.vibon`; the corpus loader MUST
+  acquire that tree before graph building and the handler MUST load only that
+  exact marker, never an ancestor or sibling;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
+- an optional `graph` snapshot path for source-graph cases; when present it
+  records canonical units, modules, source IDs, exact source bytes, and
+  unresolved dependency edges, so acceptance alone cannot hide a wrong
+  snapshot;
 - expected acceptance or diagnostics;
 - expected canonical formatting;
 - expected resolved identities, types, and effects where relevant;

@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
-use crate::project::{DependencyKind, Project};
+use crate::WorkspaceError;
+use crate::discovery::DiscoveredProject;
+use crate::project::DependencyKind;
 use crate::snapshot::SourceSnapshot;
 
 /// A canonical target-relative module identity.
@@ -200,9 +202,22 @@ pub struct SourceGraph {
 }
 
 impl SourceGraph {
-    /// Builds a graph from one discovered project and immutable snapshot.
-    #[must_use]
-    pub fn build(project: &Project, snapshot: SourceSnapshot) -> Self {
+    /// Builds a graph from one discovered project and its immutable snapshot.
+    ///
+    /// The canonical project path and typed project value are both checked so
+    /// a project from one workspace cannot be combined with another workspace
+    /// snapshot.
+    pub fn build(
+        project: &DiscoveredProject,
+        snapshot: SourceSnapshot,
+    ) -> Result<Self, WorkspaceError> {
+        if snapshot.project_path() != project.project_path()
+            || snapshot.project() != project.project()
+        {
+            return Err(WorkspaceError::message(
+                "source snapshot provenance does not match the discovered project",
+            ));
+        }
         let mut units = Vec::with_capacity(snapshot.units().len());
         let mut modules = BTreeMap::new();
         for unit_snapshot in snapshot.units() {
@@ -228,9 +243,10 @@ impl SourceGraph {
             });
         }
 
-        let mut dependencies = Vec::with_capacity(project.dependencies().len());
+        let mut dependencies =
+            Vec::with_capacity(project.project().dependencies().len());
         let mut diagnostics = Vec::new();
-        for dependency in project.dependencies() {
+        for dependency in project.project().dependencies() {
             let source = match dependency.kind() {
                 DependencyKind::Path => DependencySource::Path(
                     dependency
@@ -271,12 +287,12 @@ impl SourceGraph {
             );
         }
 
-        Self {
+        Ok(Self {
             units,
             dependencies,
             modules,
             diagnostics,
-        }
+        })
     }
 
     /// Local target units in project order.
@@ -325,7 +341,9 @@ impl SourceGraph {
 }
 
 /// Builds a graph from an immutable source snapshot.
-#[must_use]
-pub fn build_source_graph(project: &Project, snapshot: SourceSnapshot) -> SourceGraph {
+pub fn build_source_graph(
+    project: &DiscoveredProject,
+    snapshot: SourceSnapshot,
+) -> Result<SourceGraph, WorkspaceError> {
     SourceGraph::build(project, snapshot)
 }

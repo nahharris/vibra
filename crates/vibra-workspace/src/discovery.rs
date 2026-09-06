@@ -148,6 +148,68 @@ pub fn discover_project(
     }
 }
 
+/// Loads the exact marker at `root` without searching any ancestor or sibling.
+pub fn discover_project_at(
+    root: impl AsRef<Path>,
+) -> Result<DiscoveredProject, WorkspaceError> {
+    let root = root.as_ref();
+    let metadata = fs::symlink_metadata(root).map_err(|error| {
+        project_io_error(
+            PROJECT_FILE_NAME,
+            ByteSpan::empty_at(0),
+            format!(
+                "cannot inspect confined project root {}: {error}",
+                root.display()
+            ),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(project_io_error(
+            PROJECT_FILE_NAME,
+            ByteSpan::empty_at(0),
+            format!(
+                "confined project root is not a regular directory: {}",
+                root.display()
+            ),
+        ));
+    }
+    let canonical_root = fs::canonicalize(root).map_err(|error| {
+        project_io_error(
+            PROJECT_FILE_NAME,
+            ByteSpan::empty_at(0),
+            format!(
+                "cannot canonicalize confined project root {}: {error}",
+                root.display()
+            ),
+        )
+    })?;
+    let marker = canonical_root.join(PROJECT_FILE_NAME);
+    match fs::symlink_metadata(&marker) {
+        Ok(marker_metadata)
+            if !marker_metadata.file_type().is_symlink()
+                && marker_metadata.is_file() =>
+        {
+            load_project(&canonical_root, &marker)
+        }
+        Ok(_) => Err(project_io_error(
+            PROJECT_FILE_NAME,
+            ByteSpan::empty_at(0),
+            format!("project marker is not a regular file: {}", marker.display()),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(not_found(&canonical_root))
+        }
+        Err(error) => Err(project_io_error(
+            PROJECT_FILE_NAME,
+            ByteSpan::empty_at(0),
+            format!(
+                "cannot inspect project marker {}: {error}",
+                marker.display()
+            ),
+        )),
+    }
+}
+
 fn load_project(
     root: &Path,
     marker: &Path,

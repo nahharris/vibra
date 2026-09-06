@@ -80,6 +80,19 @@ impl WorkspaceSnapshot {
         Ok(Self { project, source })
     }
 
+    /// Loads exactly `project.vibon` beneath an already confined tree root.
+    ///
+    /// This entry point never searches ancestors or siblings. Callers that
+    /// receive a declared tree from another boundary must validate that tree
+    /// before handing it here.
+    pub fn load_confined(
+        project_root: impl AsRef<std::path::Path>,
+    ) -> Result<Self, WorkspaceError> {
+        let project = discovery::discover_project_at(project_root)?;
+        let source = snapshot::SourceSnapshot::capture(&project)?;
+        Ok(Self { project, source })
+    }
+
     /// The discovered and typed project.
     #[must_use]
     pub const fn project(&self) -> &discovery::DiscoveredProject {
@@ -93,8 +106,7 @@ impl WorkspaceSnapshot {
     }
 
     /// Builds the explicit source graph without consulting the filesystem.
-    #[must_use]
-    pub fn source_graph(&self) -> source_graph::SourceGraph {
-        source_graph::SourceGraph::build(self.project.project(), self.source.clone())
+    pub fn source_graph(&self) -> Result<source_graph::SourceGraph, WorkspaceError> {
+        source_graph::SourceGraph::build(&self.project, self.source.clone())
     }
 }

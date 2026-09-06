@@ -24,7 +24,10 @@ and [tooling](../../spec/05-tooling.md).
    unsupported dependency checking; never ignore declared dependencies or
    consult a network/cache fallback.
 6. Extend the real static handler to acquire all declared case inputs through
-   the confined corpus loader and exercise graph construction.
+   the confined corpus loader and exercise graph construction. Source-graph
+   manifests bind `project` exactly to `<tree>/project.vibon`; the handler uses
+   an exact-marker load rooted at that tree and never performs ancestor or
+   sibling discovery. Cases also compare a canonical graph snapshot.
 
 | Accept / preserve | Reject / prove |
 | --- | --- |
@@ -33,6 +36,8 @@ and [tooling](../../spec/05-tooling.md).
 | Nested discovery under a valid project | Missing project, legacy `project.vib`, wrong loader extension |
 | Sorted traversal despite shuffled filesystem enumeration | Escaping relative/absolute paths and symlink/junction escapes per C3 |
 | Exact bytes and source IDs on a repeated snapshot | No content sniffing, index module, extension search, or ambient dependency |
+| Nested starts, marker selection, same-basename units, and stable graph artifacts | Outside/sibling project inputs, malformed nearest markers, unavailable I/O, invalid segments, dot roots, and alias claims hidden by canonical-file deduplication |
+| In-root directory aliases are visited once | Cycles and escaping file/directory links; symlink-privileged fixtures are explicit conditional evidence |
 
 Assert `@project.overlapping-target-roots` and
 `@module.file-directory-collision` at their prescribed phase. For platform

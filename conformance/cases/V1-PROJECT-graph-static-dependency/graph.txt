@@ -1,0 +1,3 @@
+unit @hello kind lib
+module @hello.main source src/main.vib bytes 286465666e206d61696e290a
+dependency @remote kind path source path:../outside target core status unsupported

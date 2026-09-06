@@ -1,4 +1,4 @@
-id = "V1-PROJECT-graph-static-dependency"
+id = "V1-PROJECT-graph-static-invalid-segment"
 rule = "V1-PROJECT-source-graph"
 profile = "static-v1"
 operation = "source-graph"
@@ -9,10 +9,9 @@ tree = "tree"
 
 [expect]
 accepted = false
-graph = "graph.txt"
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@module.invalid-segment"
 level = "@error"
-source = "project.vibon"
-span = [158, 165]
+source = "src/Bad.vib"
+span = [0, 0]

@@ -38,6 +38,8 @@ pub struct CaseObservation {
     pub diagnostics: Vec<Diagnostic>,
     /// Canonical formatted source, if the handler provides it.
     pub formatted: Option<String>,
+    /// Canonical source-graph snapshot, if the handler provides it.
+    pub graph: Option<String>,
     /// Resolved-identity output, if the handler provides it.
     pub resolved: Option<String>,
     /// Type output, if the handler provides it.
@@ -584,6 +586,12 @@ impl CaseExpectations {
             "formatted",
             self.formatted.as_deref(),
             observation.formatted.as_deref(),
+        )?;
+        compare_snapshot(
+            case,
+            "graph",
+            self.graph.as_deref(),
+            observation.graph.as_deref(),
         )?;
         compare_snapshot(
             case,

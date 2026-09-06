@@ -71,7 +71,7 @@ path named `std` cannot confer external-declaration authority.
 | --- | --- | --- | --- | --- |
 | 1 | [Freeze M2 contracts and corpus observations](01-contracts.md) — specification/infrastructure prerequisite | M1 merge and exit evidence | in progress | — |
 | 2 | [Decode typed project data](02-project.md) | 1 | not started | — |
-| 3 | [Build the confined source graph](03-source-graph.md) | 2 | not started | — |
+| 3 | [Build the confined source graph](03-source-graph.md) | 2 | landed conditionally | local Step 3 implementation and repair commits; pending integration merge |
 | 4 | [Resolve module declarations and references](04-resolution.md) | 3 | not started | — |
 | 5 | [Execute typed primitive functions](05-primitives.md) | 4 | not started | — |
 | 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | not started | — |
@@ -128,6 +128,29 @@ keeps its M1 structure and receives the agreed availability result.
 The `@tool.unavailable` diagnostic is the canonical result for a valid v1
 surface outside the selected M2 implementation profile. It is separate from a
 runner capability status and from malformed syntax.
+
+## Step 3 handoff (conditional on integration merge)
+
+Step 3's local implementation head is `d46ef9ebde5f36710a930d07b62079bb05a8324f`
+before the follow-up confinement repair. It owns exact `project.vibon`
+discovery, canonical target-root/layout validation, immutable source IDs and
+bytes, unresolved dependency edges, and the static-v1 graph handler. The
+conformance handler binds every graph case to `<tree>/project.vibon`, loads the
+exact declared tree root without ancestor search, and compares a canonical
+graph artifact.
+
+Host evidence covers nested directory/file starts, missing and legacy markers,
+malformed nearest markers, confined-root I/O, invalid and dotted paths,
+same-basename units, sibling/equal/reversed roots, no implicit index modules,
+provenance mismatches, layout collisions, and in-root/escaping link behavior.
+Symlink-dependent tests are ignored with an explicit privilege reason on the
+ordinary Windows host and are required on a privileged Unix/CI host. The
+full corpus reports reader/static profile counts separately with zero failed or
+unavailable cases.
+
+Resolution, declaration parsing, type checking, execution, dependency sync,
+network access, cache/lock inspection, and CLI behavior remain later-step
+work.
 
 ## Exit evidence
 

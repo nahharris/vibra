@@ -1,4 +1,4 @@
-id = "V1-PROJECT-graph-static-dependency"
+id = "V1-PROJECT-graph-static-dot-root"
 rule = "V1-PROJECT-source-graph"
 profile = "static-v1"
 operation = "source-graph"
@@ -9,10 +9,9 @@ tree = "tree"
 
 [expect]
 accepted = false
-graph = "graph.txt"
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@project.invalid-target-root"
 level = "@error"
 source = "project.vibon"
-span = [158, 165]
+span = [131, 145]
