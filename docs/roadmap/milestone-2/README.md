@@ -1,6 +1,6 @@
 # Milestone 2 step plan
 
-Status: implementation in progress; Steps 1–5 are integrated
+Status: implementation in progress; Steps 1–6 are integrated
 Milestone: [Milestone 2 — executable pure core](../v1.md#milestone-2--executable-pure-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m2`
@@ -73,8 +73,8 @@ path named `std` cannot confer external-declaration authority.
 | 2 | [Decode typed project data](02-project.md) | 1 | landed | `m2` ancestor `3ad4951` |
 | 3 | [Build the confined source graph](03-source-graph.md) | 2 | landed | `m2` history through `d6368ac` |
 | 4 | [Resolve module declarations and references](04-resolution.md) | 3 | landed | `origin/m2` head `afcce59` |
-| 5 | [Execute typed primitive functions](05-primitives.md) | 4 | landed | `origin/m2` head `0477a7a`; 134-case corpus and exact-head Astra/Sol reviews clear |
-| 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | not started | — |
+| 5 | [Execute typed primitive functions](05-primitives.md) | 4 | landed | `origin/m2` head `0477a7a`; predecessor evidence retained |
+| 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | landed | tested head `44a482c`; merged on `m2` as `9494d6a`; 151-case corpus |
 | 7 | [Execute function values and labelled calls](07-functions.md) | 6 | not started | — |
 | 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | not started | — |
 | 9 | [Guarantee tail calls](09-tail-calls.md) | 8 | not started | — |
@@ -173,6 +173,24 @@ and graph/resolution validation pass locally. Step 4 does not perform type
 checking, entry-signature validation, runtime execution, effects, nested
 implementation semantics, or the complete M3 index. `origin/m2` is verified at
 `afcce59`; no separate PR or CI result is claimed here.
+
+## Step 6 handoff (integrated on `m2`)
+
+Step 6's tested implementation head is `44a482c`; the verified merge commit on
+`m2` is `9494d6a`. It adds typed immutable module values, forward-reference
+checking with initializer-cycle rejection, direct local bindings and all three
+discard spellings, empty and nonempty sequences, boolean conditionals, fixed
+nonrecursive calls, and lazy single-evaluation globals. Public checked-IR
+constructors revalidate expression shapes, slots, references, call signatures,
+function recursion, and global initializer dependency cycles before execution.
+
+The static and interpreter handlers now accept constant-only modules and expose
+canonical typed VIBON observations. Graph fixtures and the source-graph handler
+use only `@source-graph.v1` VIBON; plain-text graph snapshots were removed and
+the manifest rejects them. Focused host suites, the workspace suite, Clippy,
+rustdoc, and the evidence inventory pass. The corpus reports 73 reader, 69
+static, and 9 interpreter cases with zero failures or unavailable cases; the
+offline fuzz smoke campaign passes 6 targets and 96 cases.
 
 ## Exit evidence
 
