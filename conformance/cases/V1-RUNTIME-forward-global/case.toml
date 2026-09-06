@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-forward-global"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Forward immutable globals are initialized lazily and repeated reads preserve the same pure value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.txt" }

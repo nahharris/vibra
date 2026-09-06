@@ -589,15 +589,18 @@ tree = "tree"
 
 [expect]
 accepted = true
-graph = "graph.txt"
+graph = "graph.vibon"
 "#,
     );
     let directory = case.root.join("V1-PROJECT-graph-oracle");
     std::fs::create_dir(directory.join("tree")).expect("create declared tree");
     std::fs::write(directory.join("tree/project.vibon"), "project")
         .expect("write declared project");
-    std::fs::write(directory.join("graph.txt"), "expected graph\n")
-        .expect("write graph oracle");
+    std::fs::write(
+        directory.join("graph.vibon"),
+        "(record format: @source-graph.v1)\n",
+    )
+    .expect("write graph oracle");
 
     let report = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
         ConformanceProfile::StaticV1,

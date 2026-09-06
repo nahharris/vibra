@@ -1,6 +1,7 @@
 //! Explicit immutable source/unit graph construction.
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
@@ -338,6 +339,105 @@ impl SourceGraph {
     pub fn modules(&self) -> impl Iterator<Item = &SourceModule> {
         self.units.iter().flat_map(|unit| unit.modules.iter())
     }
+
+    /// Returns the sole canonical VIBON graph observation.
+    #[must_use]
+    pub fn canonical_vibon(&self) -> String {
+        let mut output = String::from("(record\n  format: @source-graph.v1\n");
+        output.push_str("  units: (array\n");
+        let mut units = self.units.iter().collect::<Vec<_>>();
+        units.sort_by(|left, right| left.name.cmp(&right.name));
+        for unit in units {
+            let kind = match unit.kind {
+                crate::project::TargetKind::Bin => "bin",
+                crate::project::TargetKind::Lib => "lib",
+            };
+            let _ = writeln!(
+                output,
+                "    (record name: @{} kind: @{} modules: (array",
+                unit.name, kind
+            );
+            let mut modules = unit.modules.iter().collect::<Vec<_>>();
+            modules.sort_by(|left, right| {
+                left.id
+                    .segments()
+                    .cmp(right.id.segments())
+                    .then_with(|| left.source_id.cmp(&right.source_id))
+            });
+            for module in modules {
+                let _ = writeln!(
+                    output,
+                    "      (record path: {} source: {} bytes-hex: \"{}\")",
+                    quoted(&module.id.segments().join(".")),
+                    quoted(&module.source_id),
+                    hex_bytes(&module.bytes)
+                );
+            }
+            output.push_str("    ))\n");
+        }
+        output.push_str("  )\n  dependencies: (array\n");
+        let mut dependencies = self.dependencies.iter().collect::<Vec<_>>();
+        dependencies.sort_by(|left, right| {
+            left.alias
+                .cmp(&right.alias)
+                .then_with(|| left.source_id.cmp(&right.source_id))
+                .then_with(|| left.span.cmp(&right.span))
+        });
+        for dependency in dependencies {
+            let kind = match dependency.kind {
+                DependencyKind::Path => "path",
+                DependencyKind::Git => "git",
+            };
+            let source = match &dependency.source {
+                DependencySource::Path(path) => quoted(path),
+                DependencySource::Git { url, rev } => {
+                    format!("(record url: {} rev: {})", quoted(url), quoted(rev))
+                }
+            };
+            let target = dependency
+                .target
+                .as_deref()
+                .map_or_else(|| "void".to_owned(), |target| format!("@{target}"));
+            let _ = writeln!(
+                output,
+                "    (record alias: @{} kind: @{} source: {} target: {} status: @unsupported source-id: {} span: (array {}u64 {}u64))",
+                dependency.alias,
+                kind,
+                source,
+                target,
+                quoted(&dependency.source_id),
+                dependency.span.start(),
+                dependency.span.end()
+            );
+        }
+        output.push_str("  )\n)\n");
+        output
+    }
+}
+
+fn quoted(value: &str) -> String {
+    let mut output = String::with_capacity(value.len() + 2);
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character => output.push(character),
+        }
+    }
+    output.push('"');
+    output
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
 }
 
 /// Builds a graph from an immutable source snapshot.

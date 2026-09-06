@@ -1,0 +1,17 @@
+id = "V1-TYPE-NAMES-binding-before-use"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A let initializer is checked in the outer scope before its new local binder becomes visible."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [31, 36]

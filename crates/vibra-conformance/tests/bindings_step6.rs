@@ -86,3 +86,12 @@ fn all_discard_spellings_and_sibling_scope_are_checked() {
     assert!(observation.accepted);
     assert!(observation.diagnostics.is_empty());
 }
+
+#[test]
+fn constant_only_module_is_a_successful_static_check() {
+    let case = case("V1-TYPE-NAMES-binding-constant-only");
+    let observation = StaticV1TypeHandler.run(&case).expect("type handler");
+    assert!(observation.accepted);
+    assert!(observation.types.is_none());
+    assert!(observation.diagnostics.is_empty());
+}

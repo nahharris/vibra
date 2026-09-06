@@ -45,7 +45,10 @@ impl CheckResult {
         }
     }
 
-    /// The checked program, only when every required phase succeeded.
+    /// The executable checked program, when the source contains a function.
+    ///
+    /// A constant-only module can be accepted with no executable entry point,
+    /// so callers must use [`Self::accepted`] separately from this accessor.
     #[must_use]
     pub const fn program(&self) -> Option<&CheckedProgram> {
         self.program.as_ref()
@@ -93,6 +96,14 @@ pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
         return CheckResult::new(None, diagnostics);
     }
     let Some(ast) = document.ast() else {
+        if source.trim().is_empty() {
+            unavailable(
+                &mut diagnostics,
+                source_id,
+                ByteSpan::empty_at(0),
+                "source contains no Step 6 module value or executable function",
+            );
+        }
         return CheckResult::new(None, diagnostics);
     };
     let program = check_ast(source_id, ast, &mut diagnostics);
@@ -523,6 +534,14 @@ impl<'a> Checker<'a> {
             .into_iter()
             .collect::<Option<Vec<_>>>()?;
         if functions.is_empty() {
+            if globals.is_empty() {
+                unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    self.ast.span(),
+                    "source contains no Step 6 module value or executable function",
+                );
+            }
             return None;
         }
         match CheckedProgram::try_new_with_globals(globals, functions, 0) {

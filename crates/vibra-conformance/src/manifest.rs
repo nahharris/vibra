@@ -547,6 +547,16 @@ fn decode_expectations(
     }
 
     let formatted = raw.formatted;
+    if let Some(graph) = raw.graph.as_deref()
+        && Path::new(graph)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("vibon")
+    {
+        return Err(ManifestError::Invalid(
+            "source-graph snapshots must use the .vibon extension".to_owned(),
+        ));
+    }
     let interpreter = raw.interpreter.map(decode_execution);
     let wasm = raw.wasm.map(decode_execution);
     let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);

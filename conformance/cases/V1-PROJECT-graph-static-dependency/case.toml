@@ -9,7 +9,7 @@ tree = "tree"
 
 [expect]
 accepted = false
-graph = "graph.txt"
+graph = "graph.vibon"
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"

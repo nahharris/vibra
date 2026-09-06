@@ -27,7 +27,8 @@ and [tooling](../../spec/05-tooling.md).
    the confined corpus loader and exercise graph construction. Source-graph
    manifests bind `project` exactly to `<tree>/project.vibon`; the handler uses
    an exact-marker load rooted at that tree and never performs ancestor or
-   sibling discovery. Cases also compare a canonical graph snapshot.
+   sibling discovery. Cases also compare the canonical `@source-graph.v1`
+   VIBON snapshot; no text graph projection is permitted.
 
 | Accept / preserve | Reject / prove |
 | --- | --- |

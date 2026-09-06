@@ -1,0 +1,11 @@
+(record
+  format: @source-graph.v1
+  units: (array
+    (record name: @hello kind: @lib modules: (array
+      (record path: "main" source: "src/main.vib" bytes-hex: "286465666e206d61696e290a")
+    ))
+  )
+  dependencies: (array
+    (record alias: @remote kind: @path source: "../outside" target: @core status: @unsupported source-id: "project.vibon" span: (array 166u64 219u64))
+  )
+)

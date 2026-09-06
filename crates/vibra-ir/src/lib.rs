@@ -7,6 +7,7 @@
 //! sequences, conditionals, fixed positional calls, and function signatures;
 //! effects and collections belong to later steps.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use vibra_diagnostics::ByteSpan;
@@ -539,6 +540,85 @@ impl Expr {
             }
         }
     }
+
+    fn validate_shape(
+        &self,
+        slots: &mut [Option<PrimitiveType>],
+    ) -> Result<PrimitiveType, IrError> {
+        match self {
+            Self::Literal { value, .. } => Ok(value.ty()),
+            Self::Sequence { expressions, .. } => {
+                let mut result = PrimitiveType::Void;
+                for expression in expressions {
+                    result = expression.validate_shape(slots)?;
+                }
+                Ok(result)
+            }
+            Self::Variable {
+                slot, value_type, ..
+            } => match slots.get(*slot).copied().flatten() {
+                Some(actual) if actual == *value_type => Ok(*value_type),
+                Some(actual) => Err(IrError::InvalidExpression(format!(
+                    "variable slot {slot} has type {actual}, expression declares {value_type}"
+                ))),
+                None => Err(IrError::InvalidExpression(format!(
+                    "variable slot {slot} is not bound"
+                ))),
+            },
+            Self::Global { value_type, .. } => Ok(*value_type),
+            Self::Let {
+                slot, value, body, ..
+            } => {
+                let value_type = value.validate_shape(slots)?;
+                let mut body_slots = slots.to_vec();
+                if let Some(slot) = slot {
+                    let Some(bound) = body_slots.get_mut(*slot) else {
+                        return Err(IrError::InvalidExpression(format!(
+                            "let binding slot {slot} is outside the activation"
+                        )));
+                    };
+                    if bound.is_some() {
+                        return Err(IrError::InvalidExpression(format!(
+                            "let binding slot {slot} shadows an active slot"
+                        )));
+                    }
+                    *bound = Some(value_type);
+                }
+                body.validate_shape(&mut body_slots)
+            }
+            Self::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                let condition_type = condition.validate_shape(slots)?;
+                if condition_type != PrimitiveType::Bool {
+                    return Err(IrError::InvalidExpression(format!(
+                        "if condition has type {condition_type}, expected bool"
+                    )));
+                }
+                let mut then_slots = slots.to_vec();
+                let mut else_slots = slots.to_vec();
+                let then_type = then_branch.validate_shape(&mut then_slots)?;
+                let else_type = else_branch.validate_shape(&mut else_slots)?;
+                if then_type != else_type {
+                    return Err(IrError::InvalidExpression(format!(
+                        "if branches have types {then_type} and {else_type}"
+                    )));
+                }
+                Ok(then_type)
+            }
+            Self::Call {
+                arguments, result, ..
+            } => {
+                for argument in arguments {
+                    argument.validate_shape(slots)?;
+                }
+                Ok(*result)
+            }
+        }
+    }
 }
 
 /// One checked module-level immutable value.
@@ -559,13 +639,15 @@ impl CheckedGlobal {
         initializer: Expr,
         origin: SourceOrigin,
     ) -> Result<Self, IrError> {
-        if initializer.result_type() != value_type {
+        let slot_count = initializer.slot_count();
+        let mut slots = vec![None; slot_count];
+        let actual = initializer.validate_shape(&mut slots)?;
+        if actual != value_type {
             return Err(IrError::ResultTypeMismatch {
                 expected: value_type,
-                actual: initializer.result_type(),
+                actual,
             });
         }
-        let slot_count = initializer.slot_count();
         Ok(Self {
             name: name.into(),
             value_type,
@@ -625,7 +707,7 @@ impl CheckedFunction {
         body: Expr,
         origin: SourceOrigin,
     ) -> Result<Self, IrError> {
-        let slot_count = signature.parameters().len();
+        let slot_count = signature.parameters().len().max(body.slot_count());
         Self::with_slots(name, signature, body, origin, slot_count)
     }
 
@@ -645,10 +727,17 @@ impl CheckedFunction {
                 parameters: signature.parameters().len(),
             });
         }
-        if body.result_type() != signature.result() {
+        let mut slots = vec![None; slot_count];
+        for (slot, value_type) in signature.parameters().iter().enumerate() {
+            if let Some(bound) = slots.get_mut(slot) {
+                *bound = Some(*value_type);
+            }
+        }
+        let actual = body.validate_shape(&mut slots)?;
+        if actual != signature.result() {
             return Err(IrError::ResultTypeMismatch {
                 expected: signature.result(),
-                actual: body.result_type(),
+                actual,
             });
         }
         Ok(Self {
@@ -732,21 +821,51 @@ impl CheckedProgram {
             {
                 return Err(IrError::DuplicateFunction(function.name.clone()));
             }
-            if function.body.result_type() != function.signature.result() {
+            let mut slots = vec![None; function.slot_count];
+            for (slot, value_type) in function.signature.parameters().iter().enumerate()
+            {
+                if let Some(bound) = slots.get_mut(slot) {
+                    *bound = Some(*value_type);
+                }
+            }
+            let actual = function.body.validate_shape(&mut slots)?;
+            if actual != function.signature.result() {
                 return Err(IrError::ResultTypeMismatch {
                     expected: function.signature.result(),
-                    actual: function.body.result_type(),
+                    actual,
                 });
             }
         }
         for global in &globals {
-            if global.initializer.result_type() != global.value_type {
+            let mut slots = vec![None; global.slot_count];
+            let actual = global.initializer.validate_shape(&mut slots)?;
+            if actual != global.value_type {
                 return Err(IrError::ResultTypeMismatch {
                     expected: global.value_type,
-                    actual: global.initializer.result_type(),
+                    actual,
                 });
             }
         }
+        let mut calls = vec![BTreeSet::new(); functions.len()];
+        for global in &globals {
+            validate_program_expr(
+                global.initializer(),
+                &globals,
+                &functions,
+                None,
+                &mut calls,
+            )?;
+        }
+        for (index, function) in functions.iter().enumerate() {
+            validate_program_expr(
+                function.body(),
+                &globals,
+                &functions,
+                Some(index),
+                &mut calls,
+            )?;
+        }
+        reject_recursive_calls(&calls)?;
         Ok(Self {
             globals,
             functions,
@@ -837,6 +956,10 @@ pub enum IrError {
         /// Required parameter slots.
         parameters: usize,
     },
+    /// A public expression constructor produced an invalid checked shape.
+    InvalidExpression(String),
+    /// The function-call graph contains a recursive group outside the admitted subset.
+    RecursiveCall(String),
 }
 
 impl fmt::Display for IrError {
@@ -862,11 +985,165 @@ impl fmt::Display for IrError {
                 formatter,
                 "function `{function}` allocates {slots} slots for {parameters} parameters"
             ),
+            Self::InvalidExpression(message) => {
+                write!(formatter, "invalid checked expression: {message}")
+            }
+            Self::RecursiveCall(message) => {
+                write!(formatter, "recursive call graph: {message}")
+            }
         }
     }
 }
 
 impl std::error::Error for IrError {}
+
+fn validate_program_expr(
+    expression: &Expr,
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+    owner: Option<usize>,
+    calls: &mut [BTreeSet<usize>],
+) -> Result<(), IrError> {
+    match expression {
+        Expr::Literal { .. } | Expr::Variable { .. } => {}
+        Expr::Sequence { expressions, .. } => {
+            for expression in expressions {
+                validate_program_expr(expression, globals, functions, owner, calls)?;
+            }
+        }
+        Expr::Global {
+            index, value_type, ..
+        } => {
+            let Some(global) = globals.get(*index) else {
+                return Err(IrError::InvalidExpression(format!(
+                    "global index {index} is outside the program"
+                )));
+            };
+            if global.value_type() != *value_type {
+                return Err(IrError::InvalidExpression(format!(
+                    "global index {index} has type {}, expression declares {value_type}",
+                    global.value_type()
+                )));
+            }
+        }
+        Expr::Let { value, body, .. } => {
+            validate_program_expr(value, globals, functions, owner, calls)?;
+            validate_program_expr(body, globals, functions, owner, calls)?;
+        }
+        Expr::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            validate_program_expr(condition, globals, functions, owner, calls)?;
+            validate_program_expr(then_branch, globals, functions, owner, calls)?;
+            validate_program_expr(else_branch, globals, functions, owner, calls)?;
+        }
+        Expr::Call {
+            function,
+            arguments,
+            result,
+            ..
+        } => {
+            let Some(callee) = functions.get(*function) else {
+                return Err(IrError::InvalidExpression(format!(
+                    "function index {function} is outside the program"
+                )));
+            };
+            if arguments.len() != callee.signature().parameters().len() {
+                return Err(IrError::InvalidExpression(format!(
+                    "call to `{}` has {} arguments, expected {}",
+                    callee.name(),
+                    arguments.len(),
+                    callee.signature().parameters().len()
+                )));
+            }
+            for argument in arguments {
+                validate_program_expr(argument, globals, functions, owner, calls)?;
+            }
+            for (argument, expected) in
+                arguments.iter().zip(callee.signature().parameters())
+            {
+                let actual = argument.result_type();
+                if actual != *expected {
+                    return Err(IrError::InvalidExpression(format!(
+                        "call argument has type {actual}, expected {expected}"
+                    )));
+                }
+            }
+            if *result != callee.signature().result() {
+                return Err(IrError::InvalidExpression(format!(
+                    "call result declares {result}, callee returns {}",
+                    callee.signature().result()
+                )));
+            }
+            if let Some(owner) = owner {
+                let Some(edges) = calls.get_mut(owner) else {
+                    return Err(IrError::InvalidExpression(format!(
+                        "function owner index {owner} is outside the program"
+                    )));
+                };
+                edges.insert(*function);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CallState {
+    Unvisited,
+    Visiting,
+    Done,
+}
+
+fn reject_recursive_calls(calls: &[BTreeSet<usize>]) -> Result<(), IrError> {
+    let mut states = vec![CallState::Unvisited; calls.len()];
+    for index in 0..calls.len() {
+        visit_call_graph(index, calls, &mut states)?;
+    }
+    Ok(())
+}
+
+fn visit_call_graph(
+    index: usize,
+    calls: &[BTreeSet<usize>],
+    states: &mut [CallState],
+) -> Result<(), IrError> {
+    match states.get(index).copied() {
+        Some(CallState::Done) => return Ok(()),
+        Some(CallState::Visiting) => {
+            return Err(IrError::RecursiveCall(format!(
+                "function index {index} is part of a recursive group"
+            )));
+        }
+        Some(CallState::Unvisited) => {}
+        None => {
+            return Err(IrError::InvalidExpression(format!(
+                "call graph references function index {index}"
+            )));
+        }
+    }
+    let Some(state) = states.get_mut(index) else {
+        return Err(IrError::InvalidExpression(format!(
+            "call graph references function index {index}"
+        )));
+    };
+    *state = CallState::Visiting;
+    let Some(dependencies) = calls.get(index) else {
+        return Err(IrError::InvalidExpression(format!(
+            "call graph has no node for function index {index}"
+        )));
+    };
+    for dependency in dependencies {
+        visit_call_graph(*dependency, calls, states)?;
+    }
+    if let Some(state) = states.get_mut(index) {
+        *state = CallState::Done;
+    }
+    Ok(())
+}
 
 fn canonical_expr(expression: &Expr) -> String {
     match expression {
@@ -976,4 +1253,83 @@ fn canonical_character(value: char) -> String {
 
 fn format_float<T: fmt::Display>(value: T, suffix: &str) -> String {
     format!("{value}{suffix}")
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::{
+        ByteSpan, CheckedFunction, CheckedProgram, Expr, FunctionSignature, IrError,
+        PrimitiveType, SourceOrigin, Value,
+    };
+
+    fn origin() -> SourceOrigin {
+        SourceOrigin::new("ir-test.vib", ByteSpan::new(0, 1))
+    }
+
+    #[test]
+    fn function_constructor_rejects_mismatched_if_branches() {
+        let origin = origin();
+        let body = Expr::if_expression(
+            Expr::literal(Value::Bool(true), origin.clone()),
+            Expr::literal(Value::I32(1), origin.clone()),
+            Expr::literal(Value::Str("wrong".to_owned()), origin.clone()),
+            origin.clone(),
+        );
+        let result = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            body,
+            origin,
+        );
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn function_constructor_rejects_unbound_variables() {
+        let origin = origin();
+        let result = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            origin,
+        );
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_recursive_calls() {
+        let origin = origin();
+        let function = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            origin,
+        )
+        .expect("call shape is valid before program binding");
+        let result = CheckedProgram::try_new(vec![function], 0);
+        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_bad_call_signatures() {
+        let origin = origin();
+        let callee = CheckedFunction::new(
+            "callee",
+            FunctionSignature::new(vec![PrimitiveType::I32], PrimitiveType::I32),
+            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("callee");
+        let caller = CheckedFunction::new(
+            "caller",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            origin,
+        )
+        .expect("caller shape is valid before program binding");
+        let result = CheckedProgram::try_new(vec![callee, caller], 1);
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
 }

@@ -26,7 +26,7 @@ impl ProfileHandler for StaticV1TypeHandler {
             .read_file(source_id)
             .map_err(|error| HandlerError::new(error.to_string()))?;
         let checked = check_source(source_id, &source);
-        let accepted = checked.accepted() && checked.program().is_some();
+        let accepted = checked.accepted();
         Ok(CaseObservation {
             accepted,
             diagnostics: checked.diagnostics().to_vec(),
