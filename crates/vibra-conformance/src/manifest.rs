@@ -96,6 +96,8 @@ pub struct CaseInputs {
 /// One expected source span attached to a diagnostic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedRelatedSpan {
+    /// The input path owning the related span, when known.
+    pub source_id: Option<String>,
     /// The half-open UTF-8 byte span.
     pub span: ByteSpan,
     /// An optional expected explanation. Omitted explanations are not
@@ -112,6 +114,8 @@ pub struct ExpectedDiagnostic {
     pub level: Level,
     /// Optional human-facing message assertion.
     pub message: Option<String>,
+    /// The input path owning the primary span, when known.
+    pub source_id: Option<String>,
     /// The primary half-open UTF-8 byte span.
     pub primary_span: ByteSpan,
     /// Related spans in their expected order.
@@ -274,6 +278,32 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         };
 
         let expectations = decode_expectations(raw.expect)?;
+        {
+            let declared_inputs = [&inputs.source, &inputs.project]
+                .into_iter()
+                .flatten()
+                .chain(inputs.data.iter());
+            for diagnostic in &expectations.diagnostics {
+                if let Some(source_id) = &diagnostic.source_id
+                    && !declared_inputs.clone().any(|input| input == source_id)
+                {
+                    return Err(ManifestError::Invalid(format!(
+                        "diagnostic source `{source_id}` is not declared by case `{}`",
+                        raw.id
+                    )));
+                }
+                for related in &diagnostic.related {
+                    if let Some(source_id) = &related.source_id
+                        && !declared_inputs.clone().any(|input| input == source_id)
+                    {
+                        return Err(ManifestError::Invalid(format!(
+                            "related diagnostic source `{source_id}` is not declared by case `{}`",
+                            raw.id
+                        )));
+                    }
+                }
+            }
+        }
         for query in &expectations.queries {
             let declared = inputs
                 .source
@@ -438,6 +468,7 @@ fn decode_diagnostic(
         .into_iter()
         .map(|related| {
             Ok(ExpectedRelatedSpan {
+                source_id: related.source,
                 span: decode_span(related.span, code.as_atom())?,
                 message: related.message,
             })
@@ -459,6 +490,7 @@ fn decode_diagnostic(
         code,
         level,
         message: raw.message,
+        source_id: raw.source,
         primary_span,
         related,
         notes: raw.notes,
@@ -541,6 +573,8 @@ pub(crate) struct RawExpectedDiagnostic {
     pub(crate) level: String,
     #[serde(default)]
     pub(crate) message: Option<String>,
+    #[serde(default, alias = "sourceId")]
+    pub(crate) source: Option<String>,
     pub(crate) span: RawSpan,
     #[serde(default)]
     pub(crate) related: Vec<RawRelatedSpan>,
@@ -553,6 +587,8 @@ pub(crate) struct RawExpectedDiagnostic {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawRelatedSpan {
+    #[serde(default, alias = "sourceId")]
+    pub(crate) source: Option<String>,
     pub(crate) span: RawSpan,
     #[serde(default)]
     pub(crate) message: Option<String>,

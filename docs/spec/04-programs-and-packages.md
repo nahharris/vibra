@@ -88,6 +88,47 @@ A project is rooted by `project.vibon`. It contains one `@project.v1` record:
       target: @core)))
 ```
 
+### M2 `@project.v1` schema
+
+The M2 decoder closes the following typed schema. Records may be written in any
+field order, but canonical formatting uses the order shown. Unknown fields,
+missing required fields, and wrong value kinds are `@data.invalid-shape`;
+duplicate record labels are `@data.duplicate-field`, and duplicate dependency
+map keys are `@data.duplicate-key`. The decoder retains each field and value
+span with its source identity and does not resolve an atom or read a path.
+
+| Record | Field order | Type | Requiredness and constraint |
+| --- | --- | --- | --- |
+| project | `format`, `package`, `targets`, `dependencies` | atom, record, array, map | all required; `format` is exactly `@project.v1`; `targets` contains at least one target; `dependencies` may be empty |
+| package | `name`, `version` | string, string | both required; `name` is kebab-case and `version` is one semantic version, never a range |
+| target | `name`, `kind`, `root`, `entry`, `effects` | atom, atom, string, atom, array | `name`, `kind`, and `root` required; `kind` is `@bin` or `@lib`; a binary requires `entry` and `effects`; a library omits both |
+| path dependency | `kind`, `path`, `target` | atom, string, atom | `kind` is `@path`; `path` required; `target` optional |
+| Git dependency | `kind`, `git`, `rev`, `target` | atom, string, string, atom | `kind` is `@git`; `git` is HTTPS; `rev` is exactly 40 lowercase hexadecimal characters; `target` optional |
+
+The dependency value is selected by its `kind` field. A dependency map key is
+an alias atom value. `format`, target `name` and `kind`, and dependency `kind`
+are atom values selected by their schema slots. Target `entry` is an entity
+reference requiring a declaration; each target `effects` item is an entity
+reference requiring an effect root; and dependency `target` is an entity
+reference requiring a library target. These references are retained as typed
+unresolved values by the decoder and are resolved only after the source graph
+and lock inputs exist. An atom's spelling never changes its role.
+
+The M2 decoder accepts only the records above and the generic VIBON literals
+they contain. It performs no filesystem discovery, dependency sync, network
+access, or source resolution. Path normalization, target-root overlap,
+entry-kind, and dependency-target diagnostics belong to the later graph and
+resolver phases; the decoder must report the shape error before those phases
+when the record is malformed.
+
+M2 decodes this record through a closed typed schema before it acquires any
+source files. Schema-selected atom roles are retained as values until the
+source graph and resolver phases have explicit inputs. M2's offline bootstrap
+is repository-owned and hash-checked; ordinary local/Git dependency sync and
+lock generation remain Milestone 5 work. A syntactically valid project feature
+outside the selected M2 profile reports `@tool.unavailable` rather than being
+silently ignored or executed through a fallback.
+
 Project tooling preserves comments when possible and rewrites changed data in
 canonical form. There is no executable `(project ...)` declaration and no
 legacy project format fallback. `project.vib` is not searched or accepted as a

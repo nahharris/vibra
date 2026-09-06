@@ -7,9 +7,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_conformance::{
     CaseManifest, CaseObservation, CaseStatus, ConformanceProfile, ConformanceRunner,
-    Corpus, HandlerError, ProfileDispatcher, ProfileHandler,
+    Corpus, HandlerError, ProfileDispatcher, ProfileHandler, ReaderV1Handler,
 };
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_syntax::DocumentMode;
 
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -121,6 +122,58 @@ end = 7
     assert_eq!(
         manifest.expectations.diagnostics[0].primary_span,
         ByteSpan::new(4, 7)
+    );
+}
+
+#[test]
+fn input_documents_keep_roles_and_source_identity_without_concatenation() {
+    let case = TempCase::new(
+        "V1-DIAG-input-documents",
+        r#"
+id = "V1-DIAG-input-documents"
+rule = "V1-DIAG"
+profile = "reader-v1"
+
+[inputs]
+source = "src/main.vib"
+project = "project.vibon"
+data = ["data/one.vibon", "data/two.vibon"]
+
+[expect]
+accepted = true
+"#,
+    );
+    let directory = case.root.join("V1-DIAG-input-documents");
+    std::fs::create_dir_all(directory.join("src")).expect("create source directory");
+    std::fs::create_dir_all(directory.join("data")).expect("create data directory");
+    std::fs::write(directory.join("src/main.vib"), "(defn main () void)")
+        .expect("write source");
+    std::fs::write(directory.join("project.vibon"), "(@project.v1)")
+        .expect("write project");
+    std::fs::write(directory.join("data/one.vibon"), "one").expect("write data one");
+    std::fs::write(directory.join("data/two.vibon"), "two").expect("write data two");
+
+    let documents = case.corpus().cases()[0]
+        .input_documents()
+        .expect("load declared inputs");
+    let actual = documents
+        .iter()
+        .map(|document| {
+            (
+                document.source_id.as_str(),
+                document.mode,
+                document.text.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        vec![
+            ("src/main.vib", DocumentMode::Source, "(defn main () void)"),
+            ("project.vibon", DocumentMode::Data, "(@project.v1)"),
+            ("data/one.vibon", DocumentMode::Data, "one"),
+            ("data/two.vibon", DocumentMode::Data, "two"),
+        ]
     );
 }
 
@@ -614,4 +667,145 @@ end = 5
 
     assert!(report.is_success());
     assert_eq!(report.passed(), 1);
+}
+
+#[test]
+fn runner_keeps_equal_offsets_distinct_by_source_identity() {
+    let case = TempCase::new(
+        "V1-DIAG-source-identity",
+        r#"
+id = "V1-DIAG-source-identity"
+rule = "V1-DIAG"
+profile = "reader-v1"
+
+[inputs]
+source = "one.vib"
+data = ["two.vibon"]
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+source = "one.vib"
+[expect.diagnostics.span]
+start = 0
+end = 1
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+source = "two.vibon"
+[expect.diagnostics.span]
+start = 0
+end = 1
+"#,
+    );
+    let directory = case.root.join("V1-DIAG-source-identity");
+    std::fs::write(directory.join("one.vib"), "x").expect("write source");
+    std::fs::write(directory.join("two.vibon"), "x").expect("write data");
+
+    let diagnostic = |source_id: &str| {
+        Diagnostic::new(
+            DiagnosticCode::SyntaxInvalidCharacterLiteral,
+            ByteSpan::new(0, 1),
+            "invalid character",
+        )
+        .with_source_id(source_id)
+    };
+    let handler = FixedHandler {
+        observation: CaseObservation {
+            accepted: false,
+            diagnostics: vec![diagnostic("one.vib"), diagnostic("two.vibon")],
+            ..CaseObservation::default()
+        },
+    };
+    let report = ConformanceRunner::new(
+        ProfileDispatcher::new().with_handler(ConformanceProfile::ReaderV1, handler),
+    )
+    .run(&case.corpus());
+
+    assert!(report.is_success());
+    assert_eq!(report.passed(), 1);
+
+    let swapped = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
+        ConformanceProfile::ReaderV1,
+        FixedHandler {
+            observation: CaseObservation {
+                accepted: false,
+                diagnostics: vec![diagnostic("two.vibon"), diagnostic("one.vib")],
+                ..CaseObservation::default()
+            },
+        },
+    ))
+    .run(&case.corpus());
+    assert!(!swapped.is_success());
+    assert!(format!("{:?}", swapped.cases()).contains("source mismatch"));
+
+    let missing = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
+        ConformanceProfile::ReaderV1,
+        FixedHandler {
+            observation: CaseObservation {
+                accepted: false,
+                diagnostics: vec![
+                    Diagnostic::new(
+                        DiagnosticCode::SyntaxInvalidCharacterLiteral,
+                        ByteSpan::new(0, 1),
+                        "invalid character",
+                    ),
+                    diagnostic("two.vibon"),
+                ],
+                ..CaseObservation::default()
+            },
+        },
+    ))
+    .run(&case.corpus());
+    assert!(!missing.is_success());
+    assert!(format!("{:?}", missing.cases()).contains("source mismatch"));
+}
+
+#[test]
+fn reader_attaches_source_ids_to_multi_input_diagnostics() {
+    let case = TempCase::new(
+        "V1-DIAG-reader-source-identity",
+        r#"
+id = "V1-DIAG-reader-source-identity"
+rule = "V1-DIAG"
+profile = "reader-v1"
+
+[inputs]
+source = "source.vib"
+data = ["data.vibon"]
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+source = "source.vib"
+[expect.diagnostics.span]
+start = 0
+end = 2
+
+[[expect.diagnostics]]
+code = "@data.invalid-shape"
+level = "@error"
+source = "data.vibon"
+[expect.diagnostics.span]
+start = 5
+end = 7
+"#,
+    );
+    let directory = case.root.join("V1-DIAG-reader-source-identity");
+    std::fs::write(directory.join("source.vib"), "-a").expect("write source");
+    std::fs::write(directory.join("data.vibon"), "(map @a)").expect("write data");
+
+    let report = ConformanceRunner::new(
+        ProfileDispatcher::new()
+            .with_handler(ConformanceProfile::ReaderV1, ReaderV1Handler),
+    )
+    .run(&case.corpus());
+    assert!(report.is_success(), "reader report: {report:?}");
 }

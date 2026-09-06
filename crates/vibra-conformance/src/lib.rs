@@ -27,7 +27,7 @@ mod profile;
 mod reader;
 mod runner;
 
-pub use corpus::{Case, Corpus, CorpusError};
+pub use corpus::{Case, CaseInputDocument, Corpus, CorpusError};
 pub use manifest::{
     CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic, ExpectedExecution,
     ExpectedFix, ExpectedQuery, ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError,

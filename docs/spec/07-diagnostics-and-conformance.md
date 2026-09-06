@@ -76,6 +76,7 @@ table governs.
 | `@runtime.invalid-host-value` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
+| `@tool.unavailable` | `@error` |
 
 Codes are stable within the v1 line and are atoms in Vibra data. JSON output
 serializes the exact atom spelling as a string. A code need not be renamed if
@@ -102,11 +103,19 @@ tests, but not loaded from or executed as Vibra source.
 A diagnostic contains schema version, code, level, message, primary source
 span, related spans, notes, and zero or more fixes. Spans are half-open UTF-8
 byte ranges with one-based line and Unicode-scalar column as derived display
-data. Fixes declare whether they are safe and carry expected document
-revisions.
+data. A multi-document observation carries the owning source identity on every
+primary and related span; a related span may identify a different document than
+the primary span. A single-document producer may leave identity null. Fixes
+declare whether they are safe and carry expected document revisions.
 
 Messages help people; codes and fields help tools. Tests assert codes, levels,
 spans, related identities, and fix results, not incidental English punctuation.
+
+`@tool.unavailable` is emitted when a syntactically valid v1 command or language
+surface is outside the selected implementation profile. It is distinct from a
+malformed-input diagnostic and from the conformance runner's `unavailable`
+status: a real handler reports the diagnostic through its result contract,
+while a missing handler remains an unavailable corpus observation.
 
 ## Recovery
 
@@ -363,6 +372,12 @@ called Vibra v1:
 Profiles are capability statements, not source dialects. The same source is
 never reinterpreted differently by a smaller profile; unsupported execution is
 reported as unavailable.
+
+For the M2 implementation profile, a valid source or command surface that is
+outside the admitted subset emits `@tool.unavailable` through the normal
+diagnostic result. A corpus handler with no implementation remains an
+`unavailable` observation and fails the relevant gate; it must not be turned
+into a passing case by selecting a smaller profile.
 
 ## Required implementation suites
 

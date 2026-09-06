@@ -33,6 +33,7 @@ impl ProfileHandler for ReaderV1Handler {
                 "reader-v1 case does not declare an input document",
             ));
         }
+        let attach_source_ids = paths.len() > 1;
 
         let mut accepted = true;
         let mut diagnostics = Vec::new();
@@ -56,7 +57,15 @@ impl ProfileHandler for ReaderV1Handler {
             }
             .map_err(|error| HandlerError::new(error.to_string()))?;
             accepted &= document.accepted();
-            diagnostics.extend_from_slice(document.diagnostics());
+            diagnostics.extend(document.diagnostics().iter().cloned().map(
+                |diagnostic| {
+                    if attach_source_ids {
+                        diagnostic.with_source_id(relative.as_str())
+                    } else {
+                        diagnostic
+                    }
+                },
+            ));
             for (query_order, expected) in case
                 .manifest()
                 .expectations
@@ -69,7 +78,11 @@ impl ProfileHandler for ReaderV1Handler {
                     .query_position(expected.offset)
                     .map_err(|error| HandlerError::new(error.to_string()))?;
                 let index = LineIndex::new(&source);
-                let rendered = SourcePositionQueryDocument::render(&query, &index);
+                let rendered = SourcePositionQueryDocument::render_with_source(
+                    &query,
+                    &index,
+                    Some(relative.as_str()),
+                );
                 let result = serde_json::to_string_pretty(&rendered)
                     .map(|json| format!("{json}\n"))
                     .map_err(|error| HandlerError::new(error.to_string()))?;

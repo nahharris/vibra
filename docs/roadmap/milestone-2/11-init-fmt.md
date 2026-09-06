@@ -23,8 +23,9 @@ engine**, **Project operations**, **Transactional edit plans**, projects
    transaction guarantees: confined paths, stale revision refusal, complete
    preflight, reparse/recheck postconditions and no partial writes on failure.
    The later M6 semantic edit system consumes this foundation.
-6. Publish versioned init/fmt JSON contracts and stable exit/result mapping from
-   C10. Add actual binary tests and corpus operation observations from Step 1.
+6. Implement the versioned init/fmt JSON contracts and stable exit/result
+   mapping frozen by C10. Add actual binary tests and corpus operation
+   observations from Step 1.
 
 | Positive | Negative / boundary |
 | --- | --- |

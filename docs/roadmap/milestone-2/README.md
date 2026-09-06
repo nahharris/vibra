@@ -68,7 +68,7 @@ contract; a path named `std` cannot confer external-declaration authority.
 
 | Step | One-PR slice and guide | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
-| 1 | [Freeze M2 contracts and corpus observations](01-contracts.md) — specification/infrastructure prerequisite | M1 merge and exit evidence | not started | — |
+| 1 | [Freeze M2 contracts and corpus observations](01-contracts.md) — specification/infrastructure prerequisite | M1 merge and exit evidence | in progress | — |
 | 2 | [Decode typed project data](02-project.md) | 1 | not started | — |
 | 3 | [Build the confined source graph](03-source-graph.md) | 2 | not started | — |
 | 4 | [Resolve module declarations and references](04-resolution.md) | 3 | not started | — |
@@ -123,6 +123,10 @@ rows, variadic signatures, the `result void e` entry alternative, and offline
 stdlib bootstrap. These are pending contracts, not permission to silently
 relax the language or to implement later milestones. Valid deferred syntax
 keeps its M1 structure and receives the agreed availability result.
+
+The `@tool.unavailable` diagnostic is the canonical result for a valid v1
+surface outside the selected M2 implementation profile. It is separate from a
+runner capability status and from malformed syntax.
 
 ## Exit evidence
 

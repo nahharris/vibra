@@ -8,6 +8,8 @@
 //! permits ignoring an unknown field only where an output schema explicitly
 //! allows forward extension, and neither of these does.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, LineIndex, Position};
 
@@ -25,7 +27,7 @@ pub const REGISTRY_ENTRY_SCHEMA: &str =
     include_str!("../schemas/v1/diagnostic-registry-entry.json");
 
 /// A one-based display position.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PositionDocument {
     /// One-based line number.
@@ -50,9 +52,11 @@ impl From<Position> for PositionDocument {
 /// needs the bytes; a consumer that shows text to a person needs the
 /// positions. Deriving one from the other requires the document, which a JSON
 /// consumer may not have.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SpanDocument {
+    /// The case-relative or workspace-relative source identity owning the span.
+    pub source_id: Option<String>,
     /// First byte offset.
     pub start: usize,
     /// One past the last byte offset.
@@ -67,7 +71,18 @@ impl SpanDocument {
     /// Renders `span` against the document `index` was built from.
     #[must_use]
     pub fn render(span: ByteSpan, index: &LineIndex<'_>) -> Self {
+        Self::render_with_source(span, index, None)
+    }
+
+    /// Renders `span` while retaining its owning source identity.
+    #[must_use]
+    pub fn render_with_source(
+        span: ByteSpan,
+        index: &LineIndex<'_>,
+        source_id: Option<&str>,
+    ) -> Self {
         Self {
+            source_id: source_id.map(str::to_owned),
             start: span.start(),
             end: span.end(),
             start_position: index.position(span.start()).into(),
@@ -124,18 +139,51 @@ impl DiagnosticDocument {
     /// Renders `diagnostic` against the document `index` was built from.
     #[must_use]
     pub fn render(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> Self {
+        Self::render_with_source_indexes(diagnostic, index, &BTreeMap::new())
+    }
+
+    /// Renders a diagnostic with indexes for related source documents.
+    ///
+    /// `primary_index` owns the primary span's document. When a related span
+    /// carries a source identity present in `source_indexes`, its display
+    /// positions are derived from that document instead of the primary one.
+    /// An absent related index falls back to `primary_index` so a producer can
+    /// continue rendering a diagnostic while reporting incomplete context.
+    #[must_use]
+    pub fn render_with_source_indexes<'a>(
+        diagnostic: &Diagnostic,
+        primary_index: &LineIndex<'a>,
+        source_indexes: &BTreeMap<String, LineIndex<'a>>,
+    ) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             code: diagnostic.code().as_atom().to_owned(),
             level: diagnostic.level().as_atom().to_owned(),
             message: diagnostic.message().to_owned(),
-            primary_span: SpanDocument::render(diagnostic.primary_span(), index),
+            primary_span: SpanDocument::render_with_source(
+                diagnostic.primary_span(),
+                primary_index,
+                diagnostic.source_id(),
+            ),
             related: diagnostic
                 .related()
                 .iter()
-                .map(|related| RelatedSpanDocument {
-                    span: SpanDocument::render(related.span, index),
-                    message: related.message.clone(),
+                .map(|related| {
+                    // A related span may point into another document. Use its
+                    // own line index whenever the caller supplied one.
+                    let index = related
+                        .source_id
+                        .as_deref()
+                        .and_then(|source_id| source_indexes.get(source_id))
+                        .unwrap_or(primary_index);
+                    RelatedSpanDocument {
+                        span: SpanDocument::render_with_source(
+                            related.span,
+                            index,
+                            related.source_id.as_deref(),
+                        ),
+                        message: related.message.clone(),
+                    }
                 })
                 .collect(),
             notes: diagnostic.notes().to_vec(),

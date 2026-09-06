@@ -411,6 +411,13 @@ impl CaseExpectations {
                     actual.level()
                 ));
             }
+            if expected.source_id.as_deref() != actual.source_id() {
+                return Err(format!(
+                    "diagnostic {index} source mismatch: expected {:?}, got {:?}",
+                    expected.source_id,
+                    actual.source_id()
+                ));
+            }
             if expected.primary_span != actual.primary_span() {
                 return Err(format!(
                     "diagnostic {index} primary span mismatch: expected {:?}, got {:?}",
@@ -436,6 +443,13 @@ impl CaseExpectations {
                 if expected_related.span != actual_related.span {
                     return Err(format!(
                         "diagnostic {index} related span {related_index} mismatch"
+                    ));
+                }
+                if expected_related.source_id.as_deref()
+                    != actual_related.source_id.as_deref()
+                {
+                    return Err(format!(
+                        "diagnostic {index} related span {related_index} source mismatch"
                     ));
                 }
                 if let Some(message) = &expected_related.message

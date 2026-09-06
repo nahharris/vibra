@@ -15,6 +15,8 @@
     clippy::unwrap_used
 )]
 
+use std::collections::BTreeMap;
+
 use jsonschema::Validator;
 use serde_json::{Value, json};
 use vibra_diagnostics::{
@@ -145,6 +147,36 @@ fn a_span_carries_both_bytes_and_derived_positions() {
     assert_eq!(document.primary_span.start_position.line, 1);
     assert_eq!(document.primary_span.start_position.column, 2);
     assert_eq!(document.primary_span.end_position.column, 4);
+}
+
+#[test]
+fn a_related_span_uses_the_index_for_its_source_document() {
+    let primary_source = "one\n";
+    let related_source = "a\nb\n";
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::NameUnknownSymbol,
+        ByteSpan::new(0, 1),
+        "unknown symbol",
+    )
+    .with_source_id("one.vib")
+    .with_related_source("two.vib", ByteSpan::new(2, 3), "declaration");
+    let primary_index = LineIndex::new(primary_source);
+    let mut source_indexes = BTreeMap::new();
+    source_indexes.insert("two.vib".to_owned(), LineIndex::new(related_source));
+
+    let document = DiagnosticDocument::render_with_source_indexes(
+        &diagnostic,
+        &primary_index,
+        &source_indexes,
+    );
+
+    assert_eq!(document.primary_span.source_id.as_deref(), Some("one.vib"));
+    assert_eq!(
+        document.related[0].span.source_id.as_deref(),
+        Some("two.vib")
+    );
+    assert_eq!(document.related[0].span.start_position.line, 2);
+    assert_eq!(document.related[0].span.start_position.column, 1);
 }
 
 #[test]

@@ -98,6 +98,8 @@ pub enum Domain {
     Runtime,
     /// Canonical presentation.
     Style,
+    /// Tool commands and capability availability.
+    Tool,
     /// Declared contracts that hold but say more than they need to.
     Contract,
 }
@@ -118,6 +120,7 @@ impl Domain {
             Self::Project => "project",
             Self::Runtime => "runtime",
             Self::Style => "style",
+            Self::Tool => "tool",
             Self::Contract => "contract",
         }
     }
@@ -328,6 +331,8 @@ diagnostic_registry! {
         "operands are in a noncanonical but unambiguous order";
     ContractUnusedEffect => "@contract.unused-effect", Contract, Warning, None,
         "a declared effect root is never performed";
+    ToolUnavailable => "@tool.unavailable", Tool, Error, None,
+        "a valid v1 surface is not available in the selected implementation profile";
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -342,7 +347,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 60;
+    const REGISTERED_CODES: usize = 61;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

@@ -26,6 +26,15 @@ every written atom also has a singleton type that can widen to `atom`. There is
 no null value, truthiness conversion, implicit numeric widening, or implicit
 string conversion.
 
+The M2 executable subset is deliberately smaller than this complete type
+surface. Its checker admits primitive names, `void`, monomorphic `fn` types,
+direct local-name/discard bindings, immutable `def` values, `defn`, `lambda`,
+`do`, `let`, `if`, and ordinary function application. Generic bounds and`types:` arguments, nominal bodies, collection types and constructors,
+destructuring/constructor patterns, `match`, `try`, `option`, `result`,
+ascription, widening, narrowing, and conversion remain valid syntax but are
+outside that profile and produce `@tool.unavailable` when semantic support is
+requested. This is an implementation capability boundary, not a second sourcedialect; the full rules below remain the v1 authority for later milestones.
+
 A numeric suffix is a complete type annotation on its literal. Integer
 suffixes select one of `i8` through `i64` or `u8` through `u64`; float suffixes
 select `f32` or `f64`. A suffixed literal MUST fit the selected type. An

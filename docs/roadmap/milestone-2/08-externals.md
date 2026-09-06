@@ -27,14 +27,15 @@ projects **Dependencies and lock**: [source](../../spec/01-source-language.md),
 | --- | --- |
 | Every trusted entry with exact signature | Unknown symbol, wrong types/arity/provider, body present, nonempty ceiling |
 | Explicit import of bootstrap library | Missing import; spoofed module/path/package; modified trusted bytes |
-| Every operation's specified bool/Unicode/numeric/text edge | Checked arithmetic must not wrap, trap, or invent a private result type |
+| Every admitted text operation's Unicode edge | Integer arithmetic remains unavailable; do not wrap, trap, or invent a private result type |
 | Repeated inputs yield identical values and empty events | Environment/clock/random/filesystem dependence and host callback access |
 | Valid plain source function sharing a textual name | Ordinary source external declaration must still be rejected |
 
-C7 must specify floating equality/NaN and signed-zero behavior for every
-applicable operation. Do not inherit host-language defaults by accident. Defer
-fallible arithmetic/conversions requiring M3 nominal results; use only the
-explicit M2 inventory. Assertions' test outcome path is completed in Step 13.
+C7's M2 inventory contains no floating or integer compiler operation, so those
+semantics remain deferred with the nominal result contract. Do not inherit
+host-language defaults by accident. Implement only the exact text operations
+listed in the Step 1 ledger. Assertions' test outcome path is completed in
+Step 13.
 
 Run [common validation](validation.md), focused registry/types/interpreter tests,
 and independent `V1-RUNTIME-*` cases. Done includes a registry-to-case table,

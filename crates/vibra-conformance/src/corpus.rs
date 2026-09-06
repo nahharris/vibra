@@ -5,6 +5,22 @@ use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use crate::manifest::{CaseManifest, MANIFEST_FILE_NAME, ManifestError};
+use vibra_syntax::DocumentMode;
+
+/// One immutable document supplied to a profile handler.
+///
+/// The path is the neutral source identity used by diagnostics and snapshots;
+/// handlers do not need to reconstruct it from a filesystem path or merge
+/// documents into one synthetic source string.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaseInputDocument {
+    /// The case-relative document identity.
+    pub source_id: String,
+    /// The grammar selected by the manifest role and extension.
+    pub mode: DocumentMode,
+    /// The document bytes decoded as UTF-8.
+    pub text: String,
+}
 
 /// A loaded case and its manifest directory.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +70,38 @@ impl Case {
             .as_deref()
             .map(|path| self.read_file(path))
             .transpose()
+    }
+
+    /// Loads every declared input as an explicit, source-identified document.
+    ///
+    /// Declaration order is source, project, then data paths, matching the
+    /// manifest roles. The returned order is stable and each text remains
+    /// independently addressable.
+    pub fn input_documents(&self) -> Result<Vec<CaseInputDocument>, CorpusError> {
+        let inputs = &self.manifest.inputs;
+        let mut documents = Vec::new();
+        if let Some(path) = &inputs.source {
+            documents.push(self.load_input(path, DocumentMode::Source)?);
+        }
+        if let Some(path) = &inputs.project {
+            documents.push(self.load_input(path, DocumentMode::Data)?);
+        }
+        for path in &inputs.data {
+            documents.push(self.load_input(path, DocumentMode::Data)?);
+        }
+        Ok(documents)
+    }
+
+    fn load_input(
+        &self,
+        source_id: &str,
+        mode: DocumentMode,
+    ) -> Result<CaseInputDocument, CorpusError> {
+        Ok(CaseInputDocument {
+            source_id: source_id.to_owned(),
+            mode,
+            text: self.read_file(source_id)?,
+        })
     }
 }
 
