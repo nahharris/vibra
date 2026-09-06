@@ -112,6 +112,7 @@ pub enum DataValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataField {
     label: Name,
+    label_span: ByteSpan,
     value: DataNode,
     span: ByteSpan,
 }
@@ -121,6 +122,12 @@ impl DataField {
     #[must_use]
     pub const fn label(&self) -> &Name {
         &self.label
+    }
+
+    /// The source span occupied by the field label, excluding the value.
+    #[must_use]
+    pub const fn label_span(&self) -> ByteSpan {
+        self.label_span
     }
 
     /// The field value.
@@ -262,6 +269,7 @@ fn decode_node_iterative(
                         pairs
                             .into_iter()
                             .map(|(value, (label, label_span))| DataField {
+                                label_span,
                                 span: ByteSpan::new(
                                     label_span.start(),
                                     value.span().end(),

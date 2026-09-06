@@ -6,6 +6,7 @@ use vibra_schema::SourcePositionQueryDocument;
 use vibra_syntax::{DocumentMode, parse_data, parse_source};
 
 use crate::corpus::Case;
+use crate::manifest::ConformanceOperation;
 use crate::runner::{CaseObservation, HandlerError, ProfileHandler, QueryObservation};
 
 /// A syntax/formatter handler for the `reader-v1` conformance profile.
@@ -18,6 +19,10 @@ use crate::runner::{CaseObservation, HandlerError, ProfileHandler, QueryObservat
 pub struct ReaderV1Handler;
 
 impl ProfileHandler for ReaderV1Handler {
+    fn can_run(&self, case: &Case) -> bool {
+        case.manifest().operation == ConformanceOperation::Reader
+    }
+
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
         let inputs = &case.manifest().inputs;
         let mut paths = Vec::new();

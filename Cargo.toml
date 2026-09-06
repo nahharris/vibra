@@ -17,6 +17,7 @@ vibra-diagnostics = { path = "crates/vibra-diagnostics" }
 vibra-fmt = { path = "crates/vibra-fmt" }
 vibra-schema = { path = "crates/vibra-schema" }
 vibra-syntax = { path = "crates/vibra-syntax" }
+vibra-workspace = { path = "crates/vibra-workspace" }
 
 toml = "1"
 serde = { version = "1", features = ["derive"] }

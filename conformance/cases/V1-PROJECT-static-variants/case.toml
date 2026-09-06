@@ -1,0 +1,10 @@
+id = "V1-PROJECT-static-variants"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "Path and Git dependencies accept their legal optional target forms."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = true

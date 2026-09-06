@@ -101,12 +101,12 @@ span with its source identity and does not resolve an atom or read a path.
 | --- | --- | --- | --- |
 | project | `format`, `package`, `targets`, `dependencies` | atom, record, array, map | all required; `format` is exactly `@project.v1`; `targets` contains at least one target; `dependencies` may be empty |
 | package | `name`, `version` | string, string | both required; `name` is kebab-case and `version` is one semantic version, never a range |
-| target | `name`, `kind`, `root`, `entry`, `effects` | atom, atom, string, atom, array | `name`, `kind`, and `root` required; `kind` is `@bin` or `@lib`; a binary requires `entry` and `effects`; a library omits both |
+| target | `name`, `kind`, `root`, `entry`, `effects` | atom, atom, string, atom, array | `name`, `kind`, and `root` required; `name` is one kebab-name atom component; `kind` is `@bin` or `@lib`; a binary requires `entry` and `effects`; a library omits both |
 | path dependency | `kind`, `path`, `target` | atom, string, atom | `kind` is `@path`; `path` required; `target` optional |
 | Git dependency | `kind`, `git`, `rev`, `target` | atom, string, string, atom | `kind` is `@git`; `git` is HTTPS; `rev` is exactly 40 lowercase hexadecimal characters; `target` optional |
 
 The dependency value is selected by its `kind` field. A dependency map key is
-an alias atom value. `format`, target `name` and `kind`, and dependency `kind`
+an alias atom value whose spelling is one kebab-name component. `format`, target `name` and `kind`, and dependency `kind`
 are atom values selected by their schema slots. Target `entry` is an entity
 reference requiring a declaration; each target `effects` item is an entity
 reference requiring an effect root; and dependency `target` is an entity
@@ -116,7 +116,10 @@ and lock inputs exist. An atom's spelling never changes its role.
 
 The M2 decoder accepts only the records above and the generic VIBON literals
 they contain. It performs no filesystem discovery, dependency sync, network
-access, or source resolution. Path normalization, target-root overlap,
+access, or source resolution. `root` and path-dependency `path` strings are
+opaque schema values in M2: every valid VIBON string is accepted, including
+relative, absolute-looking, and traversal-looking spellings. Path syntax,
+normalization, containment, target-root overlap,
 entry-kind, and dependency-target diagnostics belong to the later graph and
 resolver phases; the decoder must report the shape error before those phases
 when the record is malformed.
@@ -141,7 +144,7 @@ V1 does not solve version ranges; dependency selection is exact. The package
 name and version are provenance and never appear in a reference position, so
 they are strings rather than atoms.
 
-A target has a unique atom name, kind `@bin` or `@lib`, and a source root. Every
+A target has a unique one-component kebab atom name, kind `@bin` or `@lib`, and a source root. Every
 root MUST remain inside the project after canonical path resolution, and roots
 MUST be pairwise disjoint: no root may equal or contain another. Every module
 therefore belongs to exactly one target and has exactly one canonical path.
@@ -250,6 +253,13 @@ V1 supports:
 - local dependencies whose record has `kind: @path` and `path:`; and
 - Git dependencies whose record has `kind: @git`, an HTTPS `git:` URL, and a
   full 40-hex `rev:`.
+
+For the M2 schema check, an HTTPS Git URL has the form `https://authority` with
+an authority containing either DNS labels (ASCII letters, digits, and internal
+hyphens) or a bracketed IPv6 literal, plus an optional decimal port from 1 to
+65535. A path, query, or fragment may follow. Userinfo, an empty or malformed
+host, control/whitespace characters, and non-HTTPS schemes are rejected. URL
+fetching and repository-specific validation remain outside the decoder.
 
 A dependency alias binds one `@lib` target of the dependency package, named by
 the optional `target:` field, and never binds a package as a whole. An omitted

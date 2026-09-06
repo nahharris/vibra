@@ -18,8 +18,11 @@ Requires Step 1, especially C2/C11. Read projects **VIBON data documents**,
 4. Preserve field/value spans, comments, and source identity. Feed schema field
    order to formatting; verify decode/format/decode equivalence.
 5. Register a real static project-observation handler in the existing runner.
-   This slice claims schema decoding only; dependency/source resolution remains
-   explicitly unavailable. Update CLI-free library status and corpus CI scope.
+   Select it through the closed `project-decode` operation, so later graph and
+   resolution handlers can share `static-v1` without registration-order
+   coupling. This slice claims schema decoding only; dependency/source
+   resolution remains explicitly unavailable. Update CLI-free library status
+   and corpus CI scope.
 
 ## Required matrix
 
@@ -33,7 +36,9 @@ Requires Step 1, especially C2/C11. Read projects **VIBON data documents**,
 | Canonical round trip | `.vib` sent to data loader fails before parsing; Unicode diagnostic origins |
 
 Use `@data.invalid-extension`, generic data codes, and project-specific codes
-only as assigned in Step 1. Preserve M1 generic decoding behavior. No lock
+only as assigned in Step 1. Preserve M1 generic decoding behavior. M2 treats
+target roots and path-dependency paths as opaque strings; lexical path
+rejection, normalization, containment, and overlap belong to Step 3. No lock
 generation, filesystem discovery, network, resolver, or project-edit command.
 
 Run the common [validation](validation.md) sequence plus

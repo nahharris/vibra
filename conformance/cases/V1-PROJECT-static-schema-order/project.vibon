@@ -1,0 +1,9 @@
+(record
+  ; project comment
+  dependencies: (map
+    @z (record target: @core rev: "0123456789abcdef0123456789abcdef01234567" git: "https://example.com/z.git" kind: @git)
+    @a (record kind: @path path: "../a"))
+  targets: (array
+    (record effects: (array) entry: @hello.main root: "src" kind: @bin name: @hello))
+  package: (record version: "0.1.0" name: "hello")
+  format: @project.v1)

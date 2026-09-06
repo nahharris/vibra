@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_conformance::{
-    CaseManifest, CaseObservation, CaseStatus, ConformanceProfile, ConformanceRunner,
-    Corpus, HandlerError, ProfileDispatcher, ProfileHandler, ReaderV1Handler,
+    CaseManifest, CaseObservation, CaseStatus, ConformanceOperation,
+    ConformanceProfile, ConformanceRunner, Corpus, HandlerError, ProfileDispatcher,
+    ProfileHandler, ReaderV1Handler,
 };
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_syntax::DocumentMode;
@@ -116,6 +117,7 @@ end = 7
     assert_eq!(manifest.rule_id(), "V1-SRC-READER");
     assert_eq!(manifest.section(), "V1-SRC-READER");
     assert_eq!(manifest.profile(), ConformanceProfile::ReaderV1);
+    assert_eq!(manifest.operation(), ConformanceOperation::Reader);
     assert_eq!(manifest.inputs.data, ["one.vibon", "two.vibon"]);
     assert!(!manifest.expectations.accepted);
     assert_eq!(manifest.expectations.diagnostics.len(), 1);
@@ -123,6 +125,43 @@ end = 7
         manifest.expectations.diagnostics[0].primary_span,
         ByteSpan::new(4, 7)
     );
+}
+
+#[test]
+fn manifest_selects_project_decode_and_rejects_implicit_mixed_operations() {
+    let project = CaseManifest::from_str(
+        r#"
+id = "V1-PROJECT-operation-project-decode"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "project-decode"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = true
+"#,
+    )
+    .expect("project operation manifest");
+    assert_eq!(project.operation(), ConformanceOperation::ProjectDecode);
+
+    let mixed = CaseManifest::from_str(
+        r#"
+id = "V1-PROJECT-operation-mixed"
+rule = "V1-PROJECT"
+profile = "static-v1"
+
+[inputs]
+source = "main.vib"
+project = "project.vibon"
+
+[expect]
+accepted = true
+"#,
+    )
+    .expect_err("mixed non-reader inputs need an explicit operation");
+    assert!(mixed.to_string().contains("operation is required"));
 }
 
 #[test]

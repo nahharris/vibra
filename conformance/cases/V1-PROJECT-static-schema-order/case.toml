@@ -1,0 +1,11 @@
+id = "V1-PROJECT-static-schema-order"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "The static project handler decodes the closed schema and emits canonical order."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = true
+formatted = "formatted.vibon"

@@ -93,6 +93,35 @@ pub struct CaseInputs {
     pub data: Vec<String>,
 }
 
+/// The closed operation selected by a conformance case.
+///
+/// Later slices add their operation to this enum before registering a handler;
+/// input presence alone never selects a semantic implementation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConformanceOperation {
+    /// Run the reader/data grammar handler.
+    Reader,
+    /// Decode one project VIBON document without resolution or I/O.
+    ProjectDecode,
+}
+
+impl ConformanceOperation {
+    /// The stable manifest spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reader => "reader",
+            Self::ProjectDecode => "project-decode",
+        }
+    }
+}
+
+impl fmt::Display for ConformanceOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// One expected source span attached to a diagnostic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedRelatedSpan {
@@ -192,6 +221,8 @@ pub struct CaseManifest {
     pub rule_id: String,
     /// Minimum profile required to execute the case.
     pub profile: ConformanceProfile,
+    /// Closed operation selected by the case inputs and operation field.
+    pub operation: ConformanceOperation,
     /// Optional maintainer-facing description.
     pub description: Option<String>,
     /// Case inputs.
@@ -241,6 +272,12 @@ impl CaseManifest {
     pub const fn profile(&self) -> ConformanceProfile {
         self.profile
     }
+
+    /// The closed operation selected for this case.
+    #[must_use]
+    pub const fn operation(&self) -> ConformanceOperation {
+        self.operation
+    }
 }
 
 impl FromStr for CaseManifest {
@@ -276,6 +313,7 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             project: raw.inputs.project,
             data: raw.inputs.data,
         };
+        let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
         {
@@ -326,11 +364,51 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             id: raw.id,
             rule_id,
             profile,
+            operation,
             description: raw.description,
             inputs,
             expectations,
         })
     }
+}
+
+fn decode_operation(
+    raw: Option<&str>,
+    profile: ConformanceProfile,
+    inputs: &CaseInputs,
+) -> Result<ConformanceOperation, ManifestError> {
+    let input_kinds = usize::from(inputs.source.is_some())
+        + usize::from(inputs.project.is_some())
+        + usize::from(!inputs.data.is_empty());
+    if raw.is_none() && profile != ConformanceProfile::ReaderV1 && input_kinds > 1 {
+        return Err(ManifestError::Invalid(
+            "an operation is required when a non-reader case has multiple input kinds"
+                .to_owned(),
+        ));
+    }
+    let operation = match raw {
+        Some("reader") => ConformanceOperation::Reader,
+        Some("project-decode") => ConformanceOperation::ProjectDecode,
+        Some(value) => {
+            return Err(ManifestError::Invalid(format!(
+                "unknown conformance operation `{value}`"
+            )));
+        }
+        None if profile != ConformanceProfile::ReaderV1 && inputs.project.is_some() => {
+            ConformanceOperation::ProjectDecode
+        }
+        None => ConformanceOperation::Reader,
+    };
+    if operation == ConformanceOperation::ProjectDecode
+        && (inputs.project.is_none()
+            || inputs.source.is_some()
+            || !inputs.data.is_empty())
+    {
+        return Err(ManifestError::Invalid(
+            "project-decode requires exactly one project input".to_owned(),
+        ));
+    }
+    Ok(operation)
 }
 
 fn validate_case_id(id: &str) -> Result<(), ManifestError> {
@@ -524,6 +602,8 @@ pub(crate) struct RawCaseManifest {
     pub(crate) id: String,
     pub(crate) rule: String,
     pub(crate) profile: String,
+    #[serde(default)]
+    pub(crate) operation: Option<String>,
     #[serde(default)]
     pub(crate) description: Option<String>,
     #[serde(default)]

@@ -34,6 +34,12 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // The wire format. The Step 10 adapter consumes syntax facts; no phase
     // depends on the wire crate.
     ("vibra-schema", &["vibra-diagnostics", "vibra-syntax"]),
+    // Project schema decoding sits above syntax and diagnostics. Later
+    // workspace phases may widen this row when their inputs exist.
+    (
+        "vibra-workspace",
+        &["vibra-diagnostics", "vibra-fmt", "vibra-syntax"],
+    ),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -42,6 +48,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-fmt",
             "vibra-schema",
             "vibra-syntax",
+            "vibra-workspace",
         ],
     ),
 ];

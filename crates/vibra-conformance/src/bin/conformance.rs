@@ -3,11 +3,13 @@
 //! This binary is intentionally owned by `vibra-conformance`; it is a CI
 //! adapter and is not the user-facing `vibra` command promised for milestone 2.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use vibra_conformance::{
     ConformanceProfile, ConformanceRunner, Corpus, ProfileDispatcher, ReaderV1Handler,
+    StaticV1ProjectHandler,
 };
 
 fn main() -> ExitCode {
@@ -35,7 +37,8 @@ fn run() -> Result<(), String> {
         return Err("corpus contains no reader-v1 cases".to_owned());
     }
     let dispatcher = ProfileDispatcher::new()
-        .with_handler(ConformanceProfile::ReaderV1, ReaderV1Handler);
+        .with_handler(ConformanceProfile::ReaderV1, ReaderV1Handler)
+        .with_handler(ConformanceProfile::StaticV1, StaticV1ProjectHandler);
     let report = ConformanceRunner::new(dispatcher).run(&corpus);
 
     for case in report.cases() {
@@ -51,8 +54,24 @@ fn run() -> Result<(), String> {
             }
         }
     }
+    let mut by_profile = BTreeMap::<ConformanceProfile, (usize, usize, usize)>::new();
+    for case in report.cases() {
+        let counts = by_profile.entry(case.required_profile).or_default();
+        match &case.status {
+            vibra_conformance::CaseStatus::Passed => counts.0 += 1,
+            vibra_conformance::CaseStatus::Failed { .. } => counts.1 += 1,
+            vibra_conformance::CaseStatus::Unavailable { .. } => counts.2 += 1,
+        }
+    }
+    for profile in ConformanceProfile::ALL {
+        if let Some((passed, failed, unavailable)) = by_profile.get(profile) {
+            println!(
+                "{profile} conformance: {passed} passed, {failed} failed, {unavailable} unavailable"
+            );
+        }
+    }
     println!(
-        "reader-v1 conformance: {} passed, {} failed, {} unavailable",
+        "conformance total: {} passed, {} failed, {} unavailable",
         report.passed(),
         report.failed(),
         report.unavailable()

@@ -801,6 +801,7 @@ dependencies = [
  "vibra-fmt",
  "vibra-schema",
  "vibra-syntax",
+ "vibra-workspace",
 ]
 
 [[package]]
@@ -831,6 +832,15 @@ name = "vibra-syntax"
 version = "0.0.0"
 dependencies = [
  "vibra-diagnostics",
+]
+
+[[package]]
+name = "vibra-workspace"
+version = "0.0.0"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-fmt",
+ "vibra-syntax",
 ]
 
 [[package]]

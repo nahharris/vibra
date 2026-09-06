@@ -87,7 +87,9 @@ handler for reader-only cases. A negative availability case may assert the
 agreed diagnostic without claiming execution support for its input; an
 unavailable requested execution cannot be converted into a passed value test.
 
-Extend handler coverage with each step; do not register a stub that returns
+Extend handler coverage with each step. Handlers claim a closed manifest
+operation, and the dispatcher rejects overlapping claims at the selected
+profile. Do not register a stub that returns
 `accepted: true`, compare a snapshot to itself, serialize Rust `Debug` as a
 public contract, or copy expected values into observations. Prove each new
 observation channel detects an intentionally wrong expected result.

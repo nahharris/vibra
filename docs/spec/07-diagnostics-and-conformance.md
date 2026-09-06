@@ -139,6 +139,9 @@ The implementation will maintain a backend-independent corpus organized by
 specification rule, not compiler module. Each case records:
 
 - normative rule ID;
+- a closed operation selector (`reader` or `project-decode` in the current
+  slice); `project-decode` requires exactly one project input, and a
+  non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs;
 - expected acceptance or diagnostics;
 - expected canonical formatting;

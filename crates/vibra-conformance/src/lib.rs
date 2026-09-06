@@ -24,16 +24,18 @@
 mod corpus;
 mod manifest;
 mod profile;
+mod project;
 mod reader;
 mod runner;
 
 pub use corpus::{Case, CaseInputDocument, Corpus, CorpusError};
 pub use manifest::{
-    CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic, ExpectedExecution,
-    ExpectedFix, ExpectedQuery, ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError,
-    NORMATIVE_SECTION_IDS,
+    CaseExpectations, CaseInputs, CaseManifest, ConformanceOperation,
+    ExpectedDiagnostic, ExpectedExecution, ExpectedFix, ExpectedQuery,
+    ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, NORMATIVE_SECTION_IDS,
 };
 pub use profile::{ConformanceProfile, UnknownProfile};
+pub use project::StaticV1ProjectHandler;
 pub use reader::ReaderV1Handler;
 pub use runner::{
     CaseObservation, CaseReport, CaseStatus, ConformanceRunner, DispatchResult,

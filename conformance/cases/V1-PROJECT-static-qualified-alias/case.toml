@@ -1,0 +1,18 @@
+id = "V1-PROJECT-static-qualified-alias"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "Dependency aliases are single kebab-name atom components."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@data.invalid-value"
+level = "@error"
+source = "project.vibon"
+[expect.diagnostics.span]
+start = 158
+end = 167
