@@ -63,6 +63,23 @@ fn checked_binding_observation_is_valid_vibon() {
 }
 
 #[test]
+fn global_initializer_keeps_its_local_slots_at_runtime() {
+    let checked = vibra_types::check_source(
+        "global-let.vib",
+        "(def value i32 (let local 1i32 local))\n(defn answer () i32 value)",
+    );
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let program = checked.program().expect("checked program");
+    assert_eq!(program.globals()[0].slot_count(), 1);
+    let execution = vibra_interp::run(program).expect("global initializer");
+    assert_eq!(
+        execution.value(),
+        &vibra_ir::Value::I32(1),
+        "global local binding must evaluate through the checked IR"
+    );
+}
+
+#[test]
 fn all_discard_spellings_and_sibling_scope_are_checked() {
     let case = case("V1-TYPE-NAMES-binding-discards");
     let observation = StaticV1TypeHandler.run(&case).expect("type handler");

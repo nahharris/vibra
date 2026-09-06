@@ -509,6 +509,36 @@ impl Expr {
             | Self::Call { .. } => None,
         }
     }
+
+    /// Number of immutable activation slots required by this expression.
+    #[must_use]
+    pub fn slot_count(&self) -> usize {
+        match self {
+            Self::Literal { .. } | Self::Global { .. } => 0,
+            Self::Sequence { expressions, .. } => {
+                expressions.iter().map(Self::slot_count).max().unwrap_or(0)
+            }
+            Self::Variable { slot, .. } => slot.saturating_add(1),
+            Self::Let {
+                slot, value, body, ..
+            } => value
+                .slot_count()
+                .max(body.slot_count())
+                .max(slot.map_or(0, |slot| slot.saturating_add(1))),
+            Self::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => condition
+                .slot_count()
+                .max(then_branch.slot_count())
+                .max(else_branch.slot_count()),
+            Self::Call { arguments, .. } => {
+                arguments.iter().map(Self::slot_count).max().unwrap_or(0)
+            }
+        }
+    }
 }
 
 /// One checked module-level immutable value.
@@ -518,6 +548,7 @@ pub struct CheckedGlobal {
     value_type: PrimitiveType,
     initializer: Expr,
     origin: SourceOrigin,
+    slot_count: usize,
 }
 
 impl CheckedGlobal {
@@ -534,11 +565,13 @@ impl CheckedGlobal {
                 actual: initializer.result_type(),
             });
         }
+        let slot_count = initializer.slot_count();
         Ok(Self {
             name: name.into(),
             value_type,
             initializer,
             origin,
+            slot_count,
         })
     }
 
@@ -564,6 +597,12 @@ impl CheckedGlobal {
     #[must_use]
     pub const fn origin(&self) -> &SourceOrigin {
         &self.origin
+    }
+
+    /// Number of immutable activation slots required by the initializer.
+    #[must_use]
+    pub const fn slot_count(&self) -> usize {
+        self.slot_count
     }
 }
 

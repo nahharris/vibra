@@ -239,7 +239,8 @@ impl Machine<'_> {
         }
         *self.globals.get_mut(index)? = GlobalState::Evaluating;
         let global = self.program.globals().get(index)?;
-        let value = self.evaluate(global.initializer(), Vec::new());
+        let value =
+            self.evaluate(global.initializer(), vec![None; global.slot_count()]);
         if let Some(value) = &value {
             *self.globals.get_mut(index)? = GlobalState::Ready(value.clone());
         }
