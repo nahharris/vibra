@@ -215,3 +215,172 @@ fn resolved_artifact_is_structured_vibon_with_stable_text() {
     assert!(document.accepted(), "{:?}", document.diagnostics());
     assert!(artifact.ends_with("\n"));
 }
+
+#[test]
+fn importing_a_declaration_reports_wrong_entity_kind_before_unknown_path() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            None,
+            vec![
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["main"],
+                    "src/main.vib",
+                    b"(import greet @app.lib.greet)\n(defn run () void (do))",
+                ),
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["lib"],
+                    "src/lib.vib",
+                    b"(defn greet () void visibility: @public (do))",
+                ),
+            ],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(snapshot.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::NameWrongEntityKind
+            && diagnostic
+                .related()
+                .iter()
+                .any(|related| related.source_id.as_deref() == Some("src/lib.vib"))
+    }));
+    assert!(
+        !snapshot
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ModuleUnknownPath)
+    );
+    assert_eq!(snapshot.imports().len(), 1);
+    assert!(snapshot.imports()[0].module().is_none());
+}
+
+#[test]
+fn entries_accept_only_module_level_functions() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            Some("app.main.user.run"),
+            vec![vibra_resolve::SourceModule::new(
+                "app",
+                ["main"],
+                "src/main.vib",
+                b"(deftype user (record field str) (defn run () void (do)))",
+            )],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::NameWrongEntityKind)
+    );
+}
+
+#[test]
+fn lexical_and_lambda_label_bindings_cannot_shadow_visible_names() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            None,
+            vec![vibra_resolve::SourceModule::new(
+                "app",
+                ["main"],
+                "src/main.vib",
+                br#"(import lib @app.lib)
+(def x i32 0i32)
+(defn f (lib i32) void
+  (lambda () void labelled: (lib i32 0i32) (do lib)))"#,
+            )],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::NameRedeclaration)
+            .count()
+            >= 2
+    );
+    assert!(
+        !snapshot
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::NameUnknownSymbol)
+    );
+}
+
+#[test]
+fn deferred_declaration_forms_and_members_are_explicitly_unavailable() {
+    let input = ResolveInput::single_module(
+        "demo",
+        "1.0.0",
+        "app",
+        "main",
+        br#"(deftype user (record field str) (defn method () void (do)))
+(defint iface (defn call () void))
+(deffect io (defn op () void))"#,
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(
+        snapshot
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+            .count()
+            >= 6
+    );
+}
+
+#[test]
+fn import_cycle_related_span_comes_from_the_traversed_cycle_edge() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::lib(
+            "app",
+            vec![
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["a"],
+                    "src/a.vib",
+                    b"(import b @app.b)\n(defn a () void (do))",
+                ),
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["b"],
+                    "src/b.vib",
+                    b"(import c @app.c)\n(defn b () void (do))",
+                ),
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["c"],
+                    "src/c.vib",
+                    b"(import a @app.a)\n(defn c () void (do))",
+                ),
+            ],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(snapshot.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::ModuleImportCycle
+            && diagnostic
+                .related()
+                .iter()
+                .any(|related| related.source_id.as_deref() == Some("src/a.vib"))
+    }));
+}

@@ -831,7 +831,7 @@ enum BodyWork {
 
 #[derive(Clone, Debug)]
 struct ImportWork {
-    module: ModuleKey,
+    module: Option<ModuleKey>,
     alias: String,
     written: String,
     source_id: String,
@@ -842,6 +842,7 @@ struct Resolution {
     input: ResolveInput,
     modules: Vec<ParsedModule>,
     module_indexes: BTreeMap<ModuleKey, usize>,
+    module_bindings: BTreeMap<ModuleKey, BTreeMap<String, (ByteSpan, String)>>,
     declarations: Vec<DeclarationWork>,
     declaration_indexes: BTreeMap<(ModuleKey, Vec<String>), usize>,
     imports: Vec<(ModuleKey, ImportWork)>,
@@ -856,6 +857,7 @@ impl Resolution {
             input,
             modules: Vec::new(),
             module_indexes: BTreeMap::new(),
+            module_bindings: BTreeMap::new(),
             declarations: Vec::new(),
             declaration_indexes: BTreeMap::new(),
             imports: Vec::new(),
@@ -897,12 +899,14 @@ impl Resolution {
             .map(|(_, import)| ResolvedImport {
                 alias: import.alias.clone(),
                 written: import.written.clone(),
-                module: self.module_indexes.contains_key(&import.module).then(|| {
-                    ModuleId::new(
-                        &self.input.package,
-                        &import.module.unit,
-                        &import.module.segments,
-                    )
+                module: import.module.as_ref().and_then(|module| {
+                    self.module_indexes.contains_key(module).then(|| {
+                        ModuleId::new(
+                            &self.input.package,
+                            &module.unit,
+                            &module.segments,
+                        )
+                    })
                 }),
                 source_id: import.source_id.clone(),
                 span: import.span,
@@ -1043,6 +1047,7 @@ impl Resolution {
                     &source_id,
                 );
             }
+            self.module_bindings.insert(module_key, names);
         }
     }
 
@@ -1063,9 +1068,7 @@ impl Resolution {
                 .with_source_id(source_id),
             );
         }
-        if let Some((earlier_span, earlier_source)) =
-            names.insert(name.to_owned(), (span, source_id.to_owned()))
-        {
+        if let Some((earlier_span, earlier_source)) = names.get(name).cloned() {
             self.diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::NameRedeclaration,
@@ -1079,7 +1082,16 @@ impl Resolution {
                     "the earlier module-level name is here",
                 ),
             );
+        } else {
+            names.insert(name.to_owned(), (span, source_id.to_owned()));
         }
+    }
+
+    fn unavailable(&mut self, source_id: &str, span: ByteSpan, message: &'static str) {
+        self.diagnostics.push(
+            Diagnostic::new(DiagnosticCode::ToolUnavailable, span, message)
+                .with_source_id(source_id),
+        );
     }
 
     fn collect_declaration(
@@ -1135,12 +1147,28 @@ impl Resolution {
             ),
             Declaration::Import(_) => return,
         };
+        let unavailable_message = match declaration {
+            Declaration::Deftype(_) => {
+                Some("nominal type resolution is unavailable in Step 4")
+            }
+            Declaration::Defint(_) => {
+                Some("interface resolution is unavailable in Step 4")
+            }
+            Declaration::Deffect(_) => {
+                Some("effect resolution is unavailable in Step 4")
+            }
+            Declaration::Import(_)
+            | Declaration::Def(_)
+            | Declaration::Defn(_)
+            | Declaration::Test(_) => None,
+        };
+        if let Some(message) = unavailable_message {
+            self.unavailable(source_id, span, message);
+        }
         let mut path = owner;
         path.push(name.to_owned());
         if path.len() == 1 {
-            if let Some((earlier_span, earlier_source)) =
-                names.insert(name.to_owned(), (span, source_id.to_owned()))
-            {
+            if let Some((earlier_span, earlier_source)) = names.get(name).cloned() {
                 self.diagnostics.push(
                     Diagnostic::new(
                         DiagnosticCode::NameRedeclaration,
@@ -1154,6 +1182,8 @@ impl Resolution {
                         "the earlier module-level name is here",
                     ),
                 );
+            } else {
+                names.insert(name.to_owned(), (span, source_id.to_owned()));
             }
             if matches!(kind, EntityKind::Value | EntityKind::Function)
                 && matches!(name, "map" | "array" | "tuple")
@@ -1203,6 +1233,11 @@ impl Resolution {
             }
             Declaration::Deffect(value) => {
                 for member in value.members() {
+                    self.unavailable(
+                        source_id,
+                        member.span(),
+                        "effect operations are unavailable in Step 4",
+                    );
                     self.collect_member(
                         module,
                         member,
@@ -1228,6 +1263,11 @@ impl Resolution {
         for member in members {
             match member {
                 TypeMember::Method(function) => {
+                    self.unavailable(
+                        source_id,
+                        function.span(),
+                        "type and interface members are unavailable in Step 4",
+                    );
                     self.collect_member(
                         module,
                         function,
@@ -1243,14 +1283,18 @@ impl Resolution {
                     );
                 }
                 TypeMember::Implementation(implementation) => {
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            DiagnosticCode::ToolUnavailable,
-                            implementation.span(),
-                            "implementation resolution is unavailable in Step 4",
-                        )
-                        .with_source_id(source_id),
+                    self.unavailable(
+                        source_id,
+                        implementation.span(),
+                        "implementation resolution is unavailable in Step 4",
                     );
+                    for member in implementation.members() {
+                        self.unavailable(
+                            source_id,
+                            member.span(),
+                            "implementation members are unavailable in Step 4",
+                        );
+                    }
                 }
             }
         }
@@ -1281,6 +1325,11 @@ impl Resolution {
         for field in fields {
             let field_name = field.name().value();
             let field_span = field.span();
+            self.unavailable(
+                source_id,
+                field_span,
+                "nominal type members are unavailable in Step 4",
+            );
             self.check_member_name(&mut names, field_name, field_span, source_id);
             let mut path = owner.clone();
             path.push(field_name.to_owned());
@@ -1384,22 +1433,83 @@ impl Resolution {
                 let Some(unit) = target_segments.first() else {
                     continue;
                 };
-                let module = ModuleKey {
-                    unit: unit.clone(),
-                    segments: target_segments.iter().skip(1).cloned().collect(),
-                };
-                if !self.module_indexes.contains_key(&module) {
+                let target_path =
+                    target_segments.iter().skip(1).cloned().collect::<Vec<_>>();
+                let target_span = import.target().span_or(import.span());
+                let mut resolved_module = None;
+                let Some(module_len) = self.longest_module_prefix(unit, &target_path)
+                else {
                     self.diagnostics.push(
                         Diagnostic::new(
                             DiagnosticCode::ModuleUnknownPath,
-                            import.target().span_or(import.span()),
+                            target_span,
                             "import target does not resolve to a source module",
                         )
                         .with_source_id(parsed.module.source_id.clone()),
                     );
+                    let work = ImportWork {
+                        module: None,
+                        alias: import.alias().value().to_owned(),
+                        written: target.value().to_owned(),
+                        source_id: parsed.module.source_id.clone(),
+                        span: import.span(),
+                    };
+                    let index = self.imports.len();
+                    self.imports.push((module_key.clone(), work));
+                    self.imports_by_module
+                        .entry(module_key.clone())
+                        .or_default()
+                        .push(index);
+                    continue;
+                };
+                let Some(module_segments) = target_path.get(..module_len) else {
+                    continue;
+                };
+                let Some(declaration_segments) = target_path.get(module_len..) else {
+                    continue;
+                };
+                let module = ModuleKey {
+                    unit: unit.clone(),
+                    segments: module_segments.to_vec(),
+                };
+                if declaration_segments.is_empty() {
+                    resolved_module = Some(module);
+                } else {
+                    let declaration_path = declaration_segments.to_vec();
+                    let target = self
+                        .declaration_indexes
+                        .get(&(module.clone(), declaration_path))
+                        .and_then(|index| self.declarations.get(*index))
+                        .map(|work| {
+                            (work.declaration.source_id.clone(), work.declaration.span)
+                        });
+                    if let Some((source_id, span)) = target {
+                        self.diagnostics.push(
+                            Diagnostic::new(
+                                DiagnosticCode::NameWrongEntityKind,
+                                target_span,
+                                "import target names a declaration; imports require modules",
+                            )
+                            .with_source_id(parsed.module.source_id.clone())
+                            .with_related_source(
+                                source_id,
+                                span,
+                                "the imported entity is declared here",
+                            ),
+                        );
+                    } else {
+                        self.diagnostics.push(
+                            Diagnostic::new(
+                                DiagnosticCode::ModuleUnknownPath,
+                                target_span,
+                                "import target does not resolve to a source module",
+                            )
+                            .with_source_id(parsed.module.source_id.clone()),
+                        );
+                    }
                 }
                 let work = ImportWork {
-                    module,
+                    module: resolved_module,
                     alias: import.alias().value().to_owned(),
                     written: target.value().to_owned(),
                     source_id: parsed.module.source_id.clone(),
@@ -1446,18 +1556,22 @@ impl Resolution {
             let Some((_, edge)) = self.imports.get(import_index) else {
                 continue;
             };
-            let target = edge.module.clone();
-            if !self.module_indexes.contains_key(&target) {
+            let Some(target) = edge.module.clone() else {
                 continue;
-            }
+            };
             if state.get(&target) == Some(&1) {
                 let Some((_, current)) = self.imports.get(import_index) else {
                     continue;
                 };
-                let earlier = self
-                    .imports
+                let earlier = stack
                     .iter()
-                    .find(|(owner, edge)| owner == &target && edge.module == *module)
+                    .position(|candidate| candidate == &target)
+                    .and_then(|position| stack.get(position.saturating_add(1)))
+                    .and_then(|next| {
+                        self.imports.iter().find(|(owner, edge)| {
+                            owner == &target && edge.module.as_ref() == Some(next)
+                        })
+                    })
                     .map(|(_, edge)| (edge.source_id.clone(), edge.span));
                 let mut diagnostic = Diagnostic::new(
                     DiagnosticCode::ModuleImportCycle,
@@ -1554,12 +1668,14 @@ impl Resolution {
             let Some(target) = self.declarations.get(index) else {
                 continue;
             };
-            if target.declaration.id.kind() != EntityKind::Function {
+            if target.declaration.id.kind() != EntityKind::Function
+                || target.declaration.id.path().len() != 1
+            {
                 self.diagnostics.push(
                     Diagnostic::new(
                         DiagnosticCode::NameWrongEntityKind,
                         entry.span,
-                        "entry reference does not name a function",
+                        "entry reference must name a module-level function",
                     )
                     .with_source_id(entry.source_id.clone())
                     .with_related_source(
@@ -1604,7 +1720,7 @@ impl Resolution {
                 }
                 BodyWork::Function(function) => {
                     let mut scope = Vec::new();
-                    self.bind_parameters(&function, &mut scope, &source_id);
+                    self.bind_parameters(&module, &function, &mut scope, &source_id);
                     for expression in function.expressions() {
                         self.resolve_expression(
                             &module, &from, expression, &scope, &source_id,
@@ -1628,6 +1744,7 @@ impl Resolution {
 
     fn bind_parameters(
         &mut self,
+        module: &ModuleKey,
         function: &FunctionDeclaration,
         scope: &mut Vec<(String, ByteSpan)>,
         source_id: &str,
@@ -1635,13 +1752,29 @@ impl Resolution {
         for parameter in function.parameters() {
             let mut names = Vec::new();
             collect_pattern_names(parameter.parsed_pattern(), &mut names);
-            self.bind_names(scope, names, source_id);
+            self.bind_names(module, scope, names, source_id);
         }
-        for attribute in function.attributes().items() {
+        self.bind_function_attributes(
+            module,
+            function.attributes().items(),
+            scope,
+            source_id,
+        );
+    }
+
+    fn bind_function_attributes(
+        &mut self,
+        module: &ModuleKey,
+        attributes: &[Attribute],
+        scope: &mut Vec<(String, ByteSpan)>,
+        source_id: &str,
+    ) {
+        for attribute in attributes {
             match attribute {
                 Attribute::Labelled(parameters) => {
                     for parameter in parameters {
                         self.bind_names(
+                            module,
                             scope,
                             [(parameter.name().value().to_owned(), parameter.span())],
                             source_id,
@@ -1651,6 +1784,7 @@ impl Resolution {
                 Attribute::Variadic(parameter) => {
                     if !parameter.name().is_discard() {
                         self.bind_names(
+                            module,
                             scope,
                             [(parameter.name().value().to_owned(), parameter.span())],
                             source_id,
@@ -1669,6 +1803,7 @@ impl Resolution {
 
     fn bind_names<I>(
         &mut self,
+        module: &ModuleKey,
         scope: &mut Vec<(String, ByteSpan)>,
         names: I,
         source_id: &str,
@@ -1678,6 +1813,26 @@ impl Resolution {
         for (name, span) in names {
             if name == "-" || name == "@-" || name == "-:" {
                 continue;
+            }
+            if let Some((earlier_span, earlier_source)) = self
+                .module_bindings
+                .get(module)
+                .and_then(|bindings| bindings.get(&name))
+                .cloned()
+            {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::NameRedeclaration,
+                        span,
+                        "a lexical name shadows a visible module binding",
+                    )
+                    .with_source_id(source_id)
+                    .with_related_source(
+                        earlier_source,
+                        earlier_span,
+                        "the visible module binding is here",
+                    ),
+                );
             }
             if let Some((_, earlier_span)) =
                 scope.iter().find(|(bound, _)| bound == &name)
@@ -1749,8 +1904,14 @@ impl Resolution {
                 for parameter in lambda.parameters() {
                     let mut names = Vec::new();
                     collect_pattern_names(parameter.parsed_pattern(), &mut names);
-                    self.bind_names(&mut nested_scope, names, source_id);
+                    self.bind_names(module, &mut nested_scope, names, source_id);
                 }
+                self.bind_function_attributes(
+                    module,
+                    lambda.attributes().items(),
+                    &mut nested_scope,
+                    source_id,
+                );
                 for expression in lambda.body() {
                     self.resolve_expression(
                         module,
@@ -1775,7 +1936,7 @@ impl Resolution {
                 let mut nested_scope = scope.to_vec();
                 let mut names = Vec::new();
                 collect_pattern_names(pattern, &mut names);
-                self.bind_names(&mut nested_scope, names, source_id);
+                self.bind_names(module, &mut nested_scope, names, source_id);
                 for expression in body {
                     self.resolve_expression(
                         module,
@@ -1801,7 +1962,7 @@ impl Resolution {
                     let mut nested_scope = scope.to_vec();
                     let mut names = Vec::new();
                     collect_pattern_names(arm.pattern(), &mut names);
-                    self.bind_names(&mut nested_scope, names, source_id);
+                    self.bind_names(module, &mut nested_scope, names, source_id);
                     self.resolve_expression(
                         module,
                         from,
@@ -1839,14 +2000,17 @@ impl Resolution {
                         true,
                     )
                 } else {
-                    (module.clone(), path.to_vec(), false)
+                    (Some(module.clone()), path.to_vec(), false)
                 }
             } else {
-                (module.clone(), Vec::new(), false)
+                (Some(module.clone()), Vec::new(), false)
             };
-        let target = self
-            .declaration_indexes
-            .get(&(target_module.clone(), declaration_path))
+        let target = target_module
+            .as_ref()
+            .and_then(|target_module| {
+                self.declaration_indexes
+                    .get(&(target_module.clone(), declaration_path))
+            })
             .and_then(|index| self.declarations.get(*index))
             .map(|work| &work.declaration);
         let Some(target) = target else {
