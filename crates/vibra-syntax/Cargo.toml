@@ -1,0 +1,15 @@
+[package]
+name = "vibra-syntax"
+description = "Vibra lexer, lossless recovery CST, document modes, and AST."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-diagnostics.workspace = true
+
+[lints]
+workspace = true

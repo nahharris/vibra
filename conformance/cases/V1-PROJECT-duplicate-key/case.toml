@@ -1,0 +1,18 @@
+id = "V1-PROJECT-duplicate-key"
+rule = "V1-PROJECT"
+profile = "reader-v1"
+description = "Generic maps reject duplicate keys."
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+accepted = false
+formatted = "formatted.vibon"
+
+[[expect.diagnostics]]
+code = "@data.duplicate-key"
+level = "@error"
+[expect.diagnostics.span]
+start = 10
+end = 12

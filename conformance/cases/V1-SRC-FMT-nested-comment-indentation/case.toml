@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-nested-comment-indentation"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Each nesting level indents by two spaces and closes by the shared delimiter rule."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

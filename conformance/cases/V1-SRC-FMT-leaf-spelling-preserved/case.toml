@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-leaf-spelling-preserved"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Labels, atom names, qualified symbols, and numeric suffixes survive verbatim."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

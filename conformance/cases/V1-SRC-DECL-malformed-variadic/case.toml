@@ -1,0 +1,17 @@
+id = "V1-SRC-DECL-malformed-variadic"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Variadic declarations require one binding and one array/map tail type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 25
+end = 49

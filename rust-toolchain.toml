@@ -1,0 +1,6 @@
+# Pinned so that a clean checkout and CI agree, as the roadmap's
+# reproducibility gates require. Raising this is a deliberate change.
+[toolchain]
+channel = "1.94.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

@@ -1,0 +1,19 @@
+id = "V1-SRC-READER-unterminated-quote"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "An unterminated quoted leaf is recovered without losing its source bytes."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+
+[expect.diagnostics.span]
+start = 14
+end = 14

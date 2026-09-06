@@ -1,7 +1,7 @@
 # Vibra v1 source language
 
 Status: normative target
-Implementation status: not started
+Implementation status: milestone 1 steps 9–10 complete for written declaration, type, expression, pattern, and structural position metadata over the lossless reader; resolution and semantic checking remain later work
 
 ## Reader
 
@@ -55,8 +55,30 @@ trivia         = { whitespace | line-comment } ;
 required-trivia = ( whitespace | line-comment ), trivia ;
 ```
 
+The step 4–10 reader implements the shared UTF-8 tokenization, delimiter
+structure, trivia retention, recovery boundary, literal classification, and
+lexical name classification described above. Declarations and semantic AST
+nodes are available as contextual M1 views; resolution and semantic checking remain later milestone work. A recovered or incomplete tree
+remains lossless and carries an explicit error marker rather than being
+assigned an ambiguous typed node. When a double-quoted leaf reaches end of
+file without a closing quote, the reader emits
+`@syntax.unmatched-delimiter`, marks the subtree recovered, and preserves the
+original bytes. Terminated strings, characters, booleans, `void`, and decimal
+numeric spellings are classified by step 5; nonliteral leaves are classified
+as names by step 6. The formatter canonicalizes valid character spellings
+while preserving raw string, numeric, and name spellings.
+Opaque leaves and literal leaves retain interior CR and CRLF bytes. LF
+normalization applies to trivia, not to quoted leaf contents.
+
 Strings are double quoted and support `\"`, `\\`, `\n`, `\r`, `\t`, and
-`\u{HEX}`.
+`\u{HEX}`. A terminated quoted leaf containing an unsupported escape, a
+malformed braced Unicode escape, or a value that is not one Unicode scalar
+emits `@syntax.invalid-string-literal` over the complete quoted-leaf span.
+An unterminated quoted leaf, including one that ends in an unfinished escape,
+instead emits `@syntax.unmatched-delimiter`, is recovered, and retains its
+original bytes; it does not emit both diagnostics. `\u{HEX}` uses one to six
+hexadecimal digits, rejects surrogate values, and rejects values above
+U+10FFFF.
 
 A character literal follows EDN spelling and denotes exactly one Unicode scalar
 value. A backslash may be followed by one non-whitespace scalar, one of
@@ -95,6 +117,13 @@ leading hyphen is not. `?`, `!`, `_`, `/`, an empty segment, and a segment that
 starts with a digit are invalid in a symbol. A dotted symbol is a qualified
 name, never field-access syntax. For example, `a`, `a1`, `a-`, `a--b`, and
 `a.b2-c` are symbols; `1a`, `-a`, `a..b`, and `a?` are not.
+
+A nonliteral leaf that fails the shared symbol, label, atom, or discard
+production emits `@syntax.invalid-name` over its complete token span. Literal
+classification takes precedence, so malformed numeric, character, and
+terminated string leaves keep their dedicated diagnostics. This is lexical
+validation only; contextual role rejection and resolution remain later
+milestone work.
 
 Labels and atom names derive mechanically from symbols: `some.name:` is a
 label and `@some.name` is an atom name. The `"-"` symbol alternative therefore
@@ -613,6 +642,20 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   every remaining scalar;
 - adjacent lowercase numeric suffixes, preserved exactly when written;
 - leaf lists on one line when they fit within 88 columns;
+- multiline lists keep their line comments on their own indented lines;
+- delimiter placement in every multiline list, commented or not. The opening
+  delimiter shares the first form's line when that form is inline and fits
+  beside it; a hanging opening delimiter above an inline first form is never
+  canonical. It stands alone above a line comment, which keeps its own line,
+  and above a multiline first form, because a form that started beside the
+  delimiter would have to indent its body under its own opening column
+  instead of at the enclosing list's two-space step. The closing delimiter
+  shares the last form's line unless that form is a line comment, which would
+  swallow it, or is inline and leaves no room for the delimiter within 88
+  columns; a multiline last form ends on its own closing delimiter, and this
+  one stacks onto that same line rather than being orphaned below it. Closing
+  delimiters carry no indentation of their own, so the asymmetry between the
+  two ends is deliberate. Each end is decided on its own;
 - declaration headers before labelled attributes and bodies;
 - fixed, labelled, then variadic function or constructor operands;
 - one pattern/result arm per line in a multiline `match`; and
@@ -621,3 +664,8 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
 Formatting MUST be idempotent and semantics-preserving. The formatter MAY
 normalize recoverable presentation but MUST NOT guess through a syntax,
 binding, or type ambiguity.
+
+If recovery inserted an error marker, the formatter MUST preserve the original
+UTF-8 document bytes exactly. Canonical whitespace and line-ending rules apply
+only when the tree has no recovery error; rewriting an incomplete or opaque
+leaf would be a semantic guess.

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vibra:schema:v1:diagnostic-registry-entry",
+  "title": "Vibra diagnostic registry entry",
+  "description": "The compiler's registry entry for one diagnostic code, as returned by `vibra query <code> --include diagnostic`. Reading an entry does not load or execute a Vibra declaration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "code", "level", "domain", "summary", "fixCapability"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Major version of this contract.",
+      "const": 1
+    },
+    "code": {
+      "description": "A stable lowercase atom of the form @<domain>.<thing>, both components kebab-case.",
+      "type": "string",
+      "pattern": "^@[a-z][a-z0-9-]*\\.[a-z][a-z0-9-]*$"
+    },
+    "level": {
+      "description": "The code's fixed level. A command may fail on warnings by policy without changing this.",
+      "enum": ["@error", "@warning"]
+    },
+    "domain": {
+      "description": "The first component of the code's spelling.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "summary": {
+      "description": "A one-line description of the condition. Compiler data, not fixed by the specification.",
+      "type": "string",
+      "minLength": 1
+    },
+    "fixCapability": {
+      "description": "@safe when the compiler can offer a fix that `vibra edit fix` may apply, @none when it never offers one.",
+      "enum": ["@safe", "@none"]
+    }
+  }
+}

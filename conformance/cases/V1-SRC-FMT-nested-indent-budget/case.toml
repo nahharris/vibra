@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-nested-indent-budget"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Indentation counts toward the 88-column budget, so only the innermost list stays inline."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

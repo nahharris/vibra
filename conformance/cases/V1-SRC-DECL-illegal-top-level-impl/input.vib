@@ -1,0 +1,1 @@
+(impl i32 (defn m () i32 0i32))

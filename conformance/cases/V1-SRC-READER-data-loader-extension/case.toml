@@ -1,0 +1,18 @@
+id = "V1-SRC-READER-data-loader-extension"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "The data loader rejects a source extension before parsing."
+
+[inputs]
+data = ["input.vib"]
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@data.invalid-extension"
+level = "@error"
+
+[expect.diagnostics.span]
+start = 0
+end = 0

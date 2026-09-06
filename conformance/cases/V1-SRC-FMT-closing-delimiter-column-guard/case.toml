@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-closing-delimiter-column-guard"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A closing delimiter that would pass 88 columns drops to its own line."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

@@ -1,0 +1,53 @@
+id = "V1-SRC-READER-invalid-strings-recovery"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "Terminated malformed strings diagnose their full leaves while an unfinished quoted leaf remains recovery-only."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-string-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 5
+end = 12
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-string-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 13
+end = 22
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-string-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 23
+end = 36
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-string-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 37
+end = 52
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-string-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 53
+end = 69
+
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+[expect.diagnostics.span]
+start = 83
+end = 83

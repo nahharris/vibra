@@ -1,0 +1,18 @@
+id = "V1-PROJECT-odd-map"
+rule = "V1-PROJECT"
+profile = "reader-v1"
+description = "Generic maps require alternating key and value forms."
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+accepted = false
+formatted = "formatted.vibon"
+
+[[expect.diagnostics]]
+code = "@data.invalid-shape"
+level = "@error"
+[expect.diagnostics.span]
+start = 5
+end = 7

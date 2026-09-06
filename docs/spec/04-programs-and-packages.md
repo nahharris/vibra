@@ -1,7 +1,7 @@
 # Vibra v1 programs and packages
 
 Status: normative target
-Implementation status: not started
+Implementation status: milestone 1 steps 7 and 10 complete for generic VIBON grammar, canonical data, and structural query metadata; project schemas and resolution remain later work
 
 ## VIBON data documents
 
@@ -27,8 +27,10 @@ Characters, `void`, and suffixed numerics use the source reader's literal
 spelling and carry the same values and exact primitive types.
 
 Each compiler-owned format defines a closed record schema and a version atom.
-Unknown, duplicate, or missing fields are errors. Canonical output uses the
-source formatter's whitespace rules, schema field order for records, canonical
+Unknown, duplicate, or missing fields are errors. Generic records retain source
+field order until a typed schema supplies an explicit order. Generic maps sort
+keys by the complete canonical encoded key bytes. Canonical output uses the
+source formatter's whitespace rules, schema or generic field order, canonical
 key order for maps, LF endings, and one trailing newline.
 
 An atom parsed by the generic VIBON grammar is an atom value. A typed schema
@@ -55,6 +57,11 @@ wrong loader emits `@data.invalid-extension` before its contents are parsed.
 This literal subset is Vibra's object notation. Project files, lock files, and
 build metadata use it instead of persistent JSON. JSON remains the machine
 interchange format for CLI and MCP responses.
+
+The step 4–10 reader supplies the extension-selected shared lexical/document
+mode boundary, the shared literal/name surface, and generic VIBON value
+validation with canonical data formatting. Project-specific record schemas and
+source-graph resolution remain later milestone work.
 
 ## Project file
 

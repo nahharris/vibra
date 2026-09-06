@@ -1,0 +1,11 @@
+id = "V1-SRC-READER-literal-numeric-suffixes"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "All fixed-width numeric suffixes and unbounded lexical spellings are retained exactly."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

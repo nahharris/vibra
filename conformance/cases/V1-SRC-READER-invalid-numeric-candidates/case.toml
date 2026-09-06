@@ -1,0 +1,74 @@
+id = "V1-SRC-READER-invalid-numeric-candidates"
+rule = "V1-SRC-READER"
+profile = "reader-v1"
+description = "Malformed numeric candidates report complete spans without overflowing the reader."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 6
+end = 11
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 12
+end = 18
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 19
+end = 22
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 23
+end = 25
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 26
+end = 30
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 31
+end = 36
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 37
+end = 42
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 43
+end = 45
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-numeric-literal"
+level = "@error"
+[expect.diagnostics.span]
+start = 46
+end = 48

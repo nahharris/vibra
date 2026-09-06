@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-line-ending-normalization"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "CRLF endings, trailing spaces, and a missing final newline are canonicalized."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

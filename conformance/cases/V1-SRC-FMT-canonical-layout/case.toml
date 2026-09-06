@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-canonical-layout"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "The syntax-only formatter canonicalizes trivia, nesting, and endings."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

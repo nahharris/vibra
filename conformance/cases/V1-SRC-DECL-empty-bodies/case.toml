@@ -1,0 +1,11 @@
+id = "V1-SRC-DECL-empty-bodies"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Permitted empty declaration bodies and nested implementations remain native structures."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

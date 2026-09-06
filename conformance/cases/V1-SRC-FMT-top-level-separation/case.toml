@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-top-level-separation"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Top-level forms are separated by exactly one blank line."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

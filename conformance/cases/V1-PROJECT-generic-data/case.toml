@@ -1,0 +1,11 @@
+id = "V1-PROJECT-generic-data"
+rule = "V1-PROJECT"
+profile = "reader-v1"
+description = "Generic VIBON decodes literals and the four closed container heads."
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+accepted = true
+formatted = "formatted.vibon"

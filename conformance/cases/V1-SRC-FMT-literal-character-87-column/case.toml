@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-literal-character-87-column"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Canonical character spelling keeps an 87-column list inline."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

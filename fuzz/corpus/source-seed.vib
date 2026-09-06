@@ -1,0 +1,2 @@
+; deterministic seed with Unicode, labels, and a variadic-looking tail
+(defn greet (name str) str (text.concat "hello" name) level: @info rest: one two)

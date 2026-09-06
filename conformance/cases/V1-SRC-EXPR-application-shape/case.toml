@@ -1,0 +1,11 @@
+id = "V1-SRC-EXPR-application-shape"
+rule = "V1-SRC-EXPR"
+profile = "reader-v1"
+description = "Applications retain arbitrary callee forms, written labelled operands, and a full types list."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

@@ -1,0 +1,17 @@
+id = "V1-SRC-EXPR-pattern-retired-form"
+rule = "V1-SRC-EXPR"
+profile = "reader-v1"
+description = "Retired pattern wrappers do not fall through to constructor parsing."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.retired-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 32
+end = 36

@@ -1,7 +1,7 @@
 # Vibra v1 type system
 
 Status: normative target
-Implementation status: not started
+Implementation status: milestone 1 step 9 complete for written declaration, type, expression, and pattern structure; resolution and checking remain later work
 
 ## Model
 
