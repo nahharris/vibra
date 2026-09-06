@@ -1,9 +1,12 @@
 //! Workspace-owned project data and later project orchestration.
 //!
-//! The first workspace slice is intentionally small: [`project`] decodes a
-//! parsed VIBON [`vibra_syntax::DataNode`] into the closed `@project.v1`
-//! schema. It does not inspect the filesystem, resolve references, contact a
-//! network, or generate a lock file.
+//! Workspace-owned project acquisition and source graph construction.
+//!
+//! [`project`] remains a pure decoder for the typed `@project.v1` schema.
+//! [`discovery`], [`snapshot`], and [`source_graph`] form the bounded Step 3
+//! filesystem boundary: they acquire one confined project tree into immutable
+//! values and never resolve dependencies, contact a network, or consult a
+//! cache or lock file.
 
 #![cfg_attr(
     test,
@@ -15,4 +18,83 @@
     )
 )]
 
+pub mod discovery;
 pub mod project;
+pub mod snapshot;
+pub mod source_graph;
+
+use std::fmt;
+
+use vibra_diagnostics::Diagnostic;
+
+/// A workspace boundary failure with its stable diagnostics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceError {
+    message: String,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl WorkspaceError {
+    /// Creates a failure from one human-facing message and diagnostics.
+    #[must_use]
+    pub fn new(message: impl Into<String>, diagnostics: Vec<Diagnostic>) -> Self {
+        Self {
+            message: message.into(),
+            diagnostics,
+        }
+    }
+
+    /// Creates a failure with no structured diagnostic.
+    #[must_use]
+    pub fn message(message: impl Into<String>) -> Self {
+        Self::new(message, Vec::new())
+    }
+
+    /// Diagnostics emitted by the failed workspace operation.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+}
+
+impl fmt::Display for WorkspaceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for WorkspaceError {}
+
+/// The confined project plus its immutable local source snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceSnapshot {
+    project: discovery::DiscoveredProject,
+    source: snapshot::SourceSnapshot,
+}
+
+impl WorkspaceSnapshot {
+    /// Discovers a project from `start` and captures its local source tree.
+    pub fn load(start: impl AsRef<std::path::Path>) -> Result<Self, WorkspaceError> {
+        let project = discovery::discover_project(start)?;
+        let source = snapshot::SourceSnapshot::capture(&project)?;
+        Ok(Self { project, source })
+    }
+
+    /// The discovered and typed project.
+    #[must_use]
+    pub const fn project(&self) -> &discovery::DiscoveredProject {
+        &self.project
+    }
+
+    /// The immutable source snapshot.
+    #[must_use]
+    pub const fn source(&self) -> &snapshot::SourceSnapshot {
+        &self.source
+    }
+
+    /// Builds the explicit source graph without consulting the filesystem.
+    #[must_use]
+    pub fn source_graph(&self) -> source_graph::SourceGraph {
+        source_graph::SourceGraph::build(self.project.project(), self.source.clone())
+    }
+}

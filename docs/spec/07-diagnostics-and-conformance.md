@@ -36,6 +36,9 @@ table governs.
 | `@name.reserved-value-spelling` | `@error` |
 | `@module.file-directory-collision` | `@error` |
 | `@module.unknown-path` | `@error` |
+| `@module.invalid-segment` | `@error` |
+| `@module.path-escape` | `@error` |
+| `@module.io-error` | `@error` |
 | `@type.argument-mismatch` | `@error` |
 | `@type.type-argument-mismatch` | `@error` |
 | `@type.redundant-implementation` | `@error` |
@@ -73,6 +76,9 @@ table governs.
 | `@project.invalid-entry-signature` | `@error` |
 | `@project.ambiguous-dependency-target` | `@error` |
 | `@project.overlapping-target-roots` | `@error` |
+| `@project.not-found` | `@error` |
+| `@project.invalid-target-root` | `@error` |
+| `@project.io-error` | `@error` |
 | `@runtime.invalid-host-value` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
@@ -117,6 +123,30 @@ malformed-input diagnostic and from the conformance runner's `unavailable`
 status: a real handler reports the diagnostic through its result contract,
 while a missing handler remains an unavailable corpus observation.
 
+The workspace boundary uses the following additional codes. Discovery emits
+`@project.not-found` when no exact `project.vibon` is found within the allowed
+ancestor search, and emits the nearest document's normal data or syntax
+diagnostics when that exact file exists but is malformed; it MUST NOT continue
+to an older ancestor after a malformed nearest project. A legacy `project.vib`
+or any other candidate is rejected by the extension-selected loader with
+`@data.invalid-extension` and is never content-sniffed. `@project.invalid-target-root`
+is attached to a target `root` value for an empty, absolute, parent-traversing,
+missing, non-directory, or otherwise non-confined root. `@project.io-error` is
+attached to an available project/root span when a non-security filesystem
+operation fails and carries the operation and path as a note. When no project
+document exists, the primary span is the empty span `0..0` with no source ID.
+
+During source enumeration, `@module.invalid-segment` is attached to the empty
+span `0..0` of the affected project-relative path when a directory or file
+segment is not a single kebab-name component. `@module.path-escape` is used
+for a symlink or junction whose canonical target leaves the project or target
+root; its primary span is the affected project/root field when one exists,
+otherwise the empty span of the project-relative path. `@module.io-error` is
+used for a dangling or otherwise unreadable link/entry and for a source read
+failure, with the same path-span rule. These diagnostics are emitted before
+module parsing; their messages are explanatory and are not a machine
+contract. All filesystem diagnostics are errors with no fixes.
+
 ## Recovery
 
 The parser retains a lossless concrete syntax tree and recovers after malformed
@@ -139,10 +169,13 @@ The implementation will maintain a backend-independent corpus organized by
 specification rule, not compiler module. Each case records:
 
 - normative rule ID;
-- a closed operation selector (`reader` or `project-decode` in the current
-  slice); `project-decode` requires exactly one project input, and a
+- a closed operation selector (`reader`, `project-decode`, or `source-graph`);
+  `project-decode` requires exactly one project input, and a
+  `source-graph` case requires one project input and MAY declare source/data
+  inputs plus one confined `tree` directory that the corpus loader must acquire
+  before graph building;
   non-reader case with multiple input kinds must state its operation;
-- source/project/data inputs;
+- source/project/data inputs and an optional confined tree directory;
 - expected acceptance or diagnostics;
 - expected canonical formatting;
 - expected resolved identities, types, and effects where relevant;

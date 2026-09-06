@@ -10,8 +10,10 @@ and [tooling](../../spec/05-tooling.md).
 1. Add proposed workspace `discovery`, `snapshot`, and `source_graph` modules.
    Discover only `project.vibon` using C2's documented ancestor/root rules.
 2. Canonicalize target roots and validate containment and pairwise disjointness
-   before walking sources. Apply C3's symlink/junction and filesystem failure
-   policy; string-prefix path checks are insufficient.
+   before walking sources. Apply the project discovery/snapshot contract in
+   `04-programs-and-packages.md`: exact nearest-marker search, component-aware
+   confinement, explicit link/cycle/alias handling, and stable path/I/O
+   diagnostics; string-prefix path checks are insufficient.
 3. Enumerate modules deterministically. Validate kebab path segments and
    `.vib` extension; detect `text.vib` plus `text/` before parsing any module.
    Data files are never source modules and no directory index is implicit.
@@ -36,6 +38,16 @@ Assert `@project.overlapping-target-roots` and
 `@module.file-directory-collision` at their prescribed phase. For platform
 fixtures needing symlink privileges, report unavailable fixture setup honestly
 and require equivalent CI evidence; do not silently pass an unexercised attack.
+
+The Step 3 implementation MUST also prove the discovery and filesystem
+diagnostic contract: `@project.not-found`, `@project.invalid-target-root`,
+`@project.io-error`, `@module.invalid-segment`, `@module.path-escape`, and
+`@module.io-error` carry the documented empty/path or project-root spans;
+malformed nearest projects do not fall back to ancestors; in-root links are
+canonicalized with cycle/alias suppression; and layout diagnostics precede
+source parsing. The graph retains dependency declarations and reports
+`@tool.unavailable` for unsupported ordinary dependency delivery without
+performing resolution, network, cache, or lock inspection.
 
 Run [common validation](validation.md) and workspace tests. Independent
 `V1-PROJECT-*` cases plus temporary-tree host tests must show layout rejection

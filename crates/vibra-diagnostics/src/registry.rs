@@ -251,6 +251,12 @@ diagnostic_registry! {
         "a module path is claimed by both a file and a directory";
     ModuleUnknownPath => "@module.unknown-path", Module, Error, None,
         "a module path does not resolve to a source unit";
+    ModuleInvalidSegment => "@module.invalid-segment", Module, Error, None,
+        "a source path segment is not one kebab-name component";
+    ModulePathEscape => "@module.path-escape", Module, Error, None,
+        "a source link resolves outside its confined root";
+    ModuleIoError => "@module.io-error", Module, Error, None,
+        "a source path cannot be inspected or read";
     TypeArgumentMismatch => "@type.argument-mismatch", Type, Error, None,
         "an operand does not match the parameter it binds to";
     TypeTypeArgumentMismatch => "@type.type-argument-mismatch", Type, Error, None,
@@ -325,6 +331,12 @@ diagnostic_registry! {
         "a dependency alias does not bind exactly one `@lib` target";
     ProjectOverlappingTargetRoots => "@project.overlapping-target-roots", Project, Error, None,
         "two target roots nest or coincide";
+    ProjectNotFound => "@project.not-found", Project, Error, None,
+        "no exact project.vibon was found in the discovery boundary";
+    ProjectInvalidTargetRoot => "@project.invalid-target-root", Project, Error, None,
+        "a target root is missing, malformed, or outside the project";
+    ProjectIoError => "@project.io-error", Project, Error, None,
+        "a project filesystem operation failed";
     RuntimeInvalidHostValue => "@runtime.invalid-host-value", Runtime, Error, None,
         "a host operation received or returned a value its ABI does not admit";
     StyleArgumentOrder => "@style.argument-order", Style, Warning, Safe,
@@ -347,7 +359,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 61;
+    const REGISTERED_CODES: usize = 67;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

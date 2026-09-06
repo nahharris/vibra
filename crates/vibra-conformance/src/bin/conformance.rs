@@ -9,7 +9,7 @@ use std::process::ExitCode;
 
 use vibra_conformance::{
     ConformanceProfile, ConformanceRunner, Corpus, ProfileDispatcher, ReaderV1Handler,
-    StaticV1ProjectHandler,
+    StaticV1ProjectHandler, StaticV1SourceGraphHandler,
 };
 
 fn main() -> ExitCode {
@@ -38,7 +38,11 @@ fn run() -> Result<(), String> {
     }
     let dispatcher = ProfileDispatcher::new()
         .with_handler(ConformanceProfile::ReaderV1, ReaderV1Handler)
-        .with_handler(ConformanceProfile::StaticV1, StaticV1ProjectHandler);
+        .with_handler(ConformanceProfile::StaticV1, StaticV1ProjectHandler)
+        .with_additional_handler(
+            ConformanceProfile::StaticV1,
+            StaticV1SourceGraphHandler,
+        );
     let report = ConformanceRunner::new(dispatcher).run(&corpus);
 
     for case in report.cases() {

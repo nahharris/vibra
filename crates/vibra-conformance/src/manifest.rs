@@ -91,6 +91,8 @@ pub struct CaseInputs {
     pub project: Option<String>,
     /// Additional data documents, normally `.vibon` files.
     pub data: Vec<String>,
+    /// Optional confined directory tree acquired by source-graph cases.
+    pub tree: Option<String>,
 }
 
 /// The closed operation selected by a conformance case.
@@ -103,6 +105,8 @@ pub enum ConformanceOperation {
     Reader,
     /// Decode one project VIBON document without resolution or I/O.
     ProjectDecode,
+    /// Acquire a confined project tree and build its immutable source graph.
+    SourceGraph,
 }
 
 impl ConformanceOperation {
@@ -112,6 +116,7 @@ impl ConformanceOperation {
         match self {
             Self::Reader => "reader",
             Self::ProjectDecode => "project-decode",
+            Self::SourceGraph => "source-graph",
         }
     }
 }
@@ -312,18 +317,15 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             source: raw.inputs.source,
             project: raw.inputs.project,
             data: raw.inputs.data,
+            tree: raw.inputs.tree,
         };
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
         {
-            let declared_inputs = [&inputs.source, &inputs.project]
-                .into_iter()
-                .flatten()
-                .chain(inputs.data.iter());
             for diagnostic in &expectations.diagnostics {
                 if let Some(source_id) = &diagnostic.source_id
-                    && !declared_inputs.clone().any(|input| input == source_id)
+                    && !is_declared_input(&inputs, source_id)
                 {
                     return Err(ManifestError::Invalid(format!(
                         "diagnostic source `{source_id}` is not declared by case `{}`",
@@ -332,7 +334,7 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 }
                 for related in &diagnostic.related {
                     if let Some(source_id) = &related.source_id
-                        && !declared_inputs.clone().any(|input| input == source_id)
+                        && !is_declared_input(&inputs, source_id)
                     {
                         return Err(ManifestError::Invalid(format!(
                             "related diagnostic source `{source_id}` is not declared by case `{}`",
@@ -343,16 +345,7 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             }
         }
         for query in &expectations.queries {
-            let declared = inputs
-                .source
-                .as_ref()
-                .is_some_and(|input| input == &query.input)
-                || inputs
-                    .project
-                    .as_ref()
-                    .is_some_and(|input| input == &query.input)
-                || inputs.data.iter().any(|input| input == &query.input);
-            if !declared {
+            if !is_declared_input(&inputs, &query.input) {
                 return Err(ManifestError::Invalid(format!(
                     "query expectation input `{}` is not declared by case `{}`",
                     query.input, raw.id
@@ -389,10 +382,17 @@ fn decode_operation(
     let operation = match raw {
         Some("reader") => ConformanceOperation::Reader,
         Some("project-decode") => ConformanceOperation::ProjectDecode,
+        Some("source-graph") => ConformanceOperation::SourceGraph,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
             )));
+        }
+        None if profile != ConformanceProfile::ReaderV1
+            && inputs.project.is_some()
+            && inputs.tree.is_some() =>
+        {
+            ConformanceOperation::SourceGraph
         }
         None if profile != ConformanceProfile::ReaderV1 && inputs.project.is_some() => {
             ConformanceOperation::ProjectDecode
@@ -402,13 +402,40 @@ fn decode_operation(
     if operation == ConformanceOperation::ProjectDecode
         && (inputs.project.is_none()
             || inputs.source.is_some()
-            || !inputs.data.is_empty())
+            || !inputs.data.is_empty()
+            || inputs.tree.is_some())
     {
         return Err(ManifestError::Invalid(
             "project-decode requires exactly one project input".to_owned(),
         ));
     }
+    if operation == ConformanceOperation::SourceGraph && inputs.project.is_none() {
+        return Err(ManifestError::Invalid(
+            "source-graph requires one project input".to_owned(),
+        ));
+    }
     Ok(operation)
+}
+
+fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
+    inputs
+        .source
+        .as_deref()
+        .is_some_and(|input| input == source_id)
+        || inputs
+            .project
+            .as_deref()
+            .is_some_and(|input| input == source_id)
+        || inputs.data.iter().any(|input| input == source_id)
+        || inputs.tree.as_deref().is_some_and(|tree| {
+            source_id == tree
+                || source_id
+                    .strip_prefix(tree)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+                || (!source_id.is_empty()
+                    && !source_id.starts_with('/')
+                    && !source_id.contains(".."))
+        })
 }
 
 fn validate_case_id(id: &str) -> Result<(), ManifestError> {
@@ -620,6 +647,8 @@ pub(crate) struct RawInputs {
     pub(crate) project: Option<String>,
     #[serde(default)]
     pub(crate) data: Vec<String>,
+    #[serde(default)]
+    pub(crate) tree: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

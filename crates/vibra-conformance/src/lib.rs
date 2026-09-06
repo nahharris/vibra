@@ -22,13 +22,15 @@
 //! backends remain unavailable until their milestones land.
 
 mod corpus;
+mod graph;
 mod manifest;
 mod profile;
 mod project;
 mod reader;
 mod runner;
 
-pub use corpus::{Case, CaseInputDocument, Corpus, CorpusError};
+pub use corpus::{Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError};
+pub use graph::StaticV1SourceGraphHandler;
 pub use manifest::{
     CaseExpectations, CaseInputs, CaseManifest, ConformanceOperation,
     ExpectedDiagnostic, ExpectedExecution, ExpectedFix, ExpectedQuery,

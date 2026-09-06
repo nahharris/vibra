@@ -137,6 +137,74 @@ canonical form. There is no executable `(project ...)` declaration and no
 legacy project format fallback. `project.vib` is not searched or accepted as a
 project document.
 
+### M2 project discovery and source snapshot
+
+The workspace discovery API accepts an existing directory or an existing file.
+For a directory it starts at that directory; for a file it starts at the
+file's parent directory. It canonicalizes the start before searching and then
+examines that directory followed by each parent up to the filesystem root.
+The first directory containing an exact regular file named `project.vibon` is
+the project root. A caller that supplies a missing path, a non-directory and
+non-file path, or a path whose ancestor chain contains no such file receives
+`@project.not-found` at empty span `0..0` with no source ID; discovery never
+searches a sibling, child, or unrelated working directory. If the nearest
+exact file exists but cannot be read or decoded, discovery reports that
+failure and MUST NOT fall back to an older ancestor. The marker itself MUST be
+a regular file in its containing directory; a marker symlink or junction is a
+project filesystem failure. `project.vib` is not a marker and is rejected only
+when a caller explicitly presents it to the data loader, which emits
+`@data.invalid-extension`.
+
+Discovery returns the canonical project root, the canonical marker path, and
+the typed project value. The source identity of the marker is exactly
+`project.vibon`; all later source identities are project-relative paths using
+`/` separators. The discovery and snapshot APIs never read a dependency path,
+clone a Git URL, consult a cache, or inspect a lock file.
+
+Before source walking, every target `root` MUST be a non-empty relative path
+with no `.` or `..` component. Its canonical directory MUST exist, be a
+directory, and be contained by the canonical project root using path-component
+comparison. A failure is `@project.invalid-target-root` at the target's root
+string span; a non-security filesystem failure is `@project.io-error` at the
+same span. Canonical target roots MUST be pairwise disjoint. Equality and
+nested containment in either direction emit `@project.overlapping-target-roots`
+at the later target's root span with a related span for the earlier root. These
+checks MUST finish before any target directory is enumerated or any `.vib`
+bytes are read.
+
+Source walking uses `symlink_metadata` and canonical path components. A
+symlink or junction encountered at a target root or below it MUST resolve to a
+canonical path inside both the project root and the owning target root; an
+escaping link emits `@module.path-escape`, and a dangling or unreadable link
+emits `@module.io-error`. In-root links are allowed, but canonical directory
+identity is tracked: a cycle is reported as `@module.path-escape`, and an
+already visited canonical directory is skipped so aliases cannot duplicate a
+module. A linked file is admitted once, at the lexicographically first
+project-relative path. The root directory itself MUST NOT be a link; the target
+root is canonicalized as part of root validation. No source byte is read until
+these confinement checks pass.
+
+Within each target, entries are sorted by their `/`-separated project-relative
+path before descent. A regular file is a source module only when its extension
+is exactly `.vib`; `.vibon`, files with another extension, and hidden/editor
+files are ignored as data or unrelated files. There is no extension search and
+no implicit index module. Every path segment in a source file or directory
+name MUST be one kebab-name component; otherwise `@module.invalid-segment` is
+reported at the path's empty span. A file `text.vib` and directory `text/`
+claim the same module path and emit `@module.file-directory-collision` before
+any module is parsed. Source IDs are stable project-relative paths, bytes are
+copied exactly into an immutable snapshot, and repeated snapshots from an
+unchanged tree have identical unit/module order, IDs, and bytes.
+
+The Step 3 source graph contains one explicit unit for each local target and
+one explicit, unresolved dependency edge for each declared dependency. A
+dependency edge retains its alias, kind, target value, and source span. Graph
+construction MUST NOT resolve, fetch, inspect, or silently discard a dependency;
+because ordinary dependency delivery is deferred to M5, each unsupported edge
+reports `@tool.unavailable` at its dependency alias while remaining present in
+the graph. The graph accepts only the immutable snapshot produced by this
+workspace boundary; later resolver phases receive no ambient filesystem handle.
+
 ## Packages and targets
 
 A package has a kebab-case name and semantic version used as source identity.
