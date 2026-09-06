@@ -9,6 +9,8 @@ use vibra_conformance::{
     Case, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus, HandlerError,
     InterpreterV1Handler, ProfileDispatcher, ProfileHandler, StaticV1TypeHandler,
 };
+use vibra_ir::Value;
+use vibra_syntax::parse_data;
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -45,11 +47,43 @@ fn static_handler_produces_an_independent_typed_program_observation() {
 }
 
 #[test]
+fn typed_program_observation_is_valid_vibon() {
+    let case = case("V1-TYPE-INFER-primitives");
+    let observation = StaticV1TypeHandler.run(&case).expect("type handler");
+    let types = observation.types.expect("typed program observation");
+    let document =
+        parse_data(Path::new("types.vibon"), &types).expect("typed observation loader");
+    assert!(document.accepted(), "{:?}", document.diagnostics());
+    assert!(document.data().is_some());
+}
+
+#[test]
+fn bytes_and_unicode_whitespace_observations_are_valid_vibon() {
+    let values = [
+        Value::Bytes(vec![0, 1, 255]).canonical_observation(),
+        Value::Char(' ').canonical_observation(),
+        Value::Char('\u{00A0}').canonical_observation(),
+        Value::Char('\u{2003}').canonical_observation(),
+        Value::Char('\u{2028}').canonical_observation(),
+        Value::Char('😀').canonical_observation(),
+    ];
+
+    for value in values {
+        let document = parse_data(Path::new("value.vibon"), &value)
+            .expect("value observation loader");
+        assert!(document.accepted(), "{:?}", document.diagnostics());
+        assert!(document.data().is_some());
+    }
+}
+
+#[test]
 fn interpreter_handler_produces_an_empty_pure_trace() {
     let case = case("V1-RUNTIME-literal");
     let observation = InterpreterV1Handler
         .run(&case)
         .expect("interpreter handler");
+    let repeated = InterpreterV1Handler.run(&case).expect("repeat handler");
+    assert_eq!(observation, repeated);
     let execution = observation.interpreter.expect("execution");
     assert_eq!(
         execution.result.as_deref(),

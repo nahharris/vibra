@@ -44,10 +44,14 @@ including proof a bad expected value/trace causes a corpus failure.
 
 ## Step 5 implementation evidence
 
-The landed slice adds three backend-independent nodes:
+The Step 5 slice adds three backend-independent nodes:
 
 - `vibra-ir` owns primitive types, exact primitive values, signatures, source
   origins, literal/sequence expressions, and the checked-program boundary.
+  Typed observations use only VIBON data records and arrays: literal bodies
+  are `kind: @literal` records and direct function-body sequences are
+  `kind: @sequence` records under the versioned `@types.v1` envelope. They do
+  not embed executable `do` forms.
 - `vibra-types` checks source through the shared M1 AST and lowers only
   nullary module-level `defn` declarations with primitive result types to that
   IR. Integer ranges are checked from decimal magnitudes, and decimal `f32`
@@ -59,14 +63,21 @@ The landed slice adds three backend-independent nodes:
 The conformance adapter exposes `type-check` through `static-v1` and
 `interpret` through `interpreter-v1`. The independent cases are
 `V1-TYPE-INFER-primitives`, `V1-TYPE-INFER-context-numeric`,
-`V1-TYPE-INFER-boundaries`, `V1-TYPE-INFER-out-of-range`,
-`V1-TYPE-INFER-mismatch`, `V1-RUNTIME-literal`,
+`V1-TYPE-INFER-boundaries`, `V1-TYPE-INFER-range-errors`,
+`V1-TYPE-INFER-float-boundaries`, `V1-TYPE-INFER-float-overflow`,
+`V1-TYPE-INFER-out-of-range`, `V1-TYPE-INFER-mismatch`,
+`V1-TYPE-INFER-recovery`, `V1-TYPE-INFER-deferred-do`,
+`V1-RUNTIME-literal`,
 `V1-RUNTIME-sequence`, `V1-RUNTIME-void`, `V1-RUNTIME-unicode`,
 `V1-RUNTIME-rejected`, and `V1-RUNTIME-wrong-trace`. Host tests also use
 intentionally incorrect type and trace expectations to prove the runner does
 not compare an observation with itself.
 
-The slice deliberately excludes calls, bindings, effects, host providers,
-collections, CLI/Wasm paths, and later declaration forms. Valid syntax outside
-the admitted subset receives `@tool.unavailable`; rejected input never crosses
-the checked-program boundary.
+The slice deliberately excludes explicit `do` expressions, calls, bindings,
+effects, host providers, collections, CLI/Wasm paths, and later declaration
+forms. Direct multi-expression function bodies are the admitted sequence form;
+explicit `do` receives `@tool.unavailable` until Step 6. The source grammar has
+no standalone bytes literal, so the bytes IR and its data-only observation are
+covered by host round-trip tests without inventing a new source spelling. All
+valid syntax outside the admitted subset receives `@tool.unavailable`; rejected
+or recovered input never crosses the checked-program boundary.

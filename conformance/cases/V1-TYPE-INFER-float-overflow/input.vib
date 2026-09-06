@@ -1,0 +1,2 @@
+(defn f32-overflow () f32 3.5e38)
+(defn f64-overflow () f64 1.8e308)

@@ -361,42 +361,14 @@ fn check_expression(
             );
             None
         }
-        ExpressionKind::Do(values) => {
-            let mut checked = Vec::with_capacity(values.len());
-            let mut valid = true;
-            for (index, value) in values.iter().enumerate() {
-                let value_expected = (index + 1 == values.len())
-                    .then_some(expected.unwrap_or(PrimitiveType::Void));
-                match check_expression(source_id, value, value_expected, diagnostics) {
-                    Some(value) => checked.push(value),
-                    None => valid = false,
-                }
-            }
-            if !valid {
-                return None;
-            }
-            let result = if values.is_empty() {
-                PrimitiveType::Void
-            } else {
-                checked
-                    .last()
-                    .map_or(PrimitiveType::Void, Expr::result_type)
-            };
-            if expected.is_some_and(|expected| expected != result) {
-                mismatch(
-                    diagnostics,
-                    source_id,
-                    expression.span(),
-                    expected.unwrap_or(result),
-                    result,
-                    "a sequence result does not match the written result type",
-                );
-                return None;
-            }
-            Some(Expr::sequence(
-                checked,
-                SourceOrigin::new(source_id, expression.span()),
-            ))
+        ExpressionKind::Do(_) => {
+            unavailable(
+                diagnostics,
+                source_id,
+                expression.span(),
+                "explicit do expressions are available in Step 6",
+            );
+            None
         }
         _ => {
             unavailable(

@@ -1,0 +1,23 @@
+id = "V1-TYPE-INFER-float-overflow"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "Finite float literals that overflow their selected width are rejected before lowering."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [26, 32]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [60, 67]

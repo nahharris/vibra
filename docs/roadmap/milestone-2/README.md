@@ -1,6 +1,6 @@
 # Milestone 2 step plan
 
-Status: implementation in progress; Steps 1–5 have bounded implementation slices
+Status: implementation in progress; Steps 1–4 are integrated; Step 5 is under review
 Milestone: [Milestone 2 — executable pure core](../v1.md#milestone-2--executable-pure-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m2`
@@ -73,7 +73,7 @@ path named `std` cannot confer external-declaration authority.
 | 2 | [Decode typed project data](02-project.md) | 1 | landed | `m2` ancestor `3ad4951` |
 | 3 | [Build the confined source graph](03-source-graph.md) | 2 | landed | `m2` history through `d6368ac` |
 | 4 | [Resolve module declarations and references](04-resolution.md) | 3 | landed | `origin/m2` head `afcce59` |
-| 5 | [Execute typed primitive functions](05-primitives.md) | 4 | landed | Step 5 branch evidence in [05-primitives.md](05-primitives.md); verify the merge commit on `m2` |
+| 5 | [Execute typed primitive functions](05-primitives.md) | 4 | in progress | `codex/m2-step-05-primitives` at `66e1e91`; validation and review in progress |
 | 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | not started | — |
 | 7 | [Execute function values and labelled calls](07-functions.md) | 6 | not started | — |
 | 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | not started | — |

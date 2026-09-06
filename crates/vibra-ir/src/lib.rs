@@ -257,7 +257,13 @@ impl Value {
             Self::Void => "void".to_owned(),
             Self::Char(value) => canonical_character(*value),
             Self::Str(value) => quote(value),
-            Self::Bytes(value) => format!("(bytes {})", quote_bytes(value)),
+            Self::Bytes(value) => {
+                let bytes = value
+                    .iter()
+                    .map(|byte| format!("{byte}u8"))
+                    .collect::<Vec<_>>();
+                format!("(record kind: @bytes values: {})", canonical_array(&bytes))
+            }
             Self::Atom(value) => format!("@{value}"),
             Self::I8(value) => format!("{value}i8"),
             Self::I16(value) => format!("{value}i16"),
@@ -479,13 +485,12 @@ impl CheckedProgram {
                 .parameters()
                 .iter()
                 .map(|parameter| format!("@{}", parameter.as_str()))
-                .collect::<Vec<_>>()
-                .join(" ");
+                .collect::<Vec<_>>();
             let body = canonical_expr(function.body());
             output.push_str(&format!(
-                "    (record name: @{} params: (array {}) result: @{} body: {})\n",
+                "    (record name: @{} params: {} result: @{} body: {})\n",
                 function.name,
-                parameters,
+                canonical_array(&parameters),
                 function.signature.result().as_str(),
                 body
             ));
@@ -536,11 +541,27 @@ impl std::error::Error for IrError {}
 
 fn canonical_expr(expression: &Expr) -> String {
     match expression {
-        Expr::Literal { value, .. } => value.canonical_vibon(),
+        Expr::Literal { value, .. } => format!(
+            "(record kind: @literal type: @{} value: {})",
+            value.ty().as_str(),
+            value.canonical_vibon()
+        ),
         Expr::Sequence { expressions, .. } => {
             let values = expressions.iter().map(canonical_expr).collect::<Vec<_>>();
-            format!("(do {})", values.join(" "))
+            format!(
+                "(record kind: @sequence type: @{} values: {})",
+                expression.result_type().as_str(),
+                canonical_array(&values)
+            )
         }
+    }
+}
+
+fn canonical_array(values: &[String]) -> String {
+    if values.is_empty() {
+        "(array)".to_owned()
+    } else {
+        format!("(array {})", values.join(" "))
     }
 }
 
@@ -561,22 +582,15 @@ fn quote(value: &str) -> String {
     output
 }
 
-fn quote_bytes(value: &[u8]) -> String {
-    let text = value
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join("");
-    quote(&text)
-}
-
 fn canonical_character(value: char) -> String {
     match value {
         '\n' => "\\newline".to_owned(),
         '\r' => "\\return".to_owned(),
         ' ' => "\\space".to_owned(),
         '\t' => "\\tab".to_owned(),
-        _ if value.is_control() => format!("\\u{:04X}", value as u32),
+        _ if value.is_control() || value.is_whitespace() => {
+            format!("\\u{:04X}", value as u32)
+        }
         _ => format!("\\{value}"),
     }
 }

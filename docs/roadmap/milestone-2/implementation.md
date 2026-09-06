@@ -59,7 +59,9 @@ revalidates entry, unique names, and body/result invariants. `vibra-types`
 consumes an explicit source ID and the shared syntax AST; it does not read the
 filesystem or call the interpreter. `vibra-interp::run` accepts only a
 `CheckedProgram`, evaluates literal/sequence expressions deterministically, and
-returns a typed value plus an empty pure audit trace.
+returns a typed value plus an empty pure audit trace. Its `@types.v1` output is
+VIBON data: expression bodies are explicit records and arrays, never executable
+source forms; byte values use a typed array representation.
 
 The Step 5 conformance adapters are registered as `type-check` on `static-v1`
 and `interpret` on `interpreter-v1`. Their observations use canonical VIBON

@@ -1,7 +1,7 @@
 (record
   format: @types.v1
   functions: (array
-    (record name: @small params: (array ) result: @i16 body: (do 32767i16))
-    (record name: @ratio params: (array ) result: @f32 body: (do 1.0000001f32))
+    (record name: @small params: (array) result: @i16 body: (record kind: @sequence type: @i16 values: (array (record kind: @literal type: @i16 value: 32767i16))))
+    (record name: @ratio params: (array) result: @f32 body: (record kind: @sequence type: @f32 values: (array (record kind: @literal type: @f32 value: 1.0000001f32))))
   )
 )

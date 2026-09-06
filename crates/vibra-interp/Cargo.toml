@@ -9,8 +9,10 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-vibra-diagnostics.workspace = true
 vibra-ir.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+vibra-diagnostics.workspace = true
