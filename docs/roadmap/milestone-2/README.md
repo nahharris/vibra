@@ -61,8 +61,9 @@ Step PRs target `m2`; the milestone PR alone eventually targets `main`.
 
 These are implementation constraints, not new language rules. Observable
 decisions are closed in Step 1 and the owning specification before dependent
-code. In particular, the bootstrap stdlib and assertions require a written
-contract; a path named `std` cannot confer external-declaration authority.
+code. In particular, the signed offline bootstrap artifact, its module byte
+digests, and the assertion/trap result envelopes are part of that contract; a
+path named `std` cannot confer external-declaration authority.
 
 ## Steps
 

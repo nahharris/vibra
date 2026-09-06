@@ -1,0 +1,11 @@
+; M2 trusted pure text declarations. Their symbols are checked against the
+; compiler registry before the declarations are admitted.
+(defn concat (left str right str) str
+  visibility: @public
+  external: @compiler
+  symbol: "text.concat")
+
+(defn length (value str) u64
+  visibility: @public
+  external: @compiler
+  symbol: "text.length")

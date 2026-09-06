@@ -285,6 +285,60 @@ They reject a missing vendor tree, stale lock, changed vendored content, path
 escape, or undeclared dependency. Local dependencies are not copied and are
 fingerprinted on every workspace snapshot.
 
+### M2 bootstrap trust input
+
+Before ordinary dependency delivery exists, M2 has one offline standard-library
+input. The input is the repository-owned byte file
+`stdlib/m2/bootstrap.vibon`, and its authority is the adjacent
+`stdlib/m2/bootstrap-manifest.vibon`. The manifest is the only source of the
+bootstrap identity: it records the artifact's exact `sha256:` digest, an
+Ed25519 public key, a detached signature over the artifact bytes, and the
+ordered import map. The checked-in public key is the toolchain key for this
+repository; a project file, package name, filename, source annotation,
+conformance profile, or copied declaration never supplies authority.
+
+The Step 1 artifact identity is fixed at
+`sha256:8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103`.
+The toolchain public-key file is
+`stdlib/m2/toolchain-ed25519.pub` with fixed digest
+`sha256:fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509`.
+The detached signature is base64 Ed25519 over the artifact bytes; its checked
+in file has digest
+`sha256:f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63`.
+These values are part of the M2 contract and may change only with a reviewed
+bootstrap-contract change that replaces the signature and all dependent
+evidence together.
+
+The verifier reads the manifest and artifact as bytes, checks the manifest's
+format and field types, computes SHA-256 over the exact artifact bytes, and
+rejects a digest mismatch before parsing or resolving any bootstrap record. It
+then verifies the detached Ed25519 signature with the fixed public key whose
+digest is above and rejects an invalid signature. The manifest's key path and
+digest must match that fixed identity; a manifest cannot select another key.
+The verifier accepts no alternate encoding,
+newline normalization, path alias, symlink, archive member, network URL, or
+environment override. A failure is an operational provenance diagnostic and
+must not fall back to a vendored or ambient standard library.
+
+The manifest's import map is closed in M2. `@std.text` maps to the trusted text
+module and `@std.assert` maps to the trusted assertion module. Each map value
+contains the canonical relative path and SHA-256 of that module's exact bytes;
+the verifier hashes those bytes and compares them with the records inside the
+signed artifact before admitting any declaration or test registry member. An
+import is accepted only when its resolved module identity is exactly the
+mapped identity; users must write the import explicitly. No standard-library
+module is an ambient prelude, and ordinary packages cannot add, replace, or
+rebind a bootstrap map entry.
+
+The bootstrap record contains the C7 pure text symbols and the C9 assertion
+member names. It is an allowlist and provenance input, not a second language
+grammar. `stdlib/m2/src/std/text.vib` is the signed pure declaration module;
+`stdlib/m2/src/std/assert.vib` is the signed marker module whose test-only
+members come from the registry list. Step 8 verifies every listed byte before
+admitting compiler declarations, and Step 13 supplies the assertion behavior.
+M2 never performs Git, registry, or network resolution while loading this
+input.
+
 There is no registry, version range, lock auto-upgrade, lifecycle script, or
 dependency-provided executable in v1.
 
@@ -303,6 +357,50 @@ A test has a unique module-local string name. Its omitted `effects:` is empty;
 an effectful test writes its complete ceiling. Selecting and running an
 effectful test is consent to those roots. Test selection never adds effects
 that are not written in the test declaration.
+
+### M2 assertion contract
+
+An M2 test module MUST import `@std.assert` explicitly. The verified bootstrap
+exports exactly these test-only assertion members; they are resolved by their
+canonical module identity and are not user-definable external declarations:
+
+| Member | Exact signature | Passing behavior |
+| --- | --- | --- |
+| `assert.true` | `bool -> void` | succeeds when the operand is `true` |
+| `assert.false` | `bool -> void` | succeeds when the operand is `false` |
+| `assert.equal-bool` | `bool bool -> void` | succeeds when both operands are the same boolean |
+| `assert.equal-char` | `char char -> void` | succeeds when both operands have the same scalar |
+| `assert.equal-str` | `str str -> void` | succeeds when both operands have the same Unicode scalar sequence |
+| `assert.equal-i32` | `i32 i32 -> void` | succeeds when both operands have the same signed value |
+| `assert.equal-u64` | `u64 u64 -> void` | succeeds when both operands have the same unsigned value |
+
+The table is closed: another assertion name, generic assertion, implicit
+conversion, collection assertion, or deferred operand type is
+`@tool.unavailable` in M2. Assertion operands are checked and evaluated
+left-to-right. A test body has result type `void`, and its static effects row
+MUST be empty; assertion calls do not add an effect.
+
+A passing assertion returns `void`. A false assertion records one structured
+test failure with the assertion's canonical name, the canonical literal forms
+of its expected and actual values, and the assertion call's primary source
+span, then stops that test's body. For `assert.true` and `assert.false`,
+`expected` is the required boolean literal and `actual` is the operand. For an
+`assert.equal-*` member, `expected` is the first operand and `actual` is the
+second operand; both are rendered with the canonical literal formatter. It
+does not throw, create a `result` value,
+emit a host event, or become a runtime trap. The runner continues with the
+next selected test using a fresh value state and empty audit trace. A test item
+therefore has exactly one of `@test.passed`, `@test.assertion-failed`,
+`@test.invalid`, `@test.unavailable`, or `@test.trap`; only the first two are
+ordinary assertion outcomes, and a suite containing any non-passing item is not
+`@command.ok`.
+
+Static type or import errors are reported before any selected test executes.
+An unavailable assertion or test form retains its source span and reports
+`@tool.unavailable`; it is never silently skipped. A runtime trap remains the
+separate `@test.trap` outcome with its structured trap diagnostic. Empty test
+selection is a successful empty suite only when the selector is omitted; an
+unknown explicit selector is invalid input.
 
 The runner isolates each test's values and host event log. Time and random
 operations use deterministic providers by default. An unconsumed failure or

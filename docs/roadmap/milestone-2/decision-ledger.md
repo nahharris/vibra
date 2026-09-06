@@ -31,10 +31,10 @@ by Step 1 and must be copied into the owning normative chapter in the same PR.
 | C6.2 | deferred | `02-type-system.md` Generics | `types:` has no accepted M2 generic arguments; valid generic syntax is unavailable | Step 7/12 |
 | C7.1 | new | `06-runtime.md` M2 compiler intrinsic profile | Only the two listed pure text operations may execute; exact signatures and total Unicode semantics are checked | Step 8 |
 | C7.2 | settled | `06-runtime.md` Evaluation | Pure execution has no host audit events and cannot read ambient state | Steps 5–14 |
-| C8.1 | new | `04-programs-and-packages.md` Dependencies and lock | M2 bootstrap input is repository-owned and hash checked; no network/vendor sync | Step 8/11 |
+| C8.1 | new | `04-programs-and-packages.md` M2 bootstrap trust input | The exact repository artifact, manifest fields, fixed toolchain-key identity, SHA-256 and Ed25519 verification order, and explicit `@std.text`/`@std.assert` import map are closed; no network/vendor sync | Step 8/11 |
 | C8.2 | deferred | `04-programs-and-packages.md` Dependencies and lock | Ordinary pinned dependency delivery and lock generation remain M5 | Step 2/3 negatives |
 | C9.1 | new | `04-programs-and-packages.md` Tests | Test identity is module plus literal name; duplicate names are module-local errors | Step 13 |
-| C9.2 | new | M2 command table below | Pure assertion results are structured test failures, never traps or host events | Step 13 |
+| C9.2 | new | `04-programs-and-packages.md` M2 assertion contract | Exact assertion members/signatures, explicit trusted import, empty effects, canonical failure record, per-test isolation, and distinct trap/unavailable outcomes are closed; assertion failures never become traps or host events | Step 13 |
 | C10.1 | new | `05-tooling.md` M2 command contract | Exact grammar, options, payload envelopes, stream routing, and exit mapping for `project init`, `fmt`, `check`, `run`, and `test` | Steps 11–13 |
 | C10.2 | deferred | `05-tooling.md` V1 CLI | `lint`, `build`, `query`, `edit`, `mcp`, and dependency mutation are valid v1 names but unavailable in M2 | Step 12 availability cases |
 | C11.1 | new | `05-tooling.md` Workspace queries | Semantic results are neutral envelopes until their owning type/workspace step supplies payloads | Steps 4–10 |

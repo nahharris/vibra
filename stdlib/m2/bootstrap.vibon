@@ -1,0 +1,21 @@
+(record
+  format: @stdlib-bootstrap.v1
+  package: "vibra-stdlib"
+  modules: (map
+    @std.text (record
+      path: "stdlib/m2/src/std/text.vib"
+      sha256: "sha256:c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44"
+      role: @source)
+    @std.assert (record
+      path: "stdlib/m2/src/std/assert.vib"
+      sha256: "sha256:746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007"
+      role: @test-registry))
+  compiler: (array "text.concat" "text.length")
+  assertions: (array
+    "assert.true"
+    "assert.false"
+    "assert.equal-bool"
+    "assert.equal-char"
+    "assert.equal-str"
+    "assert.equal-i32"
+    "assert.equal-u64"))

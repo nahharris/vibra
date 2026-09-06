@@ -81,27 +81,33 @@ and operational logs to stderr. The envelope always has these fields:
 
 `result` is one of `@command.ok`, `@command.diagnostics`,
 `@command.test-failed`, `@command.invalid-input`,
-`@command.operational-failure`, or `@command.unavailable`. `diagnostics` is
-always an array of the versioned diagnostic documents. Payloads are closed by
+`@command.operational-failure`, `@command.trap`, or `@command.unavailable`.
+`diagnostics` is always an array of the versioned diagnostic documents. Payloads are closed by
 command: `init` has `{ "workspace": string, "created": string[] }`; `fmt`
 has `{ "path": string, "changed": boolean, "written": boolean,
 "text": string|null }`; `check` has `{ "accepted": boolean }`; `run` has
 `{ "target": string, "programResult": string|null, "stdout": string,
-"stderr": string, "auditTrace": string[] }`; and `test` has
+"stderr": string, "auditTrace": string[], "trap":
+{ "trapCode": string, "origin": SpanDocument|null }|null }`; and `test` has
 `{ "selected": integer, "passed": integer, "failed": integer,
-"tests": [{ "name": string, "result": string, "diagnostics": [] }] }`.
-`programResult` is the pure value result; a runtime trap is represented in
-`result` and its diagnostic, never as a successful value. In JSON mode
+"tests": [{ "name": string, "result": string, "failure":
+{ "assertion": string, "expected": string, "actual": string,
+"primarySpan": SpanDocument }|null, "diagnostics": [] }] }`.
+`programResult` is the pure value result; a runtime trap is represented by
+`@command.trap` and its structured diagnostic, never as a successful value.
+The trap payload has `trapCode: string` and `origin: SpanDocument|null` when
+the command owns a program result. In JSON mode
 `stdout` captures program output in the envelope, preserving one machine
 document on the process stdout. Human `run` writes the program's stdout bytes
 directly and keeps command diagnostics on stderr.
 
 The process exit mapping is fixed: `0` for `@command.ok`, `1` for
 `@command.diagnostics` or `@command.test-failed`, `2` for
-`@command.invalid-input`, `3` for `@command.operational-failure`, and `4` for
-`@command.unavailable`. A valid deferred command or language form uses the
-last result and includes `@tool.unavailable`; an unknown command or option uses
-`@command.invalid-input` instead.
+`@command.invalid-input`, `3` for `@command.operational-failure`, `4` for
+`@command.unavailable`, and `5` for `@command.trap`. A valid deferred command
+or language form uses `@command.unavailable` and includes `@tool.unavailable`;
+an unknown command or option uses `@command.invalid-input` instead. A trap is
+never recast as an operational failure or an unavailable feature.
 
 Query subjects are a source position such as `src/main.vib:120`, an atom entity
 reference such as `@std.fs.read`, a built-in diagnostic code such as

@@ -154,6 +154,14 @@ Adding a compiler symbol requires a specification change to this table and its
 registry tests; a string in source or a copied declaration cannot authorize an
 operation.
 
+M2 test assertions are a separate closed test-runner outcome surface described
+in the projects chapter. They evaluate through the ordinary typed call path,
+perform no host operation, and have no compiler or host registry symbol. A
+false assertion records `@test.assertion-failed` and stops only its current
+test; it is not a trap and cannot be caught or converted into a Vibra
+`result`. A trap raised by another runtime invariant remains `@test.trap` (or
+`@command.trap` at the CLI boundary) with its origin and stable trap code.
+
 ## External providers
 
 The unified source declaration surface has exactly two toolchain-owned external

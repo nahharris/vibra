@@ -13,6 +13,28 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, LineIndex, Position};
 
+/// A diagnostic could not be rendered because a related span names a source
+/// document whose line index was not supplied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DiagnosticRenderError {
+    /// A cross-document related span has no index from which to derive its
+    /// display positions.
+    MissingSourceIndex(String),
+}
+
+impl std::fmt::Display for DiagnosticRenderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingSourceIndex(source_id) => write!(
+                formatter,
+                "no line index was supplied for related source document {source_id:?}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DiagnosticRenderError {}
+
 /// The major version of the diagnostic contracts in this module.
 ///
 /// Schema identifiers and major versions are contracts. A reader must reject a
@@ -137,8 +159,10 @@ pub struct DiagnosticDocument {
 
 impl DiagnosticDocument {
     /// Renders `diagnostic` against the document `index` was built from.
-    #[must_use]
-    pub fn render(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> Self {
+    pub fn render(
+        diagnostic: &Diagnostic,
+        index: &LineIndex<'_>,
+    ) -> Result<Self, DiagnosticRenderError> {
         Self::render_with_source_indexes(diagnostic, index, &BTreeMap::new())
     }
 
@@ -147,15 +171,48 @@ impl DiagnosticDocument {
     /// `primary_index` owns the primary span's document. When a related span
     /// carries a source identity present in `source_indexes`, its display
     /// positions are derived from that document instead of the primary one.
-    /// An absent related index falls back to `primary_index` so a producer can
-    /// continue rendering a diagnostic while reporting incomplete context.
-    #[must_use]
+    /// A related span with the same source identity as the primary span uses
+    /// `primary_index`. A related span naming a different source requires an
+    /// entry in `source_indexes`; silently deriving its position from another
+    /// document would publish a false location.
     pub fn render_with_source_indexes<'a>(
         diagnostic: &Diagnostic,
         primary_index: &LineIndex<'a>,
         source_indexes: &BTreeMap<String, LineIndex<'a>>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DiagnosticRenderError> {
+        let related = diagnostic
+            .related()
+            .iter()
+            .map(|related| {
+                // A related span may point into another document. Use its own
+                // line index whenever the caller supplied one. A related span
+                // in the primary document is safe to render from the primary
+                // index even when the caller did not populate the map.
+                let index = match related.source_id.as_deref() {
+                    None => primary_index,
+                    Some(source_id) if diagnostic.source_id() == Some(source_id) => {
+                        primary_index
+                    }
+                    Some(source_id) => {
+                        source_indexes.get(source_id).ok_or_else(|| {
+                            DiagnosticRenderError::MissingSourceIndex(
+                                source_id.to_owned(),
+                            )
+                        })?
+                    }
+                };
+                Ok(RelatedSpanDocument {
+                    span: SpanDocument::render_with_source(
+                        related.span,
+                        index,
+                        related.source_id.as_deref(),
+                    ),
+                    message: related.message.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, DiagnosticRenderError>>()?;
+
+        Ok(Self {
             schema_version: SCHEMA_VERSION,
             code: diagnostic.code().as_atom().to_owned(),
             level: diagnostic.level().as_atom().to_owned(),
@@ -165,27 +222,7 @@ impl DiagnosticDocument {
                 primary_index,
                 diagnostic.source_id(),
             ),
-            related: diagnostic
-                .related()
-                .iter()
-                .map(|related| {
-                    // A related span may point into another document. Use its
-                    // own line index whenever the caller supplied one.
-                    let index = related
-                        .source_id
-                        .as_deref()
-                        .and_then(|source_id| source_indexes.get(source_id))
-                        .unwrap_or(primary_index);
-                    RelatedSpanDocument {
-                        span: SpanDocument::render_with_source(
-                            related.span,
-                            index,
-                            related.source_id.as_deref(),
-                        ),
-                        message: related.message.clone(),
-                    }
-                })
-                .collect(),
+            related,
             notes: diagnostic.notes().to_vec(),
             fixes: diagnostic
                 .fixes()
@@ -196,7 +233,7 @@ impl DiagnosticDocument {
                     expected_revision: fix.expected_revision().as_str().to_owned(),
                 })
                 .collect(),
-        }
+        })
     }
 }
 
