@@ -73,11 +73,11 @@ regression and the complete six-target campaign were rerun after that repair.
 
 | Normative gate | Required evidence |
 | --- | --- |
-| Reader positive/negative/recovery corpus | Repaired local head and CI run [34001398418](https://github.com/nahharris/vibra/actions/runs/34001398418): `cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases`; 73 passed, 0 failed, 0 unavailable. |
-| Every syntax example classified and exercised | `cargo test --locked --offline -p vibra-conformance --test evidence_step11`; 2 tests passed, including 42 fences and 1,408 inline spans; the same test is green in CI run [34001398418](https://github.com/nahharris/vibra/actions/runs/34001398418). |
-| Formatter round-trip/idempotence including labelled/variadic normalization | Existing formatter host/conformance suites plus `m1-fuzz` roundtrip target: 128/128 passed locally; CI run [34001398418](https://github.com/nahharris/vibra/actions/runs/34001398418) is green. |
-| Unicode byte and display spans | Existing scalar/astral/combining/CRLF/interior-offset/EOF tests plus query target: 128/128 passed locally; CI run [34001398418](https://github.com/nahharris/vibra/actions/runs/34001398418) is green. |
-| Configured fuzz campaign | `target/step11/m1-fuzz-campaign.log`; `m1.toml` campaign command; six targets × 128 = 768 passed after the deep-data repair; CI smoke is green in run [34001398418](https://github.com/nahharris/vibra/actions/runs/34001398418). |
+| Reader positive/negative/recovery corpus | Repaired local head and CI run [34001568235](https://github.com/nahharris/vibra/actions/runs/34001568235): `cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases`; 73 passed, 0 failed, 0 unavailable. |
+| Every syntax example classified and exercised | `cargo test --locked --offline -p vibra-conformance --test evidence_step11`; 2 tests passed, including 42 fences and 1,408 inline spans; the same test is green in CI run [34001568235](https://github.com/nahharris/vibra/actions/runs/34001568235). |
+| Formatter round-trip/idempotence including labelled/variadic normalization | Existing formatter host/conformance suites plus `m1-fuzz` roundtrip target: 128/128 passed locally; CI run [34001568235](https://github.com/nahharris/vibra/actions/runs/34001568235) is green. |
+| Unicode byte and display spans | Existing scalar/astral/combining/CRLF/interior-offset/EOF tests plus query target: 128/128 passed locally; CI run [34001568235](https://github.com/nahharris/vibra/actions/runs/34001568235) is green. |
+| Configured fuzz campaign | `target/step11/m1-fuzz-campaign.log`; `m1.toml` campaign command; six targets × 128 = 768 passed after the deep-data repair; CI smoke is green in run [34001568235](https://github.com/nahharris/vibra/actions/runs/34001568235). |
 
 Run the full [validation sequence](validation.md) on the final head and obtain
 CI results for that head. Record environment and logs sufficient to reproduce
