@@ -9,4 +9,4 @@ tree = "tree"
 
 [expect]
 accepted = true
-graph = "graph.txt"
+graph = "graph.vibon"

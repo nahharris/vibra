@@ -1,0 +1,11 @@
+(record
+  format: @source-graph.v1
+  units: (array
+    (record name: @hello kind: @lib modules: (array
+      (record path: "nested.a" source: "src/nested/a.vib" bytes-hex: "286465666e2061290a")
+      (record path: "z" source: "src/z.vib" bytes-hex: "286465666e207a290a")
+    ))
+  )
+  dependencies: (array
+  )
+)

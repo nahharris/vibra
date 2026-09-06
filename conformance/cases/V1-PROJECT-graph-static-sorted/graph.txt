@@ -1,3 +1,0 @@
-unit @hello kind lib
-module @hello.nested.a source src/nested/a.vib bytes 286465666e2061290a
-module @hello.z source src/z.vib bytes 286465666e207a290a

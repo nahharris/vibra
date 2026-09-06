@@ -3,7 +3,7 @@
 Read this with [the step plan](README.md) and [validation](validation.md).
 Paths in code spans are repository-relative. Existing names below were checked
 at M1's main merge `9c77b86`; re-read the actual API before calling it. The
-crate/module names describe responsibilities; the Step 5 contracts below are
+crate/module names describe responsibilities; the Step 5–6 contracts below are
 the first implemented semantic APIs.
 
 ## Existing entry points
@@ -51,22 +51,28 @@ Workspace may use filesystem APIs; resolver input is already an explicit graph.
 The Step 4 resolver owns the neutral graph-input types so the semantic crate
 does not depend on workspace acquisition or conformance adapters.
 
-## Step 5 implemented contracts
+## Step 5–6 implemented contracts
 
-`vibra-ir` is the only owner of the primitive semantic values and checked
-program boundary. `CheckedProgram::try_new` accepts only checked functions and
-revalidates entry, unique names, and body/result invariants. `vibra-types`
+`vibra-ir` is the only owner of primitive semantic values and the checked
+program boundary. `CheckedProgram::try_new` accepts checked functions, while
+`try_new_with_globals` additionally admits typed immutable module values; both
+revalidate entry, unique names, and body/result invariants. `vibra-types`
 consumes an explicit source ID and the shared syntax AST; it does not read the
-filesystem or call the interpreter. `vibra-interp::run` accepts only a
-`CheckedProgram`, evaluates literal/sequence expressions deterministically, and
+filesystem or call the interpreter. The Step 6 checker validates global
+initializer dependencies and rejects cycles before lowering, then lowers direct
+parameter/`let` slots, `do` sequences, boolean `if`, and fixed positional calls
+to the same IR; direct and mutual recursive call groups remain unavailable.
+`vibra-interp::run` accepts only a `CheckedProgram`, evaluates
+literal, binding, branch, global, and call expressions deterministically, and
 returns a typed value plus an empty pure audit trace. Its `@types.v1` output is
 VIBON data: expression bodies are explicit records and arrays, never executable
 source forms; byte values use a typed array representation.
 
-The Step 5 conformance adapters are registered as `type-check` on `static-v1`
+The Step 5–6 conformance adapters are registered as `type-check` on `static-v1`
 and `interpret` on `interpreter-v1`. Their observations use canonical VIBON
-snapshots and the existing diagnostic codes, so the neutral corpus remains the
-independent contract between the host tests and semantic crates.
+snapshots and the existing diagnostic codes plus `@type.initializer-cycle`, so
+the neutral corpus remains the independent contract between the host tests and
+semantic crates.
 
 ## Phase pipeline and invariants
 

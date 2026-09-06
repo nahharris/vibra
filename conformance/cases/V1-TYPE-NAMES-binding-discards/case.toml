@@ -1,0 +1,12 @@
+id = "V1-TYPE-NAMES-binding-discards"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "Fixed parameters and nested let forms accept all three nonbinding discard spellings while preserving sibling scope reuse."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"

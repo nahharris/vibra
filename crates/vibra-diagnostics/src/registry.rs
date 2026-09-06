@@ -283,6 +283,8 @@ diagnostic_registry! {
         "an atom selector names no field of this record";
     TypeNumericOutOfRange => "@type.numeric-out-of-range", Type, Error, None,
         "a literal lies outside the range of its suffixed type";
+    TypeInitializerCycle => "@type.initializer-cycle", Type, Error, None,
+        "module value initializers form a cycle";
     TypeAnonymousTypeBody => "@type.anonymous-type-body", Type, Error, None,
         "`record`, `enum`, `union`, or `newtype` appears outside a declaration body";
     TypeUndispatchableContractMember => "@type.undispatchable-contract-member", Type, Error, None,
@@ -365,7 +367,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 70;
+    const REGISTERED_CODES: usize = 71;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -450,7 +452,7 @@ mod tests {
 
     #[test]
     fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 61 errors and 2 warnings. Pinning
+        // The specification's table fixes 62 errors and 2 warnings. Pinning
         // the split catches a level silently flipping in either direction.
         let warnings: Vec<&str> = DiagnosticCode::ALL
             .iter()

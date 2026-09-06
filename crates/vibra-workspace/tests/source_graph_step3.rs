@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vibra_diagnostics::DiagnosticCode;
+use vibra_syntax::parse_data;
 use vibra_workspace::{WorkspaceSnapshot, source_graph::SourceGraph};
 
 fn project(targets: &str, dependencies: &str) -> String {
@@ -75,6 +76,14 @@ fn captures_sorted_exact_bytes_and_stable_module_ids() {
     assert_eq!(
         graph.lookup("hello", &["z"]).expect("z module").bytes(),
         b"z\n"
+    );
+    let canonical = graph.canonical_vibon();
+    assert!(canonical.starts_with("(record\n  format: @source-graph.v1\n"));
+    assert!(!canonical.contains("unit @"));
+    assert!(
+        parse_data(Path::new("graph.vibon"), &canonical)
+            .expect("canonical graph VIBON")
+            .accepted()
     );
     cleanup(&root);
 }

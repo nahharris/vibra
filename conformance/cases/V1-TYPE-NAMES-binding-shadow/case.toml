@@ -1,0 +1,21 @@
+id = "V1-TYPE-NAMES-binding-shadow"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A let binder cannot shadow a visible parameter or module value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [32, 41]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [0, 17]

@@ -1,8 +1,8 @@
-//! Primitive type checking and lowering for the M2 Step 5 profile.
+//! Primitive type checking and lowering for the M2 Step 6 profile.
 //!
 //! The checker consumes the syntax AST and returns an immutable checked IR.
-//! It deliberately admits only module-level functions with primitive
-//! signatures and literal/sequence bodies.  A parsed AST that contains a
+//! It admits primitive module values, direct local bindings, conditionals,
+//! sequences, and fixed positional calls. A parsed AST that contains a
 //! later-step form never crosses into `vibra-ir` or `vibra-interp`.
 
 #![cfg_attr(
@@ -15,16 +15,17 @@
     )
 )]
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, PrimitiveType,
-    SourceOrigin, Value,
+    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature,
+    PrimitiveType, SourceOrigin, Value,
 };
 use vibra_syntax::{
     Attribute, Declaration, Expression, ExpressionKind, FloatSuffix, IntegerSuffix,
-    Literal, NameKind, SourceAst, TypeExpr,
+    Literal, NameKind, PatternKind, SourceAst, TypeExpr,
 };
 
 /// The result of checking one source document.
@@ -44,7 +45,10 @@ impl CheckResult {
         }
     }
 
-    /// The checked program, only when every required phase succeeded.
+    /// The executable checked program, when the source contains a function.
+    ///
+    /// A constant-only module can be accepted with no executable entry point,
+    /// so callers must use [`Self::accepted`] separately from this accessor.
     #[must_use]
     pub const fn program(&self) -> Option<&CheckedProgram> {
         self.program.as_ref()
@@ -66,7 +70,7 @@ impl CheckResult {
 }
 
 /// Checks one `.vib` source document through the shared reader and lowers the
-/// Step 5 subset to controlled IR.
+/// Step 6 subset to controlled IR.
 pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
     let source_id = source_id.as_ref();
     let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
@@ -92,6 +96,14 @@ pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
         return CheckResult::new(None, diagnostics);
     }
     let Some(ast) = document.ast() else {
+        if source.trim().is_empty() {
+            unavailable(
+                &mut diagnostics,
+                source_id,
+                ByteSpan::empty_at(0),
+                "source contains no Step 6 module value or executable function",
+            );
+        }
         return CheckResult::new(None, diagnostics);
     };
     let program = check_ast(source_id, ast, &mut diagnostics);
@@ -112,85 +124,876 @@ pub fn check_ast(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CheckedProgram> {
     let source_id = source_id.as_ref();
-    let mut functions = Vec::new();
+    let mut checker = Checker::new(source_id, diagnostics, ast);
+    checker.collect_headers();
+    checker.check_initializer_cycles();
+    checker.check_function_cycles();
+    checker.check_globals();
+    checker.check_functions();
+    checker.finish()
+}
 
-    for declaration in ast.declarations() {
-        let Declaration::Defn(function) = declaration else {
-            // This source-only checker has no resolved graph input, so an
-            // import cannot safely contribute a checked function.  Every
-            // other declaration family likewise needs its owning semantic
-            // step before it can enter checked IR.
-            let message = if matches!(declaration, Declaration::Import(_)) {
-                "imports require the resolved multi-module checker in a later M2 step"
-            } else {
-                "this declaration family is outside the Step 5 primitive profile"
-            };
-            unavailable(diagnostics, source_id, declaration.span(), message);
-            continue;
-        };
+#[derive(Clone)]
+struct GlobalHeader {
+    name: String,
+    value_type: PrimitiveType,
+    expression: Expression,
+    span: ByteSpan,
+}
 
-        let Some(signature) = check_signature(source_id, function, diagnostics) else {
-            continue;
-        };
-        if !function.parameters().is_empty() {
-            unavailable(
-                diagnostics,
-                source_id,
-                function.span(),
-                "non-nullary function execution is available in a later M2 step",
-            );
-            continue;
-        }
-        if has_deferred_attributes(function.attributes().items()) {
-            unavailable(
-                diagnostics,
-                source_id,
-                function.span(),
-                "function attributes outside the empty-effect primitive profile are unavailable",
-            );
-            continue;
-        }
+#[derive(Clone)]
+struct FunctionHeader {
+    declaration_index: usize,
+    name: String,
+    signature: FunctionSignature,
+}
 
-        let body = check_sequence(
+#[derive(Clone)]
+struct LocalBinding {
+    slot: usize,
+    value_type: PrimitiveType,
+    span: ByteSpan,
+}
+
+struct Checker<'a> {
+    source_id: &'a str,
+    diagnostics: &'a mut Vec<Diagnostic>,
+    ast: &'a SourceAst,
+    globals: Vec<GlobalHeader>,
+    global_indices: BTreeMap<String, usize>,
+    functions: Vec<FunctionHeader>,
+    function_indices: BTreeMap<String, usize>,
+    module_names: BTreeMap<String, ByteSpan>,
+    checked_globals: Vec<Option<CheckedGlobal>>,
+    checked_functions: Vec<Option<CheckedFunction>>,
+}
+
+impl<'a> Checker<'a> {
+    fn new(
+        source_id: &'a str,
+        diagnostics: &'a mut Vec<Diagnostic>,
+        ast: &'a SourceAst,
+    ) -> Self {
+        Self {
             source_id,
-            function.expressions(),
-            signature.result(),
             diagnostics,
-        );
-        let Some(body) = body else {
-            continue;
-        };
-        let origin = SourceOrigin::new(source_id, function.span());
-        match CheckedFunction::new(function.name().value(), signature, body, origin) {
-            Ok(function) => functions.push(function),
-            Err(error) => unavailable(
-                diagnostics,
-                source_id,
-                function.span(),
-                format!("checked IR construction failed: {error}"),
-            ),
+            ast,
+            globals: Vec::new(),
+            global_indices: BTreeMap::new(),
+            functions: Vec::new(),
+            function_indices: BTreeMap::new(),
+            module_names: BTreeMap::new(),
+            checked_globals: Vec::new(),
+            checked_functions: Vec::new(),
         }
     }
 
-    if diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error)
-        || functions.is_empty()
-    {
-        return None;
+    fn collect_headers(&mut self) {
+        for (declaration_index, declaration) in
+            self.ast.declarations().iter().enumerate()
+        {
+            match declaration {
+                Declaration::Def(definition) => {
+                    let Some(value_type) = primitive_type(definition.value_type())
+                    else {
+                        unavailable(
+                            self.diagnostics,
+                            self.source_id,
+                            definition.span(),
+                            "only primitive module values are available in Step 6",
+                        );
+                        continue;
+                    };
+                    let name = definition.name().value().to_owned();
+                    if let Some(earlier) = self.module_names.get(&name).copied() {
+                        redeclaration(
+                            self.diagnostics,
+                            self.source_id,
+                            definition.name().value(),
+                            definition.name().value(),
+                            definition.span(),
+                            earlier,
+                        );
+                        continue;
+                    }
+                    self.module_names.insert(name.clone(), definition.span());
+                    let index = self.globals.len();
+                    self.global_indices.insert(name.clone(), index);
+                    self.globals.push(GlobalHeader {
+                        name,
+                        value_type,
+                        expression: definition.expression().clone(),
+                        span: definition.span(),
+                    });
+                }
+                Declaration::Defn(function) => {
+                    let Some(signature) =
+                        check_signature(self.source_id, function, self.diagnostics)
+                    else {
+                        continue;
+                    };
+                    let name = function.name().value().to_owned();
+                    if let Some(earlier) = self.module_names.get(&name).copied() {
+                        redeclaration(
+                            self.diagnostics,
+                            self.source_id,
+                            &name,
+                            &name,
+                            function.span(),
+                            earlier,
+                        );
+                        continue;
+                    }
+                    self.module_names.insert(name.clone(), function.span());
+                    let index = self.functions.len();
+                    self.function_indices.insert(name.clone(), index);
+                    self.functions.push(FunctionHeader {
+                        declaration_index,
+                        name,
+                        signature,
+                    });
+                }
+                Declaration::Import(_) => unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    declaration.span(),
+                    "imports require the resolved multi-module checker",
+                ),
+                _ => unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    declaration.span(),
+                    "this declaration family is outside the Step 6 primitive profile",
+                ),
+            }
+        }
+        self.checked_globals = vec![None; self.globals.len()];
+        self.checked_functions = vec![None; self.functions.len()];
     }
-    match CheckedProgram::try_new(functions, 0) {
-        Ok(program) => Some(program),
-        Err(error) => {
-            unavailable(
-                diagnostics,
-                source_id,
-                ast.span(),
-                format!("checked IR construction failed: {error}"),
-            );
-            None
+
+    fn check_initializer_cycles(&mut self) {
+        let mut states = vec![VisitState::Unvisited; self.globals.len()];
+        for index in 0..self.globals.len() {
+            self.visit_global(index, &mut states);
         }
     }
+
+    fn check_function_cycles(&mut self) {
+        let mut dependencies = vec![BTreeSet::new(); self.functions.len()];
+        for (index, header) in self.functions.iter().enumerate() {
+            let Some(Declaration::Defn(function)) =
+                self.ast.declarations().get(header.declaration_index)
+            else {
+                continue;
+            };
+            let Some(function_dependencies) = dependencies.get_mut(index) else {
+                continue;
+            };
+            for expression in function.expressions() {
+                collect_function_dependencies(
+                    expression,
+                    &self.function_indices,
+                    function_dependencies,
+                );
+            }
+            function_dependencies.remove(&index);
+        }
+        let mut states = vec![VisitState::Unvisited; self.functions.len()];
+        for index in 0..self.functions.len() {
+            self.visit_function(index, &dependencies, &mut states);
+        }
+    }
+
+    fn visit_function(
+        &mut self,
+        index: usize,
+        dependencies: &[BTreeSet<usize>],
+        states: &mut [VisitState],
+    ) {
+        match states.get(index).copied() {
+            Some(VisitState::Done) => return,
+            Some(VisitState::Visiting) => {
+                let Some(header) = self.functions.get(index) else {
+                    return;
+                };
+                let Some(Declaration::Defn(function)) =
+                    self.ast.declarations().get(header.declaration_index)
+                else {
+                    return;
+                };
+                unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    function.span(),
+                    "recursive call groups remain unavailable until the tail-call step",
+                );
+                return;
+            }
+            Some(VisitState::Unvisited) => {}
+            None => return,
+        }
+        let Some(state) = states.get_mut(index) else {
+            return;
+        };
+        *state = VisitState::Visiting;
+        if let Some(function_dependencies) = dependencies.get(index) {
+            for dependency in function_dependencies {
+                self.visit_function(*dependency, dependencies, states);
+            }
+        }
+        if let Some(state) = states.get_mut(index) {
+            *state = VisitState::Done;
+        }
+    }
+
+    fn visit_global(&mut self, index: usize, states: &mut [VisitState]) {
+        match states.get(index).copied() {
+            Some(VisitState::Done) => return,
+            Some(VisitState::Visiting) => {
+                let Some(header) = self.globals.get(index) else {
+                    return;
+                };
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::TypeInitializerCycle,
+                        header.span,
+                        "module value initializers form a cycle",
+                    )
+                    .with_source_id(self.source_id),
+                );
+                return;
+            }
+            Some(VisitState::Unvisited) => {}
+            None => return,
+        }
+        let Some(state) = states.get_mut(index) else {
+            return;
+        };
+        *state = VisitState::Visiting;
+        let mut dependencies = BTreeSet::new();
+        let Some(expression) = self.globals.get(index).map(|header| &header.expression)
+        else {
+            return;
+        };
+        collect_global_dependencies(
+            expression,
+            &self.global_indices,
+            &self.function_indices,
+            &self.functions,
+            self.ast,
+            &mut dependencies,
+        );
+        for dependency in dependencies {
+            self.visit_global(dependency, states);
+        }
+        if let Some(state) = states.get_mut(index) {
+            *state = VisitState::Done;
+        }
+    }
+
+    fn check_globals(&mut self) {
+        for index in 0..self.globals.len() {
+            let Some(header) = self.globals.get(index).cloned() else {
+                continue;
+            };
+            let mut environment = CheckEnvironment::new(
+                self.source_id,
+                self.diagnostics,
+                &self.global_indices,
+                &self.globals,
+                &self.functions,
+                &self.function_indices,
+                &self.module_names,
+                None,
+            );
+            let Some(expression) = check_expression(
+                &mut environment,
+                &header.expression,
+                Some(header.value_type),
+            ) else {
+                continue;
+            };
+            let origin = SourceOrigin::new(self.source_id, header.span);
+            match CheckedGlobal::new(header.name, header.value_type, expression, origin)
+            {
+                Ok(global) => {
+                    if let Some(slot) = self.checked_globals.get_mut(index) {
+                        *slot = Some(global);
+                    }
+                }
+                Err(error) => unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    header.span,
+                    format!("checked IR construction failed: {error}"),
+                ),
+            }
+        }
+    }
+
+    fn check_functions(&mut self) {
+        for (index, header) in self.functions.clone().into_iter().enumerate() {
+            let Some(Declaration::Defn(function)) =
+                self.ast.declarations().get(header.declaration_index)
+            else {
+                continue;
+            };
+            if has_deferred_attributes(function.attributes().items()) {
+                unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    function.span(),
+                    "labelled, variadic, generic, external, and nonempty-effect attributes are unavailable in Step 6",
+                );
+                continue;
+            }
+            let mut environment = CheckEnvironment::new(
+                self.source_id,
+                self.diagnostics,
+                &self.global_indices,
+                &self.globals,
+                &self.functions,
+                &self.function_indices,
+                &self.module_names,
+                Some(index),
+            );
+            let mut parameters_valid = true;
+            for (parameter_index, parameter) in function.parameters().iter().enumerate()
+            {
+                match parameter.parsed_pattern().kind() {
+                    PatternKind::Binding(name) if name.is_discard() => {}
+                    PatternKind::Binding(name) => {
+                        if !environment.add_binding(
+                            name.value(),
+                            parameter.value_type(),
+                            parameter.span(),
+                        ) {
+                            parameters_valid = false;
+                        }
+                    }
+                    _ => {
+                        parameters_valid = false;
+                        unavailable(
+                            environment.diagnostics,
+                            environment.source_id,
+                            parameter.span(),
+                            "constructor and destructuring patterns are deferred until M3",
+                        );
+                    }
+                }
+                environment.next_slot = parameter_index.saturating_add(1);
+            }
+            if !parameters_valid {
+                continue;
+            }
+            let Some(body) = check_sequence(
+                &mut environment,
+                function.expressions(),
+                Some(header.signature.result()),
+                function.span(),
+            ) else {
+                continue;
+            };
+            let origin = SourceOrigin::new(self.source_id, function.span());
+            match CheckedFunction::with_slots(
+                header.name,
+                header.signature,
+                body,
+                origin,
+                environment.next_slot,
+            ) {
+                Ok(function) => {
+                    if let Some(slot) = self.checked_functions.get_mut(index) {
+                        *slot = Some(function);
+                    }
+                }
+                Err(error) => unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    function.span(),
+                    format!("checked IR construction failed: {error}"),
+                ),
+            }
+        }
+    }
+
+    fn finish(self) -> Option<CheckedProgram> {
+        if self
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error)
+        {
+            return None;
+        }
+        let globals = self
+            .checked_globals
+            .into_iter()
+            .collect::<Option<Vec<_>>>()?;
+        let functions = self
+            .checked_functions
+            .into_iter()
+            .collect::<Option<Vec<_>>>()?;
+        if functions.is_empty() {
+            if globals.is_empty() {
+                unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    self.ast.span(),
+                    "source contains no Step 6 module value or executable function",
+                );
+            }
+            return None;
+        }
+        match CheckedProgram::try_new_with_globals(globals, functions, 0) {
+            Ok(program) => Some(program),
+            Err(error) => {
+                unavailable(
+                    self.diagnostics,
+                    self.source_id,
+                    self.ast.span(),
+                    format!("checked IR construction failed: {error}"),
+                );
+                None
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VisitState {
+    Unvisited,
+    Visiting,
+    Done,
+}
+
+struct CheckEnvironment<'a> {
+    source_id: &'a str,
+    diagnostics: &'a mut Vec<Diagnostic>,
+    global_indices: &'a BTreeMap<String, usize>,
+    globals: &'a [GlobalHeader],
+    functions: &'a [FunctionHeader],
+    function_indices: &'a BTreeMap<String, usize>,
+    module_names: &'a BTreeMap<String, ByteSpan>,
+    locals: BTreeMap<String, LocalBinding>,
+    next_slot: usize,
+    current_function: Option<usize>,
+}
+
+impl<'a> CheckEnvironment<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        source_id: &'a str,
+        diagnostics: &'a mut Vec<Diagnostic>,
+        global_indices: &'a BTreeMap<String, usize>,
+        globals: &'a [GlobalHeader],
+        functions: &'a [FunctionHeader],
+        function_indices: &'a BTreeMap<String, usize>,
+        module_names: &'a BTreeMap<String, ByteSpan>,
+        current_function: Option<usize>,
+    ) -> Self {
+        Self {
+            source_id,
+            diagnostics,
+            global_indices,
+            globals,
+            functions,
+            function_indices,
+            module_names,
+            locals: BTreeMap::new(),
+            next_slot: 0,
+            current_function,
+        }
+    }
+
+    fn add_binding(
+        &mut self,
+        name: &str,
+        value_type: &TypeExpr,
+        span: ByteSpan,
+    ) -> bool {
+        let Some(value_type) = primitive_type(value_type) else {
+            unavailable(
+                self.diagnostics,
+                self.source_id,
+                span,
+                "only primitive binding types are available in Step 6",
+            );
+            return false;
+        };
+        self.add_binding_type(name, value_type, span)
+    }
+
+    fn add_binding_type(
+        &mut self,
+        name: &str,
+        value_type: PrimitiveType,
+        span: ByteSpan,
+    ) -> bool {
+        if let Some(earlier) = self.module_names.get(name).copied() {
+            redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
+            return false;
+        }
+        if let Some(earlier) = self.locals.get(name) {
+            redeclaration(
+                self.diagnostics,
+                self.source_id,
+                name,
+                name,
+                span,
+                earlier.span,
+            );
+            return false;
+        }
+        let slot = self.next_slot;
+        self.locals.insert(
+            name.to_owned(),
+            LocalBinding {
+                slot,
+                value_type,
+                span,
+            },
+        );
+        self.next_slot = self.next_slot.saturating_add(1);
+        true
+    }
+}
+
+fn collect_global_dependencies(
+    expression: &Expression,
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    functions: &[FunctionHeader],
+    ast: &SourceAst,
+    dependencies: &mut BTreeSet<usize>,
+) {
+    let mut visited_functions = BTreeSet::new();
+    collect_global_dependencies_inner(
+        expression,
+        global_indices,
+        function_indices,
+        functions,
+        ast,
+        dependencies,
+        &mut visited_functions,
+    );
+}
+
+fn collect_global_dependencies_inner(
+    expression: &Expression,
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    functions: &[FunctionHeader],
+    ast: &SourceAst,
+    dependencies: &mut BTreeSet<usize>,
+    visited_functions: &mut BTreeSet<usize>,
+) {
+    match expression.kind() {
+        ExpressionKind::Name(name)
+            if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
+        {
+            if let Some(index) = global_indices.get(name.value()).copied() {
+                dependencies.insert(index);
+            }
+        }
+        ExpressionKind::Application(application) => {
+            if let ExpressionKind::Name(name) = application.callee().kind()
+                && name.kind() == NameKind::Symbol
+                && name.segments().len() == 1
+                && let Some(function_index) =
+                    function_indices.get(name.value()).copied()
+                && visited_functions.insert(function_index)
+                && let Some(header) = functions.get(function_index)
+                && let Some(Declaration::Defn(function)) =
+                    ast.declarations().get(header.declaration_index)
+            {
+                for expression in function.expressions() {
+                    collect_global_dependencies_inner(
+                        expression,
+                        global_indices,
+                        function_indices,
+                        functions,
+                        ast,
+                        dependencies,
+                        visited_functions,
+                    );
+                }
+            }
+            collect_global_dependencies_inner(
+                application.callee(),
+                global_indices,
+                function_indices,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+            );
+            for argument in application.arguments() {
+                collect_global_dependencies_inner(
+                    argument.value(),
+                    global_indices,
+                    function_indices,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                );
+            }
+        }
+        ExpressionKind::Do(expressions) => {
+            for expression in expressions {
+                collect_global_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                );
+            }
+        }
+        ExpressionKind::Let { value, body, .. } => {
+            collect_global_dependencies_inner(
+                value,
+                global_indices,
+                function_indices,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+            );
+            for expression in body {
+                collect_global_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                );
+            }
+        }
+        ExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_global_dependencies_inner(
+                condition,
+                global_indices,
+                function_indices,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+            );
+            collect_global_dependencies_inner(
+                then_branch,
+                global_indices,
+                function_indices,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+            );
+            collect_global_dependencies_inner(
+                else_branch,
+                global_indices,
+                function_indices,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+            );
+        }
+        ExpressionKind::Lambda(lambda) => {
+            for expression in lambda.body() {
+                collect_global_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                );
+            }
+        }
+        ExpressionKind::Match { scrutinee, arms } => {
+            collect_global_dependencies_inner(
+                scrutinee,
+                global_indices,
+                function_indices,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+            );
+            for arm in arms {
+                collect_global_dependencies_inner(
+                    arm.result(),
+                    global_indices,
+                    function_indices,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                );
+            }
+        }
+        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
+            collect_global_dependencies_inner(
+                operand,
+                global_indices,
+                function_indices,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+            );
+        }
+        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
+    }
+}
+
+fn collect_function_dependencies(
+    expression: &Expression,
+    function_indices: &BTreeMap<String, usize>,
+    dependencies: &mut BTreeSet<usize>,
+) {
+    match expression.kind() {
+        ExpressionKind::Application(application) => {
+            if let ExpressionKind::Name(name) = application.callee().kind()
+                && name.kind() == NameKind::Symbol
+                && name.segments().len() == 1
+                && let Some(index) = function_indices.get(name.value()).copied()
+            {
+                dependencies.insert(index);
+            }
+            collect_function_dependencies(
+                application.callee(),
+                function_indices,
+                dependencies,
+            );
+            for argument in application.arguments() {
+                collect_function_dependencies(
+                    argument.value(),
+                    function_indices,
+                    dependencies,
+                );
+            }
+        }
+        ExpressionKind::Do(expressions) => {
+            for expression in expressions {
+                collect_function_dependencies(
+                    expression,
+                    function_indices,
+                    dependencies,
+                );
+            }
+        }
+        ExpressionKind::Let { value, body, .. } => {
+            collect_function_dependencies(value, function_indices, dependencies);
+            for expression in body {
+                collect_function_dependencies(
+                    expression,
+                    function_indices,
+                    dependencies,
+                );
+            }
+        }
+        ExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_function_dependencies(condition, function_indices, dependencies);
+            collect_function_dependencies(then_branch, function_indices, dependencies);
+            collect_function_dependencies(else_branch, function_indices, dependencies);
+        }
+        ExpressionKind::Lambda(lambda) => {
+            for expression in lambda.body() {
+                collect_function_dependencies(
+                    expression,
+                    function_indices,
+                    dependencies,
+                );
+            }
+        }
+        ExpressionKind::Match { scrutinee, arms } => {
+            collect_function_dependencies(scrutinee, function_indices, dependencies);
+            for arm in arms {
+                collect_function_dependencies(
+                    arm.result(),
+                    function_indices,
+                    dependencies,
+                );
+            }
+        }
+        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
+            collect_function_dependencies(operand, function_indices, dependencies);
+        }
+        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
+    }
+}
+
+fn ensure_expected(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    expected: Option<PrimitiveType>,
+    actual: PrimitiveType,
+) {
+    if let Some(expected) = expected
+        && expected != actual
+    {
+        mismatch(
+            environment.diagnostics,
+            environment.source_id,
+            span,
+            expected,
+            actual,
+            "expression type does not match the written expectation",
+        );
+    }
+}
+
+fn unknown_name(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    name: &str,
+) {
+    environment.diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::NameUnknownSymbol,
+            expression.span(),
+            format!("symbol `{name}` does not resolve to a visible value"),
+        )
+        .with_source_id(environment.source_id),
+    );
+}
+
+fn redeclaration(
+    diagnostics: &mut Vec<Diagnostic>,
+    source_id: &str,
+    _name: &str,
+    _earlier_name: &str,
+    span: ByteSpan,
+    earlier_span: ByteSpan,
+) {
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::NameRedeclaration,
+            span,
+            "a visible name is introduced more than once",
+        )
+        .with_source_id(source_id)
+        .with_related_source(
+            source_id,
+            earlier_span,
+            "the earlier binding is here",
+        ),
+    );
 }
 
 fn check_signature(
@@ -272,35 +1075,36 @@ fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
 }
 
 fn check_sequence(
-    source_id: &str,
+    environment: &mut CheckEnvironment<'_>,
     expressions: &[Expression],
-    expected: PrimitiveType,
-    diagnostics: &mut Vec<Diagnostic>,
+    expected: Option<PrimitiveType>,
+    fallback_span: ByteSpan,
 ) -> Option<Expr> {
     if expressions.is_empty() {
-        if expected != PrimitiveType::Void {
+        if expected.is_some_and(|expected| expected != PrimitiveType::Void) {
             mismatch(
-                diagnostics,
-                source_id,
-                ByteSpan::empty_at(0),
-                expected,
+                environment.diagnostics,
+                environment.source_id,
+                fallback_span,
+                expected.unwrap_or(PrimitiveType::Void),
                 PrimitiveType::Void,
-                "an empty function body returns void",
+                "an empty sequence returns void",
             );
             return None;
         }
         return Some(Expr::literal(
             Value::Void,
-            SourceOrigin::new(source_id, ByteSpan::empty_at(0)),
+            SourceOrigin::new(environment.source_id, fallback_span),
         ));
     }
 
     let mut checked = Vec::with_capacity(expressions.len());
     let mut valid = true;
     for (index, expression) in expressions.iter().enumerate() {
-        let expression_expected = (index + 1 == expressions.len()).then_some(expected);
-        match check_expression(source_id, expression, expression_expected, diagnostics)
-        {
+        let expression_expected = (index + 1 == expressions.len())
+            .then_some(expected)
+            .flatten();
+        match check_expression(environment, expression, expression_expected) {
             Some(value) => checked.push(value),
             None => valid = false,
         }
@@ -312,34 +1116,37 @@ fn check_sequence(
         .first()
         .zip(expressions.last())
         .map(|(first, last)| {
-            SourceOrigin::new(source_id, first.span().join(last.span()))
+            SourceOrigin::new(environment.source_id, first.span().join(last.span()))
         })
-        .unwrap_or_else(|| SourceOrigin::new(source_id, ByteSpan::empty_at(0)));
+        .unwrap_or_else(|| SourceOrigin::new(environment.source_id, fallback_span));
     Some(Expr::sequence(checked, origin))
 }
 
 fn check_expression(
-    source_id: &str,
+    environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
     expected: Option<PrimitiveType>,
-    diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Expr> {
     match expression.kind() {
-        ExpressionKind::Literal(literal) => {
-            check_literal(source_id, expression.span(), literal, expected, diagnostics)
-                .map(|value| {
-                    Expr::literal(
-                        value,
-                        SourceOrigin::new(source_id, expression.span()),
-                    )
-                })
-        }
+        ExpressionKind::Literal(literal) => check_literal(
+            environment.source_id,
+            expression.span(),
+            literal,
+            expected,
+            environment.diagnostics,
+        )
+        .map(|value| {
+            Expr::literal(
+                value,
+                SourceOrigin::new(environment.source_id, expression.span()),
+            )
+        }),
         ExpressionKind::Name(name) if name.kind() == NameKind::Atom => {
             let actual = PrimitiveType::Atom;
             if expected.is_some_and(|expected| expected != actual) {
                 mismatch(
-                    diagnostics,
-                    source_id,
+                    environment.diagnostics,
+                    environment.source_id,
                     expression.span(),
                     expected.unwrap_or(actual),
                     actual,
@@ -349,34 +1156,239 @@ fn check_expression(
             }
             Some(Expr::literal(
                 Value::Atom(name.value().to_owned()),
-                SourceOrigin::new(source_id, expression.span()),
+                SourceOrigin::new(environment.source_id, expression.span()),
             ))
         }
+        ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => {
+            if name.segments().len() != 1 {
+                unknown_name(environment, expression, name.value());
+                return None;
+            }
+            if let Some(binding) = environment.locals.get(name.value()).cloned() {
+                ensure_expected(
+                    environment,
+                    expression.span(),
+                    expected,
+                    binding.value_type,
+                );
+                return (expected.is_none() || expected == Some(binding.value_type))
+                    .then_some(Expr::variable(
+                        binding.slot,
+                        binding.value_type,
+                        SourceOrigin::new(environment.source_id, expression.span()),
+                    ));
+            }
+            if let Some(index) = environment.global_indices.get(name.value()).copied() {
+                let global = environment.globals.get(index)?;
+                let actual = global.value_type;
+                ensure_expected(environment, expression.span(), expected, actual);
+                return (expected.is_none() || expected == Some(actual)).then_some(
+                    Expr::global(
+                        index,
+                        actual,
+                        SourceOrigin::new(environment.source_id, expression.span()),
+                    ),
+                );
+            }
+            if environment.function_indices.contains_key(name.value()) {
+                unavailable(
+                    environment.diagnostics,
+                    environment.source_id,
+                    expression.span(),
+                    "function values are deferred until the callable-value step",
+                );
+            } else {
+                unknown_name(environment, expression, name.value());
+            }
+            None
+        }
+        ExpressionKind::Application(application) => {
+            if application.type_arguments().is_some() {
+                unavailable(
+                    environment.diagnostics,
+                    environment.source_id,
+                    application.span(),
+                    "generic type arguments are deferred until M3",
+                );
+                return None;
+            }
+            if application
+                .arguments()
+                .iter()
+                .any(|argument| argument.label().is_some())
+            {
+                unavailable(
+                    environment.diagnostics,
+                    environment.source_id,
+                    application.span(),
+                    "labelled and variadic calls are deferred until Step 7",
+                );
+                return None;
+            }
+            let ExpressionKind::Name(name) = application.callee().kind() else {
+                unavailable(
+                    environment.diagnostics,
+                    environment.source_id,
+                    application.callee().span(),
+                    "only direct fixed positional calls are available in Step 6",
+                );
+                return None;
+            };
+            if name.kind() != NameKind::Symbol || name.segments().len() != 1 {
+                unknown_name(environment, application.callee(), name.value());
+                return None;
+            }
+            let Some(function_index) =
+                environment.function_indices.get(name.value()).copied()
+            else {
+                unknown_name(environment, application.callee(), name.value());
+                return None;
+            };
+            if environment.current_function == Some(function_index) {
+                unavailable(
+                    environment.diagnostics,
+                    environment.source_id,
+                    application.span(),
+                    "recursive calls remain unavailable until the tail-call step",
+                );
+                return None;
+            }
+            let header = environment.functions.get(function_index)?;
+            if header.signature.parameters().len() != application.arguments().len() {
+                mismatch(
+                    environment.diagnostics,
+                    environment.source_id,
+                    application.span(),
+                    PrimitiveType::Void,
+                    PrimitiveType::Void,
+                    format!(
+                        "call to `{}` has {} arguments, expected {}",
+                        name.value(),
+                        application.arguments().len(),
+                        header.signature.parameters().len()
+                    ),
+                );
+                return None;
+            }
+            let mut arguments = Vec::with_capacity(application.arguments().len());
+            for (argument, value_type) in application
+                .arguments()
+                .iter()
+                .zip(header.signature.parameters())
+            {
+                let value =
+                    check_expression(environment, argument.value(), Some(*value_type))?;
+                arguments.push(value);
+            }
+            ensure_expected(
+                environment,
+                application.span(),
+                expected,
+                header.signature.result(),
+            );
+            (expected.is_none() || expected == Some(header.signature.result()))
+                .then_some(Expr::call(
+                    function_index,
+                    arguments,
+                    header.signature.result(),
+                    SourceOrigin::new(environment.source_id, application.span()),
+                ))
+        }
+        ExpressionKind::Do(expressions) => {
+            check_sequence(environment, expressions, expected, expression.span())
+        }
+        ExpressionKind::Let {
+            pattern,
+            value,
+            body,
+        } => {
+            let value = check_expression(environment, value, None)?;
+            let mut nested = CheckEnvironment {
+                source_id: environment.source_id,
+                diagnostics: environment.diagnostics,
+                global_indices: environment.global_indices,
+                globals: environment.globals,
+                functions: environment.functions,
+                function_indices: environment.function_indices,
+                module_names: environment.module_names,
+                locals: environment.locals.clone(),
+                next_slot: environment.next_slot,
+                current_function: environment.current_function,
+            };
+            let slot = match pattern.kind() {
+                PatternKind::Binding(name) if name.is_discard() => None,
+                PatternKind::Binding(name) => {
+                    if !nested.add_binding_type(
+                        name.value(),
+                        value.result_type(),
+                        pattern.span(),
+                    ) {
+                        return None;
+                    }
+                    Some(nested.next_slot.saturating_sub(1))
+                }
+                _ => {
+                    unavailable(
+                        nested.diagnostics,
+                        nested.source_id,
+                        pattern.span(),
+                        "constructor and destructuring patterns are deferred until M3",
+                    );
+                    return None;
+                }
+            };
+            let result = check_sequence(&mut nested, body, expected, expression.span());
+            environment.next_slot = environment.next_slot.max(nested.next_slot);
+            result.map(|body| {
+                Expr::let_binding(
+                    slot,
+                    value,
+                    body,
+                    SourceOrigin::new(environment.source_id, expression.span()),
+                )
+            })
+        }
+        ExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            let condition =
+                check_expression(environment, condition, Some(PrimitiveType::Bool))?;
+            let then_branch = check_expression(environment, then_branch, expected)?;
+            let else_branch = check_expression(environment, else_branch, expected)?;
+            if then_branch.result_type() != else_branch.result_type() {
+                mismatch(
+                    environment.diagnostics,
+                    environment.source_id,
+                    expression.span(),
+                    then_branch.result_type(),
+                    else_branch.result_type(),
+                    "if branches must have identical types",
+                );
+                return None;
+            }
+            Some(Expr::if_expression(
+                condition,
+                then_branch,
+                else_branch,
+                SourceOrigin::new(environment.source_id, expression.span()),
+            ))
+        }
+        ExpressionKind::Lambda(_)
+        | ExpressionKind::Match { .. }
+        | ExpressionKind::As { .. }
+        | ExpressionKind::Try(_) => {
+            unavailable(
+                environment.diagnostics,
+                environment.source_id,
+                expression.span(),
+                "this expression form is deferred until a later M2/M3 step",
+            );
+            None
+        }
         ExpressionKind::Name(_) => {
-            unavailable(
-                diagnostics,
-                source_id,
-                expression.span(),
-                "name resolution and value bindings are available in a later M2 step",
-            );
-            None
-        }
-        ExpressionKind::Do(_) => {
-            unavailable(
-                diagnostics,
-                source_id,
-                expression.span(),
-                "explicit do expressions are available in Step 6",
-            );
-            None
-        }
-        _ => {
-            unavailable(
-                diagnostics,
-                source_id,
-                expression.span(),
-                "this expression form is outside the Step 5 literal profile",
-            );
+            unknown_name(environment, expression, "<invalid name>");
             None
         }
     }
@@ -748,9 +1760,100 @@ mod tests {
     }
 
     #[test]
-    fn valid_later_step_declarations_do_not_enter_partial_ir() {
+    fn typed_module_values_enter_the_checked_program_boundary() {
         let result =
             check_source("deferred.vib", "(def value i32 1)\n(defn answer () i32 2)");
+        assert!(result.accepted(), "{:?}", result.diagnostics());
+        assert_eq!(result.program().expect("program").globals().len(), 1);
+    }
+
+    #[test]
+    fn checks_bindings_conditionals_and_fixed_calls() {
+        let result = check_source(
+            "bindings.vib",
+            "(def base i32 40)\n(defn answer () i32 (add base))\n(defn add (value i32) i32 (let next (do 1i8 2i8) (if true (do value 2i32) 0i32)))",
+        );
+        assert!(result.accepted(), "{:?}", result.diagnostics());
+        let program = result.program().expect("program");
+        assert_eq!(program.functions().len(), 2);
+        assert!(matches!(
+            program.entry().body().expressions().first(),
+            Some(vibra_ir::Expr::Call { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_initializer_cycles_before_execution() {
+        let result = check_source(
+            "cycle.vib",
+            "(def first i32 second)\n(def second i32 first)\n(defn answer () i32 first)",
+        );
+        assert!(!result.accepted());
+        assert!(result.program().is_none());
+        assert!(result.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::TypeInitializerCycle
+        }));
+    }
+
+    #[test]
+    fn rejects_shadowing_and_non_boolean_condition() {
+        let result = check_source(
+            "scope.vib",
+            "(def value i32 1)\n(defn answer (value i32) i32 (let value value (if value 1i32 2i32)))",
+        );
+        assert!(!result.accepted());
+        assert!(result.program().is_none());
+        assert!(result.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::NameRedeclaration
+        }));
+        let condition = check_source(
+            "condition.vib",
+            "(defn answer (value i32) i32 (if value 1i32 2i32))",
+        );
+        assert!(condition.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+        }));
+    }
+
+    #[test]
+    fn local_shadowing_reports_binder_spans() {
+        let source =
+            "(defn answer (value i32) i32 (let first value (let first 1i32 first)))";
+        let result = check_source("scope.vib", source);
+        let diagnostic = result
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameRedeclaration)
+            .expect("local redeclaration");
+        assert_eq!(
+            diagnostic.primary_span(),
+            vibra_diagnostics::ByteSpan::new(51, 56)
+        );
+        assert_eq!(diagnostic.related().len(), 1);
+        assert_eq!(
+            diagnostic.related()[0].span,
+            vibra_diagnostics::ByteSpan::new(34, 39)
+        );
+    }
+
+    #[test]
+    fn indirect_initializer_cycles_follow_fixed_calls() {
+        let result = check_source(
+            "indirect-cycle.vib",
+            "(def first i32 (read))\n(def second i32 first)\n(defn read () i32 second)\n(defn answer () i32 first)",
+        );
+        assert!(!result.accepted());
+        assert!(result.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::TypeInitializerCycle
+        }));
+    }
+
+    #[test]
+    fn rejects_mutual_recursive_calls_before_lowering() {
+        let result = check_source(
+            "recursive.vib",
+            "(defn first () i32 (second))\n(defn second () i32 (first))\n(defn answer () i32 (first))",
+        );
         assert!(!result.accepted());
         assert!(result.program().is_none());
         assert!(result.diagnostics().iter().any(|diagnostic| {

@@ -52,6 +52,7 @@ table governs.
 | `@type.invalid-tuple-index` | `@error` |
 | `@type.unknown-record-field` | `@error` |
 | `@type.numeric-out-of-range` | `@error` |
+| `@type.initializer-cycle` | `@error` |
 | `@type.anonymous-type-body` | `@error` |
 | `@type.undispatchable-contract-member` | `@error` |
 | `@type.union-too-few-members` | `@error` |
@@ -193,7 +194,7 @@ specification rule, not compiler module. Each case records:
   already acquired graph through the filesystem-free `vibra-resolve` input;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
-- an optional `graph` snapshot path for source-graph cases; when present it
+- an optional `.vibon` `graph` snapshot path for source-graph cases; when present it
   records the canonical `@source-graph.v1` observation, so acceptance alone
   cannot hide a wrong snapshot. Its VIBON shape is one top-level `record`
   with `format: @source-graph.v1`, a `units` array, and a `dependencies`
@@ -223,13 +224,11 @@ specification rule, not compiler module. Each case records:
 - Wasm result and ordered audit trace where executable; and
 - deterministic build hashes for artifact cases.
 
-The Step 3 graph handler retains the already-landed `graph.txt` snapshots as
-a compatibility adapter for the existing source-graph corpus. Those text
-snapshots are an observation of the same logical graph and are not a second
-semantic contract. New graph consumers and new resolver cases use the
-structured `@source-graph.v1` and `@resolved.v1` VIBON records; migrating the
-remaining Step 3 fixtures is a format-only change and MUST preserve the exact
-source IDs, bytes, spans, and dependency edges above.
+The source graph has one representation: the structured `@source-graph.v1`
+VIBON record described above. Every graph consumer and corpus fixture MUST
+produce or compare that record directly. Plain-text graph snapshots are not a
+supported input, output, or compatibility format. The graph representation
+MUST preserve the exact source IDs, bytes, spans, and dependency edges above.
 
 Cases use the following stable section IDs, followed by a descriptive
 kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
