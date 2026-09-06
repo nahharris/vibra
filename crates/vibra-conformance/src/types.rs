@@ -1,4 +1,4 @@
-//! Static and interpreter conformance adapters for the Step 5 primitive path.
+//! Static and interpreter conformance adapters for the M2 primitive/binding path.
 
 use crate::corpus::Case;
 use crate::manifest::ConformanceOperation;

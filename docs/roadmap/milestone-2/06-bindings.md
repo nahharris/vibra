@@ -10,7 +10,8 @@ failure**, **Value semantics**, runtime **Evaluation**:
 
 1. Add typed `def` initialization using C5's dependency/order/cycle contract.
    Keep checking separate from initialization. A query or `check` never runs
-   constant initializers to infer their types.
+   constant initializers to infer their types. Direct and indirect initializer
+   cycles are rejected with `@type.initializer-cycle` before lowering.
 2. Resolve direct local binders and all three discards in fixed parameters and
    `let`. Validate visible scopes before adding named bindings. Resolve the
    initializer in the correct outer scope; do not accidentally enable self-use.
@@ -32,7 +33,10 @@ failure**, **Value semantics**, runtime **Evaluation**:
 | Boolean conditions, equal branch types, written numeric expectations | Non-bool condition, incompatible branch/result types, numeric ambiguity |
 | Selected branch and initializer execute once | Host evaluator instrumentation proves untaken branch is not evaluated |
 
-Literal/constructor/destructuring patterns remain deferred as C1 specifies;
+Step 6's checked slice admits primitive module values, direct fixed positional
+calls, and direct local binding names. Module globals are evaluated lazily once
+on first use after static cycle validation; this preserves legal forward
+dependencies without using execution to infer a type. Literal/constructor/destructuring patterns remain deferred as C1 specifies;
 never treat a constructor spelling as a new local binder. Retain M1 retired
 form errors. No assignment, loops, `return`, `match`, or `try` implementation.
 Calls requiring recursive execution remain unavailable until Step 9 delivers
@@ -41,4 +45,6 @@ the tail-call obligation; resolving their names earlier is not execution support
 Run [common validation](validation.md), then focused resolve/types/interpreter
 tests. Done requires `V1-TYPE-NAMES-*`, `V1-TYPE-CONTROL-*`, and `V1-RUNTIME-*`
 cases asserting scope identities, exact values, empty traces, and rejection
-before execution. Step 1 owns any missing condition/mismatch/cycle code.
+before execution. Step 6 owns the `@type.initializer-cycle` registry and
+specification entry required by C5.1; condition and mismatch cases reuse the
+existing diagnostic contracts.

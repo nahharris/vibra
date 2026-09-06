@@ -1,0 +1,9 @@
+(defn answer (- i32 @- i32 -: i32) i32
+  (let kept 7i32
+    (do
+      (let - 1i32
+        (let @- 2i32
+          (let -: 3i32 kept)))
+      (let sibling 8i32 kept)
+      (let sibling 9i32 kept)
+      (if true kept 0i32))))

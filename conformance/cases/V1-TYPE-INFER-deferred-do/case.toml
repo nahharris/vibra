@@ -2,16 +2,11 @@ id = "V1-TYPE-INFER-deferred-do"
 rule = "V1-TYPE-INFER"
 profile = "static-v1"
 operation = "type-check"
-description = "Explicit do expressions remain unavailable until the Step 6 sequencing checker."
+description = "Explicit do expressions lower as checked left-to-right sequences in Step 6."
 
 [inputs]
 source = "input.vib"
 
 [expect]
-accepted = false
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [20, 31]
+accepted = true
+types = "types.vibon"

@@ -52,6 +52,7 @@ table governs.
 | `@type.invalid-tuple-index` | `@error` |
 | `@type.unknown-record-field` | `@error` |
 | `@type.numeric-out-of-range` | `@error` |
+| `@type.initializer-cycle` | `@error` |
 | `@type.anonymous-type-body` | `@error` |
 | `@type.undispatchable-contract-member` | `@error` |
 | `@type.union-too-few-members` | `@error` |

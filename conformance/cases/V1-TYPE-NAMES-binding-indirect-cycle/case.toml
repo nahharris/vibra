@@ -1,0 +1,17 @@
+id = "V1-TYPE-NAMES-binding-indirect-cycle"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A module initializer cycle reached through a fixed call is rejected before lowering."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.initializer-cycle"
+level = "@error"
+source = "input.vib"
+span = [0, 22]

@@ -3,9 +3,9 @@
 //! The type checker is the only workspace phase that constructs a
 //! [`CheckedProgram`].  The interpreter consumes that type, rather than a
 //! parsed syntax tree, which makes the checked-program boundary explicit.
-//! This first IR slice contains primitive values, literal sequences, and
-//! function signatures; calls, bindings, effects, and collections belong to
-//! later steps.
+//! This IR slice contains primitive values, immutable bindings, literal
+//! sequences, conditionals, fixed positional calls, and function signatures;
+//! effects and collections belong to later steps.
 
 use std::fmt;
 
@@ -289,7 +289,7 @@ impl Value {
     }
 }
 
-/// One executable expression in the checked literal subset.
+/// One executable expression in the checked primitive/binding subset.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr {
     /// A typed primitive literal.
@@ -306,6 +306,57 @@ pub enum Expr {
         /// The source origin of the sequence form.
         origin: SourceOrigin,
     },
+    /// A value stored in the current function activation.
+    Variable {
+        /// The immutable activation slot.
+        slot: usize,
+        /// The statically checked value type.
+        value_type: PrimitiveType,
+        /// The source origin of the name use.
+        origin: SourceOrigin,
+    },
+    /// A module-level immutable value.
+    Global {
+        /// The program-global index.
+        index: usize,
+        /// The statically checked value type.
+        value_type: PrimitiveType,
+        /// The source origin of the name use.
+        origin: SourceOrigin,
+    },
+    /// An immutable binding followed by its body.
+    Let {
+        /// The slot receiving the checked initializer, or `None` for a discard.
+        slot: Option<usize>,
+        /// The initializer.
+        value: Box<Self>,
+        /// The body sequence after the binding.
+        body: Box<Self>,
+        /// The source origin of the complete form.
+        origin: SourceOrigin,
+    },
+    /// A boolean conditional with two already checked branches.
+    If {
+        /// The boolean condition.
+        condition: Box<Self>,
+        /// The branch selected for `true`.
+        then_branch: Box<Self>,
+        /// The branch selected for `false`.
+        else_branch: Box<Self>,
+        /// The source origin of the complete form.
+        origin: SourceOrigin,
+    },
+    /// A fixed positional call to a checked function.
+    Call {
+        /// The function index in the containing checked program.
+        function: usize,
+        /// Arguments in declaration order.
+        arguments: Vec<Self>,
+        /// The statically checked result type.
+        result: PrimitiveType,
+        /// The source origin of the complete application.
+        origin: SourceOrigin,
+    },
 }
 
 impl Expr {
@@ -313,6 +364,82 @@ impl Expr {
     #[must_use]
     pub fn literal(value: Value, origin: SourceOrigin) -> Self {
         Self::Literal { value, origin }
+    }
+
+    /// Creates a checked activation-slot reference.
+    #[must_use]
+    pub fn variable(
+        slot: usize,
+        value_type: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Variable {
+            slot,
+            value_type,
+            origin,
+        }
+    }
+
+    /// Creates a checked module-global reference.
+    #[must_use]
+    pub fn global(
+        index: usize,
+        value_type: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Global {
+            index,
+            value_type,
+            origin,
+        }
+    }
+
+    /// Creates a checked immutable binding.
+    #[must_use]
+    pub fn let_binding(
+        slot: Option<usize>,
+        value: Self,
+        body: Self,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Let {
+            slot,
+            value: Box::new(value),
+            body: Box::new(body),
+            origin,
+        }
+    }
+
+    /// Creates a checked conditional.
+    #[must_use]
+    pub fn if_expression(
+        condition: Self,
+        then_branch: Self,
+        else_branch: Self,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::If {
+            condition: Box::new(condition),
+            then_branch: Box::new(then_branch),
+            else_branch: Box::new(else_branch),
+            origin,
+        }
+    }
+
+    /// Creates a checked fixed positional call.
+    #[must_use]
+    pub fn call(
+        function: usize,
+        arguments: Vec<Self>,
+        result: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Call {
+            function,
+            arguments,
+            result,
+            origin,
+        }
     }
 
     /// Creates a checked sequence expression.
@@ -328,7 +455,13 @@ impl Expr {
     #[must_use]
     pub const fn origin(&self) -> &SourceOrigin {
         match self {
-            Self::Literal { origin, .. } | Self::Sequence { origin, .. } => origin,
+            Self::Literal { origin, .. }
+            | Self::Sequence { origin, .. }
+            | Self::Variable { origin, .. }
+            | Self::Global { origin, .. }
+            | Self::Let { origin, .. }
+            | Self::If { origin, .. }
+            | Self::Call { origin, .. } => origin,
         }
     }
 
@@ -340,6 +473,12 @@ impl Expr {
             Self::Sequence { expressions, .. } => expressions
                 .last()
                 .map_or(PrimitiveType::Void, Self::result_type),
+            Self::Variable { value_type, .. } | Self::Global { value_type, .. } => {
+                *value_type
+            }
+            Self::Let { body, .. } => body.result_type(),
+            Self::If { then_branch, .. } => then_branch.result_type(),
+            Self::Call { result, .. } => *result,
         }
     }
 
@@ -347,7 +486,12 @@ impl Expr {
     #[must_use]
     pub fn expressions(&self) -> &[Self] {
         match self {
-            Self::Literal { .. } => &[],
+            Self::Literal { .. }
+            | Self::Variable { .. }
+            | Self::Global { .. }
+            | Self::Let { .. }
+            | Self::If { .. }
+            | Self::Call { .. } => &[],
             Self::Sequence { expressions, .. } => expressions,
         }
     }
@@ -357,8 +501,69 @@ impl Expr {
     pub const fn literal_value(&self) -> Option<&Value> {
         match self {
             Self::Literal { value, .. } => Some(value),
-            Self::Sequence { .. } => None,
+            Self::Sequence { .. }
+            | Self::Variable { .. }
+            | Self::Global { .. }
+            | Self::Let { .. }
+            | Self::If { .. }
+            | Self::Call { .. } => None,
         }
+    }
+}
+
+/// One checked module-level immutable value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckedGlobal {
+    name: String,
+    value_type: PrimitiveType,
+    initializer: Expr,
+    origin: SourceOrigin,
+}
+
+impl CheckedGlobal {
+    /// Creates a checked global after validating its initializer type.
+    pub fn new(
+        name: impl Into<String>,
+        value_type: PrimitiveType,
+        initializer: Expr,
+        origin: SourceOrigin,
+    ) -> Result<Self, IrError> {
+        if initializer.result_type() != value_type {
+            return Err(IrError::ResultTypeMismatch {
+                expected: value_type,
+                actual: initializer.result_type(),
+            });
+        }
+        Ok(Self {
+            name: name.into(),
+            value_type,
+            initializer,
+            origin,
+        })
+    }
+
+    /// Global name in its owning module.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The checked global type.
+    #[must_use]
+    pub const fn value_type(&self) -> PrimitiveType {
+        self.value_type
+    }
+
+    /// The checked initializer.
+    #[must_use]
+    pub const fn initializer(&self) -> &Expr {
+        &self.initializer
+    }
+
+    /// The declaration origin.
+    #[must_use]
+    pub const fn origin(&self) -> &SourceOrigin {
+        &self.origin
     }
 }
 
@@ -369,6 +574,7 @@ pub struct CheckedFunction {
     signature: FunctionSignature,
     body: Expr,
     origin: SourceOrigin,
+    slot_count: usize,
 }
 
 impl CheckedFunction {
@@ -380,6 +586,26 @@ impl CheckedFunction {
         body: Expr,
         origin: SourceOrigin,
     ) -> Result<Self, IrError> {
+        let slot_count = signature.parameters().len();
+        Self::with_slots(name, signature, body, origin, slot_count)
+    }
+
+    /// Creates a checked function with explicit immutable activation slots.
+    pub fn with_slots(
+        name: impl Into<String>,
+        signature: FunctionSignature,
+        body: Expr,
+        origin: SourceOrigin,
+        slot_count: usize,
+    ) -> Result<Self, IrError> {
+        let name = name.into();
+        if slot_count < signature.parameters().len() {
+            return Err(IrError::InvalidSlotCount {
+                function: name,
+                slots: slot_count,
+                parameters: signature.parameters().len(),
+            });
+        }
         if body.result_type() != signature.result() {
             return Err(IrError::ResultTypeMismatch {
                 expected: signature.result(),
@@ -387,10 +613,11 @@ impl CheckedFunction {
             });
         }
         Ok(Self {
-            name: name.into(),
+            name,
             signature,
             body,
             origin,
+            slot_count,
         })
     }
 
@@ -417,11 +644,18 @@ impl CheckedFunction {
     pub const fn origin(&self) -> &SourceOrigin {
         &self.origin
     }
+
+    /// Number of immutable activation slots allocated by the checker.
+    #[must_use]
+    pub const fn slot_count(&self) -> usize {
+        self.slot_count
+    }
 }
 
 /// A complete immutable program that crossed the checker boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckedProgram {
+    globals: Vec<CheckedGlobal>,
     functions: Vec<CheckedFunction>,
     entry: usize,
 }
@@ -433,6 +667,15 @@ impl CheckedProgram {
     /// parsed AST, and it revalidates entry and function-body invariants so a
     /// caller cannot accidentally execute an arbitrary syntax tree.
     pub fn try_new(
+        functions: Vec<CheckedFunction>,
+        entry: usize,
+    ) -> Result<Self, IrError> {
+        Self::try_new_with_globals(Vec::new(), functions, entry)
+    }
+
+    /// Creates a checked program containing immutable module values.
+    pub fn try_new_with_globals(
+        globals: Vec<CheckedGlobal>,
         functions: Vec<CheckedFunction>,
         entry: usize,
     ) -> Result<Self, IrError> {
@@ -457,7 +700,25 @@ impl CheckedProgram {
                 });
             }
         }
-        Ok(Self { functions, entry })
+        for global in &globals {
+            if global.initializer.result_type() != global.value_type {
+                return Err(IrError::ResultTypeMismatch {
+                    expected: global.value_type,
+                    actual: global.initializer.result_type(),
+                });
+            }
+        }
+        Ok(Self {
+            globals,
+            functions,
+            entry,
+        })
+    }
+
+    /// Immutable module values in deterministic checked order.
+    #[must_use]
+    pub fn globals(&self) -> &[CheckedGlobal] {
+        &self.globals
     }
 
     /// Functions in deterministic source order.
@@ -477,8 +738,20 @@ impl CheckedProgram {
     /// Canonical typed-program observation used by static-v1.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
-        let mut output =
-            String::from("(record\n  format: @types.v1\n  functions: (array\n");
+        let mut output = String::from("(record\n  format: @types.v1\n");
+        if !self.globals.is_empty() {
+            output.push_str("  globals: (array\n");
+            for global in &self.globals {
+                output.push_str(&format!(
+                    "    (record name: @{} type: @{} body: {})\n",
+                    global.name,
+                    global.value_type.as_str(),
+                    canonical_expr(global.initializer()),
+                ));
+            }
+            output.push_str("  )\n");
+        }
+        output.push_str("  functions: (array\n");
         for function in &self.functions {
             let parameters = function
                 .signature
@@ -516,6 +789,15 @@ pub enum IrError {
         /// The body result type.
         actual: PrimitiveType,
     },
+    /// A function did not allocate slots for all fixed parameters.
+    InvalidSlotCount {
+        /// Function name associated with the invalid count.
+        function: String,
+        /// Allocated slots.
+        slots: usize,
+        /// Required parameter slots.
+        parameters: usize,
+    },
 }
 
 impl fmt::Display for IrError {
@@ -533,6 +815,14 @@ impl fmt::Display for IrError {
             Self::ResultTypeMismatch { expected, actual } => {
                 write!(formatter, "body has type {actual}, expected {expected}")
             }
+            Self::InvalidSlotCount {
+                function,
+                slots,
+                parameters,
+            } => write!(
+                formatter,
+                "function `{function}` allocates {slots} slots for {parameters} parameters"
+            ),
         }
     }
 }
@@ -551,6 +841,56 @@ fn canonical_expr(expression: &Expr) -> String {
             format!(
                 "(record kind: @sequence type: @{} values: {})",
                 expression.result_type().as_str(),
+                canonical_array(&values)
+            )
+        }
+        Expr::Variable {
+            slot, value_type, ..
+        } => format!(
+            "(record kind: @variable slot: {}u64 type: @{})",
+            slot,
+            value_type.as_str()
+        ),
+        Expr::Global {
+            index, value_type, ..
+        } => format!(
+            "(record kind: @global index: {}u64 type: @{})",
+            index,
+            value_type.as_str()
+        ),
+        Expr::Let {
+            slot, value, body, ..
+        } => {
+            let slot =
+                slot.map_or_else(|| "void".to_owned(), |slot| format!("{slot}u64"));
+            format!(
+                "(record kind: @let slot: {slot} value: {} body: {})",
+                canonical_expr(value),
+                canonical_expr(body)
+            )
+        }
+        Expr::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => format!(
+            "(record kind: @if condition: {} then: {} else: {})",
+            canonical_expr(condition),
+            canonical_expr(then_branch),
+            canonical_expr(else_branch)
+        ),
+        Expr::Call {
+            function,
+            arguments,
+            result,
+            ..
+        } => {
+            let values = arguments.iter().map(canonical_expr).collect::<Vec<_>>();
+            format!(
+                "(record kind: @call function: {}u64 result: @{} arguments: {})",
+                function,
+                result.as_str(),
                 canonical_array(&values)
             )
         }
