@@ -305,9 +305,9 @@ mod tests {
     fn an_untaken_branch_does_not_force_a_global_initializer() {
         let origin = SourceOrigin::new("test.vib", ByteSpan::new(0, 1));
         let global = CheckedGlobal::new(
-            "cycle",
+            "value",
             PrimitiveType::I32,
-            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            Expr::literal(Value::I32(9), origin.clone()),
             origin.clone(),
         )
         .expect("valid checked global shape");
@@ -331,8 +331,15 @@ mod tests {
         )
         .expect("valid checked program");
 
-        let result = run(&program).expect("untaken branch must not execute");
+        let mut machine = super::Machine {
+            program: &program,
+            globals: vec![super::GlobalState::Uninitialized; program.globals().len()],
+        };
+        let result = machine
+            .evaluate_function(0, vec![None; program.entry().slot_count()])
+            .expect("untaken branch must not execute");
 
-        assert_eq!(result.value(), &Value::I32(7));
+        assert_eq!(result, Value::I32(7));
+        assert_eq!(machine.globals[0], super::GlobalState::Uninitialized);
     }
 }

@@ -847,13 +847,15 @@ impl CheckedProgram {
             }
         }
         let mut calls = vec![BTreeSet::new(); functions.len()];
-        for global in &globals {
+        let mut dependencies = vec![BTreeSet::new(); globals.len() + functions.len()];
+        for (index, global) in globals.iter().enumerate() {
             validate_program_expr(
                 global.initializer(),
                 &globals,
                 &functions,
-                None,
+                Some(DependencyNode::Global(index)),
                 &mut calls,
+                &mut dependencies,
             )?;
         }
         for (index, function) in functions.iter().enumerate() {
@@ -861,11 +863,13 @@ impl CheckedProgram {
                 function.body(),
                 &globals,
                 &functions,
-                Some(index),
+                Some(DependencyNode::Function(index)),
                 &mut calls,
+                &mut dependencies,
             )?;
         }
         reject_recursive_calls(&calls)?;
+        reject_global_initializer_cycles(&dependencies, globals.len())?;
         Ok(Self {
             globals,
             functions,
@@ -960,6 +964,8 @@ pub enum IrError {
     InvalidExpression(String),
     /// The function-call graph contains a recursive group outside the admitted subset.
     RecursiveCall(String),
+    /// A module initializer dependency graph contains a cycle.
+    GlobalInitializerCycle(String),
 }
 
 impl fmt::Display for IrError {
@@ -991,24 +997,50 @@ impl fmt::Display for IrError {
             Self::RecursiveCall(message) => {
                 write!(formatter, "recursive call graph: {message}")
             }
+            Self::GlobalInitializerCycle(message) => {
+                write!(formatter, "global initializer cycle: {message}")
+            }
         }
     }
 }
 
 impl std::error::Error for IrError {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum DependencyNode {
+    Global(usize),
+    Function(usize),
+}
+
+impl DependencyNode {
+    fn node_index(self, global_count: usize) -> usize {
+        match self {
+            Self::Global(index) => index,
+            Self::Function(index) => global_count.saturating_add(index),
+        }
+    }
+}
+
 fn validate_program_expr(
     expression: &Expr,
     globals: &[CheckedGlobal],
     functions: &[CheckedFunction],
-    owner: Option<usize>,
+    owner: Option<DependencyNode>,
     calls: &mut [BTreeSet<usize>],
+    dependencies: &mut [BTreeSet<DependencyNode>],
 ) -> Result<(), IrError> {
     match expression {
         Expr::Literal { .. } | Expr::Variable { .. } => {}
         Expr::Sequence { expressions, .. } => {
             for expression in expressions {
-                validate_program_expr(expression, globals, functions, owner, calls)?;
+                validate_program_expr(
+                    expression,
+                    globals,
+                    functions,
+                    owner,
+                    calls,
+                    dependencies,
+                )?;
             }
         }
         Expr::Global {
@@ -1025,10 +1057,33 @@ fn validate_program_expr(
                     global.value_type()
                 )));
             }
+            if let Some(owner) = owner {
+                let Some(edges) = dependencies.get_mut(owner.node_index(globals.len()))
+                else {
+                    return Err(IrError::InvalidExpression(format!(
+                        "dependency owner {owner:?} is outside the program"
+                    )));
+                };
+                edges.insert(DependencyNode::Global(*index));
+            }
         }
         Expr::Let { value, body, .. } => {
-            validate_program_expr(value, globals, functions, owner, calls)?;
-            validate_program_expr(body, globals, functions, owner, calls)?;
+            validate_program_expr(
+                value,
+                globals,
+                functions,
+                owner,
+                calls,
+                dependencies,
+            )?;
+            validate_program_expr(
+                body,
+                globals,
+                functions,
+                owner,
+                calls,
+                dependencies,
+            )?;
         }
         Expr::If {
             condition,
@@ -1036,9 +1091,30 @@ fn validate_program_expr(
             else_branch,
             ..
         } => {
-            validate_program_expr(condition, globals, functions, owner, calls)?;
-            validate_program_expr(then_branch, globals, functions, owner, calls)?;
-            validate_program_expr(else_branch, globals, functions, owner, calls)?;
+            validate_program_expr(
+                condition,
+                globals,
+                functions,
+                owner,
+                calls,
+                dependencies,
+            )?;
+            validate_program_expr(
+                then_branch,
+                globals,
+                functions,
+                owner,
+                calls,
+                dependencies,
+            )?;
+            validate_program_expr(
+                else_branch,
+                globals,
+                functions,
+                owner,
+                calls,
+                dependencies,
+            )?;
         }
         Expr::Call {
             function,
@@ -1060,7 +1136,14 @@ fn validate_program_expr(
                 )));
             }
             for argument in arguments {
-                validate_program_expr(argument, globals, functions, owner, calls)?;
+                validate_program_expr(
+                    argument,
+                    globals,
+                    functions,
+                    owner,
+                    calls,
+                    dependencies,
+                )?;
             }
             for (argument, expected) in
                 arguments.iter().zip(callee.signature().parameters())
@@ -1079,12 +1162,21 @@ fn validate_program_expr(
                 )));
             }
             if let Some(owner) = owner {
-                let Some(edges) = calls.get_mut(owner) else {
+                let Some(edges) = dependencies.get_mut(owner.node_index(globals.len()))
+                else {
                     return Err(IrError::InvalidExpression(format!(
-                        "function owner index {owner} is outside the program"
+                        "dependency owner {owner:?} is outside the program"
                     )));
                 };
-                edges.insert(*function);
+                edges.insert(DependencyNode::Function(*function));
+                if let DependencyNode::Function(owner) = owner {
+                    let Some(edges) = calls.get_mut(owner) else {
+                        return Err(IrError::InvalidExpression(format!(
+                            "function owner index {owner} is outside the program"
+                        )));
+                    };
+                    edges.insert(*function);
+                }
             }
         }
     }
@@ -1138,6 +1230,63 @@ fn visit_call_graph(
     };
     for dependency in dependencies {
         visit_call_graph(*dependency, calls, states)?;
+    }
+    if let Some(state) = states.get_mut(index) {
+        *state = CallState::Done;
+    }
+    Ok(())
+}
+
+fn reject_global_initializer_cycles(
+    dependencies: &[BTreeSet<DependencyNode>],
+    global_count: usize,
+) -> Result<(), IrError> {
+    let mut states = vec![CallState::Unvisited; dependencies.len()];
+    for index in 0..global_count {
+        visit_dependency_graph(
+            DependencyNode::Global(index),
+            dependencies,
+            global_count,
+            &mut states,
+        )?;
+    }
+    Ok(())
+}
+
+fn visit_dependency_graph(
+    node: DependencyNode,
+    dependencies: &[BTreeSet<DependencyNode>],
+    global_count: usize,
+    states: &mut [CallState],
+) -> Result<(), IrError> {
+    let index = node.node_index(global_count);
+    match states.get(index).copied() {
+        Some(CallState::Done) => return Ok(()),
+        Some(CallState::Visiting) => {
+            return Err(IrError::GlobalInitializerCycle(format!(
+                "dependency node {node:?} is part of a module initializer cycle"
+            )));
+        }
+        Some(CallState::Unvisited) => {}
+        None => {
+            return Err(IrError::InvalidExpression(format!(
+                "dependency graph references node {node:?}"
+            )));
+        }
+    }
+    let Some(state) = states.get_mut(index) else {
+        return Err(IrError::InvalidExpression(format!(
+            "dependency graph references node {node:?}"
+        )));
+    };
+    *state = CallState::Visiting;
+    let Some(edges) = dependencies.get(index) else {
+        return Err(IrError::InvalidExpression(format!(
+            "dependency graph has no node for {node:?}"
+        )));
+    };
+    for dependency in edges {
+        visit_dependency_graph(*dependency, dependencies, global_count, states)?;
     }
     if let Some(state) = states.get_mut(index) {
         *state = CallState::Done;
@@ -1331,5 +1480,49 @@ mod tests {
         .expect("caller shape is valid before program binding");
         let result = CheckedProgram::try_new(vec![callee, caller], 1);
         assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_direct_global_cycles() {
+        let origin = origin();
+        let global = super::CheckedGlobal::new(
+            "value",
+            PrimitiveType::I32,
+            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("global shape");
+        let function = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("function");
+        let result =
+            CheckedProgram::try_new_with_globals(vec![global], vec![function], 0);
+        assert!(matches!(result, Err(IrError::GlobalInitializerCycle(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_global_cycles_through_functions() {
+        let origin = origin();
+        let global = super::CheckedGlobal::new(
+            "value",
+            PrimitiveType::I32,
+            Expr::call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("global shape");
+        let function = CheckedFunction::new(
+            "read",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("function");
+        let result =
+            CheckedProgram::try_new_with_globals(vec![global], vec![function], 0);
+        assert!(matches!(result, Err(IrError::GlobalInitializerCycle(_))));
     }
 }
