@@ -15,6 +15,3 @@ code = "@project.entry-outside-target"
 level = "@error"
 source = "project.vibon"
 span = [141, 156]
-
-
-

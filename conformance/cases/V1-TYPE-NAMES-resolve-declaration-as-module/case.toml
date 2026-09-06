@@ -21,7 +21,3 @@ span = [0, 24]
   [[expect.diagnostics.related]]
   source = "src/lib.vib"
   span = [0, 23]
-
-
-
-

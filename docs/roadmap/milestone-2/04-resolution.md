@@ -37,8 +37,10 @@ as values**, source **Declarations**, and diagnostics **Recovery**:
 
 The independent corpus names each boundary explicitly: `V1-TYPE-NAMES-resolve-unknown-path`,
 `V1-TYPE-NAMES-resolve-declaration-as-module`, `V1-PROJECT-resolve-entry-outside-target`,
-`V1-PROJECT-resolve-entry-module`, `V1-TYPE-NAMES-resolve-cross-namespace`,
-`V1-TYPE-NAMES-resolve-duplicate-alias`, and `V1-TYPE-NAMES-resolve-reserved-value`
+`V1-PROJECT-resolve-entry-module`, `V1-PROJECT-resolve-entry-missing-member`,
+`V1-TYPE-NAMES-resolve-cross-namespace`, `V1-TYPE-NAMES-resolve-duplicate-alias`,
+`V1-TYPE-NAMES-resolve-missing-member`, `V1-TYPE-NAMES-resolve-imported-module-value`,
+and `V1-TYPE-NAMES-resolve-reserved-value`
 cover path, entity-kind, entry, and collision diagnostics. `V1-TYPE-NAMES-resolve-alias-differs`,
 `V1-PROJECT-resolve-identical-basenames`, `V1-TYPE-NAMES-resolve-literals`, and
 `V1-TYPE-NAMES-resolve-index-fallback` cover alias/root identity and literal/index boundaries.

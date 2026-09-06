@@ -15,5 +15,3 @@ code = "@module.unknown-path"
 level = "@error"
 source = "src/main.vib"
 span = [0, 29]
-
-

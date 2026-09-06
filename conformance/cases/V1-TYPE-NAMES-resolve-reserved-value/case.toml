@@ -21,6 +21,3 @@ code = "@name.reserved-value-spelling"
 level = "@error"
 source = "src/main.vib"
 span = [5, 8]
-
-
-

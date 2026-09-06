@@ -42,4 +42,3 @@ code = "@syntax.unmatched-delimiter"
 level = "@error"
 source = "src/main.vib"
 span = [41, 41]
-

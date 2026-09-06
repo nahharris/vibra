@@ -27,4 +27,3 @@ code = "@syntax.invalid-name"
 level = "@error"
 source = "src/main.vib"
 span = [19, 21]
-
