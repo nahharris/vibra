@@ -611,6 +611,11 @@ pub enum Expr {
         function_hint: Option<usize>,
         /// The statically checked result type.
         result: PrimitiveType,
+        /// Whether this call is an explicit tail transfer in the checked IR.
+        ///
+        /// The checker sets this only for a statically known target in the
+        /// current module's recursive group and a syntactic tail position.
+        tail: bool,
         /// The source origin of the complete application.
         origin: SourceOrigin,
     },
@@ -767,6 +772,26 @@ impl Expr {
             callee: None,
             function_hint: None,
             result,
+            tail: false,
+            origin,
+        }
+    }
+
+    /// Creates a direct tail transfer to a checked function.
+    #[must_use]
+    pub fn tail_call(
+        function: usize,
+        arguments: Vec<Self>,
+        result: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Call {
+            function,
+            arguments,
+            callee: None,
+            function_hint: None,
+            result,
+            tail: true,
             origin,
         }
     }
@@ -786,8 +811,35 @@ impl Expr {
             callee: Some(Box::new(callee)),
             function_hint,
             result,
+            tail: false,
             origin,
         }
+    }
+
+    /// Creates an indirect tail transfer with a statically known target.
+    #[must_use]
+    pub fn indirect_tail_call(
+        callee: Self,
+        function_hint: usize,
+        arguments: Vec<Self>,
+        result: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Call {
+            function: function_hint,
+            arguments,
+            callee: Some(Box::new(callee)),
+            function_hint: Some(function_hint),
+            result,
+            tail: true,
+            origin,
+        }
+    }
+
+    /// Reports whether this expression is an explicit checked tail transfer.
+    #[must_use]
+    pub const fn is_tail_call(&self) -> bool {
+        matches!(self, Self::Call { tail: true, .. })
     }
 
     /// Creates a checked sequence expression.
@@ -1381,6 +1433,7 @@ pub struct CheckedProgram {
     globals: Vec<CheckedGlobal>,
     functions: Vec<CheckedFunction>,
     entry: usize,
+    recursive_groups: Vec<Vec<usize>>,
 }
 
 impl CheckedProgram {
@@ -1489,12 +1542,13 @@ impl CheckedProgram {
         {
             dependencies.extend(flow_edges);
         }
-        reject_recursive_calls(&calls)?;
+        let recursive_groups = find_recursive_groups(&calls);
         reject_global_initializer_cycles(&dependencies, globals.len())?;
         Ok(Self {
             globals,
             functions,
             entry,
+            recursive_groups,
         })
     }
 
@@ -1508,6 +1562,21 @@ impl CheckedProgram {
     #[must_use]
     pub fn functions(&self) -> &[CheckedFunction] {
         &self.functions
+    }
+
+    /// Same-module recursive groups, in deterministic function-index order.
+    #[must_use]
+    pub fn recursive_groups(&self) -> &[Vec<usize>] {
+        &self.recursive_groups
+    }
+
+    /// Returns the recursive group containing `function`, if any.
+    #[must_use]
+    pub fn recursive_group(&self, function: usize) -> Option<&[usize]> {
+        self.recursive_groups
+            .iter()
+            .find(|group| group.contains(&function))
+            .map(Vec::as_slice)
     }
 
     /// The selected entry function.
@@ -2736,51 +2805,44 @@ enum CallState {
     Done,
 }
 
-fn reject_recursive_calls(calls: &[BTreeSet<usize>]) -> Result<(), IrError> {
-    let mut states = vec![CallState::Unvisited; calls.len()];
-    for index in 0..calls.len() {
-        visit_call_graph(index, calls, &mut states)?;
+fn find_recursive_groups(calls: &[BTreeSet<usize>]) -> Vec<Vec<usize>> {
+    let reachability = (0..calls.len())
+        .map(|start| reachable_functions(start, calls))
+        .collect::<Vec<_>>();
+    let mut groups = Vec::new();
+    for start in 0..calls.len() {
+        let mut group = reachability[start]
+            .iter()
+            .copied()
+            .filter(|target| reachability[*target].contains(&start))
+            .collect::<Vec<_>>();
+        if group.len() == 1 && !calls[start].contains(&start) {
+            continue;
+        }
+        group.sort_unstable();
+        if !groups
+            .iter()
+            .any(|existing: &Vec<usize>| existing == &group)
+        {
+            groups.push(group);
+        }
     }
-    Ok(())
+    groups.sort_unstable();
+    groups
 }
 
-fn visit_call_graph(
-    index: usize,
-    calls: &[BTreeSet<usize>],
-    states: &mut [CallState],
-) -> Result<(), IrError> {
-    match states.get(index).copied() {
-        Some(CallState::Done) => return Ok(()),
-        Some(CallState::Visiting) => {
-            return Err(IrError::RecursiveCall(format!(
-                "function index {index} is part of a recursive group"
-            )));
+fn reachable_functions(start: usize, calls: &[BTreeSet<usize>]) -> BTreeSet<usize> {
+    let mut reached = BTreeSet::new();
+    let mut pending = vec![start];
+    while let Some(index) = pending.pop() {
+        if !reached.insert(index) {
+            continue;
         }
-        Some(CallState::Unvisited) => {}
-        None => {
-            return Err(IrError::InvalidExpression(format!(
-                "call graph references function index {index}"
-            )));
+        if let Some(dependencies) = calls.get(index) {
+            pending.extend(dependencies.iter().copied());
         }
     }
-    let Some(state) = states.get_mut(index) else {
-        return Err(IrError::InvalidExpression(format!(
-            "call graph references function index {index}"
-        )));
-    };
-    *state = CallState::Visiting;
-    let Some(dependencies) = calls.get(index) else {
-        return Err(IrError::InvalidExpression(format!(
-            "call graph has no node for function index {index}"
-        )));
-    };
-    for dependency in dependencies {
-        visit_call_graph(*dependency, calls, states)?;
-    }
-    if let Some(state) = states.get_mut(index) {
-        *state = CallState::Done;
-    }
-    Ok(())
+    reached
 }
 
 fn reject_global_initializer_cycles(
@@ -3120,7 +3182,7 @@ mod tests {
     }
 
     #[test]
-    fn program_constructor_rejects_recursive_calls() {
+    fn program_constructor_records_recursive_group() {
         let origin = origin();
         let function = CheckedFunction::new(
             "answer",
@@ -3129,12 +3191,13 @@ mod tests {
             origin,
         )
         .expect("call shape is valid before program binding");
-        let result = CheckedProgram::try_new(vec![function], 0);
-        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+        let program = CheckedProgram::try_new(vec![function], 0)
+            .expect("recursive calls are admitted for tail-call analysis");
+        assert_eq!(program.recursive_groups(), &[vec![0]]);
     }
 
     #[test]
-    fn program_constructor_rejects_recursive_function_values() {
+    fn program_constructor_records_recursive_function_value_group() {
         let origin = origin();
         let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
         let function_value = Expr::function(0, signature.clone(), origin.clone());
@@ -3147,8 +3210,16 @@ mod tests {
         );
         let function = CheckedFunction::new("answer", signature, body, origin)
             .expect("indirect call shape is valid before program binding");
-        let result = CheckedProgram::try_new(vec![function], 0);
-        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+        let program = CheckedProgram::try_new(vec![function], 0)
+            .expect("recursive function values are admitted for tail-call analysis");
+        assert_eq!(program.recursive_groups(), &[vec![0]]);
+    }
+
+    #[test]
+    fn tail_call_is_explicit_in_checked_ir() {
+        let origin = origin();
+        let expression = Expr::tail_call(3, Vec::new(), PrimitiveType::I32, origin);
+        assert!(expression.is_tail_call());
     }
 
     #[test]
