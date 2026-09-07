@@ -3824,7 +3824,12 @@ mod tests {
     #[test]
     fn bootstrap_rejects_tampered_declared_module_bytes() {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let root = std::env::temp_dir()
+        // macOS exposes the temporary directory through `/var`, a symlink to
+        // `/private/var`.  Canonicalize the parent so the verifier can inspect
+        // this fixture without mistaking the ambient path for a fixture link.
+        let temporary_directory =
+            std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
+        let root = temporary_directory
             .join(format!("vibra-bootstrap-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         for relative in [
