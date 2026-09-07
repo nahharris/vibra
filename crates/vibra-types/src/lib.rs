@@ -3203,7 +3203,7 @@ fn check_expression_in_position(
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
             let tail_transfer = tail_position
-                && !function_targets.known.is_empty()
+                && (!function_targets.known.is_empty() || function_targets.unknown)
                 && environment.recursive_group.as_ref().is_some_and(|group| {
                     function_targets
                         .known

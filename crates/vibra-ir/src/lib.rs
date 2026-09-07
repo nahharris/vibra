@@ -1579,13 +1579,12 @@ impl CheckedProgram {
                 &mut dependencies,
             )?;
         }
-        let (calls, flow_dependencies) =
-            analyze_call_flow(&globals, &functions, entry)?;
-        for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow_dependencies)
+        let flow = analyze_call_flow(&globals, &functions, entry)?;
+        for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow.dependencies)
         {
             dependencies.extend(flow_edges);
         }
-        let recursive_groups = find_recursive_groups(&calls, &functions);
+        let recursive_groups = find_recursive_groups(&flow.calls, &functions);
         for global in &globals {
             validate_tail_calls(
                 global.initializer(),
@@ -1598,6 +1597,12 @@ impl CheckedProgram {
             )?;
         }
         for (index, function) in functions.iter().enumerate() {
+            let aliases = parameter_aliases(
+                index,
+                &functions,
+                &flow.parameter_targets,
+                &flow.parameter_sources,
+            );
             validate_tail_calls(
                 function.body(),
                 true,
@@ -1605,7 +1610,7 @@ impl CheckedProgram {
                 &recursive_groups,
                 &globals,
                 &functions,
-                &BTreeMap::new(),
+                &aliases,
             )?;
         }
         reject_global_initializer_cycles(&dependencies, globals.len())?;
@@ -2344,7 +2349,12 @@ struct CallFlow<'a> {
     unresolved: bool,
 }
 
-type CallAnalysis = (Vec<BTreeSet<usize>>, Vec<BTreeSet<DependencyNode>>);
+struct CallAnalysis {
+    calls: Vec<BTreeSet<usize>>,
+    dependencies: Vec<BTreeSet<DependencyNode>>,
+    parameter_targets: Vec<Vec<FlowTargetSummary>>,
+    parameter_sources: Vec<Vec<bool>>,
+}
 
 fn analyze_call_flow(
     globals: &[CheckedGlobal],
@@ -2434,7 +2444,12 @@ fn analyze_call_flow(
                         .to_owned(),
                 ));
             }
-            return Ok((flow.calls, flow.dependencies));
+            return Ok(CallAnalysis {
+                calls: flow.calls,
+                dependencies: flow.dependencies,
+                parameter_targets: flow.parameter_targets,
+                parameter_sources: flow.parameter_sources,
+            });
         }
     }
     if flow.unresolved {
@@ -2442,7 +2457,54 @@ fn analyze_call_flow(
             "indirect call target analysis did not reach a bounded result".to_owned(),
         ));
     }
-    Ok((flow.calls, flow.dependencies))
+    Ok(CallAnalysis {
+        calls: flow.calls,
+        dependencies: flow.dependencies,
+        parameter_targets: flow.parameter_targets,
+        parameter_sources: flow.parameter_sources,
+    })
+}
+
+fn parameter_aliases(
+    function: usize,
+    functions: &[CheckedFunction],
+    parameter_targets: &[Vec<FlowTargetSummary>],
+    parameter_sources: &[Vec<bool>],
+) -> BTreeMap<usize, FunctionTargetSummary> {
+    let mut aliases = BTreeMap::new();
+    let Some(checked) = functions.get(function) else {
+        return aliases;
+    };
+    for (slot, value_type) in function_signature_types(checked.signature()).enumerate()
+    {
+        if !matches!(value_type, PrimitiveType::Function(_)) {
+            continue;
+        }
+        let summary = if parameter_sources
+            .get(function)
+            .and_then(|sources| sources.get(slot))
+            .copied()
+            .unwrap_or(false)
+        {
+            parameter_targets
+                .get(function)
+                .and_then(|targets| targets.get(slot))
+                .map(flow_target_summary)
+                .unwrap_or_else(FunctionTargetSummary::unknown)
+        } else {
+            FunctionTargetSummary::unknown()
+        };
+        aliases.insert(slot, summary);
+    }
+    aliases
+}
+
+fn flow_target_summary(summary: &FlowTargetSummary) -> FunctionTargetSummary {
+    FunctionTargetSummary {
+        known: summary.known.clone(),
+        unknown: summary.unknown,
+        has_closure: !summary.closures.is_empty(),
+    }
 }
 
 fn function_signature_types(
@@ -3165,7 +3227,12 @@ fn validate_tail_calls(
             } else {
                 FunctionTargetSummary::known(*function)
             };
-            if targets.known.is_empty() {
+            if targets.known.is_empty()
+                && !(targets.has_closure
+                    && callee.as_deref().is_some_and(|expression| {
+                        !matches!(expression, Expr::Closure { .. })
+                    }))
+            {
                 return Err(IrError::InvalidExpression(
                     "tail call target is not statically bounded".to_owned(),
                 ));

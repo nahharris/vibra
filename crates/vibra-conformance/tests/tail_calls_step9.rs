@@ -89,6 +89,38 @@ fn mixed_named_and_closure_tail_calls_reuse_only_the_selected_named_target() {
 }
 
 #[test]
+fn returned_function_targets_reuse_the_current_activation() {
+    let source = r#"
+(defn answer () i32 ((make)))
+(defn make () (fn () i32) leaf)
+(defn leaf () i32 1i32)
+"#;
+    let checked = check_source("tail-returned-target.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let execution =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.tail_transfer_count(), 1);
+    assert_eq!(execution.max_activation_depth(), 2);
+}
+
+#[test]
+fn parameter_targets_reuse_the_current_activation() {
+    let source = r#"
+(defn answer () i32 (dispatch leaf))
+(defn dispatch (f (fn () i32)) i32 (f))
+(defn leaf () i32 1i32)
+"#;
+    let checked = check_source("tail-parameter-target.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let execution =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.tail_transfer_count(), 2);
+    assert_eq!(execution.max_activation_depth(), 1);
+}
+
+#[test]
 fn non_tail_call_keeps_a_live_caller_activation() {
     let source = r#"
 (defn answer () i32
