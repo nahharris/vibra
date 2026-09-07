@@ -233,6 +233,239 @@ pub fn check_bootstrap_source(
     }
 }
 
+/// Checks one source module with the narrowly supported explicit `@std.text`
+/// import.  This adapter is capability-backed by [`BootstrapVerification`]; a
+/// source file cannot manufacture that authority by copying declarations.
+/// Only the exact signed `@std.text` map entry is exposed, and source external
+/// declarations remain forbidden.
+pub fn check_bootstrap_text_import(
+    verification: &BootstrapVerification,
+    source_id: impl AsRef<str>,
+    source: &str,
+) -> CheckResult {
+    let source_id = source_id.as_ref();
+    if verification.artifact.is_empty()
+        || validate_signed_bootstrap_map(&verification.artifact).is_err()
+    {
+        return bootstrap_import_unavailable(
+            source_id,
+            "the @std.text import requires the verified M2 bootstrap map",
+        );
+    }
+    let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
+        Ok(document) => document,
+        Err(error) => {
+            return bootstrap_import_unavailable(source_id, error.to_string());
+        }
+    };
+    let mut diagnostics = document
+        .diagnostics()
+        .iter()
+        .cloned()
+        .map(|diagnostic| diagnostic.with_source_id(source_id))
+        .collect::<Vec<_>>();
+    if !document.accepted() || document.recovered() {
+        return CheckResult::new(None, diagnostics);
+    }
+    let Some(ast) = document.ast() else {
+        return bootstrap_import_unavailable(
+            source_id,
+            "the @std.text adapter requires a source module",
+        );
+    };
+    let imports = ast
+        .declarations()
+        .iter()
+        .filter_map(|declaration| match declaration {
+            Declaration::Import(import) => Some(import),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some(import) = imports.first() else {
+        return bootstrap_import_unavailable(
+            source_id,
+            "the source must explicitly import `(import text @std.text)`",
+        );
+    };
+    let exact_import = import.alias().kind() == NameKind::Symbol
+        && import.alias().value() == "text"
+        && import.target().kind() == NameKind::Atom
+        && import.target().value() == "std.text";
+    if imports.len() != 1 || !exact_import {
+        return bootstrap_import_unavailable(
+            source_id,
+            "only the exact `(import text @std.text)` import is available",
+        );
+    }
+    if ast.declarations().iter().any(|declaration| {
+        matches!(
+            declaration,
+            Declaration::Defn(function)
+                if function
+                    .attributes()
+                    .items()
+                    .iter()
+                    .any(|attribute| matches!(attribute, Attribute::External(_)))
+        )
+    }) {
+        return bootstrap_import_unavailable(
+            source_id,
+            "source external declarations cannot acquire bootstrap authority",
+        );
+    }
+    if !ast
+        .declarations()
+        .iter()
+        .any(|declaration| matches!(declaration, Declaration::Def(_) | Declaration::Defn(_)))
+    {
+        return bootstrap_import_unavailable(
+            source_id,
+            "the @std.text adapter requires a source declaration",
+        );
+    }
+
+    let span = import.span();
+    let mut body = String::with_capacity(source.len());
+    body.push_str(&source[..span.start()]);
+    body.push_str(&source[span.end()..]);
+    let body = replace_bootstrap_text_names(&body);
+    let mut combined = body;
+    if !combined.ends_with('\n') {
+        combined.push('\n');
+    }
+    combined.push_str(BOOTSTRAP_TEXT_ADAPTER_DECLARATIONS);
+    let document = match vibra_syntax::parse_source(Path::new(source_id), &combined) {
+        Ok(document) => document,
+        Err(error) => {
+            return bootstrap_import_unavailable(source_id, error.to_string());
+        }
+    };
+    diagnostics.extend(
+        document
+            .diagnostics()
+            .iter()
+            .cloned()
+            .map(|diagnostic| diagnostic.with_source_id(source_id)),
+    );
+    if !document.accepted() || document.recovered() {
+        return CheckResult::new(None, diagnostics);
+    }
+    let Some(ast) = document.ast() else {
+        return CheckResult::new(None, diagnostics);
+    };
+    let (program, bindings) =
+        check_ast_with_bindings_authority(source_id, ast, &mut diagnostics, true);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error)
+    {
+        CheckResult::new(None, diagnostics)
+    } else {
+        CheckResult::with_bindings(program, diagnostics, bindings)
+    }
+}
+
+const BOOTSTRAP_TEXT_ADAPTER_DECLARATIONS: &str = r#"(defn bootstrap-text-concat (left str right str) str
+  visibility: @public
+  external: @compiler
+  symbol: "text.concat")
+(defn bootstrap-text-length (value str) u64
+  visibility: @public
+  external: @compiler
+  symbol: "text.length")"#;
+
+fn bootstrap_import_unavailable(source_id: &str, message: impl Into<String>) -> CheckResult {
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::ToolUnavailable,
+        ByteSpan::empty_at(0),
+        message,
+    )
+    .with_source_id(source_id);
+    CheckResult::new(None, vec![diagnostic])
+}
+
+fn replace_bootstrap_text_names(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut index = 0;
+    let mut in_string = false;
+    let mut in_comment = false;
+    let bytes = source.as_bytes();
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_comment {
+            let Some(character) = source[index..].chars().next() else {
+                break;
+            };
+            output.push(character);
+            index += character.len_utf8();
+            if character == '\n' {
+                in_comment = false;
+            }
+            continue;
+        }
+        if in_string {
+            let Some(character) = source[index..].chars().next() else {
+                break;
+            };
+            output.push(character);
+            index += character.len_utf8();
+            if character == '\\' && index < bytes.len() {
+                if let Some(escaped) = source[index..].chars().next() {
+                    output.push(escaped);
+                    index += escaped.len_utf8();
+                }
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if byte == b';' {
+            in_comment = true;
+            output.push(';');
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            in_string = true;
+            output.push('"');
+            index += 1;
+            continue;
+        }
+        let replacement = if source[index..].starts_with("text.concat") {
+            Some(("text.concat", "bootstrap-text-concat"))
+        } else if source[index..].starts_with("text.length") {
+            Some(("text.length", "bootstrap-text-length"))
+        } else {
+            None
+        };
+        if let Some((needle, replacement)) = replacement {
+            let previous_is_name = index > 0
+                && (bytes[index - 1].is_ascii_lowercase()
+                    || bytes[index - 1].is_ascii_digit()
+                    || bytes[index - 1] == b'-'
+                    || bytes[index - 1] == b'.');
+            let end = index.saturating_add(needle.len());
+            let next_is_name = bytes.get(end).is_some_and(|next| {
+                next.is_ascii_lowercase()
+                    || next.is_ascii_digit()
+                    || *next == b'-'
+                    || *next == b'.'
+            });
+            if !previous_is_name && !next_is_name {
+                output.push_str(replacement);
+                index = end;
+                continue;
+            }
+        }
+        let Some(character) = source[index..].chars().next() else {
+            break;
+        };
+        output.push(character);
+        index += character.len_utf8();
+    }
+    output
+}
+
 /// The canonical path of the signed M2 text bootstrap module.
 pub const BOOTSTRAP_TEXT_SOURCE_ID: &str = "stdlib/m2/src/std/text.vib";
 const BOOTSTRAP_TEXT_BYTES: &[u8] =
@@ -3412,8 +3645,8 @@ fn unavailable(
 #[cfg(test)]
 mod tests {
     use super::{
-        BOOTSTRAP_TEXT_SOURCE_ID, check_bootstrap_source, check_source,
-        verify_bootstrap,
+        BOOTSTRAP_TEXT_SOURCE_ID, check_bootstrap_source, check_bootstrap_text_import,
+        check_source, verify_bootstrap,
     };
     use std::path::Path;
     use vibra_diagnostics::DiagnosticCode;
@@ -3662,5 +3895,19 @@ mod tests {
         assert!(result.diagnostics().iter().any(|diagnostic| {
             diagnostic.code() == DiagnosticCode::ToolUnavailable
         }));
+    }
+
+    #[test]
+    fn verified_text_import_lowers_qualified_calls_through_checked_ir() {
+        let source = r#"(import text @std.text)
+(defn answer () u64
+  (text.length (text.concat "A😀" "")))"#;
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let checked = check_bootstrap_text_import(&verification, "app/main.vib", source);
+        assert!(checked.accepted(), "{:?}", checked.diagnostics());
+        let program = checked.program().expect("checked imported program");
+        assert!(program.canonical_vibon().contains("text.concat"));
+        assert!(program.canonical_vibon().contains("text.length"));
     }
 }

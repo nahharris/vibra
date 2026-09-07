@@ -1,0 +1,3 @@
+(import text @std.text)
+(defn answer () u64
+  (text.length (text.concat "A😀" "")))

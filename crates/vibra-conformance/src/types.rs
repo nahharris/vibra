@@ -5,7 +5,19 @@ use crate::manifest::ConformanceOperation;
 use crate::runner::{
     CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
 };
-use vibra_types::check_source;
+use std::path::Path;
+
+use vibra_types::{check_bootstrap_text_import, check_source, verify_bootstrap};
+
+fn check_case_source(source_id: &str, source: &str) -> vibra_types::CheckResult {
+    if source.starts_with("(import text @std.text)") {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        if let Ok(verification) = verify_bootstrap(repository) {
+            return check_bootstrap_text_import(&verification, source_id, source);
+        }
+    }
+    check_source(source_id, source)
+}
 
 /// Runs source type checking and returns the canonical checked-program
 /// observation.
@@ -25,7 +37,7 @@ impl ProfileHandler for StaticV1TypeHandler {
         let source = case
             .read_file(source_id)
             .map_err(|error| HandlerError::new(error.to_string()))?;
-        let checked = check_source(source_id, &source);
+        let checked = check_case_source(source_id, &source);
         let accepted = checked.accepted();
         Ok(CaseObservation {
             accepted,
@@ -55,7 +67,7 @@ impl ProfileHandler for InterpreterV1Handler {
         let source = case
             .read_file(source_id)
             .map_err(|error| HandlerError::new(error.to_string()))?;
-        let checked = check_source(source_id, &source);
+        let checked = check_case_source(source_id, &source);
         let Some(program) = checked.program() else {
             return Ok(CaseObservation {
                 accepted: false,
