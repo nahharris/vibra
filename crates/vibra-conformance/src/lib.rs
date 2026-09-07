@@ -32,6 +32,7 @@ mod reader;
 mod resolve;
 mod runner;
 mod types;
+mod workspace_query;
 
 pub use corpus::{Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError};
 pub use graph::StaticV1SourceGraphHandler;
@@ -50,3 +51,4 @@ pub use runner::{
     QueryObservation, RunReport,
 };
 pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
+pub use workspace_query::ToolingV1QueryHandler;

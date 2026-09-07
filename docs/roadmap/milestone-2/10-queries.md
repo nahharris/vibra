@@ -48,9 +48,15 @@ The immutable snapshot revision is
 `vibra-workspace-revision-v1` plus one `0x00` byte, length-prefixed exact
 `project.vibon` bytes, then length-prefixed source IDs and exact bytes in
 deterministic source-ID order. Absolute paths and ambient state are excluded;
-queries never reread files or mix revisions. The fixed vector
-`project.vibon = "project"`, `src/main.vib = "(defn f () str \\\"ok\\\")"`
-has digest
+queries never reread files or mix revisions. The fixed vector uses
+`project.vibon = "project"` and the exact `src/main.vib` bytes below, with no
+trailing newline or backslash bytes:
+
+```text
+(defn f () str "ok")
+```
+
+It has digest
 `sha256:292c672b9ced8e6e02fbb3768f658fb52880ffd43b624c591b18e77fb083b996`.
 
 | Positive | Negative / boundary |

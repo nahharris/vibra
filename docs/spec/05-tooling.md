@@ -264,7 +264,14 @@ snapshot is captured; queries never reread disk or combine facts from another
 revision.
 
 For the fixed vector `project.vibon = "project"`, one source with ID
-`src/main.vib` and bytes `"(defn f () str \\\"ok\\\")"`, the digest is
+`src/main.vib` has the exact source bytes shown here, with no trailing newline
+and no backslash bytes:
+
+```text
+(defn f () str "ok")
+```
+
+The digest is
 `sha256:292c672b9ced8e6e02fbb3768f658fb52880ffd43b624c591b18e77fb083b996`.
 Implementations MUST cover this vector and an equal-length source edit in
 their host tests.

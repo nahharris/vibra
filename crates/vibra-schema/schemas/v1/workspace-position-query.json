@@ -89,7 +89,7 @@
     "contextName": { "enum": ["module", "initializer", "function", "parameter", "lambda", "let-value", "let-body", "branch", "argument", "result", "trivia", "recovery"] },
     "stringFact": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "oneOf": [
         { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "type": "string", "minLength": 1 } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "type": ["string", "null"] } } },
@@ -97,23 +97,23 @@
       ]
     },
     "roleFact": {
-      "allOf": [{ "$ref": "#/$defs/stringFact" }, { "if": { "properties": { "status": { "const": "exact" } } }, "then": { "properties": { "value": { "$ref": "#/$defs/roleName" } } } }]
+      "allOf": [{ "$ref": "#/$defs/stringFact" }, { "if": { "properties": { "status": { "enum": ["exact", "recovered"] } } }, "then": { "properties": { "value": { "anyOf": [{ "$ref": "#/$defs/roleName" }, { "type": "null" }] } } } }]
     },
     "contextFact": {
-      "allOf": [{ "$ref": "#/$defs/stringFact" }, { "if": { "properties": { "status": { "const": "exact" } } }, "then": { "properties": { "value": { "$ref": "#/$defs/contextName" } } } }]
+      "allOf": [{ "$ref": "#/$defs/stringFact" }, { "if": { "properties": { "status": { "enum": ["exact", "recovered"] } } }, "then": { "properties": { "value": { "anyOf": [{ "$ref": "#/$defs/contextName" }, { "type": "null" }] } } } }]
     },
     "identity": {
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "canonical"],
       "properties": {
-        "kind": { "enum": ["module", "type", "interface", "effect", "value", "function", "test", "field", "variant", "operation"] },
+        "kind": { "enum": ["module", "type", "interface", "effect", "value", "function", "test", "field", "variant", "operation", "binder"] },
         "canonical": { "type": "string", "minLength": 1 }
       }
     },
     "identityFact": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "oneOf": [
         { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/identity" } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "$ref": "#/$defs/identityOrNull" } } },
@@ -161,7 +161,7 @@
     },
     "typeFact": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "oneOf": [
         { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/type" } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "$ref": "#/$defs/type" }, { "type": "null" }] } } },
@@ -179,7 +179,7 @@
     },
     "localFact": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "oneOf": [
         { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "type": "array", "items": { "$ref": "#/$defs/local" } } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/local" } }, { "type": "null" }] } } },
@@ -199,7 +199,7 @@
     },
     "importFact": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "oneOf": [
         { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "type": "array", "items": { "$ref": "#/$defs/import" } } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/import" } }, { "type": "null" }] } } },
@@ -208,7 +208,7 @@
     },
     "identityListFact": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "oneOf": [
         { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "type": "array", "items": { "$ref": "#/$defs/identity" } } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/identity" } }, { "type": "null" }] } } },
@@ -230,7 +230,7 @@
     },
     "applicationFact": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "oneOf": [
         { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/application" } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "$ref": "#/$defs/application" }, { "type": "null" }] } } },

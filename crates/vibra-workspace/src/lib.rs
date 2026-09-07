@@ -20,6 +20,7 @@
 
 pub mod discovery;
 pub mod project;
+pub mod query;
 pub mod snapshot;
 pub mod source_graph;
 
@@ -114,5 +115,65 @@ impl WorkspaceSnapshot {
     /// Builds the explicit source graph without consulting the filesystem.
     pub fn source_graph(&self) -> Result<source_graph::SourceGraph, WorkspaceError> {
         source_graph::SourceGraph::build(&self.project, self.source.clone())
+    }
+
+    /// Resolves the immutable local source graph without reading the filesystem.
+    pub fn resolve(&self) -> Result<vibra_resolve::ResolvedSnapshot, WorkspaceError> {
+        let graph = self.source_graph()?;
+        let package = self.project.project().package();
+        let units = graph
+            .units()
+            .iter()
+            .map(|unit| {
+                let target = self
+                    .project
+                    .project()
+                    .targets()
+                    .iter()
+                    .find(|target| target.name().atom().value() == unit.name());
+                let entry = target.and_then(|target| {
+                    target.entry().map(|entry| {
+                        vibra_resolve::ReferencePath::new(
+                            entry.atom().segments().iter().cloned(),
+                            entry.origin().source_id().to_owned(),
+                            entry.span(),
+                        )
+                    })
+                });
+                let kind = match unit.kind() {
+                    project::TargetKind::Bin => vibra_resolve::TargetKind::Bin,
+                    project::TargetKind::Lib => vibra_resolve::TargetKind::Lib,
+                };
+                let modules = unit
+                    .modules()
+                    .iter()
+                    .map(|module| {
+                        vibra_resolve::SourceModule::new(
+                            module.id().unit(),
+                            module.id().segments().iter().cloned(),
+                            module.source_id(),
+                            module.bytes(),
+                        )
+                    })
+                    .collect();
+                vibra_resolve::SourceUnit::new(unit.name(), kind, entry, modules)
+            })
+            .collect();
+        Ok(vibra_resolve::Resolver::resolve(
+            vibra_resolve::ResolveInput::new(
+                package.name().value(),
+                package.version().value(),
+                units,
+            ),
+        ))
+    }
+
+    /// Queries semantic and structural facts at one captured source position.
+    pub fn query_position(
+        &self,
+        source_id: &str,
+        offset: usize,
+    ) -> Result<query::WorkspacePositionQuery, query::WorkspaceQueryError> {
+        query::query_position(self, source_id, offset)
     }
 }

@@ -53,6 +53,7 @@
 
 mod diagnostic;
 mod query;
+mod semantic_query;
 
 pub use diagnostic::{
     DIAGNOSTIC_SCHEMA, DiagnosticDocument, DiagnosticRenderError, FixDocument,
@@ -62,4 +63,10 @@ pub use diagnostic::{
 pub use query::{
     SOURCE_POSITION_QUERY_SCHEMA, SourcePositionQueryDocument, category_name,
     status_name,
+};
+pub use semantic_query::{
+    ApplicationContractDocument, ImportAliasDocument, LabelledTypeDocument,
+    LocalBindingDocument, QueryIdentityDocument, SemanticFactDocument,
+    SemanticTypeDocument, WORKSPACE_POSITION_QUERY_SCHEMA,
+    WorkspacePositionQueryDocument,
 };

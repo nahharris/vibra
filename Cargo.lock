@@ -970,6 +970,7 @@ dependencies = [
  "serde_json",
  "vibra-diagnostics",
  "vibra-syntax",
+ "vibra-workspace",
 ]
 
 [[package]]
@@ -998,7 +999,10 @@ dependencies = [
  "sha2",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-ir",
+ "vibra-resolve",
  "vibra-syntax",
+ "vibra-types",
 ]
 
 [[package]]
