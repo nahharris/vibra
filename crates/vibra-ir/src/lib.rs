@@ -613,8 +613,9 @@ pub enum Expr {
         result: PrimitiveType,
         /// Whether this call is an explicit tail transfer in the checked IR.
         ///
-        /// The checker sets this only for a statically known target in the
-        /// current module's recursive group and a syntactic tail position.
+        /// The checker sets this only when every statically bounded target is
+        /// in the current module function's recursive group and the call is
+        /// in a syntactic tail position.
         tail: bool,
         /// The source origin of the complete application.
         origin: SourceOrigin,
@@ -825,11 +826,32 @@ impl Expr {
         result: PrimitiveType,
         origin: SourceOrigin,
     ) -> Self {
+        Self::indirect_tail_call_with_hint(
+            callee,
+            Some(function_hint),
+            arguments,
+            result,
+            origin,
+        )
+    }
+
+    /// Creates an indirect tail transfer whose statically bounded target set
+    /// may contain more than one module function.  The optional hint is only
+    /// a compact singleton observation; checked-program validation derives
+    /// the actual target set from the callee expression.
+    #[must_use]
+    pub fn indirect_tail_call_with_hint(
+        callee: Self,
+        function_hint: Option<usize>,
+        arguments: Vec<Self>,
+        result: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
         Self::Call {
-            function: function_hint,
+            function: function_hint.unwrap_or_default(),
             arguments,
             callee: Some(Box::new(callee)),
-            function_hint: Some(function_hint),
+            function_hint,
             result,
             tail: true,
             origin,
@@ -1302,6 +1324,7 @@ pub struct CheckedFunction {
     body: Expr,
     origin: SourceOrigin,
     slot_count: usize,
+    external_wrapper: bool,
 }
 
 impl CheckedFunction {
@@ -1327,12 +1350,13 @@ impl CheckedFunction {
             })
             .collect();
         let body = Expr::external(intrinsic, arguments, origin.clone());
-        Self::with_slots(
+        Self::with_slots_and_external(
             name,
             signature,
             body,
             origin,
             intrinsic.signature().fixed_parameter_count(),
+            true,
         )
     }
 
@@ -1355,6 +1379,17 @@ impl CheckedFunction {
         body: Expr,
         origin: SourceOrigin,
         slot_count: usize,
+    ) -> Result<Self, IrError> {
+        Self::with_slots_and_external(name, signature, body, origin, slot_count, false)
+    }
+
+    fn with_slots_and_external(
+        name: impl Into<String>,
+        signature: FunctionSignature,
+        body: Expr,
+        origin: SourceOrigin,
+        slot_count: usize,
+        external_wrapper: bool,
     ) -> Result<Self, IrError> {
         let name = name.into();
         if let Err(message) = validate_signature_shape(&signature) {
@@ -1393,6 +1428,7 @@ impl CheckedFunction {
             body,
             origin,
             slot_count,
+            external_wrapper,
         })
     }
 
@@ -1424,6 +1460,13 @@ impl CheckedFunction {
     #[must_use]
     pub const fn slot_count(&self) -> usize {
         self.slot_count
+    }
+
+    /// Whether this function is a synthetic wrapper around a compiler
+    /// intrinsic rather than a source-level module definition.
+    #[must_use]
+    pub const fn is_external_wrapper(&self) -> bool {
+        self.external_wrapper
     }
 }
 
@@ -1549,7 +1592,9 @@ impl CheckedProgram {
                 false,
                 None,
                 &recursive_groups,
+                &globals,
                 &functions,
+                &BTreeMap::new(),
             )?;
         }
         for (index, function) in functions.iter().enumerate() {
@@ -1558,7 +1603,9 @@ impl CheckedProgram {
                 true,
                 Some(index),
                 &recursive_groups,
+                &globals,
                 &functions,
+                &BTreeMap::new(),
             )?;
         }
         reject_global_initializer_cycles(&dependencies, globals.len())?;
@@ -1938,7 +1985,9 @@ fn validate_program_expr(
                     let summary = possible_function_targets(
                         callee_expression,
                         &BTreeMap::new(),
+                        globals,
                         functions,
+                        &mut BTreeSet::new(),
                         &mut BTreeSet::new(),
                     );
                     let labelled_index =
@@ -1998,7 +2047,9 @@ fn validate_program_expr(
                 let summary = possible_function_targets(
                     callee_expression,
                     &BTreeMap::new(),
+                    globals,
                     functions,
+                    &mut BTreeSet::new(),
                     &mut BTreeSet::new(),
                 );
                 if let Some(function_hint) = function_hint {
@@ -2056,8 +2107,10 @@ struct FunctionTargetSummary {
 fn possible_function_targets(
     expression: &Expr,
     aliases: &BTreeMap<usize, FunctionTargetSummary>,
+    globals: &[CheckedGlobal],
     functions: &[CheckedFunction],
     visiting: &mut BTreeSet<usize>,
+    visiting_globals: &mut BTreeSet<usize>,
 ) -> FunctionTargetSummary {
     match expression {
         Expr::Function { function, .. } => FunctionTargetSummary {
@@ -2067,7 +2120,14 @@ fn possible_function_targets(
         Expr::Closure {
             signature, body, ..
         } if matches!(signature.result(), PrimitiveType::Function(_)) => {
-            possible_function_targets(body, aliases, functions, visiting)
+            possible_function_targets(
+                body,
+                aliases,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            )
         }
         Expr::Closure { .. } => FunctionTargetSummary::default(),
         Expr::If {
@@ -2075,10 +2135,22 @@ fn possible_function_targets(
             else_branch,
             ..
         } => {
-            let then_targets =
-                possible_function_targets(then_branch, aliases, functions, visiting);
-            let else_targets =
-                possible_function_targets(else_branch, aliases, functions, visiting);
+            let then_targets = possible_function_targets(
+                then_branch,
+                aliases,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
+            let else_targets = possible_function_targets(
+                else_branch,
+                aliases,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
             let mut known = then_targets.known;
             known.extend(else_targets.known);
             FunctionTargetSummary {
@@ -2089,14 +2161,26 @@ fn possible_function_targets(
         Expr::Let {
             slot, value, body, ..
         } => {
-            let value_targets =
-                possible_function_targets(value, aliases, functions, visiting);
+            let value_targets = possible_function_targets(
+                value,
+                aliases,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
             let mut nested = aliases.clone();
             if let Some(slot) = slot {
                 nested.insert(*slot, value_targets.clone());
             }
-            let body_targets =
-                possible_function_targets(body, &nested, functions, visiting);
+            let body_targets = possible_function_targets(
+                body,
+                &nested,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
             FunctionTargetSummary {
                 known: body_targets.known,
                 unknown: value_targets.unknown || body_targets.unknown,
@@ -2105,7 +2189,14 @@ fn possible_function_targets(
         Expr::Sequence { expressions, .. } => expressions.last().map_or_else(
             FunctionTargetSummary::default,
             |expression| {
-                possible_function_targets(expression, aliases, functions, visiting)
+                possible_function_targets(
+                    expression,
+                    aliases,
+                    globals,
+                    functions,
+                    visiting,
+                    visiting_globals,
+                )
             },
         ),
         Expr::Variable { slot, .. } => {
@@ -2117,23 +2208,46 @@ fn possible_function_targets(
                     unknown: true,
                 })
         }
-        Expr::Captured { .. } | Expr::Global { .. } => FunctionTargetSummary {
+        Expr::Captured { .. } => FunctionTargetSummary {
             known: BTreeSet::new(),
             unknown: true,
         },
+        Expr::Global { index, .. } => {
+            let Some(global) = globals.get(*index) else {
+                return FunctionTargetSummary {
+                    known: BTreeSet::new(),
+                    unknown: true,
+                };
+            };
+            if !visiting_globals.insert(*index) {
+                return FunctionTargetSummary {
+                    known: BTreeSet::new(),
+                    unknown: true,
+                };
+            }
+            let result = possible_function_targets(
+                global.initializer(),
+                &BTreeMap::new(),
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
+            visiting_globals.remove(index);
+            result
+        }
         Expr::Call {
-            function,
-            callee,
-            function_hint,
-            ..
+            function, callee, ..
         } => {
-            let target_summary = if let Some(function_hint) = function_hint {
-                FunctionTargetSummary {
-                    known: BTreeSet::from([*function_hint]),
-                    unknown: false,
-                }
-            } else if let Some(callee) = callee {
-                possible_function_targets(callee, aliases, functions, visiting)
+            let target_summary = if let Some(callee) = callee {
+                possible_function_targets(
+                    callee,
+                    aliases,
+                    globals,
+                    functions,
+                    visiting,
+                    visiting_globals,
+                )
             } else {
                 FunctionTargetSummary {
                     known: BTreeSet::from([*function]),
@@ -2157,8 +2271,10 @@ fn possible_function_targets(
                 let returned = possible_function_targets(
                     function.body(),
                     &BTreeMap::new(),
+                    globals,
                     functions,
                     visiting,
+                    visiting_globals,
                 );
                 result.known.extend(returned.known);
                 result.unknown |= returned.unknown;
@@ -2840,7 +2956,7 @@ fn find_recursive_groups(
 fn is_module_definition(functions: &[CheckedFunction], index: usize) -> bool {
     functions
         .get(index)
-        .is_some_and(|function| !matches!(function.body(), Expr::External { .. }))
+        .is_some_and(|function| !function.is_external_wrapper())
 }
 
 fn reachable_functions(start: usize, calls: &[BTreeSet<usize>]) -> BTreeSet<usize> {
@@ -2862,7 +2978,9 @@ fn validate_tail_calls(
     tail_position: bool,
     current_function: Option<usize>,
     recursive_groups: &[Vec<usize>],
+    globals: &[CheckedGlobal],
     functions: &[CheckedFunction],
+    aliases: &BTreeMap<usize, FunctionTargetSummary>,
 ) -> Result<(), IrError> {
     match expression {
         Expr::Literal { .. }
@@ -2878,7 +2996,9 @@ fn validate_tail_calls(
                     false,
                     current_function,
                     recursive_groups,
+                    globals,
                     functions,
+                    aliases,
                 )?;
             }
         }
@@ -2889,10 +3009,20 @@ fn validate_tail_calls(
                     false,
                     current_function,
                     recursive_groups,
+                    globals,
                     functions,
+                    aliases,
                 )?;
             }
-            validate_tail_calls(body, true, None, recursive_groups, functions)?;
+            validate_tail_calls(
+                body,
+                true,
+                None,
+                recursive_groups,
+                globals,
+                functions,
+                &BTreeMap::new(),
+            )?;
         }
         Expr::Sequence { expressions, .. } => {
             for (index, expression) in expressions.iter().enumerate() {
@@ -2901,24 +3031,44 @@ fn validate_tail_calls(
                     tail_position && index + 1 == expressions.len(),
                     current_function,
                     recursive_groups,
+                    globals,
                     functions,
+                    aliases,
                 )?;
             }
         }
-        Expr::Let { value, body, .. } => {
+        Expr::Let {
+            value, body, slot, ..
+        } => {
             validate_tail_calls(
                 value,
                 false,
                 current_function,
                 recursive_groups,
+                globals,
                 functions,
+                aliases,
             )?;
+            let value_targets = possible_function_targets(
+                value,
+                aliases,
+                globals,
+                functions,
+                &mut BTreeSet::new(),
+                &mut BTreeSet::new(),
+            );
+            let mut nested_aliases = aliases.clone();
+            if let Some(slot) = slot {
+                nested_aliases.insert(*slot, value_targets);
+            }
             validate_tail_calls(
                 body,
                 tail_position,
                 current_function,
                 recursive_groups,
+                globals,
                 functions,
+                &nested_aliases,
             )?;
         }
         Expr::If {
@@ -2932,21 +3082,27 @@ fn validate_tail_calls(
                 false,
                 current_function,
                 recursive_groups,
+                globals,
                 functions,
+                aliases,
             )?;
             validate_tail_calls(
                 then_branch,
                 tail_position,
                 current_function,
                 recursive_groups,
+                globals,
                 functions,
+                aliases,
             )?;
             validate_tail_calls(
                 else_branch,
                 tail_position,
                 current_function,
                 recursive_groups,
+                globals,
                 functions,
+                aliases,
             )?;
         }
         Expr::Call {
@@ -2963,7 +3119,9 @@ fn validate_tail_calls(
                     false,
                     current_function,
                     recursive_groups,
+                    globals,
                     functions,
+                    aliases,
                 )?;
             }
             for argument in arguments {
@@ -2972,7 +3130,9 @@ fn validate_tail_calls(
                     false,
                     current_function,
                     recursive_groups,
+                    globals,
                     functions,
+                    aliases,
                 )?;
             }
             if !tail {
@@ -2989,30 +3149,49 @@ fn validate_tail_calls(
                     "tail call has no module-level function activation".to_owned(),
                 ));
             };
-            let target = if callee.is_some() {
-                function_hint.ok_or_else(|| {
-                    IrError::InvalidExpression(
-                        "tail call requires a statically known indirect target"
-                            .to_owned(),
-                    )
-                })?
+            let targets = if let Some(callee) = callee {
+                possible_function_targets(
+                    callee,
+                    aliases,
+                    globals,
+                    functions,
+                    &mut BTreeSet::new(),
+                    &mut BTreeSet::new(),
+                )
             } else {
-                *function
+                FunctionTargetSummary {
+                    known: BTreeSet::from([*function]),
+                    unknown: false,
+                }
             };
-            if functions.get(target).is_none() {
-                return Err(IrError::InvalidExpression(format!(
-                    "tail call target {target} is outside the program"
-                )));
+            if targets.unknown || targets.known.is_empty() {
+                return Err(IrError::InvalidExpression(
+                    "tail call target is not statically bounded".to_owned(),
+                ));
+            }
+            if let Some(function_hint) = function_hint
+                && targets.known != BTreeSet::from([*function_hint])
+            {
+                return Err(IrError::InvalidExpression(
+                    "tail call hint does not match indirect callee".to_owned(),
+                ));
             }
             let Some(group) = recursive_groups.get(current_function) else {
                 return Err(IrError::InvalidExpression(format!(
                     "tail call owner {current_function} is outside the program"
                 )));
             };
-            if !group.contains(&target) {
-                return Err(IrError::InvalidExpression(format!(
-                    "tail call target {target} is outside function {current_function}'s recursive group"
-                )));
+            for target in targets.known {
+                if functions.get(target).is_none() {
+                    return Err(IrError::InvalidExpression(format!(
+                        "tail call target {target} is outside the program"
+                    )));
+                }
+                if !group.contains(&target) {
+                    return Err(IrError::InvalidExpression(format!(
+                        "tail call target {target} is outside function {current_function}'s recursive group"
+                    )));
+                }
             }
         }
     }
@@ -3582,6 +3761,64 @@ mod tests {
             "external wrappers are not module-level recursive-group members",
         );
         assert!(error.to_string().contains("outside function"));
+    }
+
+    #[test]
+    fn program_constructor_keeps_source_functions_with_external_operands_in_groups() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::Str);
+        let recursive_operand =
+            Expr::call(0, Vec::new(), PrimitiveType::Str, origin.clone());
+        let body = Expr::external(
+            super::external::CompilerIntrinsic::TextConcat,
+            vec![
+                recursive_operand,
+                Expr::literal(Value::Str(String::new()), origin.clone()),
+            ],
+            origin.clone(),
+        );
+        let function = CheckedFunction::new("source", signature, body, origin)
+            .expect("source function with an intrinsic operand");
+        let program = CheckedProgram::try_new(vec![function], 0)
+            .expect("recursive external operands are valid");
+        assert_eq!(program.recursive_groups(), &[vec![0]]);
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_transfers_through_closures() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let target = CheckedFunction::new(
+            "target",
+            signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("target");
+        let callee = Expr::closure(
+            signature.clone(),
+            Vec::new(),
+            Vec::new(),
+            Expr::literal(Value::I32(2), origin.clone()),
+            0,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new(
+            "caller",
+            signature.clone(),
+            Expr::indirect_tail_call(
+                callee,
+                0,
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin,
+        )
+        .expect("caller shape");
+        let error = CheckedProgram::try_new(vec![target, caller], 1)
+            .expect_err("a closure is not a module-level tail target");
+        assert!(error.to_string().contains("statically bounded"));
     }
 
     #[test]

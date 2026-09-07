@@ -293,7 +293,7 @@ fn rejects_nonempty_effects_in_function_values() {
 }
 
 #[test]
-fn indirect_function_aliases_do_not_bypass_recursive_admission() {
+fn indirect_function_aliases_are_admitted_for_tail_analysis() {
     let source = r#"
 (defn first () i32
   (let next second
@@ -303,56 +303,43 @@ fn indirect_function_aliases_do_not_bypass_recursive_admission() {
     (next)))
 "#;
     let checked = check_source("indirect-recursion.vib", source);
-    assert!(!checked.accepted(), "recursive aliases must be rejected");
     assert!(
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
+        checked.accepted(),
+        "recursive aliases are legal in the runtime profile"
     );
-    assert!(checked.program().is_none());
+    assert!(checked.program().is_some());
 }
 
 #[test]
-fn global_function_aliases_do_not_bypass_recursive_admission() {
+fn global_function_aliases_are_admitted_for_tail_analysis() {
     let source = r#"
 (def recursive (fn () i32) loop)
 (defn loop () i32
   (recursive))
 "#;
     let checked = check_source("global-recursion.vib", source);
-    assert!(!checked.accepted(), "global aliases must be rejected");
     assert!(
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+        checked.accepted(),
+        "global aliases are legal in the runtime profile"
     );
-    assert!(checked.program().is_none());
+    assert!(checked.program().is_some());
 }
 
 #[test]
-fn conditional_function_values_do_not_bypass_recursive_admission() {
+fn conditional_function_values_remain_admitted_for_tail_analysis() {
     let source = r#"
 (defn answer () i32
   ((if true answer other)))
 (defn other () i32 1i32)
 "#;
     let checked = check_source("conditional-recursion.vib", source);
-    assert!(
-        !checked.accepted(),
-        "a conditional callee must not hide a recursive target"
-    );
-    assert!(
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
-    );
+    assert!(checked.accepted(), "conditional recursion remains legal");
+    let program = checked.program().expect("conditional recursive program");
+    assert!(program.canonical_vibon().contains("tail: true"));
 }
 
 #[test]
-fn higher_order_function_values_do_not_bypass_recursive_admission() {
+fn rejects_unbounded_higher_order_calls_before_lowering() {
     let source = r#"
 (defn apply (f (fn () i32)) i32
   (f))
@@ -362,8 +349,9 @@ fn higher_order_function_values_do_not_bypass_recursive_admission() {
     let checked = check_source("higher-order-recursion.vib", source);
     assert!(
         !checked.accepted(),
-        "higher-order recursion must be rejected"
+        "unbounded higher-order calls stay unavailable"
     );
+    assert!(checked.program().is_none());
     assert!(
         checked
             .diagnostics()
@@ -389,7 +377,7 @@ fn nonrecursive_higher_order_function_values_remain_admitted() {
 }
 
 #[test]
-fn returned_function_values_do_not_bypass_recursive_admission() {
+fn returned_function_values_remain_admitted_for_tail_analysis() {
     let source = r#"
 (defn forward () (fn () i32)
   answer)
@@ -397,35 +385,19 @@ fn returned_function_values_do_not_bypass_recursive_admission() {
   ((forward)))
 "#;
     let checked = check_source("returned-recursion.vib", source);
-    assert!(
-        !checked.accepted(),
-        "returned recursive values must be rejected"
-    );
-    assert!(
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
-    );
+    assert!(checked.accepted(), "returned recursive values remain legal");
+    assert!(checked.program().is_some());
 }
 
 #[test]
-fn closure_return_values_do_not_bypass_recursive_admission() {
+fn closure_return_values_remain_admitted_for_tail_analysis() {
     let source = r#"
 (defn answer () i32
   (((lambda () (fn () i32) answer))))
 "#;
     let checked = check_source("closure-returned-recursion.vib", source);
-    assert!(
-        !checked.accepted(),
-        "closures returning recursive values must be rejected"
-    );
-    assert!(
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-    );
+    assert!(checked.accepted(), "closure recursive values remain legal");
+    assert!(checked.program().is_some());
 }
 
 #[test]

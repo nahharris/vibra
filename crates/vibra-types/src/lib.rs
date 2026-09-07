@@ -603,6 +603,33 @@ struct GlobalHeader {
     function_index: Option<usize>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct FunctionTargetSet {
+    known: BTreeSet<usize>,
+    unknown: bool,
+}
+
+impl FunctionTargetSet {
+    fn known(function: usize) -> Self {
+        Self {
+            known: BTreeSet::from([function]),
+            unknown: false,
+        }
+    }
+
+    fn unknown() -> Self {
+        Self {
+            known: BTreeSet::new(),
+            unknown: true,
+        }
+    }
+
+    fn union(&mut self, other: &Self) {
+        self.known.extend(&other.known);
+        self.unknown |= other.unknown;
+    }
+}
+
 #[derive(Clone)]
 struct FunctionHeader {
     declaration_index: usize,
@@ -619,7 +646,7 @@ struct LocalBinding {
     slot: usize,
     value_type: PrimitiveType,
     span: ByteSpan,
-    function_index: Option<usize>,
+    function_targets: Option<FunctionTargetSet>,
 }
 
 struct Checker<'a> {
@@ -1316,6 +1343,24 @@ impl<'a> CheckEnvironment<'a> {
         span: ByteSpan,
         function_index: Option<usize>,
     ) -> bool {
+        let function_targets = if matches!(&value_type, PrimitiveType::Function(_)) {
+            Some(
+                function_index
+                    .map_or_else(FunctionTargetSet::unknown, FunctionTargetSet::known),
+            )
+        } else {
+            None
+        };
+        self.add_binding_type_with_targets(name, value_type, span, function_targets)
+    }
+
+    fn add_binding_type_with_targets(
+        &mut self,
+        name: &str,
+        value_type: PrimitiveType,
+        span: ByteSpan,
+        function_targets: Option<FunctionTargetSet>,
+    ) -> bool {
         if let Some(earlier) = self.module_names.get(name).copied() {
             redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
             return false;
@@ -1359,7 +1404,7 @@ impl<'a> CheckEnvironment<'a> {
                 slot,
                 value_type,
                 span,
-                function_index,
+                function_targets,
             },
         );
         self.next_slot = self.next_slot.saturating_add(1);
@@ -1509,43 +1554,89 @@ fn function_index_from_expr(
     expression: &Expr,
     environment: &CheckEnvironment<'_>,
 ) -> Option<usize> {
+    let summary = function_targets_from_expr(expression, environment, &BTreeMap::new());
+    (!summary.unknown && summary.known.len() == 1)
+        .then(|| summary.known.iter().next().copied())
+        .flatten()
+}
+
+fn function_targets_from_expr(
+    expression: &Expr,
+    environment: &CheckEnvironment<'_>,
+    aliases: &BTreeMap<usize, FunctionTargetSet>,
+) -> FunctionTargetSet {
     match expression {
-        Expr::Function { function, .. } => Some(*function),
-        Expr::Variable { slot, .. } => environment
-            .locals
-            .values()
-            .find(|binding| binding.slot == *slot)
-            .and_then(|binding| binding.function_index),
-        Expr::Global { index, .. } => environment
+        Expr::Function { function, .. } => FunctionTargetSet::known(*function),
+        Expr::Variable {
+            slot, value_type, ..
+        } => aliases
+            .get(slot)
+            .cloned()
+            .or_else(|| {
+                environment
+                    .locals
+                    .values()
+                    .find(|binding| binding.slot == *slot)
+                    .and_then(|binding| binding.function_targets.clone())
+            })
+            .unwrap_or_else(|| {
+                if matches!(value_type, PrimitiveType::Function(_)) {
+                    FunctionTargetSet::unknown()
+                } else {
+                    FunctionTargetSet::default()
+                }
+            }),
+        Expr::Global {
+            index, value_type, ..
+        } => environment
             .globals
             .get(*index)
-            .and_then(|global| global.function_index),
+            .and_then(|global| global.function_index)
+            .map_or_else(
+                || {
+                    if matches!(value_type, PrimitiveType::Function(_)) {
+                        FunctionTargetSet::unknown()
+                    } else {
+                        FunctionTargetSet::default()
+                    }
+                },
+                FunctionTargetSet::known,
+            ),
         Expr::Let {
             value, body, slot, ..
         } => {
-            if let Some(slot) = slot
-                && let Some(function) = function_index_from_expr(value, environment)
-                && matches!(body.as_ref(), Expr::Variable { slot: body_slot, .. } if body_slot == slot)
-            {
-                return Some(function);
+            let value_targets = function_targets_from_expr(value, environment, aliases);
+            let mut nested = aliases.clone();
+            if let Some(slot) = slot {
+                nested.insert(*slot, value_targets);
             }
-            function_index_from_expr(body, environment)
+            function_targets_from_expr(body, environment, &nested)
         }
         Expr::Sequence { expressions, .. } => expressions
             .last()
-            .and_then(|expression| function_index_from_expr(expression, environment)),
+            .map_or_else(FunctionTargetSet::default, |expression| {
+                function_targets_from_expr(expression, environment, aliases)
+            }),
         Expr::If {
             then_branch,
             else_branch,
             ..
         } => {
-            let then_function = function_index_from_expr(then_branch, environment);
-            let else_function = function_index_from_expr(else_branch, environment);
-            (then_function == else_function)
-                .then_some(then_function)
-                .flatten()
+            let mut targets =
+                function_targets_from_expr(then_branch, environment, aliases);
+            targets.union(&function_targets_from_expr(
+                else_branch,
+                environment,
+                aliases,
+            ));
+            targets
         }
-        _ => None,
+        Expr::Closure { .. }
+        | Expr::Captured { .. }
+        | Expr::Call { .. }
+        | Expr::Literal { .. }
+        | Expr::External { .. }
+        | Expr::Default { .. } => FunctionTargetSet::default(),
     }
 }
 
@@ -1654,6 +1745,97 @@ fn syntax_function_index(
                 .flatten()
         }
         _ => None,
+    }
+}
+
+fn syntax_function_targets(
+    expression: &Expression,
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    globals: &[GlobalHeader],
+    aliases: &BTreeMap<String, BTreeSet<usize>>,
+) -> BTreeSet<usize> {
+    match expression.kind() {
+        ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => aliases
+            .get(name.value())
+            .cloned()
+            .or_else(|| {
+                function_indices
+                    .get(name.value())
+                    .copied()
+                    .map(|index| BTreeSet::from([index]))
+            })
+            .or_else(|| {
+                global_indices
+                    .get(name.value())
+                    .and_then(|index| globals.get(*index))
+                    .and_then(|global| global.function_index)
+                    .map(|index| BTreeSet::from([index]))
+            })
+            .unwrap_or_default(),
+        ExpressionKind::Do(expressions) => {
+            expressions.last().map_or_else(BTreeSet::new, |expression| {
+                syntax_function_targets(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    aliases,
+                )
+            })
+        }
+        ExpressionKind::Let {
+            pattern,
+            value,
+            body,
+        } => {
+            let mut scoped = aliases.clone();
+            if let PatternKind::Binding(name) = pattern.kind()
+                && !name.is_discard()
+            {
+                let targets = syntax_function_targets(
+                    value,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    aliases,
+                );
+                if !targets.is_empty() {
+                    scoped.insert(name.value().to_owned(), targets);
+                }
+            }
+            body.last().map_or_else(BTreeSet::new, |expression| {
+                syntax_function_targets(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    &scoped,
+                )
+            })
+        }
+        ExpressionKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let mut targets = syntax_function_targets(
+                then_branch,
+                global_indices,
+                function_indices,
+                globals,
+                aliases,
+            );
+            targets.extend(syntax_function_targets(
+                else_branch,
+                global_indices,
+                function_indices,
+                globals,
+                aliases,
+            ));
+            targets
+        }
+        _ => BTreeSet::new(),
     }
 }
 
@@ -1958,19 +2140,17 @@ fn collect_function_alias_dependencies_inner(
     function_indices: &BTreeMap<String, usize>,
     globals: &[GlobalHeader],
     dependencies: &mut BTreeSet<usize>,
-    aliases: &BTreeMap<String, usize>,
+    aliases: &BTreeMap<String, BTreeSet<usize>>,
 ) {
     match expression.kind() {
         ExpressionKind::Application(application) => {
-            if let Some(index) = syntax_function_index(
+            dependencies.extend(syntax_function_targets(
                 application.callee(),
                 global_indices,
                 function_indices,
                 globals,
                 aliases,
-            ) {
-                dependencies.insert(index);
-            }
+            ));
             collect_function_alias_dependencies_inner(
                 application.callee(),
                 global_indices,
@@ -2018,15 +2198,17 @@ fn collect_function_alias_dependencies_inner(
             let mut scoped = aliases.clone();
             if let PatternKind::Binding(name) = pattern.kind()
                 && !name.is_discard()
-                && let Some(function) = syntax_function_index(
+            {
+                let targets = syntax_function_targets(
                     value,
                     global_indices,
                     function_indices,
                     globals,
                     aliases,
-                )
-            {
-                scoped.insert(name.value().to_owned(), function);
+                );
+                if !targets.is_empty() {
+                    scoped.insert(name.value().to_owned(), targets);
+                }
             }
             for expression in body {
                 collect_function_alias_dependencies_inner(
@@ -2981,14 +3163,18 @@ fn check_expression_in_position(
                 Expr::Function { function, .. } => Some(*function),
                 _ => None,
             };
+            let function_targets =
+                function_targets_from_expr(&callee, environment, &BTreeMap::new());
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
             let tail_transfer = tail_position
-                && known_function.is_some_and(|index| {
-                    environment
-                        .recursive_group
-                        .as_ref()
-                        .is_some_and(|group| group.contains(&index))
+                && !function_targets.unknown
+                && !function_targets.known.is_empty()
+                && environment.recursive_group.as_ref().is_some_and(|group| {
+                    function_targets
+                        .known
+                        .iter()
+                        .all(|index| group.contains(index))
                 });
             let facts = BindingFacts::new(
                 signature.parameters().len(),
@@ -3090,8 +3276,10 @@ fn check_expression_in_position(
                 }
                 Some(function) => Expr::call(function, arguments, result, origin),
                 None if tail_transfer => {
-                    let function_hint = known_function?;
-                    Expr::indirect_tail_call(
+                    let function_hint = (function_targets.known.len() == 1)
+                        .then(|| function_targets.known.iter().next().copied())
+                        .flatten();
+                    Expr::indirect_tail_call_with_hint(
                         callee,
                         function_hint,
                         arguments,
@@ -3121,7 +3309,10 @@ fn check_expression_in_position(
             body,
         } => {
             let value = check_expression(environment, value, None)?;
-            let function_index = function_index_from_expr(&value, environment);
+            let function_targets =
+                matches!(value.result_type(), PrimitiveType::Function(_)).then(|| {
+                    function_targets_from_expr(&value, environment, &BTreeMap::new())
+                });
             let mut nested = CheckEnvironment {
                 source_id: environment.source_id,
                 diagnostics: environment.diagnostics,
@@ -3142,11 +3333,11 @@ fn check_expression_in_position(
             let slot = match pattern.kind() {
                 PatternKind::Binding(name) if name.is_discard() => None,
                 PatternKind::Binding(name) => {
-                    if !nested.add_binding_type_with_function(
+                    if !nested.add_binding_type_with_targets(
                         name.value(),
                         value.result_type(),
                         pattern.span(),
-                        function_index,
+                        function_targets,
                     ) {
                         return None;
                     }
@@ -3944,6 +4135,7 @@ mod tests {
         let program = checked.program().expect("checked imported program");
         assert!(program.canonical_vibon().contains("text.concat"));
         assert!(program.canonical_vibon().contains("text.length"));
+        assert!(!program.canonical_vibon().contains("tail: true"));
     }
 
     #[test]
