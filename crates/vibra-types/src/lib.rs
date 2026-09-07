@@ -324,11 +324,8 @@ pub fn check_bootstrap_text_import(
         );
     }
 
-    let (program, bindings) = check_ast_with_text_import_authority(
-        source_id,
-        ast,
-        &mut diagnostics,
-    );
+    let (program, bindings) =
+        check_ast_with_text_import_authority(source_id, ast, &mut diagnostics);
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error)
@@ -339,7 +336,10 @@ pub fn check_bootstrap_text_import(
     }
 }
 
-fn bootstrap_import_unavailable(source_id: &str, message: impl Into<String>) -> CheckResult {
+fn bootstrap_import_unavailable(
+    source_id: &str,
+    message: impl Into<String>,
+) -> CheckResult {
     let diagnostic = Diagnostic::new(
         DiagnosticCode::ToolUnavailable,
         ByteSpan::empty_at(0),
@@ -661,7 +661,7 @@ impl<'a> Checker<'a> {
             trusted_bootstrap,
             text_import_authorized: false,
             text_import_span: None,
-            }
+        }
     }
 
     fn collect_headers(&mut self) {
@@ -1567,20 +1567,16 @@ fn syntax_function_index(
     aliases: &BTreeMap<String, usize>,
 ) -> Option<usize> {
     match expression.kind() {
-        ExpressionKind::Name(name)
-            if name.kind() == NameKind::Symbol =>
-        {
-            aliases
-                .get(name.value())
-                .copied()
-                .or_else(|| function_indices.get(name.value()).copied())
-                .or_else(|| {
-                    global_indices
-                        .get(name.value())
-                        .and_then(|index| globals.get(*index))
-                        .and_then(|global| global.function_index)
-                })
-        }
+        ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => aliases
+            .get(name.value())
+            .copied()
+            .or_else(|| function_indices.get(name.value()).copied())
+            .or_else(|| {
+                global_indices
+                    .get(name.value())
+                    .and_then(|index| globals.get(*index))
+                    .and_then(|global| global.function_index)
+            }),
         ExpressionKind::Do(expressions) => expressions.last().and_then(|expression| {
             syntax_function_index(
                 expression,
@@ -2813,10 +2809,12 @@ fn check_expression(
         }
         ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => {
             if name.segments().len() != 1 {
-                if let Some(index) = environment.function_indices.get(name.value()).copied()
+                if let Some(index) =
+                    environment.function_indices.get(name.value()).copied()
                     && let Some(header) = environment.functions.get(index)
                 {
-                    let actual = PrimitiveType::Function(Box::new(header.signature.clone()));
+                    let actual =
+                        PrimitiveType::Function(Box::new(header.signature.clone()));
                     ensure_expected(
                         environment,
                         expression.span(),
@@ -3872,7 +3870,8 @@ mod tests {
   (text.length (text.concat "A😀" "")))"#;
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let verification = verify_bootstrap(repository).expect("bootstrap provenance");
-        let checked = check_bootstrap_text_import(&verification, "app/main.vib", source);
+        let checked =
+            check_bootstrap_text_import(&verification, "app/main.vib", source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let program = checked.program().expect("checked imported program");
         assert!(program.canonical_vibon().contains("text.concat"));
@@ -3888,12 +3887,17 @@ mod tests {
             "(import text @std.assert)\n(defn answer () u64 1u64)",
             "(import text @std.text)\n(import assert @std.assert)\n(defn answer () u64 1u64)",
         ] {
-            let checked = check_bootstrap_text_import(&verification, "app/main.vib", source);
+            let checked =
+                check_bootstrap_text_import(&verification, "app/main.vib", source);
             assert!(!checked.accepted());
             assert!(checked.program().is_none());
-            assert!(checked.diagnostics().iter().any(|diagnostic| {
-                diagnostic.code() == DiagnosticCode::ToolUnavailable
-            }), "{:?}", checked.diagnostics());
+            assert!(
+                checked.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code() == DiagnosticCode::ToolUnavailable
+                }),
+                "{:?}",
+                checked.diagnostics()
+            );
         }
     }
 
@@ -3912,11 +3916,7 @@ mod tests {
         ] {
             let document = vibra_syntax::parse_source(Path::new("trusted.vib"), source)
                 .expect("parse trusted boundary source");
-            let mut diagnostics = document
-                .diagnostics()
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>();
+            let mut diagnostics = document.diagnostics().to_vec();
             let ast = document.ast().expect("trusted boundary AST");
             let _ = super::check_ast_with_bindings_authority(
                 "trusted.vib",
@@ -3945,18 +3945,16 @@ mod tests {
   effects: (@std.io)
   "spoof")"#,
         ] {
-            let checked = check_bootstrap_text_import(&verification, "app/main.vib", source);
+            let checked =
+                check_bootstrap_text_import(&verification, "app/main.vib", source);
             assert!(!checked.accepted());
             assert!(checked.program().is_none());
             assert!(
-                checked
-                    .diagnostics()
-                    .iter()
-                    .any(|diagnostic| {
-                        diagnostic.code() == DiagnosticCode::ToolUnavailable
-                            || diagnostic.code() == DiagnosticCode::SyntaxInvalidAttribute
-                            || diagnostic.code() == DiagnosticCode::EffectInvalidReference
-                    }),
+                checked.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code() == DiagnosticCode::ToolUnavailable
+                        || diagnostic.code() == DiagnosticCode::SyntaxInvalidAttribute
+                        || diagnostic.code() == DiagnosticCode::EffectInvalidReference
+                }),
                 "{:?}",
                 checked.diagnostics()
             );
