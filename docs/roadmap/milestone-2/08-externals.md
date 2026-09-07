@@ -1,5 +1,8 @@
 # Step 8 — closed compiler externals and pure stdlib bootstrap
 
+Implementation status: executable closed registry and signed bootstrap
+verification landed on `codex/m2-step-08-externals`.
+
 Requires Step 7 and C7/C8. Read source **External definitions**, runtime
 **External providers**, **Evaluation**, types **Control flow and failure**,
 projects **Dependencies and lock**: [source](../../spec/01-source-language.md),
@@ -41,3 +44,16 @@ Run [common validation](validation.md), focused registry/types/interpreter tests
 and independent `V1-RUNTIME-*` cases. Done includes a registry-to-case table,
 provenance/tamper evidence, unknown-provider rejection, and proof that the
 bootstrap works offline from its documented exact inputs.
+
+## Implemented registry-to-case table
+
+| Registry entry | Checked signature | Execution evidence |
+| --- | --- | --- |
+| `text.concat` | `str str -> str` | `vibra-interp` intrinsic execution test, including Unicode scalars |
+| `text.length` | `str -> u64` | `vibra-interp` intrinsic execution test counts scalars rather than UTF-8 bytes |
+
+`vibra-types::verify_bootstrap` resolves only the fixed files under the supplied
+repository root, checks the reviewed SHA-256 values, and verifies the detached
+Ed25519 signature over the exact artifact bytes. `check_bootstrap_source` then
+admits only the exact `stdlib/m2/src/std/text.vib` bytes and canonical source ID;
+ordinary `check_source` reports `@tool.unavailable` for copied declarations.

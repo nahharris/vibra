@@ -186,6 +186,40 @@ impl Machine<'_> {
     ) -> Option<RuntimeValue> {
         match expression {
             Expr::Literal { value, .. } => Some(RuntimeValue::Primitive(value.clone())),
+            Expr::External {
+                intrinsic,
+                arguments,
+                ..
+            } => {
+                let mut values = Vec::with_capacity(arguments.len());
+                for argument in arguments {
+                    values.push(self.evaluate(argument, slots.clone(), captures)?);
+                }
+                let primitives = values
+                    .into_iter()
+                    .map(|value| match value {
+                        RuntimeValue::Primitive(value) => Some(value),
+                        RuntimeValue::Function(_) => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let value = match intrinsic {
+                    vibra_ir::external::CompilerIntrinsic::TextConcat => {
+                        let [Value::Str(left), Value::Str(right)] =
+                            primitives.as_slice()
+                        else {
+                            return None;
+                        };
+                        Value::Str(format!("{left}{right}"))
+                    }
+                    vibra_ir::external::CompilerIntrinsic::TextLength => {
+                        let [Value::Str(value)] = primitives.as_slice() else {
+                            return None;
+                        };
+                        Value::U64(value.chars().count() as u64)
+                    }
+                };
+                Some(RuntimeValue::Primitive(value))
+            }
             Expr::Default { .. } => None,
             Expr::Sequence { expressions, .. } => {
                 let mut result = RuntimeValue::Primitive(Value::Void);
@@ -528,5 +562,35 @@ mod tests {
 
         assert_eq!(result, super::RuntimeValue::Primitive(Value::I32(7)));
         assert_eq!(machine.globals[0], super::GlobalState::Uninitialized);
+    }
+
+    #[test]
+    fn compiler_text_intrinsics_execute_without_audit_events() {
+        let origin = SourceOrigin::new("external.vib", ByteSpan::new(0, 1));
+        let concat = Expr::external(
+            vibra_ir::external::CompilerIntrinsic::TextConcat,
+            vec![
+                Expr::literal(Value::Str("A😀".to_owned()), origin.clone()),
+                Expr::literal(Value::Str("Ω".to_owned()), origin.clone()),
+            ],
+            origin.clone(),
+        );
+        let length = Expr::external(
+            vibra_ir::external::CompilerIntrinsic::TextLength,
+            vec![concat],
+            origin.clone(),
+        );
+        let function = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::U64),
+            length,
+            origin,
+        )
+        .expect("valid intrinsic function");
+        let program = vibra_ir::CheckedProgram::try_new(vec![function], 0)
+            .expect("valid intrinsic program");
+        let result = run(&program).expect("execution");
+        assert_eq!(result.value(), &Value::U64(3));
+        assert!(result.audit_trace().is_empty());
     }
 }
