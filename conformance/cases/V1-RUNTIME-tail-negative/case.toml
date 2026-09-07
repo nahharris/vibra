@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tail-negative"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A call in a binding initializer remains non-tail while the binding body returns its value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.txt" }

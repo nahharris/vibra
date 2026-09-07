@@ -371,6 +371,34 @@ fn closure_alternatives_are_not_marked_as_module_tail_transfers() {
 }
 
 #[test]
+fn function_returning_calls_do_not_create_a_false_singleton_hint() {
+    let source = r#"
+(defn answer () i32 ((if false a (make))))
+(defn a () i32 1i32)
+(defn b () i32 2i32)
+(defn make () (fn () i32) b)
+"#;
+    let checked = check_source("function-returning-call.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let result =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(result.value(), &vibra_ir::Value::I32(2));
+}
+
+#[test]
+fn unused_let_initializer_does_not_contaminate_tail_target() {
+    let source = r#"
+(defn leaf () i32 1i32)
+(defn answer (flag bool) i32
+  ((let unused flag leaf)))
+"#;
+    let checked = check_source("unused-let-tail.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let program = checked.program().expect("program");
+    assert!(program.canonical_vibon().contains("tail: true"));
+}
+
+#[test]
 fn rejects_unbounded_higher_order_calls_before_lowering() {
     let source = r#"
 (defn apply (f (fn () i32)) i32

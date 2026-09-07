@@ -2202,7 +2202,7 @@ fn possible_function_targets(
             );
             FunctionTargetSummary {
                 known: body_targets.known,
-                unknown: value_targets.unknown || body_targets.unknown,
+                unknown: body_targets.unknown,
                 has_closure: body_targets.has_closure,
             }
         }

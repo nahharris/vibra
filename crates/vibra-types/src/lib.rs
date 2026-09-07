@@ -1653,6 +1653,16 @@ fn function_targets_from_expr(
         }
         Expr::Closure { .. } => FunctionTargetSet::closure(),
         Expr::Captured { .. } => FunctionTargetSet::unknown(),
+        // A call's result may itself be a function value.  The checker does
+        // not have a recursive return-summary environment here, so preserve
+        // the function-typed boundary conservatively instead of dropping it
+        // to the empty set and manufacturing a singleton hint from a branch.
+        Expr::Call {
+            result: PrimitiveType::Function(_),
+            ..
+        } => {
+            FunctionTargetSet::unknown()
+        }
         Expr::Call { .. }
         | Expr::Literal { .. }
         | Expr::External { .. }
