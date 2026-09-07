@@ -68,11 +68,14 @@ returns a typed value plus an empty pure audit trace. Its `@types.v1` output is
 VIBON data: expression bodies are explicit records and arrays, never executable
 source forms; byte values use a typed array representation.
 
-The Step 5–6 conformance adapters are registered as `type-check` on `static-v1`
+The Step 5–7 conformance adapters are registered as `type-check` on `static-v1`
 and `interpret` on `interpreter-v1`. Their observations use canonical VIBON
 snapshots and the existing diagnostic codes plus `@type.initializer-cycle`, so
 the neutral corpus remains the independent contract between the host tests and
-semantic crates.
+semantic crates. Step 7 extends the checked IR with monomorphic empty-effect
+function paths, labelled/default slots, indirect callees, and owned closure
+environments. The checker emits one `ApplicationBinding` per accepted call;
+the formatter consumes those facts only when it can prove a canonical order.
 
 ## Phase pipeline and invariants
 

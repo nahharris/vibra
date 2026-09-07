@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-functions-closures"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A returned lambda owns its captured value after the defining activation has returned."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }

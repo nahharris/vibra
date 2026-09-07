@@ -6,6 +6,18 @@ Requires Step 6 and C1/C6. Read source **Labels and applications**,
 [source](../../spec/01-source-language.md), [types](../../spec/02-type-system.md),
 [runtime](../../spec/06-runtime.md).
 
+The implemented Step 7 boundary is a monomorphic, empty-effect function
+contract. `vibra-ir::FunctionSignature` stores fixed positional slots followed
+by labelled slots in declaration order; each declaration-labelled slot carries
+its typed literal default, while a written `fn` type records the same slot names
+without defaults. A module function path lowers to a first-class function node,
+and a lambda lowers to a closure whose capture expressions are evaluated into an
+owned environment before its activation can return. Calls lower to one ordered
+operand vector. The checker returns `ApplicationBinding` facts for accepted
+applications, so the formatter can normalize a safe labelled reorder without
+resolving a callee from source text. Canonical checked programs remain
+`@types.v1` VIBON records; source graph paths continue to use atoms.
+
 ## Implementation sequence
 
 1. Complete the admitted monomorphic, empty-effect `fn` signature model, including

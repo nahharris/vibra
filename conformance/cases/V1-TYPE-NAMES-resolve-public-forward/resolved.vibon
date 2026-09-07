@@ -2,15 +2,15 @@
   format: @resolved.v1
   package: (record name: "demo" version: "1.0.0")
   modules: (array
-    (record unit: @app path: "lib" source: "src/lib.vib")
-    (record unit: @app path: "main" source: "src/main.vib")
+    (record unit: @app path: @app.lib source: "src/lib.vib")
+    (record unit: @app path: @app.main source: "src/main.vib")
   )
   declarations: (array
     (record id: "@demo@1.0.0/app.lib.greet" kind: @function visibility: @public source: "src/lib.vib" span: (array 0u64 45u64))
     (record id: "@demo@1.0.0/app.main.run" kind: @function visibility: @public source: "src/main.vib" span: (array 22u64 72u64))
   )
   imports: (array
-    (record alias: @lib target: "@app.lib" source: "src/main.vib" span: (array 0u64 21u64))
+    (record alias: @lib target: @app.lib source: "src/main.vib" span: (array 0u64 21u64))
   )
   references: (array
     (record from: "@demo@1.0.0/app.main.run" written: "lib.greet" target: "@demo@1.0.0/app.lib.greet" source: "src/main.vib" span: (array 61u64 70u64))

@@ -65,6 +65,7 @@ Run only commands for crates introduced by the selected or preceding step:
 | Step 4 | `cargo test --locked --offline -p vibra-resolve -p vibra-workspace` |
 | Step 5 | `cargo test --locked --offline -p vibra-types -p vibra-ir -p vibra-interp` |
 | Step 6 | `cargo test --locked --offline -p vibra-types -p vibra-ir -p vibra-interp`<br>`cargo test --locked --offline -p vibra-conformance --test bindings_step6` |
+| Step 7 | `cargo test --locked --offline -p vibra-types -p vibra-ir -p vibra-interp`<br>`cargo test --locked --offline -p vibra-conformance --test functions_step7`<br>`cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases` |
 | Step 10 | `cargo test --locked --offline -p vibra-workspace -p vibra-schema` |
 | Step 11 | `cargo test --locked --offline -p vibra-cli -p vibra-workspace -p vibra-fmt` |
 

@@ -709,7 +709,11 @@ impl ResolvedSnapshot {
                 output,
                 "    (record unit: @{} path: {} source: {})",
                 module.unit,
-                quoted(&module.segments.join(".")),
+                if module.segments.is_empty() {
+                    format!("@{}", module.unit)
+                } else {
+                    format!("@{}.{}", module.unit, module.segments.join("."))
+                },
                 quoted(&module.source_id)
             );
         }
@@ -731,7 +735,7 @@ impl ResolvedSnapshot {
             let module = import
                 .module
                 .as_ref()
-                .map_or_else(|| "void".to_owned(), |module| quoted(&module.as_atom()));
+                .map_or_else(|| "void".to_owned(), ModuleId::as_atom);
             let _ = writeln!(
                 output,
                 "    (record alias: @{} target: {} source: {} span: (array {}u64 {}u64))",

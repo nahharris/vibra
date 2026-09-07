@@ -12,7 +12,7 @@ is required. `rejected` means the active v1 grammar itself rejects it.
 | --- | --- | --- |
 | `ExpressionKind::Literal` | supported | Steps 5–8 primitive values |
 | `ExpressionKind::Name` | supported | Steps 4–7 resolved names and values |
-| `ExpressionKind::Application` | supported | Step 6 fixed positional calls; Step 7 labels, variadics, and callable values |
+| `ExpressionKind::Application` | supported | Step 6 fixed positional calls; Step 7 labels and callable values |
 | `ExpressionKind::Lambda` | supported | Step 7 closures |
 | `ExpressionKind::Do` | supported | Step 6 sequencing |
 | `ExpressionKind::Let` | supported | Step 6 direct local bindings |

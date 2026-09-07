@@ -1,0 +1,18 @@
+id = "V1-SRC-CALLS-functions-labelled"
+rule = "V1-SRC-CALLS"
+profile = "static-v1"
+operation = "type-check"
+description = "Function values preserve the monomorphic labelled signature and bind reordered operands in declaration order."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"
+
+[[expect.diagnostics]]
+code = "@style.argument-order"
+level = "@warning"
+source = "input.vib"
+span = [40, 74]

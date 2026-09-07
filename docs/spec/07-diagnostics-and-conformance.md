@@ -199,8 +199,9 @@ specification rule, not compiler module. Each case records:
   cannot hide a wrong snapshot. Its VIBON shape is one top-level `record`
   with `format: @source-graph.v1`, a `units` array, and a `dependencies`
   array. Each unit record has `name`, `kind`, and a `modules` array; each
-  module record has target-relative `path`, project-relative `source`, and
-  `bytes-hex`. `bytes-hex` is the lowercase, two-digit-per-byte encoding of
+  module record has canonical module atom `path` (for example
+  `@hello.nested.a`), project-relative `source`, and `bytes-hex`.
+  `bytes-hex` is the lowercase, two-digit-per-byte encoding of
   the exact immutable source bytes. Each dependency record has its `alias`,
   `kind`, declared `source`, optional `target`, delivery `status`, owning
   `source-id`, and half-open `span`. Arrays are sorted by their canonical
@@ -208,8 +209,9 @@ specification rule, not compiler module. Each case records:
   resolved declarations;
 - an optional `resolved` snapshot path for `resolve` cases; when present it is
   canonical VIBON with format `@resolved.v1` and records package provenance,
-  sorted source modules, declaration IDs with source IDs/spans/visibility,
-  import edges, and body-reference edges. Exact source bytes remain in the
+  sorted source modules (whose module paths are canonical atoms), declaration
+  IDs with source IDs/spans/visibility, import edges (whose resolved module
+  targets are canonical atoms), and body-reference edges. Exact source bytes remain in the
   `@source-graph.v1` observation, so resolution never rereads or normalizes
   source input. Its top-level record has `format`, `package`, `modules`,
   `declarations`, `imports`, and `references`; declaration records carry
@@ -316,6 +318,13 @@ effect nor a function-call edge. Collection construction covers heterogeneous
 `tuple.of`, homogeneous and expected-empty `array.of`, even and duplicate-key
 `map.of`, and rejection of source `(tuple ...)`, `(array ...)`, and `(map ...)`
 value construction.
+
+For the admitted monomorphic function subset, fixed and labelled arity,
+duplicate-label, unknown-label, required-label, and operand-type failures use
+`@type.argument-mismatch`. A statically non-function callee uses
+`@type.not-applicable`. The `@style.argument-order` warning is emitted only
+after the written function signature proves a complete, unambiguous binding;
+an invalid application never produces formatter binding facts.
 
 Pattern coverage includes direct bare-name binders, nested destructuring in
 `let`, positional parameters, lambdas, and `match`, duplicate-name and

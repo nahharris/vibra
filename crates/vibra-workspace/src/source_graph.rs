@@ -368,7 +368,7 @@ impl SourceGraph {
                 let _ = writeln!(
                     output,
                     "      (record path: {} source: {} bytes-hex: \"{}\")",
-                    quoted(&module.id.segments().join(".")),
+                    module.id.as_atom(),
                     quoted(&module.source_id),
                     hex_bytes(&module.bytes)
                 );
