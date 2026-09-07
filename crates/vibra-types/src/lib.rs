@@ -601,12 +601,14 @@ struct GlobalHeader {
     expression: Expression,
     span: ByteSpan,
     function_index: Option<usize>,
+    function_targets: FunctionTargetSet,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct FunctionTargetSet {
     known: BTreeSet<usize>,
     unknown: bool,
+    has_closure: bool,
 }
 
 impl FunctionTargetSet {
@@ -614,6 +616,7 @@ impl FunctionTargetSet {
         Self {
             known: BTreeSet::from([function]),
             unknown: false,
+            has_closure: false,
         }
     }
 
@@ -621,12 +624,28 @@ impl FunctionTargetSet {
         Self {
             known: BTreeSet::new(),
             unknown: true,
+            has_closure: false,
         }
     }
 
     fn union(&mut self, other: &Self) {
         self.known.extend(&other.known);
         self.unknown |= other.unknown;
+        self.has_closure |= other.has_closure;
+    }
+
+    fn closure() -> Self {
+        Self {
+            known: BTreeSet::new(),
+            unknown: false,
+            has_closure: true,
+        }
+    }
+
+    fn singleton_function(&self) -> Option<usize> {
+        (!self.unknown && !self.has_closure && self.known.len() == 1)
+            .then(|| self.known.iter().next().copied())
+            .flatten()
     }
 }
 
@@ -730,6 +749,7 @@ impl<'a> Checker<'a> {
                         expression: definition.expression().clone(),
                         span: definition.span(),
                         function_index: None,
+                        function_targets: FunctionTargetSet::default(),
                     });
                 }
                 Declaration::Defn(function) => {
@@ -822,11 +842,11 @@ impl<'a> Checker<'a> {
             self.text_import_span = Some(import_span);
         }
         for _ in 0..=self.globals.len() {
-            let global_function_indices = self
+            let global_function_targets = self
                 .globals
                 .iter()
                 .map(|global| {
-                    syntax_function_index(
+                    syntax_function_targets(
                         &global.expression,
                         &self.global_indices,
                         &self.function_indices,
@@ -835,13 +855,16 @@ impl<'a> Checker<'a> {
                     )
                 })
                 .collect::<Vec<_>>();
-            let changed = self.globals.iter().zip(&global_function_indices).any(
-                |(global, function_index)| global.function_index != *function_index,
-            );
-            for (global, function_index) in
-                self.globals.iter_mut().zip(global_function_indices)
+            let changed = self
+                .globals
+                .iter()
+                .zip(&global_function_targets)
+                .any(|(global, targets)| global.function_targets != *targets);
+            for (global, function_targets) in
+                self.globals.iter_mut().zip(global_function_targets)
             {
-                global.function_index = function_index;
+                global.function_index = function_targets.singleton_function();
+                global.function_targets = function_targets;
             }
             if !changed {
                 break;
@@ -1555,7 +1578,7 @@ fn function_index_from_expr(
     environment: &CheckEnvironment<'_>,
 ) -> Option<usize> {
     let summary = function_targets_from_expr(expression, environment, &BTreeMap::new());
-    (!summary.unknown && summary.known.len() == 1)
+    (!summary.unknown && !summary.has_closure && summary.known.len() == 1)
         .then(|| summary.known.iter().next().copied())
         .flatten()
 }
@@ -1591,17 +1614,14 @@ fn function_targets_from_expr(
         } => environment
             .globals
             .get(*index)
-            .and_then(|global| global.function_index)
-            .map_or_else(
-                || {
-                    if matches!(value_type, PrimitiveType::Function(_)) {
-                        FunctionTargetSet::unknown()
-                    } else {
-                        FunctionTargetSet::default()
-                    }
-                },
-                FunctionTargetSet::known,
-            ),
+            .map(|global| global.function_targets.clone())
+            .unwrap_or_else(|| {
+                if matches!(value_type, PrimitiveType::Function(_)) {
+                    FunctionTargetSet::unknown()
+                } else {
+                    FunctionTargetSet::default()
+                }
+            }),
         Expr::Let {
             value, body, slot, ..
         } => {
@@ -1631,9 +1651,9 @@ fn function_targets_from_expr(
             ));
             targets
         }
-        Expr::Closure { .. }
-        | Expr::Captured { .. }
-        | Expr::Call { .. }
+        Expr::Closure { .. } => FunctionTargetSet::closure(),
+        Expr::Captured { .. } => FunctionTargetSet::unknown(),
+        Expr::Call { .. }
         | Expr::Literal { .. }
         | Expr::External { .. }
         | Expr::Default { .. } => FunctionTargetSet::default(),
@@ -1753,8 +1773,8 @@ fn syntax_function_targets(
     global_indices: &BTreeMap<String, usize>,
     function_indices: &BTreeMap<String, usize>,
     globals: &[GlobalHeader],
-    aliases: &BTreeMap<String, BTreeSet<usize>>,
-) -> BTreeSet<usize> {
+    aliases: &BTreeMap<String, FunctionTargetSet>,
+) -> FunctionTargetSet {
     match expression.kind() {
         ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => aliases
             .get(name.value())
@@ -1763,26 +1783,27 @@ fn syntax_function_targets(
                 function_indices
                     .get(name.value())
                     .copied()
-                    .map(|index| BTreeSet::from([index]))
+                    .map(FunctionTargetSet::known)
             })
             .or_else(|| {
                 global_indices
                     .get(name.value())
                     .and_then(|index| globals.get(*index))
-                    .and_then(|global| global.function_index)
-                    .map(|index| BTreeSet::from([index]))
+                    .map(|global| global.function_targets.clone())
             })
             .unwrap_or_default(),
         ExpressionKind::Do(expressions) => {
-            expressions.last().map_or_else(BTreeSet::new, |expression| {
-                syntax_function_targets(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                )
-            })
+            expressions
+                .last()
+                .map_or_else(FunctionTargetSet::default, |expression| {
+                    syntax_function_targets(
+                        expression,
+                        global_indices,
+                        function_indices,
+                        globals,
+                        aliases,
+                    )
+                })
         }
         ExpressionKind::Let {
             pattern,
@@ -1800,19 +1821,20 @@ fn syntax_function_targets(
                     globals,
                     aliases,
                 );
-                if !targets.is_empty() {
+                if !targets.known.is_empty() || targets.unknown || targets.has_closure {
                     scoped.insert(name.value().to_owned(), targets);
                 }
             }
-            body.last().map_or_else(BTreeSet::new, |expression| {
-                syntax_function_targets(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    &scoped,
-                )
-            })
+            body.last()
+                .map_or_else(FunctionTargetSet::default, |expression| {
+                    syntax_function_targets(
+                        expression,
+                        global_indices,
+                        function_indices,
+                        globals,
+                        &scoped,
+                    )
+                })
         }
         ExpressionKind::If {
             then_branch,
@@ -1826,7 +1848,7 @@ fn syntax_function_targets(
                 globals,
                 aliases,
             );
-            targets.extend(syntax_function_targets(
+            targets.union(&syntax_function_targets(
                 else_branch,
                 global_indices,
                 function_indices,
@@ -1835,7 +1857,9 @@ fn syntax_function_targets(
             ));
             targets
         }
-        _ => BTreeSet::new(),
+        ExpressionKind::Lambda(_) => FunctionTargetSet::closure(),
+        ExpressionKind::Application(_) => FunctionTargetSet::unknown(),
+        _ => FunctionTargetSet::default(),
     }
 }
 
@@ -2140,17 +2164,20 @@ fn collect_function_alias_dependencies_inner(
     function_indices: &BTreeMap<String, usize>,
     globals: &[GlobalHeader],
     dependencies: &mut BTreeSet<usize>,
-    aliases: &BTreeMap<String, BTreeSet<usize>>,
+    aliases: &BTreeMap<String, FunctionTargetSet>,
 ) {
     match expression.kind() {
         ExpressionKind::Application(application) => {
-            dependencies.extend(syntax_function_targets(
-                application.callee(),
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            ));
+            dependencies.extend(
+                syntax_function_targets(
+                    application.callee(),
+                    global_indices,
+                    function_indices,
+                    globals,
+                    aliases,
+                )
+                .known,
+            );
             collect_function_alias_dependencies_inner(
                 application.callee(),
                 global_indices,
@@ -2206,7 +2233,7 @@ fn collect_function_alias_dependencies_inner(
                     globals,
                     aliases,
                 );
-                if !targets.is_empty() {
+                if !targets.known.is_empty() || targets.unknown || targets.has_closure {
                     scoped.insert(name.value().to_owned(), targets);
                 }
             }
@@ -3169,6 +3196,7 @@ fn check_expression_in_position(
                 .or_else(|| function_index_from_expr(&callee, environment));
             let tail_transfer = tail_position
                 && !function_targets.unknown
+                && !function_targets.has_closure
                 && !function_targets.known.is_empty()
                 && environment.recursive_group.as_ref().is_some_and(|group| {
                     function_targets

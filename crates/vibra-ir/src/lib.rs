@@ -2053,9 +2053,10 @@ fn validate_program_expr(
                     &mut BTreeSet::new(),
                 );
                 if let Some(function_hint) = function_hint {
-                    if !summary.known.is_empty()
-                        && (summary.unknown
-                            || summary.known != BTreeSet::from([*function_hint]))
+                    if summary.has_closure
+                        || (!summary.known.is_empty()
+                            && (summary.unknown
+                                || summary.known != BTreeSet::from([*function_hint])))
                     {
                         return Err(IrError::InvalidExpression(
                             "function hint does not match indirect callee".to_owned(),
@@ -2102,6 +2103,39 @@ fn validate_program_expr(
 struct FunctionTargetSummary {
     known: BTreeSet<usize>,
     unknown: bool,
+    has_closure: bool,
+}
+
+impl FunctionTargetSummary {
+    fn known(function: usize) -> Self {
+        Self {
+            known: BTreeSet::from([function]),
+            unknown: false,
+            has_closure: false,
+        }
+    }
+
+    fn unknown() -> Self {
+        Self {
+            known: BTreeSet::new(),
+            unknown: true,
+            has_closure: false,
+        }
+    }
+
+    fn closure() -> Self {
+        Self {
+            known: BTreeSet::new(),
+            unknown: false,
+            has_closure: true,
+        }
+    }
+
+    fn union(&mut self, other: Self) {
+        self.known.extend(other.known);
+        self.unknown |= other.unknown;
+        self.has_closure |= other.has_closure;
+    }
 }
 
 fn possible_function_targets(
@@ -2113,23 +2147,11 @@ fn possible_function_targets(
     visiting_globals: &mut BTreeSet<usize>,
 ) -> FunctionTargetSummary {
     match expression {
-        Expr::Function { function, .. } => FunctionTargetSummary {
-            known: BTreeSet::from([*function]),
-            unknown: false,
-        },
-        Expr::Closure {
-            signature, body, ..
-        } if matches!(signature.result(), PrimitiveType::Function(_)) => {
-            possible_function_targets(
-                body,
-                aliases,
-                globals,
-                functions,
-                visiting,
-                visiting_globals,
-            )
-        }
-        Expr::Closure { .. } => FunctionTargetSummary::default(),
+        Expr::Function { function, .. } => FunctionTargetSummary::known(*function),
+        // A closure is a distinct runtime callable, even when its body
+        // returns a module function.  It therefore cannot be summarized as
+        // that function's identity for a module-level tail transfer.
+        Expr::Closure { .. } => FunctionTargetSummary::closure(),
         Expr::If {
             then_branch,
             else_branch,
@@ -2151,12 +2173,9 @@ fn possible_function_targets(
                 visiting,
                 visiting_globals,
             );
-            let mut known = then_targets.known;
-            known.extend(else_targets.known);
-            FunctionTargetSummary {
-                known,
-                unknown: then_targets.unknown || else_targets.unknown,
-            }
+            let mut summary = then_targets;
+            summary.union(else_targets);
+            summary
         }
         Expr::Let {
             slot, value, body, ..
@@ -2184,6 +2203,7 @@ fn possible_function_targets(
             FunctionTargetSummary {
                 known: body_targets.known,
                 unknown: value_targets.unknown || body_targets.unknown,
+                has_closure: body_targets.has_closure,
             }
         }
         Expr::Sequence { expressions, .. } => expressions.last().map_or_else(
@@ -2199,31 +2219,17 @@ fn possible_function_targets(
                 )
             },
         ),
-        Expr::Variable { slot, .. } => {
-            aliases
-                .get(slot)
-                .cloned()
-                .unwrap_or_else(|| FunctionTargetSummary {
-                    known: BTreeSet::new(),
-                    unknown: true,
-                })
-        }
-        Expr::Captured { .. } => FunctionTargetSummary {
-            known: BTreeSet::new(),
-            unknown: true,
-        },
+        Expr::Variable { slot, .. } => aliases
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(FunctionTargetSummary::unknown),
+        Expr::Captured { .. } => FunctionTargetSummary::unknown(),
         Expr::Global { index, .. } => {
             let Some(global) = globals.get(*index) else {
-                return FunctionTargetSummary {
-                    known: BTreeSet::new(),
-                    unknown: true,
-                };
+                return FunctionTargetSummary::unknown();
             };
             if !visiting_globals.insert(*index) {
-                return FunctionTargetSummary {
-                    known: BTreeSet::new(),
-                    unknown: true,
-                };
+                return FunctionTargetSummary::unknown();
             }
             let result = possible_function_targets(
                 global.initializer(),
@@ -2249,12 +2255,9 @@ fn possible_function_targets(
                     visiting_globals,
                 )
             } else {
-                FunctionTargetSummary {
-                    known: BTreeSet::from([*function]),
-                    unknown: false,
-                }
+                FunctionTargetSummary::known(*function)
             };
-            if target_summary.unknown {
+            if target_summary.unknown || target_summary.has_closure {
                 return target_summary;
             }
             let mut result = FunctionTargetSummary::default();
@@ -2278,6 +2281,7 @@ fn possible_function_targets(
                 );
                 result.known.extend(returned.known);
                 result.unknown |= returned.unknown;
+                result.has_closure |= returned.has_closure;
                 visiting.remove(&target);
             }
             result
@@ -3159,12 +3163,9 @@ fn validate_tail_calls(
                     &mut BTreeSet::new(),
                 )
             } else {
-                FunctionTargetSummary {
-                    known: BTreeSet::from([*function]),
-                    unknown: false,
-                }
+                FunctionTargetSummary::known(*function)
             };
-            if targets.unknown || targets.known.is_empty() {
+            if targets.unknown || targets.has_closure || targets.known.is_empty() {
                 return Err(IrError::InvalidExpression(
                     "tail call target is not statically bounded".to_owned(),
                 ));
@@ -3818,7 +3819,97 @@ mod tests {
         .expect("caller shape");
         let error = CheckedProgram::try_new(vec![target, caller], 1)
             .expect_err("a closure is not a module-level tail target");
-        assert!(error.to_string().contains("statically bounded"));
+        assert!(
+            error.to_string().contains("statically bounded")
+                || error.to_string().contains("function hint")
+        );
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_transfers_with_a_closure_branch() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let target = CheckedFunction::new(
+            "target",
+            signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("target");
+        let closure = Expr::closure(
+            signature.clone(),
+            Vec::new(),
+            Vec::new(),
+            Expr::literal(Value::I32(2), origin.clone()),
+            0,
+            origin.clone(),
+        );
+        let callee = Expr::if_expression(
+            Expr::literal(Value::Bool(true), origin.clone()),
+            Expr::function(0, signature.clone(), origin.clone()),
+            closure,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new(
+            "caller",
+            signature.clone(),
+            Expr::indirect_tail_call_with_hint(
+                callee,
+                Some(0),
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin,
+        )
+        .expect("caller shape");
+        let error = CheckedProgram::try_new(vec![target, caller], 1)
+            .expect_err("a closure branch is not a module-level tail target");
+        assert!(error.to_string().contains("function hint"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_transfers_from_closures_returning_functions() {
+        let origin = origin();
+        let target_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let target = CheckedFunction::new(
+            "target",
+            target_signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("target");
+        let closure_signature = FunctionSignature::new(
+            Vec::new(),
+            PrimitiveType::Function(Box::new(target_signature.clone())),
+        );
+        let callee = Expr::closure(
+            closure_signature,
+            Vec::new(),
+            Vec::new(),
+            Expr::function(0, target_signature.clone(), origin.clone()),
+            0,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new(
+            "caller",
+            target_signature.clone(),
+            Expr::indirect_tail_call(
+                callee,
+                0,
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin,
+        )
+        .expect("caller shape");
+        let error = CheckedProgram::try_new(vec![target, caller], 1)
+            .expect_err("closure identity cannot be replaced by its return target");
+        assert!(matches!(
+            error,
+            IrError::InvalidExpression(_) | IrError::RecursiveCall(_)
+        ));
     }
 
     #[test]

@@ -326,6 +326,25 @@ fn global_function_aliases_are_admitted_for_tail_analysis() {
 }
 
 #[test]
+fn conditional_global_function_aliases_mark_tail_transfers() {
+    let source = r#"
+(def selected (fn () i32) (if true loop leaf))
+(defn loop () i32
+  (selected))
+(defn leaf () i32 42i32)
+"#;
+    let checked = check_source("conditional-global-recursion.vib", source);
+    assert!(
+        checked.accepted(),
+        "conditional global recursion remains legal"
+    );
+    let program = checked
+        .program()
+        .expect("conditional global recursive program");
+    assert!(program.canonical_vibon().contains("tail: true"));
+}
+
+#[test]
 fn conditional_function_values_remain_admitted_for_tail_analysis() {
     let source = r#"
 (defn answer () i32
@@ -336,6 +355,19 @@ fn conditional_function_values_remain_admitted_for_tail_analysis() {
     assert!(checked.accepted(), "conditional recursion remains legal");
     let program = checked.program().expect("conditional recursive program");
     assert!(program.canonical_vibon().contains("tail: true"));
+}
+
+#[test]
+fn closure_alternatives_are_not_marked_as_module_tail_transfers() {
+    let source = r#"
+(defn leaf () i32 1i32)
+(defn caller () i32
+  ((if false leaf (lambda () i32 2i32))))
+"#;
+    let checked = check_source("closure-alternative.vib", source);
+    assert!(checked.accepted(), "closure alternative remains callable");
+    let program = checked.program().expect("closure alternative program");
+    assert!(!program.canonical_vibon().contains("tail: true"));
 }
 
 #[test]
