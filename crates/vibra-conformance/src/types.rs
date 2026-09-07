@@ -5,7 +5,61 @@ use crate::manifest::ConformanceOperation;
 use crate::runner::{
     CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
 };
-use vibra_types::check_source;
+use std::path::Path;
+
+use vibra_types::{
+    BootstrapVerification, check_bootstrap_text_import, check_source, verify_bootstrap,
+};
+
+const BOOTSTRAP_PROVENANCE_FAILURE: &str = "bootstrap provenance verification failed";
+
+fn check_case_source(
+    source_id: &str,
+    source: &str,
+) -> Result<vibra_types::CheckResult, HandlerError> {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    check_case_source_at_root(source_id, source, &repository)
+}
+
+fn check_case_source_at_root(
+    source_id: &str,
+    source: &str,
+    repository: &Path,
+) -> Result<vibra_types::CheckResult, HandlerError> {
+    let document =
+        vibra_syntax::parse_source(Path::new(source_id), source).map_err(|error| {
+            HandlerError::new(format!("source dispatch parse failed: {error}"))
+        })?;
+    let exact_import = document.ast().is_some_and(|ast| {
+        ast.declarations().iter().any(|declaration| {
+            matches!(
+                declaration,
+                vibra_syntax::Declaration::Import(import)
+                    if import.alias().kind() == vibra_syntax::NameKind::Symbol
+                        && import.alias().value() == "text"
+                        && import.target().kind() == vibra_syntax::NameKind::Atom
+                        && import.target().value() == "std.text"
+            )
+        })
+    });
+    if exact_import {
+        let verification = verified_bootstrap(repository)?;
+        return Ok(check_bootstrap_text_import(
+            &verification,
+            source_id,
+            source,
+        ));
+    }
+    Ok(check_source(source_id, source))
+}
+
+fn verified_bootstrap(
+    repository: &Path,
+) -> Result<BootstrapVerification, HandlerError> {
+    verify_bootstrap(repository).map_err(|error| {
+        HandlerError::new(format!("{BOOTSTRAP_PROVENANCE_FAILURE}: {error}"))
+    })
+}
 
 /// Runs source type checking and returns the canonical checked-program
 /// observation.
@@ -25,7 +79,7 @@ impl ProfileHandler for StaticV1TypeHandler {
         let source = case
             .read_file(source_id)
             .map_err(|error| HandlerError::new(error.to_string()))?;
-        let checked = check_source(source_id, &source);
+        let checked = check_case_source(source_id, &source)?;
         let accepted = checked.accepted();
         Ok(CaseObservation {
             accepted,
@@ -33,6 +87,71 @@ impl ProfileHandler for StaticV1TypeHandler {
             types: checked.program().map(|program| program.canonical_vibon()),
             ..CaseObservation::default()
         })
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::{BOOTSTRAP_PROVENANCE_FAILURE, check_case_source_at_root};
+    use std::path::Path;
+
+    #[test]
+    fn dispatch_parses_comments_and_multiline_imports() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source = "; leading comment\n\n(import\n text\n @std.text)\n(defn answer () u64 (text.length \"😀\"))";
+        let checked = check_case_source_at_root("app/main.vib", source, &repository)
+            .expect("dispatch should verify bootstrap");
+        assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    }
+
+    #[test]
+    fn dispatch_propagates_bootstrap_verification_failure() {
+        let root = std::env::temp_dir().join(format!(
+            "vibra-conformance-bootstrap-missing-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("temporary root");
+        let source =
+            "(import text @std.text)\n(defn answer () u64 (text.length \"x\"))";
+        let error = check_case_source_at_root("app/main.vib", source, &root)
+            .expect_err("bootstrap failure must cross the handler boundary");
+        assert!(error.message().starts_with(BOOTSTRAP_PROVENANCE_FAILURE));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dispatch_propagates_tampered_bootstrap_artifact_failure() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = std::env::temp_dir().join(format!(
+            "vibra-conformance-bootstrap-tamper-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        for relative in [
+            "stdlib/m2/bootstrap-manifest.vibon",
+            "stdlib/m2/bootstrap.vibon",
+            "stdlib/m2/bootstrap.vibon.sig",
+            "stdlib/m2/toolchain-ed25519.pub",
+            "stdlib/m2/src/std/text.vib",
+            "stdlib/m2/src/std/assert.vib",
+        ] {
+            let destination = root.join(relative);
+            std::fs::create_dir_all(destination.parent().expect("bootstrap parent"))
+                .expect("bootstrap directory");
+            std::fs::copy(repository.join(relative), destination)
+                .expect("bootstrap input copy");
+        }
+        std::fs::write(root.join("stdlib/m2/bootstrap.vibon"), b"tampered")
+            .expect("tamper bootstrap artifact");
+        let source =
+            "(import text @std.text)\n(defn answer () u64 (text.length \"x\"))";
+        let error = check_case_source_at_root("app/main.vib", source, &root)
+            .expect_err("tampered bootstrap must cross the handler boundary");
+        assert!(error.message().starts_with(BOOTSTRAP_PROVENANCE_FAILURE));
+        assert!(error.message().contains("artifact digest mismatch"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 
@@ -55,7 +174,7 @@ impl ProfileHandler for InterpreterV1Handler {
         let source = case
             .read_file(source_id)
             .map_err(|error| HandlerError::new(error.to_string()))?;
-        let checked = check_source(source_id, &source);
+        let checked = check_case_source(source_id, &source)?;
         let Some(program) = checked.program() else {
             return Ok(CaseObservation {
                 accepted: false,

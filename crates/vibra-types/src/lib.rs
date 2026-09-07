@@ -233,6 +233,122 @@ pub fn check_bootstrap_source(
     }
 }
 
+/// Checks one source module with the narrowly supported explicit `@std.text`
+/// import.  This adapter is capability-backed by [`BootstrapVerification`]; a
+/// source file cannot manufacture that authority by copying declarations.
+/// Only the exact signed `@std.text` map entry is exposed, and source external
+/// declarations remain forbidden.
+pub fn check_bootstrap_text_import(
+    verification: &BootstrapVerification,
+    source_id: impl AsRef<str>,
+    source: &str,
+) -> CheckResult {
+    let source_id = source_id.as_ref();
+    if verification.artifact.is_empty()
+        || validate_signed_bootstrap_map(&verification.artifact).is_err()
+    {
+        return bootstrap_import_unavailable(
+            source_id,
+            "the @std.text import requires the verified M2 bootstrap map",
+        );
+    }
+    let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
+        Ok(document) => document,
+        Err(error) => {
+            return bootstrap_import_unavailable(source_id, error.to_string());
+        }
+    };
+    let mut diagnostics = document
+        .diagnostics()
+        .iter()
+        .cloned()
+        .map(|diagnostic| diagnostic.with_source_id(source_id))
+        .collect::<Vec<_>>();
+    if !document.accepted() || document.recovered() {
+        return CheckResult::new(None, diagnostics);
+    }
+    let Some(ast) = document.ast() else {
+        return bootstrap_import_unavailable(
+            source_id,
+            "the @std.text adapter requires a source module",
+        );
+    };
+    let imports = ast
+        .declarations()
+        .iter()
+        .filter_map(|declaration| match declaration {
+            Declaration::Import(import) => Some(import),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some(import) = imports.first() else {
+        return bootstrap_import_unavailable(
+            source_id,
+            "the source must explicitly import `(import text @std.text)`",
+        );
+    };
+    let exact_import = import.alias().kind() == NameKind::Symbol
+        && import.alias().value() == "text"
+        && import.target().kind() == NameKind::Atom
+        && import.target().value() == "std.text";
+    if imports.len() != 1 || !exact_import {
+        return bootstrap_import_unavailable(
+            source_id,
+            "only the exact `(import text @std.text)` import is available",
+        );
+    }
+    if ast.declarations().iter().any(|declaration| {
+        matches!(
+            declaration,
+            Declaration::Defn(function)
+                if function
+                    .attributes()
+                    .items()
+                    .iter()
+                    .any(|attribute| matches!(attribute, Attribute::External(_)))
+        )
+    }) {
+        return bootstrap_import_unavailable(
+            source_id,
+            "source external declarations cannot acquire bootstrap authority",
+        );
+    }
+    if !ast
+        .declarations()
+        .iter()
+        .any(|declaration| matches!(declaration, Declaration::Defn(_)))
+    {
+        return bootstrap_import_unavailable(
+            source_id,
+            "the @std.text adapter requires a source function entry",
+        );
+    }
+
+    let (program, bindings) =
+        check_ast_with_text_import_authority(source_id, ast, &mut diagnostics);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error)
+    {
+        CheckResult::new(None, diagnostics)
+    } else {
+        CheckResult::with_bindings(program, diagnostics, bindings)
+    }
+}
+
+fn bootstrap_import_unavailable(
+    source_id: &str,
+    message: impl Into<String>,
+) -> CheckResult {
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::ToolUnavailable,
+        ByteSpan::empty_at(0),
+        message,
+    )
+    .with_source_id(source_id);
+    CheckResult::new(None, vec![diagnostic])
+}
+
 /// The canonical path of the signed M2 text bootstrap module.
 pub const BOOTSTRAP_TEXT_SOURCE_ID: &str = "stdlib/m2/src/std/text.vib";
 const BOOTSTRAP_TEXT_BYTES: &[u8] =
@@ -462,6 +578,22 @@ fn check_ast_with_bindings_authority(
     (program, checker.bindings)
 }
 
+fn check_ast_with_text_import_authority(
+    source_id: &str,
+    ast: &SourceAst,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
+    let mut checker = Checker::new(source_id, diagnostics, ast, true);
+    checker.text_import_authorized = true;
+    checker.collect_headers();
+    checker.check_initializer_cycles();
+    checker.check_function_cycles();
+    checker.check_globals();
+    checker.check_functions();
+    let program = checker.finish();
+    (program, checker.bindings)
+}
+
 #[derive(Clone)]
 struct GlobalHeader {
     name: String,
@@ -479,6 +611,8 @@ struct FunctionHeader {
     external: Option<CompilerIntrinsic>,
     external_declared: bool,
 }
+
+const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
 
 #[derive(Clone)]
 struct LocalBinding {
@@ -501,6 +635,8 @@ struct Checker<'a> {
     checked_functions: Vec<Option<CheckedFunction>>,
     bindings: Vec<ApplicationBinding>,
     trusted_bootstrap: bool,
+    text_import_authorized: bool,
+    text_import_span: Option<ByteSpan>,
 }
 
 impl<'a> Checker<'a> {
@@ -523,6 +659,8 @@ impl<'a> Checker<'a> {
             checked_functions: Vec::new(),
             bindings: Vec::new(),
             trusted_bootstrap,
+            text_import_authorized: false,
+            text_import_span: None,
         }
     }
 
@@ -601,10 +739,31 @@ impl<'a> Checker<'a> {
                         ),
                     });
                 }
-                Declaration::Import(_) => unavailable(
+                Declaration::Import(import)
+                    if self.text_import_authorized
+                        && import.alias().kind() == NameKind::Symbol
+                        && import.alias().value() == "text"
+                        && import.target().kind() == NameKind::Atom
+                        && import.target().value() == "std.text" =>
+                {
+                    if let Some(earlier) = self.module_names.get("text").copied() {
+                        redeclaration(
+                            self.diagnostics,
+                            self.source_id,
+                            "text",
+                            "text",
+                            import.span(),
+                            earlier,
+                        );
+                    } else {
+                        self.module_names.insert("text".to_owned(), import.span());
+                    }
+                    self.text_import_span = Some(import.span());
+                }
+                Declaration::Import(import) => unavailable(
                     self.diagnostics,
                     self.source_id,
-                    declaration.span(),
+                    import.span(),
                     "imports require the resolved multi-module checker",
                 ),
                 _ => unavailable(
@@ -614,6 +773,24 @@ impl<'a> Checker<'a> {
                     "this declaration family is outside the Step 7 monomorphic profile",
                 ),
             }
+        }
+        if self.text_import_authorized {
+            let import_span = self.text_import_span.unwrap_or_else(|| self.ast.span());
+            for (name, intrinsic) in [
+                ("text.concat", CompilerIntrinsic::TextConcat),
+                ("text.length", CompilerIntrinsic::TextLength),
+            ] {
+                let index = self.functions.len();
+                self.function_indices.insert(name.to_owned(), index);
+                self.functions.push(FunctionHeader {
+                    declaration_index: IMPORTED_FUNCTION_DECLARATION,
+                    name: name.to_owned(),
+                    signature: intrinsic.signature(),
+                    external: Some(intrinsic),
+                    external_declared: true,
+                });
+            }
+            self.text_import_span = Some(import_span);
         }
         for _ in 0..=self.globals.len() {
             let global_function_indices = self
@@ -828,6 +1005,25 @@ impl<'a> Checker<'a> {
 
     fn check_functions(&mut self) {
         for (index, header) in self.functions.clone().into_iter().enumerate() {
+            if header.declaration_index == IMPORTED_FUNCTION_DECLARATION {
+                let Some(intrinsic) = header.external else {
+                    continue;
+                };
+                let origin = SourceOrigin::new(
+                    self.source_id,
+                    self.text_import_span.unwrap_or_else(|| self.ast.span()),
+                );
+                if let Ok(function) = CheckedFunction::new_external(
+                    header.name,
+                    header.signature,
+                    intrinsic,
+                    origin,
+                ) && let Some(slot) = self.checked_functions.get_mut(index)
+                {
+                    *slot = Some(function);
+                }
+                continue;
+            }
             let Some(Declaration::Defn(function)) =
                 self.ast.declarations().get(header.declaration_index)
             else {
@@ -1383,20 +1579,16 @@ fn syntax_function_index(
     aliases: &BTreeMap<String, usize>,
 ) -> Option<usize> {
     match expression.kind() {
-        ExpressionKind::Name(name)
-            if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
-        {
-            aliases
-                .get(name.value())
-                .copied()
-                .or_else(|| function_indices.get(name.value()).copied())
-                .or_else(|| {
-                    global_indices
-                        .get(name.value())
-                        .and_then(|index| globals.get(*index))
-                        .and_then(|global| global.function_index)
-                })
-        }
+        ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => aliases
+            .get(name.value())
+            .copied()
+            .or_else(|| function_indices.get(name.value()).copied())
+            .or_else(|| {
+                global_indices
+                    .get(name.value())
+                    .and_then(|index| globals.get(*index))
+                    .and_then(|global| global.function_index)
+            }),
         ExpressionKind::Do(expressions) => expressions.last().and_then(|expression| {
             syntax_function_index(
                 expression,
@@ -1501,7 +1693,6 @@ fn collect_global_dependencies_inner(
         ExpressionKind::Application(application) => {
             if let ExpressionKind::Name(name) = application.callee().kind()
                 && name.kind() == NameKind::Symbol
-                && name.segments().len() == 1
                 && let Some(function_index) =
                     function_indices.get(name.value()).copied()
                 && visited_functions.insert(function_index)
@@ -1669,7 +1860,6 @@ fn collect_function_dependencies(
         ExpressionKind::Application(application) => {
             if let ExpressionKind::Name(name) = application.callee().kind()
                 && name.kind() == NameKind::Symbol
-                && name.segments().len() == 1
                 && let Some(index) = function_indices.get(name.value()).copied()
             {
                 dependencies.insert(index);
@@ -2631,6 +2821,27 @@ fn check_expression(
         }
         ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => {
             if name.segments().len() != 1 {
+                if let Some(index) =
+                    environment.function_indices.get(name.value()).copied()
+                    && let Some(header) = environment.functions.get(index)
+                {
+                    let actual =
+                        PrimitiveType::Function(Box::new(header.signature.clone()));
+                    ensure_expected(
+                        environment,
+                        expression.span(),
+                        expected.clone(),
+                        actual.clone(),
+                    );
+                    return (expected
+                        .as_ref()
+                        .is_none_or(|expected| types_match(expected, &actual)))
+                    .then_some(Expr::function(
+                        index,
+                        header.signature.clone(),
+                        SourceOrigin::new(environment.source_id, expression.span()),
+                    ));
+                }
                 unknown_name(environment, expression, name.value());
                 return None;
             }
@@ -3412,11 +3623,11 @@ fn unavailable(
 #[cfg(test)]
 mod tests {
     use super::{
-        BOOTSTRAP_TEXT_SOURCE_ID, check_bootstrap_source, check_source,
-        verify_bootstrap,
+        BOOTSTRAP_TEXT_SOURCE_ID, check_bootstrap_source, check_bootstrap_text_import,
+        check_source, verify_bootstrap,
     };
     use std::path::Path;
-    use vibra_diagnostics::DiagnosticCode;
+    use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 
     #[test]
     fn checks_an_unsuffixed_integer_against_the_written_result() {
@@ -3662,5 +3873,136 @@ mod tests {
         assert!(result.diagnostics().iter().any(|diagnostic| {
             diagnostic.code() == DiagnosticCode::ToolUnavailable
         }));
+    }
+
+    #[test]
+    fn verified_text_import_lowers_qualified_calls_through_checked_ir() {
+        let source = r#"(import text @std.text)
+(defn answer () u64
+  (text.length (text.concat "A😀" "")))"#;
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let checked =
+            check_bootstrap_text_import(&verification, "app/main.vib", source);
+        assert!(checked.accepted(), "{:?}", checked.diagnostics());
+        let program = checked.program().expect("checked imported program");
+        assert!(program.canonical_vibon().contains("text.concat"));
+        assert!(program.canonical_vibon().contains("text.length"));
+    }
+
+    #[test]
+    fn text_import_rejects_alias_target_and_extra_imports() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        for source in [
+            "(import wrong @std.text)\n(defn answer () u64 1u64)",
+            "(import text @std.assert)\n(defn answer () u64 1u64)",
+            "(import text @std.text)\n(import assert @std.assert)\n(defn answer () u64 1u64)",
+        ] {
+            let checked =
+                check_bootstrap_text_import(&verification, "app/main.vib", source);
+            assert!(!checked.accepted());
+            assert!(checked.program().is_none());
+            assert!(
+                checked.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code() == DiagnosticCode::ToolUnavailable
+                }),
+                "{:?}",
+                checked.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn trusted_text_alias_collisions_report_the_import_span() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let module = check_bootstrap_text_import(
+            &verification,
+            "app/main.vib",
+            "(import text @std.text)\n(def text str \"shadow\")\n(defn answer () str text)",
+        );
+        assert!(!module.accepted());
+        let diagnostic = module
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameRedeclaration)
+            .expect("module alias collision");
+        assert_eq!(diagnostic.related().len(), 1);
+        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(0, 23));
+
+        let local = check_bootstrap_text_import(
+            &verification,
+            "app/main.vib",
+            "(import text @std.text)\n(defn answer () u64 (let text 1u64 text))",
+        );
+        assert!(!local.accepted());
+        let diagnostic = local
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameRedeclaration)
+            .expect("local alias collision");
+        assert_eq!(diagnostic.related().len(), 1);
+        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(0, 23));
+    }
+
+    #[test]
+    fn trusted_checker_rejects_unknown_external_provider_symbol_and_signature() {
+        for source in [
+            r#"(defn read () str
+  external: @host
+  symbol: "text.concat")"#,
+            r#"(defn read () str
+  external: @compiler
+  symbol: "text.unknown")"#,
+            r#"(defn read (value str) str
+  external: @compiler
+  symbol: "text.length")"#,
+        ] {
+            let document = vibra_syntax::parse_source(Path::new("trusted.vib"), source)
+                .expect("parse trusted boundary source");
+            let mut diagnostics = document.diagnostics().to_vec();
+            let ast = document.ast().expect("trusted boundary AST");
+            let _ = super::check_ast_with_bindings_authority(
+                "trusted.vib",
+                ast,
+                &mut diagnostics,
+                true,
+            );
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.code() == DiagnosticCode::ExternalUnknownSymbol
+                    || diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+            }));
+        }
+    }
+
+    #[test]
+    fn trusted_text_import_rejects_source_body_and_effect_external_declarations() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        for source in [
+            r#"(import text @std.text)
+(defn answer () str "spoof"
+  external: @compiler
+  symbol: "text.concat")"#,
+            r#"(import text @std.text)
+(defn answer () str
+  effects: (@std.io)
+  "spoof")"#,
+        ] {
+            let checked =
+                check_bootstrap_text_import(&verification, "app/main.vib", source);
+            assert!(!checked.accepted());
+            assert!(checked.program().is_none());
+            assert!(
+                checked.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code() == DiagnosticCode::ToolUnavailable
+                        || diagnostic.code() == DiagnosticCode::SyntaxInvalidAttribute
+                        || diagnostic.code() == DiagnosticCode::EffectInvalidReference
+                }),
+                "{:?}",
+                checked.diagnostics()
+            );
+        }
     }
 }
