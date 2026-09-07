@@ -61,7 +61,8 @@ consumes an explicit source ID and the shared syntax AST; it does not read the
 filesystem or call the interpreter. The Step 6 checker validates global
 initializer dependencies and rejects cycles before lowering, then lowers direct
 parameter/`let` slots, `do` sequences, boolean `if`, and fixed positional calls
-to the same IR; direct and mutual recursive call groups remain unavailable.
+to the same IR; Step 9 adds same-module recursive groups and explicit tail
+transfer validation.
 `vibra-interp::run` accepts only a `CheckedProgram`, evaluates
 literal, binding, branch, global, and call expressions deterministically, and
 returns a typed value plus an empty pure audit trace. Its `@types.v1` output is
@@ -76,6 +77,16 @@ semantic crates. Step 7 extends the checked IR with monomorphic empty-effect
 function paths, labelled/default slots, indirect callees, and owned closure
 environments. The checker emits one `ApplicationBinding` per accepted call;
 the formatter consumes those facts only when it can prove a canonical order.
+
+Step 9 marks only activation-relative tail positions: the final expression of a
+body/sequence/`let` and both branches of a tail `if`; conditions, initializers,
+callee expressions, arguments, and nested closure activations stay ordinary. The
+interpreter replaces a module activation only when the selected named callable is
+in the current function's recursive group. Indirect candidates may include
+closures or outside-group named functions, which are invoked normally after their
+values are evaluated. The host-only execution result exposes maximum activation
+depth and transfer count for evidence, while pure traces remain empty canonical
+`@audit-trace.v1` VIBON records.
 
 ## Phase pipeline and invariants
 

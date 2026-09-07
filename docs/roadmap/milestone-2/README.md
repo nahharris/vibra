@@ -1,6 +1,6 @@
 # Milestone 2 step plan
 
-Status: implementation in progress; Steps 1–8 are integrated
+Status: implementation in progress; Steps 1–9 are integrated
 Milestone: [Milestone 2 — executable pure core](../v1.md#milestone-2--executable-pure-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m2`
@@ -77,7 +77,7 @@ path named `std` cannot confer external-declaration authority.
 | 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | landed | tested head `44a482c`; merged on `m2` as `9494d6a`; 151-case corpus |
 | 7 | [Execute function values and labelled calls](07-functions.md) | 6 | landed | `m2` merge `c9751d2`; 157-case corpus, focused IR/conformance suites |
 | 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | landed | `m2` merge `73592be`; versioned registry metadata, direct `@std.text` imports, independent concat/length cases, and 160-case corpus evidence |
-| 9 | [Guarantee tail calls](09-tail-calls.md) | 8 | not started | — |
+| 9 | [Guarantee tail calls](09-tail-calls.md) | 8 | landed | `m2` merge `5392ad0`; PR #296, platform CI green including macOS |
 | 10 | [Expose semantic position facts](10-queries.md) | 9 | not started | — |
 | 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | not started | — |
 | 12 | [Ship check and interpreter run](12-check-run.md) | 11 | not started | — |
@@ -208,6 +208,24 @@ providers/symbols, and Wasm/WASI-style surfaces remain rejected. The new
 independent runtime case and focused IR/type/interpreter suites pass. The full
 corpus reports 73 reader, 74 static, and 11 interpreter cases with zero
 failures or unavailable cases.
+
+## Step 9 handoff (integrated on `m2`)
+
+Step 9's verified merge commit is `5392ad0` (PR #296). It computes
+same-module recursive groups from checked call edges, marks only activation-relative
+tail positions, and records an explicit tail transfer in checked IR. The reference
+interpreter executes transfers through a trampoline, reusing the current activation
+for group members while invoking closures and outside-group callable alternatives
+through the ordinary boundary. Captured callable values, returned and parameter
+targets, mixed source/external branches, and unknown callable branches retain their
+runtime evaluation order and fallback behavior.
+
+The checked-in runtime tail cases include direct and mutual recursion, negative
+non-tail positions, returned/parameter/captured callables, external fallback, and a
+two-size binary-counter stress workload. Focused IR, type, interpreter, and Step 9
+conformance suites pass; the full workspace and 162-case offline corpus pass. CI is
+green on Ubuntu, Windows, and macOS. Executable audit traces use the canonical
+`.vibon` `@audit-trace.v1` record, including the empty pure trace.
 
 ## Exit evidence
 
