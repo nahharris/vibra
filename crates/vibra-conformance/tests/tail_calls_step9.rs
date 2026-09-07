@@ -192,6 +192,43 @@ fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
 }
 
 #[test]
+fn lambda_activations_keep_unknown_calls_as_ordinary_invocations() {
+    let source = r#"
+(defn answer () i32
+  (let f leaf ((lambda () i32 (f)))))
+(defn leaf () i32 1i32)
+"#;
+    let checked = check_source("tail-lambda-activation.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let program = checked.program().expect("program");
+    assert!(!program.canonical_vibon().contains("tail: true"));
+    let execution = vibra_interp::run(program).expect("execution");
+    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.tail_transfer_count(), 0);
+}
+
+#[test]
+fn returned_external_callables_fall_back_to_ordinary_invocation() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+    let source = r#"
+(import text @std.text)
+(defn answer () u64 ((make) "x"))
+(defn make () (fn (str) u64) text.length)
+"#;
+    let checked = check_bootstrap_text_import(
+        &verification,
+        "tail-returned-external.vib",
+        source,
+    );
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let execution =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(execution.value(), &vibra_ir::Value::U64(1));
+    assert_eq!(execution.tail_transfer_count(), 0);
+}
+
+#[test]
 fn non_tail_call_keeps_a_live_caller_activation() {
     let source = r#"
 (defn answer () i32

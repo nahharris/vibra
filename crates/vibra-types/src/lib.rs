@@ -3210,6 +3210,7 @@ fn check_expression_in_position(
                         .any(|index| group.contains(index))
                 });
             let tail_transfer = tail_position
+                && environment.current_function.is_some()
                 && (!function_targets.known.is_empty() || function_targets.unknown)
                 && (has_recursive_target
                     || (function_targets.known.is_empty() && function_targets.unknown));

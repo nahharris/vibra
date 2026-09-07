@@ -3366,17 +3366,6 @@ fn validate_tail_calls(
                     "tail call owner {current_function} is outside the program"
                 )));
             };
-            let has_recursive_target =
-                targets.known.iter().any(|target| group.contains(target));
-            let allows_dynamic_closure = targets.has_closure
-                && callee.as_deref().is_some_and(|expression| {
-                    !matches!(expression, Expr::Closure { .. })
-                });
-            if !has_recursive_target && !allows_dynamic_closure && callee.is_some() {
-                return Err(IrError::InvalidExpression(
-                    "tail call target is not statically bounded".to_owned(),
-                ));
-            }
             for target in targets.known {
                 if functions.get(target).is_none() {
                     return Err(IrError::InvalidExpression(format!(
