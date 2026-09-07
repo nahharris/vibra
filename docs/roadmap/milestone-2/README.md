@@ -1,6 +1,6 @@
 # Milestone 2 step plan
 
-Status: implementation in progress; Steps 1–6 are integrated
+Status: implementation in progress; Steps 1–8 are integrated
 Milestone: [Milestone 2 — executable pure core](../v1.md#milestone-2--executable-pure-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m2`
@@ -76,7 +76,7 @@ path named `std` cannot confer external-declaration authority.
 | 5 | [Execute typed primitive functions](05-primitives.md) | 4 | landed | `origin/m2` head `0477a7a`; predecessor evidence retained |
 | 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | landed | tested head `44a482c`; merged on `m2` as `9494d6a`; 151-case corpus |
 | 7 | [Execute function values and labelled calls](07-functions.md) | 6 | landed | `m2` merge `c9751d2`; 157-case corpus, focused IR/conformance suites |
-| 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | not started | — |
+| 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | landed | `m2` merge `8484cea`; 158-case corpus, signed bootstrap and focused registry suites |
 | 9 | [Guarantee tail calls](09-tail-calls.md) | 8 | not started | — |
 | 10 | [Expose semantic position facts](10-queries.md) | 9 | not started | — |
 | 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | not started | — |
@@ -191,6 +191,23 @@ the manifest rejects them. Focused host suites, the workspace suite, Clippy,
 rustdoc, and the evidence inventory pass. The corpus reports 73 reader, 69
 static, and 9 interpreter cases with zero failures or unavailable cases; the
 offline fuzz smoke campaign passes 6 targets and 96 cases.
+
+## Step 8 handoff (integrated on `m2`)
+
+Step 8's verified merge commit is `8484cea`. It adds a closed backend-neutral
+compiler registry containing only `text.concat` (`str str -> str`) and
+`text.length` (`str -> u64`), with Unicode-scalar semantics and empty pure
+traces. The checked IR validates intrinsic operands recursively, and the
+interpreter executes them through the ordinary typed function boundary.
+
+Bootstrap authority is gated by the exact signed offline artifact and its
+manifest, detached Ed25519 signature, fixed public key, source-module digests,
+and link-free confined paths. Only the verified `stdlib/m2/src/std/text.vib`
+module can declare these compiler externals; copied declarations, unknown
+providers/symbols, and Wasm/WASI-style surfaces remain rejected. The new
+independent runtime case and focused IR/type/interpreter suites pass. The full
+corpus reports 73 reader, 74 static, and 11 interpreter cases with zero
+failures or unavailable cases.
 
 ## Exit evidence
 
