@@ -853,6 +853,11 @@ impl Expr {
                 slot_count,
                 ..
             } => {
+                if let Err(message) = validate_signature_shape(signature) {
+                    return Err(IrError::InvalidExpression(format!(
+                        "closure has an invalid signature: {message}"
+                    )));
+                }
                 if captures.len() != closure_capture_types.len() {
                     return Err(IrError::InvalidExpression(
                         "closure capture metadata length does not match captures"
@@ -3187,6 +3192,38 @@ mod tests {
             vec![PrimitiveType::Str],
             Vec::new(),
             Expr::variable(0, PrimitiveType::Str, origin.clone()),
+            1,
+            origin.clone(),
+        );
+        let result = CheckedFunction::new(
+            "entry",
+            FunctionSignature::new(
+                Vec::new(),
+                PrimitiveType::Function(Box::new(signature)),
+            ),
+            closure,
+            origin,
+        );
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn closure_constructor_rejects_invalid_labelled_defaults() {
+        let origin = origin();
+        let signature = FunctionSignature::with_labelled(
+            Vec::new(),
+            vec![super::LabelledParameter::new(
+                "value",
+                PrimitiveType::I32,
+                Some(Value::Str("wrong".to_owned())),
+            )],
+            PrimitiveType::I32,
+        );
+        let closure = Expr::closure(
+            signature.clone(),
+            Vec::new(),
+            Vec::new(),
+            Expr::literal(Value::I32(1), origin.clone()),
             1,
             origin.clone(),
         );
