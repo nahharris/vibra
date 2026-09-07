@@ -2313,9 +2313,7 @@ fn compiler_intrinsic(
             None
         }
     });
-    let Some(provider) = provider else {
-        return None;
-    };
+    let provider = provider?;
     if !trusted_bootstrap {
         unavailable(
             diagnostics,
@@ -2343,9 +2341,7 @@ fn compiler_intrinsic(
             None
         }
     });
-    let Some(symbol) = symbol else {
-        return None;
-    };
+    let symbol = symbol?;
     let Some(intrinsic) = CompilerIntrinsic::from_symbol(symbol) else {
         diagnostics.push(
             Diagnostic::new(

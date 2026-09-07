@@ -1,6 +1,6 @@
 //! Closed M2 compiler registry contract.
 
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::indexing_slicing)]
 
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::external::CompilerIntrinsic;
