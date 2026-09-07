@@ -1,0 +1,1 @@
+(record format: @audit-trace.v1 events: (array))

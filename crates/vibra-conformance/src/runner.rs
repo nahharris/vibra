@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use vibra_diagnostics::Diagnostic;
+use vibra_ir::Value;
 
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, ExpectedExecution};
@@ -701,7 +702,7 @@ fn compare_execution(
         let audit = case.read_file(audit_path).map_err(|error| {
             format!("{name} audit snapshot `{audit_path}` cannot be read: {error}")
         })?;
-        let actual_audit = actual.audit_trace.join("\n");
+        let actual_audit = canonical_audit_snapshot(&actual.audit_trace);
         if actual_audit != audit {
             return Err(format!(
                 "{name} audit-trace snapshot mismatch (`{audit_path}`)"
@@ -709,4 +710,19 @@ fn compare_execution(
         }
     }
     Ok(())
+}
+
+fn canonical_audit_snapshot(events: &[String]) -> String {
+    let values = events
+        .iter()
+        .map(|event| Value::Str(event.clone()).canonical_vibon())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        "(record format: @audit-trace.v1 events: (array))\n".to_owned()
+    } else {
+        format!(
+            "(record format: @audit-trace.v1 events: (array {}))\n",
+            values.join(" ")
+        )
+    }
 }

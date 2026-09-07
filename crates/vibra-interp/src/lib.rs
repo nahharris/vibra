@@ -24,6 +24,8 @@ use vibra_ir::{CheckedProgram, Expr, FunctionSignature, PrimitiveType, Value};
 pub struct Execution {
     value: Value,
     audit_trace: Vec<String>,
+    max_activation_depth: usize,
+    tail_transfer_count: usize,
 }
 
 impl Execution {
@@ -37,6 +39,20 @@ impl Execution {
     #[must_use]
     pub fn audit_trace(&self) -> &[String] {
         &self.audit_trace
+    }
+
+    /// Maximum number of active language frames observed during execution.
+    /// This is host-side instrumentation and is not part of a Vibra result.
+    #[must_use]
+    pub const fn max_activation_depth(&self) -> usize {
+        self.max_activation_depth
+    }
+
+    /// Number of explicit tail transfers performed during execution.
+    /// This is host-side instrumentation and is not part of a Vibra result.
+    #[must_use]
+    pub const fn tail_transfer_count(&self) -> usize {
+        self.tail_transfer_count
     }
 
     /// Canonical typed value observation.
@@ -80,10 +96,7 @@ pub struct Interpreter;
 impl Interpreter {
     /// Executes the checked program's validated entry function.
     pub fn run(program: &CheckedProgram) -> Result<Execution, RuntimeError> {
-        let mut machine = Machine {
-            program,
-            globals: vec![GlobalState::Uninitialized; program.globals().len()],
-        };
+        let mut machine = Machine::new(program);
         let function = program.entry();
         let mut arguments = vec![None; function.slot_count()];
         for (offset, parameter) in function.signature().labelled().iter().enumerate() {
@@ -120,6 +133,8 @@ impl Interpreter {
         Ok(Execution {
             value,
             audit_trace: Vec::new(),
+            max_activation_depth: machine.max_depth,
+            tail_transfer_count: machine.tail_transfers,
         })
     }
 }
@@ -143,6 +158,29 @@ enum RuntimeValue {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum Evaluation {
+    Value(RuntimeValue),
+    TailTransfer {
+        callable: Callable,
+        values: Vec<RuntimeValue>,
+        result: PrimitiveType,
+    },
+}
+
+enum TailTransferAction {
+    Reuse {
+        index: usize,
+        slots: Vec<Option<RuntimeValue>>,
+        captures: Vec<RuntimeValue>,
+    },
+    Invoke {
+        callable: Callable,
+        values: Vec<RuntimeValue>,
+    },
+    Invalid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Callable {
     Named {
         index: usize,
@@ -160,22 +198,153 @@ enum Callable {
 struct Machine<'a> {
     program: &'a CheckedProgram,
     globals: Vec<GlobalState>,
+    current_depth: usize,
+    max_depth: usize,
+    tail_transfers: usize,
 }
 
-impl Machine<'_> {
+impl<'a> Machine<'a> {
+    fn new(program: &'a CheckedProgram) -> Self {
+        Self {
+            program,
+            globals: vec![GlobalState::Uninitialized; program.globals().len()],
+            current_depth: 0,
+            max_depth: 0,
+            tail_transfers: 0,
+        }
+    }
+
+    fn enter_activation(&mut self) {
+        self.current_depth = self.current_depth.saturating_add(1);
+        self.max_depth = self.max_depth.max(self.current_depth);
+    }
+
+    fn leave_activation(&mut self) {
+        self.current_depth = self.current_depth.saturating_sub(1);
+    }
+
     fn evaluate_function(
         &mut self,
         index: usize,
         slots: Vec<Option<RuntimeValue>>,
         captures: Vec<RuntimeValue>,
     ) -> Option<RuntimeValue> {
-        let function = self.program.functions().get(index)?;
-        if slots.len() != function.slot_count()
-            || !slots_match_signature(&slots, function.signature())
-        {
-            return None;
+        self.enter_activation();
+        let mut index = index;
+        let mut slots = slots;
+        let mut captures = captures;
+        let result = loop {
+            // Copy the program reference before borrowing a function body so
+            // the mutable machine borrow used by evaluation remains disjoint.
+            let program = self.program;
+            let Some(function) = program.functions().get(index) else {
+                break None;
+            };
+            if slots.len() != function.slot_count()
+                || !slots_match_signature(&slots, function.signature())
+            {
+                break None;
+            }
+            let evaluation = self.evaluate(function.body(), slots.clone(), &captures);
+            match evaluation {
+                Some(Evaluation::Value(value)) => break Some(value),
+                Some(Evaluation::TailTransfer {
+                    callable,
+                    values,
+                    result,
+                }) => {
+                    match self.tail_transfer_action(index, callable, values, &result) {
+                        TailTransferAction::Reuse {
+                            index: next_index,
+                            slots: next_slots,
+                            captures: next_captures,
+                        } => {
+                            self.tail_transfers = self.tail_transfers.saturating_add(1);
+                            index = next_index;
+                            slots = next_slots;
+                            captures = next_captures;
+                        }
+                        TailTransferAction::Invoke { callable, values } => {
+                            break self.invoke_callable(callable, values, &result);
+                        }
+                        TailTransferAction::Invalid => break None,
+                    }
+                }
+                None => break None,
+            }
+        };
+        self.leave_activation();
+        result
+    }
+
+    fn tail_transfer_action(
+        &self,
+        current_index: usize,
+        callable: Callable,
+        values: Vec<RuntimeValue>,
+        result: &PrimitiveType,
+    ) -> TailTransferAction {
+        match callable {
+            Callable::Named {
+                index,
+                signature,
+                captures,
+            } => {
+                let Some(function) = self.program.functions().get(index) else {
+                    return TailTransferAction::Invalid;
+                };
+                let actual_signature = function.signature();
+                if !signature.same_shape(actual_signature)
+                    || actual_signature.fixed_parameter_count() != values.len()
+                    || !values_match_signature(&values, actual_signature)
+                    || !actual_signature.result().same_shape(result)
+                {
+                    return TailTransferAction::Invalid;
+                }
+                let slots = values
+                    .iter()
+                    .cloned()
+                    .map(Some)
+                    .chain(std::iter::repeat(None))
+                    .take(function.slot_count())
+                    .collect();
+                if self
+                    .program
+                    .recursive_group(current_index)
+                    .is_some_and(|group| group.contains(&index))
+                {
+                    TailTransferAction::Reuse {
+                        index,
+                        slots,
+                        captures,
+                    }
+                } else {
+                    TailTransferAction::Invoke {
+                        callable: Callable::Named {
+                            index,
+                            signature,
+                            captures,
+                        },
+                        values,
+                    }
+                }
+            }
+            callable => TailTransferAction::Invoke { callable, values },
         }
-        self.evaluate(function.body(), slots, &captures)
+    }
+
+    fn evaluate_value(
+        &mut self,
+        expression: &Expr,
+        slots: Vec<Option<RuntimeValue>>,
+        captures: &[RuntimeValue],
+    ) -> Option<RuntimeValue> {
+        match self.evaluate(expression, slots, captures)? {
+            Evaluation::Value(value) => Some(value),
+            // A tail transfer is only valid as the final result of its
+            // enclosing activation, never as an immediate operand.
+            Evaluation::TailTransfer { .. } => None,
+        }
     }
 
     fn evaluate(
@@ -183,9 +352,11 @@ impl Machine<'_> {
         expression: &Expr,
         mut slots: Vec<Option<RuntimeValue>>,
         captures: &[RuntimeValue],
-    ) -> Option<RuntimeValue> {
+    ) -> Option<Evaluation> {
         match expression {
-            Expr::Literal { value, .. } => Some(RuntimeValue::Primitive(value.clone())),
+            Expr::Literal { value, .. } => {
+                Some(Evaluation::Value(RuntimeValue::Primitive(value.clone())))
+            }
             Expr::External {
                 intrinsic,
                 arguments,
@@ -193,7 +364,11 @@ impl Machine<'_> {
             } => {
                 let mut values = Vec::with_capacity(arguments.len());
                 for argument in arguments {
-                    values.push(self.evaluate(argument, slots.clone(), captures)?);
+                    values.push(self.evaluate_value(
+                        argument,
+                        slots.clone(),
+                        captures,
+                    )?);
                 }
                 let primitives = values
                     .into_iter()
@@ -218,13 +393,29 @@ impl Machine<'_> {
                         Value::U64(value.chars().count() as u64)
                     }
                 };
-                Some(RuntimeValue::Primitive(value))
+                Some(Evaluation::Value(RuntimeValue::Primitive(value)))
             }
             Expr::Default { .. } => None,
             Expr::Sequence { expressions, .. } => {
-                let mut result = RuntimeValue::Primitive(Value::Void);
-                for expression in expressions {
-                    result = self.evaluate(expression, slots.clone(), captures)?;
+                if expressions.is_empty() {
+                    return Some(Evaluation::Value(RuntimeValue::Primitive(
+                        Value::Void,
+                    )));
+                }
+                let last = expressions.len().saturating_sub(1);
+                let mut result =
+                    Evaluation::Value(RuntimeValue::Primitive(Value::Void));
+                for (index, expression) in expressions.iter().enumerate() {
+                    let evaluation =
+                        self.evaluate(expression, slots.clone(), captures)?;
+                    if index == last {
+                        result = evaluation;
+                        continue;
+                    }
+                    let Evaluation::Value(value) = evaluation else {
+                        return None;
+                    };
+                    result = Evaluation::Value(value);
                 }
                 Some(result)
             }
@@ -234,28 +425,31 @@ impl Machine<'_> {
                 .get(*slot)
                 .and_then(Option::as_ref)
                 .filter(|value| runtime_type(value).same_shape(value_type))
-                .cloned(),
+                .cloned()
+                .map(Evaluation::Value),
             Expr::Global {
                 index, value_type, ..
             } => self
                 .evaluate_global(*index)
-                .filter(|value| runtime_type(value).same_shape(value_type)),
+                .filter(|value| runtime_type(value).same_shape(value_type))
+                .map(Evaluation::Value),
             Expr::Function { function, .. } => {
-                Some(RuntimeValue::Function(Callable::Named {
+                Some(Evaluation::Value(RuntimeValue::Function(Callable::Named {
                     index: *function,
                     signature: match self.program.functions().get(*function) {
                         Some(function) => function.signature().clone(),
                         None => return None,
                     },
                     captures: Vec::new(),
-                }))
+                })))
             }
             Expr::Captured {
                 slot, value_type, ..
             } => captures
                 .get(*slot)
                 .filter(|value| runtime_type(value).same_shape(value_type))
-                .cloned(),
+                .cloned()
+                .map(Evaluation::Value),
             Expr::Closure {
                 signature,
                 parameters,
@@ -265,23 +459,25 @@ impl Machine<'_> {
             } => {
                 let mut environment = Vec::with_capacity(capture_expressions.len());
                 for capture in capture_expressions {
-                    environment.push(self.evaluate(
+                    environment.push(self.evaluate_value(
                         capture,
                         slots.clone(),
                         captures,
                     )?);
                 }
-                Some(RuntimeValue::Function(Callable::Lambda {
-                    signature: signature.clone(),
-                    parameters: parameters.clone(),
-                    body: body.clone(),
-                    captures: environment,
-                }))
+                Some(Evaluation::Value(RuntimeValue::Function(
+                    Callable::Lambda {
+                        signature: signature.clone(),
+                        parameters: parameters.clone(),
+                        body: body.clone(),
+                        captures: environment,
+                    },
+                )))
             }
             Expr::Let {
                 slot, value, body, ..
             } => {
-                let value = self.evaluate(value, slots.clone(), captures)?;
+                let value = self.evaluate_value(value, slots.clone(), captures)?;
                 if let Some(slot) = slot {
                     *slots.get_mut(*slot)? = Some(value);
                 }
@@ -293,7 +489,8 @@ impl Machine<'_> {
                 else_branch,
                 ..
             } => {
-                let condition = self.evaluate(condition, slots.clone(), captures)?;
+                let condition =
+                    self.evaluate_value(condition, slots.clone(), captures)?;
                 match condition {
                     RuntimeValue::Primitive(Value::Bool(true)) => {
                         self.evaluate(then_branch, slots, captures)
@@ -309,10 +506,11 @@ impl Machine<'_> {
                 arguments,
                 result,
                 callee,
+                tail,
                 ..
             } => {
                 let callable = if let Some(callee) = callee {
-                    self.evaluate(callee, slots.clone(), captures)?
+                    self.evaluate_value(callee, slots.clone(), captures)?
                 } else {
                     let signature =
                         self.program.functions().get(*function)?.signature().clone();
@@ -325,7 +523,7 @@ impl Machine<'_> {
                 let callable_signature = match &callable {
                     RuntimeValue::Function(Callable::Named { signature, .. })
                     | RuntimeValue::Function(Callable::Lambda { signature, .. }) => {
-                        signature
+                        signature.clone()
                     }
                     RuntimeValue::Primitive(_) => return None,
                 };
@@ -342,58 +540,103 @@ impl Machine<'_> {
                         }
                         values.push(RuntimeValue::Primitive(default));
                     } else {
-                        values.push(self.evaluate(
+                        values.push(self.evaluate_value(
                             argument,
                             slots.clone(),
                             captures,
                         )?);
                     }
                 }
-                match callable {
-                    RuntimeValue::Function(Callable::Named {
-                        index, captures, ..
-                    }) => {
-                        let callee = self.program.functions().get(index)?;
-                        if callee.signature().fixed_parameter_count() != values.len()
-                            || !values_match_signature(&values, callee.signature())
-                            || !callee.signature().result().same_shape(result)
-                        {
-                            return None;
-                        }
-                        let call_slots = values
-                            .into_iter()
-                            .map(Some)
-                            .chain(std::iter::repeat(None))
-                            .take(callee.slot_count())
-                            .collect();
-                        self.evaluate_function(index, call_slots, captures)
+                let RuntimeValue::Function(callable) = callable else {
+                    return None;
+                };
+                if *tail {
+                    if callable_signature.fixed_parameter_count() != values.len()
+                        || !values_match_signature(&values, &callable_signature)
+                        || !callable_signature.result().same_shape(result)
+                    {
+                        return None;
                     }
-                    RuntimeValue::Function(Callable::Lambda {
-                        signature,
-                        parameters,
-                        body,
-                        captures,
-                    }) => {
-                        if signature.fixed_parameter_count() != values.len()
-                            || !values_match_signature(&values, &signature)
-                            || !signature.result().same_shape(result)
-                        {
-                            return None;
-                        }
-                        let slot_count =
-                            parameters.len().max(values.len()).max(body.slot_count());
-                        let call_slots = values
-                            .into_iter()
-                            .map(Some)
-                            .chain(std::iter::repeat(None))
-                            .take(slot_count)
-                            .collect();
-                        self.evaluate(&body, call_slots, &captures)
-                    }
-                    RuntimeValue::Primitive(_) => None,
+                    return Some(Evaluation::TailTransfer {
+                        callable,
+                        values,
+                        result: result.clone(),
+                    });
                 }
+                self.invoke_callable(callable, values, result)
+                    .map(Evaluation::Value)
             }
         }
+    }
+
+    fn invoke_callable(
+        &mut self,
+        callable: Callable,
+        values: Vec<RuntimeValue>,
+        result: &PrimitiveType,
+    ) -> Option<RuntimeValue> {
+        match callable {
+            Callable::Named {
+                index, captures, ..
+            } => {
+                let (slot_count, signature) = {
+                    let function = self.program.functions().get(index)?;
+                    (function.slot_count(), function.signature().clone())
+                };
+                if signature.fixed_parameter_count() != values.len()
+                    || !values_match_signature(&values, &signature)
+                    || !signature.result().same_shape(result)
+                {
+                    return None;
+                }
+                let call_slots = values
+                    .into_iter()
+                    .map(Some)
+                    .chain(std::iter::repeat(None))
+                    .take(slot_count)
+                    .collect();
+                self.evaluate_function(index, call_slots, captures)
+            }
+            Callable::Lambda {
+                signature,
+                parameters,
+                body,
+                captures,
+            } => self
+                .evaluate_lambda(signature, parameters, body, captures, values, result),
+        }
+    }
+
+    fn evaluate_lambda(
+        &mut self,
+        signature: FunctionSignature,
+        parameters: Vec<PrimitiveType>,
+        body: Box<Expr>,
+        captures: Vec<RuntimeValue>,
+        values: Vec<RuntimeValue>,
+        result: &PrimitiveType,
+    ) -> Option<RuntimeValue> {
+        if signature.fixed_parameter_count() != values.len()
+            || !values_match_signature(&values, &signature)
+            || !signature.result().same_shape(result)
+        {
+            return None;
+        }
+        let slot_count = parameters.len().max(values.len()).max(body.slot_count());
+        let call_slots = values
+            .into_iter()
+            .map(Some)
+            .chain(std::iter::repeat(None))
+            .take(slot_count)
+            .collect();
+        self.enter_activation();
+        let evaluation = self.evaluate(&body, call_slots, &captures);
+        let result = match evaluation {
+            Some(Evaluation::Value(value)) => Some(value),
+            Some(Evaluation::TailTransfer { .. }) | None => None,
+        };
+        self.leave_activation();
+        result
     }
 
     fn evaluate_global(&mut self, index: usize) -> Option<RuntimeValue> {
@@ -405,16 +648,19 @@ impl Machine<'_> {
             return Some(value);
         }
         *self.globals.get_mut(index)? = GlobalState::Evaluating;
-        let global = self.program.globals().get(index)?;
-        let value =
-            self.evaluate(global.initializer(), vec![None; global.slot_count()], &[]);
+        let program = self.program;
+        let global = program.globals().get(index)?;
+        let value = self.evaluate_value(
+            global.initializer(),
+            vec![None; global.slot_count()],
+            &[],
+        );
         if let Some(value) = &value {
             *self.globals.get_mut(index)? = GlobalState::Ready(value.clone());
         }
         value
     }
 }
-
 fn runtime_type(value: &RuntimeValue) -> PrimitiveType {
     match value {
         RuntimeValue::Primitive(value) => value.ty(),
@@ -552,10 +798,7 @@ mod tests {
         )
         .expect("valid checked program");
 
-        let mut machine = super::Machine {
-            program: &program,
-            globals: vec![super::GlobalState::Uninitialized; program.globals().len()],
-        };
+        let mut machine = super::Machine::new(&program);
         let result = machine
             .evaluate_function(0, vec![None; program.entry().slot_count()], Vec::new())
             .expect("untaken branch must not execute");

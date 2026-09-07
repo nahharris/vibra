@@ -611,6 +611,12 @@ pub enum Expr {
         function_hint: Option<usize>,
         /// The statically checked result type.
         result: PrimitiveType,
+        /// Whether this call is an explicit tail transfer in the checked IR.
+        ///
+        /// The checker sets this only when every statically bounded target is
+        /// in the current module function's recursive group and the call is
+        /// in a syntactic tail position.
+        tail: bool,
         /// The source origin of the complete application.
         origin: SourceOrigin,
     },
@@ -767,6 +773,26 @@ impl Expr {
             callee: None,
             function_hint: None,
             result,
+            tail: false,
+            origin,
+        }
+    }
+
+    /// Creates a direct tail transfer to a checked function.
+    #[must_use]
+    pub fn tail_call(
+        function: usize,
+        arguments: Vec<Self>,
+        result: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Call {
+            function,
+            arguments,
+            callee: None,
+            function_hint: None,
+            result,
+            tail: true,
             origin,
         }
     }
@@ -786,8 +812,56 @@ impl Expr {
             callee: Some(Box::new(callee)),
             function_hint,
             result,
+            tail: false,
             origin,
         }
+    }
+
+    /// Creates an indirect tail transfer with a statically known target.
+    #[must_use]
+    pub fn indirect_tail_call(
+        callee: Self,
+        function_hint: usize,
+        arguments: Vec<Self>,
+        result: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::indirect_tail_call_with_hint(
+            callee,
+            Some(function_hint),
+            arguments,
+            result,
+            origin,
+        )
+    }
+
+    /// Creates an indirect tail transfer whose statically bounded target set
+    /// may contain more than one module function.  The optional hint is only
+    /// a compact singleton observation; checked-program validation derives
+    /// the actual target set from the callee expression.
+    #[must_use]
+    pub fn indirect_tail_call_with_hint(
+        callee: Self,
+        function_hint: Option<usize>,
+        arguments: Vec<Self>,
+        result: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Call {
+            function: function_hint.unwrap_or_default(),
+            arguments,
+            callee: Some(Box::new(callee)),
+            function_hint,
+            result,
+            tail: true,
+            origin,
+        }
+    }
+
+    /// Reports whether this expression is an explicit checked tail transfer.
+    #[must_use]
+    pub const fn is_tail_call(&self) -> bool {
+        matches!(self, Self::Call { tail: true, .. })
     }
 
     /// Creates a checked sequence expression.
@@ -1250,6 +1324,7 @@ pub struct CheckedFunction {
     body: Expr,
     origin: SourceOrigin,
     slot_count: usize,
+    external_wrapper: bool,
 }
 
 impl CheckedFunction {
@@ -1275,12 +1350,13 @@ impl CheckedFunction {
             })
             .collect();
         let body = Expr::external(intrinsic, arguments, origin.clone());
-        Self::with_slots(
+        Self::with_slots_and_external(
             name,
             signature,
             body,
             origin,
             intrinsic.signature().fixed_parameter_count(),
+            true,
         )
     }
 
@@ -1303,6 +1379,17 @@ impl CheckedFunction {
         body: Expr,
         origin: SourceOrigin,
         slot_count: usize,
+    ) -> Result<Self, IrError> {
+        Self::with_slots_and_external(name, signature, body, origin, slot_count, false)
+    }
+
+    fn with_slots_and_external(
+        name: impl Into<String>,
+        signature: FunctionSignature,
+        body: Expr,
+        origin: SourceOrigin,
+        slot_count: usize,
+        external_wrapper: bool,
     ) -> Result<Self, IrError> {
         let name = name.into();
         if let Err(message) = validate_signature_shape(&signature) {
@@ -1341,6 +1428,7 @@ impl CheckedFunction {
             body,
             origin,
             slot_count,
+            external_wrapper,
         })
     }
 
@@ -1373,6 +1461,13 @@ impl CheckedFunction {
     pub const fn slot_count(&self) -> usize {
         self.slot_count
     }
+
+    /// Whether this function is a synthetic wrapper around a compiler
+    /// intrinsic rather than a source-level module definition.
+    #[must_use]
+    pub const fn is_external_wrapper(&self) -> bool {
+        self.external_wrapper
+    }
 }
 
 /// A complete immutable program that crossed the checker boundary.
@@ -1381,6 +1476,7 @@ pub struct CheckedProgram {
     globals: Vec<CheckedGlobal>,
     functions: Vec<CheckedFunction>,
     entry: usize,
+    recursive_groups: Vec<Vec<usize>>,
 }
 
 impl CheckedProgram {
@@ -1483,18 +1579,46 @@ impl CheckedProgram {
                 &mut dependencies,
             )?;
         }
-        let (calls, flow_dependencies) =
-            analyze_call_flow(&globals, &functions, entry)?;
-        for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow_dependencies)
+        let flow = analyze_call_flow(&globals, &functions, entry)?;
+        for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow.dependencies)
         {
             dependencies.extend(flow_edges);
         }
-        reject_recursive_calls(&calls)?;
+        let recursive_groups = find_recursive_groups(&flow.calls, &functions);
+        for global in &globals {
+            validate_tail_calls(
+                global.initializer(),
+                false,
+                None,
+                &recursive_groups,
+                &globals,
+                &functions,
+                &BTreeMap::new(),
+            )?;
+        }
+        for (index, function) in functions.iter().enumerate() {
+            let aliases = parameter_aliases(
+                index,
+                &functions,
+                &flow.parameter_targets,
+                &flow.parameter_sources,
+            );
+            validate_tail_calls(
+                function.body(),
+                true,
+                Some(index),
+                &recursive_groups,
+                &globals,
+                &functions,
+                &aliases,
+            )?;
+        }
         reject_global_initializer_cycles(&dependencies, globals.len())?;
         Ok(Self {
             globals,
             functions,
             entry,
+            recursive_groups,
         })
     }
 
@@ -1508,6 +1632,18 @@ impl CheckedProgram {
     #[must_use]
     pub fn functions(&self) -> &[CheckedFunction] {
         &self.functions
+    }
+
+    /// Same-module recursive groups, in deterministic function-index order.
+    #[must_use]
+    pub fn recursive_groups(&self) -> &[Vec<usize>] {
+        &self.recursive_groups
+    }
+
+    /// Returns the recursive group containing `function`, if any.
+    #[must_use]
+    pub fn recursive_group(&self, function: usize) -> Option<&[usize]> {
+        self.recursive_groups.get(function).map(Vec::as_slice)
     }
 
     /// The selected entry function.
@@ -1854,7 +1990,9 @@ fn validate_program_expr(
                     let summary = possible_function_targets(
                         callee_expression,
                         &BTreeMap::new(),
+                        globals,
                         functions,
+                        &mut BTreeSet::new(),
                         &mut BTreeSet::new(),
                     );
                     let labelled_index =
@@ -1914,13 +2052,16 @@ fn validate_program_expr(
                 let summary = possible_function_targets(
                     callee_expression,
                     &BTreeMap::new(),
+                    globals,
                     functions,
+                    &mut BTreeSet::new(),
                     &mut BTreeSet::new(),
                 );
                 if let Some(function_hint) = function_hint {
-                    if !summary.known.is_empty()
-                        && (summary.unknown
-                            || summary.known != BTreeSet::from([*function_hint]))
+                    if summary.has_closure
+                        || (!summary.known.is_empty()
+                            && (summary.unknown
+                                || summary.known != BTreeSet::from([*function_hint])))
                     {
                         return Err(IrError::InvalidExpression(
                             "function hint does not match indirect callee".to_owned(),
@@ -1967,98 +2108,179 @@ fn validate_program_expr(
 struct FunctionTargetSummary {
     known: BTreeSet<usize>,
     unknown: bool,
+    has_closure: bool,
+}
+
+impl FunctionTargetSummary {
+    fn known(function: usize) -> Self {
+        Self {
+            known: BTreeSet::from([function]),
+            unknown: false,
+            has_closure: false,
+        }
+    }
+
+    fn unknown() -> Self {
+        Self {
+            known: BTreeSet::new(),
+            unknown: true,
+            has_closure: false,
+        }
+    }
+
+    fn closure() -> Self {
+        Self {
+            known: BTreeSet::new(),
+            unknown: false,
+            has_closure: true,
+        }
+    }
+
+    fn union(&mut self, other: Self) {
+        self.known.extend(other.known);
+        self.unknown |= other.unknown;
+        self.has_closure |= other.has_closure;
+    }
 }
 
 fn possible_function_targets(
     expression: &Expr,
     aliases: &BTreeMap<usize, FunctionTargetSummary>,
+    globals: &[CheckedGlobal],
     functions: &[CheckedFunction],
     visiting: &mut BTreeSet<usize>,
+    visiting_globals: &mut BTreeSet<usize>,
 ) -> FunctionTargetSummary {
     match expression {
-        Expr::Function { function, .. } => FunctionTargetSummary {
-            known: BTreeSet::from([*function]),
-            unknown: false,
-        },
-        Expr::Closure {
-            signature, body, ..
-        } if matches!(signature.result(), PrimitiveType::Function(_)) => {
-            possible_function_targets(body, aliases, functions, visiting)
-        }
-        Expr::Closure { .. } => FunctionTargetSummary::default(),
+        Expr::Function { function, .. } => FunctionTargetSummary::known(*function),
+        // A closure is a distinct runtime callable, even when its body
+        // returns a module function.  It therefore cannot be summarized as
+        // that function's identity for a module-level tail transfer.
+        Expr::Closure { .. } => FunctionTargetSummary::closure(),
         Expr::If {
             then_branch,
             else_branch,
             ..
         } => {
-            let then_targets =
-                possible_function_targets(then_branch, aliases, functions, visiting);
-            let else_targets =
-                possible_function_targets(else_branch, aliases, functions, visiting);
-            let mut known = then_targets.known;
-            known.extend(else_targets.known);
-            FunctionTargetSummary {
-                known,
-                unknown: then_targets.unknown || else_targets.unknown,
-            }
+            let then_targets = possible_function_targets(
+                then_branch,
+                aliases,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
+            let else_targets = possible_function_targets(
+                else_branch,
+                aliases,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
+            let mut summary = then_targets;
+            summary.union(else_targets);
+            summary
         }
         Expr::Let {
             slot, value, body, ..
         } => {
-            let value_targets =
-                possible_function_targets(value, aliases, functions, visiting);
+            let value_targets = possible_function_targets(
+                value,
+                aliases,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
             let mut nested = aliases.clone();
             if let Some(slot) = slot {
                 nested.insert(*slot, value_targets.clone());
             }
-            let body_targets =
-                possible_function_targets(body, &nested, functions, visiting);
+            let body_targets = possible_function_targets(
+                body,
+                &nested,
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
             FunctionTargetSummary {
                 known: body_targets.known,
-                unknown: value_targets.unknown || body_targets.unknown,
+                unknown: body_targets.unknown,
+                has_closure: body_targets.has_closure,
             }
         }
         Expr::Sequence { expressions, .. } => expressions.last().map_or_else(
             FunctionTargetSummary::default,
             |expression| {
-                possible_function_targets(expression, aliases, functions, visiting)
+                possible_function_targets(
+                    expression,
+                    aliases,
+                    globals,
+                    functions,
+                    visiting,
+                    visiting_globals,
+                )
             },
         ),
-        Expr::Variable { slot, .. } => {
-            aliases
-                .get(slot)
-                .cloned()
-                .unwrap_or_else(|| FunctionTargetSummary {
-                    known: BTreeSet::new(),
-                    unknown: true,
-                })
+        Expr::Variable { slot, .. } => aliases
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(FunctionTargetSummary::unknown),
+        Expr::Captured { .. } => FunctionTargetSummary::unknown(),
+        Expr::Global { index, .. } => {
+            let Some(global) = globals.get(*index) else {
+                return FunctionTargetSummary::unknown();
+            };
+            if !visiting_globals.insert(*index) {
+                return FunctionTargetSummary::unknown();
+            }
+            let result = possible_function_targets(
+                global.initializer(),
+                &BTreeMap::new(),
+                globals,
+                functions,
+                visiting,
+                visiting_globals,
+            );
+            visiting_globals.remove(index);
+            result
         }
-        Expr::Captured { .. } | Expr::Global { .. } => FunctionTargetSummary {
-            known: BTreeSet::new(),
-            unknown: true,
-        },
         Expr::Call {
             function,
+            arguments,
             callee,
-            function_hint,
             ..
         } => {
-            let target_summary = if let Some(function_hint) = function_hint {
-                FunctionTargetSummary {
-                    known: BTreeSet::from([*function_hint]),
-                    unknown: false,
-                }
-            } else if let Some(callee) = callee {
-                possible_function_targets(callee, aliases, functions, visiting)
+            let target_summary = if let Some(callee) = callee {
+                possible_function_targets(
+                    callee,
+                    aliases,
+                    globals,
+                    functions,
+                    visiting,
+                    visiting_globals,
+                )
             } else {
-                FunctionTargetSummary {
-                    known: BTreeSet::from([*function]),
-                    unknown: false,
-                }
+                FunctionTargetSummary::known(*function)
             };
-            if target_summary.unknown {
+            if target_summary.unknown || target_summary.has_closure {
                 return target_summary;
             }
+            let argument_targets = arguments
+                .iter()
+                .map(|argument| {
+                    possible_function_targets(
+                        argument,
+                        aliases,
+                        globals,
+                        functions,
+                        visiting,
+                        visiting_globals,
+                    )
+                })
+                .collect::<Vec<_>>();
             let mut result = FunctionTargetSummary::default();
             let targets = target_summary.known;
             for target in targets {
@@ -2070,14 +2292,27 @@ fn possible_function_targets(
                     result.unknown = true;
                     continue;
                 };
+                let mut target_aliases = BTreeMap::new();
+                for (slot, (argument, value_type)) in argument_targets
+                    .iter()
+                    .zip(function_signature_types(function.signature()))
+                    .enumerate()
+                {
+                    if matches!(value_type, PrimitiveType::Function(_)) {
+                        target_aliases.insert(slot, argument.clone());
+                    }
+                }
                 let returned = possible_function_targets(
                     function.body(),
-                    &BTreeMap::new(),
+                    &target_aliases,
+                    globals,
                     functions,
                     visiting,
+                    visiting_globals,
                 );
                 result.known.extend(returned.known);
                 result.unknown |= returned.unknown;
+                result.has_closure |= returned.has_closure;
                 visiting.remove(&target);
             }
             result
@@ -2140,7 +2375,12 @@ struct CallFlow<'a> {
     unresolved: bool,
 }
 
-type CallAnalysis = (Vec<BTreeSet<usize>>, Vec<BTreeSet<DependencyNode>>);
+struct CallAnalysis {
+    calls: Vec<BTreeSet<usize>>,
+    dependencies: Vec<BTreeSet<DependencyNode>>,
+    parameter_targets: Vec<Vec<FlowTargetSummary>>,
+    parameter_sources: Vec<Vec<bool>>,
+}
 
 fn analyze_call_flow(
     globals: &[CheckedGlobal],
@@ -2230,7 +2470,12 @@ fn analyze_call_flow(
                         .to_owned(),
                 ));
             }
-            return Ok((flow.calls, flow.dependencies));
+            return Ok(CallAnalysis {
+                calls: flow.calls,
+                dependencies: flow.dependencies,
+                parameter_targets: flow.parameter_targets,
+                parameter_sources: flow.parameter_sources,
+            });
         }
     }
     if flow.unresolved {
@@ -2238,7 +2483,54 @@ fn analyze_call_flow(
             "indirect call target analysis did not reach a bounded result".to_owned(),
         ));
     }
-    Ok((flow.calls, flow.dependencies))
+    Ok(CallAnalysis {
+        calls: flow.calls,
+        dependencies: flow.dependencies,
+        parameter_targets: flow.parameter_targets,
+        parameter_sources: flow.parameter_sources,
+    })
+}
+
+fn parameter_aliases(
+    function: usize,
+    functions: &[CheckedFunction],
+    parameter_targets: &[Vec<FlowTargetSummary>],
+    parameter_sources: &[Vec<bool>],
+) -> BTreeMap<usize, FunctionTargetSummary> {
+    let mut aliases = BTreeMap::new();
+    let Some(checked) = functions.get(function) else {
+        return aliases;
+    };
+    for (slot, value_type) in function_signature_types(checked.signature()).enumerate()
+    {
+        if !matches!(value_type, PrimitiveType::Function(_)) {
+            continue;
+        }
+        let summary = if parameter_sources
+            .get(function)
+            .and_then(|sources| sources.get(slot))
+            .copied()
+            .unwrap_or(false)
+        {
+            parameter_targets
+                .get(function)
+                .and_then(|targets| targets.get(slot))
+                .map(flow_target_summary)
+                .unwrap_or_else(FunctionTargetSummary::unknown)
+        } else {
+            FunctionTargetSummary::unknown()
+        };
+        aliases.insert(slot, summary);
+    }
+    aliases
+}
+
+fn flow_target_summary(summary: &FlowTargetSummary) -> FunctionTargetSummary {
+    FunctionTargetSummary {
+        known: summary.known.clone(),
+        unknown: summary.unknown,
+        has_closure: !summary.closures.is_empty(),
+    }
 }
 
 fn function_signature_types(
@@ -2316,6 +2608,21 @@ impl<'a> CallFlow<'a> {
         environment: &BTreeMap<usize, FlowTargetSummary>,
         captures: &[FlowTargetSummary],
     ) -> FlowTargetSummary {
+        self.summary_expr_with_stack(
+            expression,
+            environment,
+            captures,
+            &mut BTreeSet::new(),
+        )
+    }
+
+    fn summary_expr_with_stack(
+        &self,
+        expression: &Expr,
+        environment: &BTreeMap<usize, FlowTargetSummary>,
+        captures: &[FlowTargetSummary],
+        visiting: &mut BTreeSet<usize>,
+    ) -> FlowTargetSummary {
         match expression {
             Expr::Function { function, .. } => {
                 FlowTargetSummary::known_function(*function)
@@ -2328,7 +2635,14 @@ impl<'a> CallFlow<'a> {
             } => {
                 let closure_capture_summaries = closure_captures
                     .iter()
-                    .map(|capture| self.summary_expr(capture, environment, captures))
+                    .map(|capture| {
+                        self.summary_expr_with_stack(
+                            capture,
+                            environment,
+                            captures,
+                            visiting,
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let mut closure_environment = BTreeMap::new();
                 for (slot, value_type) in
@@ -2341,10 +2655,11 @@ impl<'a> CallFlow<'a> {
                 }
                 FlowTargetSummary {
                     is_function: true,
-                    closures: vec![self.summary_expr(
+                    closures: vec![self.summary_expr_with_stack(
                         body,
                         &closure_environment,
                         &closure_capture_summaries,
+                        visiting,
                     )],
                     closure_defaults: vec![
                         signature
@@ -2392,29 +2707,51 @@ impl<'a> CallFlow<'a> {
             Expr::Let {
                 slot, value, body, ..
             } => {
-                let value_summary = self.summary_expr(value, environment, captures);
+                let value_summary = self.summary_expr_with_stack(
+                    value,
+                    environment,
+                    captures,
+                    visiting,
+                );
                 let mut nested = environment.clone();
                 if let Some(slot) = slot {
                     nested.insert(*slot, value_summary);
                 }
-                self.summary_expr(body, &nested, captures)
+                self.summary_expr_with_stack(body, &nested, captures, visiting)
             }
             Expr::If {
                 then_branch,
                 else_branch,
                 ..
             } => {
-                let mut summary = self.summary_expr(then_branch, environment, captures);
-                summary.union(&self.summary_expr(else_branch, environment, captures));
+                let mut summary = self.summary_expr_with_stack(
+                    then_branch,
+                    environment,
+                    captures,
+                    visiting,
+                );
+                summary.union(&self.summary_expr_with_stack(
+                    else_branch,
+                    environment,
+                    captures,
+                    visiting,
+                ));
                 summary
             }
-            Expr::Sequence { expressions, .. } => expressions
-                .last()
-                .map_or_else(FlowTargetSummary::default, |expression| {
-                    self.summary_expr(expression, environment, captures)
-                }),
+            Expr::Sequence { expressions, .. } => expressions.last().map_or_else(
+                FlowTargetSummary::default,
+                |expression| {
+                    self.summary_expr_with_stack(
+                        expression,
+                        environment,
+                        captures,
+                        visiting,
+                    )
+                },
+            ),
             Expr::Call {
                 function,
+                arguments,
                 callee,
                 function_hint,
                 result,
@@ -2425,7 +2762,14 @@ impl<'a> CallFlow<'a> {
                 }
                 let callee_summary = callee.as_deref().map_or_else(
                     || FlowTargetSummary::known_function(*function),
-                    |callee| self.summary_expr(callee, environment, captures),
+                    |callee| {
+                        self.summary_expr_with_stack(
+                            callee,
+                            environment,
+                            captures,
+                            visiting,
+                        )
+                    },
                 );
                 let mut targets = callee_summary.clone();
                 if let Some(function_hint) = function_hint {
@@ -2440,12 +2784,49 @@ impl<'a> CallFlow<'a> {
                 for closure in &targets.closures {
                     summary.union(closure);
                 }
+                let argument_summaries = arguments
+                    .iter()
+                    .map(|argument| {
+                        self.summary_expr_with_stack(
+                            argument,
+                            environment,
+                            captures,
+                            visiting,
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 for target in targets.known {
-                    if let Some(returned) = self.function_returns.get(target) {
-                        summary.union(returned);
-                    } else {
-                        summary.unknown = true;
+                    if !visiting.insert(target) {
+                        if let Some(returned) = self.function_returns.get(target) {
+                            summary.union(returned);
+                        } else {
+                            summary.unknown = true;
+                        }
+                        continue;
                     }
+                    let Some(function) = self.functions.get(target) else {
+                        summary.unknown = true;
+                        visiting.remove(&target);
+                        continue;
+                    };
+                    let mut target_environment = BTreeMap::new();
+                    for (slot, (argument, value_type)) in argument_summaries
+                        .iter()
+                        .zip(function_signature_types(function.signature()))
+                        .enumerate()
+                    {
+                        if matches!(value_type, PrimitiveType::Function(_)) {
+                            target_environment.insert(slot, argument.clone());
+                        }
+                    }
+                    let returned = self.summary_expr_with_stack(
+                        function.body(),
+                        &target_environment,
+                        &[],
+                        visiting,
+                    );
+                    summary.union(&returned);
+                    visiting.remove(&target);
                 }
                 summary
             }
@@ -2736,49 +3117,268 @@ enum CallState {
     Done,
 }
 
-fn reject_recursive_calls(calls: &[BTreeSet<usize>]) -> Result<(), IrError> {
-    let mut states = vec![CallState::Unvisited; calls.len()];
-    for index in 0..calls.len() {
-        visit_call_graph(index, calls, &mut states)?;
-    }
-    Ok(())
+fn find_recursive_groups(
+    calls: &[BTreeSet<usize>],
+    functions: &[CheckedFunction],
+) -> Vec<Vec<usize>> {
+    (0..calls.len())
+        .map(|start| {
+            if !is_module_definition(functions, start) {
+                return Vec::new();
+            }
+            reachable_functions(start, calls)
+                .into_iter()
+                .filter(|target| is_module_definition(functions, *target))
+                .collect()
+        })
+        .collect()
 }
 
-fn visit_call_graph(
-    index: usize,
-    calls: &[BTreeSet<usize>],
-    states: &mut [CallState],
+fn is_module_definition(functions: &[CheckedFunction], index: usize) -> bool {
+    functions
+        .get(index)
+        .is_some_and(|function| !function.is_external_wrapper())
+}
+
+fn reachable_functions(start: usize, calls: &[BTreeSet<usize>]) -> BTreeSet<usize> {
+    let mut reached = BTreeSet::new();
+    let mut pending = vec![start];
+    while let Some(index) = pending.pop() {
+        if !reached.insert(index) {
+            continue;
+        }
+        if let Some(dependencies) = calls.get(index) {
+            pending.extend(dependencies.iter().copied());
+        }
+    }
+    reached
+}
+
+fn validate_tail_calls(
+    expression: &Expr,
+    tail_position: bool,
+    current_function: Option<usize>,
+    recursive_groups: &[Vec<usize>],
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+    aliases: &BTreeMap<usize, FunctionTargetSummary>,
 ) -> Result<(), IrError> {
-    match states.get(index).copied() {
-        Some(CallState::Done) => return Ok(()),
-        Some(CallState::Visiting) => {
-            return Err(IrError::RecursiveCall(format!(
-                "function index {index} is part of a recursive group"
-            )));
+    match expression {
+        Expr::Literal { .. }
+        | Expr::Default { .. }
+        | Expr::Variable { .. }
+        | Expr::Global { .. }
+        | Expr::Function { .. }
+        | Expr::Captured { .. } => {}
+        Expr::External { arguments, .. } => {
+            for argument in arguments {
+                validate_tail_calls(
+                    argument,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    globals,
+                    functions,
+                    aliases,
+                )?;
+            }
         }
-        Some(CallState::Unvisited) => {}
-        None => {
-            return Err(IrError::InvalidExpression(format!(
-                "call graph references function index {index}"
-            )));
+        Expr::Closure { captures, body, .. } => {
+            for capture in captures {
+                validate_tail_calls(
+                    capture,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    globals,
+                    functions,
+                    aliases,
+                )?;
+            }
+            validate_tail_calls(
+                body,
+                true,
+                None,
+                recursive_groups,
+                globals,
+                functions,
+                &BTreeMap::new(),
+            )?;
         }
-    }
-    let Some(state) = states.get_mut(index) else {
-        return Err(IrError::InvalidExpression(format!(
-            "call graph references function index {index}"
-        )));
-    };
-    *state = CallState::Visiting;
-    let Some(dependencies) = calls.get(index) else {
-        return Err(IrError::InvalidExpression(format!(
-            "call graph has no node for function index {index}"
-        )));
-    };
-    for dependency in dependencies {
-        visit_call_graph(*dependency, calls, states)?;
-    }
-    if let Some(state) = states.get_mut(index) {
-        *state = CallState::Done;
+        Expr::Sequence { expressions, .. } => {
+            for (index, expression) in expressions.iter().enumerate() {
+                validate_tail_calls(
+                    expression,
+                    tail_position && index + 1 == expressions.len(),
+                    current_function,
+                    recursive_groups,
+                    globals,
+                    functions,
+                    aliases,
+                )?;
+            }
+        }
+        Expr::Let {
+            value, body, slot, ..
+        } => {
+            validate_tail_calls(
+                value,
+                false,
+                current_function,
+                recursive_groups,
+                globals,
+                functions,
+                aliases,
+            )?;
+            let value_targets = possible_function_targets(
+                value,
+                aliases,
+                globals,
+                functions,
+                &mut BTreeSet::new(),
+                &mut BTreeSet::new(),
+            );
+            let mut nested_aliases = aliases.clone();
+            if let Some(slot) = slot {
+                nested_aliases.insert(*slot, value_targets);
+            }
+            validate_tail_calls(
+                body,
+                tail_position,
+                current_function,
+                recursive_groups,
+                globals,
+                functions,
+                &nested_aliases,
+            )?;
+        }
+        Expr::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            validate_tail_calls(
+                condition,
+                false,
+                current_function,
+                recursive_groups,
+                globals,
+                functions,
+                aliases,
+            )?;
+            validate_tail_calls(
+                then_branch,
+                tail_position,
+                current_function,
+                recursive_groups,
+                globals,
+                functions,
+                aliases,
+            )?;
+            validate_tail_calls(
+                else_branch,
+                tail_position,
+                current_function,
+                recursive_groups,
+                globals,
+                functions,
+                aliases,
+            )?;
+        }
+        Expr::Call {
+            function,
+            arguments,
+            callee,
+            function_hint,
+            tail,
+            ..
+        } => {
+            if let Some(callee) = callee {
+                validate_tail_calls(
+                    callee,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    globals,
+                    functions,
+                    aliases,
+                )?;
+            }
+            for argument in arguments {
+                validate_tail_calls(
+                    argument,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    globals,
+                    functions,
+                    aliases,
+                )?;
+            }
+            if !tail {
+                return Ok(());
+            }
+            if !tail_position {
+                return Err(IrError::InvalidExpression(
+                    "tail call is outside an activation-relative tail position"
+                        .to_owned(),
+                ));
+            }
+            let Some(current_function) = current_function else {
+                return Err(IrError::InvalidExpression(
+                    "tail call has no module-level function activation".to_owned(),
+                ));
+            };
+            let targets = if let Some(callee) = callee {
+                possible_function_targets(
+                    callee,
+                    aliases,
+                    globals,
+                    functions,
+                    &mut BTreeSet::new(),
+                    &mut BTreeSet::new(),
+                )
+            } else {
+                FunctionTargetSummary::known(*function)
+            };
+            if targets.known.is_empty()
+                && !(targets.has_closure
+                    && callee.as_deref().is_some_and(|expression| {
+                        !matches!(expression, Expr::Closure { .. })
+                    }))
+            {
+                return Err(IrError::InvalidExpression(
+                    "tail call target is not statically bounded".to_owned(),
+                ));
+            }
+            if let Some(function_hint) = function_hint
+                && (targets.unknown
+                    || targets.has_closure
+                    || targets.known != BTreeSet::from([*function_hint]))
+            {
+                return Err(IrError::InvalidExpression(
+                    "tail call hint does not match indirect callee".to_owned(),
+                ));
+            }
+            let Some(group) = recursive_groups.get(current_function) else {
+                return Err(IrError::InvalidExpression(format!(
+                    "tail call owner {current_function} is outside the program"
+                )));
+            };
+            for target in targets.known {
+                if functions.get(target).is_none() {
+                    return Err(IrError::InvalidExpression(format!(
+                        "tail call target {target} is outside the program"
+                    )));
+                }
+                if callee.is_none() && !group.contains(&target) {
+                    return Err(IrError::InvalidExpression(format!(
+                        "tail call target {target} is outside function {current_function}'s recursive group"
+                    )));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -2943,25 +3543,29 @@ fn canonical_expr(expression: &Expr) -> String {
             result,
             callee,
             function_hint,
+            tail,
             ..
         } => {
             let values = arguments.iter().map(canonical_expr).collect::<Vec<_>>();
+            let tail_field = if *tail { " tail: true" } else { "" };
             match callee {
                 Some(callee) => {
                     let function_field = function_hint
                         .map(|function| format!(" function: {function}u64"))
                         .unwrap_or_default();
                     format!(
-                        "(record kind: @call callee: {}{} result: {} arguments: {})",
+                        "(record kind: @call callee: {}{}{} result: {} arguments: {})",
                         canonical_expr(callee),
                         function_field,
+                        tail_field,
                         canonical_type(result),
                         canonical_array(&values)
                     )
                 }
                 None => format!(
-                    "(record kind: @call function: {}u64 result: {} arguments: {})",
+                    "(record kind: @call function: {}u64{} result: {} arguments: {})",
                     function,
+                    tail_field,
                     canonical_type(result),
                     canonical_array(&values)
                 ),
@@ -3081,8 +3685,8 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::{
-        ByteSpan, CheckedFunction, CheckedProgram, Expr, FunctionSignature, IrError,
-        PrimitiveType, SourceOrigin, Value,
+        ByteSpan, CheckedFunction, CheckedGlobal, CheckedProgram, Expr,
+        FunctionSignature, IrError, PrimitiveType, SourceOrigin, Value,
     };
 
     fn origin() -> SourceOrigin {
@@ -3120,7 +3724,7 @@ mod tests {
     }
 
     #[test]
-    fn program_constructor_rejects_recursive_calls() {
+    fn program_constructor_records_recursive_group() {
         let origin = origin();
         let function = CheckedFunction::new(
             "answer",
@@ -3129,12 +3733,38 @@ mod tests {
             origin,
         )
         .expect("call shape is valid before program binding");
-        let result = CheckedProgram::try_new(vec![function], 0);
-        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+        let program = CheckedProgram::try_new(vec![function], 0)
+            .expect("recursive calls are admitted for tail-call analysis");
+        assert_eq!(program.recursive_groups(), &[vec![0]]);
     }
 
     #[test]
-    fn program_constructor_rejects_recursive_function_values() {
+    fn program_constructor_records_each_function_reachability_group() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let answer = CheckedFunction::new(
+            "answer",
+            signature.clone(),
+            Expr::call(1, Vec::new(), PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("answer function");
+        let leaf = CheckedFunction::new(
+            "leaf",
+            signature,
+            Expr::literal(Value::I32(7), origin.clone()),
+            origin,
+        )
+        .expect("leaf function");
+        let program = CheckedProgram::try_new(vec![answer, leaf], 0)
+            .expect("reachable groups are valid");
+        assert_eq!(program.recursive_groups(), &[vec![0, 1], vec![1]]);
+        assert_eq!(program.recursive_group(0), Some(&[0, 1][..]));
+        assert_eq!(program.recursive_group(1), Some(&[1][..]));
+    }
+
+    #[test]
+    fn program_constructor_records_recursive_function_value_group() {
         let origin = origin();
         let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
         let function_value = Expr::function(0, signature.clone(), origin.clone());
@@ -3147,8 +3777,323 @@ mod tests {
         );
         let function = CheckedFunction::new("answer", signature, body, origin)
             .expect("indirect call shape is valid before program binding");
-        let result = CheckedProgram::try_new(vec![function], 0);
-        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+        let program = CheckedProgram::try_new(vec![function], 0)
+            .expect("recursive function values are admitted for tail-call analysis");
+        assert_eq!(program.recursive_groups(), &[vec![0]]);
+    }
+
+    #[test]
+    fn tail_call_is_explicit_in_checked_ir() {
+        let origin = origin();
+        let expression =
+            Expr::tail_call(3, Vec::new(), PrimitiveType::I32, origin.clone());
+        assert!(expression.is_tail_call());
+        assert!(super::canonical_expr(&expression).contains("tail: true"));
+        let normal = Expr::call(3, Vec::new(), PrimitiveType::I32, origin);
+        assert!(!super::canonical_expr(&normal).contains("tail: true"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_outside_sequence_tail_position() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let body = Expr::sequence(
+            vec![
+                Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+                Expr::literal(Value::I32(1), origin.clone()),
+            ],
+            origin.clone(),
+        );
+        let function = CheckedFunction::new("answer", signature, body, origin)
+            .expect("sequence shape is valid before tail-position validation");
+        let error = CheckedProgram::try_new(vec![function], 0)
+            .expect_err("non-final tail markers must not cross the checked boundary");
+        assert!(error.to_string().contains("tail position"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_in_an_operand() {
+        let origin = origin();
+        let leaf_signature =
+            FunctionSignature::new(vec![PrimitiveType::I32], PrimitiveType::I32);
+        let leaf = CheckedFunction::new(
+            "leaf",
+            leaf_signature,
+            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("leaf function");
+        let caller_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let caller_body = Expr::call(
+            0,
+            vec![Expr::tail_call(
+                1,
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            )],
+            PrimitiveType::I32,
+            origin.clone(),
+        );
+        let caller =
+            CheckedFunction::new("caller", caller_signature, caller_body, origin)
+                .expect("operand shape is valid before tail-position validation");
+        let error = CheckedProgram::try_new(vec![leaf, caller], 1)
+            .expect_err("tail markers in operands must not cross the checked boundary");
+        assert!(error.to_string().contains("tail position"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_in_a_condition() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::Bool);
+        let body = Expr::if_expression(
+            Expr::tail_call(0, Vec::new(), PrimitiveType::Bool, origin.clone()),
+            Expr::literal(Value::Bool(true), origin.clone()),
+            Expr::literal(Value::Bool(false), origin.clone()),
+            origin.clone(),
+        );
+        let function = CheckedFunction::new("answer", signature, body, origin)
+            .expect("conditional shape is valid before tail-position validation");
+        let error = CheckedProgram::try_new(vec![function], 0).expect_err(
+            "tail markers in conditions must not cross the checked boundary",
+        );
+        assert!(error.to_string().contains("tail position"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_in_a_closure_activation() {
+        let origin = origin();
+        let closure_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let outer_signature = FunctionSignature::new(
+            Vec::new(),
+            PrimitiveType::Function(Box::new(closure_signature.clone())),
+        );
+        let closure = Expr::closure(
+            closure_signature,
+            Vec::new(),
+            Vec::new(),
+            Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            0,
+            origin.clone(),
+        );
+        let callee = CheckedFunction::new(
+            "callee",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::literal(Value::I32(7), origin.clone()),
+            origin.clone(),
+        )
+        .expect("callee");
+        let function = CheckedFunction::new("answer", outer_signature, closure, origin)
+            .expect("closure shape is valid before tail-position validation");
+        let error = CheckedProgram::try_new(vec![callee, function], 1)
+            .expect_err("closure tail markers must use their own activation");
+        assert!(
+            error
+                .to_string()
+                .contains("module-level function activation"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_in_a_global_initializer() {
+        let origin = origin();
+        let function = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("function");
+        let global = CheckedGlobal::new(
+            "value",
+            PrimitiveType::I32,
+            Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("global shape is valid before tail-position validation");
+        let error =
+            CheckedProgram::try_new_with_globals(vec![global], vec![function], 0)
+                .expect_err("global initializers do not have tail-call activations");
+        assert!(error.to_string().contains("tail position"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_to_an_external_wrapper() {
+        let origin = origin();
+        let intrinsic = super::external::CompilerIntrinsic::TextLength;
+        let external = CheckedFunction::new_external(
+            "text.length",
+            intrinsic.signature(),
+            intrinsic,
+            origin.clone(),
+        )
+        .expect("external wrapper");
+        let caller = CheckedFunction::new(
+            "caller",
+            FunctionSignature::new(Vec::new(), PrimitiveType::U64),
+            Expr::tail_call(
+                0,
+                vec![Expr::literal(Value::Str("x".to_owned()), origin.clone())],
+                PrimitiveType::U64,
+                origin.clone(),
+            ),
+            origin,
+        )
+        .expect("caller shape is valid before tail-target validation");
+        let error = CheckedProgram::try_new(vec![external, caller], 1).expect_err(
+            "external wrappers are not module-level recursive-group members",
+        );
+        assert!(error.to_string().contains("outside function"));
+    }
+
+    #[test]
+    fn program_constructor_keeps_source_functions_with_external_operands_in_groups() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::Str);
+        let recursive_operand =
+            Expr::call(0, Vec::new(), PrimitiveType::Str, origin.clone());
+        let body = Expr::external(
+            super::external::CompilerIntrinsic::TextConcat,
+            vec![
+                recursive_operand,
+                Expr::literal(Value::Str(String::new()), origin.clone()),
+            ],
+            origin.clone(),
+        );
+        let function = CheckedFunction::new("source", signature, body, origin)
+            .expect("source function with an intrinsic operand");
+        let program = CheckedProgram::try_new(vec![function], 0)
+            .expect("recursive external operands are valid");
+        assert_eq!(program.recursive_groups(), &[vec![0]]);
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_transfers_through_closures() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let target = CheckedFunction::new(
+            "target",
+            signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("target");
+        let callee = Expr::closure(
+            signature.clone(),
+            Vec::new(),
+            Vec::new(),
+            Expr::literal(Value::I32(2), origin.clone()),
+            0,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new(
+            "caller",
+            signature.clone(),
+            Expr::indirect_tail_call(
+                callee,
+                0,
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin,
+        )
+        .expect("caller shape");
+        let error = CheckedProgram::try_new(vec![target, caller], 1)
+            .expect_err("a closure is not a module-level tail target");
+        assert!(
+            error.to_string().contains("statically bounded")
+                || error.to_string().contains("function hint")
+        );
+    }
+
+    #[test]
+    fn program_constructor_allows_tail_candidates_with_a_closure_branch() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let target = CheckedFunction::new(
+            "target",
+            signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("target");
+        let closure = Expr::closure(
+            signature.clone(),
+            Vec::new(),
+            Vec::new(),
+            Expr::literal(Value::I32(2), origin.clone()),
+            0,
+            origin.clone(),
+        );
+        let callee = Expr::if_expression(
+            Expr::literal(Value::Bool(true), origin.clone()),
+            Expr::function(0, signature.clone(), origin.clone()),
+            closure,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new(
+            "caller",
+            signature.clone(),
+            Expr::indirect_tail_call_with_hint(
+                callee,
+                None,
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin,
+        )
+        .expect("caller shape");
+        let program = CheckedProgram::try_new(vec![target, caller], 1)
+            .expect("a named branch remains a bounded runtime tail candidate");
+        assert_eq!(program.recursive_group(1), Some(&[0, 1][..]));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_transfers_from_closures_returning_functions() {
+        let origin = origin();
+        let target_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let target = CheckedFunction::new(
+            "target",
+            target_signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("target");
+        let closure_signature = FunctionSignature::new(
+            Vec::new(),
+            PrimitiveType::Function(Box::new(target_signature.clone())),
+        );
+        let callee = Expr::closure(
+            closure_signature,
+            Vec::new(),
+            Vec::new(),
+            Expr::function(0, target_signature.clone(), origin.clone()),
+            0,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new(
+            "caller",
+            target_signature.clone(),
+            Expr::indirect_tail_call(
+                callee,
+                0,
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin,
+        )
+        .expect("caller shape");
+        let error = CheckedProgram::try_new(vec![target, caller], 1)
+            .expect_err("closure identity cannot be replaced by its return target");
+        assert!(matches!(
+            error,
+            IrError::InvalidExpression(_) | IrError::RecursiveCall(_)
+        ));
     }
 
     #[test]

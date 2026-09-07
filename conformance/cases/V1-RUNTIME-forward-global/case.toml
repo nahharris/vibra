@@ -9,4 +9,4 @@ source = "input.vib"
 
 [expect]
 accepted = true
-interpreter = { result = "result.vibon", audit_trace = "audit.txt" }
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
