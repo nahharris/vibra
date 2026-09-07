@@ -194,6 +194,85 @@ the fact is unavailable. This milestone publishes structural grammar facts
 only: it does not add resolution, type inference, effect inference, CLI, or
 MCP behavior.
 
+### M2 workspace position envelope
+
+M2 keeps `urn:vibra:schema:v1:source-position-query` unchanged. Its
+`additionalProperties: false` contract is structural-only and remains the
+reader-facing result. Semantic facts use the separate
+`urn:vibra:schema:v1:workspace-position-query` contract. This is one envelope,
+not a compatibility bridge: a workspace query emits the latter and embeds one
+complete structural result under `structural`.
+
+The workspace envelope has these required fields: `schemaVersion`,
+`workspaceRevision`, `sourceId`, `offset`, `nodeId`, `structural`, `role`,
+`context`, `identity`, `expectedType`, `observedType`, `visibleLocals`,
+`visibleImports`, `declarationCandidates`, and `application`. The envelope's
+`schemaVersion` is `1`. `sourceId` is the immutable project-relative source
+identity and `nodeId` is the canonical locator
+`<sourceId>#<start>-<end>`, using the selected structural span. A consumer joins
+semantic observations only by the triple `(workspaceRevision, sourceId,
+nodeId)`; it never joins by token spelling or by an unversioned span.
+
+Every semantic field is a `{ "status": ..., "value": ... }` wrapper. Status
+is one of `exact`, `recovered`, or `unavailable`, independently for each field.
+An exact known empty collection uses `status: "exact"` and `value: []`;
+`unavailable` uses `value: null`. A recovered field may carry a partial value,
+but a recovered syntax neighbor does not change an unrelated exact field. A
+discard (`-`, `@-`, or `-:`) has an exact `role` and `context`, with
+`identity`, `expectedType`, `observedType`, `declarationCandidates`, and
+`application` unavailable; it never receives a binder identity.
+
+`role` is a closed M2 vocabulary: `@atom-value`, `@entity-reference`,
+`@code-reference`, `@literal`, `@local-binding`, `@discard`, `@declaration`,
+`@application`, and `@unknown`. `context` is one of `module`, `initializer`,
+`function`, `parameter`, `lambda`, `let-value`, `let-body`, `branch`,
+`argument`, `result`, `trivia`, or `recovery`. The structural category remains
+authoritative for grammar facts; these fields describe semantic position.
+
+Identity values are `{ "kind": ..., "canonical": ... }`. Declaration
+identities use the resolver's canonical spelling. Lexical binders use the
+opaque, canonical spelling `binder:<sourceId>:<start>-<end>`, where the span is
+the binding pattern span; this spelling is scoped to the enclosing
+`workspaceRevision` and is never a cross-revision identity. Binder order is
+lexical introduction order, import order is source order, and declaration
+candidates are sorted by canonical identity. Private declarations are not
+candidates outside their visibility.
+
+Types are closed objects with `kind`, `name`, `parameters`, `result`, and
+`labelled`. Primitive values use `kind: "primitive"` and names such as `str`
+or `i32`; function values use `kind: "function"`, `name: "fn"`, their ordered
+parameter types, result type, and labelled slots. A primitive has empty
+`parameters` and `labelled` arrays and a null `result`.
+
+M2 application facts are available only for the supported function form and
+are represented as `{ "kind": "@function", "callee": ..., "calleeType":
+..., "positional": [...], "labelled": [...], "resultType": ... }`.
+`callee` is null when resolution is unavailable. `positional` and `labelled`
+are the authoritative operand contract, in declaration order. Projection,
+lookup, effects, and later application forms remain unavailable in M2.
+
+`workspaceRevision` is a SHA-256 digest over a binary byte sequence with the
+exact spelling `sha256:<64 lowercase hexadecimal digits>`. The digest input is
+the ASCII bytes for `vibra-workspace-revision-v1` followed by exactly one
+`0x00` byte, then a big-endian `u64` length and exact bytes for `project.vibon`,
+followed by
+each captured source document in deterministic source-ID order: a big-endian
+`u64` source-ID length, the source-ID UTF-8 bytes, a big-endian `u64` byte
+length, and the exact source bytes. No absolute paths, timestamps, or ambient
+filesystem state participate. The revision is computed when the immutable
+snapshot is captured; queries never reread disk or combine facts from another
+revision.
+
+For the fixed vector `project.vibon = "project"`, one source with ID
+`src/main.vib` and bytes `"(defn f () str \\\"ok\\\")"`, the digest is
+`sha256:292c672b9ced8e6e02fbb3768f658fb52880ffd43b624c591b18e77fb083b996`.
+Implementations MUST cover this vector and an equal-length source edit in
+their host tests.
+
+The semantic envelope is deterministic for one snapshot. It does not add a
+public query CLI, MCP endpoint, relation index, effect witness, edit plan, or
+execution behavior; those remain later milestone work.
+
 Entity metadata and expanded references operate on resolved identities, not
 token spelling. They distinguish module, type, value, function, method,
 interface, effect root, effect operation, field, variant, and lexical binder

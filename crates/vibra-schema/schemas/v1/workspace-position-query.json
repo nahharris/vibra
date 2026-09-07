@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vibra:schema:v1:workspace-position-query",
+  "title": "Vibra semantic workspace source-position query",
+  "description": "A deterministic M2 workspace query that embeds the closed M1 structural result and independently available semantic facts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "workspaceRevision",
+    "sourceId",
+    "offset",
+    "nodeId",
+    "structural",
+    "role",
+    "context",
+    "identity",
+    "expectedType",
+    "observedType",
+    "visibleLocals",
+    "visibleImports",
+    "declarationCandidates",
+    "application"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "workspaceRevision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "sourceId": { "type": "string", "minLength": 1 },
+    "offset": { "type": "integer", "minimum": 0 },
+    "nodeId": {
+      "type": "string",
+      "pattern": "^.+#[0-9]+-[0-9]+$"
+    },
+    "structural": { "$ref": "#/$defs/structural" },
+    "role": { "$ref": "#/$defs/roleFact" },
+    "context": { "$ref": "#/$defs/contextFact" },
+    "identity": { "$ref": "#/$defs/identityFact" },
+    "expectedType": { "$ref": "#/$defs/typeFact" },
+    "observedType": { "$ref": "#/$defs/typeFact" },
+    "visibleLocals": { "$ref": "#/$defs/localFact" },
+    "visibleImports": { "$ref": "#/$defs/importFact" },
+    "declarationCandidates": { "$ref": "#/$defs/identityListFact" },
+    "application": { "$ref": "#/$defs/applicationFact" }
+  },
+  "$defs": {
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "column"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "start", "end", "startPosition", "endPosition"],
+      "properties": {
+        "sourceId": { "type": ["string", "null"], "minLength": 1 },
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "startPosition": { "$ref": "#/$defs/position" },
+        "endPosition": { "$ref": "#/$defs/position" }
+      }
+    },
+    "structural": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "offset", "sourceId", "span", "mode", "syntaxKind", "category", "status", "permittedForms", "permittedLabels"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "sourceId": { "type": ["string", "null"], "minLength": 1 },
+        "span": { "$ref": "#/$defs/span" },
+        "mode": { "enum": ["source", "data"] },
+        "syntaxKind": { "enum": ["root", "list", "atom", "whitespace", "line-comment", "open-paren", "close-paren", "error"] },
+        "category": { "enum": ["module", "declaration", "type", "pattern", "expression", "declaration-attribute", "effect-row", "data-field", "trivia", "recovery"] },
+        "status": { "enum": ["exact", "recovered", "unavailable"] },
+        "permittedForms": { "type": ["array", "null"], "items": { "type": "string" } },
+        "permittedLabels": { "type": ["array", "null"], "items": { "type": "string" } }
+      }
+    },
+    "factStatus": { "enum": ["exact", "recovered", "unavailable"] },
+    "roleName": { "enum": ["@atom-value", "@entity-reference", "@code-reference", "@literal", "@local-binding", "@discard", "@declaration", "@application", "@unknown"] },
+    "contextName": { "enum": ["module", "initializer", "function", "parameter", "lambda", "let-value", "let-body", "branch", "argument", "result", "trivia", "recovery"] },
+    "stringFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "type": "string", "minLength": 1 } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "type": ["string", "null"] } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
+    },
+    "roleFact": {
+      "allOf": [{ "$ref": "#/$defs/stringFact" }, { "if": { "properties": { "status": { "const": "exact" } } }, "then": { "properties": { "value": { "$ref": "#/$defs/roleName" } } } }]
+    },
+    "contextFact": {
+      "allOf": [{ "$ref": "#/$defs/stringFact" }, { "if": { "properties": { "status": { "const": "exact" } } }, "then": { "properties": { "value": { "$ref": "#/$defs/contextName" } } } }]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "canonical"],
+      "properties": {
+        "kind": { "enum": ["module", "type", "interface", "effect", "value", "function", "test", "field", "variant", "operation"] },
+        "canonical": { "type": "string", "minLength": 1 }
+      }
+    },
+    "identityFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/identity" } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "$ref": "#/$defs/identityOrNull" } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
+    },
+    "identityOrNull": { "anyOf": [{ "$ref": "#/$defs/identity" }, { "type": "null" }] },
+    "primitiveName": { "enum": ["bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64"] },
+    "type": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "const": "primitive" },
+            "name": { "$ref": "#/$defs/primitiveName" },
+            "parameters": { "const": [] },
+            "result": { "type": "null" },
+            "labelled": { "const": [] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "const": "function" },
+            "name": { "const": "fn" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "result": { "$ref": "#/$defs/type" },
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+          }
+        }
+      ]
+    },
+    "labelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "$ref": "#/$defs/type" }
+      }
+    },
+    "typeFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/type" } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "$ref": "#/$defs/type" }, { "type": "null" }] } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
+    },
+    "local": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "identity"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "identity": { "type": "string", "pattern": "^binder:.+:[0-9]+-[0-9]+$" }
+      }
+    },
+    "localFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "type": "array", "items": { "$ref": "#/$defs/local" } } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/local" } }, { "type": "null" }] } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
+    },
+    "import": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alias", "module", "sourceId", "span"],
+      "properties": {
+        "alias": { "type": "string", "minLength": 1 },
+        "module": { "type": ["string", "null"], "minLength": 1 },
+        "sourceId": { "type": "string", "minLength": 1 },
+        "span": { "$ref": "#/$defs/span" }
+      }
+    },
+    "importFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "type": "array", "items": { "$ref": "#/$defs/import" } } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/import" } }, { "type": "null" }] } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
+    },
+    "identityListFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "type": "array", "items": { "$ref": "#/$defs/identity" } } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "type": "array", "items": { "$ref": "#/$defs/identity" } }, { "type": "null" }] } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "callee", "calleeType", "positional", "labelled", "resultType"],
+      "properties": {
+        "kind": { "const": "@function" },
+        "callee": { "$ref": "#/$defs/identityOrNull" },
+        "calleeType": { "anyOf": [{ "$ref": "#/$defs/type" }, { "type": "null" }] },
+        "positional": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+        "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } },
+        "resultType": { "$ref": "#/$defs/type" }
+      }
+    },
+    "applicationFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/application" } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "$ref": "#/$defs/application" }, { "type": "null" }] } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
+    }
+  }
+}
