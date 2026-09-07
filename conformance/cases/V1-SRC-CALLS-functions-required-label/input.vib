@@ -1,0 +1,5 @@
+(def declared (fn () i32 labelled: (required i32)) choose)
+(defn answer () i32 (declared))
+(defn choose () i32
+  labelled: (required i32 1i32)
+  required)

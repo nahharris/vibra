@@ -1,0 +1,17 @@
+id = "V1-SRC-CALLS-functions-required-label"
+rule = "V1-SRC-CALLS"
+profile = "static-v1"
+operation = "type-check"
+description = "An indirect function type without a default requires its labelled operand at each call."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [79, 89]

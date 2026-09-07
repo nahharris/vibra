@@ -1,9 +1,10 @@
-//! Primitive type checking and lowering for the M2 Step 6 profile.
+//! Primitive type checking and lowering for the M2 Step 7 profile.
 //!
 //! The checker consumes the syntax AST and returns an immutable checked IR.
 //! It admits primitive module values, direct local bindings, conditionals,
-//! sequences, and fixed positional calls. A parsed AST that contains a
-//! later-step form never crosses into `vibra-ir` or `vibra-interp`.
+//! sequences, function values, closures, and fixed/labelled calls. A parsed
+//! AST that contains a later-step form never crosses into `vibra-ir` or
+//! `vibra-interp`.
 
 #![cfg_attr(
     test,
@@ -21,11 +22,12 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
     CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature,
-    PrimitiveType, SourceOrigin, Value,
+    LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin, Value,
 };
 use vibra_syntax::{
-    Attribute, Declaration, Expression, ExpressionKind, FloatSuffix, IntegerSuffix,
-    Literal, NameKind, PatternKind, SourceAst, TypeExpr,
+    ApplicationBinding, Attribute, BindingFacts, Declaration, Expression,
+    ExpressionKind, FloatSuffix, IntegerSuffix, Literal, NameKind, PatternKind,
+    SourceAst, TypeExpr,
 };
 
 /// The result of checking one source document.
@@ -33,6 +35,7 @@ use vibra_syntax::{
 pub struct CheckResult {
     program: Option<CheckedProgram>,
     diagnostics: Vec<Diagnostic>,
+    bindings: Vec<ApplicationBinding>,
 }
 
 impl CheckResult {
@@ -42,6 +45,19 @@ impl CheckResult {
         Self {
             program,
             diagnostics,
+            bindings: Vec::new(),
+        }
+    }
+
+    fn with_bindings(
+        program: Option<CheckedProgram>,
+        diagnostics: Vec<Diagnostic>,
+        bindings: Vec<ApplicationBinding>,
+    ) -> Self {
+        Self {
+            program,
+            diagnostics,
+            bindings,
         }
     }
 
@@ -60,6 +76,17 @@ impl CheckResult {
         &self.diagnostics
     }
 
+    /// Authoritative call binding facts for accepted applications.
+    ///
+    /// The facts are intentionally returned by the checker rather than
+    /// inferred by the syntax or formatting crates.  A formatter may use
+    /// these entries to normalize labelled operand order only after the
+    /// corresponding call has passed semantic checking.
+    #[must_use]
+    pub fn application_bindings(&self) -> &[ApplicationBinding] {
+        &self.bindings
+    }
+
     /// Whether checking accepted this source document.
     #[must_use]
     pub fn accepted(&self) -> bool {
@@ -70,7 +97,7 @@ impl CheckResult {
 }
 
 /// Checks one `.vib` source document through the shared reader and lowers the
-/// Step 6 subset to controlled IR.
+/// Step 7 subset to controlled IR.
 pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
     let source_id = source_id.as_ref();
     let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
@@ -101,19 +128,19 @@ pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
                 &mut diagnostics,
                 source_id,
                 ByteSpan::empty_at(0),
-                "source contains no Step 6 module value or executable function",
+                "source contains no Step 7 module value or executable function",
             );
         }
         return CheckResult::new(None, diagnostics);
     };
-    let program = check_ast(source_id, ast, &mut diagnostics);
+    let (program, bindings) = check_ast_with_bindings(source_id, ast, &mut diagnostics);
     if !diagnostics
         .iter()
         .all(|diagnostic| diagnostic.level() != vibra_diagnostics::Level::Error)
     {
         return CheckResult::new(None, diagnostics);
     }
-    CheckResult::new(program, diagnostics)
+    CheckResult::with_bindings(program, diagnostics, bindings)
 }
 
 /// Checks an already decoded source AST.  This is useful to workspace
@@ -123,6 +150,16 @@ pub fn check_ast(
     ast: &SourceAst,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CheckedProgram> {
+    check_ast_with_bindings(source_id, ast, diagnostics).0
+}
+
+/// Checks an already decoded source AST and returns semantic binding facts
+/// alongside the checked program.
+pub fn check_ast_with_bindings(
+    source_id: impl AsRef<str>,
+    ast: &SourceAst,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
     let source_id = source_id.as_ref();
     let mut checker = Checker::new(source_id, diagnostics, ast);
     checker.collect_headers();
@@ -130,7 +167,8 @@ pub fn check_ast(
     checker.check_function_cycles();
     checker.check_globals();
     checker.check_functions();
-    checker.finish()
+    let program = checker.finish();
+    (program, checker.bindings)
 }
 
 #[derive(Clone)]
@@ -139,6 +177,7 @@ struct GlobalHeader {
     value_type: PrimitiveType,
     expression: Expression,
     span: ByteSpan,
+    function_index: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -153,6 +192,7 @@ struct LocalBinding {
     slot: usize,
     value_type: PrimitiveType,
     span: ByteSpan,
+    function_index: Option<usize>,
 }
 
 struct Checker<'a> {
@@ -166,6 +206,7 @@ struct Checker<'a> {
     module_names: BTreeMap<String, ByteSpan>,
     checked_globals: Vec<Option<CheckedGlobal>>,
     checked_functions: Vec<Option<CheckedFunction>>,
+    bindings: Vec<ApplicationBinding>,
 }
 
 impl<'a> Checker<'a> {
@@ -185,6 +226,7 @@ impl<'a> Checker<'a> {
             module_names: BTreeMap::new(),
             checked_globals: Vec::new(),
             checked_functions: Vec::new(),
+            bindings: Vec::new(),
         }
     }
 
@@ -200,7 +242,7 @@ impl<'a> Checker<'a> {
                             self.diagnostics,
                             self.source_id,
                             definition.span(),
-                            "only primitive module values are available in Step 6",
+                            "only monomorphic module values are available in Step 7",
                         );
                         continue;
                     };
@@ -224,6 +266,7 @@ impl<'a> Checker<'a> {
                         value_type,
                         expression: definition.expression().clone(),
                         span: definition.span(),
+                        function_index: None,
                     });
                 }
                 Declaration::Defn(function) => {
@@ -263,8 +306,34 @@ impl<'a> Checker<'a> {
                     self.diagnostics,
                     self.source_id,
                     declaration.span(),
-                    "this declaration family is outside the Step 6 primitive profile",
+                    "this declaration family is outside the Step 7 monomorphic profile",
                 ),
+            }
+        }
+        for _ in 0..=self.globals.len() {
+            let global_function_indices = self
+                .globals
+                .iter()
+                .map(|global| {
+                    syntax_function_index(
+                        &global.expression,
+                        &self.global_indices,
+                        &self.function_indices,
+                        &self.globals,
+                        &BTreeMap::new(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let changed = self.globals.iter().zip(&global_function_indices).any(
+                |(global, function_index)| global.function_index != *function_index,
+            );
+            for (global, function_index) in
+                self.globals.iter_mut().zip(global_function_indices)
+            {
+                global.function_index = function_index;
+            }
+            if !changed {
+                break;
             }
         }
         self.checked_globals = vec![None; self.globals.len()];
@@ -293,6 +362,13 @@ impl<'a> Checker<'a> {
                 collect_function_dependencies(
                     expression,
                     &self.function_indices,
+                    function_dependencies,
+                );
+                collect_function_alias_dependencies(
+                    expression,
+                    &self.global_indices,
+                    &self.function_indices,
+                    &self.globals,
                     function_dependencies,
                 );
             }
@@ -383,6 +459,15 @@ impl<'a> Checker<'a> {
             self.ast,
             &mut dependencies,
         );
+        collect_global_alias_dependencies(
+            expression,
+            &self.global_indices,
+            &self.function_indices,
+            &self.globals,
+            &self.functions,
+            self.ast,
+            &mut dependencies,
+        );
         for dependency in dependencies {
             self.visit_global(dependency, states);
         }
@@ -404,18 +489,23 @@ impl<'a> Checker<'a> {
                 &self.functions,
                 &self.function_indices,
                 &self.module_names,
+                &mut self.bindings,
                 None,
             );
             let Some(expression) = check_expression(
                 &mut environment,
                 &header.expression,
-                Some(header.value_type),
+                Some(header.value_type.clone()),
             ) else {
                 continue;
             };
             let origin = SourceOrigin::new(self.source_id, header.span);
-            match CheckedGlobal::new(header.name, header.value_type, expression, origin)
-            {
+            match CheckedGlobal::new(
+                header.name,
+                header.value_type.clone(),
+                expression,
+                origin,
+            ) {
                 Ok(global) => {
                     if let Some(slot) = self.checked_globals.get_mut(index) {
                         *slot = Some(global);
@@ -443,7 +533,7 @@ impl<'a> Checker<'a> {
                     self.diagnostics,
                     self.source_id,
                     function.span(),
-                    "labelled, variadic, generic, external, and nonempty-effect attributes are unavailable in Step 6",
+                    "variadic, generic, external, and nonempty-effect attributes are unavailable in Step 7",
                 );
                 continue;
             }
@@ -455,6 +545,7 @@ impl<'a> Checker<'a> {
                 &self.functions,
                 &self.function_indices,
                 &self.module_names,
+                &mut self.bindings,
                 Some(index),
             );
             let mut parameters_valid = true;
@@ -482,6 +573,27 @@ impl<'a> Checker<'a> {
                     }
                 }
                 environment.next_slot = parameter_index.saturating_add(1);
+            }
+            let mut labelled_index = 0;
+            for attribute in function.attributes().items() {
+                let Attribute::Labelled(entries) = attribute else {
+                    continue;
+                };
+                for entry in entries {
+                    let Some(labelled) =
+                        header.signature.labelled().get(labelled_index)
+                    else {
+                        continue;
+                    };
+                    labelled_index = labelled_index.saturating_add(1);
+                    if !environment.add_binding_type(
+                        labelled.name(),
+                        labelled.value_type(),
+                        entry.span(),
+                    ) {
+                        parameters_valid = false;
+                    }
+                }
             }
             if !parameters_valid {
                 continue;
@@ -517,7 +629,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn finish(self) -> Option<CheckedProgram> {
+    fn finish(&mut self) -> Option<CheckedProgram> {
         if self
             .diagnostics
             .iter()
@@ -525,12 +637,10 @@ impl<'a> Checker<'a> {
         {
             return None;
         }
-        let globals = self
-            .checked_globals
+        let globals = std::mem::take(&mut self.checked_globals)
             .into_iter()
             .collect::<Option<Vec<_>>>()?;
-        let functions = self
-            .checked_functions
+        let functions = std::mem::take(&mut self.checked_functions)
             .into_iter()
             .collect::<Option<Vec<_>>>()?;
         if functions.is_empty() {
@@ -539,7 +649,7 @@ impl<'a> Checker<'a> {
                     self.diagnostics,
                     self.source_id,
                     self.ast.span(),
-                    "source contains no Step 6 module value or executable function",
+                    "source contains no Step 7 module value or executable function",
                 );
             }
             return None;
@@ -574,9 +684,39 @@ struct CheckEnvironment<'a> {
     functions: &'a [FunctionHeader],
     function_indices: &'a BTreeMap<String, usize>,
     module_names: &'a BTreeMap<String, ByteSpan>,
+    bindings: &'a mut Vec<ApplicationBinding>,
     locals: BTreeMap<String, LocalBinding>,
+    captures: BTreeMap<String, CaptureBinding>,
+    capture_sources: Vec<Expr>,
+    outer: Option<VisibleBindings>,
     next_slot: usize,
     current_function: Option<usize>,
+}
+
+#[derive(Clone)]
+struct CaptureBinding {
+    slot: usize,
+    value_type: PrimitiveType,
+    span: ByteSpan,
+}
+
+#[derive(Clone)]
+enum VisibleStorage {
+    Activation {
+        slot: usize,
+        value_type: PrimitiveType,
+        span: ByteSpan,
+    },
+    Closure {
+        slot: usize,
+        value_type: PrimitiveType,
+        span: ByteSpan,
+    },
+}
+
+#[derive(Clone, Default)]
+struct VisibleBindings {
+    values: BTreeMap<String, VisibleStorage>,
 }
 
 impl<'a> CheckEnvironment<'a> {
@@ -589,6 +729,7 @@ impl<'a> CheckEnvironment<'a> {
         functions: &'a [FunctionHeader],
         function_indices: &'a BTreeMap<String, usize>,
         module_names: &'a BTreeMap<String, ByteSpan>,
+        bindings: &'a mut Vec<ApplicationBinding>,
         current_function: Option<usize>,
     ) -> Self {
         Self {
@@ -599,7 +740,11 @@ impl<'a> CheckEnvironment<'a> {
             functions,
             function_indices,
             module_names,
+            bindings,
             locals: BTreeMap::new(),
+            captures: BTreeMap::new(),
+            capture_sources: Vec::new(),
+            outer: None,
             next_slot: 0,
             current_function,
         }
@@ -616,7 +761,7 @@ impl<'a> CheckEnvironment<'a> {
                 self.diagnostics,
                 self.source_id,
                 span,
-                "only primitive binding types are available in Step 6",
+                "only monomorphic binding types are available in Step 7",
             );
             return false;
         };
@@ -628,6 +773,16 @@ impl<'a> CheckEnvironment<'a> {
         name: &str,
         value_type: PrimitiveType,
         span: ByteSpan,
+    ) -> bool {
+        self.add_binding_type_with_function(name, value_type, span, None)
+    }
+
+    fn add_binding_type_with_function(
+        &mut self,
+        name: &str,
+        value_type: PrimitiveType,
+        span: ByteSpan,
+        function_index: Option<usize>,
     ) -> bool {
         if let Some(earlier) = self.module_names.get(name).copied() {
             redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
@@ -644,6 +799,27 @@ impl<'a> CheckEnvironment<'a> {
             );
             return false;
         }
+        if let Some(earlier) = self.captures.get(name) {
+            redeclaration(
+                self.diagnostics,
+                self.source_id,
+                name,
+                name,
+                span,
+                earlier.span,
+            );
+            return false;
+        }
+        if let Some(outer) = &self.outer
+            && let Some(storage) = outer.values.get(name)
+        {
+            let earlier = match storage {
+                VisibleStorage::Activation { span, .. }
+                | VisibleStorage::Closure { span, .. } => *span,
+            };
+            redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
+            return false;
+        }
         let slot = self.next_slot;
         self.locals.insert(
             name.to_owned(),
@@ -651,10 +827,279 @@ impl<'a> CheckEnvironment<'a> {
                 slot,
                 value_type,
                 span,
+                function_index,
             },
         );
         self.next_slot = self.next_slot.saturating_add(1);
         true
+    }
+
+    fn visible_bindings(&self) -> VisibleBindings {
+        let mut values = BTreeMap::new();
+        for (name, binding) in &self.locals {
+            values.insert(
+                name.clone(),
+                VisibleStorage::Activation {
+                    slot: binding.slot,
+                    value_type: binding.value_type.clone(),
+                    span: binding.span,
+                },
+            );
+        }
+        for (name, binding) in &self.captures {
+            values.insert(
+                name.clone(),
+                VisibleStorage::Closure {
+                    slot: binding.slot,
+                    value_type: binding.value_type.clone(),
+                    span: binding.span,
+                },
+            );
+        }
+        if let Some(outer) = &self.outer {
+            for (name, storage) in &outer.values {
+                values
+                    .entry(name.clone())
+                    .or_insert_with(|| storage.clone());
+            }
+        }
+        VisibleBindings { values }
+    }
+
+    fn resolve_capture(
+        &mut self,
+        name: &str,
+        span: ByteSpan,
+    ) -> Option<CaptureBinding> {
+        let storage = self.outer.as_ref()?.values.get(name)?.clone();
+        if let Some(binding) = self.captures.get(name) {
+            return Some(binding.clone());
+        }
+        let slot = self.capture_sources.len();
+        let (value_type, source) = match storage {
+            VisibleStorage::Activation {
+                slot, value_type, ..
+            } => (
+                value_type.clone(),
+                Expr::variable(
+                    slot,
+                    value_type,
+                    SourceOrigin::new(self.source_id, span),
+                ),
+            ),
+            VisibleStorage::Closure {
+                slot, value_type, ..
+            } => (
+                value_type.clone(),
+                Expr::captured(
+                    slot,
+                    value_type,
+                    SourceOrigin::new(self.source_id, span),
+                ),
+            ),
+        };
+        self.capture_sources.push(source);
+        let binding = CaptureBinding {
+            slot,
+            value_type,
+            span,
+        };
+        self.captures.insert(name.to_owned(), binding.clone());
+        Some(binding)
+    }
+}
+
+fn types_match(left: &PrimitiveType, right: &PrimitiveType) -> bool {
+    match (left, right) {
+        (PrimitiveType::Function(left), PrimitiveType::Function(right)) => {
+            left.same_shape(right)
+        }
+        _ => left == right,
+    }
+}
+
+fn collect_value_names(expression: &Expression, names: &mut Vec<String>) {
+    let add_name = |name: &vibra_syntax::Name, names: &mut Vec<String>| {
+        if name.kind() == NameKind::Symbol
+            && name.segments().len() == 1
+            && !names.iter().any(|known| known == name.value())
+        {
+            names.push(name.value().to_owned());
+        }
+    };
+    match expression.kind() {
+        ExpressionKind::Name(name) => add_name(name, names),
+        ExpressionKind::Application(application) => {
+            collect_value_names(application.callee(), names);
+            for argument in application.arguments() {
+                collect_value_names(argument.value(), names);
+            }
+        }
+        ExpressionKind::Do(expressions) => {
+            for expression in expressions {
+                collect_value_names(expression, names);
+            }
+        }
+        ExpressionKind::Let { value, body, .. } => {
+            collect_value_names(value, names);
+            for expression in body {
+                collect_value_names(expression, names);
+            }
+        }
+        ExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_value_names(condition, names);
+            collect_value_names(then_branch, names);
+            collect_value_names(else_branch, names);
+        }
+        ExpressionKind::Lambda(lambda) => {
+            for expression in lambda.body() {
+                collect_value_names(expression, names);
+            }
+        }
+        ExpressionKind::Match { scrutinee, arms } => {
+            collect_value_names(scrutinee, names);
+            for arm in arms {
+                collect_value_names(arm.result(), names);
+            }
+        }
+        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
+            collect_value_names(operand, names);
+        }
+        ExpressionKind::Literal(_) => {}
+    }
+}
+
+fn function_index_from_expr(
+    expression: &Expr,
+    environment: &CheckEnvironment<'_>,
+) -> Option<usize> {
+    match expression {
+        Expr::Function { function, .. } => Some(*function),
+        Expr::Variable { slot, .. } => environment
+            .locals
+            .values()
+            .find(|binding| binding.slot == *slot)
+            .and_then(|binding| binding.function_index),
+        Expr::Global { index, .. } => environment
+            .globals
+            .get(*index)
+            .and_then(|global| global.function_index),
+        Expr::Let {
+            value, body, slot, ..
+        } => {
+            if let Some(slot) = slot
+                && let Some(function) = function_index_from_expr(value, environment)
+                && matches!(body.as_ref(), Expr::Variable { slot: body_slot, .. } if body_slot == slot)
+            {
+                return Some(function);
+            }
+            function_index_from_expr(body, environment)
+        }
+        Expr::Sequence { expressions, .. } => expressions
+            .last()
+            .and_then(|expression| function_index_from_expr(expression, environment)),
+        Expr::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let then_function = function_index_from_expr(then_branch, environment);
+            let else_function = function_index_from_expr(else_branch, environment);
+            (then_function == else_function)
+                .then_some(then_function)
+                .flatten()
+        }
+        _ => None,
+    }
+}
+
+fn syntax_function_index(
+    expression: &Expression,
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    globals: &[GlobalHeader],
+    aliases: &BTreeMap<String, usize>,
+) -> Option<usize> {
+    match expression.kind() {
+        ExpressionKind::Name(name)
+            if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
+        {
+            aliases
+                .get(name.value())
+                .copied()
+                .or_else(|| function_indices.get(name.value()).copied())
+                .or_else(|| {
+                    global_indices
+                        .get(name.value())
+                        .and_then(|index| globals.get(*index))
+                        .and_then(|global| global.function_index)
+                })
+        }
+        ExpressionKind::Do(expressions) => expressions.last().and_then(|expression| {
+            syntax_function_index(
+                expression,
+                global_indices,
+                function_indices,
+                globals,
+                aliases,
+            )
+        }),
+        ExpressionKind::Let {
+            pattern,
+            value,
+            body,
+        } => {
+            let mut scoped = aliases.clone();
+            if let PatternKind::Binding(name) = pattern.kind()
+                && !name.is_discard()
+                && let Some(function) = syntax_function_index(
+                    value,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    aliases,
+                )
+            {
+                scoped.insert(name.value().to_owned(), function);
+            }
+            body.last().and_then(|expression| {
+                syntax_function_index(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    &scoped,
+                )
+            })
+        }
+        ExpressionKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let then_function = syntax_function_index(
+                then_branch,
+                global_indices,
+                function_indices,
+                globals,
+                aliases,
+            );
+            let else_function = syntax_function_index(
+                else_branch,
+                global_indices,
+                function_indices,
+                globals,
+                aliases,
+            );
+            (then_function == else_function)
+                .then_some(then_function)
+                .flatten()
+        }
+        _ => None,
     }
 }
 
@@ -938,6 +1383,415 @@ fn collect_function_dependencies(
     }
 }
 
+fn collect_function_alias_dependencies(
+    expression: &Expression,
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    globals: &[GlobalHeader],
+    dependencies: &mut BTreeSet<usize>,
+) {
+    collect_function_alias_dependencies_inner(
+        expression,
+        global_indices,
+        function_indices,
+        globals,
+        dependencies,
+        &BTreeMap::new(),
+    );
+}
+
+fn collect_function_alias_dependencies_inner(
+    expression: &Expression,
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    globals: &[GlobalHeader],
+    dependencies: &mut BTreeSet<usize>,
+    aliases: &BTreeMap<String, usize>,
+) {
+    match expression.kind() {
+        ExpressionKind::Application(application) => {
+            if let Some(index) = syntax_function_index(
+                application.callee(),
+                global_indices,
+                function_indices,
+                globals,
+                aliases,
+            ) {
+                dependencies.insert(index);
+            }
+            collect_function_alias_dependencies_inner(
+                application.callee(),
+                global_indices,
+                function_indices,
+                globals,
+                dependencies,
+                aliases,
+            );
+            for argument in application.arguments() {
+                collect_function_alias_dependencies_inner(
+                    argument.value(),
+                    global_indices,
+                    function_indices,
+                    globals,
+                    dependencies,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::Do(expressions) => {
+            for expression in expressions {
+                collect_function_alias_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    dependencies,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::Let {
+            pattern,
+            value,
+            body,
+        } => {
+            collect_function_alias_dependencies_inner(
+                value,
+                global_indices,
+                function_indices,
+                globals,
+                dependencies,
+                aliases,
+            );
+            let mut scoped = aliases.clone();
+            if let PatternKind::Binding(name) = pattern.kind()
+                && !name.is_discard()
+                && let Some(function) = syntax_function_index(
+                    value,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    aliases,
+                )
+            {
+                scoped.insert(name.value().to_owned(), function);
+            }
+            for expression in body {
+                collect_function_alias_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    dependencies,
+                    &scoped,
+                );
+            }
+        }
+        ExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_function_alias_dependencies_inner(
+                condition,
+                global_indices,
+                function_indices,
+                globals,
+                dependencies,
+                aliases,
+            );
+            collect_function_alias_dependencies_inner(
+                then_branch,
+                global_indices,
+                function_indices,
+                globals,
+                dependencies,
+                aliases,
+            );
+            collect_function_alias_dependencies_inner(
+                else_branch,
+                global_indices,
+                function_indices,
+                globals,
+                dependencies,
+                aliases,
+            );
+        }
+        ExpressionKind::Lambda(lambda) => {
+            for expression in lambda.body() {
+                collect_function_alias_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    dependencies,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::Match { scrutinee, arms } => {
+            collect_function_alias_dependencies_inner(
+                scrutinee,
+                global_indices,
+                function_indices,
+                globals,
+                dependencies,
+                aliases,
+            );
+            for arm in arms {
+                collect_function_alias_dependencies_inner(
+                    arm.result(),
+                    global_indices,
+                    function_indices,
+                    globals,
+                    dependencies,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
+            collect_function_alias_dependencies_inner(
+                operand,
+                global_indices,
+                function_indices,
+                globals,
+                dependencies,
+                aliases,
+            );
+        }
+        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
+    }
+}
+
+fn collect_global_alias_dependencies(
+    expression: &Expression,
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    globals: &[GlobalHeader],
+    functions: &[FunctionHeader],
+    ast: &SourceAst,
+    dependencies: &mut BTreeSet<usize>,
+) {
+    let mut visited_functions = BTreeSet::new();
+    collect_global_alias_dependencies_inner(
+        expression,
+        global_indices,
+        function_indices,
+        globals,
+        functions,
+        ast,
+        dependencies,
+        &mut visited_functions,
+        &BTreeMap::new(),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_global_alias_dependencies_inner(
+    expression: &Expression,
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    globals: &[GlobalHeader],
+    functions: &[FunctionHeader],
+    ast: &SourceAst,
+    dependencies: &mut BTreeSet<usize>,
+    visited_functions: &mut BTreeSet<usize>,
+    aliases: &BTreeMap<String, usize>,
+) {
+    match expression.kind() {
+        ExpressionKind::Name(name)
+            if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
+        {
+            if let Some(index) = global_indices.get(name.value()).copied() {
+                dependencies.insert(index);
+            }
+        }
+        ExpressionKind::Application(application) => {
+            if let Some(function_index) = syntax_function_index(
+                application.callee(),
+                global_indices,
+                function_indices,
+                globals,
+                aliases,
+            ) && visited_functions.insert(function_index)
+                && let Some(header) = functions.get(function_index)
+                && let Some(Declaration::Defn(function)) =
+                    ast.declarations().get(header.declaration_index)
+            {
+                for expression in function.expressions() {
+                    collect_global_alias_dependencies_inner(
+                        expression,
+                        global_indices,
+                        function_indices,
+                        globals,
+                        functions,
+                        ast,
+                        dependencies,
+                        visited_functions,
+                        &BTreeMap::new(),
+                    );
+                }
+            }
+            collect_global_alias_dependencies_inner(
+                application.callee(),
+                global_indices,
+                function_indices,
+                globals,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+                aliases,
+            );
+            for argument in application.arguments() {
+                collect_global_alias_dependencies_inner(
+                    argument.value(),
+                    global_indices,
+                    function_indices,
+                    globals,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::Do(expressions) => {
+            for expression in expressions {
+                collect_global_alias_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::Let {
+            pattern,
+            value,
+            body,
+        } => {
+            collect_global_alias_dependencies_inner(
+                value,
+                global_indices,
+                function_indices,
+                globals,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+                aliases,
+            );
+            let mut scoped = aliases.clone();
+            if let PatternKind::Binding(name) = pattern.kind()
+                && !name.is_discard()
+                && let Some(function) = syntax_function_index(
+                    value,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    aliases,
+                )
+            {
+                scoped.insert(name.value().to_owned(), function);
+            }
+            for expression in body {
+                collect_global_alias_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                    &scoped,
+                );
+            }
+        }
+        ExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            for expression in [condition, then_branch, else_branch] {
+                collect_global_alias_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::Lambda(lambda) => {
+            for expression in lambda.body() {
+                collect_global_alias_dependencies_inner(
+                    expression,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::Match { scrutinee, arms } => {
+            collect_global_alias_dependencies_inner(
+                scrutinee,
+                global_indices,
+                function_indices,
+                globals,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+                aliases,
+            );
+            for arm in arms {
+                collect_global_alias_dependencies_inner(
+                    arm.result(),
+                    global_indices,
+                    function_indices,
+                    globals,
+                    functions,
+                    ast,
+                    dependencies,
+                    visited_functions,
+                    aliases,
+                );
+            }
+        }
+        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
+            collect_global_alias_dependencies_inner(
+                operand,
+                global_indices,
+                function_indices,
+                globals,
+                functions,
+                ast,
+                dependencies,
+                visited_functions,
+                aliases,
+            );
+        }
+        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
+    }
+}
+
 fn ensure_expected(
     environment: &mut CheckEnvironment<'_>,
     span: ByteSpan,
@@ -945,7 +1799,7 @@ fn ensure_expected(
     actual: PrimitiveType,
 ) {
     if let Some(expected) = expected
-        && expected != actual
+        && !types_match(&expected, &actual)
     {
         mismatch(
             environment.diagnostics,
@@ -970,6 +1824,17 @@ fn unknown_name(
             format!("symbol `{name}` does not resolve to a visible value"),
         )
         .with_source_id(environment.source_id),
+    );
+}
+
+fn call_contract_error(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    message: String,
+) {
+    environment.diagnostics.push(
+        Diagnostic::new(DiagnosticCode::TypeArgumentMismatch, span, message)
+            .with_source_id(environment.source_id),
     );
 }
 
@@ -1012,7 +1877,7 @@ fn check_signature(
                     diagnostics,
                     source_id,
                     parameter.span(),
-                    "only primitive parameter types are available in Step 5",
+                    "only monomorphic parameter types are available in Step 7",
                 );
             }
         }
@@ -1025,12 +1890,144 @@ fn check_signature(
                 diagnostics,
                 source_id,
                 function.span(),
-                "only primitive result types are available in Step 5",
+                "only monomorphic result types are available in Step 7",
             );
             PrimitiveType::Void
         }
     };
-    valid.then(|| FunctionSignature::new(parameters, result))
+    let mut labelled = Vec::new();
+    for attribute in function.attributes().items() {
+        match attribute {
+            Attribute::Labelled(entries) => {
+                for entry in entries {
+                    let Some(value_type) = primitive_type(entry.value_type()) else {
+                        valid = false;
+                        unavailable(
+                            diagnostics,
+                            source_id,
+                            entry.span(),
+                            "labelled parameter types must be monomorphic in Step 7",
+                        );
+                        continue;
+                    };
+                    let Some(default) = check_literal(
+                        source_id,
+                        entry.span(),
+                        entry.default(),
+                        Some(value_type.clone()),
+                        diagnostics,
+                    ) else {
+                        valid = false;
+                        continue;
+                    };
+                    labelled.push(IrLabelledParameter::new(
+                        entry.name().value(),
+                        value_type,
+                        Some(default),
+                    ));
+                }
+            }
+            Attribute::Effects(row) if !row.references().is_empty() => {
+                valid = false;
+                unavailable(
+                    diagnostics,
+                    source_id,
+                    row.span(),
+                    "nonempty effect ceilings remain unavailable in M2",
+                );
+            }
+            _ => {}
+        }
+    }
+    valid.then(|| FunctionSignature::with_labelled(parameters, labelled, result))
+}
+
+fn check_lambda_signature(
+    source_id: &str,
+    lambda: &vibra_syntax::LambdaExpression,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<FunctionSignature> {
+    let mut valid = true;
+    let parameters = lambda
+        .parameters()
+        .iter()
+        .map(|parameter| {
+            let value_type = primitive_type(parameter.value_type());
+            if value_type.is_none() {
+                valid = false;
+                unavailable(
+                    diagnostics,
+                    source_id,
+                    parameter.span(),
+                    "lambda parameter types must be monomorphic in Step 7",
+                );
+            }
+            value_type
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let Some(result) = primitive_type(lambda.result()) else {
+        unavailable(
+            diagnostics,
+            source_id,
+            lambda.span(),
+            "lambda result types must be monomorphic in Step 7",
+        );
+        return None;
+    };
+    let mut labelled = Vec::new();
+    for attribute in lambda.attributes().items() {
+        match attribute {
+            Attribute::Labelled(entries) => {
+                for entry in entries {
+                    let Some(value_type) = primitive_type(entry.value_type()) else {
+                        valid = false;
+                        unavailable(
+                            diagnostics,
+                            source_id,
+                            entry.span(),
+                            "labelled parameter types must be monomorphic in Step 7",
+                        );
+                        continue;
+                    };
+                    let Some(default) = check_literal(
+                        source_id,
+                        entry.span(),
+                        entry.default(),
+                        Some(value_type.clone()),
+                        diagnostics,
+                    ) else {
+                        valid = false;
+                        continue;
+                    };
+                    labelled.push(IrLabelledParameter::new(
+                        entry.name().value(),
+                        value_type,
+                        Some(default),
+                    ));
+                }
+            }
+            Attribute::Effects(row) if !row.references().is_empty() => {
+                valid = false;
+                unavailable(
+                    diagnostics,
+                    source_id,
+                    row.span(),
+                    "nonempty effect ceilings remain unavailable in M2",
+                );
+            }
+            Attribute::Variadic(parameter) => {
+                valid = false;
+                unavailable(
+                    diagnostics,
+                    source_id,
+                    parameter.span(),
+                    "variadic parameters remain unavailable until M3",
+                );
+            }
+            _ => {}
+        }
+    }
+    valid.then(|| FunctionSignature::with_labelled(parameters, labelled, result))
 }
 
 fn primitive_type(value: &TypeExpr) -> Option<PrimitiveType> {
@@ -1054,6 +2051,30 @@ fn primitive_type(value: &TypeExpr) -> Option<PrimitiveType> {
             "f64" => Some(PrimitiveType::F64),
             _ => None,
         },
+        TypeExpr::Function(function)
+            if function.effects().is_empty() && function.variadic().is_none() =>
+        {
+            let parameters = function
+                .parameters()
+                .iter()
+                .map(primitive_type)
+                .collect::<Option<Vec<_>>>()?;
+            let labelled = function
+                .labelled()
+                .iter()
+                .map(|slot| {
+                    Some(IrLabelledParameter::new(
+                        slot.name().value(),
+                        primitive_type(slot.value_type())?,
+                        None,
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let result = primitive_type(function.result())?;
+            Some(PrimitiveType::Function(Box::new(
+                FunctionSignature::with_labelled(parameters, labelled, result),
+            )))
+        }
         TypeExpr::Applied { .. }
         | TypeExpr::Tuple(_)
         | TypeExpr::Array(_)
@@ -1065,10 +2086,10 @@ fn primitive_type(value: &TypeExpr) -> Option<PrimitiveType> {
 fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
     attributes.iter().any(|attribute| match attribute {
         Attribute::Where(_)
-        | Attribute::Labelled(_)
         | Attribute::Variadic(_)
         | Attribute::External(_)
         | Attribute::Symbol(_) => true,
+        Attribute::Labelled(_) => false,
         Attribute::Effects(row) => !row.references().is_empty(),
         Attribute::Visibility(_) | Attribute::Doc(_) => false,
     })
@@ -1081,12 +2102,15 @@ fn check_sequence(
     fallback_span: ByteSpan,
 ) -> Option<Expr> {
     if expressions.is_empty() {
-        if expected.is_some_and(|expected| expected != PrimitiveType::Void) {
+        if expected
+            .as_ref()
+            .is_some_and(|expected| *expected != PrimitiveType::Void)
+        {
             mismatch(
                 environment.diagnostics,
                 environment.source_id,
                 fallback_span,
-                expected.unwrap_or(PrimitiveType::Void),
+                expected.clone().unwrap_or(PrimitiveType::Void),
                 PrimitiveType::Void,
                 "an empty sequence returns void",
             );
@@ -1102,7 +2126,7 @@ fn check_sequence(
     let mut valid = true;
     for (index, expression) in expressions.iter().enumerate() {
         let expression_expected = (index + 1 == expressions.len())
-            .then_some(expected)
+            .then_some(expected.clone())
             .flatten();
         match check_expression(environment, expression, expression_expected) {
             Some(value) => checked.push(value),
@@ -1143,13 +2167,16 @@ fn check_expression(
         }),
         ExpressionKind::Name(name) if name.kind() == NameKind::Atom => {
             let actual = PrimitiveType::Atom;
-            if expected.is_some_and(|expected| expected != actual) {
+            if expected
+                .as_ref()
+                .is_some_and(|expected| *expected != actual)
+            {
                 mismatch(
                     environment.diagnostics,
                     environment.source_id,
                     expression.span(),
-                    expected.unwrap_or(actual),
-                    actual,
+                    expected.clone().unwrap_or(actual.clone()),
+                    actual.clone(),
                     "an atom literal does not match the written result type",
                 );
                 return None;
@@ -1168,38 +2195,91 @@ fn check_expression(
                 ensure_expected(
                     environment,
                     expression.span(),
-                    expected,
-                    binding.value_type,
+                    expected.clone(),
+                    binding.value_type.clone(),
                 );
-                return (expected.is_none() || expected == Some(binding.value_type))
-                    .then_some(Expr::variable(
-                        binding.slot,
-                        binding.value_type,
-                        SourceOrigin::new(environment.source_id, expression.span()),
-                    ));
+                return (expected.as_ref().is_none_or(|expected| {
+                    types_match(expected, &binding.value_type)
+                }))
+                .then_some(Expr::variable(
+                    binding.slot,
+                    binding.value_type.clone(),
+                    SourceOrigin::new(environment.source_id, expression.span()),
+                ));
+            }
+            if let Some(binding) = environment.captures.get(name.value()).cloned() {
+                ensure_expected(
+                    environment,
+                    expression.span(),
+                    expected.clone(),
+                    binding.value_type.clone(),
+                );
+                return (expected.as_ref().is_none_or(|expected| {
+                    types_match(expected, &binding.value_type)
+                }))
+                .then_some(Expr::captured(
+                    binding.slot,
+                    binding.value_type,
+                    SourceOrigin::new(environment.source_id, expression.span()),
+                ));
+            }
+            if let Some(binding) =
+                environment.resolve_capture(name.value(), expression.span())
+            {
+                ensure_expected(
+                    environment,
+                    expression.span(),
+                    expected.clone(),
+                    binding.value_type.clone(),
+                );
+                return (expected.as_ref().is_none_or(|expected| {
+                    types_match(expected, &binding.value_type)
+                }))
+                .then_some(Expr::captured(
+                    binding.slot,
+                    binding.value_type,
+                    SourceOrigin::new(environment.source_id, expression.span()),
+                ));
             }
             if let Some(index) = environment.global_indices.get(name.value()).copied() {
                 let global = environment.globals.get(index)?;
-                let actual = global.value_type;
-                ensure_expected(environment, expression.span(), expected, actual);
-                return (expected.is_none() || expected == Some(actual)).then_some(
-                    Expr::global(
-                        index,
-                        actual,
-                        SourceOrigin::new(environment.source_id, expression.span()),
-                    ),
-                );
-            }
-            if environment.function_indices.contains_key(name.value()) {
-                unavailable(
-                    environment.diagnostics,
-                    environment.source_id,
+                let actual = global.value_type.clone();
+                ensure_expected(
+                    environment,
                     expression.span(),
-                    "function values are deferred until the callable-value step",
+                    expected.clone(),
+                    actual.clone(),
                 );
-            } else {
-                unknown_name(environment, expression, name.value());
+                return (expected
+                    .as_ref()
+                    .is_none_or(|expected| types_match(expected, &actual)))
+                .then_some(Expr::global(
+                    index,
+                    actual,
+                    SourceOrigin::new(environment.source_id, expression.span()),
+                ));
             }
+            if let Some(index) = environment.function_indices.get(name.value()).copied()
+            {
+                let header = environment.functions.get(index)?;
+                let actual =
+                    PrimitiveType::Function(Box::new(header.signature.clone()));
+                ensure_expected(
+                    environment,
+                    expression.span(),
+                    expected.clone(),
+                    actual.clone(),
+                );
+                return (expected
+                    .as_ref()
+                    .is_none_or(|expected| types_match(expected, &actual)))
+                .then_some(Expr::function(
+                    index,
+                    header.signature.clone(),
+                    SourceOrigin::new(environment.source_id, expression.span()),
+                ));
+            }
+            unknown_name(environment, expression, name.value());
             None
         }
         ExpressionKind::Application(application) => {
@@ -1212,39 +2292,27 @@ fn check_expression(
                 );
                 return None;
             }
-            if application
-                .arguments()
-                .iter()
-                .any(|argument| argument.label().is_some())
+            let callee = check_expression(environment, application.callee(), None)?;
+            let PrimitiveType::Function(signature) = callee.result_type() else {
+                environment.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::TypeNotApplicable,
+                        application.callee().span(),
+                        "the statically resolved callee is not a function",
+                    )
+                    .with_source_id(environment.source_id),
+                );
+                return None;
+            };
+            let direct_function = match &callee {
+                Expr::Function { function, .. } => Some(*function),
+                _ => None,
+            };
+            let known_function = direct_function
+                .or_else(|| function_index_from_expr(&callee, environment));
+            if known_function
+                .is_some_and(|index| environment.current_function == Some(index))
             {
-                unavailable(
-                    environment.diagnostics,
-                    environment.source_id,
-                    application.span(),
-                    "labelled and variadic calls are deferred until Step 7",
-                );
-                return None;
-            }
-            let ExpressionKind::Name(name) = application.callee().kind() else {
-                unavailable(
-                    environment.diagnostics,
-                    environment.source_id,
-                    application.callee().span(),
-                    "only direct fixed positional calls are available in Step 6",
-                );
-                return None;
-            };
-            if name.kind() != NameKind::Symbol || name.segments().len() != 1 {
-                unknown_name(environment, application.callee(), name.value());
-                return None;
-            }
-            let Some(function_index) =
-                environment.function_indices.get(name.value()).copied()
-            else {
-                unknown_name(environment, application.callee(), name.value());
-                return None;
-            };
-            if environment.current_function == Some(function_index) {
                 unavailable(
                     environment.diagnostics,
                     environment.source_id,
@@ -1253,46 +2321,110 @@ fn check_expression(
                 );
                 return None;
             }
-            let header = environment.functions.get(function_index)?;
-            if header.signature.parameters().len() != application.arguments().len() {
-                mismatch(
-                    environment.diagnostics,
-                    environment.source_id,
-                    application.span(),
-                    PrimitiveType::Void,
-                    PrimitiveType::Void,
-                    format!(
-                        "call to `{}` has {} arguments, expected {}",
-                        name.value(),
-                        application.arguments().len(),
-                        header.signature.parameters().len()
-                    ),
-                );
-                return None;
+            let facts = BindingFacts::new(
+                signature.parameters().len(),
+                signature
+                    .labelled()
+                    .iter()
+                    .map(|parameter| parameter.name().to_owned())
+                    .collect(),
+                None,
+            );
+            let ordered = match application.ordered_arguments(&facts) {
+                Ok(arguments) => arguments,
+                Err(error) => {
+                    call_contract_error(
+                        environment,
+                        application.span(),
+                        error.to_string(),
+                    );
+                    return None;
+                }
+            };
+            let mut labelled = BTreeMap::new();
+            for argument in ordered.iter().skip(signature.parameters().len()) {
+                if let Some(label) = argument.label() {
+                    labelled.insert(label.value().to_owned(), *argument);
+                }
             }
-            let mut arguments = Vec::with_capacity(application.arguments().len());
-            for (argument, value_type) in application
-                .arguments()
+            let mut arguments = Vec::with_capacity(signature.fixed_parameter_count());
+            for (argument, value_type) in ordered
                 .iter()
-                .zip(header.signature.parameters())
+                .take(signature.parameters().len())
+                .zip(signature.parameters())
             {
-                let value =
-                    check_expression(environment, argument.value(), Some(*value_type))?;
-                arguments.push(value);
+                arguments.push(check_expression(
+                    environment,
+                    argument.value(),
+                    Some(value_type.clone()),
+                )?);
             }
+            for parameter in signature.labelled() {
+                if let Some(argument) = labelled.remove(parameter.name()) {
+                    arguments.push(check_expression(
+                        environment,
+                        argument.value(),
+                        Some(parameter.value_type()),
+                    )?);
+                } else {
+                    let Some(default) = parameter.default() else {
+                        call_contract_error(
+                            environment,
+                            application.span(),
+                            format!(
+                                "labelled argument `{}` has no default",
+                                parameter.name()
+                            ),
+                        );
+                        return None;
+                    };
+                    arguments.push(Expr::literal(
+                        default.clone(),
+                        SourceOrigin::new(environment.source_id, application.span()),
+                    ));
+                }
+            }
+            let result = signature.result();
             ensure_expected(
                 environment,
                 application.span(),
-                expected,
-                header.signature.result(),
+                expected.clone(),
+                result.clone(),
             );
-            (expected.is_none() || expected == Some(header.signature.result()))
-                .then_some(Expr::call(
-                    function_index,
+            if expected
+                .as_ref()
+                .is_some_and(|expected| !types_match(expected, &result))
+            {
+                return None;
+            }
+            if ordered
+                .iter()
+                .zip(application.arguments())
+                .any(|(left, right)| !std::ptr::eq(*left, right))
+            {
+                environment.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::StyleArgumentOrder,
+                        application.span(),
+                        "application operands are not in canonical declaration order",
+                    )
+                    .with_source_id(environment.source_id),
+                );
+            }
+            environment
+                .bindings
+                .push(ApplicationBinding::new(application.span(), facts));
+            let origin = SourceOrigin::new(environment.source_id, application.span());
+            Some(match direct_function {
+                Some(function) => Expr::call(function, arguments, result, origin),
+                None => Expr::indirect_call(
+                    callee,
+                    known_function,
                     arguments,
-                    header.signature.result(),
-                    SourceOrigin::new(environment.source_id, application.span()),
-                ))
+                    result,
+                    origin,
+                ),
+            })
         }
         ExpressionKind::Do(expressions) => {
             check_sequence(environment, expressions, expected, expression.span())
@@ -1303,6 +2435,7 @@ fn check_expression(
             body,
         } => {
             let value = check_expression(environment, value, None)?;
+            let function_index = function_index_from_expr(&value, environment);
             let mut nested = CheckEnvironment {
                 source_id: environment.source_id,
                 diagnostics: environment.diagnostics,
@@ -1311,17 +2444,22 @@ fn check_expression(
                 functions: environment.functions,
                 function_indices: environment.function_indices,
                 module_names: environment.module_names,
+                bindings: &mut *environment.bindings,
                 locals: environment.locals.clone(),
+                captures: environment.captures.clone(),
+                capture_sources: environment.capture_sources.clone(),
+                outer: environment.outer.clone(),
                 next_slot: environment.next_slot,
                 current_function: environment.current_function,
             };
             let slot = match pattern.kind() {
                 PatternKind::Binding(name) if name.is_discard() => None,
                 PatternKind::Binding(name) => {
-                    if !nested.add_binding_type(
+                    if !nested.add_binding_type_with_function(
                         name.value(),
                         value.result_type(),
                         pattern.span(),
+                        function_index,
                     ) {
                         return None;
                     }
@@ -1338,7 +2476,13 @@ fn check_expression(
                 }
             };
             let result = check_sequence(&mut nested, body, expected, expression.span());
-            environment.next_slot = environment.next_slot.max(nested.next_slot);
+            let next_slot = nested.next_slot;
+            let captures = nested.captures.clone();
+            let capture_sources = nested.capture_sources.clone();
+            drop(nested);
+            environment.next_slot = environment.next_slot.max(next_slot);
+            environment.captures = captures;
+            environment.capture_sources = capture_sources;
             result.map(|body| {
                 Expr::let_binding(
                     slot,
@@ -1355,9 +2499,11 @@ fn check_expression(
         } => {
             let condition =
                 check_expression(environment, condition, Some(PrimitiveType::Bool))?;
-            let then_branch = check_expression(environment, then_branch, expected)?;
-            let else_branch = check_expression(environment, else_branch, expected)?;
-            if then_branch.result_type() != else_branch.result_type() {
+            let then_branch =
+                check_expression(environment, then_branch, expected.clone())?;
+            let else_branch =
+                check_expression(environment, else_branch, expected.clone())?;
+            if !types_match(&then_branch.result_type(), &else_branch.result_type()) {
                 mismatch(
                     environment.diagnostics,
                     environment.source_id,
@@ -1375,8 +2521,131 @@ fn check_expression(
                 SourceOrigin::new(environment.source_id, expression.span()),
             ))
         }
-        ExpressionKind::Lambda(_)
-        | ExpressionKind::Match { .. }
+        ExpressionKind::Lambda(lambda) => {
+            let signature = check_lambda_signature(
+                environment.source_id,
+                lambda,
+                environment.diagnostics,
+            )?;
+            let outer = environment.visible_bindings();
+            let mut nested = CheckEnvironment::new(
+                environment.source_id,
+                environment.diagnostics,
+                environment.global_indices,
+                environment.globals,
+                environment.functions,
+                environment.function_indices,
+                environment.module_names,
+                &mut *environment.bindings,
+                environment.current_function,
+            );
+            nested.outer = Some(outer);
+            let mut referenced_names = Vec::new();
+            for expression in lambda.body() {
+                collect_value_names(expression, &mut referenced_names);
+            }
+            for name in referenced_names {
+                if nested
+                    .outer
+                    .as_ref()
+                    .is_some_and(|outer| outer.values.contains_key(&name))
+                {
+                    let _ = nested.resolve_capture(&name, lambda.span());
+                }
+            }
+            let mut parameters_valid = true;
+            let mut parameter_types = Vec::with_capacity(lambda.parameters().len());
+            for (parameter_index, parameter) in lambda.parameters().iter().enumerate() {
+                let Some(value_type) = primitive_type(parameter.value_type()) else {
+                    parameters_valid = false;
+                    nested.next_slot = parameter_index.saturating_add(1);
+                    unavailable(
+                        nested.diagnostics,
+                        nested.source_id,
+                        parameter.span(),
+                        "lambda parameter types must be monomorphic in Step 7",
+                    );
+                    continue;
+                };
+                parameter_types.push(value_type.clone());
+                match parameter.parsed_pattern().kind() {
+                    PatternKind::Binding(name) if name.is_discard() => {}
+                    PatternKind::Binding(name) => {
+                        if !nested.add_binding_type(
+                            name.value(),
+                            value_type,
+                            parameter.span(),
+                        ) {
+                            parameters_valid = false;
+                        }
+                    }
+                    _ => {
+                        parameters_valid = false;
+                        unavailable(
+                            nested.diagnostics,
+                            nested.source_id,
+                            parameter.span(),
+                            "constructor and destructuring patterns are deferred until M3",
+                        );
+                    }
+                }
+                nested.next_slot = parameter_index.saturating_add(1);
+            }
+            let mut labelled_index = 0;
+            for attribute in lambda.attributes().items() {
+                let Attribute::Labelled(entries) = attribute else {
+                    continue;
+                };
+                for entry in entries {
+                    let Some(labelled) = signature.labelled().get(labelled_index)
+                    else {
+                        continue;
+                    };
+                    labelled_index = labelled_index.saturating_add(1);
+                    if !nested.add_binding_type(
+                        labelled.name(),
+                        labelled.value_type(),
+                        entry.span(),
+                    ) {
+                        parameters_valid = false;
+                    }
+                }
+            }
+            if !parameters_valid {
+                return None;
+            }
+            let body = check_sequence(
+                &mut nested,
+                lambda.body(),
+                Some(signature.result()),
+                lambda.span(),
+            )?;
+            let capture_sources = std::mem::take(&mut nested.capture_sources);
+            let slot_count = nested.next_slot;
+            drop(nested);
+            let actual = PrimitiveType::Function(Box::new(signature.clone()));
+            ensure_expected(
+                environment,
+                expression.span(),
+                expected.clone(),
+                actual.clone(),
+            );
+            if expected
+                .as_ref()
+                .is_some_and(|expected| !types_match(expected, &actual))
+            {
+                return None;
+            }
+            Some(Expr::closure(
+                signature,
+                parameter_types,
+                capture_sources,
+                body,
+                slot_count,
+                SourceOrigin::new(environment.source_id, expression.span()),
+            ))
+        }
+        ExpressionKind::Match { .. }
         | ExpressionKind::As { .. }
         | ExpressionKind::Try(_) => {
             unavailable(
@@ -1451,12 +2720,15 @@ fn expect_fixed(
     value: Value,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
-    if expected.is_some_and(|expected| expected != actual) {
+    if expected
+        .as_ref()
+        .is_some_and(|expected| *expected != actual)
+    {
         mismatch(
             diagnostics,
             source_id,
             span,
-            expected.unwrap_or(actual),
+            expected.clone().unwrap_or(actual.clone()),
             actual,
             "literal type does not match the written result type",
         );
@@ -1476,7 +2748,7 @@ fn check_integer(
     let target = literal
         .suffix()
         .map(integer_suffix_type)
-        .or_else(|| expected.filter(|value| value.is_integer()));
+        .or_else(|| expected.clone().filter(|value| value.is_integer()));
     let Some(target) = target else {
         mismatch(
             diagnostics,
@@ -1497,7 +2769,8 @@ fn check_integer(
         );
         return None;
     };
-    let Some(value) = integer_value(target, literal.is_negative(), magnitude) else {
+    let Some(value) = integer_value(target.clone(), literal.is_negative(), magnitude)
+    else {
         out_of_range(
             diagnostics,
             source_id,
@@ -1506,12 +2779,15 @@ fn check_integer(
         );
         return None;
     };
-    if expected.is_some_and(|expected| expected != target) {
+    if expected
+        .as_ref()
+        .is_some_and(|expected| *expected != target)
+    {
         mismatch(
             diagnostics,
             source_id,
             span,
-            expected.unwrap_or(target),
+            expected.clone().unwrap_or(target.clone()),
             target,
             "numeric suffixes never request an implicit conversion",
         );
@@ -1530,7 +2806,7 @@ fn check_float(
     let target = literal
         .suffix()
         .map(float_suffix_type)
-        .or_else(|| expected.filter(|value| value.is_float()));
+        .or_else(|| expected.clone().filter(|value| value.is_float()));
     let Some(target) = target else {
         mismatch(
             diagnostics,
@@ -1566,12 +2842,15 @@ fn check_float(
         );
         return None;
     };
-    if expected.is_some_and(|expected| expected != target) {
+    if expected
+        .as_ref()
+        .is_some_and(|expected| *expected != target)
+    {
         mismatch(
             diagnostics,
             source_id,
             span,
-            expected.unwrap_or(target),
+            expected.clone().unwrap_or(target.clone()),
             target,
             "numeric suffixes never request an implicit conversion",
         );

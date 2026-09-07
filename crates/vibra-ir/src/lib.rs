@@ -1,11 +1,11 @@
-//! The small, backend independent IR admitted by M2 Step 5.
+//! The small, backend independent IR admitted by M2 Step 7.
 //!
 //! The type checker is the only workspace phase that constructs a
 //! [`CheckedProgram`].  The interpreter consumes that type, rather than a
 //! parsed syntax tree, which makes the checked-program boundary explicit.
 //! This IR slice contains primitive values, immutable bindings, literal
-//! sequences, conditionals, fixed positional calls, and function signatures;
-//! effects and collections belong to later steps.
+//! sequences, conditionals, first-class function paths, owned closures, and
+//! fixed/labelled calls; effects and collections belong to later steps.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -13,7 +13,7 @@ use std::fmt;
 use vibra_diagnostics::ByteSpan;
 
 /// One of the primitive types admitted by the M2 literal profile.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
     /// Boolean values.
     Bool,
@@ -47,12 +47,14 @@ pub enum PrimitiveType {
     F32,
     /// IEEE 754 binary64 values.
     F64,
+    /// A first-class monomorphic function value.
+    Function(Box<FunctionSignature>),
 }
 
 impl PrimitiveType {
     /// The canonical source/type spelling.
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Bool => "bool",
             Self::Void => "void",
@@ -70,12 +72,26 @@ impl PrimitiveType {
             Self::U64 => "u64",
             Self::F32 => "f32",
             Self::F64 => "f64",
+            Self::Function(_) => "fn",
+        }
+    }
+
+    /// Whether two types have the same semantic shape.
+    ///
+    /// Function defaults are call-site metadata rather than part of the
+    /// function type, so this comparison deliberately delegates to
+    /// [`FunctionSignature::same_shape`] for function values.
+    #[must_use]
+    pub fn same_shape(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Function(left), Self::Function(right)) => left.same_shape(right),
+            _ => self == other,
         }
     }
 
     /// Whether this type is one of the fixed-width integer types.
     #[must_use]
-    pub const fn is_integer(self) -> bool {
+    pub fn is_integer(&self) -> bool {
         matches!(
             self,
             Self::I8
@@ -91,7 +107,7 @@ impl PrimitiveType {
 
     /// Whether this type is a floating-point type.
     #[must_use]
-    pub const fn is_float(self) -> bool {
+    pub fn is_float(&self) -> bool {
         matches!(self, Self::F32 | Self::F64)
     }
 }
@@ -102,10 +118,54 @@ impl fmt::Display for PrimitiveType {
     }
 }
 
+/// One labelled slot in a function value's call contract.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LabelledParameter {
+    name: String,
+    value_type: PrimitiveType,
+    default: Option<Value>,
+}
+
+impl LabelledParameter {
+    /// Creates a labelled slot.  Function type expressions use `None`; a
+    /// declaration signature carries the typed literal default.
+    #[must_use]
+    pub fn new(
+        name: impl Into<String>,
+        value_type: PrimitiveType,
+        default: Option<Value>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            value_type,
+            default,
+        }
+    }
+
+    /// The source-level label without its trailing colon.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The labelled slot type.
+    #[must_use]
+    pub fn value_type(&self) -> PrimitiveType {
+        self.value_type.clone()
+    }
+
+    /// The declaration default, when this is a callable declaration value.
+    #[must_use]
+    pub const fn default(&self) -> Option<&Value> {
+        self.default.as_ref()
+    }
+}
+
 /// One fully checked monomorphic function signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionSignature {
     parameters: Vec<PrimitiveType>,
+    labelled: Vec<LabelledParameter>,
     result: PrimitiveType,
 }
 
@@ -113,7 +173,25 @@ impl FunctionSignature {
     /// Creates a signature from its checked primitive slots.
     #[must_use]
     pub fn new(parameters: Vec<PrimitiveType>, result: PrimitiveType) -> Self {
-        Self { parameters, result }
+        Self {
+            parameters,
+            labelled: Vec::new(),
+            result,
+        }
+    }
+
+    /// Creates a signature with declaration-order labelled slots.
+    #[must_use]
+    pub fn with_labelled(
+        parameters: Vec<PrimitiveType>,
+        labelled: Vec<LabelledParameter>,
+        result: PrimitiveType,
+    ) -> Self {
+        Self {
+            parameters,
+            labelled,
+            result,
+        }
     }
 
     /// Required positional parameter types in written order.
@@ -122,10 +200,46 @@ impl FunctionSignature {
         &self.parameters
     }
 
+    /// Labelled slots in declaration order.
+    #[must_use]
+    pub fn labelled(&self) -> &[LabelledParameter] {
+        &self.labelled
+    }
+
+    /// Total fixed slots after defaults have been materialized.
+    #[must_use]
+    pub fn fixed_parameter_count(&self) -> usize {
+        self.parameters.len().saturating_add(self.labelled.len())
+    }
+
+    /// Whether two signatures have the same callable type shape.
+    ///
+    /// Defaults belong to a value and are deliberately excluded from the
+    /// function type comparison.
+    #[must_use]
+    pub fn same_shape(&self, other: &Self) -> bool {
+        self.parameters.len() == other.parameters.len()
+            && self
+                .parameters
+                .iter()
+                .zip(&other.parameters)
+                .all(|(left, right)| left.same_shape(right))
+            && self.result.same_shape(&other.result)
+            && self.labelled.len() == other.labelled.len()
+            && self
+                .labelled
+                .iter()
+                .zip(&other.labelled)
+                .all(|(left, right)| {
+                    left.name == right.name
+                        && left.value_type.same_shape(&right.value_type)
+                })
+    }
+
     /// The declared result type.
     #[must_use]
-    pub const fn result(&self) -> PrimitiveType {
-        self.result
+    pub fn result(&self) -> PrimitiveType {
+        self.result.clone()
     }
 }
 
@@ -199,7 +313,7 @@ pub enum Value {
 impl Value {
     /// Returns the primitive type carried by this value.
     #[must_use]
-    pub const fn ty(&self) -> PrimitiveType {
+    pub fn ty(&self) -> PrimitiveType {
         match self {
             Self::Bool(_) => PrimitiveType::Bool,
             Self::Void => PrimitiveType::Void,
@@ -325,6 +439,41 @@ pub enum Expr {
         /// The source origin of the name use.
         origin: SourceOrigin,
     },
+    /// A module-level function path reified as a function value.
+    Function {
+        /// The function index in the containing checked program.
+        function: usize,
+        /// The resolved callable signature.
+        signature: FunctionSignature,
+        /// The source origin of the path.
+        origin: SourceOrigin,
+    },
+    /// A lambda with an immutable, owned closure environment.
+    Closure {
+        /// The lambda's checked signature.
+        signature: FunctionSignature,
+        /// Lambda parameters/body, checked in a separate lexical activation.
+        parameters: Vec<PrimitiveType>,
+        /// Expressions evaluated once when the closure is created.
+        captures: Vec<Self>,
+        /// Static types of the closure-environment slots.
+        capture_types: Vec<PrimitiveType>,
+        /// The lambda body, whose free names use [`Self::Captured`].
+        body: Box<Self>,
+        /// Activation slots needed by the lambda body.
+        slot_count: usize,
+        /// The source origin of the lambda form.
+        origin: SourceOrigin,
+    },
+    /// A value captured into a closure environment.
+    Captured {
+        /// The closure-environment slot.
+        slot: usize,
+        /// The statically checked value type.
+        value_type: PrimitiveType,
+        /// The source origin of the captured name use.
+        origin: SourceOrigin,
+    },
     /// An immutable binding followed by its body.
     Let {
         /// The slot receiving the checked initializer, or `None` for a discard.
@@ -353,6 +502,14 @@ pub enum Expr {
         function: usize,
         /// Arguments in declaration order.
         arguments: Vec<Self>,
+        /// An indirect callee expression.  `None` preserves the compact
+        /// direct-call representation used by the M2 Step 6 IR.
+        callee: Option<Box<Self>>,
+        /// A statically known target for an indirect call, when one exists.
+        /// This preserves recursive-call dependency checking through a local
+        /// function alias without treating an arbitrary lambda as a call to
+        /// function zero.
+        function_hint: Option<usize>,
         /// The statically checked result type.
         result: PrimitiveType,
         /// The source origin of the complete application.
@@ -390,6 +547,56 @@ impl Expr {
     ) -> Self {
         Self::Global {
             index,
+            value_type,
+            origin,
+        }
+    }
+
+    /// Creates a first-class module function value.
+    #[must_use]
+    pub fn function(
+        function: usize,
+        signature: FunctionSignature,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Function {
+            function,
+            signature,
+            origin,
+        }
+    }
+
+    /// Creates a closure with explicit capture expressions and body slots.
+    #[must_use]
+    pub fn closure(
+        signature: FunctionSignature,
+        parameters: Vec<PrimitiveType>,
+        captures: Vec<Self>,
+        body: Self,
+        slot_count: usize,
+        origin: SourceOrigin,
+    ) -> Self {
+        let capture_types = captures.iter().map(Self::result_type).collect::<Vec<_>>();
+        Self::Closure {
+            signature,
+            parameters,
+            captures,
+            capture_types,
+            body: Box::new(body),
+            slot_count,
+            origin,
+        }
+    }
+
+    /// Creates a closure-environment reference.
+    #[must_use]
+    pub fn captured(
+        slot: usize,
+        value_type: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Captured {
+            slot,
             value_type,
             origin,
         }
@@ -438,6 +645,27 @@ impl Expr {
         Self::Call {
             function,
             arguments,
+            callee: None,
+            function_hint: None,
+            result,
+            origin,
+        }
+    }
+
+    /// Creates an indirect call whose callee is evaluated exactly once.
+    #[must_use]
+    pub fn indirect_call(
+        callee: Self,
+        function_hint: Option<usize>,
+        arguments: Vec<Self>,
+        result: PrimitiveType,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Call {
+            function: function_hint.unwrap_or_default(),
+            arguments,
+            callee: Some(Box::new(callee)),
+            function_hint,
             result,
             origin,
         }
@@ -460,6 +688,9 @@ impl Expr {
             | Self::Sequence { origin, .. }
             | Self::Variable { origin, .. }
             | Self::Global { origin, .. }
+            | Self::Function { origin, .. }
+            | Self::Closure { origin, .. }
+            | Self::Captured { origin, .. }
             | Self::Let { origin, .. }
             | Self::If { origin, .. }
             | Self::Call { origin, .. } => origin,
@@ -475,11 +706,15 @@ impl Expr {
                 .last()
                 .map_or(PrimitiveType::Void, Self::result_type),
             Self::Variable { value_type, .. } | Self::Global { value_type, .. } => {
-                *value_type
+                value_type.clone()
             }
+            Self::Function { signature, .. } | Self::Closure { signature, .. } => {
+                PrimitiveType::Function(Box::new(signature.clone()))
+            }
+            Self::Captured { value_type, .. } => value_type.clone(),
             Self::Let { body, .. } => body.result_type(),
             Self::If { then_branch, .. } => then_branch.result_type(),
-            Self::Call { result, .. } => *result,
+            Self::Call { result, .. } => result.clone(),
         }
     }
 
@@ -490,6 +725,9 @@ impl Expr {
             Self::Literal { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
+            | Self::Function { .. }
+            | Self::Closure { .. }
+            | Self::Captured { .. }
             | Self::Let { .. }
             | Self::If { .. }
             | Self::Call { .. } => &[],
@@ -505,6 +743,9 @@ impl Expr {
             Self::Sequence { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
+            | Self::Function { .. }
+            | Self::Closure { .. }
+            | Self::Captured { .. }
             | Self::Let { .. }
             | Self::If { .. }
             | Self::Call { .. } => None,
@@ -515,7 +756,10 @@ impl Expr {
     #[must_use]
     pub fn slot_count(&self) -> usize {
         match self {
-            Self::Literal { .. } | Self::Global { .. } => 0,
+            Self::Literal { .. }
+            | Self::Global { .. }
+            | Self::Function { .. }
+            | Self::Captured { .. } => 0,
             Self::Sequence { expressions, .. } => {
                 expressions.iter().map(Self::slot_count).max().unwrap_or(0)
             }
@@ -535,8 +779,14 @@ impl Expr {
                 .slot_count()
                 .max(then_branch.slot_count())
                 .max(else_branch.slot_count()),
-            Self::Call { arguments, .. } => {
-                arguments.iter().map(Self::slot_count).max().unwrap_or(0)
+            Self::Call {
+                arguments, callee, ..
+            } => callee
+                .as_deref()
+                .map_or(0, Self::slot_count)
+                .max(arguments.iter().map(Self::slot_count).max().unwrap_or(0)),
+            Self::Closure { captures, .. } => {
+                captures.iter().map(Self::slot_count).max().unwrap_or(0)
             }
         }
     }
@@ -545,19 +795,113 @@ impl Expr {
         &self,
         slots: &mut [Option<PrimitiveType>],
     ) -> Result<PrimitiveType, IrError> {
+        self.validate_shape_with_captures(slots, &[])
+    }
+
+    fn validate_shape_with_captures(
+        &self,
+        slots: &mut [Option<PrimitiveType>],
+        capture_types: &[PrimitiveType],
+    ) -> Result<PrimitiveType, IrError> {
         match self {
             Self::Literal { value, .. } => Ok(value.ty()),
+            Self::Function { signature, .. } => {
+                Ok(PrimitiveType::Function(Box::new(signature.clone())))
+            }
+            Self::Captured {
+                slot, value_type, ..
+            } => {
+                let Some(actual) = capture_types.get(*slot) else {
+                    return Err(IrError::InvalidExpression(format!(
+                        "capture slot {slot} is outside the closure environment"
+                    )));
+                };
+                if !actual.same_shape(value_type) {
+                    return Err(IrError::InvalidExpression(format!(
+                        "capture slot {slot} has type {actual}, expression declares {value_type}"
+                    )));
+                }
+                Ok(value_type.clone())
+            }
+            Self::Closure {
+                signature,
+                parameters,
+                captures,
+                capture_types: closure_capture_types,
+                body,
+                slot_count,
+                ..
+            } => {
+                if captures.len() != closure_capture_types.len() {
+                    return Err(IrError::InvalidExpression(
+                        "closure capture metadata length does not match captures"
+                            .to_owned(),
+                    ));
+                }
+                if parameters.len() != signature.parameters().len() {
+                    return Err(IrError::InvalidExpression(
+                        "closure parameter metadata does not match its signature"
+                            .to_owned(),
+                    ));
+                }
+                if *slot_count < signature.fixed_parameter_count()
+                    || *slot_count < body.slot_count()
+                {
+                    return Err(IrError::InvalidExpression(
+                        "closure activation slot count is smaller than its body"
+                            .to_owned(),
+                    ));
+                }
+                for (capture, expected) in captures.iter().zip(closure_capture_types) {
+                    let actual =
+                        capture.validate_shape_with_captures(slots, capture_types)?;
+                    if !actual.same_shape(expected) {
+                        return Err(IrError::InvalidExpression(format!(
+                            "closure capture has type {actual}, expected {expected}"
+                        )));
+                    }
+                }
+                let mut closure_slots =
+                    vec![
+                        None;
+                        signature.fixed_parameter_count().max(body.slot_count())
+                    ];
+                for (slot, value_type) in parameters.iter().enumerate() {
+                    if let Some(bound) = closure_slots.get_mut(slot) {
+                        *bound = Some(value_type.clone());
+                    }
+                }
+                for (offset, parameter) in signature.labelled().iter().enumerate() {
+                    if let Some(bound) =
+                        closure_slots.get_mut(parameters.len().saturating_add(offset))
+                    {
+                        *bound = Some(parameter.value_type());
+                    }
+                }
+                let actual = body.validate_shape_with_captures(
+                    &mut closure_slots,
+                    closure_capture_types,
+                )?;
+                if !actual.same_shape(&signature.result()) {
+                    return Err(IrError::ResultTypeMismatch {
+                        expected: signature.result(),
+                        actual,
+                    });
+                }
+                Ok(PrimitiveType::Function(Box::new(signature.clone())))
+            }
             Self::Sequence { expressions, .. } => {
                 let mut result = PrimitiveType::Void;
                 for expression in expressions {
-                    result = expression.validate_shape(slots)?;
+                    result = expression
+                        .validate_shape_with_captures(slots, capture_types)?;
                 }
                 Ok(result)
             }
             Self::Variable {
                 slot, value_type, ..
-            } => match slots.get(*slot).copied().flatten() {
-                Some(actual) if actual == *value_type => Ok(*value_type),
+            } => match slots.get(*slot).cloned().flatten() {
+                Some(actual) if actual.same_shape(value_type) => Ok(value_type.clone()),
                 Some(actual) => Err(IrError::InvalidExpression(format!(
                     "variable slot {slot} has type {actual}, expression declares {value_type}"
                 ))),
@@ -565,11 +909,12 @@ impl Expr {
                     "variable slot {slot} is not bound"
                 ))),
             },
-            Self::Global { value_type, .. } => Ok(*value_type),
+            Self::Global { value_type, .. } => Ok(value_type.clone()),
             Self::Let {
                 slot, value, body, ..
             } => {
-                let value_type = value.validate_shape(slots)?;
+                let value_type =
+                    value.validate_shape_with_captures(slots, capture_types)?;
                 let mut body_slots = slots.to_vec();
                 if let Some(slot) = slot {
                     let Some(bound) = body_slots.get_mut(*slot) else {
@@ -584,7 +929,7 @@ impl Expr {
                     }
                     *bound = Some(value_type);
                 }
-                body.validate_shape(&mut body_slots)
+                body.validate_shape_with_captures(&mut body_slots, capture_types)
             }
             Self::If {
                 condition,
@@ -592,17 +937,20 @@ impl Expr {
                 else_branch,
                 ..
             } => {
-                let condition_type = condition.validate_shape(slots)?;
-                if condition_type != PrimitiveType::Bool {
+                let condition_type =
+                    condition.validate_shape_with_captures(slots, capture_types)?;
+                if !condition_type.same_shape(&PrimitiveType::Bool) {
                     return Err(IrError::InvalidExpression(format!(
                         "if condition has type {condition_type}, expected bool"
                     )));
                 }
                 let mut then_slots = slots.to_vec();
                 let mut else_slots = slots.to_vec();
-                let then_type = then_branch.validate_shape(&mut then_slots)?;
-                let else_type = else_branch.validate_shape(&mut else_slots)?;
-                if then_type != else_type {
+                let then_type = then_branch
+                    .validate_shape_with_captures(&mut then_slots, capture_types)?;
+                let else_type = else_branch
+                    .validate_shape_with_captures(&mut else_slots, capture_types)?;
+                if !then_type.same_shape(&else_type) {
                     return Err(IrError::InvalidExpression(format!(
                         "if branches have types {then_type} and {else_type}"
                     )));
@@ -610,12 +958,24 @@ impl Expr {
                 Ok(then_type)
             }
             Self::Call {
-                arguments, result, ..
+                arguments,
+                result,
+                callee,
+                ..
             } => {
-                for argument in arguments {
-                    argument.validate_shape(slots)?;
+                if let Some(callee) = callee {
+                    let callee_type =
+                        callee.validate_shape_with_captures(slots, capture_types)?;
+                    if !matches!(callee_type, PrimitiveType::Function(_)) {
+                        return Err(IrError::InvalidExpression(
+                            "indirect callee is not a function".to_owned(),
+                        ));
+                    }
                 }
-                Ok(*result)
+                for argument in arguments {
+                    argument.validate_shape_with_captures(slots, capture_types)?;
+                }
+                Ok(result.clone())
             }
         }
     }
@@ -639,17 +999,24 @@ impl CheckedGlobal {
         initializer: Expr,
         origin: SourceOrigin,
     ) -> Result<Self, IrError> {
+        let name = name.into();
+        if let Err(message) = validate_type_shape(&value_type) {
+            return Err(IrError::InvalidExpression(format!(
+                "global `{}` has an invalid type: {message}",
+                name
+            )));
+        }
         let slot_count = initializer.slot_count();
         let mut slots = vec![None; slot_count];
         let actual = initializer.validate_shape(&mut slots)?;
-        if actual != value_type {
+        if !actual.same_shape(&value_type) {
             return Err(IrError::ResultTypeMismatch {
                 expected: value_type,
                 actual,
             });
         }
         Ok(Self {
-            name: name.into(),
+            name,
             value_type,
             initializer,
             origin,
@@ -665,8 +1032,8 @@ impl CheckedGlobal {
 
     /// The checked global type.
     #[must_use]
-    pub const fn value_type(&self) -> PrimitiveType {
-        self.value_type
+    pub fn value_type(&self) -> PrimitiveType {
+        self.value_type.clone()
     }
 
     /// The checked initializer.
@@ -707,7 +1074,7 @@ impl CheckedFunction {
         body: Expr,
         origin: SourceOrigin,
     ) -> Result<Self, IrError> {
-        let slot_count = signature.parameters().len().max(body.slot_count());
+        let slot_count = signature.fixed_parameter_count().max(body.slot_count());
         Self::with_slots(name, signature, body, origin, slot_count)
     }
 
@@ -720,21 +1087,31 @@ impl CheckedFunction {
         slot_count: usize,
     ) -> Result<Self, IrError> {
         let name = name.into();
-        if slot_count < signature.parameters().len() {
+        if let Err(message) = validate_signature_shape(&signature) {
+            return Err(IrError::InvalidExpression(format!(
+                "function `{name}` has an invalid signature: {message}"
+            )));
+        }
+        if slot_count < signature.fixed_parameter_count() {
             return Err(IrError::InvalidSlotCount {
                 function: name,
                 slots: slot_count,
-                parameters: signature.parameters().len(),
+                parameters: signature.fixed_parameter_count(),
             });
         }
         let mut slots = vec![None; slot_count];
         for (slot, value_type) in signature.parameters().iter().enumerate() {
             if let Some(bound) = slots.get_mut(slot) {
-                *bound = Some(*value_type);
+                *bound = Some(value_type.clone());
+            }
+        }
+        for (offset, parameter) in signature.labelled().iter().enumerate() {
+            if let Some(bound) = slots.get_mut(signature.parameters().len() + offset) {
+                *bound = Some(parameter.value_type());
             }
         }
         let actual = body.validate_shape(&mut slots)?;
-        if actual != signature.result() {
+        if !actual.same_shape(&signature.result()) {
             return Err(IrError::ResultTypeMismatch {
                 expected: signature.result(),
                 actual,
@@ -821,15 +1198,29 @@ impl CheckedProgram {
             {
                 return Err(IrError::DuplicateFunction(function.name.clone()));
             }
+            if let Err(message) = validate_signature_shape(function.signature()) {
+                return Err(IrError::InvalidExpression(format!(
+                    "function `{}` has an invalid signature: {message}",
+                    function.name
+                )));
+            }
             let mut slots = vec![None; function.slot_count];
             for (slot, value_type) in function.signature.parameters().iter().enumerate()
             {
                 if let Some(bound) = slots.get_mut(slot) {
-                    *bound = Some(*value_type);
+                    *bound = Some(value_type.clone());
+                }
+            }
+            for (offset, parameter) in function.signature.labelled().iter().enumerate()
+            {
+                if let Some(bound) =
+                    slots.get_mut(function.signature.parameters().len() + offset)
+                {
+                    *bound = Some(parameter.value_type());
                 }
             }
             let actual = function.body.validate_shape(&mut slots)?;
-            if actual != function.signature.result() {
+            if !actual.same_shape(&function.signature.result()) {
                 return Err(IrError::ResultTypeMismatch {
                     expected: function.signature.result(),
                     actual,
@@ -837,11 +1228,17 @@ impl CheckedProgram {
             }
         }
         for global in &globals {
+            if let Err(message) = validate_type_shape(&global.value_type) {
+                return Err(IrError::InvalidExpression(format!(
+                    "global `{}` has an invalid type: {message}",
+                    global.name
+                )));
+            }
             let mut slots = vec![None; global.slot_count];
             let actual = global.initializer.validate_shape(&mut slots)?;
-            if actual != global.value_type {
+            if !actual.same_shape(&global.value_type) {
                 return Err(IrError::ResultTypeMismatch {
-                    expected: global.value_type,
+                    expected: global.value_type.clone(),
                     actual,
                 });
             }
@@ -905,9 +1302,9 @@ impl CheckedProgram {
             output.push_str("  globals: (array\n");
             for global in &self.globals {
                 output.push_str(&format!(
-                    "    (record name: @{} type: @{} body: {})\n",
+                    "    (record name: @{} type: {} body: {})\n",
                     global.name,
-                    global.value_type.as_str(),
+                    canonical_type(&global.value_type),
                     canonical_expr(global.initializer()),
                 ));
             }
@@ -919,14 +1316,15 @@ impl CheckedProgram {
                 .signature
                 .parameters()
                 .iter()
-                .map(|parameter| format!("@{}", parameter.as_str()))
+                .map(canonical_type)
                 .collect::<Vec<_>>();
             let body = canonical_expr(function.body());
             output.push_str(&format!(
-                "    (record name: @{} params: {} result: @{} body: {})\n",
+                "    (record name: @{} params: {} result: {}{} body: {})\n",
                 function.name,
                 canonical_array(&parameters),
-                function.signature.result().as_str(),
+                canonical_type(&function.signature.result()),
+                canonical_labelled_field(&function.signature),
                 body
             ));
         }
@@ -1030,7 +1428,43 @@ fn validate_program_expr(
     dependencies: &mut [BTreeSet<DependencyNode>],
 ) -> Result<(), IrError> {
     match expression {
-        Expr::Literal { .. } | Expr::Variable { .. } => {}
+        Expr::Literal { .. } | Expr::Variable { .. } | Expr::Captured { .. } => {}
+        Expr::Function {
+            function,
+            signature,
+            ..
+        } => {
+            let Some(callee) = functions.get(*function) else {
+                return Err(IrError::InvalidExpression(format!(
+                    "function index {function} is outside the program"
+                )));
+            };
+            if callee.signature() != signature {
+                return Err(IrError::InvalidExpression(format!(
+                    "function value index {function} carries a mismatched signature"
+                )));
+            }
+        }
+        Expr::Closure { captures, body, .. } => {
+            for capture in captures {
+                validate_program_expr(
+                    capture,
+                    globals,
+                    functions,
+                    owner,
+                    calls,
+                    dependencies,
+                )?;
+            }
+            validate_program_expr(
+                body,
+                globals,
+                functions,
+                owner,
+                calls,
+                dependencies,
+            )?;
+        }
         Expr::Sequence { expressions, .. } => {
             for expression in expressions {
                 validate_program_expr(
@@ -1051,7 +1485,7 @@ fn validate_program_expr(
                     "global index {index} is outside the program"
                 )));
             };
-            if global.value_type() != *value_type {
+            if !global.value_type().same_shape(value_type) {
                 return Err(IrError::InvalidExpression(format!(
                     "global index {index} has type {}, expression declares {value_type}",
                     global.value_type()
@@ -1120,19 +1554,40 @@ fn validate_program_expr(
             function,
             arguments,
             result,
+            callee: callee_expression,
+            function_hint,
             ..
         } => {
-            let Some(callee) = functions.get(*function) else {
-                return Err(IrError::InvalidExpression(format!(
-                    "function index {function} is outside the program"
-                )));
+            let signature = if let Some(callee_expression) = callee_expression {
+                validate_program_expr(
+                    callee_expression,
+                    globals,
+                    functions,
+                    owner,
+                    calls,
+                    dependencies,
+                )?;
+                match callee_expression.result_type() {
+                    PrimitiveType::Function(signature) => *signature,
+                    actual => {
+                        return Err(IrError::InvalidExpression(format!(
+                            "indirect callee has non-function type {actual}"
+                        )));
+                    }
+                }
+            } else {
+                let Some(callee) = functions.get(*function) else {
+                    return Err(IrError::InvalidExpression(format!(
+                        "function index {function} is outside the program"
+                    )));
+                };
+                callee.signature().clone()
             };
-            if arguments.len() != callee.signature().parameters().len() {
+            if arguments.len() != signature.fixed_parameter_count() {
                 return Err(IrError::InvalidExpression(format!(
-                    "call to `{}` has {} arguments, expected {}",
-                    callee.name(),
+                    "call has {} arguments, expected {}",
                     arguments.len(),
-                    callee.signature().parameters().len()
+                    signature.fixed_parameter_count()
                 )));
             }
             for argument in arguments {
@@ -1145,42 +1600,136 @@ fn validate_program_expr(
                     dependencies,
                 )?;
             }
-            for (argument, expected) in
-                arguments.iter().zip(callee.signature().parameters())
-            {
+            let expected_parameters = signature
+                .parameters()
+                .iter()
+                .cloned()
+                .chain(
+                    signature
+                        .labelled()
+                        .iter()
+                        .map(|parameter| parameter.value_type()),
+                )
+                .collect::<Vec<_>>();
+            for (argument, expected) in arguments.iter().zip(expected_parameters) {
                 let actual = argument.result_type();
-                if actual != *expected {
+                if !actual.same_shape(&expected) {
                     return Err(IrError::InvalidExpression(format!(
                         "call argument has type {actual}, expected {expected}"
                     )));
                 }
             }
-            if *result != callee.signature().result() {
+            if !result.same_shape(&signature.result()) {
                 return Err(IrError::InvalidExpression(format!(
                     "call result declares {result}, callee returns {}",
-                    callee.signature().result()
+                    signature.result()
                 )));
             }
-            if let Some(owner) = owner {
+            let dependency_target = if callee_expression.is_none() {
+                Some(*function)
+            } else {
+                function_hint.as_ref().copied().or_else(|| {
+                    callee_expression.as_deref().and_then(static_function_index)
+                })
+            };
+            if let Some(dependency_target) = dependency_target
+                && functions.get(dependency_target).is_none()
+            {
+                return Err(IrError::InvalidExpression(format!(
+                    "function index {dependency_target} is outside the program"
+                )));
+            }
+            if let Some(dependency_target) = dependency_target
+                && let Some(owner) = owner
+            {
                 let Some(edges) = dependencies.get_mut(owner.node_index(globals.len()))
                 else {
                     return Err(IrError::InvalidExpression(format!(
                         "dependency owner {owner:?} is outside the program"
                     )));
                 };
-                edges.insert(DependencyNode::Function(*function));
+                edges.insert(DependencyNode::Function(dependency_target));
                 if let DependencyNode::Function(owner) = owner {
                     let Some(edges) = calls.get_mut(owner) else {
                         return Err(IrError::InvalidExpression(format!(
                             "function owner index {owner} is outside the program"
                         )));
                     };
-                    edges.insert(*function);
+                    edges.insert(dependency_target);
                 }
             }
         }
     }
     Ok(())
+}
+
+fn static_function_index(expression: &Expr) -> Option<usize> {
+    match expression {
+        Expr::Function { function, .. } => Some(*function),
+        Expr::Let {
+            slot: Some(slot),
+            value,
+            body,
+            ..
+        } if matches!(body.as_ref(), Expr::Variable { slot: body_slot, .. } if body_slot == slot) => {
+            static_function_index(value)
+        }
+        Expr::Sequence { expressions, .. } => {
+            expressions.last().and_then(static_function_index)
+        }
+        Expr::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let then_function = static_function_index(then_branch);
+            let else_function = static_function_index(else_branch);
+            (then_function == else_function)
+                .then_some(then_function)
+                .flatten()
+        }
+        Expr::Literal { .. }
+        | Expr::Global { .. }
+        | Expr::Variable { .. }
+        | Expr::Captured { .. }
+        | Expr::Closure { .. }
+        | Expr::Let { .. } => None,
+        Expr::Call { .. } => None,
+    }
+}
+
+fn validate_type_shape(value_type: &PrimitiveType) -> Result<(), String> {
+    if let PrimitiveType::Function(signature) = value_type {
+        validate_signature_shape(signature)?;
+    }
+    Ok(())
+}
+
+fn validate_signature_shape(signature: &FunctionSignature) -> Result<(), String> {
+    for parameter in signature.parameters() {
+        validate_type_shape(parameter)?;
+    }
+    let mut labels = BTreeSet::new();
+    for parameter in signature.labelled() {
+        if !labels.insert(parameter.name()) {
+            return Err(format!(
+                "function signature repeats labelled parameter `{}`",
+                parameter.name()
+            ));
+        }
+        validate_type_shape(&parameter.value_type())?;
+        if let Some(default) = parameter.default()
+            && !default.ty().same_shape(&parameter.value_type())
+        {
+            return Err(format!(
+                "default for labelled parameter `{}` has type {}, expected {}",
+                parameter.name(),
+                default.ty(),
+                parameter.value_type()
+            ));
+        }
+    }
+    validate_type_shape(&signature.result())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1304,25 +1853,57 @@ fn canonical_expr(expression: &Expr) -> String {
         Expr::Sequence { expressions, .. } => {
             let values = expressions.iter().map(canonical_expr).collect::<Vec<_>>();
             format!(
-                "(record kind: @sequence type: @{} values: {})",
-                expression.result_type().as_str(),
+                "(record kind: @sequence type: {} values: {})",
+                canonical_type(&expression.result_type()),
                 canonical_array(&values)
             )
         }
         Expr::Variable {
             slot, value_type, ..
         } => format!(
-            "(record kind: @variable slot: {}u64 type: @{})",
+            "(record kind: @variable slot: {}u64 type: {})",
             slot,
-            value_type.as_str()
+            canonical_type(value_type)
         ),
         Expr::Global {
             index, value_type, ..
         } => format!(
-            "(record kind: @global index: {}u64 type: @{})",
+            "(record kind: @global index: {}u64 type: {})",
             index,
-            value_type.as_str()
+            canonical_type(value_type)
         ),
+        Expr::Function {
+            function,
+            signature,
+            ..
+        } => format!(
+            "(record kind: @function function: {}u64 type: {} result: {})",
+            function,
+            canonical_function_signature(signature),
+            canonical_type(&signature.result())
+        ),
+        Expr::Captured {
+            slot, value_type, ..
+        } => format!(
+            "(record kind: @captured slot: {}u64 type: {})",
+            slot,
+            canonical_type(value_type)
+        ),
+        Expr::Closure {
+            signature,
+            captures,
+            body,
+            ..
+        } => {
+            let capture_values =
+                captures.iter().map(canonical_expr).collect::<Vec<_>>();
+            format!(
+                "(record kind: @closure type: {} captures: {} body: {})",
+                canonical_function_signature(signature),
+                canonical_array(&capture_values),
+                canonical_expr(body)
+            )
+        }
         Expr::Let {
             slot, value, body, ..
         } => {
@@ -1349,17 +1930,97 @@ fn canonical_expr(expression: &Expr) -> String {
             function,
             arguments,
             result,
+            callee,
             ..
         } => {
             let values = arguments.iter().map(canonical_expr).collect::<Vec<_>>();
-            format!(
-                "(record kind: @call function: {}u64 result: @{} arguments: {})",
-                function,
-                result.as_str(),
-                canonical_array(&values)
-            )
+            match callee {
+                Some(callee) => format!(
+                    "(record kind: @call callee: {} function: {}u64 result: {} arguments: {})",
+                    canonical_expr(callee),
+                    function,
+                    canonical_type(result),
+                    canonical_array(&values)
+                ),
+                None => format!(
+                    "(record kind: @call function: {}u64 result: {} arguments: {})",
+                    function,
+                    canonical_type(result),
+                    canonical_array(&values)
+                ),
+            }
         }
     }
+}
+
+fn canonical_type(value: &PrimitiveType) -> String {
+    match value {
+        PrimitiveType::Function(signature) => canonical_function_signature(signature),
+        _ => format!("@{}", value.as_str()),
+    }
+}
+
+fn canonical_function_signature(signature: &FunctionSignature) -> String {
+    let parameters = signature
+        .parameters()
+        .iter()
+        .map(canonical_type)
+        .collect::<Vec<_>>();
+    let mut output = format!(
+        "(fn {} {}",
+        canonical_array(&parameters),
+        canonical_type(&signature.result())
+    );
+    if !signature.labelled().is_empty() {
+        let labelled = signature
+            .labelled()
+            .iter()
+            .map(|parameter| {
+                let mut output = format!(
+                    "(record name: @{} type: {}",
+                    parameter.name(),
+                    canonical_type(&parameter.value_type())
+                );
+                if let Some(default) = parameter.default() {
+                    output
+                        .push_str(&format!(" default: {}", default.canonical_vibon()));
+                }
+                output.push(')');
+                output
+            })
+            .collect::<Vec<_>>();
+        output.push_str(&format!(" labelled: {}", canonical_array(&labelled)));
+    }
+    output.push(')');
+    output
+}
+
+fn canonical_labelled_field(signature: &FunctionSignature) -> String {
+    if signature.labelled().is_empty() {
+        String::new()
+    } else {
+        format!(" labelled: {}", canonical_labelled_array(signature))
+    }
+}
+
+fn canonical_labelled_array(signature: &FunctionSignature) -> String {
+    let labelled = signature
+        .labelled()
+        .iter()
+        .map(|parameter| {
+            let mut output = format!(
+                "(record name: @{} type: {}",
+                parameter.name(),
+                canonical_type(&parameter.value_type())
+            );
+            if let Some(default) = parameter.default() {
+                output.push_str(&format!(" default: {}", default.canonical_vibon()));
+            }
+            output.push(')');
+            output
+        })
+        .collect::<Vec<_>>();
+    canonical_array(&labelled)
 }
 
 fn canonical_array(values: &[String]) -> String {
@@ -1457,6 +2118,24 @@ mod tests {
             origin,
         )
         .expect("call shape is valid before program binding");
+        let result = CheckedProgram::try_new(vec![function], 0);
+        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_recursive_function_values() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let function_value = Expr::function(0, signature.clone(), origin.clone());
+        let body = Expr::indirect_call(
+            function_value,
+            None,
+            Vec::new(),
+            PrimitiveType::I32,
+            origin.clone(),
+        );
+        let function = CheckedFunction::new("answer", signature, body, origin)
+            .expect("indirect call shape is valid before program binding");
         let result = CheckedProgram::try_new(vec![function], 0);
         assert!(matches!(result, Err(IrError::RecursiveCall(_))));
     }

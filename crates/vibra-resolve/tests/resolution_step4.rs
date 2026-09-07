@@ -64,6 +64,41 @@ fn imported_private_declaration_reports_access_with_stable_span() {
 }
 
 #[test]
+fn imported_public_function_path_resolves_as_a_function_reference() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            Some("app.main.run"),
+            vec![
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["main"],
+                    "src/main.vib",
+                    b"(import lib @app.lib)\n(defn run () void (lib.greet))",
+                ),
+                vibra_resolve::SourceModule::new(
+                    "app",
+                    ["lib"],
+                    "src/lib.vib",
+                    b"(defn greet () void visibility: @public (do))",
+                ),
+            ],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(snapshot.accepted(), "{:?}", snapshot.diagnostics());
+    let target = snapshot.references()[0]
+        .target()
+        .expect("resolved imported function reference");
+    assert_eq!(target.kind(), EntityKind::Function);
+    assert_eq!(target.module(), ["lib"]);
+    assert_eq!(target.name(), "greet");
+}
+
+#[test]
 fn bare_imported_module_alias_reports_wrong_entity_kind_in_a_body() {
     let input = ResolveInput::new(
         "demo",

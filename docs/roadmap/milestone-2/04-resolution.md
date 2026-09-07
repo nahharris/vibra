@@ -69,7 +69,8 @@ identity contains package name and version, unit, module segments, owner path,
 and entity kind. It never uses a source-order vector index as identity.
 
 The static resolved artifact is canonical VIBON data with format atom
-`@resolved.v1`. It records the package identity, sorted modules, declaration
+`@resolved.v1`. It records the package identity, sorted modules (whose `path`
+fields are canonical module atoms), declaration
 IDs with source IDs/spans/visibility, imports, and body reference edges. Exact
 module bytes remain in the Step 3 source graph artifact; the resolved artifact
 records each module's source ID and does not re-read or normalize those bytes.
