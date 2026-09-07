@@ -3611,6 +3611,36 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_rejects_tampered_declared_module_bytes() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = std::env::temp_dir()
+            .join(format!("vibra-bootstrap-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for relative in [
+            "stdlib/m2/bootstrap-manifest.vibon",
+            "stdlib/m2/bootstrap.vibon",
+            "stdlib/m2/bootstrap.vibon.sig",
+            "stdlib/m2/toolchain-ed25519.pub",
+            "stdlib/m2/src/std/text.vib",
+            "stdlib/m2/src/std/assert.vib",
+        ] {
+            let destination = root.join(relative);
+            std::fs::create_dir_all(destination.parent().expect("module parent"))
+                .expect("module directory");
+            std::fs::copy(repository.join(relative), &destination)
+                .expect("module copy");
+        }
+        std::fs::write(
+            root.join("stdlib/m2/src/std/text.vib"),
+            b"; modified trusted module\n",
+        )
+        .expect("tamper module");
+        let error = verify_bootstrap(&root).expect_err("tampered module");
+        assert!(error.to_string().contains("text module digest mismatch"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn rejects_mutual_recursive_calls_before_lowering() {
         let result = check_source(
             "recursive.vib",
