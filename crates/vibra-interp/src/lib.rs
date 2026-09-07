@@ -167,6 +167,19 @@ enum Evaluation {
     },
 }
 
+enum TailTransferAction {
+    Reuse {
+        index: usize,
+        slots: Vec<Option<RuntimeValue>>,
+        captures: Vec<RuntimeValue>,
+    },
+    Invoke {
+        callable: Callable,
+        values: Vec<RuntimeValue>,
+    },
+    Invalid,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Callable {
     Named {
@@ -240,15 +253,22 @@ impl<'a> Machine<'a> {
                     values,
                     result,
                 }) => {
-                    let Some((next_index, next_slots, next_captures)) =
-                        self.prepare_tail_transfer(index, callable, values, &result)
-                    else {
-                        break None;
-                    };
-                    self.tail_transfers = self.tail_transfers.saturating_add(1);
-                    index = next_index;
-                    slots = next_slots;
-                    captures = next_captures;
+                    match self.tail_transfer_action(index, callable, values, &result) {
+                        TailTransferAction::Reuse {
+                            index: next_index,
+                            slots: next_slots,
+                            captures: next_captures,
+                        } => {
+                            self.tail_transfers = self.tail_transfers.saturating_add(1);
+                            index = next_index;
+                            slots = next_slots;
+                            captures = next_captures;
+                        }
+                        TailTransferAction::Invoke { callable, values } => {
+                            break self.invoke_callable(callable, values, &result);
+                        }
+                        TailTransferAction::Invalid => break None,
+                    }
                 }
                 None => break None,
             }
@@ -257,43 +277,60 @@ impl<'a> Machine<'a> {
         result
     }
 
-    fn prepare_tail_transfer(
+    fn tail_transfer_action(
         &self,
         current_index: usize,
         callable: Callable,
         values: Vec<RuntimeValue>,
         result: &PrimitiveType,
-    ) -> Option<(usize, Vec<Option<RuntimeValue>>, Vec<RuntimeValue>)> {
-        let Callable::Named {
-            index, captures, ..
-        } = callable
-        else {
-            // Checked IR never marks a closure transfer as tail-position
-            // module recursion. Keep the runtime boundary defensive for
-            // callers that construct IR directly.
-            return None;
-        };
-        let group = self.program.recursive_group(current_index)?;
-        if !group.contains(&index) {
-            return None;
+    ) -> TailTransferAction {
+        match callable {
+            Callable::Named {
+                index,
+                signature,
+                captures,
+            } => {
+                let Some(function) = self.program.functions().get(index) else {
+                    return TailTransferAction::Invalid;
+                };
+                let actual_signature = function.signature();
+                if !signature.same_shape(actual_signature)
+                    || actual_signature.fixed_parameter_count() != values.len()
+                    || !values_match_signature(&values, actual_signature)
+                    || !actual_signature.result().same_shape(result)
+                {
+                    return TailTransferAction::Invalid;
+                }
+                let slots = values
+                    .iter()
+                    .cloned()
+                    .map(Some)
+                    .chain(std::iter::repeat(None))
+                    .take(function.slot_count())
+                    .collect();
+                if self
+                    .program
+                    .recursive_group(current_index)
+                    .is_some_and(|group| group.contains(&index))
+                {
+                    TailTransferAction::Reuse {
+                        index,
+                        slots,
+                        captures,
+                    }
+                } else {
+                    TailTransferAction::Invoke {
+                        callable: Callable::Named {
+                            index,
+                            signature,
+                            captures,
+                        },
+                        values,
+                    }
+                }
+            }
+            callable => TailTransferAction::Invoke { callable, values },
         }
-        let (slot_count, signature) = {
-            let function = self.program.functions().get(index)?;
-            (function.slot_count(), function.signature().clone())
-        };
-        if signature.fixed_parameter_count() != values.len()
-            || !values_match_signature(&values, &signature)
-            || !signature.result().same_shape(result)
-        {
-            return None;
-        }
-        let slots = values
-            .into_iter()
-            .map(Some)
-            .chain(std::iter::repeat(None))
-            .take(slot_count)
-            .collect();
-        Some((index, slots, captures))
     }
 
     fn evaluate_value(
@@ -486,7 +523,7 @@ impl<'a> Machine<'a> {
                 let callable_signature = match &callable {
                     RuntimeValue::Function(Callable::Named { signature, .. })
                     | RuntimeValue::Function(Callable::Lambda { signature, .. }) => {
-                        signature
+                        signature.clone()
                     }
                     RuntimeValue::Primitive(_) => return None,
                 };
@@ -514,6 +551,12 @@ impl<'a> Machine<'a> {
                     return None;
                 };
                 if *tail {
+                    if callable_signature.fixed_parameter_count() != values.len()
+                        || !values_match_signature(&values, &callable_signature)
+                        || !callable_signature.result().same_shape(result)
+                    {
+                        return None;
+                    }
                     return Some(Evaluation::TailTransfer {
                         callable,
                         values,

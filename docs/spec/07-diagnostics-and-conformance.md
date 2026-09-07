@@ -222,7 +222,10 @@ specification rule, not compiler module. Each case records:
 - expected acceptance or diagnostics;
 - expected canonical formatting;
 - expected resolved identities, types, and effects where relevant;
-- interpreter result and ordered audit trace where executable;
+- interpreter result and ordered audit trace where executable; the expected
+  audit trace is a `.vibon` snapshot whose canonical root is
+  `(record format: @audit-trace.v1 events: (array ...))`, with event strings in
+  execution order;
 - Wasm result and ordered audit trace where executable; and
 - deterministic build hashes for artifact cases.
 
@@ -231,6 +234,12 @@ VIBON record described above. Every graph consumer and corpus fixture MUST
 produce or compare that record directly. Plain-text graph snapshots are not a
 supported input, output, or compatibility format. The graph representation
 MUST preserve the exact source IDs, bytes, spans, and dependency edges above.
+
+Executable audit traces have one representation as well: the structured
+`@audit-trace.v1` VIBON record described above. An empty pure trace is the
+canonical `(record format: @audit-trace.v1 events: (array))` value. Event
+strings remain ordered and are never flattened into a line-oriented text
+snapshot; plain-text audit snapshots are not a supported format.
 
 Cases use the following stable section IDs, followed by a descriptive
 kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:

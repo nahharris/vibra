@@ -1660,9 +1660,7 @@ fn function_targets_from_expr(
         Expr::Call {
             result: PrimitiveType::Function(_),
             ..
-        } => {
-            FunctionTargetSet::unknown()
-        }
+        } => FunctionTargetSet::unknown(),
         Expr::Call { .. }
         | Expr::Literal { .. }
         | Expr::External { .. }
@@ -3205,8 +3203,6 @@ fn check_expression_in_position(
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
             let tail_transfer = tail_position
-                && !function_targets.unknown
-                && !function_targets.has_closure
                 && !function_targets.known.is_empty()
                 && environment.recursive_group.as_ref().is_some_and(|group| {
                     function_targets
@@ -3314,7 +3310,9 @@ fn check_expression_in_position(
                 }
                 Some(function) => Expr::call(function, arguments, result, origin),
                 None if tail_transfer => {
-                    let function_hint = (function_targets.known.len() == 1)
+                    let function_hint = (function_targets.known.len() == 1
+                        && !function_targets.unknown
+                        && !function_targets.has_closure)
                         .then(|| function_targets.known.iter().next().copied())
                         .flatten();
                     Expr::indirect_tail_call_with_hint(

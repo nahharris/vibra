@@ -3165,13 +3165,15 @@ fn validate_tail_calls(
             } else {
                 FunctionTargetSummary::known(*function)
             };
-            if targets.unknown || targets.has_closure || targets.known.is_empty() {
+            if targets.known.is_empty() {
                 return Err(IrError::InvalidExpression(
                     "tail call target is not statically bounded".to_owned(),
                 ));
             }
             if let Some(function_hint) = function_hint
-                && targets.known != BTreeSet::from([*function_hint])
+                && (targets.unknown
+                    || targets.has_closure
+                    || targets.known != BTreeSet::from([*function_hint]))
             {
                 return Err(IrError::InvalidExpression(
                     "tail call hint does not match indirect callee".to_owned(),
@@ -3826,7 +3828,7 @@ mod tests {
     }
 
     #[test]
-    fn program_constructor_rejects_tail_transfers_with_a_closure_branch() {
+    fn program_constructor_allows_tail_candidates_with_a_closure_branch() {
         let origin = origin();
         let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
         let target = CheckedFunction::new(
@@ -3855,7 +3857,7 @@ mod tests {
             signature.clone(),
             Expr::indirect_tail_call_with_hint(
                 callee,
-                Some(0),
+                None,
                 Vec::new(),
                 PrimitiveType::I32,
                 origin.clone(),
@@ -3863,9 +3865,9 @@ mod tests {
             origin,
         )
         .expect("caller shape");
-        let error = CheckedProgram::try_new(vec![target, caller], 1)
-            .expect_err("a closure branch is not a module-level tail target");
-        assert!(error.to_string().contains("function hint"));
+        let program = CheckedProgram::try_new(vec![target, caller], 1)
+            .expect("a named branch remains a bounded runtime tail candidate");
+        assert_eq!(program.recursive_group(1), Some(&[0, 1][..]));
     }
 
     #[test]

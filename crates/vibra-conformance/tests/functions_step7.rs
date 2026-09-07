@@ -358,7 +358,7 @@ fn conditional_function_values_remain_admitted_for_tail_analysis() {
 }
 
 #[test]
-fn closure_alternatives_are_not_marked_as_module_tail_transfers() {
+fn closure_alternatives_remain_runtime_tail_candidates() {
     let source = r#"
 (defn leaf () i32 1i32)
 (defn caller () i32
@@ -367,7 +367,7 @@ fn closure_alternatives_are_not_marked_as_module_tail_transfers() {
     let checked = check_source("closure-alternative.vib", source);
     assert!(checked.accepted(), "closure alternative remains callable");
     let program = checked.program().expect("closure alternative program");
-    assert!(!program.canonical_vibon().contains("tail: true"));
+    assert!(program.canonical_vibon().contains("tail: true"));
 }
 
 #[test]

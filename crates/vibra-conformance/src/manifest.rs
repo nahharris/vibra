@@ -185,7 +185,7 @@ pub struct ExpectedFix {
 pub struct ExpectedExecution {
     /// A relative path to the expected result snapshot.
     pub result: Option<String>,
-    /// A relative path to the expected ordered audit-trace snapshot.
+    /// A relative path to the expected ordered `.vibon` audit-trace snapshot.
     pub audit_trace: Option<String>,
 }
 
