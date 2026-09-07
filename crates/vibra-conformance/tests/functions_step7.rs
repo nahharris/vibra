@@ -117,6 +117,20 @@ fn formatter_uses_only_checker_binding_facts_for_safe_reordering() {
     let first = formatted.find("first: 9i32").expect("first label");
     let second = formatted.find("second: 11i32").expect("second label");
     assert!(first < second, "{formatted}");
+    let reparsed = check_source("format-bindings.vib", formatted);
+    assert!(reparsed.accepted(), "{:?}", reparsed.diagnostics());
+    let result = vibra_interp::run(reparsed.program().expect("reparsed program"))
+        .expect("reparsed execution");
+    assert_eq!(result.value(), &vibra_ir::Value::I32(9));
+    let reformatted = vibra_fmt::format_source_with_bindings(
+        "format-bindings.vib",
+        formatted,
+        reparsed.application_bindings(),
+    )
+    .expect("reformatted source")
+    .text()
+    .to_owned();
+    assert_eq!(reformatted, formatted);
 }
 
 #[test]
@@ -359,6 +373,22 @@ fn higher_order_function_values_do_not_bypass_recursive_admission() {
 }
 
 #[test]
+fn nonrecursive_higher_order_function_values_remain_admitted() {
+    let source = r#"
+(defn answer () i32
+  (apply choose))
+(defn apply (f (fn () i32)) i32
+  (f))
+(defn choose () i32 1i32)
+"#;
+    let checked = check_source("higher-order-value.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let result =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(result.value(), &vibra_ir::Value::I32(1));
+}
+
+#[test]
 fn returned_function_values_do_not_bypass_recursive_admission() {
     let source = r#"
 (defn forward () (fn () i32)
@@ -376,6 +406,25 @@ fn returned_function_values_do_not_bypass_recursive_admission() {
             .diagnostics()
             .iter()
             .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
+    );
+}
+
+#[test]
+fn closure_return_values_do_not_bypass_recursive_admission() {
+    let source = r#"
+(defn answer () i32
+  (((lambda () (fn () i32) answer))))
+"#;
+    let checked = check_source("closure-returned-recursion.vib", source);
+    assert!(
+        !checked.accepted(),
+        "closures returning recursive values must be rejected"
+    );
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
     );
 }
 

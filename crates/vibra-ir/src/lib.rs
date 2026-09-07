@@ -823,7 +823,9 @@ impl Expr {
     ) -> Result<PrimitiveType, IrError> {
         match self {
             Self::Literal { value, .. } => Ok(value.ty()),
-            Self::Default { value_type, .. } => Ok(value_type.clone()),
+            Self::Default { .. } => Err(IrError::InvalidExpression(
+                "default argument marker is only valid as a call operand".to_owned(),
+            )),
             Self::Function { signature, .. } => {
                 Ok(PrimitiveType::Function(Box::new(signature.clone())))
             }
@@ -1001,7 +1003,19 @@ impl Expr {
                     }
                 }
                 for argument in arguments {
-                    argument.validate_shape_with_captures(slots, capture_types)?;
+                    match argument {
+                        Self::Default { value_type, .. } => {
+                            validate_type_shape(value_type).map_err(|message| {
+                                IrError::InvalidExpression(format!(
+                                    "default argument marker has an invalid type: {message}"
+                                ))
+                            })?;
+                        }
+                        _ => {
+                            argument
+                                .validate_shape_with_captures(slots, capture_types)?;
+                        }
+                    }
                 }
                 Ok(result.clone())
             }
@@ -1292,6 +1306,12 @@ impl CheckedProgram {
                 &mut calls,
                 &mut dependencies,
             )?;
+        }
+        let (calls, flow_dependencies) =
+            analyze_call_flow(&globals, &functions, entry)?;
+        for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow_dependencies)
+        {
+            dependencies.extend(flow_edges);
         }
         reject_recursive_calls(&calls)?;
         reject_global_initializer_cycles(&dependencies, globals.len())?;
@@ -1621,6 +1641,51 @@ fn validate_program_expr(
                     signature.fixed_parameter_count()
                 )));
             }
+            for (index, argument) in arguments.iter().enumerate() {
+                let Expr::Default { .. } = argument else {
+                    continue;
+                };
+                if index < signature.parameters().len() {
+                    return Err(IrError::InvalidExpression(
+                        "default argument marker is only valid for a labelled parameter"
+                            .to_owned(),
+                    ));
+                }
+                if callee_expression.is_none()
+                    && signature
+                        .labelled()
+                        .get(index.saturating_sub(signature.parameters().len()))
+                        .is_some_and(|parameter| parameter.default().is_none())
+                {
+                    return Err(IrError::InvalidExpression(
+                        "direct call default marker has no declaration default"
+                            .to_owned(),
+                    ));
+                }
+                if let Some(callee_expression) = callee_expression {
+                    let summary = possible_function_targets(
+                        callee_expression,
+                        &BTreeMap::new(),
+                        functions,
+                        &mut BTreeSet::new(),
+                    );
+                    let labelled_index =
+                        index.saturating_sub(signature.parameters().len());
+                    if summary.known.iter().any(|target| {
+                        functions
+                            .get(*target)
+                            .and_then(|function| {
+                                function.signature().labelled().get(labelled_index)
+                            })
+                            .is_some_and(|parameter| parameter.default().is_none())
+                    }) {
+                        return Err(IrError::InvalidExpression(
+                            "indirect call default marker has no declaration default"
+                                .to_owned(),
+                        ));
+                    }
+                }
+            }
             for argument in arguments {
                 validate_program_expr(
                     argument,
@@ -1658,21 +1723,23 @@ fn validate_program_expr(
             }
             let mut targets = BTreeSet::new();
             if let Some(callee_expression) = callee_expression {
+                let summary = possible_function_targets(
+                    callee_expression,
+                    &BTreeMap::new(),
+                    functions,
+                    &mut BTreeSet::new(),
+                );
                 if let Some(function_hint) = function_hint {
-                    targets.insert(*function_hint);
-                } else {
-                    let summary = possible_function_targets(
-                        callee_expression,
-                        &BTreeMap::new(),
-                        functions,
-                        &mut BTreeSet::new(),
-                    );
-                    if summary.unknown {
-                        return Err(IrError::RecursiveCall(
-                            "indirect call target is not statically bounded before Step 9"
-                                .to_owned(),
+                    if !summary.known.is_empty()
+                        && (summary.unknown
+                            || summary.known != BTreeSet::from([*function_hint]))
+                    {
+                        return Err(IrError::InvalidExpression(
+                            "function hint does not match indirect callee".to_owned(),
                         ));
                     }
+                    targets.insert(*function_hint);
+                } else {
                     targets.extend(summary.known);
                 }
             } else {
@@ -1725,6 +1792,11 @@ fn possible_function_targets(
             known: BTreeSet::from([*function]),
             unknown: false,
         },
+        Expr::Closure {
+            signature, body, ..
+        } if matches!(signature.result(), PrimitiveType::Function(_)) => {
+            possible_function_targets(body, aliases, functions, visiting)
+        }
         Expr::Closure { .. } => FunctionTargetSummary::default(),
         Expr::If {
             then_branch,
@@ -1823,6 +1895,606 @@ fn possible_function_targets(
             result
         }
         Expr::Literal { .. } | Expr::Default { .. } => FunctionTargetSummary::default(),
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct FlowTargetSummary {
+    known: BTreeSet<usize>,
+    unknown: bool,
+    is_function: bool,
+    closures: Vec<Self>,
+    closure_defaults: Vec<Vec<bool>>,
+}
+
+impl FlowTargetSummary {
+    fn known_function(function: usize) -> Self {
+        Self {
+            known: BTreeSet::from([function]),
+            unknown: false,
+            is_function: true,
+            closures: Vec::new(),
+            closure_defaults: Vec::new(),
+        }
+    }
+
+    fn unknown_function() -> Self {
+        Self {
+            known: BTreeSet::new(),
+            unknown: true,
+            is_function: true,
+            closures: Vec::new(),
+            closure_defaults: Vec::new(),
+        }
+    }
+
+    fn union(&mut self, other: &Self) {
+        self.known.extend(&other.known);
+        self.unknown |= other.unknown;
+        self.is_function |= other.is_function;
+        self.closures.extend(other.closures.iter().cloned());
+        self.closure_defaults
+            .extend(other.closure_defaults.iter().cloned());
+    }
+}
+
+struct CallFlow<'a> {
+    globals: &'a [CheckedGlobal],
+    functions: &'a [CheckedFunction],
+    global_returns: Vec<FlowTargetSummary>,
+    function_returns: Vec<FlowTargetSummary>,
+    parameter_targets: Vec<Vec<FlowTargetSummary>>,
+    parameter_sources: Vec<Vec<bool>>,
+    calls: Vec<BTreeSet<usize>>,
+    dependencies: Vec<BTreeSet<DependencyNode>>,
+    unresolved: bool,
+}
+
+type CallAnalysis = (Vec<BTreeSet<usize>>, Vec<BTreeSet<DependencyNode>>);
+
+fn analyze_call_flow(
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+    entry: usize,
+) -> Result<CallAnalysis, IrError> {
+    let mut flow = CallFlow {
+        globals,
+        functions,
+        global_returns: vec![FlowTargetSummary::default(); globals.len()],
+        function_returns: vec![FlowTargetSummary::default(); functions.len()],
+        parameter_targets: functions
+            .iter()
+            .map(|function| {
+                vec![
+                    FlowTargetSummary::default();
+                    function.signature().fixed_parameter_count()
+                ]
+            })
+            .collect(),
+        parameter_sources: functions
+            .iter()
+            .map(|function| vec![false; function.signature().fixed_parameter_count()])
+            .collect(),
+        calls: vec![BTreeSet::new(); functions.len()],
+        dependencies: vec![BTreeSet::new(); globals.len() + functions.len()],
+        unresolved: false,
+    };
+
+    if let Some(function) = functions.get(entry) {
+        for (slot, value_type) in
+            function_signature_types(function.signature()).enumerate()
+        {
+            if matches!(value_type, PrimitiveType::Function(_))
+                && let Some(summary) = flow
+                    .parameter_targets
+                    .get_mut(entry)
+                    .and_then(|parameters| parameters.get_mut(slot))
+            {
+                *summary = FlowTargetSummary::unknown_function();
+                if let Some(source) = flow
+                    .parameter_sources
+                    .get_mut(entry)
+                    .and_then(|parameters| parameters.get_mut(slot))
+                {
+                    *source = true;
+                }
+            }
+        }
+    }
+
+    let iteration_limit = functions
+        .len()
+        .saturating_mul(functions.len().saturating_add(1))
+        .saturating_add(globals.len())
+        .saturating_add(8);
+    for _ in 0..iteration_limit.max(1) {
+        let previous_parameters = flow.parameter_targets.clone();
+        let previous_sources = flow.parameter_sources.clone();
+        let returns_changed = flow.refresh_returns();
+        flow.calls = vec![BTreeSet::new(); functions.len()];
+        flow.dependencies = vec![BTreeSet::new(); globals.len() + functions.len()];
+        flow.unresolved = false;
+        for (global_index, global) in globals.iter().enumerate() {
+            flow.collect_expr(
+                global.initializer(),
+                Some(DependencyNode::Global(global_index)),
+                &BTreeMap::new(),
+                &[],
+            )?;
+        }
+        for (index, function) in functions.iter().enumerate() {
+            let environment = flow.parameter_environment(index);
+            flow.collect_expr(
+                function.body(),
+                Some(DependencyNode::Function(index)),
+                &environment,
+                &[],
+            )?;
+        }
+        let parameters_changed = previous_parameters != flow.parameter_targets
+            || previous_sources != flow.parameter_sources;
+        if !returns_changed && !parameters_changed {
+            if flow.unresolved {
+                return Err(IrError::RecursiveCall(
+                    "indirect call target is not statically bounded before Step 9"
+                        .to_owned(),
+                ));
+            }
+            return Ok((flow.calls, flow.dependencies));
+        }
+    }
+    if flow.unresolved {
+        return Err(IrError::RecursiveCall(
+            "indirect call target analysis did not reach a bounded result".to_owned(),
+        ));
+    }
+    Ok((flow.calls, flow.dependencies))
+}
+
+fn function_signature_types(
+    signature: &FunctionSignature,
+) -> impl Iterator<Item = PrimitiveType> + '_ {
+    signature.parameters().iter().cloned().chain(
+        signature
+            .labelled()
+            .iter()
+            .map(LabelledParameter::value_type),
+    )
+}
+
+impl<'a> CallFlow<'a> {
+    fn parameter_environment(
+        &self,
+        function: usize,
+    ) -> BTreeMap<usize, FlowTargetSummary> {
+        let Some(checked) = self.functions.get(function) else {
+            return BTreeMap::new();
+        };
+        let mut environment = BTreeMap::new();
+        for (slot, value_type) in
+            function_signature_types(checked.signature()).enumerate()
+        {
+            if matches!(value_type, PrimitiveType::Function(_)) {
+                let summary = if self
+                    .parameter_sources
+                    .get(function)
+                    .and_then(|parameters| parameters.get(slot))
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    self.parameter_targets
+                        .get(function)
+                        .and_then(|parameters| parameters.get(slot))
+                        .cloned()
+                        .unwrap_or_else(FlowTargetSummary::unknown_function)
+                } else {
+                    FlowTargetSummary::unknown_function()
+                };
+                environment.insert(slot, summary);
+            }
+        }
+        environment
+    }
+
+    fn refresh_returns(&mut self) -> bool {
+        let new_globals = self
+            .globals
+            .iter()
+            .map(|global| {
+                self.summary_expr(global.initializer(), &BTreeMap::new(), &[])
+            })
+            .collect::<Vec<_>>();
+        let new_functions = self
+            .functions
+            .iter()
+            .enumerate()
+            .map(|(index, function)| {
+                let environment = self.parameter_environment(index);
+                self.summary_expr(function.body(), &environment, &[])
+            })
+            .collect::<Vec<_>>();
+        let changed = new_globals != self.global_returns
+            || new_functions != self.function_returns;
+        self.global_returns = new_globals;
+        self.function_returns = new_functions;
+        changed
+    }
+
+    fn summary_expr(
+        &self,
+        expression: &Expr,
+        environment: &BTreeMap<usize, FlowTargetSummary>,
+        captures: &[FlowTargetSummary],
+    ) -> FlowTargetSummary {
+        match expression {
+            Expr::Function { function, .. } => {
+                FlowTargetSummary::known_function(*function)
+            }
+            Expr::Closure {
+                signature,
+                body,
+                captures: closure_captures,
+                ..
+            } => {
+                let closure_capture_summaries = closure_captures
+                    .iter()
+                    .map(|capture| self.summary_expr(capture, environment, captures))
+                    .collect::<Vec<_>>();
+                let mut closure_environment = BTreeMap::new();
+                for (slot, value_type) in
+                    function_signature_types(signature).enumerate()
+                {
+                    if matches!(value_type, PrimitiveType::Function(_)) {
+                        closure_environment
+                            .insert(slot, FlowTargetSummary::unknown_function());
+                    }
+                }
+                FlowTargetSummary {
+                    is_function: true,
+                    closures: vec![self.summary_expr(
+                        body,
+                        &closure_environment,
+                        &closure_capture_summaries,
+                    )],
+                    closure_defaults: vec![
+                        signature
+                            .labelled()
+                            .iter()
+                            .map(|parameter| parameter.default().is_some())
+                            .collect(),
+                    ],
+                    ..FlowTargetSummary::default()
+                }
+            }
+            Expr::Variable {
+                slot, value_type, ..
+            } => {
+                if !matches!(value_type, PrimitiveType::Function(_)) {
+                    return FlowTargetSummary::default();
+                }
+                environment
+                    .get(slot)
+                    .cloned()
+                    .unwrap_or_else(FlowTargetSummary::unknown_function)
+            }
+            Expr::Captured {
+                slot, value_type, ..
+            } => {
+                if !matches!(value_type, PrimitiveType::Function(_)) {
+                    return FlowTargetSummary::default();
+                }
+                captures
+                    .get(*slot)
+                    .cloned()
+                    .unwrap_or_else(FlowTargetSummary::unknown_function)
+            }
+            Expr::Global {
+                index, value_type, ..
+            } => {
+                if !matches!(value_type, PrimitiveType::Function(_)) {
+                    return FlowTargetSummary::default();
+                }
+                self.global_returns
+                    .get(*index)
+                    .cloned()
+                    .unwrap_or_else(FlowTargetSummary::unknown_function)
+            }
+            Expr::Let {
+                slot, value, body, ..
+            } => {
+                let value_summary = self.summary_expr(value, environment, captures);
+                let mut nested = environment.clone();
+                if let Some(slot) = slot {
+                    nested.insert(*slot, value_summary);
+                }
+                self.summary_expr(body, &nested, captures)
+            }
+            Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                let mut summary = self.summary_expr(then_branch, environment, captures);
+                summary.union(&self.summary_expr(else_branch, environment, captures));
+                summary
+            }
+            Expr::Sequence { expressions, .. } => expressions
+                .last()
+                .map_or_else(FlowTargetSummary::default, |expression| {
+                    self.summary_expr(expression, environment, captures)
+                }),
+            Expr::Call {
+                function,
+                callee,
+                function_hint,
+                result,
+                ..
+            } => {
+                if !matches!(result, PrimitiveType::Function(_)) {
+                    return FlowTargetSummary::default();
+                }
+                let callee_summary = callee.as_deref().map_or_else(
+                    || FlowTargetSummary::known_function(*function),
+                    |callee| self.summary_expr(callee, environment, captures),
+                );
+                let mut targets = callee_summary.clone();
+                if let Some(function_hint) = function_hint {
+                    targets.known.insert(*function_hint);
+                    targets.is_function = true;
+                }
+                let mut summary = FlowTargetSummary {
+                    is_function: true,
+                    unknown: targets.unknown,
+                    ..FlowTargetSummary::default()
+                };
+                for closure in &targets.closures {
+                    summary.union(closure);
+                }
+                for target in targets.known {
+                    if let Some(returned) = self.function_returns.get(target) {
+                        summary.union(returned);
+                    } else {
+                        summary.unknown = true;
+                    }
+                }
+                summary
+            }
+            Expr::Literal { .. } | Expr::Default { .. } => FlowTargetSummary::default(),
+        }
+    }
+
+    fn collect_expr(
+        &mut self,
+        expression: &Expr,
+        owner: Option<DependencyNode>,
+        environment: &BTreeMap<usize, FlowTargetSummary>,
+        captures: &[FlowTargetSummary],
+    ) -> Result<(), IrError> {
+        match expression {
+            Expr::Literal { .. }
+            | Expr::Default { .. }
+            | Expr::Variable { .. }
+            | Expr::Global { .. }
+            | Expr::Function { .. }
+            | Expr::Captured { .. } => {}
+            Expr::Closure {
+                captures: closure_captures,
+                body,
+                signature,
+                ..
+            } => {
+                for capture in closure_captures {
+                    self.collect_expr(capture, owner, environment, captures)?;
+                }
+                let closure_capture_summaries = closure_captures
+                    .iter()
+                    .map(|capture| self.summary_expr(capture, environment, captures))
+                    .collect::<Vec<_>>();
+                let mut closure_environment = BTreeMap::new();
+                for (slot, value_type) in
+                    function_signature_types(signature).enumerate()
+                {
+                    if matches!(value_type, PrimitiveType::Function(_)) {
+                        closure_environment
+                            .insert(slot, FlowTargetSummary::unknown_function());
+                    }
+                }
+                self.collect_expr(
+                    body,
+                    owner,
+                    &closure_environment,
+                    &closure_capture_summaries,
+                )?;
+            }
+            Expr::Sequence { expressions, .. } => {
+                for expression in expressions {
+                    self.collect_expr(expression, owner, environment, captures)?;
+                }
+            }
+            Expr::Let {
+                slot, value, body, ..
+            } => {
+                self.collect_expr(value, owner, environment, captures)?;
+                let value_summary = self.summary_expr(value, environment, captures);
+                let mut nested = environment.clone();
+                if let Some(slot) = slot {
+                    nested.insert(*slot, value_summary);
+                }
+                self.collect_expr(body, owner, &nested, captures)?;
+            }
+            Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.collect_expr(condition, owner, environment, captures)?;
+                self.collect_expr(then_branch, owner, environment, captures)?;
+                self.collect_expr(else_branch, owner, environment, captures)?;
+            }
+            Expr::Call {
+                function,
+                arguments,
+                callee,
+                function_hint,
+                ..
+            } => {
+                if let Some(callee) = callee {
+                    self.collect_expr(callee, owner, environment, captures)?;
+                }
+                for argument in arguments {
+                    self.collect_expr(argument, owner, environment, captures)?;
+                }
+                let callee_summary = callee.as_deref().map_or_else(
+                    || FlowTargetSummary::known_function(*function),
+                    |callee| self.summary_expr(callee, environment, captures),
+                );
+                let mut target_summary = callee_summary;
+                if let Some(function_hint) = function_hint {
+                    target_summary.known.insert(*function_hint);
+                    target_summary.is_function = true;
+                }
+                if target_summary.unknown {
+                    self.unresolved = true;
+                }
+                let argument_summaries = arguments
+                    .iter()
+                    .map(|argument| self.summary_expr(argument, environment, captures))
+                    .collect::<Vec<_>>();
+                for closure in &target_summary.closures {
+                    if closure.unknown {
+                        self.unresolved = true;
+                    }
+                    if let Some(owner) = owner {
+                        let Some(dependencies) = self
+                            .dependencies
+                            .get_mut(owner.node_index(self.globals.len()))
+                        else {
+                            return Err(IrError::InvalidExpression(format!(
+                                "dependency owner {owner:?} is outside the program"
+                            )));
+                        };
+                        for target in &closure.known {
+                            dependencies.insert(DependencyNode::Function(*target));
+                        }
+                        if let DependencyNode::Function(owner) = owner {
+                            let Some(edges) = self.calls.get_mut(owner) else {
+                                return Err(IrError::InvalidExpression(format!(
+                                    "function owner index {owner} is outside the program"
+                                )));
+                            };
+                            edges.extend(&closure.known);
+                        }
+                    }
+                }
+                if !target_summary.closure_defaults.is_empty()
+                    && let Some(callee) = callee.as_deref()
+                    && let PrimitiveType::Function(signature) = callee.result_type()
+                {
+                    for (index, argument) in arguments.iter().enumerate() {
+                        if !matches!(argument, Expr::Default { .. }) {
+                            continue;
+                        }
+                        let labelled_index =
+                            index.saturating_sub(signature.parameters().len());
+                        if target_summary.closure_defaults.iter().any(|defaults| {
+                            defaults
+                                .get(labelled_index)
+                                .is_some_and(|has_default| !has_default)
+                        }) {
+                            return Err(IrError::InvalidExpression(
+                                "indirect call default marker has no closure default"
+                                    .to_owned(),
+                            ));
+                        }
+                    }
+                }
+                for target in target_summary.known {
+                    let Some(callee) = self.functions.get(target) else {
+                        return Err(IrError::InvalidExpression(format!(
+                            "function index {target} is outside the program"
+                        )));
+                    };
+                    for (index, argument) in arguments.iter().enumerate() {
+                        if !matches!(argument, Expr::Default { .. }) {
+                            continue;
+                        }
+                        let labelled_index =
+                            index.saturating_sub(callee.signature().parameters().len());
+                        if callee
+                            .signature()
+                            .labelled()
+                            .get(labelled_index)
+                            .is_some_and(|parameter| parameter.default().is_none())
+                        {
+                            return Err(IrError::InvalidExpression(
+                                "indirect call default marker has no declaration default"
+                                    .to_owned(),
+                            ));
+                        }
+                    }
+                    if let Some(owner) = owner {
+                        let Some(dependencies) = self
+                            .dependencies
+                            .get_mut(owner.node_index(self.globals.len()))
+                        else {
+                            return Err(IrError::InvalidExpression(format!(
+                                "dependency owner {owner:?} is outside the program"
+                            )));
+                        };
+                        dependencies.insert(DependencyNode::Function(target));
+                        if let DependencyNode::Function(owner) = owner {
+                            let Some(edges) = self.calls.get_mut(owner) else {
+                                return Err(IrError::InvalidExpression(format!(
+                                    "function owner index {owner} is outside the program"
+                                )));
+                            };
+                            edges.insert(target);
+                        }
+                    }
+                    for (slot, (argument, value_type)) in argument_summaries
+                        .iter()
+                        .zip(function_signature_types(callee.signature()))
+                        .enumerate()
+                    {
+                        if !matches!(value_type, PrimitiveType::Function(_)) {
+                            continue;
+                        }
+                        let Some(target_parameters) =
+                            self.parameter_targets.get_mut(target)
+                        else {
+                            return Err(IrError::InvalidExpression(format!(
+                                "function index {target} is outside the program"
+                            )));
+                        };
+                        let Some(target_parameter) = target_parameters.get_mut(slot)
+                        else {
+                            return Err(IrError::InvalidExpression(format!(
+                                "function index {target} has no parameter slot {slot}"
+                            )));
+                        };
+                        let was_source = self
+                            .parameter_sources
+                            .get(target)
+                            .and_then(|parameters| parameters.get(slot))
+                            .copied()
+                            .unwrap_or(false);
+                        target_parameter.union(argument);
+                        if let Some(source) = self
+                            .parameter_sources
+                            .get_mut(target)
+                            .and_then(|parameters| parameters.get_mut(slot))
+                        {
+                            *source = true;
+                        }
+                        if !was_source && argument.unknown {
+                            target_parameter.unknown = true;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -2114,17 +2786,11 @@ fn canonical_function_signature(signature: &FunctionSignature) -> String {
             .labelled()
             .iter()
             .map(|parameter| {
-                let mut output = format!(
+                format!(
                     "(record name: @{} type: {}",
                     parameter.name(),
                     canonical_type(&parameter.value_type())
-                );
-                if let Some(default) = parameter.default() {
-                    output
-                        .push_str(&format!(" default: {}", default.canonical_vibon()));
-                }
-                output.push(')');
-                output
+                ) + ")"
             })
             .collect::<Vec<_>>();
         output.push_str(&format!(" labelled: {}", canonical_array(&labelled)));
@@ -2279,6 +2945,239 @@ mod tests {
     }
 
     #[test]
+    fn function_constructor_rejects_standalone_default_markers() {
+        let origin = origin();
+        let result = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::default_value(PrimitiveType::I32, origin.clone()),
+            origin,
+        );
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_forged_indirect_function_hints() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let first = CheckedFunction::new(
+            "first",
+            signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("first function");
+        let second = CheckedFunction::new(
+            "second",
+            signature.clone(),
+            Expr::literal(Value::I32(2), origin.clone()),
+            origin.clone(),
+        )
+        .expect("second function");
+        let caller_body = Expr::indirect_call(
+            Expr::function(0, signature.clone(), origin.clone()),
+            Some(1),
+            Vec::new(),
+            PrimitiveType::I32,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new("caller", signature, caller_body, origin)
+            .expect("caller function");
+        let result = CheckedProgram::try_new(vec![first, second, caller], 2);
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_hints_that_drop_conditional_targets() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let first = CheckedFunction::new(
+            "first",
+            signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("first function");
+        let second = CheckedFunction::new(
+            "second",
+            signature.clone(),
+            Expr::literal(Value::I32(2), origin.clone()),
+            origin.clone(),
+        )
+        .expect("second function");
+        let callee = Expr::if_expression(
+            Expr::literal(Value::Bool(true), origin.clone()),
+            Expr::function(0, signature.clone(), origin.clone()),
+            Expr::function(1, signature.clone(), origin.clone()),
+            origin.clone(),
+        );
+        let caller_body = Expr::indirect_call(
+            callee,
+            Some(1),
+            Vec::new(),
+            PrimitiveType::I32,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new("caller", signature, caller_body, origin)
+            .expect("caller function");
+        let result = CheckedProgram::try_new(vec![first, second, caller], 2);
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn program_constructor_does_not_trust_hints_for_unknown_parameters() {
+        let origin = origin();
+        let called_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let first = CheckedFunction::new(
+            "first",
+            called_signature.clone(),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("first function");
+        let second = CheckedFunction::new(
+            "second",
+            called_signature.clone(),
+            Expr::literal(Value::I32(2), origin.clone()),
+            origin.clone(),
+        )
+        .expect("second function");
+        let caller_signature = FunctionSignature::new(
+            vec![PrimitiveType::Function(Box::new(called_signature.clone()))],
+            PrimitiveType::I32,
+        );
+        let caller_body = Expr::indirect_call(
+            Expr::variable(
+                0,
+                PrimitiveType::Function(Box::new(called_signature)),
+                origin.clone(),
+            ),
+            Some(1),
+            Vec::new(),
+            PrimitiveType::I32,
+            origin.clone(),
+        );
+        let caller =
+            CheckedFunction::new("caller", caller_signature, caller_body, origin)
+                .expect("caller function");
+        let result = CheckedProgram::try_new(vec![first, second, caller], 2);
+        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_default_markers_in_positional_slots() {
+        let origin = origin();
+        let callee_signature = FunctionSignature::with_labelled(
+            vec![PrimitiveType::I32],
+            vec![super::LabelledParameter::new(
+                "value",
+                PrimitiveType::I32,
+                Some(Value::I32(7)),
+            )],
+            PrimitiveType::I32,
+        );
+        let callee = CheckedFunction::new(
+            "callee",
+            callee_signature.clone(),
+            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("callee function");
+        let caller_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let caller_body = Expr::call(
+            0,
+            vec![
+                Expr::default_value(PrimitiveType::I32, origin.clone()),
+                Expr::literal(Value::I32(8), origin.clone()),
+            ],
+            PrimitiveType::I32,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new(
+            "caller",
+            caller_signature,
+            caller_body,
+            origin.clone(),
+        )
+        .expect("caller function");
+        let result = CheckedProgram::try_new(vec![callee, caller], 1);
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_unavailable_indirect_defaults() {
+        let origin = origin();
+        let signature = FunctionSignature::with_labelled(
+            Vec::new(),
+            vec![super::LabelledParameter::new(
+                "value",
+                PrimitiveType::I32,
+                None,
+            )],
+            PrimitiveType::I32,
+        );
+        let callee = CheckedFunction::new(
+            "callee",
+            signature.clone(),
+            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("callee");
+        let caller = CheckedFunction::new(
+            "caller",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::indirect_call(
+                Expr::function(0, signature, origin.clone()),
+                None,
+                vec![Expr::default_value(PrimitiveType::I32, origin.clone())],
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin.clone(),
+        )
+        .expect("caller");
+        let result = CheckedProgram::try_new(vec![callee, caller], 1);
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
+    fn program_constructor_rejects_unavailable_closure_defaults() {
+        let origin = origin();
+        let signature = FunctionSignature::with_labelled(
+            Vec::new(),
+            vec![super::LabelledParameter::new(
+                "value",
+                PrimitiveType::I32,
+                None,
+            )],
+            PrimitiveType::I32,
+        );
+        let closure = Expr::closure(
+            signature.clone(),
+            Vec::new(),
+            Vec::new(),
+            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            1,
+            origin.clone(),
+        );
+        let caller = CheckedFunction::new(
+            "caller",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::indirect_call(
+                closure,
+                None,
+                vec![Expr::default_value(PrimitiveType::I32, origin.clone())],
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin.clone(),
+        )
+        .expect("caller");
+        let result = CheckedProgram::try_new(vec![caller], 0);
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
+    }
+
+    #[test]
     fn closure_constructor_rejects_parameter_metadata_with_wrong_types() {
         let origin = origin();
         let signature =
@@ -2365,6 +3264,65 @@ mod tests {
         .expect("function");
         let result =
             CheckedProgram::try_new_with_globals(vec![global], vec![function], 0);
+        assert!(matches!(result, Err(IrError::GlobalInitializerCycle(_))));
+    }
+
+    #[test]
+    fn higher_order_global_cycles_reach_initializer_validation() {
+        let origin = origin();
+        let read_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let apply_signature = FunctionSignature::new(
+            vec![PrimitiveType::Function(Box::new(read_signature.clone()))],
+            PrimitiveType::I32,
+        );
+        let global = super::CheckedGlobal::new(
+            "value",
+            PrimitiveType::I32,
+            Expr::call(
+                0,
+                vec![Expr::function(1, read_signature.clone(), origin.clone())],
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin.clone(),
+        )
+        .expect("global shape");
+        let apply = CheckedFunction::new(
+            "apply",
+            apply_signature,
+            Expr::indirect_call(
+                Expr::variable(
+                    0,
+                    PrimitiveType::Function(Box::new(read_signature.clone())),
+                    origin.clone(),
+                ),
+                None,
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin.clone(),
+        )
+        .expect("apply");
+        let read = CheckedFunction::new(
+            "read",
+            read_signature,
+            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("read");
+        let answer = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("answer");
+        let result = CheckedProgram::try_new_with_globals(
+            vec![global],
+            vec![apply, read, answer],
+            2,
+        );
         assert!(matches!(result, Err(IrError::GlobalInitializerCycle(_))));
     }
 }
