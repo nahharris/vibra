@@ -76,7 +76,7 @@ path named `std` cannot confer external-declaration authority.
 | 5 | [Execute typed primitive functions](05-primitives.md) | 4 | landed | `origin/m2` head `0477a7a`; predecessor evidence retained |
 | 6 | [Execute constants, bindings, and control flow](06-bindings.md) | 5 | landed | tested head `44a482c`; merged on `m2` as `9494d6a`; 151-case corpus |
 | 7 | [Execute function values and labelled calls](07-functions.md) | 6 | landed | `m2` merge `c9751d2`; 157-case corpus, focused IR/conformance suites |
-| 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | landed | `m2` merge `8484cea`; follow-up has versioned registry metadata, direct `@std.text` imports, independent concat/length cases, and 160-case corpus evidence |
+| 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | landed | `m2` merge `73592be`; versioned registry metadata, direct `@std.text` imports, independent concat/length cases, and 160-case corpus evidence |
 | 9 | [Guarantee tail calls](09-tail-calls.md) | 8 | not started | — |
 | 10 | [Expose semantic position facts](10-queries.md) | 9 | not started | — |
 | 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | not started | — |

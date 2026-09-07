@@ -1,8 +1,6 @@
 # Step 8 — closed compiler externals and pure stdlib bootstrap
 
-Implementation status: closed registry and signed bootstrap verification landed
-on `m2`; the explicit-import adapter and boundary evidence are on the current
-Step 8 follow-up branch.
+Implementation status: complete on `m2` at merge `73592be`.
 
 Requires Step 7 and C7/C8. Read source **External definitions**, runtime
 **External providers**, **Evaluation**, types **Control flow and failure**,
