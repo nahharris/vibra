@@ -1,0 +1,17 @@
+id = "V1-TYPE-NAMES-binding-cycle"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "Direct immutable module value initializer cycles are rejected before lowering."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.initializer-cycle"
+level = "@error"
+source = "input.vib"
+span = [0, 22]

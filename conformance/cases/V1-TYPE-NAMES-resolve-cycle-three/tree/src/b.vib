@@ -1,0 +1,2 @@
+(import c @app.c)
+(defn call () void (do))

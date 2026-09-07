@@ -1,0 +1,1 @@
+(defn answer () i32 (do (if true 1i32 2.0f32) 0i32))

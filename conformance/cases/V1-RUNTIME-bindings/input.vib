@@ -1,0 +1,7 @@
+(def base i32 (let seed 40i32 seed))
+(defn answer () i32 (let local base (add local)))
+(defn add (value i32) i32
+  (let ignored (do 1i8 2i8)
+    (if true
+      (do value 2i32)
+      0i32)))

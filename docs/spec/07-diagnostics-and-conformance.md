@@ -29,6 +29,8 @@ table governs.
 | `@syntax.invalid-attribute` | `@error` |
 | `@name.unknown-symbol` | `@error` |
 | `@name.wrong-entity-kind` | `@error` |
+| `@name.private-access` | `@error` |
+| `@name.redeclaration` | `@error` |
 | `@name.member-collision` | `@error` |
 | `@name.generic-redeclaration` | `@error` |
 | `@name.reserved-label` | `@error` |
@@ -36,6 +38,10 @@ table governs.
 | `@name.reserved-value-spelling` | `@error` |
 | `@module.file-directory-collision` | `@error` |
 | `@module.unknown-path` | `@error` |
+| `@module.import-cycle` | `@error` |
+| `@module.invalid-segment` | `@error` |
+| `@module.path-escape` | `@error` |
+| `@module.io-error` | `@error` |
 | `@type.argument-mismatch` | `@error` |
 | `@type.type-argument-mismatch` | `@error` |
 | `@type.redundant-implementation` | `@error` |
@@ -46,6 +52,7 @@ table governs.
 | `@type.invalid-tuple-index` | `@error` |
 | `@type.unknown-record-field` | `@error` |
 | `@type.numeric-out-of-range` | `@error` |
+| `@type.initializer-cycle` | `@error` |
 | `@type.anonymous-type-body` | `@error` |
 | `@type.undispatchable-contract-member` | `@error` |
 | `@type.union-too-few-members` | `@error` |
@@ -73,9 +80,13 @@ table governs.
 | `@project.invalid-entry-signature` | `@error` |
 | `@project.ambiguous-dependency-target` | `@error` |
 | `@project.overlapping-target-roots` | `@error` |
+| `@project.not-found` | `@error` |
+| `@project.invalid-target-root` | `@error` |
+| `@project.io-error` | `@error` |
 | `@runtime.invalid-host-value` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
+| `@tool.unavailable` | `@error` |
 
 Codes are stable within the v1 line and are atoms in Vibra data. JSON output
 serializes the exact atom spelling as a string. A code need not be renamed if
@@ -102,11 +113,53 @@ tests, but not loaded from or executed as Vibra source.
 A diagnostic contains schema version, code, level, message, primary source
 span, related spans, notes, and zero or more fixes. Spans are half-open UTF-8
 byte ranges with one-based line and Unicode-scalar column as derived display
-data. Fixes declare whether they are safe and carry expected document
-revisions.
+data. A multi-document observation carries the owning source identity on every
+primary and related span; a related span may identify a different document than
+the primary span. A single-document producer may leave identity null. Fixes
+declare whether they are safe and carry expected document revisions.
 
 Messages help people; codes and fields help tools. Tests assert codes, levels,
 spans, related identities, and fix results, not incidental English punctuation.
+
+`@tool.unavailable` is emitted when a syntactically valid v1 command or language
+surface is outside the selected implementation profile. It is distinct from a
+malformed-input diagnostic and from the conformance runner's `unavailable`
+status: a real handler reports the diagnostic through its result contract,
+while a missing handler remains an unavailable corpus observation.
+
+The workspace boundary uses the following additional codes. Discovery emits
+`@project.not-found` when no exact `project.vibon` is found within the allowed
+ancestor search, and emits the nearest document's normal data or syntax
+diagnostics when that exact file exists but is malformed; it MUST NOT continue
+to an older ancestor after a malformed nearest project. A legacy `project.vib`
+or any other candidate is rejected by the extension-selected loader with
+`@data.invalid-extension` and is never content-sniffed. `@project.invalid-target-root`
+is attached to a target `root` value for an empty, absolute, parent-traversing,
+missing, non-directory, or otherwise non-confined root. `@project.io-error` is
+attached to an available project/root span when a non-security filesystem
+operation fails and carries the operation and path as a note. When no project
+document exists, the primary span is the empty span `0..0` with no source ID.
+
+During source enumeration, `@module.invalid-segment` is attached to the empty
+span `0..0` of the affected project-relative path when a directory or file
+segment is not a single kebab-name component. `@module.path-escape` is used
+for a symlink or junction whose canonical target leaves the project or target
+root; its primary span is the affected project/root field when one exists,
+otherwise the empty span of the project-relative path. `@module.io-error` is
+used for a dangling or otherwise unreadable link/entry and for a source read
+failure, with the same path-span rule. These diagnostics are emitted before
+module parsing; their messages are explanatory and are not a machine
+contract. All filesystem diagnostics are errors with no fixes.
+
+Resolution diagnostics retain the referring source ID and half-open span. A
+private imported declaration is `@name.private-access`; a repeated top-level,
+import-alias, or lexical binding name is `@name.redeclaration`; a repeated
+member in one owner's flat namespace is `@name.member-collision`; and an
+import back edge is `@module.import-cycle`. The later span is primary and the
+earlier declaration or edge is a related span when available. Resolver output
+is deterministic by source ID, primary span, and registry order. Resolution
+consumes only an explicit immutable source graph and performs no filesystem,
+dependency, lock, cache, or network access.
 
 ## Recovery
 
@@ -130,13 +183,63 @@ The implementation will maintain a backend-independent corpus organized by
 specification rule, not compiler module. Each case records:
 
 - normative rule ID;
-- source/project/data inputs;
+- a closed operation selector (`reader`, `project-decode`, `source-graph`,
+  `resolve`, `type-check`, or `interpret`);
+  `project-decode` requires exactly one project input, and a
+  `source-graph` case requires one confined `tree` directory and a `project`
+  input whose path is exactly `<tree>/project.vibon`; the corpus loader MUST
+  acquire that tree before graph building and the handler MUST load only that
+  exact marker, never an ancestor or sibling;
+  `resolve` has the same confined `tree`/`project` binding and consumes the
+  already acquired graph through the filesystem-free `vibra-resolve` input;
+  non-reader case with multiple input kinds must state its operation;
+- source/project/data inputs and an optional confined tree directory;
+- an optional `.vibon` `graph` snapshot path for source-graph cases; when present it
+  records the canonical `@source-graph.v1` observation, so acceptance alone
+  cannot hide a wrong snapshot. Its VIBON shape is one top-level `record`
+  with `format: @source-graph.v1`, a `units` array, and a `dependencies`
+  array. Each unit record has `name`, `kind`, and a `modules` array; each
+  module record has canonical module atom `path` (for example
+  `@hello.nested.a`), project-relative `source`, and `bytes-hex`.
+  `bytes-hex` is the lowercase, two-digit-per-byte encoding of
+  the exact immutable source bytes. Each dependency record has its `alias`,
+  `kind`, declared `source`, optional `target`, delivery `status`, owning
+  `source-id`, and half-open `span`. Arrays are sorted by their canonical
+  identity and source identity. The graph record contains no parsed or
+  resolved declarations;
+- an optional `resolved` snapshot path for `resolve` cases; when present it is
+  canonical VIBON with format `@resolved.v1` and records package provenance,
+  sorted source modules (whose module paths are canonical atoms), declaration
+  IDs with source IDs/spans/visibility, import edges (whose resolved module
+  targets are canonical atoms), and body-reference edges. Exact source bytes remain in the
+  `@source-graph.v1` observation, so resolution never rereads or normalizes
+  source input. Its top-level record has `format`, `package`, `modules`,
+  `declarations`, `imports`, and `references`; declaration records carry
+  canonical package-qualified IDs, entity kind, visibility, source ID, and
+  span; import and reference records carry their written edge and source/span
+  provenance. Both snapshot formats are compared as canonical text by the
+  runner; expected text is never reparsed by the implementation under test;
 - expected acceptance or diagnostics;
 - expected canonical formatting;
 - expected resolved identities, types, and effects where relevant;
-- interpreter result and ordered audit trace where executable;
+- interpreter result and ordered audit trace where executable; the expected
+  audit trace is a `.vibon` snapshot whose canonical root is
+  `(record format: @audit-trace.v1 events: (array ...))`, with event strings in
+  execution order;
 - Wasm result and ordered audit trace where executable; and
 - deterministic build hashes for artifact cases.
+
+The source graph has one representation: the structured `@source-graph.v1`
+VIBON record described above. Every graph consumer and corpus fixture MUST
+produce or compare that record directly. Plain-text graph snapshots are not a
+supported input, output, or compatibility format. The graph representation
+MUST preserve the exact source IDs, bytes, spans, and dependency edges above.
+
+Executable audit traces have one representation as well: the structured
+`@audit-trace.v1` VIBON record described above. An empty pure trace is the
+canonical `(record format: @audit-trace.v1 events: (array))` value. Event
+strings remain ordered and are never flattened into a line-oriented text
+snapshot; plain-text audit snapshots are not a supported format.
 
 Cases use the following stable section IDs, followed by a descriptive
 kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
@@ -224,6 +327,13 @@ effect nor a function-call edge. Collection construction covers heterogeneous
 `tuple.of`, homogeneous and expected-empty `array.of`, even and duplicate-key
 `map.of`, and rejection of source `(tuple ...)`, `(array ...)`, and `(map ...)`
 value construction.
+
+For the admitted monomorphic function subset, fixed and labelled arity,
+duplicate-label, unknown-label, required-label, and operand-type failures use
+`@type.argument-mismatch`. A statically non-function callee uses
+`@type.not-applicable`. The `@style.argument-order` warning is emitted only
+after the written function signature proves a complete, unambiguous binding;
+an invalid application never produces formatter binding facts.
 
 Pattern coverage includes direct bare-name binders, nested destructuring in
 `let`, positional parameters, lambdas, and `match`, duplicate-name and
@@ -363,6 +473,12 @@ called Vibra v1:
 Profiles are capability statements, not source dialects. The same source is
 never reinterpreted differently by a smaller profile; unsupported execution is
 reported as unavailable.
+
+For the M2 implementation profile, a valid source or command surface that is
+outside the admitted subset emits `@tool.unavailable` through the normal
+diagnostic result. A corpus handler with no implementation remains an
+`unavailable` observation and fails the relevant gate; it must not be turned
+into a passing case by selecting a smaller profile.
 
 ## Required implementation suites
 

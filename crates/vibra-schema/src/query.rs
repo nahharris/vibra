@@ -18,6 +18,8 @@ pub struct SourcePositionQueryDocument {
     pub schema_version: u32,
     /// The queried UTF-8 byte offset.
     pub offset: usize,
+    /// The source identity owning the query span, when known.
+    pub source_id: Option<String>,
     /// The selected half-open syntax span and its display endpoints.
     pub span: SpanDocument,
     /// The extension-selected document mode.
@@ -38,10 +40,21 @@ impl SourcePositionQueryDocument {
     /// Renders a syntax-owned query against the source's line index.
     #[must_use]
     pub fn render(query: &StructuralQuery, index: &LineIndex<'_>) -> Self {
+        Self::render_with_source(query, index, None)
+    }
+
+    /// Renders a query while retaining its owning source identity.
+    #[must_use]
+    pub fn render_with_source(
+        query: &StructuralQuery,
+        index: &LineIndex<'_>,
+        source_id: Option<&str>,
+    ) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             offset: query.offset(),
-            span: SpanDocument::render(query.span(), index),
+            source_id: source_id.map(str::to_owned),
+            span: SpanDocument::render_with_source(query.span(), index, source_id),
             mode: query.mode().as_str().to_owned(),
             syntax_kind: syntax_kind_name(query.syntax_kind()).to_owned(),
             category: query.category().as_str().to_owned(),

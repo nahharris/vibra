@@ -5,6 +5,31 @@ use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use crate::manifest::{CaseManifest, MANIFEST_FILE_NAME, ManifestError};
+use vibra_syntax::DocumentMode;
+
+/// One immutable document supplied to a profile handler.
+///
+/// The path is the neutral source identity used by diagnostics and snapshots;
+/// handlers do not need to reconstruct it from a filesystem path or merge
+/// documents into one synthetic source string.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaseInputDocument {
+    /// The case-relative document identity.
+    pub source_id: String,
+    /// The grammar selected by the manifest role and extension.
+    pub mode: DocumentMode,
+    /// The document bytes decoded as UTF-8.
+    pub text: String,
+}
+
+/// One exact file acquired from a manifest-declared tree input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaseTreeFile {
+    /// Case-relative slash-separated source identity.
+    pub source_id: String,
+    /// Exact bytes on disk.
+    pub bytes: Vec<u8>,
+}
 
 /// A loaded case and its manifest directory.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +79,86 @@ impl Case {
             .as_deref()
             .map(|path| self.read_file(path))
             .transpose()
+    }
+
+    /// Loads every declared input as an explicit, source-identified document.
+    ///
+    /// Declaration order is source, project, then data paths, matching the
+    /// manifest roles. The returned order is stable and each text remains
+    /// independently addressable.
+    pub fn input_documents(&self) -> Result<Vec<CaseInputDocument>, CorpusError> {
+        let inputs = &self.manifest.inputs;
+        let mut documents = Vec::new();
+        if let Some(path) = &inputs.source {
+            documents.push(self.load_input(path, DocumentMode::Source)?);
+        }
+        if let Some(path) = &inputs.project {
+            documents.push(self.load_input(path, DocumentMode::Data)?);
+        }
+        for path in &inputs.data {
+            documents.push(self.load_input(path, DocumentMode::Data)?);
+        }
+        Ok(documents)
+    }
+
+    /// Acquires every regular file under the optional confined tree input.
+    ///
+    /// The tree is walked in stable path order. Symlink and junction targets
+    /// must stay inside both the tree and case directory; canonical directory
+    /// identities suppress aliases and cycles.
+    pub fn tree_files(&self) -> Result<Vec<CaseTreeFile>, CorpusError> {
+        if self.manifest.inputs.tree.is_none() {
+            return Ok(Vec::new());
+        }
+        let tree = self.tree_path()?;
+        let case_root = std::fs::canonicalize(&self.directory).map_err(|source| {
+            CorpusError::Io {
+                path: self.directory.clone(),
+                source,
+            }
+        })?;
+        let tree_root =
+            std::fs::canonicalize(&tree).map_err(|source| CorpusError::Io {
+                path: tree.clone(),
+                source,
+            })?;
+        let mut files = Vec::new();
+        let mut visited = BTreeSet::new();
+        collect_tree_files(&tree, &case_root, &tree_root, &mut visited, &mut files)?;
+        files.sort_by(|left, right| left.0.cmp(&right.0));
+        files
+            .into_iter()
+            .map(|(source_id, path)| {
+                let bytes = std::fs::read(&path).map_err(|source| CorpusError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+                Ok(CaseTreeFile { source_id, bytes })
+            })
+            .collect()
+    }
+
+    /// Resolves the manifest-declared tree root as a canonical directory.
+    pub(crate) fn tree_path(&self) -> Result<PathBuf, CorpusError> {
+        let Some(relative) = self.manifest.inputs.tree.as_deref() else {
+            return Err(CorpusError::InvalidCase {
+                path: self.directory.clone(),
+                message: "source-graph case has no declared tree input".to_owned(),
+            });
+        };
+        resolve_directory(&self.directory, relative, &self.manifest.id)
+    }
+
+    fn load_input(
+        &self,
+        source_id: &str,
+        mode: DocumentMode,
+    ) -> Result<CaseInputDocument, CorpusError> {
+        Ok(CaseInputDocument {
+            source_id: source_id.to_owned(),
+            mode,
+            text: self.read_file(source_id)?,
+        })
     }
 }
 
@@ -354,6 +459,9 @@ fn validate_declared_files(
     if let Some(project) = &manifest.inputs.project {
         let _ = resolve_file(directory, project, &manifest.id)?;
     }
+    if let Some(tree) = &manifest.inputs.tree {
+        let _ = resolve_directory(directory, tree, &manifest.id)?;
+    }
     for data in &manifest.inputs.data {
         let _ = resolve_file(directory, data, &manifest.id)?;
     }
@@ -361,6 +469,7 @@ fn validate_declared_files(
     let expectations = &manifest.expectations;
     for snapshot in [
         expectations.formatted.as_ref(),
+        expectations.graph.as_ref(),
         expectations.resolved.as_ref(),
         expectations.types.as_ref(),
         expectations.effects.as_ref(),
@@ -441,4 +550,159 @@ fn resolve_file(
         });
     }
     Ok(canonical_file)
+}
+
+fn resolve_directory(
+    directory: &Path,
+    relative: &str,
+    case_id: &str,
+) -> Result<PathBuf, CorpusError> {
+    let relative_path = Path::new(relative);
+    if relative.is_empty()
+        || relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(CorpusError::InvalidCase {
+            path: directory.to_path_buf(),
+            message: format!(
+                "case `{case_id}` uses a non-relative tree path `{relative}`"
+            ),
+        });
+    }
+    let path = directory.join(relative_path);
+    let metadata =
+        std::fs::symlink_metadata(&path).map_err(|source| CorpusError::Io {
+            path: path.clone(),
+            source,
+        })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(CorpusError::InvalidCase {
+            path,
+            message: "declared tree input is not a regular directory or is a link"
+                .to_owned(),
+        });
+    }
+    let canonical_directory =
+        std::fs::canonicalize(directory).map_err(|source| CorpusError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?;
+    let canonical_tree =
+        std::fs::canonicalize(&path).map_err(|source| CorpusError::Io {
+            path: path.clone(),
+            source,
+        })?;
+    if !canonical_tree.starts_with(&canonical_directory) {
+        return Err(CorpusError::InvalidCase {
+            path,
+            message: "declared tree resolves outside its case directory".to_owned(),
+        });
+    }
+    Ok(canonical_tree)
+}
+
+fn collect_tree_files(
+    directory: &Path,
+    case_root: &Path,
+    tree_root: &Path,
+    visited: &mut BTreeSet<PathBuf>,
+    files: &mut Vec<(String, PathBuf)>,
+) -> Result<(), CorpusError> {
+    let canonical_directory =
+        std::fs::canonicalize(directory).map_err(|source| CorpusError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?;
+    if !canonical_directory.starts_with(case_root)
+        || !canonical_directory.starts_with(tree_root)
+    {
+        return Err(CorpusError::InvalidCase {
+            path: directory.to_path_buf(),
+            message: "tree entry resolves outside the confined tree".to_owned(),
+        });
+    }
+    if !visited.insert(canonical_directory) {
+        return Ok(());
+    }
+    let mut entries = std::fs::read_dir(directory)
+        .map_err(|source| CorpusError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?
+        .map(|entry| {
+            entry
+                .map_err(|source| CorpusError::Io {
+                    path: directory.to_path_buf(),
+                    source,
+                })
+                .map(|entry| entry.path())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort();
+    for path in entries {
+        let metadata =
+            std::fs::symlink_metadata(&path).map_err(|source| CorpusError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        if metadata.file_type().is_symlink() {
+            let canonical =
+                std::fs::canonicalize(&path).map_err(|source| CorpusError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+            if !canonical.starts_with(case_root) || !canonical.starts_with(tree_root) {
+                return Err(CorpusError::InvalidCase {
+                    path,
+                    message: "tree link resolves outside its confined tree".to_owned(),
+                });
+            }
+            let target_metadata =
+                std::fs::metadata(&path).map_err(|source| CorpusError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+            if target_metadata.is_dir() {
+                collect_tree_files(&path, case_root, tree_root, visited, files)?;
+            } else if target_metadata.is_file() {
+                files.push((relative_id(case_root, &path), canonical));
+            }
+        } else if metadata.is_dir() {
+            collect_tree_files(&path, case_root, tree_root, visited, files)?;
+        } else if metadata.is_file() {
+            let canonical =
+                std::fs::canonicalize(&path).map_err(|source| CorpusError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+            if !canonical.starts_with(case_root) || !canonical.starts_with(tree_root) {
+                return Err(CorpusError::InvalidCase {
+                    path,
+                    message: "tree file resolves outside its confined tree".to_owned(),
+                });
+            }
+            files.push((relative_id(case_root, &path), canonical));
+        }
+    }
+    Ok(())
+}
+
+fn relative_id(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }

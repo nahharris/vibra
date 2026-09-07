@@ -15,6 +15,8 @@
     clippy::unwrap_used
 )]
 
+use std::collections::BTreeMap;
+
 use jsonschema::Validator;
 use serde_json::{Value, json};
 use vibra_diagnostics::{
@@ -75,7 +77,8 @@ fn rich_diagnostic() -> (String, Diagnostic) {
 fn a_rendered_diagnostic_validates_against_the_published_schema() {
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
-    let document = DiagnosticDocument::render(&diagnostic, &index);
+    let document = DiagnosticDocument::render(&diagnostic, &index)
+        .expect("the diagnostic has all required source indexes");
 
     let instance = serde_json::to_value(&document).expect("the document serializes");
     assert_valid(&diagnostic_validator(), &instance);
@@ -93,7 +96,8 @@ fn a_minimal_diagnostic_validates_against_the_published_schema() {
             "`while` was retired",
         ),
         &index,
-    );
+    )
+    .expect("the diagnostic has all required source indexes");
 
     let instance = serde_json::to_value(&document).expect("the document serializes");
     assert_valid(&diagnostic_validator(), &instance);
@@ -138,7 +142,8 @@ fn a_span_carries_both_bytes_and_derived_positions() {
             "unknown symbol",
         ),
         &index,
-    );
+    )
+    .expect("the diagnostic has all required source indexes");
 
     assert_eq!(document.primary_span.start, 4);
     assert_eq!(document.primary_span.end, 6);
@@ -148,10 +153,47 @@ fn a_span_carries_both_bytes_and_derived_positions() {
 }
 
 #[test]
+fn a_related_span_uses_the_index_for_its_source_document() {
+    let primary_source = "one\n";
+    let related_source = "a\nb\n";
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::NameUnknownSymbol,
+        ByteSpan::new(0, 1),
+        "unknown symbol",
+    )
+    .with_source_id("one.vib")
+    .with_related_source("two.vib", ByteSpan::new(2, 3), "declaration");
+    let primary_index = LineIndex::new(primary_source);
+    let mut source_indexes = BTreeMap::new();
+    source_indexes.insert("two.vib".to_owned(), LineIndex::new(related_source));
+
+    let document = DiagnosticDocument::render_with_source_indexes(
+        &diagnostic,
+        &primary_index,
+        &source_indexes,
+    )
+    .expect("the related source index is supplied");
+
+    assert!(
+        DiagnosticDocument::render(&diagnostic, &primary_index).is_err(),
+        "a foreign related source must not use the primary document's positions"
+    );
+
+    assert_eq!(document.primary_span.source_id.as_deref(), Some("one.vib"));
+    assert_eq!(
+        document.related[0].span.source_id.as_deref(),
+        Some("two.vib")
+    );
+    assert_eq!(document.related[0].span.start_position.line, 2);
+    assert_eq!(document.related[0].span.start_position.column, 1);
+}
+
+#[test]
 fn a_rendered_diagnostic_round_trips_through_json() {
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
-    let document = DiagnosticDocument::render(&diagnostic, &index);
+    let document = DiagnosticDocument::render(&diagnostic, &index)
+        .expect("the diagnostic has all required source indexes");
 
     let text = serde_json::to_string(&document).expect("the document serializes");
     let parsed: DiagnosticDocument =
@@ -177,9 +219,11 @@ fn an_unknown_field_is_rejected_when_reading() {
     // does, so both the schema and the reader must refuse it.
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
-    let mut instance =
-        serde_json::to_value(DiagnosticDocument::render(&diagnostic, &index))
-            .expect("the document serializes");
+    let mut instance = serde_json::to_value(
+        DiagnosticDocument::render(&diagnostic, &index)
+            .expect("the diagnostic has all required source indexes"),
+    )
+    .expect("the document serializes");
     instance["severity"] = json!("fatal");
 
     assert!(
@@ -199,9 +243,11 @@ fn an_unknown_field_is_rejected_when_reading() {
 fn a_missing_required_field_is_rejected_when_reading() {
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
-    let mut instance =
-        serde_json::to_value(DiagnosticDocument::render(&diagnostic, &index))
-            .expect("the document serializes");
+    let mut instance = serde_json::to_value(
+        DiagnosticDocument::render(&diagnostic, &index)
+            .expect("the diagnostic has all required source indexes"),
+    )
+    .expect("the document serializes");
     instance
         .as_object_mut()
         .expect("an object")
@@ -223,9 +269,11 @@ fn an_unsupported_schema_version_is_rejected_by_the_schema() {
     // A reader must reject a newer major version rather than guessing.
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
-    let mut instance =
-        serde_json::to_value(DiagnosticDocument::render(&diagnostic, &index))
-            .expect("the document serializes");
+    let mut instance = serde_json::to_value(
+        DiagnosticDocument::render(&diagnostic, &index)
+            .expect("the diagnostic has all required source indexes"),
+    )
+    .expect("the document serializes");
     instance["schemaVersion"] = json!(SCHEMA_VERSION + 1);
 
     assert!(
@@ -241,9 +289,11 @@ fn an_unsupported_schema_version_is_rejected_by_the_schema() {
 fn an_unregistered_level_is_rejected_by_the_schema() {
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
-    let mut instance =
-        serde_json::to_value(DiagnosticDocument::render(&diagnostic, &index))
-            .expect("the document serializes");
+    let mut instance = serde_json::to_value(
+        DiagnosticDocument::render(&diagnostic, &index)
+            .expect("the diagnostic has all required source indexes"),
+    )
+    .expect("the document serializes");
     instance["level"] = json!("@info");
 
     assert!(

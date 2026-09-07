@@ -1,0 +1,18 @@
+id = "V1-PROJECT-static-binary-contract"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "Binary targets require both entry and effects fields."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@data.invalid-shape"
+level = "@error"
+source = "project.vibon"
+[expect.diagnostics.span]
+start = 93
+end = 156

@@ -1,0 +1,12 @@
+id = "V1-TYPE-NAMES-binding-forward"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A module value may refer forward to a later immutable value without using execution for type inference."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"

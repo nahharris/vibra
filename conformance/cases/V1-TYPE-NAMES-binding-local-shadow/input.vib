@@ -1,0 +1,1 @@
+(defn answer (value i32) i32 (let first value (let first 1i32 first)))

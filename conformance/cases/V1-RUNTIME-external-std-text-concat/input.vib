@@ -1,0 +1,3 @@
+(import text @std.text)
+(defn answer () str
+  (text.concat "A😀" ""))

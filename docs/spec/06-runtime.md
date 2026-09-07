@@ -15,6 +15,12 @@ The interpreter is not a second frontend: it consumes the same resolved typed
 IR as the Wasm backend. Parsing, name resolution, type checking, performed-row
 calculation, and external-registry validation are shared.
 
+The M2 interpreter consumes only successfully checked IR from the M2 supported
+surface. It has no host provider execution, ambient filesystem/environment/time
+reads, or Wasm path. A valid later-v1 operation that is outside this profile is
+reported as `@tool.unavailable` before lowering; it is never reinterpreted as a
+generic application.
+
 WebAssembly is a compiler output backend, not a source interoperability
 surface. V1 source cannot import a `.wasm` module or name a WebAssembly
 provider.
@@ -127,6 +133,35 @@ V1 defines no portable stack-depth limit. Non-tail recursion and non-tail calls
 that exhaust an embedding host's stack are host events, not portable semantic
 results, and are outside interpreter/Wasm parity. Default `iter` method bodies
 MAY lower to internal loops; that mutation is not a source feature.
+
+## M2 compiler intrinsic profile
+
+The M2 `@compiler` registry is closed to two pure operations; its versioned
+identity is `vibra_v1`. A trusted standard-library declaration may bind
+`text.concat` with signature `str str -> str` and `text.length` with signature
+`str -> u64`. Concatenation preserves Unicode scalar order; length counts
+Unicode scalars rather than UTF-8 bytes. Both operations are total,
+deterministic, and host-event free.
+They accept no ambient input and have no runtime trap outcome.
+
+No integer or floating compiler operation is admitted in M2. The v1
+`integer.add-checked` declaration remains a valid source spelling but is
+`@tool.unavailable` until its nominal `result` contract and overflow behavior
+are implemented. `integer.increment` and `integer.to-str` likewise require
+their own reviewed signatures. The checker must report availability before
+lowering instead of wrapping, trapping, or fabricating a private result type.
+
+Adding a compiler symbol requires a specification change to this table and its
+registry tests; a string in source or a copied declaration cannot authorize an
+operation.
+
+M2 test assertions are a separate closed test-runner outcome surface described
+in the projects chapter. They evaluate through the ordinary typed call path,
+perform no host operation, and have no compiler or host registry symbol. A
+false assertion records `@test.assertion-failed` and stops only its current
+test; it is not a trap and cannot be caught or converted into a Vibra
+`result`. A trap raised by another runtime invariant remains `@test.trap` (or
+`@command.trap` at the CLI boundary) with its origin and stable trap code.
 
 ## External providers
 

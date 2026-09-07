@@ -1,0 +1,17 @@
+id = "V1-RUNTIME-rejected"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A failed type check prevents any interpreter result or trace from being produced."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [16, 21]

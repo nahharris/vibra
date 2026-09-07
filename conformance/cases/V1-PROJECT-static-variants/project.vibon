@@ -1,0 +1,1 @@
+(record format: @project.v1 package: (record name: "hello" version: "0.1.0") targets: (array (record name: @hello kind: @lib root: "src")) dependencies: (map @local (record kind: @path path: "../local" target: @core) @remote (record kind: @git git: "https://example.com/repo.git/path?q=1#top" rev: "0123456789abcdef0123456789abcdef01234567")))

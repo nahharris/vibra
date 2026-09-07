@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-sequence"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Literal sequences evaluate left to right and return the final checked value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use vibra_diagnostics::Diagnostic;
+use vibra_ir::Value;
 
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, ExpectedExecution};
@@ -38,6 +39,8 @@ pub struct CaseObservation {
     pub diagnostics: Vec<Diagnostic>,
     /// Canonical formatted source, if the handler provides it.
     pub formatted: Option<String>,
+    /// Canonical source-graph snapshot, if the handler provides it.
+    pub graph: Option<String>,
     /// Resolved-identity output, if the handler provides it.
     pub resolved: Option<String>,
     /// Type output, if the handler provides it.
@@ -98,6 +101,16 @@ impl std::error::Error for HandlerError {}
 /// The interface a future reader, static, interpreter, tooling, or Wasm
 /// implementation uses to plug into the internal runner.
 pub trait ProfileHandler: Send + Sync {
+    /// Whether this handler owns the declared shape of `case`.
+    ///
+    /// A profile can have several composable handlers. The dispatcher asks
+    /// this predicate before selecting one, so a later static slice can add a
+    /// handler without replacing the project handler or claiming unrelated
+    /// cases.
+    fn can_run(&self, _case: &Case) -> bool {
+        true
+    }
+
     /// Executes one case and returns backend-neutral observations.
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError>;
 }
@@ -105,8 +118,12 @@ pub trait ProfileHandler: Send + Sync {
 /// Selects the closest registered profile capable of running each case.
 #[derive(Default)]
 pub struct ProfileDispatcher {
-    handlers: BTreeMap<ConformanceProfile, Box<dyn ProfileHandler>>,
+    handlers: BTreeMap<ConformanceProfile, Vec<Box<dyn ProfileHandler>>>,
 }
+
+type HandlerCandidate<'a> = (ConformanceProfile, &'a dyn ProfileHandler);
+type HandlerSelection<'a> =
+    Result<Option<HandlerCandidate<'a>>, (ConformanceProfile, String)>;
 
 impl fmt::Debug for ProfileDispatcher {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -129,7 +146,7 @@ impl ProfileDispatcher {
     where
         H: ProfileHandler + 'static,
     {
-        self.handlers.insert(profile, Box::new(handler));
+        self.handlers.insert(profile, vec![Box::new(handler)]);
     }
 
     /// Builder form of [`Self::register`].
@@ -139,6 +156,33 @@ impl ProfileDispatcher {
         H: ProfileHandler + 'static,
     {
         self.register(profile, handler);
+        self
+    }
+
+    /// Adds a handler to a profile without replacing existing capability
+    /// handlers. Selection remains deterministic by profile depth and
+    /// registration order.
+    pub fn register_additional<H>(&mut self, profile: ConformanceProfile, handler: H)
+    where
+        H: ProfileHandler + 'static,
+    {
+        self.handlers
+            .entry(profile)
+            .or_default()
+            .push(Box::new(handler));
+    }
+
+    /// Builder form of [`Self::register_additional`].
+    #[must_use]
+    pub fn with_additional_handler<H>(
+        mut self,
+        profile: ConformanceProfile,
+        handler: H,
+    ) -> Self
+    where
+        H: ProfileHandler + 'static,
+    {
+        self.register_additional(profile, handler);
         self
     }
 
@@ -152,7 +196,17 @@ impl ProfileDispatcher {
     #[must_use]
     pub fn dispatch(&self, case: &Case) -> DispatchResult {
         let required = case.manifest().profile;
-        let Some((provided, handler)) = self.best_handler(required) else {
+        let selection = match self.best_handler(required, case) {
+            Ok(selection) => selection,
+            Err((provided, reason)) => {
+                return DispatchResult::Failed {
+                    required,
+                    provided,
+                    error: HandlerError::new(reason),
+                };
+            }
+        };
+        let Some((provided, handler)) = selection else {
             return DispatchResult::Unavailable {
                 required,
                 reason: format!("no handler provides {required}"),
@@ -176,14 +230,45 @@ impl ProfileDispatcher {
     fn best_handler(
         &self,
         required: ConformanceProfile,
-    ) -> Option<(ConformanceProfile, &dyn ProfileHandler)> {
-        self.handlers
+        case: &Case,
+    ) -> HandlerSelection<'_> {
+        let candidates = self
+            .handlers
             .iter()
             .filter(|(profile, _)| profile.supports(required))
-            .min_by_key(|(profile, _)| {
-                (profile.depth().saturating_sub(required.depth()), **profile)
+            .flat_map(|(profile, handlers)| {
+                handlers
+                    .iter()
+                    .filter(|handler| handler.can_run(case))
+                    .map(move |handler| (*profile, handler.as_ref()))
             })
-            .map(|(profile, handler)| (*profile, handler.as_ref()))
+            .collect::<Vec<_>>();
+        let Some(best_key) = candidates
+            .iter()
+            .map(|(profile, _)| {
+                (profile.depth().saturating_sub(required.depth()), *profile)
+            })
+            .min()
+        else {
+            return Ok(None);
+        };
+        let mut matching = candidates.into_iter().filter(|(profile, _)| {
+            (profile.depth().saturating_sub(required.depth()), *profile) == best_key
+        });
+        let Some(first) = matching.next() else {
+            return Ok(None);
+        };
+        if matching.next().is_some() {
+            return Err((
+                first.0,
+                format!(
+                    "multiple handlers claim operation `{}` at profile {}",
+                    case.manifest().operation(),
+                    first.0
+                ),
+            ));
+        }
+        Ok(Some(first))
     }
 }
 
@@ -411,6 +496,13 @@ impl CaseExpectations {
                     actual.level()
                 ));
             }
+            if expected.source_id.as_deref() != actual.source_id() {
+                return Err(format!(
+                    "diagnostic {index} source mismatch: expected {:?}, got {:?}",
+                    expected.source_id,
+                    actual.source_id()
+                ));
+            }
             if expected.primary_span != actual.primary_span() {
                 return Err(format!(
                     "diagnostic {index} primary span mismatch: expected {:?}, got {:?}",
@@ -436,6 +528,13 @@ impl CaseExpectations {
                 if expected_related.span != actual_related.span {
                     return Err(format!(
                         "diagnostic {index} related span {related_index} mismatch"
+                    ));
+                }
+                if expected_related.source_id.as_deref()
+                    != actual_related.source_id.as_deref()
+                {
+                    return Err(format!(
+                        "diagnostic {index} related span {related_index} source mismatch"
                     ));
                 }
                 if let Some(message) = &expected_related.message
@@ -488,6 +587,12 @@ impl CaseExpectations {
             "formatted",
             self.formatted.as_deref(),
             observation.formatted.as_deref(),
+        )?;
+        compare_snapshot(
+            case,
+            "graph",
+            self.graph.as_deref(),
+            observation.graph.as_deref(),
         )?;
         compare_snapshot(
             case,
@@ -597,7 +702,7 @@ fn compare_execution(
         let audit = case.read_file(audit_path).map_err(|error| {
             format!("{name} audit snapshot `{audit_path}` cannot be read: {error}")
         })?;
-        let actual_audit = actual.audit_trace.join("\n");
+        let actual_audit = canonical_audit_snapshot(&actual.audit_trace);
         if actual_audit != audit {
             return Err(format!(
                 "{name} audit-trace snapshot mismatch (`{audit_path}`)"
@@ -605,4 +710,19 @@ fn compare_execution(
         }
     }
     Ok(())
+}
+
+fn canonical_audit_snapshot(events: &[String]) -> String {
+    let values = events
+        .iter()
+        .map(|event| Value::Str(event.clone()).canonical_vibon())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        "(record format: @audit-trace.v1 events: (array))\n".to_owned()
+    } else {
+        format!(
+            "(record format: @audit-trace.v1 events: (array {}))\n",
+            values.join(" ")
+        )
+    }
 }

@@ -1,0 +1,2 @@
+(import lib @app.lib)
+(defn run () void lib)

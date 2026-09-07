@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_conformance::{
-    CaseManifest, CaseObservation, CaseStatus, ConformanceProfile, ConformanceRunner,
-    Corpus, HandlerError, ProfileDispatcher, ProfileHandler,
+    CaseManifest, CaseObservation, CaseStatus, ConformanceOperation,
+    ConformanceProfile, ConformanceRunner, Corpus, HandlerError, ProfileDispatcher,
+    ProfileHandler, ReaderV1Handler,
 };
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_syntax::DocumentMode;
 
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -115,12 +117,149 @@ end = 7
     assert_eq!(manifest.rule_id(), "V1-SRC-READER");
     assert_eq!(manifest.section(), "V1-SRC-READER");
     assert_eq!(manifest.profile(), ConformanceProfile::ReaderV1);
+    assert_eq!(manifest.operation(), ConformanceOperation::Reader);
     assert_eq!(manifest.inputs.data, ["one.vibon", "two.vibon"]);
     assert!(!manifest.expectations.accepted);
     assert_eq!(manifest.expectations.diagnostics.len(), 1);
     assert_eq!(
         manifest.expectations.diagnostics[0].primary_span,
         ByteSpan::new(4, 7)
+    );
+}
+
+#[test]
+fn manifest_selects_project_decode_and_rejects_implicit_mixed_operations() {
+    let project = CaseManifest::from_str(
+        r#"
+id = "V1-PROJECT-operation-project-decode"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "project-decode"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = true
+"#,
+    )
+    .expect("project operation manifest");
+    assert_eq!(project.operation(), ConformanceOperation::ProjectDecode);
+
+    let mixed = CaseManifest::from_str(
+        r#"
+id = "V1-PROJECT-operation-mixed"
+rule = "V1-PROJECT"
+profile = "static-v1"
+
+[inputs]
+source = "main.vib"
+project = "project.vibon"
+
+[expect]
+accepted = true
+"#,
+    )
+    .expect_err("mixed non-reader inputs need an explicit operation");
+    assert!(mixed.to_string().contains("operation is required"));
+}
+
+#[test]
+fn source_graph_binds_the_project_marker_to_the_declared_tree() {
+    let outside = CaseManifest::from_str(
+        r#"
+id = "V1-PROJECT-source-graph-outside"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "input.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+"#,
+    )
+    .expect_err("source graph must reject an outside project input");
+    assert!(
+        outside
+            .to_string()
+            .contains("must be exactly `tree/project.vibon`")
+    );
+
+    let sibling = CaseManifest::from_str(
+        r#"
+id = "V1-PROJECT-source-graph-sibling"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "tree/sibling.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+"#,
+    )
+    .expect_err("source graph must reject an undeclared sibling marker");
+    assert!(
+        sibling
+            .to_string()
+            .contains("must be exactly `tree/project.vibon`")
+    );
+}
+
+#[test]
+fn input_documents_keep_roles_and_source_identity_without_concatenation() {
+    let case = TempCase::new(
+        "V1-DIAG-input-documents",
+        r#"
+id = "V1-DIAG-input-documents"
+rule = "V1-DIAG"
+profile = "reader-v1"
+
+[inputs]
+source = "src/main.vib"
+project = "project.vibon"
+data = ["data/one.vibon", "data/two.vibon"]
+
+[expect]
+accepted = true
+"#,
+    );
+    let directory = case.root.join("V1-DIAG-input-documents");
+    std::fs::create_dir_all(directory.join("src")).expect("create source directory");
+    std::fs::create_dir_all(directory.join("data")).expect("create data directory");
+    std::fs::write(directory.join("src/main.vib"), "(defn main () void)")
+        .expect("write source");
+    std::fs::write(directory.join("project.vibon"), "(@project.v1)")
+        .expect("write project");
+    std::fs::write(directory.join("data/one.vibon"), "one").expect("write data one");
+    std::fs::write(directory.join("data/two.vibon"), "two").expect("write data two");
+
+    let documents = case.corpus().cases()[0]
+        .input_documents()
+        .expect("load declared inputs");
+    let actual = documents
+        .iter()
+        .map(|document| {
+            (
+                document.source_id.as_str(),
+                document.mode,
+                document.text.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        vec![
+            ("src/main.vib", DocumentMode::Source, "(defn main () void)"),
+            ("project.vibon", DocumentMode::Data, "(@project.v1)"),
+            ("data/one.vibon", DocumentMode::Data, "one"),
+            ("data/two.vibon", DocumentMode::Data, "two"),
+        ]
     );
 }
 
@@ -435,6 +574,51 @@ fn artifact_expectations_are_compared_only_when_declared() {
 }
 
 #[test]
+fn runner_rejects_a_wrong_source_graph_snapshot() {
+    let case = TempCase::new(
+        "V1-PROJECT-graph-oracle",
+        r#"
+id = "V1-PROJECT-graph-oracle"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+graph = "graph.vibon"
+"#,
+    );
+    let directory = case.root.join("V1-PROJECT-graph-oracle");
+    std::fs::create_dir(directory.join("tree")).expect("create declared tree");
+    std::fs::write(directory.join("tree/project.vibon"), "project")
+        .expect("write declared project");
+    std::fs::write(
+        directory.join("graph.vibon"),
+        "(record format: @source-graph.v1)\n",
+    )
+    .expect("write graph oracle");
+
+    let report = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
+        ConformanceProfile::StaticV1,
+        FixedHandler {
+            observation: CaseObservation {
+                accepted: true,
+                graph: Some("wrong graph\n".to_owned()),
+                ..CaseObservation::default()
+            },
+        },
+    ))
+    .run(&case.corpus());
+
+    assert!(!report.is_success());
+    assert!(format!("{:?}", report.cases()).contains("graph snapshot mismatch"));
+}
+
+#[test]
 fn fix_expectations_are_compared_only_when_declared() {
     let case = TempCase::new(
         "V1-DIAG-optional-fix",
@@ -614,4 +798,145 @@ end = 5
 
     assert!(report.is_success());
     assert_eq!(report.passed(), 1);
+}
+
+#[test]
+fn runner_keeps_equal_offsets_distinct_by_source_identity() {
+    let case = TempCase::new(
+        "V1-DIAG-source-identity",
+        r#"
+id = "V1-DIAG-source-identity"
+rule = "V1-DIAG"
+profile = "reader-v1"
+
+[inputs]
+source = "one.vib"
+data = ["two.vibon"]
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+source = "one.vib"
+[expect.diagnostics.span]
+start = 0
+end = 1
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+source = "two.vibon"
+[expect.diagnostics.span]
+start = 0
+end = 1
+"#,
+    );
+    let directory = case.root.join("V1-DIAG-source-identity");
+    std::fs::write(directory.join("one.vib"), "x").expect("write source");
+    std::fs::write(directory.join("two.vibon"), "x").expect("write data");
+
+    let diagnostic = |source_id: &str| {
+        Diagnostic::new(
+            DiagnosticCode::SyntaxInvalidCharacterLiteral,
+            ByteSpan::new(0, 1),
+            "invalid character",
+        )
+        .with_source_id(source_id)
+    };
+    let handler = FixedHandler {
+        observation: CaseObservation {
+            accepted: false,
+            diagnostics: vec![diagnostic("one.vib"), diagnostic("two.vibon")],
+            ..CaseObservation::default()
+        },
+    };
+    let report = ConformanceRunner::new(
+        ProfileDispatcher::new().with_handler(ConformanceProfile::ReaderV1, handler),
+    )
+    .run(&case.corpus());
+
+    assert!(report.is_success());
+    assert_eq!(report.passed(), 1);
+
+    let swapped = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
+        ConformanceProfile::ReaderV1,
+        FixedHandler {
+            observation: CaseObservation {
+                accepted: false,
+                diagnostics: vec![diagnostic("two.vibon"), diagnostic("one.vib")],
+                ..CaseObservation::default()
+            },
+        },
+    ))
+    .run(&case.corpus());
+    assert!(!swapped.is_success());
+    assert!(format!("{:?}", swapped.cases()).contains("source mismatch"));
+
+    let missing = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
+        ConformanceProfile::ReaderV1,
+        FixedHandler {
+            observation: CaseObservation {
+                accepted: false,
+                diagnostics: vec![
+                    Diagnostic::new(
+                        DiagnosticCode::SyntaxInvalidCharacterLiteral,
+                        ByteSpan::new(0, 1),
+                        "invalid character",
+                    ),
+                    diagnostic("two.vibon"),
+                ],
+                ..CaseObservation::default()
+            },
+        },
+    ))
+    .run(&case.corpus());
+    assert!(!missing.is_success());
+    assert!(format!("{:?}", missing.cases()).contains("source mismatch"));
+}
+
+#[test]
+fn reader_attaches_source_ids_to_multi_input_diagnostics() {
+    let case = TempCase::new(
+        "V1-DIAG-reader-source-identity",
+        r#"
+id = "V1-DIAG-reader-source-identity"
+rule = "V1-DIAG"
+profile = "reader-v1"
+
+[inputs]
+source = "source.vib"
+data = ["data.vibon"]
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-name"
+level = "@error"
+source = "source.vib"
+[expect.diagnostics.span]
+start = 0
+end = 2
+
+[[expect.diagnostics]]
+code = "@data.invalid-shape"
+level = "@error"
+source = "data.vibon"
+[expect.diagnostics.span]
+start = 5
+end = 7
+"#,
+    );
+    let directory = case.root.join("V1-DIAG-reader-source-identity");
+    std::fs::write(directory.join("source.vib"), "-a").expect("write source");
+    std::fs::write(directory.join("data.vibon"), "(map @a)").expect("write data");
+
+    let report = ConformanceRunner::new(
+        ProfileDispatcher::new()
+            .with_handler(ConformanceProfile::ReaderV1, ReaderV1Handler),
+    )
+    .run(&case.corpus());
+    assert!(report.is_success(), "reader report: {report:?}");
 }

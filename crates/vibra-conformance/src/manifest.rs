@@ -91,11 +91,56 @@ pub struct CaseInputs {
     pub project: Option<String>,
     /// Additional data documents, normally `.vibon` files.
     pub data: Vec<String>,
+    /// Optional confined directory tree acquired by source-graph cases.
+    pub tree: Option<String>,
+}
+
+/// The closed operation selected by a conformance case.
+///
+/// Later slices add their operation to this enum before registering a handler;
+/// input presence alone never selects a semantic implementation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConformanceOperation {
+    /// Run the reader/data grammar handler.
+    Reader,
+    /// Decode one project VIBON document without resolution or I/O.
+    ProjectDecode,
+    /// Acquire a confined project tree and build its immutable source graph.
+    SourceGraph,
+    /// Resolve declarations/imports from a confined source graph.
+    Resolve,
+    /// Check one source document into typed IR.
+    TypeCheck,
+    /// Execute one checked source document through the reference interpreter.
+    Interpret,
+}
+
+impl ConformanceOperation {
+    /// The stable manifest spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reader => "reader",
+            Self::ProjectDecode => "project-decode",
+            Self::SourceGraph => "source-graph",
+            Self::Resolve => "resolve",
+            Self::TypeCheck => "type-check",
+            Self::Interpret => "interpret",
+        }
+    }
+}
+
+impl fmt::Display for ConformanceOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
 }
 
 /// One expected source span attached to a diagnostic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedRelatedSpan {
+    /// The input path owning the related span, when known.
+    pub source_id: Option<String>,
     /// The half-open UTF-8 byte span.
     pub span: ByteSpan,
     /// An optional expected explanation. Omitted explanations are not
@@ -112,6 +157,8 @@ pub struct ExpectedDiagnostic {
     pub level: Level,
     /// Optional human-facing message assertion.
     pub message: Option<String>,
+    /// The input path owning the primary span, when known.
+    pub source_id: Option<String>,
     /// The primary half-open UTF-8 byte span.
     pub primary_span: ByteSpan,
     /// Related spans in their expected order.
@@ -138,7 +185,7 @@ pub struct ExpectedFix {
 pub struct ExpectedExecution {
     /// A relative path to the expected result snapshot.
     pub result: Option<String>,
-    /// A relative path to the expected ordered audit-trace snapshot.
+    /// A relative path to the expected ordered `.vibon` audit-trace snapshot.
     pub audit_trace: Option<String>,
 }
 
@@ -162,6 +209,8 @@ pub struct CaseExpectations {
     pub diagnostics: Vec<ExpectedDiagnostic>,
     /// A relative path to the canonical formatting snapshot.
     pub formatted: Option<String>,
+    /// A relative path to the canonical source-graph snapshot.
+    pub graph: Option<String>,
     /// A relative path to resolved-identity output.
     pub resolved: Option<String>,
     /// A relative path to type output.
@@ -188,6 +237,8 @@ pub struct CaseManifest {
     pub rule_id: String,
     /// Minimum profile required to execute the case.
     pub profile: ConformanceProfile,
+    /// Closed operation selected by the case inputs and operation field.
+    pub operation: ConformanceOperation,
     /// Optional maintainer-facing description.
     pub description: Option<String>,
     /// Case inputs.
@@ -237,6 +288,12 @@ impl CaseManifest {
     pub const fn profile(&self) -> ConformanceProfile {
         self.profile
     }
+
+    /// The closed operation selected for this case.
+    #[must_use]
+    pub const fn operation(&self) -> ConformanceOperation {
+        self.operation
+    }
 }
 
 impl FromStr for CaseManifest {
@@ -271,20 +328,35 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             source: raw.inputs.source,
             project: raw.inputs.project,
             data: raw.inputs.data,
+            tree: raw.inputs.tree,
         };
+        let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
+        {
+            for diagnostic in &expectations.diagnostics {
+                if let Some(source_id) = &diagnostic.source_id
+                    && !is_declared_input(&inputs, source_id)
+                {
+                    return Err(ManifestError::Invalid(format!(
+                        "diagnostic source `{source_id}` is not declared by case `{}`",
+                        raw.id
+                    )));
+                }
+                for related in &diagnostic.related {
+                    if let Some(source_id) = &related.source_id
+                        && !is_declared_input(&inputs, source_id)
+                    {
+                        return Err(ManifestError::Invalid(format!(
+                            "related diagnostic source `{source_id}` is not declared by case `{}`",
+                            raw.id
+                        )));
+                    }
+                }
+            }
+        }
         for query in &expectations.queries {
-            let declared = inputs
-                .source
-                .as_ref()
-                .is_some_and(|input| input == &query.input)
-                || inputs
-                    .project
-                    .as_ref()
-                    .is_some_and(|input| input == &query.input)
-                || inputs.data.iter().any(|input| input == &query.input);
-            if !declared {
+            if !is_declared_input(&inputs, &query.input) {
                 return Err(ManifestError::Invalid(format!(
                     "query expectation input `{}` is not declared by case `{}`",
                     query.input, raw.id
@@ -296,11 +368,116 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             id: raw.id,
             rule_id,
             profile,
+            operation,
             description: raw.description,
             inputs,
             expectations,
         })
     }
+}
+
+fn decode_operation(
+    raw: Option<&str>,
+    profile: ConformanceProfile,
+    inputs: &CaseInputs,
+) -> Result<ConformanceOperation, ManifestError> {
+    let input_kinds = usize::from(inputs.source.is_some())
+        + usize::from(inputs.project.is_some())
+        + usize::from(!inputs.data.is_empty());
+    if raw.is_none() && profile != ConformanceProfile::ReaderV1 && input_kinds > 1 {
+        return Err(ManifestError::Invalid(
+            "an operation is required when a non-reader case has multiple input kinds"
+                .to_owned(),
+        ));
+    }
+    let operation = match raw {
+        Some("reader") => ConformanceOperation::Reader,
+        Some("project-decode") => ConformanceOperation::ProjectDecode,
+        Some("source-graph") => ConformanceOperation::SourceGraph,
+        Some("resolve") => ConformanceOperation::Resolve,
+        Some("type-check") => ConformanceOperation::TypeCheck,
+        Some("interpret") => ConformanceOperation::Interpret,
+        Some(value) => {
+            return Err(ManifestError::Invalid(format!(
+                "unknown conformance operation `{value}`"
+            )));
+        }
+        None if profile != ConformanceProfile::ReaderV1
+            && inputs.project.is_some()
+            && inputs.tree.is_some() =>
+        {
+            ConformanceOperation::SourceGraph
+        }
+        None if profile != ConformanceProfile::ReaderV1 && inputs.project.is_some() => {
+            ConformanceOperation::ProjectDecode
+        }
+        None => ConformanceOperation::Reader,
+    };
+    if operation == ConformanceOperation::ProjectDecode
+        && (inputs.project.is_none()
+            || inputs.source.is_some()
+            || !inputs.data.is_empty()
+            || inputs.tree.is_some())
+    {
+        return Err(ManifestError::Invalid(
+            "project-decode requires exactly one project input".to_owned(),
+        ));
+    }
+    if matches!(
+        operation,
+        ConformanceOperation::TypeCheck | ConformanceOperation::Interpret
+    ) && (inputs.source.is_none()
+        || inputs.project.is_some()
+        || !inputs.data.is_empty()
+        || inputs.tree.is_some())
+    {
+        return Err(ManifestError::Invalid(
+            "type-check and interpret require exactly one source input".to_owned(),
+        ));
+    }
+    if matches!(
+        operation,
+        ConformanceOperation::SourceGraph | ConformanceOperation::Resolve
+    ) {
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "source-graph and resolve require one confined tree input".to_owned(),
+            ));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "source-graph and resolve require one project input".to_owned(),
+            ));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "source-graph project input must be exactly `{expected_project}`"
+            )));
+        }
+    }
+    Ok(operation)
+}
+
+fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
+    inputs
+        .source
+        .as_deref()
+        .is_some_and(|input| input == source_id)
+        || inputs
+            .project
+            .as_deref()
+            .is_some_and(|input| input == source_id)
+        || inputs.data.iter().any(|input| input == source_id)
+        || inputs.tree.as_deref().is_some_and(|tree| {
+            source_id == tree
+                || source_id
+                    .strip_prefix(tree)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+                || (!source_id.is_empty()
+                    && !source_id.starts_with('/')
+                    && !source_id.contains(".."))
+        })
 }
 
 fn validate_case_id(id: &str) -> Result<(), ManifestError> {
@@ -370,6 +547,16 @@ fn decode_expectations(
     }
 
     let formatted = raw.formatted;
+    if let Some(graph) = raw.graph.as_deref()
+        && Path::new(graph)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("vibon")
+    {
+        return Err(ManifestError::Invalid(
+            "source-graph snapshots must use the .vibon extension".to_owned(),
+        ));
+    }
     let interpreter = raw.interpreter.map(decode_execution);
     let wasm = raw.wasm.map(decode_execution);
     let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);
@@ -378,6 +565,7 @@ fn decode_expectations(
         accepted,
         diagnostics,
         formatted,
+        graph: raw.graph,
         resolved: raw.resolved,
         types: raw.types,
         effects: raw.effects,
@@ -438,6 +626,7 @@ fn decode_diagnostic(
         .into_iter()
         .map(|related| {
             Ok(ExpectedRelatedSpan {
+                source_id: related.source,
                 span: decode_span(related.span, code.as_atom())?,
                 message: related.message,
             })
@@ -459,6 +648,7 @@ fn decode_diagnostic(
         code,
         level,
         message: raw.message,
+        source_id: raw.source,
         primary_span,
         related,
         notes: raw.notes,
@@ -493,6 +683,8 @@ pub(crate) struct RawCaseManifest {
     pub(crate) rule: String,
     pub(crate) profile: String,
     #[serde(default)]
+    pub(crate) operation: Option<String>,
+    #[serde(default)]
     pub(crate) description: Option<String>,
     #[serde(default)]
     pub(crate) inputs: RawInputs,
@@ -508,6 +700,8 @@ pub(crate) struct RawInputs {
     pub(crate) project: Option<String>,
     #[serde(default)]
     pub(crate) data: Vec<String>,
+    #[serde(default)]
+    pub(crate) tree: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -518,6 +712,8 @@ pub(crate) struct RawExpectations {
     pub(crate) diagnostics: Vec<RawExpectedDiagnostic>,
     #[serde(default)]
     pub(crate) formatted: Option<String>,
+    #[serde(default)]
+    pub(crate) graph: Option<String>,
     #[serde(default)]
     pub(crate) resolved: Option<String>,
     #[serde(default)]
@@ -541,6 +737,8 @@ pub(crate) struct RawExpectedDiagnostic {
     pub(crate) level: String,
     #[serde(default)]
     pub(crate) message: Option<String>,
+    #[serde(default, alias = "sourceId")]
+    pub(crate) source: Option<String>,
     pub(crate) span: RawSpan,
     #[serde(default)]
     pub(crate) related: Vec<RawRelatedSpan>,
@@ -553,6 +751,8 @@ pub(crate) struct RawExpectedDiagnostic {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawRelatedSpan {
+    #[serde(default, alias = "sourceId")]
+    pub(crate) source: Option<String>,
     pub(crate) span: RawSpan,
     #[serde(default)]
     pub(crate) message: Option<String>,

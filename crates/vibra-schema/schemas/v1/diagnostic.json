@@ -70,8 +70,13 @@
       "description": "A half-open UTF-8 byte range, with its endpoints also given as derived display positions.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["start", "end", "startPosition", "endPosition"],
+      "required": ["sourceId", "start", "end", "startPosition", "endPosition"],
       "properties": {
+        "sourceId": {
+          "description": "The source identity owning this span, or null when the producer has no document identity.",
+          "type": ["string", "null"],
+          "minLength": 1
+        },
         "start": { "type": "integer", "minimum": 0 },
         "end": { "type": "integer", "minimum": 0 },
         "startPosition": { "$ref": "#/$defs/position" },

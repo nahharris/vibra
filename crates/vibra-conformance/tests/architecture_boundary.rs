@@ -29,11 +29,29 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-diagnostics", &[]),
     // The reader. Emits diagnostics; must not reach the formatter or schemas.
     ("vibra-syntax", &["vibra-diagnostics"]),
+    // Checked semantic IR is independent of syntax and wire formats.
+    ("vibra-ir", &["vibra-diagnostics"]),
+    // The checker lowers syntax and resolved identities to checked IR.
+    (
+        "vibra-types",
+        &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
+    ),
+    // The interpreter consumes checked IR and has no frontend dependency.
+    ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
     // Consumes the reader's tree; nothing in the language depends on it.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
     // The wire format. The Step 10 adapter consumes syntax facts; no phase
     // depends on the wire crate.
     ("vibra-schema", &["vibra-diagnostics", "vibra-syntax"]),
+    // Project schema decoding sits above syntax and diagnostics. Later
+    // workspace phases may widen this row when their inputs exist.
+    (
+        "vibra-workspace",
+        &["vibra-diagnostics", "vibra-fmt", "vibra-syntax"],
+    ),
+    // Resolution owns its neutral graph input and depends only on language
+    // structure; workspace and conformance adapt filesystem snapshots into it.
+    ("vibra-resolve", &["vibra-diagnostics", "vibra-syntax"]),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -41,7 +59,12 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-diagnostics",
             "vibra-fmt",
             "vibra-schema",
+            "vibra-resolve",
             "vibra-syntax",
+            "vibra-workspace",
+            "vibra-interp",
+            "vibra-ir",
+            "vibra-types",
         ],
     ),
 ];

@@ -1,0 +1,6 @@
+(record
+  format: @types.v1
+  functions: (array
+    (record name: @answer params: (array) result: @i32 body: (record kind: @sequence type: @i32 values: (array (record kind: @sequence type: @i32 values: (array (record kind: @literal type: @i8 value: 1i8) (record kind: @literal type: @i32 value: 42i32))))))
+  )
+)

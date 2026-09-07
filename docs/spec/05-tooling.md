@@ -35,6 +35,80 @@ vibra edit fix|rename|organize-imports
 vibra mcp
 ```
 
+The M2 implementation profile admits only `project init`, `fmt`, `check`,
+`run`, and `test`, with the exact flags and result envelopes closed by the
+milestone's Step 1 contract before those commands are implemented. The other
+v1 command names remain reserved and produce `@tool.unavailable` in M2;
+unknown spellings remain invalid input. This capability status does not alter
+the stable v1 command surface or create a profile-specific source language.
+
+### M2 command contract
+
+The admitted process grammar is closed and uses one global option prefix:
+
+```text
+vibra [--format human|json] [--workspace PATH] project init [DEST]
+vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
+vibra [--format human|json] [--workspace PATH] check [TARGET]
+vibra [--format human|json] [--workspace PATH] run TARGET
+vibra [--format human|json] [--workspace PATH] test [TEST]
+```
+
+`--format` defaults to `human` and may occur once before the command. The
+default workspace is the current directory; `PATH`, `DEST`, `TARGET`, and
+`TEST` are workspace-relative and may not escape its canonical root. `DEST`
+defaults to the workspace for `project init`; it must be absent or empty, and
+the command creates only the canonical `project.vibon`, `src/`, and `tests/`
+layout. `fmt` previews by default; `--write` is its only mutating flag. `check`
+checks every target when `TARGET` is omitted. `run` requires one binary target.
+`test` runs every test when `TEST` is omitted and otherwise selects one exact
+module-qualified test name. Options after the command are limited to the
+explicit `fmt --write` spelling; unknown options, extra positionals, and
+alternate spellings are invalid input.
+
+JSON mode emits exactly one versioned envelope to stdout and sends diagnostics
+and operational logs to stderr. The envelope always has these fields:
+
+```json
+{
+  "schemaVersion": 1,
+  "command": "check",
+  "result": "@command.ok",
+  "diagnostics": [],
+  "payload": {}
+}
+```
+
+`result` is one of `@command.ok`, `@command.diagnostics`,
+`@command.test-failed`, `@command.invalid-input`,
+`@command.operational-failure`, `@command.trap`, or `@command.unavailable`.
+`diagnostics` is always an array of the versioned diagnostic documents. Payloads are closed by
+command: `init` has `{ "workspace": string, "created": string[] }`; `fmt`
+has `{ "path": string, "changed": boolean, "written": boolean,
+"text": string|null }`; `check` has `{ "accepted": boolean }`; `run` has
+`{ "target": string, "programResult": string|null, "stdout": string,
+"stderr": string, "auditTrace": string[], "trap":
+{ "trapCode": string, "origin": SpanDocument|null }|null }`; and `test` has
+`{ "selected": integer, "passed": integer, "failed": integer,
+"tests": [{ "name": string, "result": string, "failure":
+{ "assertion": string, "expected": string, "actual": string,
+"primarySpan": SpanDocument }|null, "diagnostics": [] }] }`.
+`programResult` is the pure value result; a runtime trap is represented by
+`@command.trap` and its structured diagnostic, never as a successful value.
+The trap payload has `trapCode: string` and `origin: SpanDocument|null` when
+the command owns a program result. In JSON mode
+`stdout` captures program output in the envelope, preserving one machine
+document on the process stdout. Human `run` writes the program's stdout bytes
+directly and keeps command diagnostics on stderr.
+
+The process exit mapping is fixed: `0` for `@command.ok`, `1` for
+`@command.diagnostics` or `@command.test-failed`, `2` for
+`@command.invalid-input`, `3` for `@command.operational-failure`, `4` for
+`@command.unavailable`, and `5` for `@command.trap`. A valid deferred command
+or language form uses `@command.unavailable` and includes `@tool.unavailable`;
+an unknown command or option uses `@command.invalid-input` instead. A trap is
+never recast as an operational failure or an unavailable feature.
+
 Query subjects are a source position such as `src/main.vib:120`, an atom entity
 reference such as `@std.fs.read`, a built-in diagnostic code such as
 `@type.argument-mismatch`, or `@workspace`. Types, effects, context,
@@ -110,7 +184,8 @@ without slicing or panicking. Trivia is reported as `trivia` with
 part of the file needs recovery.
 
 The published `source-position-query` schema carries `schemaVersion`, the
-queried `offset`, a byte/display `span`, `mode`, `syntaxKind`, `category`,
+queried `offset`, its nullable `sourceId`, a byte/display `span`, `mode`,
+`syntaxKind`, `category`,
 `status`, `permittedForms`, and `permittedLabels`. Categories are the closed
 v1 vocabulary `module`, `declaration`, `type`, `pattern`, `expression`,
 `declaration-attribute`, `effect-row`, `data-field`, `trivia`, and `recovery`.

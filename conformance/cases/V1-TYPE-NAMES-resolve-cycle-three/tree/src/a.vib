@@ -1,0 +1,2 @@
+(import b @app.b)
+(defn run () void (do))

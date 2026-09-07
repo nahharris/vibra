@@ -55,9 +55,9 @@ mod diagnostic;
 mod query;
 
 pub use diagnostic::{
-    DIAGNOSTIC_SCHEMA, DiagnosticDocument, FixDocument, PositionDocument,
-    REGISTRY_ENTRY_SCHEMA, RegistryEntryDocument, RelatedSpanDocument, SCHEMA_VERSION,
-    SpanDocument,
+    DIAGNOSTIC_SCHEMA, DiagnosticDocument, DiagnosticRenderError, FixDocument,
+    PositionDocument, REGISTRY_ENTRY_SCHEMA, RegistryEntryDocument,
+    RelatedSpanDocument, SCHEMA_VERSION, SpanDocument,
 };
 pub use query::{
     SOURCE_POSITION_QUERY_SCHEMA, SourcePositionQueryDocument, category_name,

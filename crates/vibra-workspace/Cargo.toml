@@ -1,0 +1,17 @@
+[package]
+name = "vibra-workspace"
+description = "Typed project data decoding and workspace orchestration for Vibra."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-diagnostics.workspace = true
+vibra-fmt.workspace = true
+vibra-syntax.workspace = true
+
+[lints]
+workspace = true

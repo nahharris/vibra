@@ -1,0 +1,27 @@
+(record
+  format: @stdlib-bootstrap-manifest.v1
+  artifact: "stdlib/m2/bootstrap.vibon"
+  artifact-sha256: "sha256:8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103"
+  signature: "stdlib/m2/bootstrap.vibon.sig"
+  signature-encoding: @base64
+  signature-sha256: "sha256:f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63"
+  public-key: "stdlib/m2/toolchain-ed25519.pub"
+  public-key-sha256: "sha256:fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509"
+  modules: (map
+    @std.text (record
+      path: "stdlib/m2/src/std/text.vib"
+      sha256: "sha256:c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44"
+      role: @source)
+    @std.assert (record
+      path: "stdlib/m2/src/std/assert.vib"
+      sha256: "sha256:746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007"
+      role: @test-registry))
+  compiler: (array "text.concat" "text.length")
+  assertions: (array
+    "assert.true"
+    "assert.false"
+    "assert.equal-bool"
+    "assert.equal-char"
+    "assert.equal-str"
+    "assert.equal-i32"
+    "assert.equal-u64"))

@@ -15,13 +15,21 @@ publish = false
 vibra-conformance = { path = "crates/vibra-conformance" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }
 vibra-fmt = { path = "crates/vibra-fmt" }
+vibra-interp = { path = "crates/vibra-interp" }
+vibra-ir = { path = "crates/vibra-ir" }
 vibra-schema = { path = "crates/vibra-schema" }
 vibra-syntax = { path = "crates/vibra-syntax" }
+vibra-resolve = { path = "crates/vibra-resolve" }
+vibra-types = { path = "crates/vibra-types" }
+vibra-workspace = { path = "crates/vibra-workspace" }
 
 toml = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 jsonschema = { version = "0.35", default-features = false }
+base64 = "0.22"
+ring = "0.17"
+sha2 = "0.10"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

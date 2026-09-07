@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-if-selected"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Only the selected boolean branch contributes the result and pure execution records no audit events."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

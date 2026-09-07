@@ -27,6 +27,7 @@ illustrative.
 - [Roadmap to a usable v1](roadmap/v1.md)
 - [Milestone execution model](roadmap/execution.md)
 - [Milestone 1 step plan](roadmap/milestone-1/README.md)
+- [Milestone 2 step plan](roadmap/milestone-2/README.md)
 
 The roadmap orders implementation. It cannot weaken the specification. If a
 milestone exposes a missing or incoherent design, the specification is changed

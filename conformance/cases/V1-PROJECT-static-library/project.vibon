@@ -1,0 +1,1 @@
+(record format: @project.v1 package: (record name: "my-lib" version: "1.2.3") targets: (array (record root: "src" kind: @lib name: @core)) dependencies: (map))

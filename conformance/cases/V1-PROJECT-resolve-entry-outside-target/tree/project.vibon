@@ -1,0 +1,1 @@
+(record format: @project.v1 package: (record name: "demo" version: "1.0.0") targets: (array (record name: @app kind: @bin root: "src" entry: @other.main.run effects: (array))) dependencies: (map))

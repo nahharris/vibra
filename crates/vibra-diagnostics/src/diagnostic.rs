@@ -19,18 +19,20 @@
 //!
 //! # Documents
 //!
-//! Spans here carry no document identity, because everything in milestone 1
-//! diagnoses one document at a time. Diagnostics that relate spans across
-//! modules arrive with the type system in milestone 3, and the workspace
-//! service that owns document identity does not exist yet. Adding an
-//! identifier now would mean guessing its representation before its only
-//! consumer is designed.
+//! A span may carry the case-relative source identity that owns it. The
+//! identity is optional for the syntax-only APIs, which historically diagnose
+//! one document at a time, but conformance and workspace adapters attach it
+//! before comparing observations from more than one document. Keeping the
+//! identity beside the byte span prevents equal offsets in different files
+//! from being flattened into one location.
 
 use crate::{ByteSpan, DiagnosticCode, Level};
 
 /// An additional span that helps explain a diagnostic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelatedSpan {
+    /// The source identity that owns the span, when known.
+    pub source_id: Option<String>,
     /// Where the related construct is.
     pub span: ByteSpan,
     /// What that construct contributes to the diagnostic.
@@ -42,6 +44,7 @@ impl RelatedSpan {
     #[must_use]
     pub fn new(span: ByteSpan, message: impl Into<String>) -> Self {
         Self {
+            source_id: None,
             span,
             message: message.into(),
         }
@@ -144,6 +147,7 @@ impl Fix {
 pub struct Diagnostic {
     code: DiagnosticCode,
     message: String,
+    source_id: Option<String>,
     primary_span: ByteSpan,
     related: Vec<RelatedSpan>,
     notes: Vec<String>,
@@ -164,6 +168,7 @@ impl Diagnostic {
         Self {
             code,
             message: message.into(),
+            source_id: None,
             primary_span,
             related: Vec::new(),
             notes: Vec::new(),
@@ -171,10 +176,46 @@ impl Diagnostic {
         }
     }
 
+    /// Attaches the source identity that owns this diagnostic.
+    ///
+    /// Related spans created before this call inherit the same identity when
+    /// they do not already have one. A later workspace phase can attach a
+    /// different identity to an individual related span if it crosses a
+    /// document boundary.
+    #[must_use]
+    pub fn with_source_id(mut self, source_id: impl Into<String>) -> Self {
+        let source_id = source_id.into();
+        self.source_id = Some(source_id.clone());
+        for related in &mut self.related {
+            if related.source_id.is_none() {
+                related.source_id = Some(source_id.clone());
+            }
+        }
+        self
+    }
+
     /// Adds a related span.
     #[must_use]
     pub fn with_related(mut self, span: ByteSpan, message: impl Into<String>) -> Self {
-        self.related.push(RelatedSpan::new(span, message));
+        let mut related = RelatedSpan::new(span, message);
+        related.source_id = self.source_id.clone();
+        self.related.push(related);
+        self
+    }
+
+    /// Adds a related span owned by an explicitly named source document.
+    #[must_use]
+    pub fn with_related_source(
+        mut self,
+        source_id: impl Into<String>,
+        span: ByteSpan,
+        message: impl Into<String>,
+    ) -> Self {
+        self.related.push(RelatedSpan {
+            source_id: Some(source_id.into()),
+            span,
+            message: message.into(),
+        });
         self
     }
 
@@ -202,6 +243,12 @@ impl Diagnostic {
     #[must_use]
     pub const fn level(&self) -> Level {
         self.code.level()
+    }
+
+    /// The source identity that owns the primary span, when known.
+    #[must_use]
+    pub fn source_id(&self) -> Option<&str> {
+        self.source_id.as_deref()
     }
 
     /// The human-facing message.
@@ -367,6 +414,35 @@ mod tests {
                 ByteSpan::new(1, 3),
                 "not applicable",
             )
+        );
+    }
+
+    #[test]
+    fn a_source_identity_is_carried_to_the_primary_and_related_spans() {
+        let diagnostic = Diagnostic::new(
+            DiagnosticCode::NameUnknownSymbol,
+            ByteSpan::new(2, 3),
+            "unknown symbol",
+        )
+        .with_related(ByteSpan::new(8, 9), "declaration")
+        .with_source_id("src/one.vib");
+
+        assert_eq!(diagnostic.source_id(), Some("src/one.vib"));
+        assert_eq!(
+            diagnostic.related()[0].source_id.as_deref(),
+            Some("src/one.vib")
+        );
+
+        let cross_document = Diagnostic::new(
+            DiagnosticCode::NameUnknownSymbol,
+            ByteSpan::new(2, 3),
+            "unknown symbol",
+        )
+        .with_source_id("src/one.vib")
+        .with_related_source("src/two.vib", ByteSpan::new(8, 9), "declaration");
+        assert_eq!(
+            cross_document.related()[0].source_id.as_deref(),
+            Some("src/two.vib")
         );
     }
 }

@@ -98,6 +98,8 @@ pub enum Domain {
     Runtime,
     /// Canonical presentation.
     Style,
+    /// Tool commands and capability availability.
+    Tool,
     /// Declared contracts that hold but say more than they need to.
     Contract,
 }
@@ -118,6 +120,7 @@ impl Domain {
             Self::Project => "project",
             Self::Runtime => "runtime",
             Self::Style => "style",
+            Self::Tool => "tool",
             Self::Contract => "contract",
         }
     }
@@ -234,6 +237,10 @@ diagnostic_registry! {
         "a symbol does not resolve to a visible entity";
     NameWrongEntityKind => "@name.wrong-entity-kind", Name, Error, None,
         "a resolved entity is not the kind this position requires";
+    NamePrivateAccess => "@name.private-access", Name, Error, None,
+        "a reference resolves to a declaration that is private from this position";
+    NameRedeclaration => "@name.redeclaration", Name, Error, None,
+        "a lexical name or top-level declaration is introduced more than once";
     NameMemberCollision => "@name.member-collision", Name, Error, None,
         "two members of one owner share a name in its flat member namespace";
     NameGenericRedeclaration => "@name.generic-redeclaration", Name, Error, None,
@@ -248,6 +255,14 @@ diagnostic_registry! {
         "a module path is claimed by both a file and a directory";
     ModuleUnknownPath => "@module.unknown-path", Module, Error, None,
         "a module path does not resolve to a source unit";
+    ModuleImportCycle => "@module.import-cycle", Module, Error, None,
+        "module imports form a cycle";
+    ModuleInvalidSegment => "@module.invalid-segment", Module, Error, None,
+        "a source path segment is not one kebab-name component";
+    ModulePathEscape => "@module.path-escape", Module, Error, None,
+        "a source link resolves outside its confined root";
+    ModuleIoError => "@module.io-error", Module, Error, None,
+        "a source path cannot be inspected or read";
     TypeArgumentMismatch => "@type.argument-mismatch", Type, Error, None,
         "an operand does not match the parameter it binds to";
     TypeTypeArgumentMismatch => "@type.type-argument-mismatch", Type, Error, None,
@@ -268,6 +283,8 @@ diagnostic_registry! {
         "an atom selector names no field of this record";
     TypeNumericOutOfRange => "@type.numeric-out-of-range", Type, Error, None,
         "a literal lies outside the range of its suffixed type";
+    TypeInitializerCycle => "@type.initializer-cycle", Type, Error, None,
+        "module value initializers form a cycle";
     TypeAnonymousTypeBody => "@type.anonymous-type-body", Type, Error, None,
         "`record`, `enum`, `union`, or `newtype` appears outside a declaration body";
     TypeUndispatchableContractMember => "@type.undispatchable-contract-member", Type, Error, None,
@@ -322,12 +339,20 @@ diagnostic_registry! {
         "a dependency alias does not bind exactly one `@lib` target";
     ProjectOverlappingTargetRoots => "@project.overlapping-target-roots", Project, Error, None,
         "two target roots nest or coincide";
+    ProjectNotFound => "@project.not-found", Project, Error, None,
+        "no exact project.vibon was found in the discovery boundary";
+    ProjectInvalidTargetRoot => "@project.invalid-target-root", Project, Error, None,
+        "a target root is missing, malformed, or outside the project";
+    ProjectIoError => "@project.io-error", Project, Error, None,
+        "a project filesystem operation failed";
     RuntimeInvalidHostValue => "@runtime.invalid-host-value", Runtime, Error, None,
         "a host operation received or returned a value its ABI does not admit";
     StyleArgumentOrder => "@style.argument-order", Style, Warning, Safe,
         "operands are in a noncanonical but unambiguous order";
     ContractUnusedEffect => "@contract.unused-effect", Contract, Warning, None,
         "a declared effect root is never performed";
+    ToolUnavailable => "@tool.unavailable", Tool, Error, None,
+        "a valid v1 surface is not available in the selected implementation profile";
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -342,7 +367,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 60;
+    const REGISTERED_CODES: usize = 71;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -427,7 +452,7 @@ mod tests {
 
     #[test]
     fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 58 errors and 2 warnings. Pinning
+        // The specification's table fixes 62 errors and 2 warnings. Pinning
         // the split catches a level silently flipping in either direction.
         let warnings: Vec<&str> = DiagnosticCode::ALL
             .iter()

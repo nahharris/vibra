@@ -1,0 +1,17 @@
+id = "V1-SRC-CALLS-functions-duplicate-label"
+rule = "V1-SRC-CALLS"
+profile = "static-v1"
+operation = "type-check"
+description = "Duplicate labelled operands are rejected before an application is lowered."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [20, 57]

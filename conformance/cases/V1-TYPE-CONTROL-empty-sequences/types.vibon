@@ -1,0 +1,7 @@
+(record
+  format: @types.v1
+  functions: (array
+    (record name: @empty params: (array) result: @void body: (record kind: @sequence type: @void values: (array (record kind: @literal type: @void value: void))))
+    (record name: @let-empty params: (array) result: @void body: (record kind: @sequence type: @void values: (array (record kind: @let slot: void value: (record kind: @literal type: @i32 value: 1i32) body: (record kind: @sequence type: @void values: (array (record kind: @literal type: @void value: void)))))))
+  )
+)

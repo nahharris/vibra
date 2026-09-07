@@ -1,0 +1,20 @@
+[package]
+name = "vibra-types"
+description = "Primitive type checking and lowering to controlled Vibra IR."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-diagnostics.workspace = true
+vibra-ir.workspace = true
+vibra-syntax.workspace = true
+base64.workspace = true
+ring.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

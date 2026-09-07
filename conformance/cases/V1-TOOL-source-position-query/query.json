@@ -1,7 +1,9 @@
 {
   "schemaVersion": 1,
   "offset": 16,
+  "sourceId": "input.vib",
   "span": {
+    "sourceId": "input.vib",
     "start": 16,
     "end": 21,
     "startPosition": {

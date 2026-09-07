@@ -1,0 +1,12 @@
+id = "V1-PROJECT-resolve-identical-basenames"
+rule = "V1-PROJECT-resolution"
+profile = "static-v1"
+operation = "resolve"
+description = "Step 4 resolution matrix case: V1-PROJECT-resolve-identical-basenames."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
