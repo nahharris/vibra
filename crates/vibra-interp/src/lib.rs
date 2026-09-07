@@ -590,7 +590,9 @@ mod tests {
         let program = vibra_ir::CheckedProgram::try_new(vec![function], 0)
             .expect("valid intrinsic program");
         let result = run(&program).expect("execution");
+        let repeated = run(&program).expect("repeated execution");
         assert_eq!(result.value(), &Value::U64(3));
         assert!(result.audit_trace().is_empty());
+        assert_eq!(result, repeated);
     }
 }

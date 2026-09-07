@@ -3878,4 +3878,88 @@ mod tests {
         assert!(program.canonical_vibon().contains("text.concat"));
         assert!(program.canonical_vibon().contains("text.length"));
     }
+
+    #[test]
+    fn text_import_rejects_alias_target_and_extra_imports() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        for source in [
+            "(import wrong @std.text)\n(defn answer () u64 1u64)",
+            "(import text @std.assert)\n(defn answer () u64 1u64)",
+            "(import text @std.text)\n(import assert @std.assert)\n(defn answer () u64 1u64)",
+        ] {
+            let checked = check_bootstrap_text_import(&verification, "app/main.vib", source);
+            assert!(!checked.accepted());
+            assert!(checked.program().is_none());
+            assert!(checked.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code() == DiagnosticCode::ToolUnavailable
+            }), "{:?}", checked.diagnostics());
+        }
+    }
+
+    #[test]
+    fn trusted_checker_rejects_unknown_external_provider_symbol_and_signature() {
+        for source in [
+            r#"(defn read () str
+  external: @host
+  symbol: "text.concat")"#,
+            r#"(defn read () str
+  external: @compiler
+  symbol: "text.unknown")"#,
+            r#"(defn read (value str) str
+  external: @compiler
+  symbol: "text.length")"#,
+        ] {
+            let document = vibra_syntax::parse_source(Path::new("trusted.vib"), source)
+                .expect("parse trusted boundary source");
+            let mut diagnostics = document
+                .diagnostics()
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            let ast = document.ast().expect("trusted boundary AST");
+            let _ = super::check_ast_with_bindings_authority(
+                "trusted.vib",
+                ast,
+                &mut diagnostics,
+                true,
+            );
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.code() == DiagnosticCode::ExternalUnknownSymbol
+                    || diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+            }));
+        }
+    }
+
+    #[test]
+    fn trusted_text_import_rejects_source_body_and_effect_external_declarations() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        for source in [
+            r#"(import text @std.text)
+(defn answer () str "spoof"
+  external: @compiler
+  symbol: "text.concat")"#,
+            r#"(import text @std.text)
+(defn answer () str
+  effects: (@std.io)
+  "spoof")"#,
+        ] {
+            let checked = check_bootstrap_text_import(&verification, "app/main.vib", source);
+            assert!(!checked.accepted());
+            assert!(checked.program().is_none());
+            assert!(
+                checked
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| {
+                        diagnostic.code() == DiagnosticCode::ToolUnavailable
+                            || diagnostic.code() == DiagnosticCode::SyntaxInvalidAttribute
+                            || diagnostic.code() == DiagnosticCode::EffectInvalidReference
+                    }),
+                "{:?}",
+                checked.diagnostics()
+            );
+        }
+    }
 }
