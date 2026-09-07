@@ -47,6 +47,11 @@ bootstrap works offline from its documented exact inputs.
 
 ## Implemented registry-to-case table
 
+The backend-neutral registry carries the exact v1 identity and semantic
+contract alongside each signature. Its version is `vibra_v1`; the two semantic
+identities are Unicode scalar concatenation for `text.concat` and Unicode
+scalar length for `text.length`.
+
 | Registry entry | Checked signature | Execution evidence |
 | --- | --- | --- |
 | `text.concat` | `str str -> str` | `vibra-interp` intrinsic execution test, including Unicode scalars |

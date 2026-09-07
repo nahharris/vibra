@@ -16,6 +16,22 @@ use vibra_diagnostics::ByteSpan;
 pub mod external {
     use super::{FunctionSignature, PrimitiveType};
 
+    /// The closed M2 compiler registry identity used by the runtime contract.
+    ///
+    /// `vibra_v1` is the version named by the v1 runtime specification.  The
+    /// compiler registry and the host registry are separate namespaces, but
+    /// share this stable toolchain ABI version.
+    pub const REGISTRY_VERSION: &str = "vibra_v1";
+
+    /// The semantic operation implemented by a compiler intrinsic.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum SemanticIdentity {
+        /// Concatenate Unicode scalar sequences in order.
+        UnicodeScalarConcatenation,
+        /// Count Unicode scalars, rather than UTF-8 bytes.
+        UnicodeScalarLength,
+    }
+
     /// One pure, compiler-owned operation.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum CompilerIntrinsic {
@@ -26,6 +42,21 @@ pub mod external {
     }
 
     impl CompilerIntrinsic {
+        /// The closed registry version for this operation.
+        #[must_use]
+        pub const fn registry_version(self) -> &'static str {
+            REGISTRY_VERSION
+        }
+
+        /// The semantic contract implemented by this operation.
+        #[must_use]
+        pub const fn semantic_identity(self) -> SemanticIdentity {
+            match self {
+                Self::TextConcat => SemanticIdentity::UnicodeScalarConcatenation,
+                Self::TextLength => SemanticIdentity::UnicodeScalarLength,
+            }
+        }
+
         /// The stable registry symbol.
         #[must_use]
         pub const fn symbol(self) -> &'static str {

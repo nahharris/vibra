@@ -136,7 +136,8 @@ MAY lower to internal loops; that mutation is not a source feature.
 
 ## M2 compiler intrinsic profile
 
-The M2 `@compiler` registry is closed to two pure operations. A trusted
+The M2 `@compiler` registry is closed to two pure operations and uses the
+versioned registry identity `vibra_v1`. A trusted
 standard-library declaration may bind `text.concat` with signature
 `str str -> str` and `text.length` with signature `str -> u64`. Concatenation
 preserves Unicode scalar order; length counts Unicode scalars rather than

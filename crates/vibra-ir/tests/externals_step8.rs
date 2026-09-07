@@ -3,7 +3,7 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
 use vibra_diagnostics::ByteSpan;
-use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::external::{CompilerIntrinsic, SemanticIdentity, REGISTRY_VERSION};
 use vibra_ir::{
     CheckedFunction, CheckedProgram, Expr, FunctionSignature, PrimitiveType,
     SourceOrigin, Value,
@@ -33,6 +33,21 @@ fn registry_signatures_are_exact_and_backend_neutral() {
     let length = CompilerIntrinsic::TextLength.signature();
     assert_eq!(length.parameters(), &[vibra_ir::PrimitiveType::Str]);
     assert_eq!(length.result(), vibra_ir::PrimitiveType::U64);
+}
+
+#[test]
+fn registry_entries_expose_the_versioned_semantic_identity() {
+    assert_eq!(REGISTRY_VERSION, "vibra_v1");
+    assert_eq!(CompilerIntrinsic::TextConcat.registry_version(), REGISTRY_VERSION);
+    assert_eq!(CompilerIntrinsic::TextLength.registry_version(), REGISTRY_VERSION);
+    assert_eq!(
+        CompilerIntrinsic::TextConcat.semantic_identity(),
+        SemanticIdentity::UnicodeScalarConcatenation
+    );
+    assert_eq!(
+        CompilerIntrinsic::TextLength.semantic_identity(),
+        SemanticIdentity::UnicodeScalarLength
+    );
 }
 
 #[test]
