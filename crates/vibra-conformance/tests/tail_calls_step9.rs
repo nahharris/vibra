@@ -121,6 +121,46 @@ fn parameter_targets_reuse_the_current_activation() {
 }
 
 #[test]
+fn identity_returned_targets_remain_bounded_through_direct_and_local_calls() {
+    let direct = r#"
+(defn answer () i32 ((identity leaf)))
+(defn identity (f (fn () i32)) (fn () i32) f)
+(defn leaf () i32 1i32)
+"#;
+    let checked = check_source("tail-identity-direct.vib", direct);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let execution =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.tail_transfer_count(), 1);
+
+    let local = r#"
+(defn answer () i32
+  (let selected (identity leaf) (selected)))
+(defn identity (f (fn () i32)) (fn () i32) f)
+(defn leaf () i32 1i32)
+"#;
+    let checked = check_source("tail-identity-local.vib", local);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let execution =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.tail_transfer_count(), 1);
+
+    let nested = r#"
+(defn answer () i32 ((identity (identity leaf))))
+(defn identity (f (fn () i32)) (fn () i32) f)
+(defn leaf () i32 1i32)
+"#;
+    let checked = check_source("tail-identity-nested.vib", nested);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let execution =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.tail_transfer_count(), 1);
+}
+
+#[test]
 fn non_tail_call_keeps_a_live_caller_activation() {
     let source = r#"
 (defn answer () i32

@@ -2248,7 +2248,10 @@ fn possible_function_targets(
             result
         }
         Expr::Call {
-            function, callee, ..
+            function,
+            arguments,
+            callee,
+            ..
         } => {
             let target_summary = if let Some(callee) = callee {
                 possible_function_targets(
@@ -2265,6 +2268,19 @@ fn possible_function_targets(
             if target_summary.unknown || target_summary.has_closure {
                 return target_summary;
             }
+            let argument_targets = arguments
+                .iter()
+                .map(|argument| {
+                    possible_function_targets(
+                        argument,
+                        aliases,
+                        globals,
+                        functions,
+                        visiting,
+                        visiting_globals,
+                    )
+                })
+                .collect::<Vec<_>>();
             let mut result = FunctionTargetSummary::default();
             let targets = target_summary.known;
             for target in targets {
@@ -2276,9 +2292,19 @@ fn possible_function_targets(
                     result.unknown = true;
                     continue;
                 };
+                let mut target_aliases = BTreeMap::new();
+                for (slot, (argument, value_type)) in argument_targets
+                    .iter()
+                    .zip(function_signature_types(function.signature()))
+                    .enumerate()
+                {
+                    if matches!(value_type, PrimitiveType::Function(_)) {
+                        target_aliases.insert(slot, argument.clone());
+                    }
+                }
                 let returned = possible_function_targets(
                     function.body(),
-                    &BTreeMap::new(),
+                    &target_aliases,
                     globals,
                     functions,
                     visiting,
@@ -2582,6 +2608,21 @@ impl<'a> CallFlow<'a> {
         environment: &BTreeMap<usize, FlowTargetSummary>,
         captures: &[FlowTargetSummary],
     ) -> FlowTargetSummary {
+        self.summary_expr_with_stack(
+            expression,
+            environment,
+            captures,
+            &mut BTreeSet::new(),
+        )
+    }
+
+    fn summary_expr_with_stack(
+        &self,
+        expression: &Expr,
+        environment: &BTreeMap<usize, FlowTargetSummary>,
+        captures: &[FlowTargetSummary],
+        visiting: &mut BTreeSet<usize>,
+    ) -> FlowTargetSummary {
         match expression {
             Expr::Function { function, .. } => {
                 FlowTargetSummary::known_function(*function)
@@ -2594,7 +2635,14 @@ impl<'a> CallFlow<'a> {
             } => {
                 let closure_capture_summaries = closure_captures
                     .iter()
-                    .map(|capture| self.summary_expr(capture, environment, captures))
+                    .map(|capture| {
+                        self.summary_expr_with_stack(
+                            capture,
+                            environment,
+                            captures,
+                            visiting,
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let mut closure_environment = BTreeMap::new();
                 for (slot, value_type) in
@@ -2607,10 +2655,11 @@ impl<'a> CallFlow<'a> {
                 }
                 FlowTargetSummary {
                     is_function: true,
-                    closures: vec![self.summary_expr(
+                    closures: vec![self.summary_expr_with_stack(
                         body,
                         &closure_environment,
                         &closure_capture_summaries,
+                        visiting,
                     )],
                     closure_defaults: vec![
                         signature
@@ -2658,29 +2707,51 @@ impl<'a> CallFlow<'a> {
             Expr::Let {
                 slot, value, body, ..
             } => {
-                let value_summary = self.summary_expr(value, environment, captures);
+                let value_summary = self.summary_expr_with_stack(
+                    value,
+                    environment,
+                    captures,
+                    visiting,
+                );
                 let mut nested = environment.clone();
                 if let Some(slot) = slot {
                     nested.insert(*slot, value_summary);
                 }
-                self.summary_expr(body, &nested, captures)
+                self.summary_expr_with_stack(body, &nested, captures, visiting)
             }
             Expr::If {
                 then_branch,
                 else_branch,
                 ..
             } => {
-                let mut summary = self.summary_expr(then_branch, environment, captures);
-                summary.union(&self.summary_expr(else_branch, environment, captures));
+                let mut summary = self.summary_expr_with_stack(
+                    then_branch,
+                    environment,
+                    captures,
+                    visiting,
+                );
+                summary.union(&self.summary_expr_with_stack(
+                    else_branch,
+                    environment,
+                    captures,
+                    visiting,
+                ));
                 summary
             }
-            Expr::Sequence { expressions, .. } => expressions
-                .last()
-                .map_or_else(FlowTargetSummary::default, |expression| {
-                    self.summary_expr(expression, environment, captures)
-                }),
+            Expr::Sequence { expressions, .. } => expressions.last().map_or_else(
+                FlowTargetSummary::default,
+                |expression| {
+                    self.summary_expr_with_stack(
+                        expression,
+                        environment,
+                        captures,
+                        visiting,
+                    )
+                },
+            ),
             Expr::Call {
                 function,
+                arguments,
                 callee,
                 function_hint,
                 result,
@@ -2691,7 +2762,14 @@ impl<'a> CallFlow<'a> {
                 }
                 let callee_summary = callee.as_deref().map_or_else(
                     || FlowTargetSummary::known_function(*function),
-                    |callee| self.summary_expr(callee, environment, captures),
+                    |callee| {
+                        self.summary_expr_with_stack(
+                            callee,
+                            environment,
+                            captures,
+                            visiting,
+                        )
+                    },
                 );
                 let mut targets = callee_summary.clone();
                 if let Some(function_hint) = function_hint {
@@ -2706,12 +2784,49 @@ impl<'a> CallFlow<'a> {
                 for closure in &targets.closures {
                     summary.union(closure);
                 }
+                let argument_summaries = arguments
+                    .iter()
+                    .map(|argument| {
+                        self.summary_expr_with_stack(
+                            argument,
+                            environment,
+                            captures,
+                            visiting,
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 for target in targets.known {
-                    if let Some(returned) = self.function_returns.get(target) {
-                        summary.union(returned);
-                    } else {
-                        summary.unknown = true;
+                    if !visiting.insert(target) {
+                        if let Some(returned) = self.function_returns.get(target) {
+                            summary.union(returned);
+                        } else {
+                            summary.unknown = true;
+                        }
+                        continue;
                     }
+                    let Some(function) = self.functions.get(target) else {
+                        summary.unknown = true;
+                        visiting.remove(&target);
+                        continue;
+                    };
+                    let mut target_environment = BTreeMap::new();
+                    for (slot, (argument, value_type)) in argument_summaries
+                        .iter()
+                        .zip(function_signature_types(function.signature()))
+                        .enumerate()
+                    {
+                        if matches!(value_type, PrimitiveType::Function(_)) {
+                            target_environment.insert(slot, argument.clone());
+                        }
+                    }
+                    let returned = self.summary_expr_with_stack(
+                        function.body(),
+                        &target_environment,
+                        &[],
+                        visiting,
+                    );
+                    summary.union(&returned);
+                    visiting.remove(&target);
                 }
                 summary
             }
