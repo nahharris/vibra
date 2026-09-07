@@ -175,10 +175,15 @@ pub fn check_ast_with_bindings(
 /// package cannot gain compiler authority merely by copying an external
 /// declaration. The verifier in this crate must approve the bootstrap bytes
 /// before callers pass them here.
-pub fn check_bootstrap_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
+pub fn check_bootstrap_source(
+    verification: &BootstrapVerification,
+    source_id: impl AsRef<str>,
+    source: &str,
+) -> CheckResult {
     let source_id = source_id.as_ref();
     if source_id != BOOTSTRAP_TEXT_SOURCE_ID
         || source.as_bytes() != BOOTSTRAP_TEXT_BYTES
+        || verification.artifact.is_empty()
     {
         let diagnostic = Diagnostic::new(
             DiagnosticCode::ToolUnavailable,
@@ -265,6 +270,10 @@ const BOOTSTRAP_SIGNATURE_SHA256: &str =
     "f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63";
 const BOOTSTRAP_PUBLIC_KEY_SHA256: &str =
     "fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509";
+const BOOTSTRAP_TEXT_SHA256: &str =
+    "c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44";
+const BOOTSTRAP_ASSERT_SHA256: &str =
+    "746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007";
 const BOOTSTRAP_MANIFEST: &[u8] =
     include_bytes!("../../../stdlib/m2/bootstrap-manifest.vibon");
 const BOOTSTRAP_SIGNATURE: &[u8] =
@@ -293,6 +302,11 @@ pub fn verify_bootstrap(
     check_digest("artifact", &artifact, BOOTSTRAP_ARTIFACT_SHA256)?;
     check_digest("signature", &signature_bytes, BOOTSTRAP_SIGNATURE_SHA256)?;
     check_digest("public key", &public_key, BOOTSTRAP_PUBLIC_KEY_SHA256)?;
+    let text_module = read_bootstrap_file(root, BOOTSTRAP_TEXT_SOURCE_ID)?;
+    let assert_module = read_bootstrap_file(root, "stdlib/m2/src/std/assert.vib")?;
+    check_digest("text module", &text_module, BOOTSTRAP_TEXT_SHA256)?;
+    check_digest("assertion module", &assert_module, BOOTSTRAP_ASSERT_SHA256)?;
+    validate_signed_bootstrap_map(&artifact)?;
     if signature_bytes != BOOTSTRAP_SIGNATURE || public_key != BOOTSTRAP_PUBLIC_KEY {
         return Err(BootstrapVerificationError(
             "M2 bootstrap trust inputs do not match the reviewed bytes".to_owned(),
@@ -332,14 +346,50 @@ pub fn verify_bootstrap(
     Ok(BootstrapVerification { artifact })
 }
 
+fn validate_signed_bootstrap_map(
+    artifact: &[u8],
+) -> Result<(), BootstrapVerificationError> {
+    let text = std::str::from_utf8(artifact).map_err(|_| {
+        BootstrapVerificationError("bootstrap artifact is not UTF-8".to_owned())
+    })?;
+    for fragment in [
+        "@std.text",
+        "stdlib/m2/src/std/text.vib",
+        "sha256:c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44",
+        "@std.assert",
+        "stdlib/m2/src/std/assert.vib",
+        "sha256:746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007",
+        "text.concat",
+        "text.length",
+        "assert.equal-u64",
+    ] {
+        if !text.contains(fragment) {
+            return Err(BootstrapVerificationError(format!(
+                "signed bootstrap import map is missing `{fragment}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn read_bootstrap_file(
     root: &Path,
     relative: &str,
 ) -> Result<Vec<u8>, BootstrapVerificationError> {
+    if path_contains_link(root) {
+        return Err(BootstrapVerificationError(
+            "bootstrap root contains a symlink or junction".to_owned(),
+        ));
+    }
     let root = fs::canonicalize(root).map_err(|error| {
         BootstrapVerificationError(format!("cannot resolve bootstrap root: {error}"))
     })?;
     let candidate = root.join(relative);
+    if path_contains_link(&candidate) {
+        return Err(BootstrapVerificationError(format!(
+            "bootstrap path `{relative}` contains a symlink or junction"
+        )));
+    }
     let resolved = fs::canonicalize(&candidate).map_err(|error| {
         BootstrapVerificationError(format!(
             "cannot read bootstrap `{relative}`: {error}"
@@ -355,6 +405,31 @@ fn read_bootstrap_file(
             "cannot read bootstrap `{relative}`: {error}"
         ))
     })
+}
+
+fn path_contains_link(path: &Path) -> bool {
+    let mut current = Path::new("").to_path_buf();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        let Ok(metadata) = fs::symlink_metadata(&current) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || is_windows_reparse_point(&metadata) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(windows)]
+fn is_windows_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & 0x400 != 0
+}
+
+#[cfg(not(windows))]
+const fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
 }
 
 fn check_digest(
@@ -402,6 +477,7 @@ struct FunctionHeader {
     name: String,
     signature: FunctionSignature,
     external: Option<CompilerIntrinsic>,
+    external_declared: bool,
 }
 
 #[derive(Clone)]
@@ -519,6 +595,9 @@ impl<'a> Checker<'a> {
                             function,
                             self.diagnostics,
                             self.trusted_bootstrap,
+                        ),
+                        external_declared: function.attributes().items().iter().any(
+                            |attribute| matches!(attribute, Attribute::External(_)),
                         ),
                     });
                 }
@@ -754,7 +833,7 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            if header.external.is_none()
+            if !header.external_declared
                 && has_deferred_attributes(function.attributes().items())
             {
                 unavailable(
@@ -785,6 +864,9 @@ impl<'a> Checker<'a> {
                         format!("checked IR construction failed: {error}"),
                     ),
                 }
+                continue;
+            }
+            if header.external_declared {
                 continue;
             }
             let mut environment = CheckEnvironment::new(
@@ -3512,7 +3594,10 @@ mod tests {
     #[test]
     fn the_exact_bootstrap_text_module_admits_only_closed_intrinsics() {
         let source = include_str!("../../../stdlib/m2/src/std/text.vib");
-        let checked = check_bootstrap_source(BOOTSTRAP_TEXT_SOURCE_ID, source);
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let checked =
+            check_bootstrap_source(&verification, BOOTSTRAP_TEXT_SOURCE_ID, source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let program = checked.program().expect("bootstrap program");
         assert!(program.canonical_vibon().contains("text.length"));

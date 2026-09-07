@@ -43,10 +43,9 @@ pub mod external {
                     vec![PrimitiveType::Str, PrimitiveType::Str],
                     PrimitiveType::Str,
                 ),
-                Self::TextLength => FunctionSignature::new(
-                    vec![PrimitiveType::Str],
-                    PrimitiveType::U64,
-                ),
+                Self::TextLength => {
+                    FunctionSignature::new(vec![PrimitiveType::Str], PrimitiveType::U64)
+                }
             }
         }
 
@@ -920,9 +919,10 @@ impl Expr {
                         arguments.len()
                     )));
                 }
-                for (argument, expected) in arguments.iter().zip(signature.parameters()) {
-                    let actual = argument
-                        .validate_shape_with_captures(slots, capture_types)?;
+                for (argument, expected) in arguments.iter().zip(signature.parameters())
+                {
+                    let actual =
+                        argument.validate_shape_with_captures(slots, capture_types)?;
                     if !actual.same_shape(expected) {
                         return Err(IrError::InvalidExpression(format!(
                             "{} argument has type {actual}, expected {expected}",
@@ -1244,7 +1244,13 @@ impl CheckedFunction {
             })
             .collect();
         let body = Expr::external(intrinsic, arguments, origin.clone());
-        Self::with_slots(name, signature, body, origin, intrinsic.signature().fixed_parameter_count())
+        Self::with_slots(
+            name,
+            signature,
+            body,
+            origin,
+            intrinsic.signature().fixed_parameter_count(),
+        )
     }
 
     /// Creates a checked function, rejecting a body whose final type differs
@@ -2427,12 +2433,16 @@ impl<'a> CallFlow<'a> {
     ) -> Result<(), IrError> {
         match expression {
             Expr::Literal { .. }
-            | Expr::External { .. }
             | Expr::Default { .. }
             | Expr::Variable { .. }
             | Expr::Global { .. }
             | Expr::Function { .. }
             | Expr::Captured { .. } => {}
+            Expr::External { arguments, .. } => {
+                for argument in arguments {
+                    self.collect_expr(argument, owner, environment, captures)?;
+                }
+            }
             Expr::Closure {
                 captures: closure_captures,
                 body,
@@ -2814,9 +2824,7 @@ fn canonical_expr(expression: &Expr) -> String {
             "(record kind: @external symbol: \"{}\" result: {} arguments: {})",
             intrinsic.symbol(),
             canonical_type(&intrinsic.signature().result()),
-            canonical_array(
-                &arguments.iter().map(canonical_expr).collect::<Vec<_>>()
-            )
+            canonical_array(&arguments.iter().map(canonical_expr).collect::<Vec<_>>())
         ),
         Expr::Default { value_type, .. } => format!(
             "(record kind: @default type: {})",
