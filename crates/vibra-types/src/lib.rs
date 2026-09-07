@@ -756,8 +756,7 @@ impl<'a> Checker<'a> {
                             earlier,
                         );
                     } else {
-                        self.module_names
-                            .insert("text".to_owned(), import.span());
+                        self.module_names.insert("text".to_owned(), import.span());
                     }
                     self.text_import_span = Some(import.span());
                 }
