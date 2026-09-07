@@ -1542,7 +1542,25 @@ impl CheckedProgram {
         {
             dependencies.extend(flow_edges);
         }
-        let recursive_groups = find_recursive_groups(&calls);
+        let recursive_groups = find_recursive_groups(&calls, &functions);
+        for global in &globals {
+            validate_tail_calls(
+                global.initializer(),
+                false,
+                None,
+                &recursive_groups,
+                &functions,
+            )?;
+        }
+        for (index, function) in functions.iter().enumerate() {
+            validate_tail_calls(
+                function.body(),
+                true,
+                Some(index),
+                &recursive_groups,
+                &functions,
+            )?;
+        }
         reject_global_initializer_cycles(&dependencies, globals.len())?;
         Ok(Self {
             globals,
@@ -1573,10 +1591,7 @@ impl CheckedProgram {
     /// Returns the recursive group containing `function`, if any.
     #[must_use]
     pub fn recursive_group(&self, function: usize) -> Option<&[usize]> {
-        self.recursive_groups
-            .iter()
-            .find(|group| group.contains(&function))
-            .map(Vec::as_slice)
+        self.recursive_groups.get(function).map(Vec::as_slice)
     }
 
     /// The selected entry function.
@@ -2805,30 +2820,27 @@ enum CallState {
     Done,
 }
 
-fn find_recursive_groups(calls: &[BTreeSet<usize>]) -> Vec<Vec<usize>> {
-    let reachability = (0..calls.len())
-        .map(|start| reachable_functions(start, calls))
-        .collect::<Vec<_>>();
-    let mut groups = Vec::new();
-    for start in 0..calls.len() {
-        let mut group = reachability[start]
-            .iter()
-            .copied()
-            .filter(|target| reachability[*target].contains(&start))
-            .collect::<Vec<_>>();
-        if group.len() == 1 && !calls[start].contains(&start) {
-            continue;
-        }
-        group.sort_unstable();
-        if !groups
-            .iter()
-            .any(|existing: &Vec<usize>| existing == &group)
-        {
-            groups.push(group);
-        }
-    }
-    groups.sort_unstable();
-    groups
+fn find_recursive_groups(
+    calls: &[BTreeSet<usize>],
+    functions: &[CheckedFunction],
+) -> Vec<Vec<usize>> {
+    (0..calls.len())
+        .map(|start| {
+            if !is_module_definition(functions, start) {
+                return Vec::new();
+            }
+            reachable_functions(start, calls)
+                .into_iter()
+                .filter(|target| is_module_definition(functions, *target))
+                .collect()
+        })
+        .collect()
+}
+
+fn is_module_definition(functions: &[CheckedFunction], index: usize) -> bool {
+    functions
+        .get(index)
+        .is_some_and(|function| !matches!(function.body(), Expr::External { .. }))
 }
 
 fn reachable_functions(start: usize, calls: &[BTreeSet<usize>]) -> BTreeSet<usize> {
@@ -2843,6 +2855,168 @@ fn reachable_functions(start: usize, calls: &[BTreeSet<usize>]) -> BTreeSet<usiz
         }
     }
     reached
+}
+
+fn validate_tail_calls(
+    expression: &Expr,
+    tail_position: bool,
+    current_function: Option<usize>,
+    recursive_groups: &[Vec<usize>],
+    functions: &[CheckedFunction],
+) -> Result<(), IrError> {
+    match expression {
+        Expr::Literal { .. }
+        | Expr::Default { .. }
+        | Expr::Variable { .. }
+        | Expr::Global { .. }
+        | Expr::Function { .. }
+        | Expr::Captured { .. } => {}
+        Expr::External { arguments, .. } => {
+            for argument in arguments {
+                validate_tail_calls(
+                    argument,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    functions,
+                )?;
+            }
+        }
+        Expr::Closure { captures, body, .. } => {
+            for capture in captures {
+                validate_tail_calls(
+                    capture,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    functions,
+                )?;
+            }
+            validate_tail_calls(body, true, None, recursive_groups, functions)?;
+        }
+        Expr::Sequence { expressions, .. } => {
+            for (index, expression) in expressions.iter().enumerate() {
+                validate_tail_calls(
+                    expression,
+                    tail_position && index + 1 == expressions.len(),
+                    current_function,
+                    recursive_groups,
+                    functions,
+                )?;
+            }
+        }
+        Expr::Let { value, body, .. } => {
+            validate_tail_calls(
+                value,
+                false,
+                current_function,
+                recursive_groups,
+                functions,
+            )?;
+            validate_tail_calls(
+                body,
+                tail_position,
+                current_function,
+                recursive_groups,
+                functions,
+            )?;
+        }
+        Expr::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            validate_tail_calls(
+                condition,
+                false,
+                current_function,
+                recursive_groups,
+                functions,
+            )?;
+            validate_tail_calls(
+                then_branch,
+                tail_position,
+                current_function,
+                recursive_groups,
+                functions,
+            )?;
+            validate_tail_calls(
+                else_branch,
+                tail_position,
+                current_function,
+                recursive_groups,
+                functions,
+            )?;
+        }
+        Expr::Call {
+            function,
+            arguments,
+            callee,
+            function_hint,
+            tail,
+            ..
+        } => {
+            if let Some(callee) = callee {
+                validate_tail_calls(
+                    callee,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    functions,
+                )?;
+            }
+            for argument in arguments {
+                validate_tail_calls(
+                    argument,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    functions,
+                )?;
+            }
+            if !tail {
+                return Ok(());
+            }
+            if !tail_position {
+                return Err(IrError::InvalidExpression(
+                    "tail call is outside an activation-relative tail position"
+                        .to_owned(),
+                ));
+            }
+            let Some(current_function) = current_function else {
+                return Err(IrError::InvalidExpression(
+                    "tail call has no module-level function activation".to_owned(),
+                ));
+            };
+            let target = if callee.is_some() {
+                function_hint.ok_or_else(|| {
+                    IrError::InvalidExpression(
+                        "tail call requires a statically known indirect target"
+                            .to_owned(),
+                    )
+                })?
+            } else {
+                *function
+            };
+            if functions.get(target).is_none() {
+                return Err(IrError::InvalidExpression(format!(
+                    "tail call target {target} is outside the program"
+                )));
+            }
+            let Some(group) = recursive_groups.get(current_function) else {
+                return Err(IrError::InvalidExpression(format!(
+                    "tail call owner {current_function} is outside the program"
+                )));
+            };
+            if !group.contains(&target) {
+                return Err(IrError::InvalidExpression(format!(
+                    "tail call target {target} is outside function {current_function}'s recursive group"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn reject_global_initializer_cycles(
@@ -3005,25 +3179,29 @@ fn canonical_expr(expression: &Expr) -> String {
             result,
             callee,
             function_hint,
+            tail,
             ..
         } => {
             let values = arguments.iter().map(canonical_expr).collect::<Vec<_>>();
+            let tail_field = if *tail { " tail: true" } else { "" };
             match callee {
                 Some(callee) => {
                     let function_field = function_hint
                         .map(|function| format!(" function: {function}u64"))
                         .unwrap_or_default();
                     format!(
-                        "(record kind: @call callee: {}{} result: {} arguments: {})",
+                        "(record kind: @call callee: {}{}{} result: {} arguments: {})",
                         canonical_expr(callee),
                         function_field,
+                        tail_field,
                         canonical_type(result),
                         canonical_array(&values)
                     )
                 }
                 None => format!(
-                    "(record kind: @call function: {}u64 result: {} arguments: {})",
+                    "(record kind: @call function: {}u64{} result: {} arguments: {})",
                     function,
+                    tail_field,
                     canonical_type(result),
                     canonical_array(&values)
                 ),
@@ -3143,8 +3321,8 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::{
-        ByteSpan, CheckedFunction, CheckedProgram, Expr, FunctionSignature, IrError,
-        PrimitiveType, SourceOrigin, Value,
+        ByteSpan, CheckedFunction, CheckedGlobal, CheckedProgram, Expr,
+        FunctionSignature, IrError, PrimitiveType, SourceOrigin, Value,
     };
 
     fn origin() -> SourceOrigin {
@@ -3197,6 +3375,31 @@ mod tests {
     }
 
     #[test]
+    fn program_constructor_records_each_function_reachability_group() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let answer = CheckedFunction::new(
+            "answer",
+            signature.clone(),
+            Expr::call(1, Vec::new(), PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("answer function");
+        let leaf = CheckedFunction::new(
+            "leaf",
+            signature,
+            Expr::literal(Value::I32(7), origin.clone()),
+            origin,
+        )
+        .expect("leaf function");
+        let program = CheckedProgram::try_new(vec![answer, leaf], 0)
+            .expect("reachable groups are valid");
+        assert_eq!(program.recursive_groups(), &[vec![0, 1], vec![1]]);
+        assert_eq!(program.recursive_group(0), Some(&[0, 1][..]));
+        assert_eq!(program.recursive_group(1), Some(&[1][..]));
+    }
+
+    #[test]
     fn program_constructor_records_recursive_function_value_group() {
         let origin = origin();
         let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
@@ -3218,8 +3421,167 @@ mod tests {
     #[test]
     fn tail_call_is_explicit_in_checked_ir() {
         let origin = origin();
-        let expression = Expr::tail_call(3, Vec::new(), PrimitiveType::I32, origin);
+        let expression =
+            Expr::tail_call(3, Vec::new(), PrimitiveType::I32, origin.clone());
         assert!(expression.is_tail_call());
+        assert!(super::canonical_expr(&expression).contains("tail: true"));
+        let normal = Expr::call(3, Vec::new(), PrimitiveType::I32, origin);
+        assert!(!super::canonical_expr(&normal).contains("tail: true"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_outside_sequence_tail_position() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let body = Expr::sequence(
+            vec![
+                Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+                Expr::literal(Value::I32(1), origin.clone()),
+            ],
+            origin.clone(),
+        );
+        let function = CheckedFunction::new("answer", signature, body, origin)
+            .expect("sequence shape is valid before tail-position validation");
+        let error = CheckedProgram::try_new(vec![function], 0)
+            .expect_err("non-final tail markers must not cross the checked boundary");
+        assert!(error.to_string().contains("tail position"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_in_an_operand() {
+        let origin = origin();
+        let leaf_signature =
+            FunctionSignature::new(vec![PrimitiveType::I32], PrimitiveType::I32);
+        let leaf = CheckedFunction::new(
+            "leaf",
+            leaf_signature,
+            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("leaf function");
+        let caller_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let caller_body = Expr::call(
+            0,
+            vec![Expr::tail_call(
+                1,
+                Vec::new(),
+                PrimitiveType::I32,
+                origin.clone(),
+            )],
+            PrimitiveType::I32,
+            origin.clone(),
+        );
+        let caller =
+            CheckedFunction::new("caller", caller_signature, caller_body, origin)
+                .expect("operand shape is valid before tail-position validation");
+        let error = CheckedProgram::try_new(vec![leaf, caller], 1)
+            .expect_err("tail markers in operands must not cross the checked boundary");
+        assert!(error.to_string().contains("tail position"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_in_a_condition() {
+        let origin = origin();
+        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::Bool);
+        let body = Expr::if_expression(
+            Expr::tail_call(0, Vec::new(), PrimitiveType::Bool, origin.clone()),
+            Expr::literal(Value::Bool(true), origin.clone()),
+            Expr::literal(Value::Bool(false), origin.clone()),
+            origin.clone(),
+        );
+        let function = CheckedFunction::new("answer", signature, body, origin)
+            .expect("conditional shape is valid before tail-position validation");
+        let error = CheckedProgram::try_new(vec![function], 0).expect_err(
+            "tail markers in conditions must not cross the checked boundary",
+        );
+        assert!(error.to_string().contains("tail position"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_in_a_closure_activation() {
+        let origin = origin();
+        let closure_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let outer_signature = FunctionSignature::new(
+            Vec::new(),
+            PrimitiveType::Function(Box::new(closure_signature.clone())),
+        );
+        let closure = Expr::closure(
+            closure_signature,
+            Vec::new(),
+            Vec::new(),
+            Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            0,
+            origin.clone(),
+        );
+        let callee = CheckedFunction::new(
+            "callee",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::literal(Value::I32(7), origin.clone()),
+            origin.clone(),
+        )
+        .expect("callee");
+        let function = CheckedFunction::new("answer", outer_signature, closure, origin)
+            .expect("closure shape is valid before tail-position validation");
+        let error = CheckedProgram::try_new(vec![callee, function], 1)
+            .expect_err("closure tail markers must use their own activation");
+        assert!(
+            error
+                .to_string()
+                .contains("module-level function activation"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_in_a_global_initializer() {
+        let origin = origin();
+        let function = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::literal(Value::I32(1), origin.clone()),
+            origin.clone(),
+        )
+        .expect("function");
+        let global = CheckedGlobal::new(
+            "value",
+            PrimitiveType::I32,
+            Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            origin.clone(),
+        )
+        .expect("global shape is valid before tail-position validation");
+        let error =
+            CheckedProgram::try_new_with_globals(vec![global], vec![function], 0)
+                .expect_err("global initializers do not have tail-call activations");
+        assert!(error.to_string().contains("tail position"));
+    }
+
+    #[test]
+    fn program_constructor_rejects_tail_call_to_an_external_wrapper() {
+        let origin = origin();
+        let intrinsic = super::external::CompilerIntrinsic::TextLength;
+        let external = CheckedFunction::new_external(
+            "text.length",
+            intrinsic.signature(),
+            intrinsic,
+            origin.clone(),
+        )
+        .expect("external wrapper");
+        let caller = CheckedFunction::new(
+            "caller",
+            FunctionSignature::new(Vec::new(), PrimitiveType::U64),
+            Expr::tail_call(
+                0,
+                vec![Expr::literal(Value::Str("x".to_owned()), origin.clone())],
+                PrimitiveType::U64,
+                origin.clone(),
+            ),
+            origin,
+        )
+        .expect("caller shape is valid before tail-target validation");
+        let error = CheckedProgram::try_new(vec![external, caller], 1).expect_err(
+            "external wrappers are not module-level recursive-group members",
+        );
+        assert!(error.to_string().contains("outside function"));
     }
 
     #[test]

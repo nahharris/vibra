@@ -637,6 +637,7 @@ struct Checker<'a> {
     trusted_bootstrap: bool,
     text_import_authorized: bool,
     text_import_span: Option<ByteSpan>,
+    recursive_groups: Vec<Vec<usize>>,
 }
 
 impl<'a> Checker<'a> {
@@ -661,6 +662,7 @@ impl<'a> Checker<'a> {
             trusted_bootstrap,
             text_import_authorized: false,
             text_import_span: None,
+            recursive_groups: Vec::new(),
         }
     }
 
@@ -854,54 +856,14 @@ impl<'a> Checker<'a> {
                     function_dependencies,
                 );
             }
-            function_dependencies.remove(&index);
         }
-        let mut states = vec![VisitState::Unvisited; self.functions.len()];
-        for index in 0..self.functions.len() {
-            self.visit_function(index, &dependencies, &mut states);
-        }
-    }
-
-    fn visit_function(
-        &mut self,
-        index: usize,
-        dependencies: &[BTreeSet<usize>],
-        states: &mut [VisitState],
-    ) {
-        match states.get(index).copied() {
-            Some(VisitState::Done) => return,
-            Some(VisitState::Visiting) => {
-                let Some(header) = self.functions.get(index) else {
-                    return;
-                };
-                let Some(Declaration::Defn(function)) =
-                    self.ast.declarations().get(header.declaration_index)
-                else {
-                    return;
-                };
-                unavailable(
-                    self.diagnostics,
-                    self.source_id,
-                    function.span(),
-                    "recursive call groups remain unavailable until the tail-call step",
-                );
-                return;
-            }
-            Some(VisitState::Unvisited) => {}
-            None => return,
-        }
-        let Some(state) = states.get_mut(index) else {
-            return;
-        };
-        *state = VisitState::Visiting;
-        if let Some(function_dependencies) = dependencies.get(index) {
-            for dependency in function_dependencies {
-                self.visit_function(*dependency, dependencies, states);
-            }
-        }
-        if let Some(state) = states.get_mut(index) {
-            *state = VisitState::Done;
-        }
+        let module_definitions = self
+            .functions
+            .iter()
+            .map(|function| function.declaration_index != IMPORTED_FUNCTION_DECLARATION)
+            .collect::<Vec<_>>();
+        self.recursive_groups =
+            find_recursive_groups(&dependencies, &module_definitions);
     }
 
     fn visit_global(&mut self, index: usize, states: &mut [VisitState]) {
@@ -972,6 +934,7 @@ impl<'a> Checker<'a> {
                 &self.function_indices,
                 &self.module_names,
                 &mut self.bindings,
+                None,
                 None,
             );
             let Some(expression) = check_expression(
@@ -1075,6 +1038,7 @@ impl<'a> Checker<'a> {
                 &self.module_names,
                 &mut self.bindings,
                 Some(index),
+                self.recursive_groups.get(index).cloned(),
             );
             let mut parameters_valid = true;
             for (parameter_index, parameter) in function.parameters().iter().enumerate()
@@ -1131,6 +1095,7 @@ impl<'a> Checker<'a> {
                 function.expressions(),
                 Some(header.signature.result()),
                 function.span(),
+                true,
             ) else {
                 continue;
             };
@@ -1204,6 +1169,42 @@ enum VisitState {
     Done,
 }
 
+fn find_recursive_groups(
+    dependencies: &[BTreeSet<usize>],
+    module_definitions: &[bool],
+) -> Vec<Vec<usize>> {
+    (0..dependencies.len())
+        .map(|start| {
+            if !module_definitions.get(start).copied().unwrap_or(false) {
+                return Vec::new();
+            }
+            reachable_functions(start, dependencies)
+                .into_iter()
+                .filter(|target| {
+                    module_definitions.get(*target).copied().unwrap_or(false)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn reachable_functions(
+    start: usize,
+    dependencies: &[BTreeSet<usize>],
+) -> BTreeSet<usize> {
+    let mut reached = BTreeSet::new();
+    let mut pending = vec![start];
+    while let Some(index) = pending.pop() {
+        if !reached.insert(index) {
+            continue;
+        }
+        if let Some(next) = dependencies.get(index) {
+            pending.extend(next.iter().copied());
+        }
+    }
+    reached
+}
+
 struct CheckEnvironment<'a> {
     source_id: &'a str,
     diagnostics: &'a mut Vec<Diagnostic>,
@@ -1219,6 +1220,7 @@ struct CheckEnvironment<'a> {
     outer: Option<VisibleBindings>,
     next_slot: usize,
     current_function: Option<usize>,
+    recursive_group: Option<Vec<usize>>,
 }
 
 #[derive(Clone)]
@@ -1259,6 +1261,7 @@ impl<'a> CheckEnvironment<'a> {
         module_names: &'a BTreeMap<String, ByteSpan>,
         bindings: &'a mut Vec<ApplicationBinding>,
         current_function: Option<usize>,
+        recursive_group: Option<Vec<usize>>,
     ) -> Self {
         Self {
             source_id,
@@ -1275,6 +1278,7 @@ impl<'a> CheckEnvironment<'a> {
             outer: None,
             next_slot: 0,
             current_function,
+            recursive_group,
         }
     }
 
@@ -2733,6 +2737,7 @@ fn check_sequence(
     expressions: &[Expression],
     expected: Option<PrimitiveType>,
     fallback_span: ByteSpan,
+    tail_position: bool,
 ) -> Option<Expr> {
     if expressions.is_empty() {
         if expected
@@ -2761,7 +2766,12 @@ fn check_sequence(
         let expression_expected = (index + 1 == expressions.len())
             .then_some(expected.clone())
             .flatten();
-        match check_expression(environment, expression, expression_expected) {
+        match check_expression_in_position(
+            environment,
+            expression,
+            expression_expected,
+            tail_position && index + 1 == expressions.len(),
+        ) {
             Some(value) => checked.push(value),
             None => valid = false,
         }
@@ -2783,6 +2793,15 @@ fn check_expression(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
     expected: Option<PrimitiveType>,
+) -> Option<Expr> {
+    check_expression_in_position(environment, expression, expected, false)
+}
+
+fn check_expression_in_position(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    expected: Option<PrimitiveType>,
+    tail_position: bool,
 ) -> Option<Expr> {
     match expression.kind() {
         ExpressionKind::Literal(literal) => check_literal(
@@ -2964,17 +2983,13 @@ fn check_expression(
             };
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
-            if known_function
-                .is_some_and(|index| environment.current_function == Some(index))
-            {
-                unavailable(
-                    environment.diagnostics,
-                    environment.source_id,
-                    application.span(),
-                    "recursive calls remain unavailable until the tail-call step",
-                );
-                return None;
-            }
+            let tail_transfer = tail_position
+                && known_function.is_some_and(|index| {
+                    environment
+                        .recursive_group
+                        .as_ref()
+                        .is_some_and(|group| group.contains(&index))
+                });
             let facts = BindingFacts::new(
                 signature.parameters().len(),
                 signature
@@ -3070,7 +3085,20 @@ fn check_expression(
                 .push(ApplicationBinding::new(application.span(), facts));
             let origin = SourceOrigin::new(environment.source_id, application.span());
             Some(match direct_function {
+                Some(function) if tail_transfer => {
+                    Expr::tail_call(function, arguments, result, origin)
+                }
                 Some(function) => Expr::call(function, arguments, result, origin),
+                None if tail_transfer => {
+                    let function_hint = known_function?;
+                    Expr::indirect_tail_call(
+                        callee,
+                        function_hint,
+                        arguments,
+                        result,
+                        origin,
+                    )
+                }
                 None => Expr::indirect_call(
                     callee,
                     known_function,
@@ -3080,9 +3108,13 @@ fn check_expression(
                 ),
             })
         }
-        ExpressionKind::Do(expressions) => {
-            check_sequence(environment, expressions, expected, expression.span())
-        }
+        ExpressionKind::Do(expressions) => check_sequence(
+            environment,
+            expressions,
+            expected,
+            expression.span(),
+            tail_position,
+        ),
         ExpressionKind::Let {
             pattern,
             value,
@@ -3105,6 +3137,7 @@ fn check_expression(
                 outer: environment.outer.clone(),
                 next_slot: environment.next_slot,
                 current_function: environment.current_function,
+                recursive_group: environment.recursive_group.clone(),
             };
             let slot = match pattern.kind() {
                 PatternKind::Binding(name) if name.is_discard() => None,
@@ -3129,7 +3162,13 @@ fn check_expression(
                     return None;
                 }
             };
-            let result = check_sequence(&mut nested, body, expected, expression.span());
+            let result = check_sequence(
+                &mut nested,
+                body,
+                expected,
+                expression.span(),
+                tail_position,
+            );
             let next_slot = nested.next_slot;
             let captures = nested.captures.clone();
             let capture_sources = nested.capture_sources.clone();
@@ -3153,10 +3192,18 @@ fn check_expression(
         } => {
             let condition =
                 check_expression(environment, condition, Some(PrimitiveType::Bool))?;
-            let then_branch =
-                check_expression(environment, then_branch, expected.clone())?;
-            let else_branch =
-                check_expression(environment, else_branch, expected.clone())?;
+            let then_branch = check_expression_in_position(
+                environment,
+                then_branch,
+                expected.clone(),
+                tail_position,
+            )?;
+            let else_branch = check_expression_in_position(
+                environment,
+                else_branch,
+                expected.clone(),
+                tail_position,
+            )?;
             if !types_match(&then_branch.result_type(), &else_branch.result_type()) {
                 mismatch(
                     environment.diagnostics,
@@ -3191,7 +3238,8 @@ fn check_expression(
                 environment.function_indices,
                 environment.module_names,
                 &mut *environment.bindings,
-                environment.current_function,
+                None,
+                None,
             );
             nested.outer = Some(outer);
             let mut referenced_names = Vec::new();
@@ -3273,6 +3321,7 @@ fn check_expression(
                 lambda.body(),
                 Some(signature.result()),
                 lambda.span(),
+                true,
             )?;
             let capture_sources = std::mem::take(&mut nested.capture_sources);
             let slot_count = nested.next_slot;
@@ -3857,16 +3906,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_mutual_recursive_calls_before_lowering() {
+    fn admits_mutual_recursive_calls_and_marks_tail_transfers() {
         let result = check_source(
             "recursive.vib",
             "(defn first () i32 (second))\n(defn second () i32 (first))\n(defn answer () i32 (first))",
         );
-        assert!(!result.accepted());
-        assert!(result.program().is_none());
-        assert!(result.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code() == DiagnosticCode::ToolUnavailable
-        }));
+        assert!(result.accepted(), "{:?}", result.diagnostics());
+        let program = result.program().expect("recursive program");
+        assert_eq!(
+            program.recursive_groups(),
+            &[vec![0, 1], vec![0, 1], vec![0, 1, 2]]
+        );
+        assert!(program.canonical_vibon().contains("tail: true"));
     }
 
     #[test]
