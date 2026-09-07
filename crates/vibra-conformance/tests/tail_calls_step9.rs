@@ -229,6 +229,33 @@ fn returned_external_callables_fall_back_to_ordinary_invocation() {
 }
 
 #[test]
+fn unknown_callable_branches_keep_known_recursive_and_external_fallbacks() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+    for (condition, expected, transfers) in [("true", 99, 1), ("false", 1, 0)] {
+        let source = format!(
+            "\
+(import text @std.text)
+(defn answer () u64
+  ((if {condition} (make) text.length) \"x\"))
+(defn make () (fn (str) u64) local-length)
+(defn local-length (value str) u64 99u64)
+"
+        );
+        let checked = check_bootstrap_text_import(
+            &verification,
+            "tail-unknown-external-branch.vib",
+            &source,
+        );
+        assert!(checked.accepted(), "{:?}", checked.diagnostics());
+        let execution =
+            vibra_interp::run(checked.program().expect("program")).expect("execution");
+        assert_eq!(execution.value(), &vibra_ir::Value::U64(expected));
+        assert_eq!(execution.tail_transfer_count(), transfers);
+    }
+}
+
+#[test]
 fn non_tail_call_keeps_a_live_caller_activation() {
     let source = r#"
 (defn answer () i32
