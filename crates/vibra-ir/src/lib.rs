@@ -7,7 +7,7 @@
 //! sequences, conditionals, first-class function paths, owned closures, and
 //! fixed/labelled calls; effects and collections belong to later steps.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use vibra_diagnostics::ByteSpan;
@@ -414,6 +414,13 @@ pub enum Expr {
         /// The source origin of the literal.
         origin: SourceOrigin,
     },
+    /// A labelled argument whose default is resolved from the runtime callee.
+    Default {
+        /// The statically checked labelled slot type.
+        value_type: PrimitiveType,
+        /// The source origin of the omitted argument.
+        origin: SourceOrigin,
+    },
     /// A strict left-to-right sequence.
     Sequence {
         /// Expressions in evaluation order.
@@ -522,6 +529,12 @@ impl Expr {
     #[must_use]
     pub fn literal(value: Value, origin: SourceOrigin) -> Self {
         Self::Literal { value, origin }
+    }
+
+    /// Creates an omitted labelled argument resolved by the selected callable.
+    #[must_use]
+    pub fn default_value(value_type: PrimitiveType, origin: SourceOrigin) -> Self {
+        Self::Default { value_type, origin }
     }
 
     /// Creates a checked activation-slot reference.
@@ -685,6 +698,7 @@ impl Expr {
     pub const fn origin(&self) -> &SourceOrigin {
         match self {
             Self::Literal { origin, .. }
+            | Self::Default { origin, .. }
             | Self::Sequence { origin, .. }
             | Self::Variable { origin, .. }
             | Self::Global { origin, .. }
@@ -702,6 +716,7 @@ impl Expr {
     pub fn result_type(&self) -> PrimitiveType {
         match self {
             Self::Literal { value, .. } => value.ty(),
+            Self::Default { value_type, .. } => value_type.clone(),
             Self::Sequence { expressions, .. } => expressions
                 .last()
                 .map_or(PrimitiveType::Void, Self::result_type),
@@ -723,6 +738,7 @@ impl Expr {
     pub fn expressions(&self) -> &[Self] {
         match self {
             Self::Literal { .. }
+            | Self::Default { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
             | Self::Function { .. }
@@ -740,7 +756,8 @@ impl Expr {
     pub const fn literal_value(&self) -> Option<&Value> {
         match self {
             Self::Literal { value, .. } => Some(value),
-            Self::Sequence { .. }
+            Self::Default { .. }
+            | Self::Sequence { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
             | Self::Function { .. }
@@ -757,6 +774,7 @@ impl Expr {
     pub fn slot_count(&self) -> usize {
         match self {
             Self::Literal { .. }
+            | Self::Default { .. }
             | Self::Global { .. }
             | Self::Function { .. }
             | Self::Captured { .. } => 0,
@@ -805,6 +823,7 @@ impl Expr {
     ) -> Result<PrimitiveType, IrError> {
         match self {
             Self::Literal { value, .. } => Ok(value.ty()),
+            Self::Default { value_type, .. } => Ok(value_type.clone()),
             Self::Function { signature, .. } => {
                 Ok(PrimitiveType::Function(Box::new(signature.clone())))
             }
@@ -843,6 +862,15 @@ impl Expr {
                         "closure parameter metadata does not match its signature"
                             .to_owned(),
                     ));
+                }
+                for (index, (actual, expected)) in
+                    parameters.iter().zip(signature.parameters()).enumerate()
+                {
+                    if !actual.same_shape(expected) {
+                        return Err(IrError::InvalidExpression(format!(
+                            "closure parameter {index} has type {actual}, expected {expected}"
+                        )));
+                    }
                 }
                 if *slot_count < signature.fixed_parameter_count()
                     || *slot_count < body.slot_count()
@@ -1428,7 +1456,10 @@ fn validate_program_expr(
     dependencies: &mut [BTreeSet<DependencyNode>],
 ) -> Result<(), IrError> {
     match expression {
-        Expr::Literal { .. } | Expr::Variable { .. } | Expr::Captured { .. } => {}
+        Expr::Literal { .. }
+        | Expr::Default { .. }
+        | Expr::Variable { .. }
+        | Expr::Captured { .. } => {}
         Expr::Function {
             function,
             signature,
@@ -1625,37 +1656,51 @@ fn validate_program_expr(
                     signature.result()
                 )));
             }
-            let dependency_target = if callee_expression.is_none() {
-                Some(*function)
+            let mut targets = BTreeSet::new();
+            if let Some(callee_expression) = callee_expression {
+                if let Some(function_hint) = function_hint {
+                    targets.insert(*function_hint);
+                } else {
+                    let summary = possible_function_targets(
+                        callee_expression,
+                        &BTreeMap::new(),
+                        functions,
+                        &mut BTreeSet::new(),
+                    );
+                    if summary.unknown {
+                        return Err(IrError::RecursiveCall(
+                            "indirect call target is not statically bounded before Step 9"
+                                .to_owned(),
+                        ));
+                    }
+                    targets.extend(summary.known);
+                }
             } else {
-                function_hint.as_ref().copied().or_else(|| {
-                    callee_expression.as_deref().and_then(static_function_index)
-                })
-            };
-            if let Some(dependency_target) = dependency_target
-                && functions.get(dependency_target).is_none()
-            {
-                return Err(IrError::InvalidExpression(format!(
-                    "function index {dependency_target} is outside the program"
-                )));
+                targets.insert(*function);
             }
-            if let Some(dependency_target) = dependency_target
-                && let Some(owner) = owner
-            {
-                let Some(edges) = dependencies.get_mut(owner.node_index(globals.len()))
-                else {
+            for dependency_target in targets {
+                if functions.get(dependency_target).is_none() {
                     return Err(IrError::InvalidExpression(format!(
-                        "dependency owner {owner:?} is outside the program"
+                        "function index {dependency_target} is outside the program"
                     )));
-                };
-                edges.insert(DependencyNode::Function(dependency_target));
-                if let DependencyNode::Function(owner) = owner {
-                    let Some(edges) = calls.get_mut(owner) else {
+                }
+                if let Some(owner) = owner {
+                    let Some(edges) =
+                        dependencies.get_mut(owner.node_index(globals.len()))
+                    else {
                         return Err(IrError::InvalidExpression(format!(
-                            "function owner index {owner} is outside the program"
+                            "dependency owner {owner:?} is outside the program"
                         )));
                     };
-                    edges.insert(dependency_target);
+                    edges.insert(DependencyNode::Function(dependency_target));
+                    if let DependencyNode::Function(owner) = owner {
+                        let Some(edges) = calls.get_mut(owner) else {
+                            return Err(IrError::InvalidExpression(format!(
+                                "function owner index {owner} is outside the program"
+                            )));
+                        };
+                        edges.insert(dependency_target);
+                    }
                 }
             }
         }
@@ -1663,38 +1708,121 @@ fn validate_program_expr(
     Ok(())
 }
 
-fn static_function_index(expression: &Expr) -> Option<usize> {
+#[derive(Clone, Debug, Default)]
+struct FunctionTargetSummary {
+    known: BTreeSet<usize>,
+    unknown: bool,
+}
+
+fn possible_function_targets(
+    expression: &Expr,
+    aliases: &BTreeMap<usize, FunctionTargetSummary>,
+    functions: &[CheckedFunction],
+    visiting: &mut BTreeSet<usize>,
+) -> FunctionTargetSummary {
     match expression {
-        Expr::Function { function, .. } => Some(*function),
-        Expr::Let {
-            slot: Some(slot),
-            value,
-            body,
-            ..
-        } if matches!(body.as_ref(), Expr::Variable { slot: body_slot, .. } if body_slot == slot) => {
-            static_function_index(value)
-        }
-        Expr::Sequence { expressions, .. } => {
-            expressions.last().and_then(static_function_index)
-        }
+        Expr::Function { function, .. } => FunctionTargetSummary {
+            known: BTreeSet::from([*function]),
+            unknown: false,
+        },
+        Expr::Closure { .. } => FunctionTargetSummary::default(),
         Expr::If {
             then_branch,
             else_branch,
             ..
         } => {
-            let then_function = static_function_index(then_branch);
-            let else_function = static_function_index(else_branch);
-            (then_function == else_function)
-                .then_some(then_function)
-                .flatten()
+            let then_targets =
+                possible_function_targets(then_branch, aliases, functions, visiting);
+            let else_targets =
+                possible_function_targets(else_branch, aliases, functions, visiting);
+            let mut known = then_targets.known;
+            known.extend(else_targets.known);
+            FunctionTargetSummary {
+                known,
+                unknown: then_targets.unknown || else_targets.unknown,
+            }
         }
-        Expr::Literal { .. }
-        | Expr::Global { .. }
-        | Expr::Variable { .. }
-        | Expr::Captured { .. }
-        | Expr::Closure { .. }
-        | Expr::Let { .. } => None,
-        Expr::Call { .. } => None,
+        Expr::Let {
+            slot, value, body, ..
+        } => {
+            let value_targets =
+                possible_function_targets(value, aliases, functions, visiting);
+            let mut nested = aliases.clone();
+            if let Some(slot) = slot {
+                nested.insert(*slot, value_targets.clone());
+            }
+            let body_targets =
+                possible_function_targets(body, &nested, functions, visiting);
+            FunctionTargetSummary {
+                known: body_targets.known,
+                unknown: value_targets.unknown || body_targets.unknown,
+            }
+        }
+        Expr::Sequence { expressions, .. } => expressions.last().map_or_else(
+            FunctionTargetSummary::default,
+            |expression| {
+                possible_function_targets(expression, aliases, functions, visiting)
+            },
+        ),
+        Expr::Variable { slot, .. } => {
+            aliases
+                .get(slot)
+                .cloned()
+                .unwrap_or_else(|| FunctionTargetSummary {
+                    known: BTreeSet::new(),
+                    unknown: true,
+                })
+        }
+        Expr::Captured { .. } | Expr::Global { .. } => FunctionTargetSummary {
+            known: BTreeSet::new(),
+            unknown: true,
+        },
+        Expr::Call {
+            function,
+            callee,
+            function_hint,
+            ..
+        } => {
+            let target_summary = if let Some(function_hint) = function_hint {
+                FunctionTargetSummary {
+                    known: BTreeSet::from([*function_hint]),
+                    unknown: false,
+                }
+            } else if let Some(callee) = callee {
+                possible_function_targets(callee, aliases, functions, visiting)
+            } else {
+                FunctionTargetSummary {
+                    known: BTreeSet::from([*function]),
+                    unknown: false,
+                }
+            };
+            if target_summary.unknown {
+                return target_summary;
+            }
+            let mut result = FunctionTargetSummary::default();
+            let targets = target_summary.known;
+            for target in targets {
+                if !visiting.insert(target) {
+                    result.unknown = true;
+                    continue;
+                }
+                let Some(function) = functions.get(target) else {
+                    result.unknown = true;
+                    continue;
+                };
+                let returned = possible_function_targets(
+                    function.body(),
+                    &BTreeMap::new(),
+                    functions,
+                    visiting,
+                );
+                result.known.extend(returned.known);
+                result.unknown |= returned.unknown;
+                visiting.remove(&target);
+            }
+            result
+        }
+        Expr::Literal { .. } | Expr::Default { .. } => FunctionTargetSummary::default(),
     }
 }
 
@@ -1850,6 +1978,10 @@ fn canonical_expr(expression: &Expr) -> String {
             value.ty().as_str(),
             value.canonical_vibon()
         ),
+        Expr::Default { value_type, .. } => format!(
+            "(record kind: @default type: {})",
+            canonical_type(value_type)
+        ),
         Expr::Sequence { expressions, .. } => {
             let values = expressions.iter().map(canonical_expr).collect::<Vec<_>>();
             format!(
@@ -1931,17 +2063,23 @@ fn canonical_expr(expression: &Expr) -> String {
             arguments,
             result,
             callee,
+            function_hint,
             ..
         } => {
             let values = arguments.iter().map(canonical_expr).collect::<Vec<_>>();
             match callee {
-                Some(callee) => format!(
-                    "(record kind: @call callee: {} function: {}u64 result: {} arguments: {})",
-                    canonical_expr(callee),
-                    function,
-                    canonical_type(result),
-                    canonical_array(&values)
-                ),
+                Some(callee) => {
+                    let function_field = function_hint
+                        .map(|function| format!(" function: {function}u64"))
+                        .unwrap_or_default();
+                    format!(
+                        "(record kind: @call callee: {}{} result: {} arguments: {})",
+                        canonical_expr(callee),
+                        function_field,
+                        canonical_type(result),
+                        canonical_array(&values)
+                    )
+                }
                 None => format!(
                     "(record kind: @call function: {}u64 result: {} arguments: {})",
                     function,
@@ -2138,6 +2276,31 @@ mod tests {
             .expect("indirect call shape is valid before program binding");
         let result = CheckedProgram::try_new(vec![function], 0);
         assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+    }
+
+    #[test]
+    fn closure_constructor_rejects_parameter_metadata_with_wrong_types() {
+        let origin = origin();
+        let signature =
+            FunctionSignature::new(vec![PrimitiveType::I32], PrimitiveType::Str);
+        let closure = Expr::closure(
+            signature.clone(),
+            vec![PrimitiveType::Str],
+            Vec::new(),
+            Expr::variable(0, PrimitiveType::Str, origin.clone()),
+            1,
+            origin.clone(),
+        );
+        let result = CheckedFunction::new(
+            "entry",
+            FunctionSignature::new(
+                Vec::new(),
+                PrimitiveType::Function(Box::new(signature)),
+            ),
+            closure,
+            origin,
+        );
+        assert!(matches!(result, Err(IrError::InvalidExpression(_))));
     }
 
     #[test]

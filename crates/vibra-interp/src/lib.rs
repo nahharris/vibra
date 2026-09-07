@@ -186,6 +186,7 @@ impl Machine<'_> {
     ) -> Option<RuntimeValue> {
         match expression {
             Expr::Literal { value, .. } => Some(RuntimeValue::Primitive(value.clone())),
+            Expr::Default { .. } => None,
             Expr::Sequence { expressions, .. } => {
                 let mut result = RuntimeValue::Primitive(Value::Void);
                 for expression in expressions {
@@ -287,9 +288,32 @@ impl Machine<'_> {
                         captures: Vec::new(),
                     })
                 };
+                let callable_signature = match &callable {
+                    RuntimeValue::Function(Callable::Named { signature, .. })
+                    | RuntimeValue::Function(Callable::Lambda { signature, .. }) => {
+                        signature
+                    }
+                    RuntimeValue::Primitive(_) => return None,
+                };
                 let mut values = Vec::with_capacity(arguments.len());
-                for argument in arguments {
-                    values.push(self.evaluate(argument, slots.clone(), captures)?);
+                for (argument_index, argument) in arguments.iter().enumerate() {
+                    if matches!(argument, Expr::Default { .. }) {
+                        let labelled_index = argument_index
+                            .checked_sub(callable_signature.parameters().len())?;
+                        let parameter =
+                            callable_signature.labelled().get(labelled_index)?;
+                        let default = parameter.default()?.clone();
+                        if !default.ty().same_shape(&argument.result_type()) {
+                            return None;
+                        }
+                        values.push(RuntimeValue::Primitive(default));
+                    } else {
+                        values.push(self.evaluate(
+                            argument,
+                            slots.clone(),
+                            captures,
+                        )?);
+                    }
                 }
                 match callable {
                     RuntimeValue::Function(Callable::Named {

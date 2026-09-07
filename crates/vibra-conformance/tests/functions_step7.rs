@@ -232,13 +232,11 @@ fn rejects_call_contract_violations_before_lowering() {
         assert!(checked.application_bindings().is_empty());
     }
     let checked = check_source(
-        "bad-indirect-call.vib",
-        "(def declared (fn (i32) i32 labelled: (required i32)) choose)\n(defn answer () i32 (let f declared (f 1i32)))\n(defn choose (value i32) i32 labelled: (required i32 1i32) value)",
+        "bad-required-label.vib",
+        "(defn answer () i32 (choose 1i32))\n(defn choose (value i32) i32 labelled: (required i32) value)",
     );
     assert!(!checked.accepted());
-    assert!(checked.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
-    }));
+    assert!(checked.program().is_none());
 }
 
 #[test]
@@ -317,4 +315,102 @@ fn global_function_aliases_do_not_bypass_recursive_admission() {
             .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
     );
     assert!(checked.program().is_none());
+}
+
+#[test]
+fn conditional_function_values_do_not_bypass_recursive_admission() {
+    let source = r#"
+(defn answer () i32
+  ((if true answer other)))
+(defn other () i32 1i32)
+"#;
+    let checked = check_source("conditional-recursion.vib", source);
+    assert!(
+        !checked.accepted(),
+        "a conditional callee must not hide a recursive target"
+    );
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
+    );
+}
+
+#[test]
+fn higher_order_function_values_do_not_bypass_recursive_admission() {
+    let source = r#"
+(defn apply (f (fn () i32)) i32
+  (f))
+(defn answer () i32
+  (apply answer))
+"#;
+    let checked = check_source("higher-order-recursion.vib", source);
+    assert!(
+        !checked.accepted(),
+        "higher-order recursion must be rejected"
+    );
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
+    );
+}
+
+#[test]
+fn returned_function_values_do_not_bypass_recursive_admission() {
+    let source = r#"
+(defn forward () (fn () i32)
+  answer)
+(defn answer () i32
+  ((forward)))
+"#;
+    let checked = check_source("returned-recursion.vib", source);
+    assert!(
+        !checked.accepted(),
+        "returned recursive values must be rejected"
+    );
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
+    );
+}
+
+#[test]
+fn omitted_labels_resolve_defaults_from_the_selected_callable() {
+    let source = r#"
+(defn answer () i32
+  ((if false first second)))
+(defn first () i32
+  labelled: (value i32 1i32)
+  value)
+(defn second () i32
+  labelled: (value i32 2i32)
+  value)
+"#;
+    let checked = check_source("selected-default.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let result =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(result.value(), &vibra_ir::Value::I32(2));
+}
+
+#[test]
+fn omitted_labels_through_a_written_function_type_use_value_defaults() {
+    let source = r#"
+(def selected (fn () i32 labelled: (value i32)) choose)
+(defn answer () i32
+  (selected))
+(defn choose () i32
+  labelled: (value i32 7i32)
+  value)
+"#;
+    let checked = check_source("typed-default.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let result =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(result.value(), &vibra_ir::Value::I32(7));
 }

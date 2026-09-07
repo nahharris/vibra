@@ -1017,6 +1017,32 @@ fn function_index_from_expr(
     }
 }
 
+/// Returns whether every statically known branch of a callable expression
+/// proves that a labelled slot has no default.  An unknown callable keeps the
+/// omitted slot in the IR so the interpreter can resolve the selected value's
+/// default after evaluating the callee.
+fn callable_default_is_missing(expression: &Expr, label: &str) -> bool {
+    match expression {
+        Expr::Function { signature, .. } | Expr::Closure { signature, .. } => signature
+            .labelled()
+            .iter()
+            .find(|parameter| parameter.name() == label)
+            .is_some_and(|parameter| parameter.default().is_none()),
+        Expr::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            callable_default_is_missing(then_branch, label)
+                && callable_default_is_missing(else_branch, label)
+        }
+        Expr::Sequence { expressions, .. } => expressions
+            .last()
+            .is_some_and(|expression| callable_default_is_missing(expression, label)),
+        _ => false,
+    }
+}
+
 fn syntax_function_index(
     expression: &Expression,
     global_indices: &BTreeMap<String, usize>,
@@ -2367,7 +2393,7 @@ fn check_expression(
                         Some(parameter.value_type()),
                     )?);
                 } else {
-                    let Some(default) = parameter.default() else {
+                    if callable_default_is_missing(&callee, parameter.name()) {
                         call_contract_error(
                             environment,
                             application.span(),
@@ -2377,9 +2403,9 @@ fn check_expression(
                             ),
                         );
                         return None;
-                    };
-                    arguments.push(Expr::literal(
-                        default.clone(),
+                    }
+                    arguments.push(Expr::default_value(
+                        parameter.value_type(),
                         SourceOrigin::new(environment.source_id, application.span()),
                     ));
                 }
