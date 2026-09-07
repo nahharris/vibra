@@ -12,6 +12,59 @@ use std::fmt;
 
 use vibra_diagnostics::ByteSpan;
 
+/// The closed compiler intrinsic registry admitted by M2.
+pub mod external {
+    use super::{FunctionSignature, PrimitiveType};
+
+    /// One pure, compiler-owned operation.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum CompilerIntrinsic {
+        /// Concatenate two Unicode scalar sequences.
+        TextConcat,
+        /// Count Unicode scalars in a string.
+        TextLength,
+    }
+
+    impl CompilerIntrinsic {
+        /// The stable registry symbol.
+        #[must_use]
+        pub const fn symbol(self) -> &'static str {
+            match self {
+                Self::TextConcat => "text.concat",
+                Self::TextLength => "text.length",
+            }
+        }
+
+        /// The exact checked signature.
+        #[must_use]
+        pub fn signature(self) -> FunctionSignature {
+            match self {
+                Self::TextConcat => FunctionSignature::new(
+                    vec![PrimitiveType::Str, PrimitiveType::Str],
+                    PrimitiveType::Str,
+                ),
+                Self::TextLength => FunctionSignature::new(
+                    vec![PrimitiveType::Str],
+                    PrimitiveType::U64,
+                ),
+            }
+        }
+
+        /// Resolves only a symbol in the closed registry.
+        #[must_use]
+        pub fn from_symbol(symbol: &str) -> Option<Self> {
+            match symbol {
+                "text.concat" => Some(Self::TextConcat),
+                "text.length" => Some(Self::TextLength),
+                _ => None,
+            }
+        }
+
+        /// Every compiler intrinsic in canonical registry order.
+        pub const ALL: [Self; 2] = [Self::TextConcat, Self::TextLength];
+    }
+}
+
 /// One of the primitive types admitted by the M2 literal profile.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
@@ -414,6 +467,15 @@ pub enum Expr {
         /// The source origin of the literal.
         origin: SourceOrigin,
     },
+    /// A call to one admitted pure compiler intrinsic.
+    External {
+        /// The closed compiler registry operation.
+        intrinsic: external::CompilerIntrinsic,
+        /// Checked operands in the registry's declaration order.
+        arguments: Vec<Self>,
+        /// The source origin of the intrinsic call.
+        origin: SourceOrigin,
+    },
     /// A labelled argument whose default is resolved from the runtime callee.
     Default {
         /// The statically checked labelled slot type.
@@ -529,6 +591,20 @@ impl Expr {
     #[must_use]
     pub fn literal(value: Value, origin: SourceOrigin) -> Self {
         Self::Literal { value, origin }
+    }
+
+    /// Creates a checked compiler intrinsic call.
+    #[must_use]
+    pub fn external(
+        intrinsic: external::CompilerIntrinsic,
+        arguments: Vec<Self>,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::External {
+            intrinsic,
+            arguments,
+            origin,
+        }
     }
 
     /// Creates an omitted labelled argument resolved by the selected callable.
@@ -698,6 +774,7 @@ impl Expr {
     pub const fn origin(&self) -> &SourceOrigin {
         match self {
             Self::Literal { origin, .. }
+            | Self::External { origin, .. }
             | Self::Default { origin, .. }
             | Self::Sequence { origin, .. }
             | Self::Variable { origin, .. }
@@ -716,6 +793,7 @@ impl Expr {
     pub fn result_type(&self) -> PrimitiveType {
         match self {
             Self::Literal { value, .. } => value.ty(),
+            Self::External { intrinsic, .. } => intrinsic.signature().result(),
             Self::Default { value_type, .. } => value_type.clone(),
             Self::Sequence { expressions, .. } => expressions
                 .last()
@@ -738,6 +816,7 @@ impl Expr {
     pub fn expressions(&self) -> &[Self] {
         match self {
             Self::Literal { .. }
+            | Self::External { .. }
             | Self::Default { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
@@ -757,6 +836,7 @@ impl Expr {
         match self {
             Self::Literal { value, .. } => Some(value),
             Self::Default { .. }
+            | Self::External { .. }
             | Self::Sequence { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
@@ -778,6 +858,9 @@ impl Expr {
             | Self::Global { .. }
             | Self::Function { .. }
             | Self::Captured { .. } => 0,
+            Self::External { arguments, .. } => {
+                arguments.iter().map(Self::slot_count).max().unwrap_or(0)
+            }
             Self::Sequence { expressions, .. } => {
                 expressions.iter().map(Self::slot_count).max().unwrap_or(0)
             }
@@ -823,6 +906,32 @@ impl Expr {
     ) -> Result<PrimitiveType, IrError> {
         match self {
             Self::Literal { value, .. } => Ok(value.ty()),
+            Self::External {
+                intrinsic,
+                arguments,
+                ..
+            } => {
+                let signature = intrinsic.signature();
+                if arguments.len() != signature.parameters().len() {
+                    return Err(IrError::InvalidExpression(format!(
+                        "{} expects {} arguments, got {}",
+                        intrinsic.symbol(),
+                        signature.parameters().len(),
+                        arguments.len()
+                    )));
+                }
+                for (argument, expected) in arguments.iter().zip(signature.parameters()) {
+                    let actual = argument
+                        .validate_shape_with_captures(slots, capture_types)?;
+                    if !actual.same_shape(expected) {
+                        return Err(IrError::InvalidExpression(format!(
+                            "{} argument has type {actual}, expected {expected}",
+                            intrinsic.symbol()
+                        )));
+                    }
+                }
+                Ok(signature.result())
+            }
             Self::Default { .. } => Err(IrError::InvalidExpression(
                 "default argument marker is only valid as a call operand".to_owned(),
             )),
@@ -1113,6 +1222,31 @@ pub struct CheckedFunction {
 }
 
 impl CheckedFunction {
+    /// Creates a checked function backed by a closed compiler intrinsic.
+    pub fn new_external(
+        name: impl Into<String>,
+        signature: FunctionSignature,
+        intrinsic: external::CompilerIntrinsic,
+        origin: SourceOrigin,
+    ) -> Result<Self, IrError> {
+        if signature != intrinsic.signature() {
+            return Err(IrError::InvalidExpression(format!(
+                "external {} has a mismatched declaration signature",
+                intrinsic.symbol()
+            )));
+        }
+        let arguments = signature
+            .parameters()
+            .iter()
+            .enumerate()
+            .map(|(slot, value_type)| {
+                Expr::variable(slot, value_type.clone(), origin.clone())
+            })
+            .collect();
+        let body = Expr::external(intrinsic, arguments, origin.clone());
+        Self::with_slots(name, signature, body, origin, intrinsic.signature().fixed_parameter_count())
+    }
+
     /// Creates a checked function, rejecting a body whose final type differs
     /// from its written result type.
     pub fn new(
@@ -1485,6 +1619,18 @@ fn validate_program_expr(
         | Expr::Default { .. }
         | Expr::Variable { .. }
         | Expr::Captured { .. } => {}
+        Expr::External { arguments, .. } => {
+            for argument in arguments {
+                validate_program_expr(
+                    argument,
+                    globals,
+                    functions,
+                    owner,
+                    calls,
+                    dependencies,
+                )?;
+            }
+        }
         Expr::Function {
             function,
             signature,
@@ -1899,7 +2045,9 @@ fn possible_function_targets(
             }
             result
         }
-        Expr::Literal { .. } | Expr::Default { .. } => FunctionTargetSummary::default(),
+        Expr::Literal { .. } | Expr::External { .. } | Expr::Default { .. } => {
+            FunctionTargetSummary::default()
+        }
     }
 }
 
@@ -2264,7 +2412,9 @@ impl<'a> CallFlow<'a> {
                 }
                 summary
             }
-            Expr::Literal { .. } | Expr::Default { .. } => FlowTargetSummary::default(),
+            Expr::Literal { .. } | Expr::External { .. } | Expr::Default { .. } => {
+                FlowTargetSummary::default()
+            }
         }
     }
 
@@ -2277,6 +2427,7 @@ impl<'a> CallFlow<'a> {
     ) -> Result<(), IrError> {
         match expression {
             Expr::Literal { .. }
+            | Expr::External { .. }
             | Expr::Default { .. }
             | Expr::Variable { .. }
             | Expr::Global { .. }
@@ -2654,6 +2805,18 @@ fn canonical_expr(expression: &Expr) -> String {
             "(record kind: @literal type: @{} value: {})",
             value.ty().as_str(),
             value.canonical_vibon()
+        ),
+        Expr::External {
+            intrinsic,
+            arguments,
+            ..
+        } => format!(
+            "(record kind: @external symbol: \"{}\" result: {} arguments: {})",
+            intrinsic.symbol(),
+            canonical_type(&intrinsic.signature().result()),
+            canonical_array(
+                &arguments.iter().map(canonical_expr).collect::<Vec<_>>()
+            )
         ),
         Expr::Default { value_type, .. } => format!(
             "(record kind: @default type: {})",
