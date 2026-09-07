@@ -17,12 +17,18 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::fs;
 use std::path::Path;
 
+use base64::Engine;
+use ring::signature;
+use sha2::{Digest, Sha256};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
     CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature,
     LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin, Value,
+    external::CompilerIntrinsic,
 };
 use vibra_syntax::{
     ApplicationBinding, Attribute, BindingFacts, Declaration, Expression,
@@ -160,8 +166,293 @@ pub fn check_ast_with_bindings(
     ast: &SourceAst,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
+    check_ast_with_bindings_authority(source_id.as_ref(), ast, diagnostics, false)
+}
+
+/// Checks the exact signed M2 text bootstrap module.
+///
+/// This entry point is intentionally separate from [`check_source`]: a source
+/// package cannot gain compiler authority merely by copying an external
+/// declaration. The verifier in this crate must approve the bootstrap bytes
+/// before callers pass them here.
+pub fn check_bootstrap_source(
+    verification: &BootstrapVerification,
+    source_id: impl AsRef<str>,
+    source: &str,
+) -> CheckResult {
     let source_id = source_id.as_ref();
-    let mut checker = Checker::new(source_id, diagnostics, ast);
+    if source_id != BOOTSTRAP_TEXT_SOURCE_ID
+        || source.as_bytes() != BOOTSTRAP_TEXT_BYTES
+        || verification.artifact.is_empty()
+    {
+        let diagnostic = Diagnostic::new(
+            DiagnosticCode::ToolUnavailable,
+            ByteSpan::empty_at(0),
+            "compiler externals require the verified M2 bootstrap module",
+        )
+        .with_source_id(source_id);
+        return CheckResult::new(None, vec![diagnostic]);
+    }
+    let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
+        Ok(document) => document,
+        Err(error) => {
+            return CheckResult::new(
+                None,
+                vec![
+                    Diagnostic::new(
+                        DiagnosticCode::ModuleIoError,
+                        ByteSpan::empty_at(0),
+                        error.to_string(),
+                    )
+                    .with_source_id(source_id),
+                ],
+            );
+        }
+    };
+    let mut diagnostics = document
+        .diagnostics()
+        .iter()
+        .cloned()
+        .map(|diagnostic| diagnostic.with_source_id(source_id))
+        .collect::<Vec<_>>();
+    if !document.accepted() || document.recovered() {
+        return CheckResult::new(None, diagnostics);
+    }
+    let Some(ast) = document.ast() else {
+        return CheckResult::new(None, diagnostics);
+    };
+    let (program, bindings) =
+        check_ast_with_bindings_authority(source_id, ast, &mut diagnostics, true);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error)
+    {
+        CheckResult::new(None, diagnostics)
+    } else {
+        CheckResult::with_bindings(program, diagnostics, bindings)
+    }
+}
+
+/// The canonical path of the signed M2 text bootstrap module.
+pub const BOOTSTRAP_TEXT_SOURCE_ID: &str = "stdlib/m2/src/std/text.vib";
+const BOOTSTRAP_TEXT_BYTES: &[u8] =
+    include_bytes!("../../../stdlib/m2/src/std/text.vib");
+
+/// The result of verifying the repository's signed M2 bootstrap input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootstrapVerification {
+    artifact: Vec<u8>,
+}
+
+impl BootstrapVerification {
+    /// The exact signed artifact bytes.
+    #[must_use]
+    pub fn artifact(&self) -> &[u8] {
+        &self.artifact
+    }
+}
+
+/// A failure while checking the fixed offline bootstrap provenance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootstrapVerificationError(String);
+
+impl fmt::Display for BootstrapVerificationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for BootstrapVerificationError {}
+
+const BOOTSTRAP_ARTIFACT_SHA256: &str =
+    "8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103";
+const BOOTSTRAP_SIGNATURE_SHA256: &str =
+    "f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63";
+const BOOTSTRAP_PUBLIC_KEY_SHA256: &str =
+    "fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509";
+const BOOTSTRAP_TEXT_SHA256: &str =
+    "c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44";
+const BOOTSTRAP_ASSERT_SHA256: &str =
+    "746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007";
+const BOOTSTRAP_MANIFEST: &[u8] =
+    include_bytes!("../../../stdlib/m2/bootstrap-manifest.vibon");
+const BOOTSTRAP_SIGNATURE: &[u8] =
+    include_bytes!("../../../stdlib/m2/bootstrap.vibon.sig");
+const BOOTSTRAP_PUBLIC_KEY: &[u8] =
+    include_bytes!("../../../stdlib/m2/toolchain-ed25519.pub");
+
+/// Verifies the exact checked-in M2 artifact, manifest, key, and signature.
+///
+/// All paths are fixed relative paths under `root`. The manifest is itself
+/// pinned to the reviewed bytes, and Ed25519 verification is performed over
+/// the artifact bytes before any source declaration is admitted.
+pub fn verify_bootstrap(
+    root: impl AsRef<Path>,
+) -> Result<BootstrapVerification, BootstrapVerificationError> {
+    let root = root.as_ref();
+    let manifest = read_bootstrap_file(root, "stdlib/m2/bootstrap-manifest.vibon")?;
+    if manifest != BOOTSTRAP_MANIFEST {
+        return Err(BootstrapVerificationError(
+            "M2 bootstrap manifest bytes do not match the reviewed manifest".to_owned(),
+        ));
+    }
+    let artifact = read_bootstrap_file(root, "stdlib/m2/bootstrap.vibon")?;
+    let signature_bytes = read_bootstrap_file(root, "stdlib/m2/bootstrap.vibon.sig")?;
+    let public_key = read_bootstrap_file(root, "stdlib/m2/toolchain-ed25519.pub")?;
+    check_digest("artifact", &artifact, BOOTSTRAP_ARTIFACT_SHA256)?;
+    check_digest("signature", &signature_bytes, BOOTSTRAP_SIGNATURE_SHA256)?;
+    check_digest("public key", &public_key, BOOTSTRAP_PUBLIC_KEY_SHA256)?;
+    let text_module = read_bootstrap_file(root, BOOTSTRAP_TEXT_SOURCE_ID)?;
+    let assert_module = read_bootstrap_file(root, "stdlib/m2/src/std/assert.vib")?;
+    check_digest("text module", &text_module, BOOTSTRAP_TEXT_SHA256)?;
+    check_digest("assertion module", &assert_module, BOOTSTRAP_ASSERT_SHA256)?;
+    validate_signed_bootstrap_map(&artifact)?;
+    if signature_bytes != BOOTSTRAP_SIGNATURE || public_key != BOOTSTRAP_PUBLIC_KEY {
+        return Err(BootstrapVerificationError(
+            "M2 bootstrap trust inputs do not match the reviewed bytes".to_owned(),
+        ));
+    }
+    let signature_text = std::str::from_utf8(&signature_bytes).map_err(|_| {
+        BootstrapVerificationError("bootstrap signature is not UTF-8".to_owned())
+    })?;
+    let signature = base64::engine::general_purpose::STANDARD
+        .decode(signature_text.trim())
+        .map_err(|_| {
+            BootstrapVerificationError("bootstrap signature is not base64".to_owned())
+        })?;
+    let key_text = std::str::from_utf8(&public_key).map_err(|_| {
+        BootstrapVerificationError("bootstrap public key is not UTF-8".to_owned())
+    })?;
+    let key_text = key_text
+        .lines()
+        .filter(|line| !line.starts_with("---"))
+        .collect::<String>();
+    let key = base64::engine::general_purpose::STANDARD
+        .decode(key_text)
+        .map_err(|_| {
+            BootstrapVerificationError("bootstrap public key is not base64".to_owned())
+        })?;
+    let key = key.get(key.len().saturating_sub(32)..).ok_or_else(|| {
+        BootstrapVerificationError(
+            "bootstrap public key has no Ed25519 key bytes".to_owned(),
+        )
+    })?;
+    let verifier = signature::UnparsedPublicKey::new(&signature::ED25519, key);
+    verifier.verify(&artifact, &signature).map_err(|_| {
+        BootstrapVerificationError(
+            "M2 bootstrap Ed25519 signature is invalid".to_owned(),
+        )
+    })?;
+    Ok(BootstrapVerification { artifact })
+}
+
+fn validate_signed_bootstrap_map(
+    artifact: &[u8],
+) -> Result<(), BootstrapVerificationError> {
+    let text = std::str::from_utf8(artifact).map_err(|_| {
+        BootstrapVerificationError("bootstrap artifact is not UTF-8".to_owned())
+    })?;
+    for fragment in [
+        "@std.text",
+        "stdlib/m2/src/std/text.vib",
+        "sha256:c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44",
+        "@std.assert",
+        "stdlib/m2/src/std/assert.vib",
+        "sha256:746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007",
+        "text.concat",
+        "text.length",
+        "assert.equal-u64",
+    ] {
+        if !text.contains(fragment) {
+            return Err(BootstrapVerificationError(format!(
+                "signed bootstrap import map is missing `{fragment}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn read_bootstrap_file(
+    root: &Path,
+    relative: &str,
+) -> Result<Vec<u8>, BootstrapVerificationError> {
+    if path_contains_link(root) {
+        return Err(BootstrapVerificationError(
+            "bootstrap root contains a symlink or junction".to_owned(),
+        ));
+    }
+    let root = fs::canonicalize(root).map_err(|error| {
+        BootstrapVerificationError(format!("cannot resolve bootstrap root: {error}"))
+    })?;
+    let candidate = root.join(relative);
+    if path_contains_link(&candidate) {
+        return Err(BootstrapVerificationError(format!(
+            "bootstrap path `{relative}` contains a symlink or junction"
+        )));
+    }
+    let resolved = fs::canonicalize(&candidate).map_err(|error| {
+        BootstrapVerificationError(format!(
+            "cannot read bootstrap `{relative}`: {error}"
+        ))
+    })?;
+    if !resolved.starts_with(&root) {
+        return Err(BootstrapVerificationError(format!(
+            "bootstrap path `{relative}` escapes its root"
+        )));
+    }
+    fs::read(resolved).map_err(|error| {
+        BootstrapVerificationError(format!(
+            "cannot read bootstrap `{relative}`: {error}"
+        ))
+    })
+}
+
+fn path_contains_link(path: &Path) -> bool {
+    let mut current = Path::new("").to_path_buf();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        let Ok(metadata) = fs::symlink_metadata(&current) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || is_windows_reparse_point(&metadata) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(windows)]
+fn is_windows_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & 0x400 != 0
+}
+
+#[cfg(not(windows))]
+const fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
+}
+
+fn check_digest(
+    label: &str,
+    bytes: &[u8],
+    expected: &str,
+) -> Result<(), BootstrapVerificationError> {
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if actual != expected {
+        return Err(BootstrapVerificationError(format!(
+            "M2 bootstrap {label} digest mismatch: expected sha256:{expected}, got sha256:{actual}"
+        )));
+    }
+    Ok(())
+}
+
+fn check_ast_with_bindings_authority(
+    source_id: &str,
+    ast: &SourceAst,
+    diagnostics: &mut Vec<Diagnostic>,
+    trusted_bootstrap: bool,
+) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
+    let mut checker = Checker::new(source_id, diagnostics, ast, trusted_bootstrap);
     checker.collect_headers();
     checker.check_initializer_cycles();
     checker.check_function_cycles();
@@ -185,6 +476,8 @@ struct FunctionHeader {
     declaration_index: usize,
     name: String,
     signature: FunctionSignature,
+    external: Option<CompilerIntrinsic>,
+    external_declared: bool,
 }
 
 #[derive(Clone)]
@@ -207,6 +500,7 @@ struct Checker<'a> {
     checked_globals: Vec<Option<CheckedGlobal>>,
     checked_functions: Vec<Option<CheckedFunction>>,
     bindings: Vec<ApplicationBinding>,
+    trusted_bootstrap: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -214,6 +508,7 @@ impl<'a> Checker<'a> {
         source_id: &'a str,
         diagnostics: &'a mut Vec<Diagnostic>,
         ast: &'a SourceAst,
+        trusted_bootstrap: bool,
     ) -> Self {
         Self {
             source_id,
@@ -227,6 +522,7 @@ impl<'a> Checker<'a> {
             checked_globals: Vec::new(),
             checked_functions: Vec::new(),
             bindings: Vec::new(),
+            trusted_bootstrap,
         }
     }
 
@@ -294,6 +590,15 @@ impl<'a> Checker<'a> {
                         declaration_index,
                         name,
                         signature,
+                        external: compiler_intrinsic(
+                            self.source_id,
+                            function,
+                            self.diagnostics,
+                            self.trusted_bootstrap,
+                        ),
+                        external_declared: function.attributes().items().iter().any(
+                            |attribute| matches!(attribute, Attribute::External(_)),
+                        ),
                     });
                 }
                 Declaration::Import(_) => unavailable(
@@ -528,13 +833,40 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            if has_deferred_attributes(function.attributes().items()) {
+            if !header.external_declared
+                && has_deferred_attributes(function.attributes().items())
+            {
                 unavailable(
                     self.diagnostics,
                     self.source_id,
                     function.span(),
                     "variadic, generic, external, and nonempty-effect attributes are unavailable in Step 7",
                 );
+                continue;
+            }
+            if let Some(intrinsic) = header.external {
+                let origin = SourceOrigin::new(self.source_id, function.span());
+                match CheckedFunction::new_external(
+                    header.name,
+                    header.signature,
+                    intrinsic,
+                    origin,
+                ) {
+                    Ok(function) => {
+                        if let Some(slot) = self.checked_functions.get_mut(index) {
+                            *slot = Some(function);
+                        }
+                    }
+                    Err(error) => unavailable(
+                        self.diagnostics,
+                        self.source_id,
+                        function.span(),
+                        format!("checked IR construction failed: {error}"),
+                    ),
+                }
+                continue;
+            }
+            if header.external_declared {
                 continue;
             }
             let mut environment = CheckEnvironment::new(
@@ -1968,6 +2300,91 @@ fn check_signature(
     valid.then(|| FunctionSignature::with_labelled(parameters, labelled, result))
 }
 
+fn compiler_intrinsic(
+    source_id: &str,
+    function: &vibra_syntax::FunctionDeclaration,
+    diagnostics: &mut Vec<Diagnostic>,
+    trusted_bootstrap: bool,
+) -> Option<CompilerIntrinsic> {
+    let provider = function.attributes().items().iter().find_map(|attribute| {
+        if let Attribute::External(name) = attribute {
+            Some(name.value())
+        } else {
+            None
+        }
+    });
+    let provider = provider?;
+    if !trusted_bootstrap {
+        unavailable(
+            diagnostics,
+            source_id,
+            function.span(),
+            "external declarations require the verified M2 bootstrap module",
+        );
+        return None;
+    }
+    if provider != "compiler" {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalUnknownSymbol,
+                function.span(),
+                "only the closed @compiler registry is executable in M2",
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    }
+    let symbol = function.attributes().items().iter().find_map(|attribute| {
+        if let Attribute::Symbol(Literal::String(value)) = attribute {
+            Some(value.value())
+        } else {
+            None
+        }
+    });
+    let symbol = symbol?;
+    let Some(intrinsic) = CompilerIntrinsic::from_symbol(symbol) else {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalUnknownSymbol,
+                function.span(),
+                format!("compiler symbol `{symbol}` is outside the closed M2 registry"),
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    };
+    let expected = intrinsic.signature();
+    let actual = FunctionSignature::new(
+        function
+            .parameters()
+            .iter()
+            .filter_map(|parameter| primitive_type(parameter.value_type()))
+            .collect(),
+        primitive_type(function.result()).unwrap_or(PrimitiveType::Void),
+    );
+    if !actual.same_shape(&expected) {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeArgumentMismatch,
+                function.span(),
+                format!(
+                    "compiler symbol `{symbol}` has signature {} -> {}",
+                    expected
+                        .parameters()
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    expected.result()
+                ),
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    }
+    Some(intrinsic)
+}
+
 fn check_lambda_signature(
     source_id: &str,
     lambda: &vibra_syntax::LambdaExpression,
@@ -2994,7 +3411,11 @@ fn unavailable(
 
 #[cfg(test)]
 mod tests {
-    use super::check_source;
+    use super::{
+        BOOTSTRAP_TEXT_SOURCE_ID, check_bootstrap_source, check_source,
+        verify_bootstrap,
+    };
+    use std::path::Path;
     use vibra_diagnostics::DiagnosticCode;
 
     #[test]
@@ -3151,6 +3572,72 @@ mod tests {
         assert!(result.diagnostics().iter().any(|diagnostic| {
             diagnostic.code() == DiagnosticCode::TypeInitializerCycle
         }));
+    }
+
+    #[test]
+    fn ordinary_source_cannot_authorize_a_compiler_external() {
+        let source = r#"(defn length (value str) u64
+  external: @compiler
+  symbol: "text.length")"#;
+        let checked = check_source("copied.vib", source);
+        assert!(!checked.accepted());
+        assert!(checked.program().is_none());
+        assert!(checked.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::ToolUnavailable
+        }));
+    }
+
+    #[test]
+    fn the_exact_bootstrap_text_module_admits_only_closed_intrinsics() {
+        let source = include_str!("../../../stdlib/m2/src/std/text.vib");
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let checked =
+            check_bootstrap_source(&verification, BOOTSTRAP_TEXT_SOURCE_ID, source);
+        assert!(checked.accepted(), "{:?}", checked.diagnostics());
+        let program = checked.program().expect("bootstrap program");
+        assert!(program.canonical_vibon().contains("text.length"));
+    }
+
+    #[test]
+    fn signed_bootstrap_verifies_exact_bytes_and_ed25519_signature() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification =
+            verify_bootstrap(repository).expect("checked-in bootstrap provenance");
+        assert_eq!(
+            verification.artifact(),
+            include_bytes!("../../../stdlib/m2/bootstrap.vibon")
+        );
+    }
+
+    #[test]
+    fn bootstrap_rejects_tampered_declared_module_bytes() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = std::env::temp_dir()
+            .join(format!("vibra-bootstrap-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for relative in [
+            "stdlib/m2/bootstrap-manifest.vibon",
+            "stdlib/m2/bootstrap.vibon",
+            "stdlib/m2/bootstrap.vibon.sig",
+            "stdlib/m2/toolchain-ed25519.pub",
+            "stdlib/m2/src/std/text.vib",
+            "stdlib/m2/src/std/assert.vib",
+        ] {
+            let destination = root.join(relative);
+            std::fs::create_dir_all(destination.parent().expect("module parent"))
+                .expect("module directory");
+            std::fs::copy(repository.join(relative), &destination)
+                .expect("module copy");
+        }
+        std::fs::write(
+            root.join("stdlib/m2/src/std/text.vib"),
+            b"; modified trusted module\n",
+        )
+        .expect("tamper module");
+        let error = verify_bootstrap(&root).expect_err("tampered module");
+        assert!(error.to_string().contains("text module digest mismatch"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
