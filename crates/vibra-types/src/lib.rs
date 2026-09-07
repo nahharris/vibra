@@ -3202,14 +3202,17 @@ fn check_expression_in_position(
                 function_targets_from_expr(&callee, environment, &BTreeMap::new());
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
-            let tail_transfer = tail_position
-                && (!function_targets.known.is_empty() || function_targets.unknown)
-                && environment.recursive_group.as_ref().is_some_and(|group| {
+            let has_recursive_target =
+                environment.recursive_group.as_ref().is_some_and(|group| {
                     function_targets
                         .known
                         .iter()
-                        .all(|index| group.contains(index))
+                        .any(|index| group.contains(index))
                 });
+            let tail_transfer = tail_position
+                && (!function_targets.known.is_empty() || function_targets.unknown)
+                && (has_recursive_target
+                    || (function_targets.known.is_empty() && function_targets.unknown));
             let facts = BindingFacts::new(
                 signature.parameters().len(),
                 signature

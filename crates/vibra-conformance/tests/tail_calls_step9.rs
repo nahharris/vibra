@@ -2,11 +2,13 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
 
+use std::path::Path;
+
 use vibra_conformance::{
     CaseStatus, ConformanceProfile, ConformanceRunner, Corpus, InterpreterV1Handler,
     ProfileDispatcher,
 };
-use vibra_types::check_source;
+use vibra_types::{check_bootstrap_text_import, check_source, verify_bootstrap};
 
 fn binary_counter_source(bit_count: usize) -> String {
     let names = (0..bit_count)
@@ -158,6 +160,35 @@ fn identity_returned_targets_remain_bounded_through_direct_and_local_calls() {
         vibra_interp::run(checked.program().expect("program")).expect("execution");
     assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
     assert_eq!(execution.tail_transfer_count(), 1);
+}
+
+#[test]
+fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+    for (condition, expected, transfers, depth) in
+        [("true", 99, 1, 1), ("false", 1, 0, 2)]
+    {
+        let source = format!(
+            "\
+(import text @std.text)
+(defn answer () u64
+  ((if {condition} local-length text.length) \"x\"))
+(defn local-length (value str) u64 99u64)
+"
+        );
+        let checked = check_bootstrap_text_import(
+            &verification,
+            "tail-mixed-external.vib",
+            &source,
+        );
+        assert!(checked.accepted(), "{:?}", checked.diagnostics());
+        let execution =
+            vibra_interp::run(checked.program().expect("program")).expect("execution");
+        assert_eq!(execution.value(), &vibra_ir::Value::U64(expected));
+        assert_eq!(execution.tail_transfer_count(), transfers);
+        assert_eq!(execution.max_activation_depth(), depth);
+    }
 }
 
 #[test]
