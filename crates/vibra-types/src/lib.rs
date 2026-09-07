@@ -746,6 +746,19 @@ impl<'a> Checker<'a> {
                         && import.target().kind() == NameKind::Atom
                         && import.target().value() == "std.text" =>
                 {
+                    if let Some(earlier) = self.module_names.get("text").copied() {
+                        redeclaration(
+                            self.diagnostics,
+                            self.source_id,
+                            "text",
+                            "text",
+                            import.span(),
+                            earlier,
+                        );
+                    } else {
+                        self.module_names
+                            .insert("text".to_owned(), import.span());
+                    }
                     self.text_import_span = Some(import.span());
                 }
                 Declaration::Import(import) => unavailable(
@@ -3615,7 +3628,7 @@ mod tests {
         check_source, verify_bootstrap,
     };
     use std::path::Path;
-    use vibra_diagnostics::DiagnosticCode;
+    use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 
     #[test]
     fn checks_an_unsuffixed_integer_against_the_written_result() {
@@ -3899,6 +3912,39 @@ mod tests {
                 checked.diagnostics()
             );
         }
+    }
+
+    #[test]
+    fn trusted_text_alias_collisions_report_the_import_span() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let module = check_bootstrap_text_import(
+            &verification,
+            "app/main.vib",
+            "(import text @std.text)\n(def text str \"shadow\")\n(defn answer () str text)",
+        );
+        assert!(!module.accepted());
+        let diagnostic = module
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameRedeclaration)
+            .expect("module alias collision");
+        assert_eq!(diagnostic.related().len(), 1);
+        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(0, 23));
+
+        let local = check_bootstrap_text_import(
+            &verification,
+            "app/main.vib",
+            "(import text @std.text)\n(defn answer () u64 (let text 1u64 text))",
+        );
+        assert!(!local.accepted());
+        let diagnostic = local
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameRedeclaration)
+            .expect("local alias collision");
+        assert_eq!(diagnostic.related().len(), 1);
+        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(0, 23));
     }
 
     #[test]
