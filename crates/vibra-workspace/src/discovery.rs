@@ -21,6 +21,7 @@ pub struct DiscoveredProject {
     root: PathBuf,
     project_path: PathBuf,
     project: Project,
+    project_bytes: Vec<u8>,
 }
 
 impl DiscoveredProject {
@@ -40,6 +41,12 @@ impl DiscoveredProject {
     #[must_use]
     pub const fn project(&self) -> &Project {
         &self.project
+    }
+
+    /// Exact bytes read from the project marker during discovery.
+    #[must_use]
+    pub fn project_bytes(&self) -> &[u8] {
+        &self.project_bytes
     }
 
     /// The stable source identity of the project marker.
@@ -221,6 +228,7 @@ fn load_project(
             format!("cannot read project marker {}: {error}", marker.display()),
         )
     })?;
+    let project_bytes = source.clone();
     let source = String::from_utf8(source).map_err(|error| {
         project_io_error(
             PROJECT_FILE_NAME,
@@ -276,6 +284,7 @@ fn load_project(
         root: root.to_path_buf(),
         project_path: marker.to_path_buf(),
         project,
+        project_bytes,
     })
 }
 

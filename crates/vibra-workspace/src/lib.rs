@@ -105,6 +105,12 @@ impl WorkspaceSnapshot {
         &self.source
     }
 
+    /// Revision of the exact immutable project and source bytes in this snapshot.
+    #[must_use]
+    pub const fn revision(&self) -> &vibra_diagnostics::DocumentRevision {
+        self.source.revision()
+    }
+
     /// Builds the explicit source graph without consulting the filesystem.
     pub fn source_graph(&self) -> Result<source_graph::SourceGraph, WorkspaceError> {
         source_graph::SourceGraph::build(&self.project, self.source.clone())

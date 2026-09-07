@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use sha2::{Digest, Sha256};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, DocumentRevision};
 
 use crate::WorkspaceError;
 use crate::discovery::DiscoveredProject;
@@ -150,6 +151,7 @@ pub struct SourceSnapshot {
     project_path: PathBuf,
     project: Project,
     units: Vec<SourceUnitSnapshot>,
+    revision: DocumentRevision,
 }
 
 impl SourceSnapshot {
@@ -167,11 +169,13 @@ impl SourceSnapshot {
                 modules,
             });
         }
+        let revision = compute_revision(project.project_bytes(), &units);
         Ok(Self {
             project_root: project.root().to_path_buf(),
             project_path: project.project_path().to_path_buf(),
             project: project.project().clone(),
             units,
+            revision,
         })
     }
 
@@ -193,6 +197,12 @@ impl SourceSnapshot {
         &self.project
     }
 
+    /// Revision of the exact immutable project and source bytes captured here.
+    #[must_use]
+    pub const fn revision(&self) -> &DocumentRevision {
+        &self.revision
+    }
+
     /// Local target units in project source order.
     #[must_use]
     pub fn units(&self) -> &[SourceUnitSnapshot] {
@@ -202,6 +212,82 @@ impl SourceSnapshot {
     /// All source documents in deterministic unit and path order.
     pub fn documents(&self) -> impl Iterator<Item = &SourceDocument> {
         self.units.iter().flat_map(|unit| unit.modules.iter())
+    }
+}
+
+fn compute_revision(
+    project_bytes: &[u8],
+    units: &[SourceUnitSnapshot],
+) -> DocumentRevision {
+    let mut hasher = Sha256::new();
+    hasher.update(b"vibra-workspace-revision-v1");
+    hasher.update([0]);
+    update_length(&mut hasher, project_bytes.len());
+    hasher.update(project_bytes);
+
+    let mut documents = units
+        .iter()
+        .flat_map(SourceUnitSnapshot::modules)
+        .collect::<Vec<_>>();
+    documents.sort_by(|left, right| left.source_id.cmp(&right.source_id));
+    for document in documents {
+        let source_id = document.source_id().as_bytes();
+        update_length(&mut hasher, source_id.len());
+        hasher.update(source_id);
+        update_length(&mut hasher, document.bytes().len());
+        hasher.update(document.bytes());
+    }
+
+    let digest = hasher.finalize();
+    let mut identifier = String::with_capacity("sha256:".len() + digest.len() * 2);
+    identifier.push_str("sha256:");
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(identifier, "{byte:02x}");
+    }
+    DocumentRevision::new(identifier)
+}
+
+fn update_length(hasher: &mut Sha256, length: usize) {
+    let length = u64::try_from(length).unwrap_or(u64::MAX);
+    hasher.update(length.to_be_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SourceDocument, SourceUnitSnapshot, compute_revision};
+    use crate::project::TargetKind;
+
+    #[test]
+    fn revision_matches_the_frozen_vector_and_changes_for_equal_length_edits() {
+        let document = SourceDocument {
+            source_id: "src/main.vib".to_owned(),
+            relative_path: "src/main.vib".to_owned(),
+            module_segments: vec!["main".to_owned()],
+            bytes: b"(defn f () str \"ok\")".to_vec(),
+        };
+        let units = vec![SourceUnitSnapshot {
+            target_index: 0,
+            name: "hello".to_owned(),
+            kind: TargetKind::Lib,
+            root: "src".into(),
+            modules: vec![document.clone()],
+        }];
+        assert_eq!(
+            compute_revision(b"project", &units).as_str(),
+            "sha256:292c672b9ced8e6e02fbb3768f658fb52880ffd43b624c591b18e77fb083b996"
+        );
+
+        let mut changed = document;
+        changed.bytes = b"(defn f () str \"no\")".to_vec();
+        let changed_units = vec![SourceUnitSnapshot {
+            modules: vec![changed],
+            ..units[0].clone()
+        }];
+        assert_ne!(
+            compute_revision(b"project", &units),
+            compute_revision(b"project", &changed_units)
+        );
     }
 }
 

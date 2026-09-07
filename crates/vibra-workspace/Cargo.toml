@@ -12,6 +12,7 @@ publish.workspace = true
 vibra-diagnostics.workspace = true
 vibra-fmt.workspace = true
 vibra-syntax.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true
