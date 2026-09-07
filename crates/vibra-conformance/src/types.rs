@@ -124,7 +124,13 @@ mod tests {
     #[test]
     fn dispatch_propagates_tampered_bootstrap_artifact_failure() {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let root = std::env::temp_dir().join(format!(
+        // macOS exposes the temporary directory through `/var`, a symlink to
+        // `/private/var`.  The bootstrap verifier intentionally rejects
+        // symlinked roots, so canonicalize the parent before constructing the
+        // fixture to exercise the intended artifact-digest failure.
+        let temporary_directory =
+            std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
+        let root = temporary_directory.join(format!(
             "vibra-conformance-bootstrap-tamper-{}",
             std::process::id()
         ));
