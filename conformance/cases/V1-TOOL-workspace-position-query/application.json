@@ -2,27 +2,27 @@
   "schemaVersion": 1,
   "workspaceRevision": "sha256:cad1de46d849d1f71e8955b66e21725ead26f58b5f51183736125d96c44ce3d6",
   "sourceId": "src/main.vib",
-  "offset": 92,
-  "nodeId": "src/main.vib#92-96",
+  "offset": 84,
+  "nodeId": "src/main.vib#84-85",
   "structural": {
     "schemaVersion": 1,
-    "offset": 92,
+    "offset": 84,
     "sourceId": "src/main.vib",
     "span": {
       "sourceId": "src/main.vib",
-      "start": 92,
-      "end": 96,
+      "start": 84,
+      "end": 85,
       "startPosition": {
         "line": 3,
-        "column": 29
+        "column": 21
       },
       "endPosition": {
         "line": 3,
-        "column": 33
+        "column": 22
       }
     },
     "mode": "source",
-    "syntaxKind": "atom",
+    "syntaxKind": "open-paren",
     "category": "expression",
     "status": "exact",
     "permittedForms": [
@@ -40,11 +40,11 @@
   },
   "role": {
     "status": "exact",
-    "value": "@literal"
+    "value": "@application"
   },
   "context": {
     "status": "exact",
-    "value": "argument"
+    "value": "result"
   },
   "identity": {
     "status": "unavailable",
@@ -61,14 +61,8 @@
     }
   },
   "observedType": {
-    "status": "exact",
-    "value": {
-      "kind": "primitive",
-      "name": "i32",
-      "parameters": [],
-      "result": null,
-      "labelled": []
-    }
+    "status": "unavailable",
+    "value": null
   },
   "visibleLocals": {
     "status": "exact",
@@ -102,7 +96,51 @@
     "value": []
   },
   "application": {
-    "status": "unavailable",
-    "value": null
+    "status": "exact",
+    "value": {
+      "kind": "@function",
+      "callee": {
+        "kind": "function",
+        "canonical": "@app@0.1.0/app.main.choose"
+      },
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "primitive",
+            "name": "i32",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "primitive",
+          "name": "i32",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": []
+      },
+      "positional": [
+        {
+          "kind": "primitive",
+          "name": "i32",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ],
+      "labelled": [],
+      "resultType": {
+        "kind": "primitive",
+        "name": "i32",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      }
+    }
   }
 }

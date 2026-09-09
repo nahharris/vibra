@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:cad1de46d849d1f71e8955b66e21725ead26f58b5f51183736125d96c44ce3d6",
+  "sourceId": "src/main.vib",
+  "offset": 91,
+  "nodeId": "src/main.vib#91-92",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 91,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 91,
+      "end": 92,
+      "startPosition": {
+        "line": 3,
+        "column": 28
+      },
+      "endPosition": {
+        "line": 3,
+        "column": 29
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "whitespace",
+    "category": "trivia",
+    "status": "unavailable",
+    "permittedForms": null,
+    "permittedLabels": null
+  },
+  "role": {
+    "status": "exact",
+    "value": "@unknown"
+  },
+  "context": {
+    "status": "exact",
+    "value": "trivia"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "visibleLocals": {
+    "status": "unavailable",
+    "value": null
+  },
+  "visibleImports": {
+    "status": "unavailable",
+    "value": null
+  },
+  "declarationCandidates": {
+    "status": "unavailable",
+    "value": null
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  }
+}

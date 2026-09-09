@@ -45,6 +45,11 @@ impl ProfileHandler for ToolingV1QueryHandler {
                 });
             }
         };
+        let resolved = workspace
+            .resolve()
+            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let accepted = resolved.accepted();
+        let diagnostics = resolved.diagnostics().to_vec();
 
         let tree_name = case.manifest().inputs.tree.as_deref().ok_or_else(|| {
             HandlerError::new("query case has no confined tree input")
@@ -87,7 +92,8 @@ impl ProfileHandler for ToolingV1QueryHandler {
         }
 
         Ok(CaseObservation {
-            accepted: true,
+            accepted,
+            diagnostics,
             queries,
             ..CaseObservation::default()
         })

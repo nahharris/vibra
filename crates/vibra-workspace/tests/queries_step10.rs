@@ -299,3 +299,120 @@ fn semantic_query_keeps_trivia_facts_unavailable() {
     );
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn semantic_query_collects_lambda_labelled_binders() {
+    let root = temporary_directory("lambda-label");
+    let source = "(defn answer () i32 (lambda () i32 labelled: (x i32 1i32) x))";
+    write_workspace(&root, source);
+    let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
+    let query = workspace
+        .query_position("src/main.vib", source.rfind('x').expect("lambda body"))
+        .expect("query");
+    assert_eq!(
+        query.role().value().map(String::as_str),
+        Some("@local-binding")
+    );
+    assert_eq!(query.identity().value().expect("binder").kind(), "binder");
+    assert!(
+        query
+            .visible_locals()
+            .value()
+            .expect("locals")
+            .iter()
+            .any(|local| local.name() == "x")
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn semantic_query_does_not_bind_labelled_parameter_type() {
+    let root = temporary_directory("label-type");
+    let source = "(defn answer () i32 (lambda () i32 labelled: (x i32 1i32) x))";
+    write_workspace(&root, source);
+    let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
+    let offset = source.find("x i32").expect("labelled parameter") + 2;
+    let query = workspace
+        .query_position("src/main.vib", offset)
+        .expect("query");
+    assert_ne!(
+        query.role().value().map(String::as_str),
+        Some("@local-binding")
+    );
+    assert_eq!(query.identity().status(), SemanticFactStatus::Unavailable);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn semantic_query_collects_match_arm_bindings() {
+    let root = temporary_directory("match-scope");
+    let source = r#"(defn answer (value i32) i32
+  (match value
+    (as i32 n) n
+    - 0i32))"#;
+    write_workspace(&root, source);
+    let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
+    let query = workspace
+        .query_position("src/main.vib", source.rfind("n").expect("arm body"))
+        .expect("query");
+    assert_eq!(
+        query.role().value().map(String::as_str),
+        Some("@local-binding")
+    );
+    assert_eq!(query.identity().value().expect("binder").kind(), "binder");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn semantic_query_does_not_publish_unsupported_variadic_contracts() {
+    let root = temporary_directory("variadic-contract");
+    let source = r#"(defn f (value i32) i32
+  variadic: (rest (array i32))
+  value)
+(defn answer () i32 (f 1i32))"#;
+    write_workspace(&root, source);
+    let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
+    let query = workspace
+        .query_position("src/main.vib", source.rfind("(f").expect("call"))
+        .expect("query");
+    assert_eq!(
+        query.application().status(),
+        SemanticFactStatus::Unavailable
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn semantic_query_resolves_import_target_identity() {
+    let root = temporary_directory("import-target");
+    fs::create_dir_all(root.join("src")).expect("source directory");
+    fs::write(
+        root.join("project.vibon"),
+        "(record format: @project.v1 package: (record name: \"app\" version: \"0.1.0\") targets: (array (record name: @app kind: @lib root: \"src\")) dependencies: (map))",
+    )
+    .expect("project marker");
+    fs::write(
+        root.join("src/main.vib"),
+        "(import helper @app.helper)\n(defn answer () i32 1i32)",
+    )
+    .expect("main source");
+    fs::write(root.join("src/helper.vib"), "(defn provided () i32 1i32)")
+        .expect("helper source");
+    let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
+    let source = fs::read_to_string(root.join("src/main.vib")).expect("main source");
+    let query = workspace
+        .query_position(
+            "src/main.vib",
+            source.find("@app.helper").expect("import target"),
+        )
+        .expect("query");
+    assert_eq!(
+        query.role().value().map(String::as_str),
+        Some("@entity-reference")
+    );
+    assert_eq!(
+        query.identity().value().expect("module identity").kind(),
+        "module"
+    );
+    let _ = fs::remove_dir_all(root);
+}

@@ -13,5 +13,30 @@ accepted = true
 
 [[expect.queries]]
 input = "tree/src/main.vib"
-offset = 64
+offset = 92
 snapshot = "query.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 84
+snapshot = "application.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 57
+snapshot = "local.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 20
+snapshot = "import.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 153
+snapshot = "discard.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 91
+snapshot = "trivia.json"

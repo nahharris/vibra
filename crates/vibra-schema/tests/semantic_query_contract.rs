@@ -227,3 +227,82 @@ fn consumer_rejects_missing_values_and_closed_vocabularies() {
     );
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn consumer_rejects_inconsistent_structure_and_invalid_scope_records() {
+    let (root, workspace, source) = fixture();
+    let query = workspace
+        .query_position("src/main.vib", source.find("1i32").expect("literal"))
+        .expect("workspace query");
+    let rendered = WorkspacePositionQueryDocument::render_with_source(
+        &query,
+        &LineIndex::new(&source),
+    );
+
+    let mut invalid_structural: Value =
+        serde_json::to_value(&rendered).expect("query JSON");
+    invalid_structural["structural"]["schemaVersion"] = json!(99);
+    assert!(
+        validator()
+            .iter_errors(&invalid_structural)
+            .next()
+            .is_some()
+    );
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_structural)
+            .is_err()
+    );
+
+    let mut mismatched_offset: Value =
+        serde_json::to_value(&rendered).expect("query JSON");
+    mismatched_offset["structural"]["offset"] = json!(0);
+    assert!(validator().iter_errors(&mismatched_offset).next().is_none());
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(mismatched_offset)
+            .is_err()
+    );
+
+    let mut mismatched_node: Value =
+        serde_json::to_value(&rendered).expect("query JSON");
+    mismatched_node["nodeId"] = json!("src/main.vib#0-1");
+    assert!(validator().iter_errors(&mismatched_node).next().is_none());
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(mismatched_node)
+            .is_err()
+    );
+
+    let mut invalid_local: Value = serde_json::to_value(&rendered).expect("query JSON");
+    invalid_local["visibleLocals"] = json!({
+        "status": "exact",
+        "value": [{"name": "", "identity": "garbage"}]
+    });
+    assert!(validator().iter_errors(&invalid_local).next().is_some());
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_local)
+            .is_err()
+    );
+
+    let mut invalid_import: Value =
+        serde_json::to_value(&rendered).expect("query JSON");
+    invalid_import["visibleImports"] = json!({
+        "status": "exact",
+        "value": [{
+            "alias": "",
+            "module": "",
+            "sourceId": "",
+            "span": {
+                "sourceId": "",
+                "start": 8,
+                "end": 2,
+                "startPosition": {"line": 0, "column": 0},
+                "endPosition": {"line": 0, "column": 0}
+            }
+        }]
+    });
+    assert!(validator().iter_errors(&invalid_import).next().is_some());
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_import)
+            .is_err()
+    );
+    let _ = fs::remove_dir_all(root);
+}

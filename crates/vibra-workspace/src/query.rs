@@ -530,7 +530,7 @@ pub fn query_position(
         .map_err(|error| WorkspaceQueryError::Workspace(error.to_string()))?;
     let catalog = CallableCatalog::build(workspace, &resolved);
     let mut collector =
-        SemanticCollector::new(source_id, &resolved, &catalog, source.len());
+        SemanticCollector::new(source_id, source, &resolved, &catalog, source.len());
     if let Some(ast) = syntax.ast() {
         collector.collect_ast(ast);
     }
@@ -642,6 +642,7 @@ struct PatternSite {
 #[derive(Clone, Debug)]
 struct SemanticCollector<'a> {
     source_id: &'a str,
+    source: &'a str,
     resolved: &'a ResolvedSnapshot,
     catalog: &'a CallableCatalog,
     source_length: usize,
@@ -656,12 +657,14 @@ struct SemanticCollector<'a> {
 impl<'a> SemanticCollector<'a> {
     fn new(
         source_id: &'a str,
+        source: &'a str,
         resolved: &'a ResolvedSnapshot,
         catalog: &'a CallableCatalog,
         source_length: usize,
     ) -> Self {
         Self {
             source_id,
+            source,
             resolved,
             catalog,
             source_length,
@@ -675,6 +678,7 @@ impl<'a> SemanticCollector<'a> {
     }
 
     fn collect_ast(&mut self, ast: &SourceAst) {
+        self.collect_imports();
         for declaration in ast.declarations() {
             match declaration {
                 Declaration::Def(value) => {
@@ -708,6 +712,48 @@ impl<'a> SemanticCollector<'a> {
         }
     }
 
+    fn collect_imports(&mut self) {
+        for import in self
+            .resolved
+            .imports()
+            .iter()
+            .filter(|import| import.source_id() == self.source_id)
+        {
+            let span = import.span();
+            let Some(import_source) = self.source.get(span.start()..span.end()) else {
+                continue;
+            };
+            let target = format!("@{}", import.written());
+            let Some(relative_start) = import_source.find(&target) else {
+                continue;
+            };
+            let target_span = ByteSpan::new(
+                span.start() + relative_start,
+                span.start() + relative_start + target.len(),
+            );
+            let identity = import.module().map(|module| {
+                let declaration = DeclarationId::new(
+                    module.package().name(),
+                    module.package().version(),
+                    module.unit(),
+                    module.segments().iter().cloned(),
+                    std::iter::empty::<String>(),
+                    EntityKind::Module,
+                );
+                query_identity(&declaration)
+            });
+            self.expressions.push(ExpressionSite {
+                span: target_span,
+                role: "@entity-reference".to_owned(),
+                context: "module".to_owned(),
+                identity,
+                expected_type: None,
+                observed_type: None,
+                application: None,
+            });
+        }
+    }
+
     fn collect_function(&mut self, function: &FunctionDeclaration) {
         let mut locals = Vec::new();
         for parameter in function.parameters() {
@@ -721,16 +767,19 @@ impl<'a> SemanticCollector<'a> {
             if let Attribute::Labelled(parameters) = attribute {
                 for parameter in parameters {
                     if parameter.name().kind() != NameKind::Discard {
-                        let binding = self
-                            .local_binding(parameter.name().value(), parameter.span());
+                        let binding_span =
+                            self.name_span(parameter.span(), parameter.name().raw());
+                        let binding =
+                            self.local_binding(parameter.name().value(), binding_span);
                         self.binders.push(BinderSite {
-                            span: parameter.span(),
+                            span: binding_span,
                             binding: binding.clone(),
                         });
                         locals.push(binding);
                     } else {
                         self.patterns.push(PatternSite {
-                            span: parameter.span(),
+                            span: self
+                                .name_span(parameter.span(), parameter.name().raw()),
                             role: "@discard".to_owned(),
                             context: "parameter".to_owned(),
                         });
@@ -768,16 +817,17 @@ impl<'a> SemanticCollector<'a> {
     ) {
         match pattern.kind() {
             PatternKind::Binding(name) if !name.is_discard() => {
-                let binding = self.local_binding(name.value(), pattern.span());
+                let binding_span = self.name_span(pattern.span(), name.raw());
+                let binding = self.local_binding(name.value(), binding_span);
                 self.binders.push(BinderSite {
-                    span: pattern.span(),
+                    span: binding_span,
                     binding: binding.clone(),
                 });
                 locals.push(binding);
             }
-            PatternKind::Binding(_) => {
+            PatternKind::Binding(name) => {
                 self.patterns.push(PatternSite {
-                    span: pattern.span(),
+                    span: self.name_span(pattern.span(), name.raw()),
                     role: "@discard".to_owned(),
                     context: context.to_owned(),
                 });
@@ -804,6 +854,18 @@ impl<'a> SemanticCollector<'a> {
             name,
             format!("binder:{}:{}-{}", self.source_id, span.start(), span.end()),
         )
+    }
+
+    fn name_span(&self, span: ByteSpan, raw: &str) -> ByteSpan {
+        self.source
+            .get(span.start()..span.end())
+            .and_then(|slice| slice.find(raw))
+            .map_or(span, |relative_start| {
+                ByteSpan::new(
+                    span.start() + relative_start,
+                    span.start() + relative_start + raw.len(),
+                )
+            })
     }
 
     fn collect_expression(
@@ -928,6 +990,36 @@ impl<'a> SemanticCollector<'a> {
                         "parameter",
                     );
                 }
+                for attribute in lambda.attributes().items() {
+                    if let Attribute::Labelled(parameters) = attribute {
+                        for parameter in parameters {
+                            if parameter.name().kind() != NameKind::Discard {
+                                let binding_span = self.name_span(
+                                    parameter.span(),
+                                    parameter.name().raw(),
+                                );
+                                let binding = self.local_binding(
+                                    parameter.name().value(),
+                                    binding_span,
+                                );
+                                self.binders.push(BinderSite {
+                                    span: binding_span,
+                                    binding: binding.clone(),
+                                });
+                                nested.push(binding);
+                            } else {
+                                self.patterns.push(PatternSite {
+                                    span: self.name_span(
+                                        parameter.span(),
+                                        parameter.name().raw(),
+                                    ),
+                                    role: "@discard".to_owned(),
+                                    context: "parameter".to_owned(),
+                                });
+                            }
+                        }
+                    }
+                }
                 self.scopes.push(ScopeSite {
                     span: lambda.span(),
                     locals: nested.clone(),
@@ -959,9 +1051,24 @@ impl<'a> SemanticCollector<'a> {
             ExpressionKind::Try(operand) => {
                 self.collect_expression(operand, locals, context, expected_type);
             }
-            ExpressionKind::Literal(_)
-            | ExpressionKind::Name(_)
-            | ExpressionKind::Match { .. } => {}
+            ExpressionKind::Match { scrutinee, arms } => {
+                self.collect_expression(scrutinee, locals, "branch", None);
+                for arm in arms {
+                    let mut nested = locals.to_vec();
+                    self.collect_pattern_binding(arm.pattern(), &mut nested, "branch");
+                    self.scopes.push(ScopeSite {
+                        span: arm.span(),
+                        locals: nested.clone(),
+                    });
+                    self.collect_expression(
+                        arm.result(),
+                        &nested,
+                        "result",
+                        expected_type.clone(),
+                    );
+                }
+            }
+            ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
         }
     }
 
@@ -1574,6 +1681,23 @@ fn ir_application_contract(expression: &Expr) -> Option<ApplicationContract> {
 }
 
 fn function_type(function: &FunctionDeclaration) -> Option<SemanticType> {
+    if function
+        .attributes()
+        .items()
+        .iter()
+        .any(|attribute| match attribute {
+            Attribute::Where(_) | Attribute::Variadic(_) | Attribute::External(_) => {
+                true
+            }
+            Attribute::Effects(row) => !row.references().is_empty(),
+            Attribute::Labelled(_)
+            | Attribute::Visibility(_)
+            | Attribute::Symbol(_)
+            | Attribute::Doc(_) => false,
+        })
+    {
+        return None;
+    }
     let parameters = function
         .parameters()
         .iter()

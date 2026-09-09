@@ -11,10 +11,10 @@ use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_conformance::{
-    ConformanceProfile, ConformanceRunner, Corpus, ProfileDispatcher,
+    ConformanceProfile, ConformanceRunner, Corpus, ProfileDispatcher, ProfileHandler,
     ToolingV1QueryHandler,
 };
-use vibra_diagnostics::LineIndex;
+use vibra_diagnostics::{DiagnosticCode, LineIndex};
 use vibra_schema::WorkspacePositionQueryDocument;
 use vibra_workspace::WorkspaceSnapshot;
 
@@ -102,5 +102,66 @@ snapshot = "query.json"
     let reason = format!("{:?}", failed.cases());
     assert!(reason.contains("query snapshot mismatch"), "{reason}");
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn the_tooling_handler_reports_workspace_diagnostics() {
+    let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+    let parent = fs::canonicalize(std::env::temp_dir()).expect("canonical temp parent");
+    let root = parent.join(format!(
+        "vibra-conformance-semantic-query-error-{serial}-{}",
+        std::process::id()
+    ));
+    let tree = root.join("V1-TOOL-query-error").join("tree");
+    fs::create_dir_all(tree.join("src")).expect("tree source directory");
+    let case = tree.parent().expect("case directory").to_path_buf();
+    fs::write(
+        case.join("case.toml"),
+        r#"id = "V1-TOOL-query-error"
+rule = "V1-TOOL-workspace-position-query"
+profile = "tooling-v1"
+operation = "query"
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "src/main.vib"
+span = [21, 28]
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 21
+snapshot = "query.json"
+"#,
+    )
+    .expect("write manifest");
+    fs::write(
+        tree.join("project.vibon"),
+        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @hello kind: @lib root: \"src\")) dependencies: (map))",
+    )
+    .expect("write project marker");
+    fs::write(tree.join("src/main.vib"), "(defn broken () i32 (missing))")
+        .expect("write source module");
+    fs::write(case.join("query.json"), "{}").expect("write query placeholder");
+
+    let corpus = Corpus::discover(&root).expect("temporary corpus");
+    let observation = ToolingV1QueryHandler
+        .run(corpus.cases().first().expect("query case"))
+        .expect("handler observation");
+    assert!(!observation.accepted);
+    assert!(
+        observation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::NameUnknownSymbol)
+    );
     let _ = fs::remove_dir_all(root);
 }

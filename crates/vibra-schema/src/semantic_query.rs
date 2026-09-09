@@ -136,7 +136,7 @@ impl<'de> Deserialize<'de> for LabelledTypeDocument {
 }
 
 /// A visible lexical binder.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalBindingDocument {
     /// Local source spelling.
@@ -145,8 +145,17 @@ pub struct LocalBindingDocument {
     pub identity: String,
 }
 
+impl<'de> Deserialize<'de> for LocalBindingDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_local(Value::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
 /// A visible imported module alias.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ImportAliasDocument {
     /// Local alias.
@@ -157,6 +166,15 @@ pub struct ImportAliasDocument {
     pub source_id: String,
     /// Import declaration span.
     pub span: SpanDocument,
+}
+
+impl<'de> Deserialize<'de> for ImportAliasDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_import(Value::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
 }
 
 /// A supported M2 function application contract.
@@ -345,6 +363,54 @@ fn parse_labelled(value: Value) -> Result<LabelledTypeDocument, String> {
     Ok(LabelledTypeDocument { name, value_type })
 }
 
+fn parse_local(value: Value) -> Result<LocalBindingDocument, String> {
+    let object = object(value, "local binding")?;
+    ensure_keys(&object, &["name", "identity"])?;
+    let name = required_string(&object, "name")?;
+    if name.is_empty() {
+        return Err("local binding name cannot be empty".to_owned());
+    }
+    let identity = required_string(&object, "identity")?;
+    if !valid_binder_identity(&identity) {
+        return Err("local binding identity has an invalid spelling".to_owned());
+    }
+    Ok(LocalBindingDocument { name, identity })
+}
+
+fn parse_import(value: Value) -> Result<ImportAliasDocument, String> {
+    let object = object(value, "import alias")?;
+    ensure_keys(&object, &["alias", "module", "sourceId", "span"])?;
+    let alias = required_string(&object, "alias")?;
+    if alias.is_empty() {
+        return Err("import alias cannot be empty".to_owned());
+    }
+    let module_value = required(&object, "module")?;
+    let module = if module_value.is_null() {
+        None
+    } else {
+        let module = module_value
+            .as_str()
+            .ok_or_else(|| "import module must be a string or null".to_owned())?;
+        if module.is_empty() {
+            return Err("import module cannot be empty".to_owned());
+        }
+        Some(module.to_owned())
+    };
+    let source_id = required_string(&object, "sourceId")?;
+    if source_id.is_empty() {
+        return Err("import sourceId cannot be empty".to_owned());
+    }
+    let span: SpanDocument = serde_json::from_value(required(&object, "span")?.clone())
+        .map_err(|error| format!("invalid import span: {error}"))?;
+    validate_span(&span, Some(&source_id))?;
+    Ok(ImportAliasDocument {
+        alias,
+        module,
+        source_id,
+        span,
+    })
+}
+
 fn parse_type(value: Value) -> Result<SemanticTypeDocument, String> {
     let object = object(value, "semantic type")?;
     ensure_keys(
@@ -513,7 +579,6 @@ fn parse_workspace(value: Value) -> Result<WorkspacePositionQueryDocument, Strin
     }
     let offset = required_usize(&object, "offset")?;
     let node_id = required_string(&object, "nodeId")?;
-    validate_node_id(&node_id, &source_id)?;
     let structural: SourcePositionQueryDocument =
         serde_json::from_value(required(&object, "structural")?.clone())
             .map_err(|error| format!("invalid structural query: {error}"))?;
@@ -558,13 +623,8 @@ fn parse_workspace(value: Value) -> Result<WorkspacePositionQueryDocument, Strin
     let application: SemanticFactDocument<ApplicationContractDocument> =
         serde_json::from_value(required(&object, "application")?.clone())
             .map_err(|error| format!("invalid application fact: {error}"))?;
-    if structural
-        .source_id
-        .as_deref()
-        .is_some_and(|value| value != source_id)
-    {
-        return Err("structural sourceId must match sourceId".to_owned());
-    }
+    let (node_start, node_end) = parse_node_id(&node_id, &source_id)?;
+    validate_structural(&structural, &source_id, offset, node_start, node_end)?;
     Ok(WorkspacePositionQueryDocument {
         schema_version: u32::try_from(schema_version)
             .map_err(|_| "schemaVersion is too large".to_owned())?,
@@ -595,7 +655,7 @@ fn valid_revision(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
-fn validate_node_id(value: &str, source_id: &str) -> Result<(), String> {
+fn parse_node_id(value: &str, source_id: &str) -> Result<(usize, usize), String> {
     let prefix = format!("{source_id}#");
     let Some(range) = value.strip_prefix(&prefix) else {
         return Err("nodeId must begin with sourceId#".to_owned());
@@ -610,7 +670,121 @@ fn validate_node_id(value: &str, source_id: &str) -> Result<(), String> {
     {
         return Err("nodeId range must contain decimal offsets".to_owned());
     }
+    let start = start
+        .parse::<usize>()
+        .map_err(|_| "nodeId start is too large".to_owned())?;
+    let end = end
+        .parse::<usize>()
+        .map_err(|_| "nodeId end is too large".to_owned())?;
+    Ok((start, end))
+}
+
+fn validate_structural(
+    structural: &SourcePositionQueryDocument,
+    source_id: &str,
+    offset: usize,
+    node_start: usize,
+    node_end: usize,
+) -> Result<(), String> {
+    if structural.schema_version != SCHEMA_VERSION {
+        return Err(
+            "structural schemaVersion must match the workspace envelope".to_owned()
+        );
+    }
+    if structural.offset != offset {
+        return Err("structural offset must match the workspace offset".to_owned());
+    }
+    if structural.source_id.as_deref() != Some(source_id) {
+        return Err("structural sourceId must match sourceId".to_owned());
+    }
+    if structural.span.source_id.as_deref() != Some(source_id) {
+        return Err("structural span sourceId must match sourceId".to_owned());
+    }
+    validate_span(&structural.span, Some(source_id))?;
+    if structural.span.start != node_start || structural.span.end != node_end {
+        return Err("nodeId must identify the structural span exactly".to_owned());
+    }
+    if !matches!(structural.mode.as_str(), "source" | "data") {
+        return Err("structural mode has an unknown value".to_owned());
+    }
+    if !matches!(
+        structural.syntax_kind.as_str(),
+        "root"
+            | "list"
+            | "atom"
+            | "whitespace"
+            | "line-comment"
+            | "open-paren"
+            | "close-paren"
+            | "error"
+    ) {
+        return Err("structural syntaxKind has an unknown value".to_owned());
+    }
+    if !matches!(
+        structural.category.as_str(),
+        "module"
+            | "declaration"
+            | "type"
+            | "pattern"
+            | "expression"
+            | "declaration-attribute"
+            | "effect-row"
+            | "data-field"
+            | "trivia"
+            | "recovery"
+    ) {
+        return Err("structural category has an unknown value".to_owned());
+    }
+    if !matches!(
+        structural.status.as_str(),
+        "exact" | "recovered" | "unavailable"
+    ) {
+        return Err("structural status has an unknown value".to_owned());
+    }
     Ok(())
+}
+
+fn validate_span(span: &SpanDocument, source_id: Option<&str>) -> Result<(), String> {
+    if span.start > span.end {
+        return Err("span start cannot exceed end".to_owned());
+    }
+    if span
+        .source_id
+        .as_deref()
+        .is_some_and(|value| value.is_empty())
+    {
+        return Err("span sourceId cannot be empty".to_owned());
+    }
+    if let Some(source_id) = source_id
+        && span.source_id.as_deref() != Some(source_id)
+    {
+        return Err("span sourceId does not match its owning source".to_owned());
+    }
+    if span.start_position.line == 0
+        || span.start_position.column == 0
+        || span.end_position.line == 0
+        || span.end_position.column == 0
+    {
+        return Err("span positions are one-based".to_owned());
+    }
+    Ok(())
+}
+
+fn valid_binder_identity(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix("binder:") else {
+        return false;
+    };
+    let Some((source_id, range)) = rest.rsplit_once(':') else {
+        return false;
+    };
+    let Some((start, end)) = range.split_once('-') else {
+        return false;
+    };
+    !source_id.is_empty()
+        && !start.is_empty()
+        && !end.is_empty()
+        && start.bytes().all(|byte| byte.is_ascii_digit())
+        && end.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 impl WorkspacePositionQueryDocument {

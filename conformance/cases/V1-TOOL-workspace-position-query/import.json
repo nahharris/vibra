@@ -2,73 +2,62 @@
   "schemaVersion": 1,
   "workspaceRevision": "sha256:cad1de46d849d1f71e8955b66e21725ead26f58b5f51183736125d96c44ce3d6",
   "sourceId": "src/main.vib",
-  "offset": 92,
-  "nodeId": "src/main.vib#92-96",
+  "offset": 20,
+  "nodeId": "src/main.vib#15-26",
   "structural": {
     "schemaVersion": 1,
-    "offset": 92,
+    "offset": 20,
     "sourceId": "src/main.vib",
     "span": {
       "sourceId": "src/main.vib",
-      "start": 92,
-      "end": 96,
+      "start": 15,
+      "end": 26,
       "startPosition": {
-        "line": 3,
-        "column": 29
+        "line": 1,
+        "column": 16
       },
       "endPosition": {
-        "line": 3,
-        "column": 33
+        "line": 1,
+        "column": 27
       }
     },
     "mode": "source",
     "syntaxKind": "atom",
-    "category": "expression",
+    "category": "declaration",
     "status": "exact",
     "permittedForms": [
-      "lambda",
-      "do",
-      "let",
-      "if",
-      "match",
-      "as",
-      "try"
+      "import",
+      "deftype",
+      "defint",
+      "deffect",
+      "def",
+      "defn",
+      "test"
     ],
-    "permittedLabels": [
-      "types"
-    ]
+    "permittedLabels": []
   },
   "role": {
     "status": "exact",
-    "value": "@literal"
+    "value": "@entity-reference"
   },
   "context": {
     "status": "exact",
-    "value": "argument"
+    "value": "module"
   },
   "identity": {
+    "status": "exact",
+    "value": {
+      "kind": "module",
+      "canonical": "@app@0.1.0/app.helper"
+    }
+  },
+  "expectedType": {
     "status": "unavailable",
     "value": null
   },
-  "expectedType": {
-    "status": "exact",
-    "value": {
-      "kind": "primitive",
-      "name": "i32",
-      "parameters": [],
-      "result": null,
-      "labelled": []
-    }
-  },
   "observedType": {
-    "status": "exact",
-    "value": {
-      "kind": "primitive",
-      "name": "i32",
-      "parameters": [],
-      "result": null,
-      "labelled": []
-    }
+    "status": "unavailable",
+    "value": null
   },
   "visibleLocals": {
     "status": "exact",
@@ -99,7 +88,12 @@
   },
   "declarationCandidates": {
     "status": "exact",
-    "value": []
+    "value": [
+      {
+        "kind": "module",
+        "canonical": "@app@0.1.0/app.helper"
+      }
+    ]
   },
   "application": {
     "status": "unavailable",

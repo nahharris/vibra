@@ -2,23 +2,23 @@
   "schemaVersion": 1,
   "workspaceRevision": "sha256:cad1de46d849d1f71e8955b66e21725ead26f58b5f51183736125d96c44ce3d6",
   "sourceId": "src/main.vib",
-  "offset": 92,
-  "nodeId": "src/main.vib#92-96",
+  "offset": 57,
+  "nodeId": "src/main.vib#57-62",
   "structural": {
     "schemaVersion": 1,
-    "offset": 92,
+    "offset": 57,
     "sourceId": "src/main.vib",
     "span": {
       "sourceId": "src/main.vib",
-      "start": 92,
-      "end": 96,
+      "start": 57,
+      "end": 62,
       "startPosition": {
-        "line": 3,
-        "column": 29
+        "line": 2,
+        "column": 30
       },
       "endPosition": {
-        "line": 3,
-        "column": 33
+        "line": 2,
+        "column": 35
       }
     },
     "mode": "source",
@@ -40,15 +40,18 @@
   },
   "role": {
     "status": "exact",
-    "value": "@literal"
+    "value": "@local-binding"
   },
   "context": {
     "status": "exact",
-    "value": "argument"
+    "value": "result"
   },
   "identity": {
-    "status": "unavailable",
-    "value": null
+    "status": "exact",
+    "value": {
+      "kind": "binder",
+      "canonical": "binder:src/main.vib:42-47"
+    }
   },
   "expectedType": {
     "status": "exact",
@@ -61,18 +64,17 @@
     }
   },
   "observedType": {
-    "status": "exact",
-    "value": {
-      "kind": "primitive",
-      "name": "i32",
-      "parameters": [],
-      "result": null,
-      "labelled": []
-    }
+    "status": "unavailable",
+    "value": null
   },
   "visibleLocals": {
     "status": "exact",
-    "value": []
+    "value": [
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:42-47"
+      }
+    ]
   },
   "visibleImports": {
     "status": "exact",

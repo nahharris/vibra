@@ -1,2 +1,5 @@
+(import helper @app.helper)
 (defn choose (value i32) i32 value)
 (defn answer () i32 (choose 1i32))
+(defn imported () i32 2i32)
+(defn ignored () str (let - "ignored" "done"))
