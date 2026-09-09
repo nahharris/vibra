@@ -14,8 +14,8 @@ use vibra_ir::{Expr, FunctionSignature, PrimitiveType};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedReference, ResolvedSnapshot};
 use vibra_syntax::{
     Application, Attribute, Declaration, Expression, ExpressionKind, FloatSuffix,
-    FunctionDeclaration, IntegerSuffix, Literal, NameKind, Pattern, PatternKind,
-    SourceAst, StructuralQuery, TypeExpr,
+    FunctionDeclaration, GrammarCategory, IntegerSuffix, Literal, NameKind, Pattern,
+    PatternKind, SourceAst, StructuralQuery, TypeExpr,
 };
 use vibra_types::check_source;
 
@@ -980,9 +980,12 @@ impl<'a> SemanticCollector<'a> {
                 ("@atom-value".to_owned(), None)
             }
             ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => {
-                if let Some(binding) = locals.iter().rev().find(|binding| {
-                    binding.name() == name.segments().first().map_or("", String::as_str)
-                }) {
+                if name.segments().len() == 1
+                    && let Some(binding) = locals.iter().rev().find(|binding| {
+                        binding.name()
+                            == name.segments().first().map_or("", String::as_str)
+                    })
+                {
                     return (
                         "@local-binding".to_owned(),
                         Some(QueryIdentity::new("binder", binding.identity())),
@@ -1144,6 +1147,10 @@ impl<'a> SemanticCollector<'a> {
         let ir_observation = self
             .best_ir(structural.offset())
             .map(|site| (site.ty.clone(), site.application.clone()));
+        let is_discard = structural_status == SemanticFactStatus::Exact
+            && self
+                .best_pattern(structural.offset())
+                .is_some_and(|site| site.role == "@discard");
         let (role, context, identity, expected_type, application) = if structural_status
             == SemanticFactStatus::Unavailable
         {
@@ -1179,7 +1186,6 @@ impl<'a> SemanticCollector<'a> {
                 .or_else(|| binder.map(|_| "parameter".to_owned()))
                 .or_else(|| declaration.as_ref().map(|_| "module".to_owned()))
                 .unwrap_or_else(|| "module".to_owned());
-            let is_discard = pattern.is_some_and(|site| site.role == "@discard");
             let identity = (!is_discard)
                 .then(|| {
                     binder
@@ -1264,25 +1270,27 @@ impl<'a> SemanticCollector<'a> {
         } else {
             Vec::new()
         };
-        let declaration_candidates = if structural_status == SemanticFactStatus::Exact {
-            SemanticFact::exact(candidates)
+        let declaration_candidates =
+            if structural_status == SemanticFactStatus::Exact && !is_discard {
+                SemanticFact::exact(candidates)
+            } else {
+                SemanticFact::unavailable()
+            };
+        let observed_type = if structural_status == SemanticFactStatus::Exact
+            && structural.category() != GrammarCategory::Trivia
+            && !is_discard
+        {
+            ir_observation
+                .as_ref()
+                .and_then(|(ty, _)| ty.clone())
+                .or_else(|| {
+                    self.best_expression(structural.offset())
+                        .and_then(|site| site.observed_type.clone())
+                })
+                .map_or_else(SemanticFact::unavailable, SemanticFact::exact)
         } else {
             SemanticFact::unavailable()
         };
-        let observed_type = self
-            .best_pattern(structural.offset())
-            .is_none()
-            .then(|| {
-                ir_observation
-                    .as_ref()
-                    .and_then(|(ty, _)| ty.clone())
-                    .or_else(|| {
-                        self.best_expression(structural.offset())
-                            .and_then(|site| site.observed_type.clone())
-                    })
-            })
-            .flatten()
-            .map_or_else(SemanticFact::unavailable, SemanticFact::exact);
         WorkspacePositionQuery {
             structural,
             workspace_revision: revision,
@@ -1480,7 +1488,7 @@ fn expression_observed_type(
         ExpressionKind::Name(name) if name.kind() == NameKind::Atom => {
             Some(SemanticType::primitive("atom"))
         }
-        ExpressionKind::Application(_) => expected.cloned(),
+        ExpressionKind::Application(_) => None,
         _ => None,
     }
 }

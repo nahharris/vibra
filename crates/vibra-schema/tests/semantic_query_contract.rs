@@ -136,3 +136,94 @@ fn schema_identifier_is_stable() {
         json!("urn:vibra:schema:v1:workspace-position-query")
     );
 }
+
+#[test]
+fn consumer_rejects_missing_values_and_closed_vocabularies() {
+    let (root, workspace, source) = fixture();
+    let query = workspace
+        .query_position("src/main.vib", source.find("1i32").expect("literal"))
+        .expect("workspace query");
+    let rendered = WorkspacePositionQueryDocument::render_with_source(
+        &query,
+        &LineIndex::new(&source),
+    );
+
+    let mut missing_value: Value = serde_json::to_value(&rendered).expect("query JSON");
+    missing_value["role"]
+        .as_object_mut()
+        .expect("role object")
+        .remove("value");
+    assert!(validator().iter_errors(&missing_value).next().is_some());
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(missing_value)
+            .is_err()
+    );
+
+    let mut invalid_identity: Value =
+        serde_json::to_value(&rendered).expect("query JSON");
+    invalid_identity["identity"] = json!({
+        "status": "exact",
+        "value": {"kind": "future", "canonical": "hello"}
+    });
+    assert!(validator().iter_errors(&invalid_identity).next().is_some());
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_identity)
+            .is_err()
+    );
+
+    let mut invalid_type: Value = serde_json::to_value(&rendered).expect("query JSON");
+    invalid_type["expectedType"] = json!({
+        "status": "exact",
+        "value": {
+            "kind": "future",
+            "name": "anything",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+        }
+    });
+    assert!(validator().iter_errors(&invalid_type).next().is_some());
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_type).is_err()
+    );
+
+    let mut invalid_application: Value =
+        serde_json::to_value(&rendered).expect("query JSON");
+    invalid_application["application"] = json!({
+        "status": "exact",
+        "value": {
+            "kind": "future",
+            "callee": null,
+            "calleeType": null,
+            "positional": [],
+            "labelled": [],
+            "resultType": {
+                "kind": "primitive",
+                "name": "i32",
+                "parameters": [],
+                "result": null,
+                "labelled": []
+            }
+        }
+    });
+    assert!(
+        validator()
+            .iter_errors(&invalid_application)
+            .next()
+            .is_some()
+    );
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_application)
+            .is_err()
+    );
+
+    let mut invalid_revision: Value =
+        serde_json::to_value(&rendered).expect("query JSON");
+    invalid_revision["workspaceRevision"] = json!("revision");
+    assert!(validator().iter_errors(&invalid_revision).next().is_some());
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_revision)
+            .is_err()
+    );
+    let _ = fs::remove_dir_all(root);
+}

@@ -142,6 +142,10 @@ fn semantic_query_keeps_discards_unidentified_and_binds_labelled_slots() {
         discard.application().status(),
         SemanticFactStatus::Unavailable
     );
+    assert_eq!(
+        discard.declaration_candidates().status(),
+        SemanticFactStatus::Unavailable
+    );
 
     let tail_offset = source.find("\"tail\"").expect("labelled tail");
     let tail = workspace
@@ -228,5 +232,70 @@ fn semantic_query_rejects_structural_boundaries_without_panicking() {
             _
         ))
     ));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn semantic_query_does_not_promote_expected_to_observed_for_unresolved_application() {
+    let root = temporary_directory("unresolved-call");
+    let source = "(defn answer () i32 (missing))";
+    write_workspace(&root, source);
+    let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
+    let query = workspace
+        .query_position("src/main.vib", source.find("(missing").expect("call"))
+        .expect("query");
+    assert_eq!(
+        query.expected_type().value().map(|value| value.name()),
+        Some("i32")
+    );
+    assert_eq!(
+        query.observed_type().status(),
+        SemanticFactStatus::Unavailable
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn semantic_query_does_not_bind_qualified_name_to_unqualified_local() {
+    let root = temporary_directory("qualified-local");
+    let source = "(defn answer () i32 (let x 1i32 x.bad))";
+    write_workspace(&root, source);
+    let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
+    let query = workspace
+        .query_position(
+            "src/main.vib",
+            source.find("x.bad").expect("qualified name"),
+        )
+        .expect("query");
+    assert_ne!(
+        query.role().value().map(String::as_str),
+        Some("@local-binding")
+    );
+    assert_eq!(query.identity().status(), SemanticFactStatus::Unavailable);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn semantic_query_keeps_trivia_facts_unavailable() {
+    let root = temporary_directory("trivia");
+    let source = "(defn answer () i32 (let x 1i32 x))";
+    write_workspace(&root, source);
+    let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
+    let offset = source.find("1i32").expect("literal") - 1;
+    let query = workspace
+        .query_position("src/main.vib", offset)
+        .expect("trivia query");
+    assert_eq!(
+        query.structural().category(),
+        vibra_syntax::GrammarCategory::Trivia
+    );
+    assert_eq!(
+        query.observed_type().status(),
+        SemanticFactStatus::Unavailable
+    );
+    assert_eq!(
+        query.declaration_candidates().status(),
+        SemanticFactStatus::Unavailable
+    );
     let _ = fs::remove_dir_all(root);
 }
