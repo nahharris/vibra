@@ -47,7 +47,7 @@ accepted = true
 
 [[expect.queries]]
 input = "tree/src/main.vib"
-offset = 69
+offset = 64
 snapshot = "query.json"
 "#,
     )
@@ -64,7 +64,7 @@ snapshot = "query.json"
     let workspace =
         WorkspaceSnapshot::load_confined(&tree).expect("workspace snapshot");
     let query = workspace
-        .query_position("src/main.vib", 69)
+        .query_position("src/main.vib", 64)
         .expect("semantic query");
     let rendered = WorkspacePositionQueryDocument::render_with_source(
         &query,

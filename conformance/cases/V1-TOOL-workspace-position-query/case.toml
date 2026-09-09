@@ -1,0 +1,17 @@
+id = "V1-TOOL-workspace-position-query"
+rule = "V1-TOOL-workspace-position-query"
+profile = "tooling-v1"
+operation = "query"
+description = "The tooling profile renders semantic facts from one immutable workspace snapshot."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 64
+snapshot = "query.json"

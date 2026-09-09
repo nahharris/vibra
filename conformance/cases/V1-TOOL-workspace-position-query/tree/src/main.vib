@@ -1,0 +1,2 @@
+(defn choose (value i32) i32 value)
+(defn answer () i32 (choose 1i32))

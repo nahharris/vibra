@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:4a57d48447792bf3ca863511cdd1203a9bd0874e3af2830b1ec72e97d53cfe52",
+  "sourceId": "src/main.vib",
+  "offset": 64,
+  "nodeId": "src/main.vib#64-68",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 64,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 64,
+      "end": 68,
+      "startPosition": {
+        "line": 2,
+        "column": 29
+      },
+      "endPosition": {
+        "line": 2,
+        "column": 33
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "atom",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "if",
+      "match",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@literal"
+  },
+  "context": {
+    "status": "exact",
+    "value": "argument"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "i32",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "i32",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": []
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": []
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  }
+}

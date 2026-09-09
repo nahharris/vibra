@@ -13,9 +13,9 @@ use vibra_diagnostics::{ByteSpan, DocumentRevision};
 use vibra_ir::{Expr, FunctionSignature, PrimitiveType};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedReference, ResolvedSnapshot};
 use vibra_syntax::{
-    Application, Attribute, Declaration, Expression, ExpressionKind,
-    FunctionDeclaration, NameKind, Pattern, PatternKind, SourceAst, StructuralQuery,
-    TypeExpr,
+    Application, Attribute, Declaration, Expression, ExpressionKind, FloatSuffix,
+    FunctionDeclaration, IntegerSuffix, Literal, NameKind, Pattern, PatternKind,
+    SourceAst, StructuralQuery, TypeExpr,
 };
 use vibra_types::check_source;
 
@@ -616,6 +616,7 @@ struct ExpressionSite {
     context: String,
     identity: Option<QueryIdentity>,
     expected_type: Option<SemanticType>,
+    observed_type: Option<SemanticType>,
     application: Option<ApplicationContract>,
 }
 
@@ -632,6 +633,13 @@ struct ScopeSite {
 }
 
 #[derive(Clone, Debug)]
+struct PatternSite {
+    span: ByteSpan,
+    role: String,
+    context: String,
+}
+
+#[derive(Clone, Debug)]
 struct SemanticCollector<'a> {
     source_id: &'a str,
     resolved: &'a ResolvedSnapshot,
@@ -640,7 +648,9 @@ struct SemanticCollector<'a> {
     expressions: Vec<ExpressionSite>,
     binders: Vec<BinderSite>,
     scopes: Vec<ScopeSite>,
+    patterns: Vec<PatternSite>,
     ir_sites: Vec<IrSite>,
+    ir_expected_sites: Vec<IrExpectedSite>,
 }
 
 impl<'a> SemanticCollector<'a> {
@@ -658,7 +668,9 @@ impl<'a> SemanticCollector<'a> {
             expressions: Vec::new(),
             binders: Vec::new(),
             scopes: Vec::new(),
+            patterns: Vec::new(),
             ir_sites: Vec::new(),
+            ir_expected_sites: Vec::new(),
         }
     }
 
@@ -699,7 +711,11 @@ impl<'a> SemanticCollector<'a> {
     fn collect_function(&mut self, function: &FunctionDeclaration) {
         let mut locals = Vec::new();
         for parameter in function.parameters() {
-            self.collect_pattern_binding(parameter.parsed_pattern(), &mut locals);
+            self.collect_pattern_binding(
+                parameter.parsed_pattern(),
+                &mut locals,
+                "parameter",
+            );
         }
         for attribute in function.attributes().items() {
             if let Attribute::Labelled(parameters) = attribute {
@@ -712,6 +728,12 @@ impl<'a> SemanticCollector<'a> {
                             binding: binding.clone(),
                         });
                         locals.push(binding);
+                    } else {
+                        self.patterns.push(PatternSite {
+                            span: parameter.span(),
+                            role: "@discard".to_owned(),
+                            context: "parameter".to_owned(),
+                        });
                     }
                 }
             }
@@ -742,6 +764,7 @@ impl<'a> SemanticCollector<'a> {
         &mut self,
         pattern: &Pattern,
         locals: &mut Vec<LocalBinding>,
+        context: &str,
     ) {
         match pattern.kind() {
             PatternKind::Binding(name) if !name.is_discard() => {
@@ -752,20 +775,27 @@ impl<'a> SemanticCollector<'a> {
                 });
                 locals.push(binding);
             }
+            PatternKind::Binding(_) => {
+                self.patterns.push(PatternSite {
+                    span: pattern.span(),
+                    role: "@discard".to_owned(),
+                    context: context.to_owned(),
+                });
+            }
             PatternKind::Tuple(patterns) | PatternKind::Array(patterns) => {
                 for pattern in patterns {
-                    self.collect_pattern_binding(pattern, locals);
+                    self.collect_pattern_binding(pattern, locals, context);
                 }
             }
             PatternKind::Constructor { arguments, .. } => {
                 for argument in arguments {
-                    self.collect_pattern_binding(argument.pattern(), locals);
+                    self.collect_pattern_binding(argument.pattern(), locals, context);
                 }
             }
             PatternKind::As { pattern, .. } => {
-                self.collect_pattern_binding(pattern, locals);
+                self.collect_pattern_binding(pattern, locals, context);
             }
-            PatternKind::Binding(_) | PatternKind::Literal(_) => {}
+            PatternKind::Literal(_) => {}
         }
     }
 
@@ -796,23 +826,36 @@ impl<'a> SemanticCollector<'a> {
             context: context.to_owned(),
             identity,
             expected_type: expected_type.clone(),
+            observed_type: expression_observed_type(expression, expected_type.as_ref()),
             application,
         });
 
         match expression.kind() {
             ExpressionKind::Application(application) => {
                 self.collect_expression(application.callee(), locals, "function", None);
-                let argument_types = self
-                    .application_contract(application)
-                    .map(|contract| contract.positional().to_vec());
-                for (index, argument) in application.arguments().iter().enumerate() {
+                let contract = self.application_contract(application);
+                let mut positional_index = 0;
+                for argument in application.arguments() {
+                    let expected = if let Some(label) = argument.label() {
+                        contract.as_ref().and_then(|contract| {
+                            contract
+                                .labelled()
+                                .iter()
+                                .find(|slot| slot.name() == label.value())
+                                .map(|slot| slot.value_type().clone())
+                        })
+                    } else {
+                        let expected = contract.as_ref().and_then(|contract| {
+                            contract.positional().get(positional_index).cloned()
+                        });
+                        positional_index = positional_index.saturating_add(1);
+                        expected
+                    };
                     self.collect_expression(
                         argument.value(),
                         locals,
                         "argument",
-                        argument_types
-                            .as_ref()
-                            .and_then(|types| types.get(index).cloned()),
+                        expected,
                     );
                 }
             }
@@ -837,7 +880,7 @@ impl<'a> SemanticCollector<'a> {
             } => {
                 self.collect_expression(value, locals, "let-value", None);
                 let mut nested = locals.to_vec();
-                self.collect_pattern_binding(pattern, &mut nested);
+                self.collect_pattern_binding(pattern, &mut nested, "let-value");
                 if let (Some(first), Some(last)) = (body.first(), body.last()) {
                     self.scopes.push(ScopeSite {
                         span: first.span().join(last.span()),
@@ -882,6 +925,7 @@ impl<'a> SemanticCollector<'a> {
                     self.collect_pattern_binding(
                         parameter.parsed_pattern(),
                         &mut nested,
+                        "parameter",
                     );
                 }
                 self.scopes.push(ScopeSite {
@@ -1001,6 +1045,29 @@ impl<'a> SemanticCollector<'a> {
     }
 
     fn collect_ir(&mut self, expression: &Expr) {
+        let application = ir_application_contract(expression);
+        if let Expr::Call {
+            callee: Some(callee),
+            arguments,
+            ..
+        } = expression
+            && let PrimitiveType::Function(signature) = callee.result_type()
+        {
+            let mut expected_types = signature.parameters().to_vec();
+            expected_types.extend(
+                signature
+                    .labelled()
+                    .iter()
+                    .map(|parameter| parameter.value_type().clone()),
+            );
+            for (argument, expected_type) in arguments.iter().zip(expected_types) {
+                self.ir_expected_sites.push(IrExpectedSite {
+                    source_id: argument.origin().source_id().to_owned(),
+                    span: argument.origin().span(),
+                    expected_type: semantic_type_primitive(&expected_type),
+                });
+            }
+        }
         // The IR is immutable and every node carries its own source origin.
         // Recursion follows only the checked enum, never source text.
         match expression {
@@ -1057,6 +1124,7 @@ impl<'a> SemanticCollector<'a> {
             source_id: expression.origin().source_id().to_owned(),
             span: expression.origin().span(),
             ty: semantic_type_primitive(&expression.result_type()),
+            application,
         });
     }
 
@@ -1073,6 +1141,9 @@ impl<'a> SemanticCollector<'a> {
             vibra_syntax::FactStatus::Recovered => SemanticFactStatus::Recovered,
             vibra_syntax::FactStatus::Unavailable => SemanticFactStatus::Unavailable,
         };
+        let ir_observation = self
+            .best_ir(structural.offset())
+            .map(|site| (site.ty.clone(), site.application.clone()));
         let (role, context, identity, expected_type, application) = if structural_status
             == SemanticFactStatus::Unavailable
         {
@@ -1094,23 +1165,53 @@ impl<'a> SemanticCollector<'a> {
         } else {
             let expression = self.best_expression(structural.offset());
             let binder = self.best_binder(structural.offset());
+            let pattern = self.best_pattern(structural.offset());
             let declaration = self.declaration_at(structural.offset());
-            let role = binder
-                .map(|_| "@local-binding".to_owned())
+            let role = pattern
+                .map(|site| site.role.clone())
+                .or_else(|| binder.map(|_| "@local-binding".to_owned()))
                 .or_else(|| expression.map(|site| site.role.clone()))
                 .or_else(|| declaration.as_ref().map(|_| "@declaration".to_owned()))
                 .unwrap_or_else(|| "@unknown".to_owned());
-            let context = expression
+            let context = pattern
                 .map(|site| site.context.clone())
+                .or_else(|| expression.map(|site| site.context.clone()))
                 .or_else(|| binder.map(|_| "parameter".to_owned()))
                 .or_else(|| declaration.as_ref().map(|_| "module".to_owned()))
                 .unwrap_or_else(|| "module".to_owned());
-            let identity = binder
-                .map(|site| QueryIdentity::new("binder", site.binding.identity()))
-                .or_else(|| expression.and_then(|site| site.identity.clone()))
-                .or_else(|| declaration.map(|(_, identity)| identity));
-            let expected = expression.and_then(|site| site.expected_type.clone());
-            let application = expression.and_then(|site| site.application.clone());
+            let is_discard = pattern.is_some_and(|site| site.role == "@discard");
+            let identity = (!is_discard)
+                .then(|| {
+                    binder
+                        .map(|site| {
+                            QueryIdentity::new("binder", site.binding.identity())
+                        })
+                        .or_else(|| expression.and_then(|site| site.identity.clone()))
+                        .or_else(|| {
+                            (binder.is_none() && expression.is_none())
+                                .then(|| declaration.map(|(_, identity)| identity))
+                                .flatten()
+                        })
+                })
+                .flatten();
+            let expected = (!is_discard)
+                .then(|| {
+                    expression
+                        .and_then(|site| site.expected_type.clone())
+                        .or_else(|| self.best_ir_expected(structural.offset()))
+                })
+                .flatten();
+            let application = (!is_discard)
+                .then(|| {
+                    expression
+                        .and_then(|site| site.application.clone())
+                        .or_else(|| {
+                            ir_observation
+                                .as_ref()
+                                .and_then(|(_, application)| application.clone())
+                        })
+                })
+                .flatten();
             (
                 SemanticFact::exact(role),
                 SemanticFact::exact(context),
@@ -1169,8 +1270,18 @@ impl<'a> SemanticCollector<'a> {
             SemanticFact::unavailable()
         };
         let observed_type = self
-            .best_ir(structural.offset())
-            .and_then(|site| site.ty.clone())
+            .best_pattern(structural.offset())
+            .is_none()
+            .then(|| {
+                ir_observation
+                    .as_ref()
+                    .and_then(|(ty, _)| ty.clone())
+                    .or_else(|| {
+                        self.best_expression(structural.offset())
+                            .and_then(|site| site.observed_type.clone())
+                    })
+            })
+            .flatten()
             .map_or_else(SemanticFact::unavailable, SemanticFact::exact);
         WorkspacePositionQuery {
             structural,
@@ -1203,6 +1314,13 @@ impl<'a> SemanticCollector<'a> {
             .min_by_key(|site| site.span.len())
     }
 
+    fn best_pattern(&self, offset: usize) -> Option<&PatternSite> {
+        self.patterns
+            .iter()
+            .filter(|site| contains(site.span, offset, self.source_length))
+            .min_by_key(|site| site.span.len())
+    }
+
     fn declaration_at(&self, offset: usize) -> Option<(ByteSpan, QueryIdentity)> {
         self.resolved
             .declarations()
@@ -1224,6 +1342,17 @@ impl<'a> SemanticCollector<'a> {
             })
             .min_by_key(|site| site.span.len())
     }
+
+    fn best_ir_expected(&self, offset: usize) -> Option<SemanticType> {
+        self.ir_expected_sites
+            .iter()
+            .filter(|site| {
+                site.source_id == self.source_id
+                    && contains(site.span, offset, self.source_length)
+            })
+            .min_by_key(|site| site.span.len())
+            .and_then(|site| site.expected_type.clone())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1231,6 +1360,14 @@ struct IrSite {
     source_id: String,
     span: ByteSpan,
     ty: Option<SemanticType>,
+    application: Option<ApplicationContract>,
+}
+
+#[derive(Clone, Debug)]
+struct IrExpectedSite {
+    source_id: String,
+    span: ByteSpan,
+    expected_type: Option<SemanticType>,
 }
 
 fn contains(span: ByteSpan, offset: usize, source_length: usize) -> bool {
@@ -1332,6 +1469,100 @@ fn semantic_type_signature(signature: &FunctionSignature) -> SemanticType {
             .unwrap_or_else(|| SemanticType::primitive("void")),
         labelled,
     )
+}
+
+fn expression_observed_type(
+    expression: &Expression,
+    expected: Option<&SemanticType>,
+) -> Option<SemanticType> {
+    match expression.kind() {
+        ExpressionKind::Literal(literal) => literal_type(literal, expected),
+        ExpressionKind::Name(name) if name.kind() == NameKind::Atom => {
+            Some(SemanticType::primitive("atom"))
+        }
+        ExpressionKind::Application(_) => expected.cloned(),
+        _ => None,
+    }
+}
+
+fn literal_type(
+    literal: &Literal,
+    expected: Option<&SemanticType>,
+) -> Option<SemanticType> {
+    let primitive = match literal {
+        Literal::String(_) => Some("str"),
+        Literal::Character(_) => Some("char"),
+        Literal::Boolean(_) => Some("bool"),
+        Literal::Void(_) => Some("void"),
+        Literal::Integer(value) => value
+            .suffix()
+            .map(integer_suffix_name)
+            .or_else(|| expected.and_then(numeric_expected_name)),
+        Literal::Float(value) => value
+            .suffix()
+            .map(float_suffix_name)
+            .or_else(|| expected.and_then(float_expected_name)),
+    };
+    primitive.map(SemanticType::primitive)
+}
+
+fn integer_suffix_name(suffix: IntegerSuffix) -> &'static str {
+    suffix.as_str()
+}
+
+fn float_suffix_name(suffix: FloatSuffix) -> &'static str {
+    suffix.as_str()
+}
+
+fn numeric_expected_name(value: &SemanticType) -> Option<&str> {
+    matches!(
+        value.name(),
+        "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
+    )
+    .then_some(value.name())
+}
+
+fn float_expected_name(value: &SemanticType) -> Option<&str> {
+    matches!(value.name(), "f32" | "f64").then_some(value.name())
+}
+
+fn ir_application_contract(expression: &Expr) -> Option<ApplicationContract> {
+    let Expr::Call {
+        callee: Some(callee),
+        ..
+    } = expression
+    else {
+        return None;
+    };
+    let PrimitiveType::Function(signature) = callee.result_type() else {
+        return None;
+    };
+    let callee_type = semantic_type_signature(signature.as_ref());
+    Some(ApplicationContract::new(
+        None,
+        Some(callee_type),
+        signature
+            .parameters()
+            .iter()
+            .map(|parameter| {
+                semantic_type_primitive(parameter)
+                    .unwrap_or_else(|| SemanticType::primitive("void"))
+            })
+            .collect(),
+        signature
+            .labelled()
+            .iter()
+            .map(|parameter| {
+                LabelledType::new(
+                    parameter.name(),
+                    semantic_type_primitive(&parameter.value_type())
+                        .unwrap_or_else(|| SemanticType::primitive("void")),
+                )
+            })
+            .collect(),
+        semantic_type_primitive(&signature.result())
+            .unwrap_or_else(|| SemanticType::primitive("void")),
+    ))
 }
 
 fn function_type(function: &FunctionDeclaration) -> Option<SemanticType> {
