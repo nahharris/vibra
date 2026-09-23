@@ -79,7 +79,7 @@ path named `std` cannot confer external-declaration authority.
 | 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | landed | `m2` merge `73592be`; versioned registry metadata, direct `@std.text` imports, independent concat/length cases, and 160-case corpus evidence |
 | 9 | [Guarantee tail calls](09-tail-calls.md) | 8 | landed | `m2` merge `5392ad0`; PR #296, platform CI green including macOS |
 | 10 | [Expose semantic position facts](10-queries.md) | 9 | landed | `m2` merge `fdbf6d2`; PR #297, all platform CI green including macOS |
-| 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | not started | — |
+| 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | landed | `m2` merge `c624c3d`; PR #299, all platform CI and reader corpus green |
 | 12 | [Ship check and interpreter run](12-check-run.md) | 11 | not started | — |
 | 13 | [Ship pure tests and assertions](13-tests.md) | 12 | not started | — |
 | 14 | [Audit the demo and exit gate](14-evidence.md) — evidence step | 13 | not started | — |
