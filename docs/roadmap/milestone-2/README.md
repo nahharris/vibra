@@ -1,6 +1,6 @@
 # Milestone 2 step plan
 
-Status: Steps 1–13 are merged to `m2`; Step 14 evidence is implemented in PR #302 and awaits that merge
+Status: All 14 steps are merged to `m2`; M2 exit evidence is complete
 Milestone: [Milestone 2 — executable pure core](../v1.md#milestone-2--executable-pure-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m2`
@@ -84,7 +84,7 @@ path named `std` cannot confer external-declaration authority.
 | 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | landed | `m2` merge `c624c3d`; PR #299, all platform CI and reader corpus green |
 | 12 | [Ship check and interpreter run](12-check-run.md) | 11 | landed | `m2` merge `ed1b7ae`; PR #300; 173-case corpus and all CI jobs green |
 | 13 | [Ship pure tests and assertions](13-tests.md) | 12 | landed | `m2` merge `d12cb6c`; PR #301; 178-case corpus |
-| 14 | [Audit the demo and exit gate](14-evidence.md) — evidence step | 13 | implemented; PR #302 pending merge | [PR #302](https://github.com/nahharris/vibra/pull/302); report: [exit evidence](14-exit-evidence.md) |
+| 14 | [Audit the demo and exit gate](14-evidence.md) — evidence step | 13 | landed | PR #302 merged as `6132925`; 198-case corpus and all five final-head CI jobs passed in run `35927423703`; [exit evidence](14-exit-evidence.md) |
 
 Step 1 is explicitly a specification and test-infrastructure prerequisite, not
 a language-feature completion claim. Steps 2–13 each deliver their complete

@@ -5,15 +5,17 @@ process tests were run from the clean candidate source revision
 `0521364dd920fdd2f20aefef897aebca778e8d6d`. Its integration base was the
 verified Step 13 merge `d12cb6cd66630436e4503a899873a688e3502ad3` on `m2`.
 The M2 branch descends from the M1 merge `9c77b8642e1a7f3f4d8aab1eb0cd709bbbefebf6`
-(PR #283). The exact current Step 14 PR head and its checks are visible at
+(PR #283). PR #302's final head `f0d7785996bff546dc43db26da176871ae2d2732`
+merged to `m2` as `6132925ed4024d7a85ed82bf657ce3b313eb3054`. Final-head CI
+[run 35927423703](https://github.com/nahharris/vibra/actions/runs/35927423703)
+passed all five jobs: Ubuntu, Windows, macOS, reader corpus, and archive
+boundary. The full PR history and checks remain visible at
 [PR #302](https://github.com/nahharris/vibra/pull/302) and its
-[check page](https://github.com/nahharris/vibra/pull/302/checks). The report
-commit changes documentation only. The linked PR check page shows checks for
-the current PR head; verify it is green after this evidence update is pushed.
+[check page](https://github.com/nahharris/vibra/pull/302/checks).
 
 ## Integration and decision audit
 
-The step PRs targeting `m2` and the current Step 14 candidate are:
+The step PRs that delivered M2 Steps 9–14 are:
 
 | Step | PR and verified merge | Merged validation / CI |
 | --- | --- | --- |
@@ -22,7 +24,7 @@ The step PRs targeting `m2` and the current Step 14 candidate are:
 | 11 | [#299](https://github.com/nahharris/vibra/pull/299), `c624c3d216c2e1c0e7237dff1fc4590d5889c802` | 165-case corpus and 429 workspace tests; all five checks passed in [run 35858148272](https://github.com/nahharris/vibra/actions/runs/35858148272). |
 | 12 | [#300](https://github.com/nahharris/vibra/pull/300), `ed1b7ae868c44cc0c58c96e184ffd6f7d0ab5cb5` | 173-case corpus; all five checks passed in [run 35878876006](https://github.com/nahharris/vibra/actions/runs/35878876006). The PR description called macOS broken, but its attached macOS check succeeded. |
 | 13 | [#301](https://github.com/nahharris/vibra/pull/301), `d12cb6cd66630436e4503a899873a688e3502ad3` | 178-case corpus; all five checks passed in [run 35903397276](https://github.com/nahharris/vibra/actions/runs/35903397276). |
-| 14 | [#302](https://github.com/nahharris/vibra/pull/302), candidate source `0521364dd920fdd2f20aefef897aebca778e8d6d` | Its captured run [35924662446](https://github.com/nahharris/vibra/actions/runs/35924662446) passed Ubuntu, Windows, macOS, reader corpus, and archive-boundary jobs. The linked PR check page tracks the final documentation head. |
+| 14 | [#302](https://github.com/nahharris/vibra/pull/302), merged as `6132925ed4024d7a85ed82bf657ce3b313eb3054` | Final-head run [35927423703](https://github.com/nahharris/vibra/actions/runs/35927423703) passed Ubuntu, Windows, macOS, reader corpus, and archive-boundary jobs. The implementation and process tests ran from source commit `0521364dd920fdd2f20aefef897aebca778e8d6d`. |
 
 GitHub's M2 pull request history contains no Step PRs for Steps 1–8. Those
 steps are present in the `m2` history at the integration revisions recorded in
@@ -54,7 +56,7 @@ conformance tree.
 Every row uses the final Step 14 PR check page linked above; that suite runs the
 three platform checks, independent reader corpus, and archive boundary check.
 
-| Roadmap obligation | Conformance cases and host tests | PR checks for current head |
+| Roadmap obligation | Conformance cases and host tests | Final-head PR CI |
 | --- | --- | --- |
 | Project schema, discovery, and schema-selected atom roles | `V1-PROJECT-static-schema-order`, `V1-PROJECT-static-variants`, `V1-PROJECT-static-unknown-field`; workspace project decoder tests | [PR #302 checks](https://github.com/nahharris/vibra/pull/302/checks) |
 | Unit-rooted graph, imports, roots, and visibility | `V1-PROJECT-graph-static-*`, `V1-TYPE-NAMES-resolve-*`; workspace and resolver host suites | [PR #302 checks](https://github.com/nahharris/vibra/pull/302/checks) |
