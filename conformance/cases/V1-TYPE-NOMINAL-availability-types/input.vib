@@ -1,0 +1,4 @@
+(defn applied (value (box i32)) i32 1i32)
+(defn tupled (value (tuple i32 str)) i32 1i32)
+(defn arrayed (value (array i32)) i32 1i32)
+(defn mapped (value (map str i32)) i32 1i32)

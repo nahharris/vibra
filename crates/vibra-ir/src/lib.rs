@@ -1892,7 +1892,7 @@ pub enum IrError {
     /// The function-call graph contains a recursive group outside the admitted subset.
     RecursiveCall(String),
     /// A module initializer dependency graph contains a cycle.
-    GlobalInitializerCycle(String),
+    GlobalInitializerCycle(usize),
 }
 
 impl fmt::Display for IrError {
@@ -1924,8 +1924,11 @@ impl fmt::Display for IrError {
             Self::RecursiveCall(message) => {
                 write!(formatter, "recursive call graph: {message}")
             }
-            Self::GlobalInitializerCycle(message) => {
-                write!(formatter, "global initializer cycle: {message}")
+            Self::GlobalInitializerCycle(global) => {
+                write!(
+                    formatter,
+                    "global initializer cycle involving global {global}"
+                )
             }
         }
     }
@@ -3671,6 +3674,7 @@ fn reject_global_initializer_cycles(
             dependencies,
             global_count,
             &mut states,
+            &mut Vec::new(),
         )?;
     }
     Ok(())
@@ -3681,14 +3685,23 @@ fn visit_dependency_graph(
     dependencies: &[BTreeSet<DependencyNode>],
     global_count: usize,
     states: &mut [CallState],
+    path: &mut Vec<DependencyNode>,
 ) -> Result<(), IrError> {
     let index = node.node_index(global_count);
     match states.get(index).copied() {
         Some(CallState::Done) => return Ok(()),
         Some(CallState::Visiting) => {
-            return Err(IrError::GlobalInitializerCycle(format!(
-                "dependency node {node:?} is part of a module initializer cycle"
-            )));
+            let cycle_global = path
+                .iter()
+                .skip_while(|active| **active != node)
+                .find_map(|active| match active {
+                    DependencyNode::Global(index) => Some(*index),
+                    DependencyNode::Function(_) => None,
+                });
+            if let Some(global) = cycle_global {
+                return Err(IrError::GlobalInitializerCycle(global));
+            }
+            return Ok(());
         }
         Some(CallState::Unvisited) => {}
         None => {
@@ -3703,14 +3716,16 @@ fn visit_dependency_graph(
         )));
     };
     *state = CallState::Visiting;
+    path.push(node);
     let Some(edges) = dependencies.get(index) else {
         return Err(IrError::InvalidExpression(format!(
             "dependency graph has no node for {node:?}"
         )));
     };
     for dependency in edges {
-        visit_dependency_graph(*dependency, dependencies, global_count, states)?;
+        visit_dependency_graph(*dependency, dependencies, global_count, states, path)?;
     }
+    path.pop();
     if let Some(state) = states.get_mut(index) {
         *state = CallState::Done;
     }
@@ -4726,6 +4741,54 @@ mod tests {
         let result =
             CheckedProgram::try_new_with_globals(vec![global], vec![function], 0);
         assert!(matches!(result, Err(IrError::GlobalInitializerCycle(_))));
+    }
+
+    #[test]
+    fn program_constructor_allows_global_call_to_terminating_recursive_helper() {
+        let origin = origin();
+        let helper_signature =
+            FunctionSignature::new(vec![PrimitiveType::Bool], PrimitiveType::I32);
+        let global = super::CheckedGlobal::new(
+            "value",
+            PrimitiveType::I32,
+            Expr::call(
+                0,
+                vec![Expr::literal(Value::Bool(false), origin.clone())],
+                PrimitiveType::I32,
+                origin.clone(),
+            ),
+            origin.clone(),
+        )
+        .expect("global shape");
+        let helper = CheckedFunction::new(
+            "helper",
+            helper_signature,
+            Expr::if_expression(
+                Expr::variable(0, PrimitiveType::Bool, origin.clone()),
+                Expr::tail_call(
+                    0,
+                    vec![Expr::literal(Value::Bool(false), origin.clone())],
+                    PrimitiveType::I32,
+                    origin.clone(),
+                ),
+                Expr::literal(Value::I32(1), origin.clone()),
+                origin.clone(),
+            ),
+            origin.clone(),
+        )
+        .expect("recursive helper");
+        let answer = CheckedFunction::new(
+            "answer",
+            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            origin,
+        )
+        .expect("answer");
+
+        let program =
+            CheckedProgram::try_new_with_globals(vec![global], vec![helper, answer], 1);
+
+        assert!(program.is_ok(), "{program:?}");
     }
 
     #[test]

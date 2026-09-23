@@ -1,0 +1,10 @@
+(defn collect-array (first i32) i32
+  variadic: (rest (array i32))
+  first)
+(defn use-direct () (fn () i32)
+  (let alias collect-array
+    (lambda () i32 (alias 1i32))))
+(defn use-nested () (fn () (fn () i32))
+  (let alias collect-array
+    (lambda () (fn () i32)
+      (lambda () i32 (alias 1i32)))))

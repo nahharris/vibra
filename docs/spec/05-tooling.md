@@ -1,9 +1,9 @@
 # Vibra v1 CLI, MCP, and code tooling
 
 Status: normative target
-Implementation status: Milestone 1 step 10 provides the structural
-source-position query library and schema adapter; CLI and MCP surfaces remain
-unimplemented.
+Implementation status: M2 provides `project init`, `fmt`, `check`, `run`, and
+`test` through the shared workspace engine. MCP and the remaining v1 tooling
+commands remain unavailable.
 
 ## One workspace engine
 
@@ -161,6 +161,11 @@ returned. A recovered document is preserved byte-for-byte. The formatter may
 reorder labelled arguments only when an accepted checker result for that exact
 source in the captured workspace snapshot supplies their binding facts; absent
 facts never authorize an inferred reorder.
+If the single-source checker reports `@tool.unavailable`, `fmt` discards that
+incomplete check result and continues with syntax-only formatting. It uses no
+binding facts and must preserve labelled argument order; the unavailable
+semantic check does not make formatting unavailable. Parser and formatter
+diagnostics still apply to preview and write.
 
 JSON mode emits exactly one versioned envelope to stdout and sends diagnostics
 and operational logs to stderr. The envelope always has these fields:

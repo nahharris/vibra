@@ -1,0 +1,10 @@
+(defn collect-array (first i32) i32
+  variadic: (rest (array i32))
+  first)
+(defn use-array () i32
+  (do (collect-array 1i32) (collect-array 1i32 2i32)))
+(defn collect-map (first i32) i32
+  variadic: (rest (map str i32))
+  first)
+(defn use-map () i32
+  (do (collect-map 1i32) (collect-map 1i32 "key" 2i32)))

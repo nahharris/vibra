@@ -1,0 +1,15 @@
+(deftype handle i32)
+(deftype pair (record left i32 right bool))
+(deftype option (enum some i32 none void))
+(deftype number (union i32 str))
+(deftype user-id (newtype u64)
+  (defn unwrap (value self) u64 0u64))
+(defint printable
+  (defn render (value self) str)
+  (impl i32
+    (defn render (value self) str "integer")))
+(deffect audit
+  (defn record (message str) void
+    external: @host
+    symbol: "audit.record"))
+(defn use-handle (value handle) i32 0i32)

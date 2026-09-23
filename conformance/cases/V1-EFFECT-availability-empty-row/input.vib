@@ -1,0 +1,1 @@
+(defn pure () i32 effects: () 1i32)

@@ -1,0 +1,14 @@
+id = "V1-TOOL-format-imported-source"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "format"
+description = "Formatting an imported source without checker binding facts preserves labelled argument order."
+
+[inputs]
+source = "tree/src/hello/main.vib"
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

@@ -1,7 +1,9 @@
 # Vibra v1 source language
 
 Status: normative target
-Implementation status: milestone 1 steps 9–10 complete for written declaration, type, expression, pattern, and structural position metadata over the lossless reader; resolution and semantic checking remain later work
+Implementation status: M1 supplies the lossless source structure and position
+metadata; M2 resolves and checks the documented executable subset. Later-v1
+source forms remain deferred as recorded in the M2 surface inventory.
 
 ## Reader
 

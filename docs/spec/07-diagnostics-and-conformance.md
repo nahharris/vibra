@@ -1,7 +1,9 @@
 # Vibra v1 diagnostics and conformance
 
 Status: normative target
-Implementation status: milestone 1 step 10 complete (declaration/type/expression diagnostics, structural query snapshots, and reader-v1 corpus); the executable milestone exit gate is recorded by Step 11
+Implementation status: M1 reader diagnostics and M2 static, interpreter, and
+tooling observations have conformance coverage. The M2 exit evidence and exact
+profile counts are recorded in Step 14.
 
 ## Diagnostics are a language surface
 
@@ -130,6 +132,22 @@ surface is outside the selected implementation profile. It is distinct from a
 malformed-input diagnostic and from the conformance runner's `unavailable`
 status: a real handler reports the diagnostic through its result contract,
 while a missing handler remains an unavailable corpus observation.
+
+### M2 unavailable-form spans
+
+For an unavailable source-language construct, the primary span MUST be the
+complete half-open UTF-8 span of the owning source form represented by the AST
+node that the checker rejects. A rejected declaration uses its complete
+declaration form. If unsupported semantics occur in a nested type or another
+child not represented by a separately spanned node used by the checker, the
+diagnostic uses the complete source form of its owning parameter or
+declaration. A rejected expression uses its complete expression form; a
+nonempty effect ceiling uses the complete effect-row form; and a reference
+that is unavailable because of its resolved entity uses the complete
+reference. List forms include their opening and closing delimiters. The
+diagnostic retains the owning source ID, and a source-form diagnostic never
+uses an invented or empty `0..0` span. A command-level availability diagnostic
+follows the process contract in `05-tooling.md`.
 
 The workspace boundary uses the following additional codes. Discovery emits
 `@project.not-found` when no exact `project.vibon` is found within the allowed

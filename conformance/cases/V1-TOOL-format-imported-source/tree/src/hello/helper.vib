@@ -1,0 +1,1 @@
+(defn combine (fallback i32) i32 visibility: @public labelled: (first i32 7i32 second i32 8i32) first)

@@ -6,7 +6,9 @@ requires every `Enum::Variant` token below to remain present in this document;
 adding an AST variant without a disposition fails the test. `supported` means
 the M2 checker/interpreter will implement it by the owning step. `deferred`
 means M1 may parse it, but M2 reports `@tool.unavailable` when semantic support
-is required. `rejected` means the active v1 grammar itself rejects it.
+is required. `rejected` means the active v1 grammar itself rejects it. This is
+a proof inventory only; normative behavior and M2 availability are defined by
+the linked topic chapters in `docs/spec/`.
 
 | AST variant | Disposition | Owner / reason |
 | --- | --- | --- |

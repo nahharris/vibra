@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use vibra_diagnostics::DiagnosticCode;
+use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_workspace::{
     WorkspaceSnapshot,
     semantic::{CheckStatus, RunOutcome},
@@ -239,6 +239,68 @@ fn checking_a_library_without_an_entry_still_rejects_initializer_cycles() {
         diagnostic.code() == DiagnosticCode::TypeInitializerCycle
             && diagnostic.source_id() == Some("src/util/main.vib")
     }));
+}
+
+#[test]
+fn initializer_cycle_diagnostic_points_into_disjoint_cycle() {
+    let source = "(def unrelated i32 1i32)\n(def first i32 second)\n(def second i32 first)\n(defn execute () void (do))\n";
+    let project = TempProject::new(
+        "initializer-cycle-span-after-acyclic-global",
+        &[("src/app/main.vib", source)],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+    let diagnostic = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code() == DiagnosticCode::TypeInitializerCycle)
+        .expect("initializer-cycle diagnostic");
+    let cycle_start = source.find("(def first").expect("first cycle declaration");
+    let cycle_end = source[cycle_start..]
+        .find('\n')
+        .map(|offset| cycle_start + offset)
+        .expect("cycle declaration end");
+
+    assert_eq!(diagnostic.source_id(), Some("src/app/main.vib"));
+    assert_eq!(
+        diagnostic.primary_span(),
+        ByteSpan::new(cycle_start, cycle_end)
+    );
+}
+
+#[test]
+fn global_initializer_may_call_a_terminating_recursive_helper() {
+    let project = TempProject::new(
+        "recursive-helper-global-initializer",
+        &[(
+            "src/app/main.vib",
+            "(def value i32 (helper false))\n(defn helper (again bool) i32 (if again (helper false) 1i32))\n(defn execute () void (let - value (do)))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+
+    assert_eq!(
+        run.check().status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        run.check().diagnostics()
+    );
+    assert!(matches!(run.outcome(), Some(RunOutcome::Program(_))));
 }
 
 #[test]

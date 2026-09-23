@@ -18,7 +18,9 @@ engine**, **Project operations**, **Transactional edit plans**, projects
    the reviewed revision-checked atomic plan. Recovered documents retain bytes.
 4. For source calls, use snapshot binding facts to normalize only proven label
    order, preserving evaluation order and attached comments. Missing semantic
-   facts cannot authorize a guessed reordering.
+   facts cannot authorize a guessed reordering. When the single-source checker
+   returns `@tool.unavailable`, format syntax without those facts, discard that
+   incomplete check result, and preserve the source's labelled argument order.
 5. Implement only the necessary format-plan foundation, honoring all applicable
    transaction guarantees: confined paths, stale revision refusal, complete
    preflight, reparse/recheck postconditions and no partial writes on failure.
@@ -47,6 +49,9 @@ rename, fix, or public query command.
 plan through the `tooling-v1` corpus handler and compares its output with a
 checked-in formatted snapshot. The host-level conformance test also checks that
 reordering proven labelled arguments preserves the checked program result.
+`V1-TOOL-format-imported-source` exercises the syntax-only fallback when the
+single-source checker cannot resolve imports; its formatted snapshot preserves
+the original labelled argument order in the absence of binding facts.
 Process tests cover project creation and decoding, conflict refusal, versioned
 JSON schema validation, source and VIBON preview/write behavior, and unavailable
 later-step commands.

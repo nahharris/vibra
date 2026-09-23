@@ -1,0 +1,5 @@
+(defn collect-array (first i32) i32
+  variadic: (rest (array i32))
+  first)
+(defn use-array () i32
+  (do (collect-array 1i32) (collect-array 1i32 2i32)))

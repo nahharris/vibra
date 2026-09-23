@@ -1,0 +1,2 @@
+(defn accept-map (callback (fn (i32) i32 variadic: (map str i32))) i32
+  (callback 1i32 "key" 2i32))

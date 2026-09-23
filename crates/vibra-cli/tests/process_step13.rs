@@ -58,9 +58,16 @@ impl Drop for TempProject {
 }
 
 fn run(project: &TempProject, arguments: &[&str]) -> Output {
+    let mut command = Vec::with_capacity(arguments.len().saturating_add(1));
+    command.push("test");
+    command.extend_from_slice(arguments);
+    run_command(project, &command)
+}
+
+fn run_command(project: &TempProject, arguments: &[&str]) -> Output {
     let workspace = project.path().to_string_lossy().into_owned();
     Command::new(env!("CARGO_BIN_EXE_vibra"))
-        .args(["--format", "json", "--workspace", &workspace, "test"])
+        .args(["--format", "json", "--workspace", &workspace])
         .args(arguments)
         .output()
         .expect("run the built vibra binary")
@@ -389,4 +396,50 @@ fn unavailability_takes_precedence_over_assertion_failure() {
         envelope["payload"]["tests"][1]["result"],
         "@test.unavailable"
     );
+}
+
+#[test]
+fn reserved_v1_commands_are_unavailable_and_unknown_names_are_invalid() {
+    let project = TempProject::new("reserved-commands", &[]);
+    let commands: &[&[&str]] = &[
+        &["lint"],
+        &["build", "src/app"],
+        &["query", "@workspace"],
+        &["edit", "fix"],
+        &["mcp"],
+        &["project", "inspect"],
+        &["project", "add"],
+        &["project", "remove"],
+        &["project", "sync"],
+    ];
+
+    for arguments in commands {
+        let output = run_command(&project, arguments);
+
+        assert_eq!(output.status.code(), Some(4), "{arguments:?}: {output:?}");
+        let envelope = json(&output);
+        assert_envelope_schema(&envelope);
+        let expected_command = if arguments[0] == "project" {
+            arguments[1]
+        } else {
+            arguments[0]
+        };
+        assert_eq!(envelope["command"], expected_command);
+        assert_eq!(envelope["result"], "@command.unavailable");
+        assert_eq!(
+            envelope["diagnostics"][0]["code"], "@tool.unavailable",
+            "{arguments:?}"
+        );
+        assert_eq!(envelope["diagnostics"][0]["level"], "@error");
+        assert_eq!(envelope["diagnostics"][0]["span"], Value::Null);
+    }
+
+    let unknown = run_command(&project, &["unknown-command"]);
+
+    assert_eq!(unknown.status.code(), Some(2), "{unknown:?}");
+    let envelope = json(&unknown);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["command"], "invalid");
+    assert_eq!(envelope["result"], "@command.invalid-input");
+    assert_eq!(envelope["diagnostics"], serde_json::json!([]));
 }

@@ -1,0 +1,11 @@
+id = "V1-EFFECT-availability-empty-row"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "An explicit empty effects row is admitted by the M2 checker."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

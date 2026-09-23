@@ -248,18 +248,14 @@ pub fn check_bootstrap_text_import(
     source: &str,
 ) -> CheckResult {
     let source_id = source_id.as_ref();
-    if verification.artifact.is_empty()
-        || validate_signed_bootstrap_map(&verification.artifact).is_err()
-    {
-        return bootstrap_import_unavailable(
-            source_id,
-            "the @std.text import requires the verified M2 bootstrap map",
-        );
-    }
     let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
         Ok(document) => document,
         Err(error) => {
-            return bootstrap_import_unavailable(source_id, error.to_string());
+            return bootstrap_import_unavailable(
+                source_id,
+                ByteSpan::empty_at(0),
+                error.to_string(),
+            );
         }
     };
     let mut diagnostics = document
@@ -274,6 +270,7 @@ pub fn check_bootstrap_text_import(
     let Some(ast) = document.ast() else {
         return bootstrap_import_unavailable(
             source_id,
+            ByteSpan::empty_at(0),
             "the @std.text adapter requires a source module",
         );
     };
@@ -288,6 +285,7 @@ pub fn check_bootstrap_text_import(
     let Some(import) = imports.first() else {
         return bootstrap_import_unavailable(
             source_id,
+            ByteSpan::empty_at(0),
             "the source must explicitly import `(import text @std.text)`",
         );
     };
@@ -296,9 +294,24 @@ pub fn check_bootstrap_text_import(
         && import.target().kind() == NameKind::Atom
         && import.target().value() == "std.text";
     if imports.len() != 1 || !exact_import {
+        let rejected_import = if exact_import {
+            imports.get(1).copied().unwrap_or(import)
+        } else {
+            import
+        };
         return bootstrap_import_unavailable(
             source_id,
+            rejected_import.span(),
             "only the exact `(import text @std.text)` import is available",
+        );
+    }
+    if verification.artifact.is_empty()
+        || validate_signed_bootstrap_map(&verification.artifact).is_err()
+    {
+        return bootstrap_import_unavailable(
+            source_id,
+            import.span(),
+            "the @std.text import requires the verified M2 bootstrap map",
         );
     }
     if ast.declarations().iter().any(|declaration| {
@@ -312,8 +325,22 @@ pub fn check_bootstrap_text_import(
                     .any(|attribute| matches!(attribute, Attribute::External(_)))
         )
     }) {
+        let source_external = ast.declarations().iter().find_map(|declaration| {
+            if let Declaration::Defn(function) = declaration
+                && function
+                    .attributes()
+                    .items()
+                    .iter()
+                    .any(|attribute| matches!(attribute, Attribute::External(_)))
+            {
+                Some(function.span())
+            } else {
+                None
+            }
+        });
         return bootstrap_import_unavailable(
             source_id,
+            source_external.unwrap_or(import.span()),
             "source external declarations cannot acquire bootstrap authority",
         );
     }
@@ -324,6 +351,9 @@ pub fn check_bootstrap_text_import(
     {
         return bootstrap_import_unavailable(
             source_id,
+            ast.declarations()
+                .first()
+                .map_or(import.span(), Declaration::span),
             "the @std.text adapter requires a source function entry",
         );
     }
@@ -342,14 +372,11 @@ pub fn check_bootstrap_text_import(
 
 fn bootstrap_import_unavailable(
     source_id: &str,
+    span: ByteSpan,
     message: impl Into<String>,
 ) -> CheckResult {
-    let diagnostic = Diagnostic::new(
-        DiagnosticCode::ToolUnavailable,
-        ByteSpan::empty_at(0),
-        message,
-    )
-    .with_source_id(source_id);
+    let diagnostic = Diagnostic::new(DiagnosticCode::ToolUnavailable, span, message)
+        .with_source_id(source_id);
     CheckResult::new(None, vec![diagnostic])
 }
 
@@ -709,6 +736,7 @@ struct FunctionHeader {
     source_id: String,
     name: String,
     signature: FunctionSignature,
+    variadic: bool,
     external: Option<CompilerIntrinsic>,
     external_declared: bool,
     test: Option<vibra_syntax::TestDeclaration>,
@@ -838,6 +866,9 @@ impl<'a> Checker<'a> {
                         source_id: self.source_id.to_owned(),
                         name,
                         signature,
+                        variadic: function.attributes().items().iter().any(
+                            |attribute| matches!(attribute, Attribute::Variadic(_)),
+                        ),
                         external: compiler_intrinsic(
                             self.source_id,
                             function,
@@ -900,6 +931,7 @@ impl<'a> Checker<'a> {
                     source_id: self.source_id.to_owned(),
                     name: name.to_owned(),
                     signature: intrinsic.signature(),
+                    variadic: false,
                     external: Some(intrinsic),
                     external_declared: true,
                     test: None,
@@ -1354,6 +1386,7 @@ struct CaptureBinding {
     slot: usize,
     value_type: PrimitiveType,
     span: ByteSpan,
+    function_targets: Option<FunctionTargetSet>,
 }
 
 #[derive(Clone)]
@@ -1362,11 +1395,13 @@ enum VisibleStorage {
         slot: usize,
         value_type: PrimitiveType,
         span: ByteSpan,
+        function_targets: Option<FunctionTargetSet>,
     },
     Closure {
         slot: usize,
         value_type: PrimitiveType,
         span: ByteSpan,
+        function_targets: Option<FunctionTargetSet>,
     },
 }
 
@@ -1520,6 +1555,7 @@ impl<'a> CheckEnvironment<'a> {
                     slot: binding.slot,
                     value_type: binding.value_type.clone(),
                     span: binding.span,
+                    function_targets: binding.function_targets.clone(),
                 },
             );
         }
@@ -1530,6 +1566,7 @@ impl<'a> CheckEnvironment<'a> {
                     slot: binding.slot,
                     value_type: binding.value_type.clone(),
                     span: binding.span,
+                    function_targets: binding.function_targets.clone(),
                 },
             );
         }
@@ -1553,11 +1590,15 @@ impl<'a> CheckEnvironment<'a> {
             return Some(binding.clone());
         }
         let slot = self.capture_sources.len();
-        let (value_type, source) = match storage {
+        let (value_type, function_targets, source) = match storage {
             VisibleStorage::Activation {
-                slot, value_type, ..
+                slot,
+                value_type,
+                function_targets,
+                ..
             } => (
                 value_type.clone(),
+                function_targets.clone(),
                 Expr::variable(
                     slot,
                     value_type,
@@ -1565,9 +1606,13 @@ impl<'a> CheckEnvironment<'a> {
                 ),
             ),
             VisibleStorage::Closure {
-                slot, value_type, ..
+                slot,
+                value_type,
+                function_targets,
+                ..
             } => (
                 value_type.clone(),
+                function_targets.clone(),
                 Expr::captured(
                     slot,
                     value_type,
@@ -1580,6 +1625,7 @@ impl<'a> CheckEnvironment<'a> {
             slot,
             value_type,
             span,
+            function_targets,
         };
         self.captures.insert(name.to_owned(), binding.clone());
         Some(binding)
@@ -1729,7 +1775,20 @@ fn function_targets_from_expr(
             targets
         }
         Expr::Closure { .. } => FunctionTargetSet::closure(),
-        Expr::Captured { .. } => FunctionTargetSet::unknown(),
+        Expr::Captured {
+            slot, value_type, ..
+        } => environment
+            .captures
+            .values()
+            .find(|binding| binding.slot == *slot)
+            .and_then(|binding| binding.function_targets.clone())
+            .unwrap_or_else(|| {
+                if matches!(value_type, PrimitiveType::Function(_)) {
+                    FunctionTargetSet::unknown()
+                } else {
+                    FunctionTargetSet::default()
+                }
+            }),
         // A call's result may itself be a function value.  The checker does
         // not have a recursive return-summary environment here, so preserve
         // the function-typed boundary conservatively instead of dropping it
@@ -3313,6 +3372,20 @@ fn check_expression_in_position(
             };
             let function_targets =
                 function_targets_from_expr(&callee, environment, &BTreeMap::new());
+            if function_targets.known.iter().any(|index| {
+                environment
+                    .functions
+                    .get(*index)
+                    .is_some_and(|function| function.variadic)
+            }) {
+                unavailable(
+                    environment.diagnostics,
+                    environment.source_id,
+                    application.span(),
+                    "applications of variadic function signatures are unavailable in M2",
+                );
+                return None;
+            }
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
             let has_recursive_target =
@@ -4377,6 +4450,27 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_explicit_text_import_uses_import_span() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let source = "(import wrong @std.text)\n(defn answer () u64 1u64)";
+        let checked =
+            check_bootstrap_text_import(&verification, "app/main.vib", source);
+        let diagnostic = checked
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+            .expect("unavailable import diagnostic");
+
+        assert!(!checked.accepted());
+        assert_eq!(diagnostic.source_id(), Some("app/main.vib"));
+        assert_eq!(
+            diagnostic.primary_span(),
+            ByteSpan::new(0, source.find('\n').unwrap())
+        );
+    }
+
+    #[test]
     fn trusted_text_alias_collisions_report_the_import_span() {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let verification = verify_bootstrap(repository).expect("bootstrap provenance");
@@ -4473,6 +4567,69 @@ mod tests {
                 }),
                 "{:?}",
                 checked.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn variadic_array_and_map_calls_are_unavailable_at_the_application() {
+        let sources = [
+            (
+                "array",
+                "(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-array () i32\n  (do (collect-array 1i32) (collect-array 1i32 2i32)))",
+                ["(collect-array 1i32)", "(collect-array 1i32 2i32)"],
+            ),
+            (
+                "map",
+                "(defn collect-map (first i32) i32\n  variadic: (rest (map str i32))\n  first)\n(defn use-map () i32\n  (do (collect-map 1i32) (collect-map 1i32 \"key\" 2i32)))",
+                ["(collect-map 1i32)", "(collect-map 1i32 \"key\" 2i32)"],
+            ),
+        ];
+
+        for (label, source, calls) in sources {
+            let result = check_source(format!("{label}.vib"), source);
+            for call in calls {
+                let start = source.find(call).expect("call source span");
+                let span = ByteSpan::new(start, start + call.len());
+                assert!(
+                    result.diagnostics().iter().any(|diagnostic| {
+                        diagnostic.code() == DiagnosticCode::ToolUnavailable
+                            && diagnostic.primary_span() == span
+                    }),
+                    "{label} call must be unavailable at {span:?}: {:?}",
+                    result.diagnostics()
+                );
+                assert!(
+                    !result.diagnostics().iter().any(|diagnostic| {
+                        diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+                            && diagnostic.primary_span() == span
+                    }),
+                    "{label} call must not be reclassified as a fixed-arity mismatch: {:?}",
+                    result.diagnostics()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn variadic_targets_survive_lambda_alias_captures() {
+        let source = "(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-alias () i32\n  (let alias collect-array (alias 1i32)))\n(defn use-direct () (fn () i32)\n  (let alias collect-array\n    (lambda () i32 (alias 1i32))))\n(defn use-nested () (fn () (fn () i32))\n  (let alias collect-array\n    (lambda () (fn () i32)\n      (lambda () i32 (alias 1i32)))))";
+        let result = check_source("captured-variadic.vib", source);
+        let call = "(alias 1i32)";
+        let expected_spans = source
+            .match_indices(call)
+            .map(|(start, _)| ByteSpan::new(start, start + call.len()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(expected_spans.len(), 3);
+        for span in expected_spans {
+            assert!(
+                result.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code() == DiagnosticCode::ToolUnavailable
+                        && diagnostic.primary_span() == span
+                }),
+                "captured variadic call must be unavailable at {span:?}: {:?}",
+                result.diagnostics()
             );
         }
     }
