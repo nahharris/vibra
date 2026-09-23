@@ -42,8 +42,8 @@ fn static_project_cases_are_executed_by_the_real_handler() {
         .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler);
     let dispatcher = dispatcher
         .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler);
-    let dispatcher = dispatcher
-        .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler);
+    let dispatcher =
+        dispatcher.with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler);
     let report = ConformanceRunner::new(dispatcher).run(&corpus);
     assert_eq!(report.failed(), 0, "static project cases must pass");
     assert_eq!(report.unavailable(), 0);
