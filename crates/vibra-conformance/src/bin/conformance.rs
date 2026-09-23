@@ -9,10 +9,10 @@ use std::process::ExitCode;
 
 use vibra_conformance::{
     ConformanceProfile, ConformanceRunner, Corpus, InterpreterV1Handler,
-    InterpreterV1WorkspaceRunHandler, ProfileDispatcher, ReaderV1Handler,
-    StaticV1ProjectHandler, StaticV1ResolveHandler, StaticV1SourceGraphHandler,
-    StaticV1TypeHandler, StaticV1WorkspaceCheckHandler, ToolingV1FormatHandler,
-    ToolingV1QueryHandler,
+    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
+    ProfileDispatcher, ReaderV1Handler, StaticV1ProjectHandler, StaticV1ResolveHandler,
+    StaticV1SourceGraphHandler, StaticV1TypeHandler, StaticV1WorkspaceCheckHandler,
+    ToolingV1FormatHandler, ToolingV1QueryHandler,
 };
 
 fn main() -> ExitCode {
@@ -56,6 +56,10 @@ fn run() -> Result<(), String> {
     let dispatcher = dispatcher.with_additional_handler(
         ConformanceProfile::InterpreterV1,
         InterpreterV1WorkspaceRunHandler,
+    );
+    let dispatcher = dispatcher.with_additional_handler(
+        ConformanceProfile::InterpreterV1,
+        InterpreterV1WorkspaceTestHandler,
     );
     let dispatcher = dispatcher
         .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)

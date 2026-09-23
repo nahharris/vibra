@@ -1,0 +1,19 @@
+id = "V1-PROJECT-workspace-test-invalid-missing-assert-import"
+rule = "V1-PROJECT"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test module without its required explicit assertion import is statically invalid."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+interpreter = { result = "result.vibon" }
+
+[[expect.diagnostics]]
+code = "@module.missing-required-import"
+level = "@error"
+source = "tests/math.vib"
+span = [6, 22]

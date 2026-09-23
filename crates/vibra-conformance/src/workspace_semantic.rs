@@ -116,6 +116,130 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
     }
 }
 
+/// Discovers, statically checks, and executes tests in one confined snapshot.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InterpreterV1WorkspaceTestHandler;
+
+impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
+    fn can_run(&self, case: &Case) -> bool {
+        case.manifest().operation == ConformanceOperation::WorkspaceTest
+    }
+
+    fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
+        let snapshot = match load_workspace(case)? {
+            WorkspaceLoad::Snapshot(snapshot) => snapshot,
+            WorkspaceLoad::Diagnostics(diagnostics) => {
+                return Ok(CaseObservation {
+                    accepted: false,
+                    diagnostics,
+                    interpreter: Some(ExecutionObservation {
+                        result: Some(format_test_run("@command.diagnostics", &[])),
+                        audit_trace: Vec::new(),
+                    }),
+                    ..CaseObservation::default()
+                });
+            }
+        };
+        let verification = verified_bootstrap_if_used(&snapshot)?;
+        let result = vibra_workspace::semantic::run_tests(
+            &snapshot,
+            None,
+            verification.as_ref(),
+        );
+        let (command_result, accepted) = match result.status() {
+            vibra_workspace::semantic::TestSuiteStatus::Ok => ("@command.ok", true),
+            vibra_workspace::semantic::TestSuiteStatus::Diagnostics => {
+                ("@command.diagnostics", false)
+            }
+            vibra_workspace::semantic::TestSuiteStatus::TestFailed => {
+                ("@command.test-failed", true)
+            }
+            vibra_workspace::semantic::TestSuiteStatus::InvalidInput => {
+                return Err(HandlerError::new(
+                    "workspace-test without a selector produced invalid input",
+                ));
+            }
+            vibra_workspace::semantic::TestSuiteStatus::Unavailable => {
+                ("@command.unavailable", false)
+            }
+            vibra_workspace::semantic::TestSuiteStatus::Trap => ("@command.trap", true),
+        };
+        Ok(CaseObservation {
+            accepted,
+            diagnostics: result.diagnostics().to_vec(),
+            interpreter: Some(ExecutionObservation {
+                result: Some(format_test_run(command_result, result.items())),
+                audit_trace: Vec::new(),
+            }),
+            ..CaseObservation::default()
+        })
+    }
+}
+
+fn format_test_run(
+    command_result: &str,
+    items: &[vibra_workspace::semantic::TestItem],
+) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = format!(
+        "(record\n  format: @test-run.v1\n  result: {command_result}\n  tests: (array"
+    );
+    if items.is_empty() {
+        output.push_str(")\n)\n");
+        return output;
+    }
+    output.push('\n');
+    for item in items {
+        let _ = write!(
+            output,
+            "    (record name: {} result: {}",
+            vibon_string(item.name()),
+            item.status().as_atom()
+        );
+        if let Some(failure) = item.failure() {
+            let span = failure.primary_span();
+            let _ = write!(
+                output,
+                " failure: (record assertion: {} expected: {} actual: {} primary-span: (record source-id: {} start: {}u64 end: {}u64))",
+                failure.assertion(),
+                vibon_string(failure.expected()),
+                vibon_string(failure.actual()),
+                vibon_string(failure.source_id()),
+                span.start(),
+                span.end()
+            );
+        }
+        if let Some(trap) = item.trap() {
+            let _ = write!(
+                output,
+                " trap: (record trap-code: {}",
+                vibon_string(trap.trap_code())
+            );
+            if let Some(origin) = trap.origin() {
+                let span = origin.span();
+                let _ = write!(
+                    output,
+                    " origin: (record source-id: {} start: {}u64 end: {}u64)",
+                    vibon_string(origin.source_id()),
+                    span.start(),
+                    span.end()
+                );
+            }
+            output.push(')');
+        }
+        output.push_str(
+            " audit-trace: (record format: @audit-trace.v1 events: (array)))\n",
+        );
+    }
+    output.push_str("  )\n)\n");
+    output
+}
+
+fn vibon_string(value: &str) -> String {
+    vibra_ir::Value::Str(value.to_owned()).canonical_vibon()
+}
+
 enum WorkspaceLoad {
     Snapshot(Box<WorkspaceSnapshot>),
     Diagnostics(Vec<Diagnostic>),

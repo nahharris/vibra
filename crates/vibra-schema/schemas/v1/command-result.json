@@ -123,10 +123,18 @@
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["name", "result", "failure", "diagnostics"],
+                  "required": ["name", "result", "failure", "trap", "auditTrace", "diagnostics"],
                   "properties": {
                     "name": { "type": "string" },
-                    "result": { "type": "string" },
+                    "result": {
+                      "enum": [
+                        "@test.passed",
+                        "@test.assertion-failed",
+                        "@test.invalid",
+                        "@test.unavailable",
+                        "@test.trap"
+                      ]
+                    },
                     "failure": {
                       "oneOf": [
                         { "type": "null" },
@@ -135,7 +143,10 @@
                           "additionalProperties": false,
                           "required": ["assertion", "expected", "actual", "primarySpan"],
                           "properties": {
-                            "assertion": { "type": "string" },
+                            "assertion": {
+                              "type": "string",
+                              "pattern": "^@std\\.assert\\.(true|false|equal-bool|equal-char|equal-str|equal-i32|equal-u64)$"
+                            },
                             "expected": { "type": "string" },
                             "actual": { "type": "string" },
                             "primarySpan": { "$ref": "#/$defs/span" }
@@ -143,8 +154,53 @@
                         }
                       ]
                     },
+                    "trap": {
+                      "oneOf": [
+                        { "type": "null" },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["trapCode", "origin"],
+                          "properties": {
+                            "trapCode": { "const": "@runtime.invalid-checked-program" },
+                            "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+                          }
+                        }
+                      ]
+                    },
+                    "auditTrace": { "type": "array", "maxItems": 0 },
                     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
-                  }
+                  },
+                  "allOf": [
+                    {
+                      "if": { "properties": { "result": { "const": "@test.assertion-failed" } } },
+                      "then": {
+                        "properties": {
+                          "failure": { "type": "object" },
+                          "trap": { "type": "null" }
+                        }
+                      },
+                      "else": { "properties": { "failure": { "type": "null" } } }
+                    },
+                    {
+                      "if": { "properties": { "result": { "const": "@test.trap" } } },
+                      "then": {
+                        "properties": {
+                          "trap": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["trapCode", "origin"],
+                            "properties": {
+                              "trapCode": { "const": "@runtime.invalid-checked-program" },
+                              "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+                            }
+                          },
+                          "failure": { "type": "null" }
+                        }
+                      },
+                      "else": { "properties": { "trap": { "type": "null" } } }
+                    }
+                  ]
                 }
               }
             }

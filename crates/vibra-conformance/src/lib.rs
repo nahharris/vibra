@@ -57,5 +57,6 @@ pub use runner::{
 pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
 pub use workspace_query::ToolingV1QueryHandler;
 pub use workspace_semantic::{
-    InterpreterV1WorkspaceRunHandler, StaticV1WorkspaceCheckHandler,
+    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
+    StaticV1WorkspaceCheckHandler,
 };

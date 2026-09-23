@@ -1,0 +1,13 @@
+id = "V1-RUNTIME-workspace-test-empty"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A project without tests succeeds with the canonical empty test snapshot."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }

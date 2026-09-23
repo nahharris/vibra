@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use vibra_conformance::{
     Case, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus,
     DispatchResult, HandlerError, InterpreterV1Handler,
-    InterpreterV1WorkspaceRunHandler, ProfileDispatcher, ProfileHandler,
-    ReaderV1Handler, StaticV1ProjectHandler, StaticV1ResolveHandler,
-    StaticV1SourceGraphHandler, StaticV1TypeHandler, StaticV1WorkspaceCheckHandler,
-    ToolingV1FormatHandler, ToolingV1QueryHandler,
+    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
+    ProfileDispatcher, ProfileHandler, ReaderV1Handler, StaticV1ProjectHandler,
+    StaticV1ResolveHandler, StaticV1SourceGraphHandler, StaticV1TypeHandler,
+    StaticV1WorkspaceCheckHandler, ToolingV1FormatHandler, ToolingV1QueryHandler,
 };
 
 fn workspace_root() -> PathBuf {
@@ -51,6 +51,10 @@ fn static_project_cases_are_executed_by_the_real_handler() {
         .with_additional_handler(
             ConformanceProfile::InterpreterV1,
             InterpreterV1WorkspaceRunHandler,
+        )
+        .with_additional_handler(
+            ConformanceProfile::InterpreterV1,
+            InterpreterV1WorkspaceTestHandler,
         );
     let dispatcher = dispatcher
         .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)
