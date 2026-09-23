@@ -39,6 +39,7 @@ The delivery sequence and measurable release gates are in
 | --- | --- |
 | v1 specification | Normative target, open to deliberate revision |
 | v1 roadmap | Defined |
+| post-v1 direction | [Design tracks drafted](docs/roadmap/beyond-v1/README.md); non-normative |
 | v1 implementation | Milestone 1 merged; [Milestone 2 planned](docs/roadmap/milestone-2/README.md) on `m2`, implementation not started |
 | pre-v1 implementation | Archived; unsupported |
 
