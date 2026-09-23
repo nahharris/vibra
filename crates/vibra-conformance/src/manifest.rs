@@ -762,8 +762,8 @@ fn decode_expectations(
             "source-graph snapshots must use the .vibon extension".to_owned(),
         ));
     }
-    let interpreter = raw.interpreter.map(decode_execution);
-    let wasm = raw.wasm.map(decode_execution);
+    let interpreter = raw.interpreter.map(decode_execution).transpose()?;
+    let wasm = raw.wasm.map(decode_execution).transpose()?;
     let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);
 
     Ok(CaseExpectations {
@@ -789,11 +789,22 @@ fn decode_expectations(
     })
 }
 
-fn decode_execution(raw: RawExecution) -> ExpectedExecution {
-    ExpectedExecution {
+fn decode_execution(raw: RawExecution) -> Result<ExpectedExecution, ManifestError> {
+    if raw.audit_trace.as_deref().is_some_and(|audit_trace| {
+        Path::new(audit_trace)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("vibon")
+    }) {
+        return Err(ManifestError::Invalid(
+            "audit-trace snapshots must use the .vibon extension".to_owned(),
+        ));
+    }
+
+    Ok(ExpectedExecution {
         result: raw.result,
         audit_trace: raw.audit_trace,
-    }
+    })
 }
 
 fn decode_diagnostic(

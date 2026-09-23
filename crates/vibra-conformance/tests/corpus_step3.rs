@@ -553,6 +553,41 @@ hashes = ["sha256:test"]
 }
 
 #[test]
+fn execution_audit_snapshots_require_vibon_extensions() {
+    for field in ["interpreter", "wasm"] {
+        let manifest = |extension: &str| {
+            format!(
+                r#"
+id = "V1-RUNTIME-audit-snapshot-extension"
+rule = "V1-RUNTIME"
+profile = "full-v1"
+operation = "interpret"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+{field} = {{ result = "result.vibon", audit_trace = "audit.{extension}" }}
+"#
+            )
+        };
+
+        CaseManifest::from_str(&manifest("vibon"))
+            .expect("VIBON audit-trace snapshots are valid");
+
+        let error = CaseManifest::from_str(&manifest("txt"))
+            .expect_err("plain-text audit-trace snapshots must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("audit-trace snapshots must use the .vibon extension"),
+            "unexpected validation error: {error}"
+        );
+    }
+}
+
+#[test]
 fn artifact_expectations_are_compared_only_when_declared() {
     let case = TempCase::new(
         "V1-DIAG-optional-artifact",
