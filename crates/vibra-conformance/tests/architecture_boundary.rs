@@ -34,7 +34,12 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // The checker lowers syntax and resolved identities to checked IR.
     (
         "vibra-types",
-        &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
+        &[
+            "vibra-diagnostics",
+            "vibra-ir",
+            "vibra-resolve",
+            "vibra-syntax",
+        ],
     ),
     // The interpreter consumes checked IR and has no frontend dependency.
     ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
@@ -53,6 +58,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-interp",
             "vibra-ir",
             "vibra-resolve",
             "vibra-syntax",
