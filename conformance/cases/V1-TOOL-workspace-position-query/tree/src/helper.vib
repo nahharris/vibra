@@ -1,0 +1,1 @@
+(defn provided () i32 7i32)

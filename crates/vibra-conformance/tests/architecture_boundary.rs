@@ -40,14 +40,24 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
     // Consumes the reader's tree; nothing in the language depends on it.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
-    // The wire format. The Step 10 adapter consumes syntax facts; no phase
-    // depends on the wire crate.
-    ("vibra-schema", &["vibra-diagnostics", "vibra-syntax"]),
+    // The wire format. The Step 10 adapter consumes syntax and workspace
+    // facts; no phase depends on the wire crate.
+    (
+        "vibra-schema",
+        &["vibra-diagnostics", "vibra-syntax", "vibra-workspace"],
+    ),
     // Project schema decoding sits above syntax and diagnostics. Later
     // workspace phases may widen this row when their inputs exist.
     (
         "vibra-workspace",
-        &["vibra-diagnostics", "vibra-fmt", "vibra-syntax"],
+        &[
+            "vibra-diagnostics",
+            "vibra-fmt",
+            "vibra-ir",
+            "vibra-resolve",
+            "vibra-syntax",
+            "vibra-types",
+        ],
     ),
     // Resolution owns its neutral graph input and depends only on language
     // structure; workspace and conformance adapt filesystem snapshots into it.

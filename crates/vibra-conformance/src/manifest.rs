@@ -113,6 +113,8 @@ pub enum ConformanceOperation {
     TypeCheck,
     /// Execute one checked source document through the reference interpreter.
     Interpret,
+    /// Render semantic facts from one immutable workspace snapshot.
+    Query,
 }
 
 impl ConformanceOperation {
@@ -126,6 +128,7 @@ impl ConformanceOperation {
             Self::Resolve => "resolve",
             Self::TypeCheck => "type-check",
             Self::Interpret => "interpret",
+            Self::Query => "query",
         }
     }
 }
@@ -333,6 +336,11 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
+        if operation == ConformanceOperation::Query && expectations.queries.is_empty() {
+            return Err(ManifestError::Invalid(
+                "query cases must declare at least one expected query".to_owned(),
+            ));
+        }
         {
             for diagnostic in &expectations.diagnostics {
                 if let Some(source_id) = &diagnostic.source_id
@@ -361,6 +369,10 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                     "query expectation input `{}` is not declared by case `{}`",
                     query.input, raw.id
                 )));
+            }
+            if operation == ConformanceOperation::Query {
+                let tree = inputs.tree.as_deref().unwrap_or_default();
+                validate_query_input(tree, &query.input)?;
             }
         }
 
@@ -397,6 +409,7 @@ fn decode_operation(
         Some("resolve") => ConformanceOperation::Resolve,
         Some("type-check") => ConformanceOperation::TypeCheck,
         Some("interpret") => ConformanceOperation::Interpret,
+        Some("query") => ConformanceOperation::Query,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
@@ -456,6 +469,29 @@ fn decode_operation(
             )));
         }
     }
+    if operation == ConformanceOperation::Query {
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "query requires one confined tree input".to_owned(),
+            ));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "query requires one project input".to_owned(),
+            ));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "query project input must be exactly `{expected_project}`"
+            )));
+        }
+        if inputs.source.is_some() || !inputs.data.is_empty() {
+            return Err(ManifestError::Invalid(
+                "query cases use the confined tree as their source input".to_owned(),
+            ));
+        }
+    }
     Ok(operation)
 }
 
@@ -478,6 +514,33 @@ fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
                     && !source_id.starts_with('/')
                     && !source_id.contains(".."))
         })
+}
+
+fn validate_query_input(tree: &str, input: &str) -> Result<(), ManifestError> {
+    let prefix = format!("{tree}/");
+    let Some(source_id) = input.strip_prefix(&prefix) else {
+        return Err(ManifestError::Invalid(format!(
+            "query input `{input}` must be beneath the declared tree `{tree}`"
+        )));
+    };
+    let path = Path::new(source_id);
+    if source_id.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+        || path.extension().and_then(|extension| extension.to_str()) != Some("vib")
+    {
+        return Err(ManifestError::Invalid(format!(
+            "query input `{input}` must be a relative `.vib` file beneath `{tree}`"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_case_id(id: &str) -> Result<(), ManifestError> {
