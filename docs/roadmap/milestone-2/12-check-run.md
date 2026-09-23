@@ -8,9 +8,11 @@ errors**, projects **Packages and targets**, runtime **Semantic reference**,
 ## Implementation sequence
 
 1. Add `check` and `run` argument/target selection adapters over the same
-   workspace snapshot. Add the verified bootstrap modules to resolver input
-   with their manifest-owned package identity; ordinary dependencies remain
-   unavailable. Honor C3's checking scope, not only reachable entry code.
+   workspace snapshot. `TARGET` selects the canonical root path of a local
+   target. Add the verified bootstrap modules to resolver input with their
+   manifest-owned package identity; ordinary dependencies remain unavailable.
+   Honor C3's selected-target and transitive-import scope, not only reachable
+   entry code.
 2. Validate entry using the shared atom walker, then separately its entity kind
    and signature. Only the C1-admitted entry subset executes; valid deferred
    `result void e` is not reported as malformed syntax.
@@ -26,9 +28,10 @@ errors**, projects **Packages and targets**, runtime **Semantic reference**,
 
 | Positive | Negative / boundary |
 | --- | --- |
-| Init output checks/runs from nested project directory | Missing project; missing/ambiguous target per C2; library selected for run |
+| Init output checks/runs from nested project directory | Missing project; omitted required run target; unknown target root; library selected for run |
 | Pure multi-module program; private non-main entry | Outside-target entry; unknown path; wrong entity kind; invalid signature |
 | Named/lambda calls, constants, recursion and stdlib | Type error anywhere in required checking scope prevents execution |
+| Explicit selection checks every declaration in its import closure | Unrelated local target errors do not block explicit selection; omitted `check TARGET` checks every target |
 | Stable values/results/empty program output and events | Deferred effects/dependencies, unknown providers, Wasm/WASI source FFI |
 | JSON and human classification of same failure | Distinguish availability, source errors, operational failure and trap |
 

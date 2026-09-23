@@ -66,6 +66,24 @@ module-qualified test name. Options after the command are limited to the
 explicit `fmt --write` spelling; unknown options, extra positionals, and
 alternate spellings are invalid input.
 
+`TARGET` is a relative filesystem path. After canonicalization beneath the
+discovered project root, it MUST identify exactly one validated local target's
+canonical root; target names and target-name atoms are not selectors. Pairwise
+disjoint roots make this match unique. A path that does not identify a target
+and a library selected by `run` are `@command.invalid-input` with process exit
+2 and an empty diagnostic array. Omitting the required `run TARGET` is also
+invalid input.
+
+`check TARGET` checks every source declaration in that target and in every
+local target unit reached through its imports, recursively. It checks all
+modules and declarations in those units, including declarations unreachable
+from the selected entry. Errors in an unrelated local target do not affect an
+explicitly selected target. Without `TARGET`, `check` covers every local
+target. `run TARGET` uses the same checking scope, then executes only the
+selected binary target. Workspace discovery, source-graph, ordinary dependency,
+and bootstrap-provenance diagnostics still apply to the whole captured
+workspace snapshot and block checking or execution.
+
 M2 Step 11 implements only `project init` and `fmt`; valid `check`, `run`, and
 `test` requests still return `@command.unavailable` until their later steps.
 The default init destination is the workspace root. Otherwise `DEST` names a

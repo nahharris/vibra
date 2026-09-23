@@ -20,7 +20,7 @@ by Step 1 and must be copied into the owning normative chapter in the same PR.
 | C2.3 | settled | `04-programs-and-packages.md` VIBON data documents | Atom roles are selected by schema slot, never spelling | Step 2 schema tests |
 | C3.1 | new | M2 supported-surface table | Discovery order is canonical path order; source graph is an explicit immutable input | Step 3 host tests |
 | C3.2 | settled | `04-programs-and-packages.md` Modules and imports | File/dir collision and unknown path retain their distinct module diagnostics | Step 3/4 corpus |
-| C3.3 | new | `03-source-language.md` Declarations | M2 checks all discovered source declarations in deterministic file/declaration order | Step 4/12 corpus |
+| C3.3 | new | `03-source-language.md` Declarations; `05-tooling.md` M2 command contract | M2 checks every declaration in each selected target and its transitive local-import units, including unreachable declarations, in deterministic file/declaration order; an omitted check selector covers every target | Step 4/12 corpus |
 | C3.4 | new | `07-diagnostics-and-conformance.md` Diagnostics are a language surface | Valid but deferred semantic forms emit `@tool.unavailable` at their form span | Step 1 registry; Step 12 corpus |
 | C3.5 | new | `04-programs-and-packages.md` M2 project discovery and source snapshot | Existing file/dir starts search nearest ancestors for exact `project.vibon`; malformed nearest marker stops search; missing discovery is `@project.not-found`; legacy marker is never sniffed | Step 3 host + V1-PROJECT corpus |
 | C3.6 | new | `04-programs-and-packages.md` M2 project discovery and source snapshot | Target roots are relative, existing, canonical, contained, and pairwise disjoint before walking; root failures use `@project.invalid-target-root` or `@project.io-error` with root spans | Step 3 host + V1-PROJECT corpus |
@@ -42,7 +42,7 @@ by Step 1 and must be copied into the owning normative chapter in the same PR.
 | C8.2 | deferred | `04-programs-and-packages.md` Dependencies and lock | Ordinary pinned dependency delivery and lock generation remain M5 | Step 2/3 negatives |
 | C9.1 | new | `04-programs-and-packages.md` Tests | Test identity is module plus literal name; duplicate names are module-local errors | Step 13 |
 | C9.2 | new | `04-programs-and-packages.md` M2 assertion contract | Exact assertion members/signatures, explicit trusted import, empty effects, canonical failure record, per-test isolation, and distinct trap/unavailable outcomes are closed; assertion failures never become traps or host events | Step 13 |
-| C10.1 | new | `05-tooling.md` M2 command contract | Exact grammar, options, payload envelopes, stream routing, and exit mapping for `project init`, `fmt`, `check`, `run`, and `test` | Steps 11–13 |
+| C10.1 | new | `05-tooling.md` M2 command contract | Exact grammar, options, canonical-root target selection, checking scope, payload envelopes, stream routing, and exit mapping for `project init`, `fmt`, `check`, `run`, and `test` | Steps 11–13 |
 | C10.2 | deferred | `05-tooling.md` V1 CLI | `lint`, `build`, `query`, `edit`, `mcp`, and dependency mutation are valid v1 names but unavailable in M2 | Step 12 availability cases |
 | C11.1 | new | `05-tooling.md` Workspace queries | Semantic results are neutral envelopes until their owning type/workspace step supplies payloads | Steps 4–10 |
 | C11.2 | new | `07-diagnostics-and-conformance.md` Conformance corpus | Multi-file observations carry source ID; same byte offsets never merge | Step 1 synthetic tests |
