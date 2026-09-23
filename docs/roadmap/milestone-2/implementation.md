@@ -21,7 +21,7 @@ the first implemented semantic APIs.
 | `crates/vibra-schema/src/query.rs`, `diagnostic.rs`, `schemas/v1/` | Wire adapters and schemas; language phases must not import these |
 | `crates/vibra-conformance/src/manifest.rs`, `corpus.rs` | Neutral TOML oracle and confined input/snapshot loading |
 | `crates/vibra-conformance/src/runner.rs`: `ProfileHandler`, `CaseObservation`, `ExecutionObservation` | Real static/interpreter adapters and negative-oracle tests |
-| `crates/vibra-conformance/src/profile.rs`, `bin/conformance.rs`, `reader.rs` | Capability dispatch; baseline binary registers only `reader-v1` |
+| `crates/vibra-conformance/src/profile.rs`, `bin/conformance.rs`, `reader.rs` | Capability dispatch; the binary registers each implemented reader, static, interpreter, and tooling handler |
 | `crates/vibra-conformance/tests/architecture_boundary.rs` | Add actual new nodes and narrowly justified arrows |
 | `.github/workflows/ci.yml` | Three-platform host checks and independent corpus job; broaden the job as handlers land |
 

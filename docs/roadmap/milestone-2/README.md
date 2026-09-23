@@ -1,6 +1,6 @@
 # Milestone 2 step plan
 
-Status: implementation in progress; Steps 1–9 are integrated
+Status: implementation in progress; Steps 1–10 are integrated
 Milestone: [Milestone 2 — executable pure core](../v1.md#milestone-2--executable-pure-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m2`
@@ -78,7 +78,7 @@ path named `std` cannot confer external-declaration authority.
 | 7 | [Execute function values and labelled calls](07-functions.md) | 6 | landed | `m2` merge `c9751d2`; 157-case corpus, focused IR/conformance suites |
 | 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | landed | `m2` merge `73592be`; versioned registry metadata, direct `@std.text` imports, independent concat/length cases, and 160-case corpus evidence |
 | 9 | [Guarantee tail calls](09-tail-calls.md) | 8 | landed | `m2` merge `5392ad0`; PR #296, platform CI green including macOS |
-| 10 | [Expose semantic position facts](10-queries.md) | 9 | not started | — |
+| 10 | [Expose semantic position facts](10-queries.md) | 9 | landed | `m2` merge `fdbf6d2`; PR #297, all platform CI green including macOS |
 | 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | not started | — |
 | 12 | [Ship check and interpreter run](12-check-run.md) | 11 | not started | — |
 | 13 | [Ship pure tests and assertions](13-tests.md) | 12 | not started | — |
@@ -226,6 +226,25 @@ two-size binary-counter stress workload. Focused IR, type, interpreter, and Step
 conformance suites pass; the full workspace and 162-case offline corpus pass. CI is
 green on Ubuntu, Windows, and macOS. Executable audit traces use the canonical
 `.vibon` `@audit-trace.v1` record, including the empty pure trace.
+
+## Step 10 handoff (integrated on `m2`)
+
+Step 10's verified merge commit is `fdbf6d2` (PR #297). It publishes the
+versioned semantic workspace-position envelope alongside the unchanged M1
+structural schema. Queries join every fact by immutable workspace revision,
+source identity, and structural node locator; the consumer rejects contradictory
+embedded structure, open vocabularies, invalid scope records, and status/value
+combinations. The producer carries resolver identities, lexical scopes and
+imports, primitive/function expectations, supported function application
+contracts, and conservative unavailable facts for unresolved or recovered input.
+
+The tooling-v1 handler now reports the workspace resolver's real acceptance and
+diagnostics. The positive corpus matrix covers literals, applications, locals,
+imports, discards, and trivia; a separate rejected case covers unresolved names
+and zero-width delimiter recovery. Focused schema, workspace, and handler suites
+pass, and the complete locked/offline corpus reports 164 cases with zero failed
+or unavailable. The repaired CI run is green on Ubuntu, Windows, and macOS;
+the macOS check is job `107000055216` in run `35803840805`.
 
 ## Exit evidence
 
