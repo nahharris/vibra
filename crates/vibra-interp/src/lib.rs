@@ -17,7 +17,10 @@
 
 use std::fmt;
 
-use vibra_ir::{CheckedProgram, Expr, FunctionSignature, PrimitiveType, Value};
+use vibra_ir::{
+    CheckedProgram, Expr, FunctionSignature, PrimitiveType, SourceOrigin,
+    TestAssertion, Value,
+};
 
 /// One successful reference-interpreter run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +65,76 @@ impl Execution {
     }
 }
 
+/// One completed test body and its optional non-exception assertion failure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestExecution {
+    assertion_failure: Option<TestAssertionFailure>,
+    audit_trace: Vec<String>,
+    max_activation_depth: usize,
+    tail_transfer_count: usize,
+}
+
+impl TestExecution {
+    /// Structured failure from the first false assertion, if any.
+    #[must_use]
+    pub const fn assertion_failure(&self) -> Option<&TestAssertionFailure> {
+        self.assertion_failure.as_ref()
+    }
+
+    /// Ordered audit events. Pure M2 test execution has an empty trace.
+    #[must_use]
+    pub fn audit_trace(&self) -> &[String] {
+        &self.audit_trace
+    }
+
+    /// Maximum active language frames observed during the test.
+    #[must_use]
+    pub const fn max_activation_depth(&self) -> usize {
+        self.max_activation_depth
+    }
+
+    /// Number of tail transfers during the test.
+    #[must_use]
+    pub const fn tail_transfer_count(&self) -> usize {
+        self.tail_transfer_count
+    }
+}
+
+/// Data from a false assertion, kept outside the language value and trap paths.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestAssertionFailure {
+    assertion: String,
+    expected: Value,
+    actual: Value,
+    origin: SourceOrigin,
+}
+
+impl TestAssertionFailure {
+    /// Canonical assertion member identity.
+    #[must_use]
+    pub fn assertion(&self) -> &str {
+        &self.assertion
+    }
+
+    /// Expected assertion operand or required boolean.
+    #[must_use]
+    pub const fn expected(&self) -> &Value {
+        &self.expected
+    }
+
+    /// Actual assertion operand.
+    #[must_use]
+    pub const fn actual(&self) -> &Value {
+        &self.actual
+    }
+
+    /// Source origin of the assertion call.
+    #[must_use]
+    pub const fn origin(&self) -> &SourceOrigin {
+        &self.origin
+    }
+}
+
 /// A failure at the checked-program execution boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeError {
@@ -96,7 +169,12 @@ pub struct Interpreter;
 impl Interpreter {
     /// Executes the checked program's validated entry function.
     pub fn run(program: &CheckedProgram) -> Result<Execution, RuntimeError> {
-        let mut machine = Machine::new(program);
+        if program.entry().test_assertion().is_some() {
+            return Err(RuntimeError::InvalidBody {
+                function: program.entry().name().to_owned(),
+            });
+        }
+        let mut machine = Machine::new(program, false);
         let function = program.entry();
         let mut arguments = vec![None; function.slot_count()];
         for (offset, parameter) in function.signature().labelled().iter().enumerate() {
@@ -137,6 +215,60 @@ impl Interpreter {
             tail_transfer_count: machine.tail_transfers,
         })
     }
+
+    /// Executes one checked void test entry with the verified assertion path.
+    ///
+    /// Each call constructs fresh module-value and trace state. A false
+    /// assertion is returned as test data and does not become a runtime error.
+    pub fn run_test(program: &CheckedProgram) -> Result<TestExecution, RuntimeError> {
+        let mut machine = Machine::new(program, true);
+        let function = program.entry();
+        if function.signature().result() != PrimitiveType::Void {
+            return Err(RuntimeError::InvalidBody {
+                function: function.name().to_owned(),
+            });
+        }
+        let mut arguments = vec![None; function.slot_count()];
+        for (offset, parameter) in function.signature().labelled().iter().enumerate() {
+            if let Some(default) = parameter.default()
+                && let Some(slot) =
+                    arguments.get_mut(function.signature().parameters().len() + offset)
+            {
+                *slot = Some(RuntimeValue::Primitive(default.clone()));
+            }
+        }
+        let value = machine.evaluate_function(
+            program
+                .functions()
+                .iter()
+                .position(|candidate| std::ptr::eq(candidate, function))
+                .unwrap_or(0),
+            arguments,
+            Vec::new(),
+        );
+        if machine.assertion_failure.is_some() {
+            return Ok(TestExecution {
+                assertion_failure: machine.assertion_failure,
+                audit_trace: Vec::new(),
+                max_activation_depth: machine.max_depth,
+                tail_transfer_count: machine.tail_transfers,
+            });
+        }
+        let value = value.ok_or_else(|| RuntimeError::InvalidBody {
+            function: function.name().to_owned(),
+        })?;
+        let RuntimeValue::Primitive(Value::Void) = value else {
+            return Err(RuntimeError::InvalidBody {
+                function: function.name().to_owned(),
+            });
+        };
+        Ok(TestExecution {
+            assertion_failure: machine.assertion_failure,
+            audit_trace: Vec::new(),
+            max_activation_depth: machine.max_depth,
+            tail_transfer_count: machine.tail_transfers,
+        })
+    }
 }
 
 /// Convenience entry point for the reference interpreter.
@@ -160,6 +292,7 @@ enum RuntimeValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Evaluation {
     Value(RuntimeValue),
+    TestAssertionFailed,
     TailTransfer {
         callable: Callable,
         values: Vec<RuntimeValue>,
@@ -201,16 +334,20 @@ struct Machine<'a> {
     current_depth: usize,
     max_depth: usize,
     tail_transfers: usize,
+    test_mode: bool,
+    assertion_failure: Option<TestAssertionFailure>,
 }
 
 impl<'a> Machine<'a> {
-    fn new(program: &'a CheckedProgram) -> Self {
+    fn new(program: &'a CheckedProgram, test_mode: bool) -> Self {
         Self {
             program,
             globals: vec![GlobalState::Uninitialized; program.globals().len()],
             current_depth: 0,
             max_depth: 0,
             tail_transfers: 0,
+            test_mode,
+            assertion_failure: None,
         }
     }
 
@@ -248,6 +385,7 @@ impl<'a> Machine<'a> {
             let evaluation = self.evaluate(function.body(), slots.clone(), &captures);
             match evaluation {
                 Some(Evaluation::Value(value)) => break Some(value),
+                Some(Evaluation::TestAssertionFailed) => break None,
                 Some(Evaluation::TailTransfer {
                     callable,
                     values,
@@ -341,6 +479,7 @@ impl<'a> Machine<'a> {
     ) -> Option<RuntimeValue> {
         match self.evaluate(expression, slots, captures)? {
             Evaluation::Value(value) => Some(value),
+            Evaluation::TestAssertionFailed => None,
             // A tail transfer is only valid as the final result of its
             // enclosing activation, never as an immediate operand.
             Evaluation::TailTransfer { .. } => None,
@@ -507,6 +646,7 @@ impl<'a> Machine<'a> {
                 result,
                 callee,
                 tail,
+                origin,
                 ..
             } => {
                 let callable = if let Some(callee) = callee {
@@ -550,6 +690,24 @@ impl<'a> Machine<'a> {
                 let RuntimeValue::Function(callable) = callable else {
                     return None;
                 };
+                if let Callable::Named { index, .. } = &callable
+                    && let Some(assertion) = self
+                        .program
+                        .functions()
+                        .get(*index)
+                        .and_then(|function| function.test_assertion())
+                {
+                    if !self.test_mode {
+                        return None;
+                    }
+                    let value =
+                        self.invoke_test_assertion(assertion, values, origin.clone())?;
+                    return Some(if self.assertion_failure.is_some() {
+                        Evaluation::TestAssertionFailed
+                    } else {
+                        Evaluation::Value(value)
+                    });
+                }
                 if *tail {
                     if callable_signature.fixed_parameter_count() != values.len()
                         || !values_match_signature(&values, &callable_signature)
@@ -567,6 +725,44 @@ impl<'a> Machine<'a> {
                     .map(Evaluation::Value)
             }
         }
+    }
+
+    fn invoke_test_assertion(
+        &mut self,
+        assertion: TestAssertion,
+        values: Vec<RuntimeValue>,
+        origin: SourceOrigin,
+    ) -> Option<RuntimeValue> {
+        let values = values
+            .into_iter()
+            .map(|value| match value {
+                RuntimeValue::Primitive(value) => Some(value),
+                RuntimeValue::Function(_) => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let (passed, expected, actual) = match (assertion, values.as_slice()) {
+            (TestAssertion::True, [Value::Bool(actual)]) => {
+                (*actual, Value::Bool(true), Value::Bool(*actual))
+            }
+            (TestAssertion::False, [Value::Bool(actual)]) => {
+                (!*actual, Value::Bool(false), Value::Bool(*actual))
+            }
+            (assertion, [left, right])
+                if !matches!(assertion, TestAssertion::True | TestAssertion::False) =>
+            {
+                (left == right, left.clone(), right.clone())
+            }
+            _ => return None,
+        };
+        if !passed {
+            self.assertion_failure = Some(TestAssertionFailure {
+                assertion: assertion.symbol(),
+                expected,
+                actual,
+                origin,
+            });
+        }
+        Some(RuntimeValue::Primitive(Value::Void))
     }
 
     fn invoke_callable(
@@ -633,7 +829,9 @@ impl<'a> Machine<'a> {
         let evaluation = self.evaluate(&body, call_slots, &captures);
         let result = match evaluation {
             Some(Evaluation::Value(value)) => Some(value),
-            Some(Evaluation::TailTransfer { .. }) | None => None,
+            Some(Evaluation::TestAssertionFailed)
+            | Some(Evaluation::TailTransfer { .. })
+            | None => None,
         };
         self.leave_activation();
         result
@@ -798,7 +996,7 @@ mod tests {
         )
         .expect("valid checked program");
 
-        let mut machine = super::Machine::new(&program);
+        let mut machine = super::Machine::new(&program, false);
         let result = machine
             .evaluate_function(0, vec![None; program.entry().slot_count()], Vec::new())
             .expect("untaken branch must not execute");

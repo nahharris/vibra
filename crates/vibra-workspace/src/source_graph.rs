@@ -243,6 +243,23 @@ impl SourceGraph {
                 modules: unit_modules,
             });
         }
+        let mut test_modules = Vec::with_capacity(snapshot.test_modules().len());
+        for document in snapshot.test_modules() {
+            let id = ModuleId::new("tests", document.module_segments().iter().cloned());
+            let module_index = modules.len();
+            modules.insert(id.clone(), module_index);
+            test_modules.push(SourceModule {
+                id,
+                source_id: document.source_id().to_owned(),
+                bytes: document.bytes().to_vec(),
+            });
+        }
+        units.push(SourceUnit {
+            name: "tests".to_owned(),
+            kind: crate::project::TargetKind::Lib,
+            root: project.root().join("tests"),
+            modules: test_modules,
+        });
 
         let mut dependencies =
             Vec::with_capacity(project.project().dependencies().len());

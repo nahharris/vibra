@@ -326,6 +326,97 @@ impl FunctionSignature {
     }
 }
 
+/// One closed verified assertion exported only by `@std.assert` for tests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TestAssertion {
+    /// Require one boolean operand to be `true`.
+    True,
+    /// Require one boolean operand to be `false`.
+    False,
+    /// Compare two booleans.
+    EqualBool,
+    /// Compare two Unicode scalars.
+    EqualChar,
+    /// Compare two Unicode scalar strings.
+    EqualStr,
+    /// Compare two signed 32-bit integers.
+    EqualI32,
+    /// Compare two unsigned 64-bit integers.
+    EqualU64,
+}
+
+impl TestAssertion {
+    /// Every supported M2 test assertion in canonical order.
+    pub const ALL: [Self; 7] = [
+        Self::True,
+        Self::False,
+        Self::EqualBool,
+        Self::EqualChar,
+        Self::EqualStr,
+        Self::EqualI32,
+        Self::EqualU64,
+    ];
+
+    /// The assertion member without its `@std.assert.` prefix.
+    #[must_use]
+    pub const fn member(self) -> &'static str {
+        match self {
+            Self::True => "true",
+            Self::False => "false",
+            Self::EqualBool => "equal-bool",
+            Self::EqualChar => "equal-char",
+            Self::EqualStr => "equal-str",
+            Self::EqualI32 => "equal-i32",
+            Self::EqualU64 => "equal-u64",
+        }
+    }
+
+    /// Canonical source-level assertion identity.
+    #[must_use]
+    pub fn symbol(self) -> String {
+        format!("@std.assert.{}", self.member())
+    }
+
+    /// Resolves only a member in the closed assertion table.
+    #[must_use]
+    pub fn from_member(member: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|assertion| assertion.member() == member)
+    }
+
+    /// Exact monomorphic M2 function signature.
+    #[must_use]
+    pub fn signature(self) -> FunctionSignature {
+        let (parameters, result) = match self {
+            Self::True | Self::False => {
+                (vec![PrimitiveType::Bool], PrimitiveType::Void)
+            }
+            Self::EqualBool => (
+                vec![PrimitiveType::Bool, PrimitiveType::Bool],
+                PrimitiveType::Void,
+            ),
+            Self::EqualChar => (
+                vec![PrimitiveType::Char, PrimitiveType::Char],
+                PrimitiveType::Void,
+            ),
+            Self::EqualStr => (
+                vec![PrimitiveType::Str, PrimitiveType::Str],
+                PrimitiveType::Void,
+            ),
+            Self::EqualI32 => (
+                vec![PrimitiveType::I32, PrimitiveType::I32],
+                PrimitiveType::Void,
+            ),
+            Self::EqualU64 => (
+                vec![PrimitiveType::U64, PrimitiveType::U64],
+                PrimitiveType::Void,
+            ),
+        };
+        FunctionSignature::new(parameters, result)
+    }
+}
+
 /// A source identity and span carried by checked operands.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceOrigin {
@@ -1325,6 +1416,7 @@ pub struct CheckedFunction {
     origin: SourceOrigin,
     slot_count: usize,
     external_wrapper: bool,
+    test_assertion: Option<TestAssertion>,
 }
 
 impl CheckedFunction {
@@ -1357,6 +1449,7 @@ impl CheckedFunction {
             origin,
             intrinsic.signature().fixed_parameter_count(),
             true,
+            None,
         )
     }
 
@@ -1380,7 +1473,29 @@ impl CheckedFunction {
         origin: SourceOrigin,
         slot_count: usize,
     ) -> Result<Self, IrError> {
-        Self::with_slots_and_external(name, signature, body, origin, slot_count, false)
+        Self::with_slots_and_external(
+            name, signature, body, origin, slot_count, false, None,
+        )
+    }
+
+    /// Creates a verified member of the closed test assertion table.
+    pub fn new_test_assertion(
+        name: impl Into<String>,
+        assertion: TestAssertion,
+        origin: SourceOrigin,
+    ) -> Result<Self, IrError> {
+        let signature = assertion.signature();
+        let slot_count = signature.fixed_parameter_count();
+        let body = Expr::literal(Value::Void, origin.clone());
+        Self::with_slots_and_external(
+            name,
+            signature,
+            body,
+            origin,
+            slot_count,
+            false,
+            Some(assertion),
+        )
     }
 
     fn with_slots_and_external(
@@ -1390,6 +1505,7 @@ impl CheckedFunction {
         origin: SourceOrigin,
         slot_count: usize,
         external_wrapper: bool,
+        test_assertion: Option<TestAssertion>,
     ) -> Result<Self, IrError> {
         let name = name.into();
         if let Err(message) = validate_signature_shape(&signature) {
@@ -1429,6 +1545,7 @@ impl CheckedFunction {
             origin,
             slot_count,
             external_wrapper,
+            test_assertion,
         })
     }
 
@@ -1467,6 +1584,12 @@ impl CheckedFunction {
     #[must_use]
     pub const fn is_external_wrapper(&self) -> bool {
         self.external_wrapper
+    }
+
+    /// Whether this is one of the closed verified test assertion functions.
+    #[must_use]
+    pub const fn test_assertion(&self) -> Option<TestAssertion> {
+        self.test_assertion
     }
 }
 

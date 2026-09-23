@@ -26,6 +26,7 @@ pub mod query;
 pub mod semantic;
 pub mod snapshot;
 pub mod source_graph;
+mod test_runner;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -157,16 +158,98 @@ impl WorkspaceSnapshot {
     }
 
     /// Whether this immutable workspace contains an exact mapped bootstrap
-    /// import that requires signed provenance before checking.
+    /// import in any captured local unit, including `@tests`, that requires
+    /// signed provenance before checking.
     ///
     /// The scan resolves only the already captured source graph. It does not
     /// inspect dependencies or consult the filesystem.
     pub fn requires_bootstrap_verification(&self) -> Result<bool, WorkspaceError> {
         let resolved = self.resolve()?;
-        Ok(resolved
-            .imports()
+        Ok(resolved.imports().iter().any(|import| {
+            semantic::is_bootstrap_import_path(import.written())
+                && resolved.modules().iter().any(|module| {
+                    module.package() == resolved.package()
+                        && module.source_id() == import.source_id()
+                })
+        }))
+    }
+
+    /// Whether the selected test modules and their import closure use a
+    /// bootstrap module whose signed provenance must be verified.
+    ///
+    /// This query is separate from target check/run scope. With no selector,
+    /// it scans the import closures of modules that declare tests. An explicit
+    /// selector scans only its exact test module when that test exists.
+    pub fn requires_test_bootstrap_verification(
+        &self,
+        selector: Option<&semantic::TestSelector>,
+    ) -> Result<bool, WorkspaceError> {
+        use vibra_syntax::{Declaration, Literal};
+
+        let resolved = self.resolve()?;
+        let local = resolved.package();
+        let mut source_ids = resolved
+            .modules()
             .iter()
-            .any(|import| semantic::is_bootstrap_import_path(import.written())))
+            .filter(|module| module.package() == local && module.unit() == "tests")
+            .filter(|module| {
+                let module_atom = if module.segments().is_empty() {
+                    "@tests".to_owned()
+                } else {
+                    format!("@tests.{}", module.segments().join("."))
+                };
+                if selector.is_some_and(|selector| selector.module() != module_atom) {
+                    return false;
+                }
+                module.ast().is_some_and(|ast| {
+                    ast.declarations().iter().any(|declaration| {
+                        let Declaration::Test(test) = declaration else {
+                            return false;
+                        };
+                        match selector {
+                            Some(selector) => matches!(
+                                test.name(),
+                                Literal::String(name) if name.value() == selector.name()
+                            ),
+                            None => true,
+                        }
+                    })
+                })
+            })
+            .map(|module| module.source_id().to_owned())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        loop {
+            let before = source_ids.len();
+            let current_source_ids = source_ids.clone();
+            for import in resolved
+                .imports()
+                .iter()
+                .filter(|import| current_source_ids.contains(import.source_id()))
+            {
+                if semantic::is_bootstrap_import_path(import.written()) {
+                    return Ok(true);
+                }
+                let Some(target) = import.module() else {
+                    continue;
+                };
+                if target.package() != local {
+                    continue;
+                }
+                if let Some(module) = resolved.modules().iter().find(|module| {
+                    module.package() == target.package()
+                        && module.unit() == target.unit()
+                        && module.segments() == target.segments()
+                }) {
+                    source_ids.insert(module.source_id().to_owned());
+                }
+            }
+            if source_ids.len() == before {
+                break;
+            }
+        }
+
+        Ok(false)
     }
 
     pub(crate) fn resolve_graph(

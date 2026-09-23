@@ -22,7 +22,7 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_syntax::{
     Attribute, Declaration, DeftypeBody, Expression, ExpressionKind,
-    FunctionDeclaration, Name, Pattern, PatternKind, TypeMember, parse_source,
+    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeMember, parse_source,
 };
 
 /// Package provenance carried by every declaration identity.
@@ -1223,6 +1223,58 @@ impl Resolution {
             }
             self.module_bindings.insert(module_key, names);
         }
+        self.collect_verified_assertion_headers();
+    }
+
+    fn collect_verified_assertion_headers(&mut self) {
+        let Some(overlay) = self.input.overlay.as_ref() else {
+            return;
+        };
+        let Some(assert_module) = overlay.modules.iter().find(|module| {
+            module.unit == "std"
+                && module.segments == ["assert"]
+                && module.source_id == "stdlib/m2/src/std/assert.vib"
+        }) else {
+            return;
+        };
+        let module = ModuleKey {
+            package: overlay.package.clone(),
+            unit: "std".to_owned(),
+            segments: vec!["assert".to_owned()],
+        };
+        let names = [
+            "true",
+            "false",
+            "equal-bool",
+            "equal-char",
+            "equal-str",
+            "equal-i32",
+            "equal-u64",
+        ];
+        for name in names {
+            let path = vec![name.to_owned()];
+            let id = DeclarationId::with_package(
+                &overlay.package,
+                "std",
+                ["assert"],
+                path.clone(),
+                EntityKind::Function,
+            );
+            let span = ByteSpan::empty_at(0);
+            let declaration = ResolvedDeclaration {
+                id,
+                visibility: Visibility::Public,
+                source_id: assert_module.source_id.clone(),
+                span,
+            };
+            let index = self.declarations.len();
+            self.declaration_indexes
+                .insert((module.clone(), path), index);
+            self.declarations.push(DeclarationWork {
+                declaration,
+                body: None,
+            });
+        }
     }
 
     fn record_import_name(
@@ -1276,6 +1328,33 @@ impl Resolution {
         owner: Vec<String>,
         source_id: &str,
     ) {
+        if let Declaration::Test(test) = declaration {
+            let Literal::String(name) = test.name() else {
+                return;
+            };
+            let mut path = owner;
+            path.extend(["$test".to_owned(), name.value().to_owned()]);
+            let id = DeclarationId::with_package(
+                &module.package,
+                &module.unit,
+                &module.segments,
+                &path,
+                EntityKind::Test,
+            );
+            let work_index = self.declarations.len();
+            self.declaration_indexes
+                .insert((module.clone(), path), work_index);
+            self.declarations.push(DeclarationWork {
+                declaration: ResolvedDeclaration {
+                    id,
+                    visibility: Visibility::Private,
+                    source_id: source_id.to_owned(),
+                    span: test.span(),
+                },
+                body: Some(BodyWork::Test(test.clone())),
+            });
+            return;
+        }
         let (name, kind, visibility, span, body) = match declaration {
             Declaration::Deftype(value) => (
                 value.name().value(),
@@ -1312,14 +1391,8 @@ impl Resolution {
                 value.span(),
                 Some(BodyWork::Function(value.clone())),
             ),
-            Declaration::Test(value) => (
-                value.name().raw(),
-                EntityKind::Test,
-                Visibility::Private,
-                value.span(),
-                Some(BodyWork::Test(value.clone())),
-            ),
             Declaration::Import(_) => return,
+            Declaration::Test(_) => return,
         };
         let unavailable_message = match declaration {
             Declaration::Deftype(_) => {
@@ -1610,6 +1683,32 @@ impl Resolution {
                 let target_path =
                     target_segments.iter().skip(1).cloned().collect::<Vec<_>>();
                 let target_span = import.target().span_or(import.span());
+                let test_unit_import_forbidden =
+                    unit == "tests" && module_key.unit != "tests";
+                if test_unit_import_forbidden {
+                    self.diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::ModuleUnknownPath,
+                            target_span,
+                            "the reserved `@tests` unit is importable only from test modules",
+                        )
+                        .with_source_id(parsed.module.source_id.clone()),
+                    );
+                    let work = ImportWork {
+                        module: None,
+                        alias: import.alias().value().to_owned(),
+                        written: target.value().to_owned(),
+                        source_id: parsed.module.source_id.clone(),
+                        span: import.span(),
+                    };
+                    let index = self.imports.len();
+                    self.imports.push((module_key.clone(), work));
+                    self.imports_by_module
+                        .entry(module_key.clone())
+                        .or_default()
+                        .push(index);
+                    continue;
+                }
                 let mut resolved_module = None;
                 let overlay_package = self
                     .input
@@ -2331,11 +2430,26 @@ impl Resolution {
             .and_then(|index| self.declarations.get(*index))
             .map(|work| &work.declaration);
         let Some(target) = target else {
+            let unavailable_assertion = target_module.as_ref().is_some_and(|target| {
+                target.package.name() == "vibra-stdlib"
+                    && target.unit == "std"
+                    && target.segments == ["assert"]
+                    && imported
+            });
+            let code = if unavailable_assertion {
+                DiagnosticCode::ToolUnavailable
+            } else {
+                DiagnosticCode::NameUnknownSymbol
+            };
             self.diagnostics.push(
                 Diagnostic::new(
-                    DiagnosticCode::NameUnknownSymbol,
+                    code,
                     span,
-                    "symbol does not resolve to a declaration",
+                    if unavailable_assertion {
+                        "assertion members outside the closed M2 table are unavailable"
+                    } else {
+                        "symbol does not resolve to a declaration"
+                    },
                 )
                 .with_source_id(source_id),
             );
