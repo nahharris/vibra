@@ -1,0 +1,7 @@
+(record
+  format: @test-run.v1
+  result: @command.unavailable
+  tests: (array
+    (record name: "@tests.math::\"generic\"" result: @test.unavailable audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

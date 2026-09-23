@@ -4,6 +4,8 @@
     (record name: @hello kind: @lib modules: (array
       (record path: @hello.main source: "src/main.vib" bytes-hex: "286465666e206d61696e290a")
     ))
+    (record name: @tests kind: @lib modules: (array
+    ))
   )
   dependencies: (array
     (record alias: @remote kind: @path source: "../outside" target: @core status: @unsupported source-id: "project.vibon" span: (array 166u64 219u64))

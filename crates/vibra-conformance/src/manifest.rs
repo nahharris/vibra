@@ -121,6 +121,8 @@ pub enum ConformanceOperation {
     WorkspaceCheck,
     /// Check and interpret the unique binary target in a confined workspace.
     WorkspaceRun,
+    /// Discover, check, and run all tests in a confined workspace.
+    WorkspaceTest,
 }
 
 impl ConformanceOperation {
@@ -138,6 +140,7 @@ impl ConformanceOperation {
             Self::Format => "format",
             Self::WorkspaceCheck => "workspace-check",
             Self::WorkspaceRun => "workspace-run",
+            Self::WorkspaceTest => "workspace-test",
         }
     }
 }
@@ -376,6 +379,16 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 ));
             }
         }
+        if operation == ConformanceOperation::WorkspaceTest
+            && expectations.interpreter.as_ref().is_none_or(|execution| {
+                execution.result.is_none() || execution.audit_trace.is_some()
+            })
+        {
+            return Err(ManifestError::Invalid(
+                "workspace-test cases require one result snapshot and no audit trace"
+                    .to_owned(),
+            ));
+        }
         {
             for diagnostic in &expectations.diagnostics {
                 if let Some(source_id) = &diagnostic.source_id
@@ -448,6 +461,7 @@ fn decode_operation(
         Some("format") => ConformanceOperation::Format,
         Some("workspace-check") => ConformanceOperation::WorkspaceCheck,
         Some("workspace-run") => ConformanceOperation::WorkspaceRun,
+        Some("workspace-test") => ConformanceOperation::WorkspaceTest,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
@@ -566,11 +580,14 @@ fn decode_operation(
     }
     if matches!(
         operation,
-        ConformanceOperation::WorkspaceCheck | ConformanceOperation::WorkspaceRun
+        ConformanceOperation::WorkspaceCheck
+            | ConformanceOperation::WorkspaceRun
+            | ConformanceOperation::WorkspaceTest
     ) {
         let required_profile = match operation {
             ConformanceOperation::WorkspaceCheck => ConformanceProfile::StaticV1,
-            ConformanceOperation::WorkspaceRun => ConformanceProfile::InterpreterV1,
+            ConformanceOperation::WorkspaceRun
+            | ConformanceOperation::WorkspaceTest => ConformanceProfile::InterpreterV1,
             _ => {
                 return Err(ManifestError::Invalid(
                     "workspace operation profile validation was misrouted".to_owned(),

@@ -1,0 +1,5 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array)
+)

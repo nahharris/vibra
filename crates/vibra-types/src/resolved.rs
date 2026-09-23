@@ -3,7 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
-use vibra_ir::{CheckedFunction, CheckedGlobal, CheckedProgram, IrError, SourceOrigin};
+use vibra_ir::{
+    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
+    PrimitiveType, SourceOrigin, TestAssertion, Value,
+};
 use vibra_resolve::{DeclarationId, ResolvedSnapshot};
 use vibra_syntax::{ApplicationBinding, Declaration, SourceAst};
 
@@ -219,6 +222,52 @@ pub fn check_resolved(
                                 )
                             },
                         ),
+                        test: None,
+                        test_assertion: None,
+                    });
+                }
+                Declaration::Test(test) => {
+                    if module.record.unit() != "tests" {
+                        unavailable(
+                            &mut diagnostics,
+                            module.record.source_id(),
+                            test.span(),
+                            "test declarations are available only in the reserved @tests unit",
+                        );
+                        continue;
+                    }
+                    let Some(id) = module
+                        .declarations
+                        .get(&(module.record.source_id().to_owned(), test.span()))
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    if let Some(effects) = test.effects()
+                        && !effects.references().is_empty()
+                    {
+                        unavailable(
+                            &mut diagnostics,
+                            module.record.source_id(),
+                            effects.span(),
+                            "nonempty test effect ceilings are unavailable in M2",
+                        );
+                    }
+                    let index = functions.len();
+                    function_indices.insert(id.clone(), index);
+                    functions.push(FunctionHeader {
+                        declaration_index,
+                        module_index,
+                        source_id: module.record.source_id().to_owned(),
+                        name: id.canonical(),
+                        signature: FunctionSignature::new(
+                            Vec::new(),
+                            PrimitiveType::Void,
+                        ),
+                        external: None,
+                        external_declared: false,
+                        test: Some(test.clone()),
+                        test_assertion: None,
                     });
                 }
                 Declaration::Import(_) => {}
@@ -232,12 +281,59 @@ pub fn check_resolved(
         }
     }
 
+    for declaration in snapshot.declarations().iter().filter(|declaration| {
+        selected.contains(declaration.source_id())
+            && is_verified_assertion_declaration(
+                snapshot,
+                declaration.id(),
+                verification,
+            )
+    }) {
+        let Some(assertion) = TestAssertion::from_member(declaration.id().name())
+        else {
+            continue;
+        };
+        let index = functions.len();
+        function_indices.insert(declaration.id().clone(), index);
+        functions.push(FunctionHeader {
+            declaration_index: usize::MAX,
+            module_index: usize::MAX,
+            source_id: declaration.source_id().to_owned(),
+            name: declaration.id().canonical(),
+            signature: assertion.signature(),
+            external: None,
+            external_declared: true,
+            test: None,
+            test_assertion: Some(assertion),
+        });
+    }
+
     let mut resolved_targets = BTreeMap::new();
     for reference in snapshot
         .references()
         .iter()
         .filter(|reference| selected.contains(reference.source_id()))
     {
+        let assertion_reference = reference.target().is_some_and(|target| {
+            is_verified_assertion_declaration(snapshot, target, verification)
+        });
+        let local_non_test_reference = snapshot
+            .modules()
+            .iter()
+            .find(|module| module.source_id() == reference.source_id())
+            .is_some_and(|module| {
+                module.package() == snapshot.package() && module.unit() != "tests"
+            });
+        if assertion_reference && local_non_test_reference {
+            diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::ToolUnavailable,
+                    reference.span(),
+                    "verified test assertions are available only in @tests declarations",
+                )
+                .with_source_id(reference.source_id()),
+            );
+        }
         let target = reference.target().and_then(|target| {
             global_indices
                 .get(target)
@@ -327,6 +423,68 @@ pub fn check_resolved(
 
     let mut checked_functions = vec![None; functions.len()];
     for (index, header) in functions.iter().cloned().enumerate() {
+        if let Some(assertion) = header.test_assertion {
+            let origin = SourceOrigin::new(&header.source_id, ByteSpan::empty_at(0));
+            match CheckedFunction::new_test_assertion(header.name, assertion, origin) {
+                Ok(checked) => {
+                    if let Some(slot) = checked_functions.get_mut(index) {
+                        *slot = Some(checked);
+                    }
+                }
+                Err(error) => unavailable(
+                    &mut diagnostics,
+                    &header.source_id,
+                    ByteSpan::empty_at(0),
+                    format!("checked assertion construction failed: {error}"),
+                ),
+            }
+            continue;
+        }
+        if let Some(test) = header.test.as_ref() {
+            let mut environment = CheckEnvironment::new(
+                &header.source_id,
+                &mut diagnostics,
+                &empty_indices,
+                &globals,
+                &functions,
+                &empty_indices,
+                &empty_names,
+                &mut bindings,
+                Some(index),
+                recursive_groups.get(index).cloned(),
+            );
+            environment.resolved_targets = Some(&resolved_targets);
+            let Some(body) = crate::check_sequence(
+                &mut environment,
+                test.expressions(),
+                Some(PrimitiveType::Void),
+                test.span(),
+                true,
+            ) else {
+                continue;
+            };
+            let origin = SourceOrigin::new(&header.source_id, test.span());
+            match CheckedFunction::with_slots(
+                header.name,
+                header.signature,
+                body,
+                origin,
+                environment.next_slot,
+            ) {
+                Ok(checked) => {
+                    if let Some(slot) = checked_functions.get_mut(index) {
+                        *slot = Some(checked);
+                    }
+                }
+                Err(error) => unavailable(
+                    &mut diagnostics,
+                    &header.source_id,
+                    test.span(),
+                    format!("checked test construction failed: {error}"),
+                ),
+            }
+            continue;
+        }
         let Some(module) = modules.get(header.module_index) else {
             continue;
         };
@@ -466,6 +624,61 @@ pub fn check_resolved(
         }
     }
 
+    let can_build_unavailable_stubs = diagnostics.iter().all(|diagnostic| {
+        diagnostic.level() != Level::Error
+            || diagnostic.code() == DiagnosticCode::ToolUnavailable
+    });
+    if can_build_unavailable_stubs {
+        for (index, checked) in checked_globals.iter_mut().enumerate() {
+            if checked.is_some() {
+                continue;
+            }
+            let Some(header) = globals.get(index) else {
+                continue;
+            };
+            let origin = SourceOrigin::new(&header.source_id, header.span);
+            let Some(initializer) =
+                default_expression(&header.value_type, origin.clone())
+            else {
+                continue;
+            };
+            *checked = CheckedGlobal::new(
+                header.name.clone(),
+                header.value_type.clone(),
+                initializer,
+                origin,
+            )
+            .ok();
+        }
+        for (index, checked) in checked_functions.iter_mut().enumerate() {
+            if checked.is_some() {
+                continue;
+            }
+            let Some(header) = functions.get(index) else {
+                continue;
+            };
+            let span = header
+                .test
+                .as_ref()
+                .map_or(ByteSpan::empty_at(0), vibra_syntax::TestDeclaration::span);
+            let origin = SourceOrigin::new(&header.source_id, span);
+            let body = if header.test.is_some() {
+                Some(Expr::sequence(Vec::new(), origin.clone()))
+            } else {
+                default_expression(&header.signature.result(), origin.clone())
+            };
+            if let Some(body) = body {
+                *checked = CheckedFunction::with_slots(
+                    header.name.clone(),
+                    header.signature.clone(),
+                    body,
+                    origin,
+                    header.signature.fixed_parameter_count(),
+                )
+                .ok();
+            }
+        }
+    }
     let globals = checked_globals.into_iter().collect::<Option<Vec<_>>>();
     let functions = checked_functions.into_iter().collect::<Option<Vec<_>>>();
     if let (Some(globals), Some(functions)) = (&globals, &functions) {
@@ -495,11 +708,14 @@ pub fn check_resolved(
             }
         }
     }
-    let has_error = diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.level() == Level::Error);
+    let has_blocking_error = diagnostics.iter().any(|diagnostic| {
+        diagnostic.level() == Level::Error
+            && diagnostic.code() != DiagnosticCode::ToolUnavailable
+    });
     let mut programs = BTreeMap::new();
-    if !has_error && let (Some(globals), Some(functions)) = (globals, functions) {
+    if !has_blocking_error
+        && let (Some(globals), Some(functions)) = (&globals, &functions)
+    {
         for entry in snapshot.entries() {
             let Some(declaration) = entry.declaration() else {
                 continue;
@@ -547,6 +763,45 @@ pub fn check_resolved(
         }
     }
 
+    if !has_blocking_error
+        && let (Some(globals), Some(functions)) = (&globals, &functions)
+    {
+        for declaration in function_indices
+            .keys()
+            .filter(|declaration| declaration.kind() == vibra_resolve::EntityKind::Test)
+        {
+            let Some(index) = function_indices.get(declaration).copied() else {
+                continue;
+            };
+            match CheckedProgram::try_new_with_globals(
+                globals.clone(),
+                functions.clone(),
+                index,
+            ) {
+                Ok(program) => {
+                    programs.insert(declaration.clone(), program);
+                }
+                Err(error) => {
+                    if let Some(declaration) = snapshot
+                        .declarations()
+                        .iter()
+                        .find(|candidate| candidate.id() == declaration)
+                    {
+                        unavailable(
+                            &mut diagnostics,
+                            declaration.source_id(),
+                            declaration.span(),
+                            format!(
+                                "checked test program construction failed: {error}"
+                            ),
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
     diagnostics.sort_by_key(|diagnostic| {
         (
             diagnostic.source_id().unwrap_or_default().to_owned(),
@@ -561,4 +816,77 @@ pub fn check_resolved(
         bindings,
         function_indices,
     }
+}
+
+fn default_expression(
+    value_type: &PrimitiveType,
+    origin: SourceOrigin,
+) -> Option<Expr> {
+    let value = match value_type {
+        PrimitiveType::Bool => Some(Value::Bool(false)),
+        PrimitiveType::Void => Some(Value::Void),
+        PrimitiveType::Char => Some(Value::Char('\0')),
+        PrimitiveType::Str => Some(Value::Str(String::new())),
+        PrimitiveType::Bytes => Some(Value::Bytes(Vec::new())),
+        PrimitiveType::Atom => Some(Value::Atom(String::new())),
+        PrimitiveType::I8 => Some(Value::I8(0)),
+        PrimitiveType::I16 => Some(Value::I16(0)),
+        PrimitiveType::I32 => Some(Value::I32(0)),
+        PrimitiveType::I64 => Some(Value::I64(0)),
+        PrimitiveType::U8 => Some(Value::U8(0)),
+        PrimitiveType::U16 => Some(Value::U16(0)),
+        PrimitiveType::U32 => Some(Value::U32(0)),
+        PrimitiveType::U64 => Some(Value::U64(0)),
+        PrimitiveType::F32 => Value::f32(0.0),
+        PrimitiveType::F64 => Value::f64(0.0),
+        PrimitiveType::Function(signature) => {
+            let body = default_expression(&signature.result(), origin.clone())?;
+            return Some(Expr::closure(
+                (**signature).clone(),
+                signature.parameters().to_vec(),
+                Vec::new(),
+                body,
+                signature.fixed_parameter_count(),
+                origin,
+            ));
+        }
+    }?;
+    Some(Expr::literal(value, origin))
+}
+
+fn is_verified_assertion_declaration(
+    snapshot: &ResolvedSnapshot,
+    id: &DeclarationId,
+    verification: Option<&crate::BootstrapVerification>,
+) -> bool {
+    let Some(verification) = verification else {
+        return false;
+    };
+    if id.package() != verification.package()
+        || id.unit() != "std"
+        || id.module() != ["assert"]
+        || id.kind() != vibra_resolve::EntityKind::Function
+        || id.path().len() != 1
+        || TestAssertion::from_member(id.name()).is_none()
+    {
+        return false;
+    }
+    let Some(declaration) = snapshot
+        .declarations()
+        .iter()
+        .find(|declaration| declaration.id() == id)
+    else {
+        return false;
+    };
+    let Some(module) = snapshot
+        .modules()
+        .iter()
+        .find(|module| module.source_id() == declaration.source_id())
+    else {
+        return false;
+    };
+    module.package() == verification.package()
+        && module.unit() == "std"
+        && module.segments() == ["assert"]
+        && verification.trusts_module(module)
 }

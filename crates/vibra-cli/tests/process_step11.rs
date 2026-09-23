@@ -440,7 +440,7 @@ fn process_exit_codes_and_json_envelopes_are_stable_for_invalid_input() {
 }
 
 #[test]
-fn step12_commands_run_while_the_later_test_command_remains_unavailable() {
+fn step13_test_command_runs_an_empty_suite_after_step12_commands() {
     let root = TempDir::new("unavailable");
     fs::create_dir_all(root.path().join("src/app")).expect("create source root");
     fs::write(
@@ -479,16 +479,18 @@ fn step12_commands_run_while_the_later_test_command_remains_unavailable() {
     assert_eq!(run_envelope["result"], "@command.ok");
 
     let test = run(&["--format", "json", "--workspace", &workspace, "test"]);
-    assert_eq!(test.status.code(), Some(4));
+    assert_eq!(test.status.code(), Some(0));
     let test_envelope = json(&test);
     assert_envelope_schema(&test_envelope);
     assert_eq!(test_envelope["command"], "test");
-    assert_eq!(test_envelope["result"], "@command.unavailable");
-    assert_eq!(test_envelope["diagnostics"][0]["code"], "@tool.unavailable");
+    assert_eq!(test_envelope["result"], "@command.ok");
+    assert_eq!(test_envelope["diagnostics"], serde_json::json!([]));
+    assert_eq!(test_envelope["payload"]["selected"], 0);
+    assert_eq!(test_envelope["payload"]["tests"], serde_json::json!([]));
 }
 
 #[test]
-fn valid_or_unavailable_commands_validate_the_frozen_argument_grammar_first() {
+fn valid_commands_validate_the_frozen_argument_grammar_first() {
     let root = TempDir::new("unavailable-grammar");
     fs::create_dir_all(root.path().join("src/app")).expect("create source root");
     fs::write(
@@ -510,6 +512,7 @@ fn valid_or_unavailable_commands_validate_the_frozen_argument_grammar_first() {
         &["run", "app", "extra"],
         &["run", "../outside"],
         &["test", "module.case", "extra"],
+        &["test", "module.case"],
         &["test", "--all"],
         &["test", "../outside"],
     ];
@@ -547,7 +550,6 @@ fn valid_or_unavailable_commands_validate_the_frozen_argument_grammar_first() {
         &["check", "src/app"],
         &["run", "src/app"],
         &["test"],
-        &["test", "app.main.case"],
     ];
     for arguments in valid {
         let mut command = vec!["--format", "json", "--workspace", workspace.as_str()];
@@ -557,14 +559,8 @@ fn valid_or_unavailable_commands_validate_the_frozen_argument_grammar_first() {
         let envelope = json(&output);
         assert_envelope_schema(&envelope);
         assert_eq!(envelope["command"], arguments[0]);
-        if arguments[0] == "test" {
-            assert_eq!(output.status.code(), Some(4), "arguments: {arguments:?}");
-            assert_eq!(envelope["result"], "@command.unavailable");
-            assert_eq!(envelope["diagnostics"][0]["code"], "@tool.unavailable");
-        } else {
-            assert_eq!(output.status.code(), Some(0), "arguments: {arguments:?}");
-            assert_eq!(envelope["result"], "@command.ok");
-            assert_eq!(envelope["diagnostics"], serde_json::json!([]));
-        }
+        assert_eq!(output.status.code(), Some(0), "arguments: {arguments:?}");
+        assert_eq!(envelope["result"], "@command.ok");
+        assert_eq!(envelope["diagnostics"], serde_json::json!([]));
     }
 }

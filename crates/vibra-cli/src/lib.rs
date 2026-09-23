@@ -13,6 +13,7 @@ use vibra_schema::{DiagnosticDocument, SCHEMA_VERSION};
 use vibra_workspace::format_plan::{
     FormatPlan, FormatPlanError, apply_format, plan_format,
 };
+use vibra_workspace::semantic::{TestSelector, TestSuiteStatus};
 
 pub use init::{InitError, InitPlan, apply_init, plan_init};
 
@@ -166,6 +167,9 @@ enum Action {
     Run {
         target: PathBuf,
     },
+    Test {
+        selector: Option<TestSelector>,
+    },
     Unavailable {
         arguments: Vec<OsString>,
     },
@@ -230,6 +234,9 @@ fn execute<W: Write, E: Write>(
             execute_check(&invocation, target.as_deref(), stdout, stderr)
         }
         Action::Run { target } => execute_run(&invocation, &target, stderr),
+        Action::Test { selector } => {
+            execute_test(&invocation, selector.as_ref(), stdout, stderr)
+        }
         Action::Unavailable { arguments } => {
             let message =
                 format!("`{}` is not available in M2 Step 12", invocation.command);
@@ -578,6 +585,153 @@ fn execute_run<E: Write>(
     }
 }
 
+fn execute_test<W: Write, E: Write>(
+    invocation: &Invocation,
+    selector: Option<&TestSelector>,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> CommandEnvelope {
+    let snapshot = match vibra_workspace::WorkspaceSnapshot::load(&invocation.workspace)
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => return workspace_load_error_envelope(invocation, error, stderr),
+    };
+    let verification = match snapshot
+        .requires_test_bootstrap_verification(selector)
+        .map_err(|error| error.to_string())
+    {
+        Ok(true) => match verify_toolchain_bootstrap() {
+            Ok(verification) => Some(verification),
+            Err(message) => {
+                return operational_test_envelope(invocation, message, stderr);
+            }
+        },
+        Ok(false) => None,
+        Err(message) => return operational_test_envelope(invocation, message, stderr),
+    };
+    let result = vibra_workspace::semantic::run_tests(
+        &snapshot,
+        selector,
+        verification.as_ref(),
+    );
+    let diagnostics = match render_workspace_diagnostics(
+        &snapshot,
+        verification.as_ref(),
+        result.diagnostics(),
+    ) {
+        Ok(diagnostics) => diagnostics,
+        Err(message) => return operational_test_envelope(invocation, message, stderr),
+    };
+    let mut tests = Vec::with_capacity(result.items().len());
+    for item in result.items() {
+        let item_diagnostics = match render_workspace_diagnostics(
+            &snapshot,
+            verification.as_ref(),
+            item.diagnostics(),
+        ) {
+            Ok(diagnostics) => diagnostics,
+            Err(message) => {
+                return operational_test_envelope(invocation, message, stderr);
+            }
+        };
+        let failure = item.failure().map(|failure| {
+            let source = snapshot
+                .source()
+                .documents()
+                .find(|document| document.source_id() == failure.source_id())
+                .map(|document| String::from_utf8_lossy(document.bytes()).into_owned())
+                .unwrap_or_default();
+            let source_index = LineIndex::new(&source);
+            serde_json::json!({
+                "assertion": failure.assertion(),
+                "expected": failure.expected(),
+                "actual": failure.actual(),
+                "primarySpan": vibra_schema::SpanDocument::render_with_source(
+                    failure.primary_span(),
+                    &source_index,
+                    Some(failure.source_id()),
+                ),
+            })
+        });
+        let trap = item.trap().map(|trap| {
+            let origin = trap.origin().map(|origin| {
+                let source = snapshot
+                    .source()
+                    .documents()
+                    .find(|document| document.source_id() == origin.source_id())
+                    .map(|document| {
+                        String::from_utf8_lossy(document.bytes()).into_owned()
+                    })
+                    .unwrap_or_default();
+                let source_index = LineIndex::new(&source);
+                vibra_schema::SpanDocument::render_with_source(
+                    origin.span(),
+                    &source_index,
+                    Some(origin.source_id()),
+                )
+            });
+            serde_json::json!({ "trapCode": trap.trap_code(), "origin": origin })
+        });
+        tests.push(serde_json::json!({
+            "name": item.name(),
+            "result": item.status().as_atom(),
+            "failure": failure,
+            "trap": trap,
+            "auditTrace": item.audit_trace(),
+            "diagnostics": item_diagnostics,
+        }));
+    }
+    let status = result.status();
+    let command_result = match status {
+        TestSuiteStatus::Ok => CommandResult::Ok,
+        TestSuiteStatus::Diagnostics => CommandResult::Diagnostics,
+        TestSuiteStatus::TestFailed => CommandResult::TestFailed,
+        TestSuiteStatus::InvalidInput => CommandResult::InvalidInput,
+        TestSuiteStatus::Unavailable => CommandResult::Unavailable,
+        TestSuiteStatus::Trap => CommandResult::Trap,
+    };
+    if command_result == CommandResult::InvalidInput {
+        return invalid_envelope(invocation, None);
+    }
+    if command_result == CommandResult::Ok
+        && invocation.output_format == OutputFormat::Human
+    {
+        let _ = writeln!(stdout, "test suite passed: {} test(s)", result.selected());
+    }
+    CommandEnvelope {
+        schema_version: SCHEMA_VERSION,
+        command: invocation.command.clone(),
+        result: command_result,
+        diagnostics,
+        payload: Payload::Test(TestPayload {
+            selected: result.selected(),
+            passed: result.passed(),
+            failed: result.failed(),
+            tests,
+        }),
+    }
+}
+
+fn operational_test_envelope<E: Write>(
+    invocation: &Invocation,
+    message: String,
+    stderr: &mut E,
+) -> CommandEnvelope {
+    let _ = writeln!(stderr, "{message}");
+    CommandEnvelope {
+        schema_version: SCHEMA_VERSION,
+        command: invocation.command.clone(),
+        result: CommandResult::OperationalFailure,
+        diagnostics: render_unlocated_diagnostics(&[operational_diagnostic(message)]),
+        payload: Payload::Test(TestPayload {
+            selected: 0,
+            passed: 0,
+            failed: 0,
+            tests: Vec::new(),
+        }),
+    }
+}
+
 fn select_target<'a>(
     snapshot: &'a vibra_workspace::WorkspaceSnapshot,
     path: &Path,
@@ -790,6 +944,12 @@ fn check_or_run_error_envelope(
             audit_trace: Vec::new(),
             trap: None,
         }),
+        "test" => Payload::Test(TestPayload {
+            selected: 0,
+            passed: 0,
+            failed: 0,
+            tests: Vec::new(),
+        }),
         _ => Payload::Empty(EmptyPayload {}),
     };
     CommandEnvelope {
@@ -898,12 +1058,7 @@ fn parse_invocation(
         "fmt" => parse_fmt_command(output_format, workspace, remaining),
         "check" => parse_check_command(output_format, workspace, remaining),
         "run" => parse_run_command(output_format, workspace, remaining),
-        "test" => parse_unavailable_target_command(
-            output_format,
-            workspace,
-            command_name,
-            remaining,
-        ),
+        "test" => parse_test_command(output_format, workspace, remaining),
         "lint" | "build" | "query" | "edit" | "mcp" => Invocation {
             output_format,
             workspace,
@@ -922,31 +1077,49 @@ fn parse_invocation(
     }
 }
 
-fn parse_unavailable_target_command(
+fn parse_test_command(
     output_format: OutputFormat,
     workspace: PathBuf,
-    command_name: &str,
     arguments: &[OsString],
 ) -> Invocation {
-    let (minimum, maximum, usage) = match command_name {
-        "test" => (0, 1, "`test` accepts at most one test name"),
-        _ => unreachable!("only deferred target commands use this parser"),
-    };
-    if arguments.len() < minimum
-        || arguments.len() > maximum
-        || arguments
-            .iter()
-            .any(|argument| !is_confined_workspace_argument(argument))
-    {
-        return invalid_invocation(output_format, workspace, command_name, usage, None);
+    if arguments.len() > 1 {
+        return invalid_invocation(
+            output_format,
+            workspace,
+            "test",
+            "`test` accepts at most one canonical selector",
+            None,
+        );
     }
+    let selector = match arguments.first() {
+        None => None,
+        Some(argument) => {
+            let Some(value) = argument.to_str() else {
+                return invalid_invocation(
+                    output_format,
+                    workspace,
+                    "test",
+                    "test selectors must be valid UTF-8 and canonical",
+                    None,
+                );
+            };
+            let Some(selector) = TestSelector::parse(value) else {
+                return invalid_invocation(
+                    output_format,
+                    workspace,
+                    "test",
+                    "test selectors must use the canonical `@tests.module::\"name\"` spelling",
+                    None,
+                );
+            };
+            Some(selector)
+        }
+    };
     Invocation {
         output_format,
         workspace,
-        command: command_name.to_owned(),
-        action: Action::Unavailable {
-            arguments: arguments.to_vec(),
-        },
+        command: "test".to_owned(),
+        action: Action::Test { selector },
     }
 }
 

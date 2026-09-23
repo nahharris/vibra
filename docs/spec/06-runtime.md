@@ -193,8 +193,14 @@ lifetime semantics in v1.
 
 Host responses that are ordinary environmental outcomes use typed `result`
 errors. ABI mismatch, impossible typed IR, invalid host value IDs, and runtime
-invariant violation are traps. A trap has a stable code and source origin but
-is not catchable by user code.
+invariant violation are traps. A trap has a stable code and a source origin
+when its failing source span is known; otherwise it has no origin. M2 failures
+at the checked-program execution boundary (no executable entry or a body that
+violates checked-IR invariants) use `@runtime.invalid-checked-program`. These
+failures have no source origin and use an unlocated diagnostic primary at
+`0..0` with no source ID. The CLI `trapCode` is the exact diagnostic-code
+spelling as a string, and its `origin` is `null`. Traps are not catchable by
+user code.
 
 ## WebAssembly boundary
 

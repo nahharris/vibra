@@ -13,6 +13,11 @@ use crate::{
     project::{Target, TargetKind},
 };
 
+pub use crate::test_runner::{
+    TestFailure, TestItem, TestItemStatus, TestSelector, TestSuiteStatus, TestTrap,
+    WorkspaceTestResult, run_tests,
+};
+
 /// Overall result of checking a workspace scope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckStatus {
@@ -203,6 +208,7 @@ fn check_scope(
         let units = graph
             .units()
             .iter()
+            .filter(|unit| unit.name() != "tests")
             .map(|unit| unit.name().to_owned())
             .collect::<BTreeSet<_>>();
         return check_resolved_scope(

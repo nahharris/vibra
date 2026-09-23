@@ -5,6 +5,8 @@
       (record path: @hello.nested.a source: "src/nested/a.vib" bytes-hex: "286465666e2061290a")
       (record path: @hello.z source: "src/z.vib" bytes-hex: "286465666e207a290a")
     ))
+    (record name: @tests kind: @lib modules: (array
+    ))
   )
   dependencies: (array
   )

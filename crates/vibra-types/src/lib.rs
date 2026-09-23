@@ -27,8 +27,8 @@ use sha2::{Digest, Sha256};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
     CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature,
-    LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin, Value,
-    external::CompilerIntrinsic,
+    LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin,
+    TestAssertion, Value, external::CompilerIntrinsic,
 };
 use vibra_syntax::{
     ApplicationBinding, Attribute, BindingFacts, Declaration, Expression,
@@ -711,6 +711,8 @@ struct FunctionHeader {
     signature: FunctionSignature,
     external: Option<CompilerIntrinsic>,
     external_declared: bool,
+    test: Option<vibra_syntax::TestDeclaration>,
+    test_assertion: Option<TestAssertion>,
 }
 
 const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
@@ -845,6 +847,8 @@ impl<'a> Checker<'a> {
                         external_declared: function.attributes().items().iter().any(
                             |attribute| matches!(attribute, Attribute::External(_)),
                         ),
+                        test: None,
+                        test_assertion: None,
                     });
                 }
                 Declaration::Import(import)
@@ -898,6 +902,8 @@ impl<'a> Checker<'a> {
                     signature: intrinsic.signature(),
                     external: Some(intrinsic),
                     external_declared: true,
+                    test: None,
+                    test_assertion: None,
                 });
             }
             self.text_import_span = Some(import_span);

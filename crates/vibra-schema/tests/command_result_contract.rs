@@ -44,3 +44,47 @@ fn command_result_schema_closes_init_and_fmt_payloads() {
         .remove("text");
     assert!(!validator.is_valid(&invalid));
 }
+
+#[test]
+fn test_result_schema_closes_items_and_rejects_m2_trace_events() {
+    let validator = validator();
+    let envelope = json!({
+        "schemaVersion": 1,
+        "command": "test",
+        "result": "@command.test-failed",
+        "diagnostics": [],
+        "payload": {
+            "selected": 1,
+            "passed": 0,
+            "failed": 1,
+            "tests": [{
+                "name": "@tests.math::\"bad\"",
+                "result": "@test.assertion-failed",
+                "failure": {
+                    "assertion": "@std.assert.equal-i32",
+                    "expected": "4i32",
+                    "actual": "5i32",
+                    "primarySpan": {
+                        "sourceId": "tests/math.vib",
+                        "start": 42,
+                        "end": 70,
+                        "startPosition": { "line": 2, "column": 20 },
+                        "endPosition": { "line": 2, "column": 48 }
+                    }
+                },
+                "trap": null,
+                "auditTrace": [],
+                "diagnostics": []
+            }]
+        }
+    });
+    assert!(validator.is_valid(&envelope));
+
+    let mut traced = envelope.clone();
+    traced["payload"]["tests"][0]["auditTrace"] = json!(["ambient.clock"]);
+    assert!(!validator.is_valid(&traced));
+
+    let mut wrong_outcome = envelope;
+    wrong_outcome["payload"]["tests"][0]["result"] = json!("@test.passed");
+    assert!(!validator.is_valid(&wrong_outcome));
+}
