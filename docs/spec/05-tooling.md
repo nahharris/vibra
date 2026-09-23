@@ -84,8 +84,8 @@ selected binary target. Workspace discovery, source-graph, ordinary dependency,
 and bootstrap-provenance diagnostics still apply to the whole captured
 workspace snapshot and block checking or execution.
 
-M2 Step 11 implements only `project init` and `fmt`; valid `check`, `run`, and
-`test` requests still return `@command.unavailable` until their later steps.
+M2 Step 12 implements `check` and pure `run` over a captured project snapshot.
+Valid `test` requests still return `@command.unavailable` until Step 13.
 The default init destination is the workspace root. Otherwise `DEST` names a
 workspace-relative directory whose parent directories already exist. The
 package and binary target name comes from the destination directory name (or
