@@ -55,8 +55,10 @@ vibra [--format human|json] [--workspace PATH] test [TEST]
 ```
 
 `--format` defaults to `human` and may occur once before the command. The
-default workspace is the current directory; `PATH`, `DEST`, `TARGET`, and
-`TEST` are workspace-relative and may not escape its canonical root. `DEST`
+default workspace is the current directory. `PATH` and `DEST` are
+workspace-relative and may not escape its canonical root. `TARGET` is relative
+to the discovered project root and may not escape it. `TEST` is an exact
+module-qualified test name, not a path. `DEST`
 defaults to the workspace for `project init`; it must be absent or empty, and
 the command creates only the canonical `project.vibon`, `src/`, and `tests/`
 layout. `fmt` previews by default; `--write` is its only mutating flag. `check`
