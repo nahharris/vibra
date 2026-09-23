@@ -196,6 +196,9 @@ the command owns a program result. In JSON mode
 `stdout` captures program output in the envelope, preserving one machine
 document on the process stdout. Human `run` writes the program's stdout bytes
 directly and keeps command diagnostics on stderr.
+For M2 checked-program execution failures, `trapCode` is exactly the string
+`"@runtime.invalid-checked-program"`; their diagnostic uses that code with
+primary span `0..0` and no source ID, and the CLI trap `origin` is `null`.
 
 The process exit mapping is fixed: `0` for `@command.ok`, `1` for
 `@command.diagnostics` or `@command.test-failed`, `2` for

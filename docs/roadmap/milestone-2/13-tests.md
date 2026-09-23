@@ -23,7 +23,8 @@ Requires Step 12 and C8/C9/C10/C11. Read projects **Tests**, source
    order discovery, selection, execution and reporting deterministically.
 5. Add `test` CLI output and result/schema adapters. One failed assertion, static
    error, unavailable selected test, or trap cannot be reported as suite success.
-   Keep their structured outcome classes distinct.
+   Keep their structured outcome classes distinct; map M2 checked-program
+   execution traps to C11's exact code and unlocated-origin rule.
 
 | Positive | Negative / boundary |
 | --- | --- |

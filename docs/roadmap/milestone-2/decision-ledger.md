@@ -47,6 +47,7 @@ by Step 1 and must be copied into the owning normative chapter in the same PR.
 | C10.2 | deferred | `05-tooling.md` V1 CLI | `lint`, `build`, `query`, `edit`, `mcp`, and dependency mutation are valid v1 names but unavailable in M2 | Step 12 availability cases |
 | C11.1 | new | `05-tooling.md` Workspace queries | Semantic results are neutral envelopes until their owning type/workspace step supplies payloads | Steps 4–10 |
 | C11.2 | new | `07-diagnostics-and-conformance.md` Conformance corpus | Multi-file observations carry source ID; same byte offsets never merge | Step 1 synthetic tests |
+| C11.3 | new | `06-runtime.md` Traps; `07-diagnostics-and-conformance.md` diagnostic registry | M2 checked-program boundary failures use `@runtime.invalid-checked-program`, with CLI/VIBON code spelling fixed and no source origin | Steps 12–13 |
 | C12.1 | new | M2 supported-surface table | Every M1 AST enum variant has one M2 disposition and an inventory coverage test | Step 1 test |
 | C12.2 | new | `07-diagnostics-and-conformance.md` Conformance profiles | Profile capability and semantic `@tool.unavailable` are separate; neither may be silently skipped | All steps |
 | C12.3 | new | `04-programs-and-packages.md` bootstrap overlay; `07-diagnostics-and-conformance.md` diagnostic registry | A resolver graph has unique source IDs across local and verified packages; duplicates emit `@module.source-id-collision` and block checking before lowering or execution | Step 12 host + corpus |

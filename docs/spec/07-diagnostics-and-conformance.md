@@ -86,6 +86,7 @@ table governs.
 | `@project.invalid-target-root` | `@error` |
 | `@project.io-error` | `@error` |
 | `@runtime.invalid-host-value` | `@error` |
+| `@runtime.invalid-checked-program` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
@@ -149,6 +150,15 @@ roots nesting or coinciding with each other,
 `@project.overlapping-target-roots` is attached to a target's `root` value
 when that root equals or is nested beneath the reserved `tests/` root; this
 case has no related span for the synthetic test root.
+
+`@runtime.invalid-checked-program` identifies an M2 execution-boundary trap
+when a checked program has no executable entry or its body violates checked-IR
+invariants. Its diagnostic has no source ID and an empty primary span `0..0`;
+the corresponding CLI `trapCode` and VIBON `trap-code` are the exact string
+`"@runtime.invalid-checked-program"`, with no source origin (`null` in JSON
+and omitted from the closed VIBON trap record). `@runtime.invalid-host-value`
+remains reserved for invalid host-value IDs and does not describe these
+checked-program failures.
 
 During source enumeration, `@module.invalid-segment` is attached to the empty
 span `0..0` of the affected project-relative path when a directory or file
@@ -295,7 +305,9 @@ test record contains diagnostics; the case's ordinary diagnostic expectations
 carry those independently. No other fields are permitted. The
 `audit-trace` record has exactly `format: @audit-trace.v1` and `events: (array)`;
 M2 events are empty for every test result, including invalid, unavailable, and
-trap outcomes. The test records contain all per-test traces, so a second
+trap outcomes. For M2 checked-program execution-boundary traps, `trap-code` is
+the exact string `"@runtime.invalid-checked-program"` and `origin` is omitted.
+The test records contain all per-test traces, so a second
 suite-level audit snapshot is forbidden. An empty suite is `tests: (array)`
 with result `@command.ok`.
 
