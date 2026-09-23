@@ -184,7 +184,7 @@ specification rule, not compiler module. Each case records:
 
 - normative rule ID;
 - a closed operation selector (`reader`, `project-decode`, `source-graph`,
-  `resolve`, `type-check`, or `interpret`);
+  `resolve`, `type-check`, `interpret`, `query`, or `format`);
   `project-decode` requires exactly one project input, and a
   `source-graph` case requires one confined `tree` directory and a `project`
   input whose path is exactly `<tree>/project.vibon`; the corpus loader MUST
@@ -192,6 +192,10 @@ specification rule, not compiler module. Each case records:
   exact marker, never an ancestor or sibling;
   `resolve` has the same confined `tree`/`project` binding and consumes the
   already acquired graph through the filesystem-free `vibra-resolve` input;
+  `format` requires the tooling profile, one confined tree, its exact
+  `<tree>/project.vibon` input, and one `.vib` source beneath that tree; it
+  compares the snapshot-backed formatter result with a required formatted
+  source snapshot;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
 - an optional `.vibon` `graph` snapshot path for source-graph cases; when present it

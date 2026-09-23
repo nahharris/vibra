@@ -40,3 +40,13 @@ plan tests. Use the actual newly built `vibra` binary; in-process service tests
 alone cannot prove command grammar or exit behavior. Record exact init/fmt
 invocations in validation documentation. No project sync, lint, build, MCP,
 rename, fix, or public query command.
+
+## Step 11 conformance observations
+
+`V1-TOOL-format-safe-label-order` exercises the real snapshot-backed formatting
+plan through the `tooling-v1` corpus handler and compares its output with a
+checked-in formatted snapshot. The host-level conformance test also checks that
+reordering proven labelled arguments preserves the checked program result.
+Process tests cover project creation and decoding, conflict refusal, versioned
+JSON schema validation, source and VIBON preview/write behavior, and unavailable
+later-step commands.

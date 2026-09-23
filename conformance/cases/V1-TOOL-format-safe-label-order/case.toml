@@ -1,0 +1,23 @@
+id = "V1-TOOL-format-safe-label-order"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "format"
+description = "Snapshot checker facts normalize proven labelled argument order without changing the source program result."
+
+[inputs]
+source = "tree/src/hello/main.vib"
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@style.argument-order"
+level = "@warning"
+source = "src/hello/main.vib"
+
+[expect.diagnostics.span]
+start = 18
+end = 57

@@ -115,6 +115,8 @@ pub enum ConformanceOperation {
     Interpret,
     /// Render semantic facts from one immutable workspace snapshot.
     Query,
+    /// Format one source document using bindings from its confined snapshot.
+    Format,
 }
 
 impl ConformanceOperation {
@@ -129,6 +131,7 @@ impl ConformanceOperation {
             Self::TypeCheck => "type-check",
             Self::Interpret => "interpret",
             Self::Query => "query",
+            Self::Format => "format",
         }
     }
 }
@@ -341,6 +344,12 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 "query cases must declare at least one expected query".to_owned(),
             ));
         }
+        if operation == ConformanceOperation::Format && expectations.formatted.is_none()
+        {
+            return Err(ManifestError::Invalid(
+                "format cases must declare a formatted snapshot".to_owned(),
+            ));
+        }
         {
             for diagnostic in &expectations.diagnostics {
                 if let Some(source_id) = &diagnostic.source_id
@@ -410,6 +419,7 @@ fn decode_operation(
         Some("type-check") => ConformanceOperation::TypeCheck,
         Some("interpret") => ConformanceOperation::Interpret,
         Some("query") => ConformanceOperation::Query,
+        Some("format") => ConformanceOperation::Format,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
@@ -492,6 +502,40 @@ fn decode_operation(
             ));
         }
     }
+    if operation == ConformanceOperation::Format {
+        if profile != ConformanceProfile::ToolingV1 {
+            return Err(ManifestError::Invalid(
+                "format cases require the tooling-v1 profile".to_owned(),
+            ));
+        }
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one confined tree input".to_owned(),
+            ));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one project input".to_owned(),
+            ));
+        };
+        let Some(source) = inputs.source.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one source input".to_owned(),
+            ));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "format project input must be exactly `{expected_project}`"
+            )));
+        }
+        if !inputs.data.is_empty() {
+            return Err(ManifestError::Invalid(
+                "format cases may not declare additional data inputs".to_owned(),
+            ));
+        }
+        validate_tree_source_input(tree, source, "format")?;
+    }
     Ok(operation)
 }
 
@@ -517,10 +561,18 @@ fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
 }
 
 fn validate_query_input(tree: &str, input: &str) -> Result<(), ManifestError> {
+    validate_tree_source_input(tree, input, "query")
+}
+
+fn validate_tree_source_input(
+    tree: &str,
+    input: &str,
+    operation: &str,
+) -> Result<(), ManifestError> {
     let prefix = format!("{tree}/");
     let Some(source_id) = input.strip_prefix(&prefix) else {
         return Err(ManifestError::Invalid(format!(
-            "query input `{input}` must be beneath the declared tree `{tree}`"
+            "{operation} input `{input}` must be beneath the declared tree `{tree}`"
         )));
     };
     let path = Path::new(source_id);
@@ -537,7 +589,7 @@ fn validate_query_input(tree: &str, input: &str) -> Result<(), ManifestError> {
         || path.extension().and_then(|extension| extension.to_str()) != Some("vib")
     {
         return Err(ManifestError::Invalid(format!(
-            "query input `{input}` must be a relative `.vib` file beneath `{tree}`"
+            "{operation} input `{input}` must be a relative `.vib` file beneath `{tree}`"
         )));
     }
     Ok(())

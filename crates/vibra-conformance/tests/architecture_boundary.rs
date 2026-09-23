@@ -59,6 +59,19 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-types",
         ],
     ),
+    // Command services consume the workspace plan and render schema facts;
+    // no language phase depends on the process interface.
+    (
+        "vibra-cli",
+        &[
+            "vibra-diagnostics",
+            "vibra-fmt",
+            "vibra-schema",
+            "vibra-syntax",
+            "vibra-types",
+            "vibra-workspace",
+        ],
+    ),
     // Resolution owns its neutral graph input and depends only on language
     // structure; workspace and conformance adapt filesystem snapshots into it.
     ("vibra-resolve", &["vibra-diagnostics", "vibra-syntax"]),

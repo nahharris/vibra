@@ -33,10 +33,9 @@
 //!
 //! # Status
 //!
-//! Milestone 1 step 2 published the diagnostic contracts and step 10 adds the
-//! structural source-position query contract. Edit-plan, test-report, and
-//! command-result contracts follow in later milestones; see
-//! `docs/roadmap/milestone-1/README.md`.
+//! Milestone 1 published the diagnostic and source-position query contracts;
+//! M2 Step 11 adds the versioned CLI command-result contract. Edit-plan and
+//! test-report contracts follow in later milestones.
 
 // Tests assert by panicking and index fixtures they just built. The library
 // itself is still checked against these lints, because clippy builds the lib
@@ -54,6 +53,10 @@
 mod diagnostic;
 mod query;
 mod semantic_query;
+
+/// The published JSON Schema for versioned CLI command-result envelopes.
+pub const COMMAND_RESULT_SCHEMA: &str =
+    include_str!("../schemas/v1/command-result.json");
 
 pub use diagnostic::{
     DIAGNOSTIC_SCHEMA, DiagnosticDocument, DiagnosticRenderError, FixDocument,
