@@ -1,0 +1,29 @@
+id = "V1-TYPE-CONTROL-availability-expressions"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "Match, ascription, and try retain their M2 unavailable-form spans."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [32, 66]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [94, 107]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [134, 144]

@@ -1,0 +1,1 @@
+(defn accept (pure (fn (i32) i32) callback (fn (i32) i32 effects: (io.stdout))) i32 0i32)

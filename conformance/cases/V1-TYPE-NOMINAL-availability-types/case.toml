@@ -1,0 +1,35 @@
+id = "V1-TYPE-NOMINAL-availability-types"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "Applied, tuple, array, and map type expressions are valid syntax but unavailable in M2."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [15, 30]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [56, 77]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [104, 121]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [147, 166]

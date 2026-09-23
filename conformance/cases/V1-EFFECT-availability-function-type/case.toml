@@ -1,0 +1,17 @@
+id = "V1-EFFECT-availability-function-type"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A valid function type with a nonempty effect row is unavailable in M2."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [34, 78]

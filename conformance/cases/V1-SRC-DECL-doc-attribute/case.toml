@@ -1,0 +1,11 @@
+id = "V1-SRC-DECL-doc-attribute"
+rule = "V1-SRC-DECL"
+profile = "static-v1"
+operation = "type-check"
+description = "A declaration documentation attribute is accepted and preserved as source metadata."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

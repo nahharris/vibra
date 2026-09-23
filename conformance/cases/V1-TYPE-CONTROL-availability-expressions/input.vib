@@ -1,0 +1,6 @@
+(defn branch (value bool) i32
+  (match value true 1i32 false 0i32))
+(defn ascription () i32
+  (as i32 1i32))
+(defn propagate () i32
+  (try 1i32))
