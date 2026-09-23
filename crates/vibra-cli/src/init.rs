@@ -149,10 +149,16 @@ pub fn plan_init(
 pub fn apply_init(plan: &InitPlan) -> Result<(), InitError> {
     let stage = create_stage(plan)?;
     let result = install_stage(plan, &stage);
-    if result.is_err() {
-        cleanup_stage(&stage, plan);
+    let cleanup = cleanup_stage(stage, plan);
+    match (result, cleanup) {
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(error), Err(cleanup_error)) => {
+            Err(InitError::OperationalFailure(format!(
+                "{error}; initialization staging cleanup also failed: {cleanup_error}"
+            )))
+        }
+        (Ok(()), Ok(())) => Ok(()),
     }
-    result
 }
 
 fn normalize_destination(destination: Option<&Path>) -> Result<PathBuf, InitError> {
@@ -305,19 +311,10 @@ fn validate_generated_documents(
 
 fn destination_parent(plan: &InitPlan) -> Result<(ConfinedDir, OsString), InitError> {
     if plan.relative_destination.as_os_str().is_empty() {
-        let parent_path = plan.workspace_root.parent().ok_or_else(|| {
-            InitError::InvalidInput("workspace root has no parent directory".to_owned())
-        })?;
-        let name = plan.workspace_root.file_name().ok_or_else(|| {
-            InitError::InvalidInput("workspace root has no directory name".to_owned())
-        })?;
-        return ConfinedDir::open(parent_path)
-            .map(|parent| (parent, OsString::from(name)))
-            .map_err(|error| {
-                InitError::InvalidInput(format!(
-                    "cannot safely open workspace parent: {error}"
-                ))
-            });
+        return Err(InitError::OperationalFailure(
+            "workspace-root initialization must use the confined workspace handle"
+                .to_owned(),
+        ));
     }
     let root = ConfinedDir::open(&plan.workspace_root).map_err(|error| {
         InitError::InvalidInput(format!("cannot safely reopen workspace: {error}"))
@@ -336,7 +333,15 @@ fn destination_parent(plan: &InitPlan) -> Result<(ConfinedDir, OsString), InitEr
 }
 
 fn create_stage(plan: &InitPlan) -> Result<InitStage, InitError> {
-    let (parent, _) = destination_parent(plan)?;
+    let parent = if plan.relative_destination.as_os_str().is_empty() {
+        ConfinedDir::open(&plan.workspace_root).map_err(|error| {
+            InitError::InvalidInput(format!(
+                "cannot safely open workspace for initialization staging: {error}"
+            ))
+        })?
+    } else {
+        destination_parent(plan)?.0
+    };
     for _ in 0..32 {
         let nonce = NEXT_STAGE.fetch_add(1, Ordering::Relaxed);
         let name =
@@ -358,7 +363,11 @@ fn create_stage(plan: &InitPlan) -> Result<InitStage, InitError> {
                     directory,
                 };
                 if let Err(error) = populate_stage(plan, &stage.directory) {
-                    cleanup_stage(&stage, plan);
+                    if let Err(cleanup_error) = cleanup_stage(stage, plan) {
+                        return Err(InitError::OperationalFailure(format!(
+                            "{error}; initialization staging cleanup also failed: {cleanup_error}"
+                        )));
+                    }
                     return Err(error);
                 }
                 return Ok(stage);
@@ -474,6 +483,15 @@ fn install_stage_with_hook(
     stage: &InitStage,
     before_publish: impl FnOnce() -> Result<(), InitError>,
 ) -> Result<(), InitError> {
+    install_stage_with_creation_hook(plan, stage, before_publish, |_| Ok(()))
+}
+
+fn install_stage_with_creation_hook(
+    plan: &InitPlan,
+    stage: &InitStage,
+    before_publish: impl FnOnce() -> Result<(), InitError>,
+    mut after_create: impl FnMut(usize) -> Result<(), InitError>,
+) -> Result<(), InitError> {
     if !stage
         .parent
         .is_same_directory(&stage.name, &stage.directory)
@@ -487,6 +505,22 @@ fn install_stage_with_hook(
             "initialization staging path changed before installation".to_owned(),
         ));
     }
+
+    if plan.relative_destination.as_os_str().is_empty() {
+        if !stage.parent.is_empty_except(&stage.name).map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot recheck the current workspace before initialization: {error}"
+            ))
+        })? {
+            return Err(InitError::InvalidInput(format!(
+                "project destination became nonempty after planning: {}",
+                plan.destination.display()
+            )));
+        }
+        before_publish()?;
+        return publish_staged_tree(plan, &stage.parent, &mut after_create);
+    }
+
     let (destination_parent, destination_name) = destination_parent(plan)?;
     if !stage.parent.same_as(&destination_parent).map_err(|error| {
         InitError::OperationalFailure(format!(
@@ -498,77 +532,53 @@ fn install_stage_with_hook(
         ));
     }
     recheck_destination(plan, &destination_parent, &destination_name)?;
-    if plan.expected_state == DestinationState::Absent {
-        stage
-            .parent
-            .rename_noreplace_to(&stage.name, &destination_parent, &destination_name)
+    before_publish()?;
+
+    let created_destination = plan.expected_state == DestinationState::Absent;
+    if created_destination {
+        destination_parent
+            .create_dir(&destination_name)
             .map_err(|error| {
                 InitError::InvalidInput(format!(
                     "project destination became unavailable or conflicting: {error}"
                 ))
             })?;
-        return Ok(());
     }
-
-    let backup_name = OsString::from(format!(
-        ".vibra-init-backup-{}-{}.tmp",
-        std::process::id(),
-        NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-    ));
-    destination_parent
-        .rename_noreplace_to(&destination_name, &destination_parent, &backup_name)
-        .map_err(|error| {
-            InitError::InvalidInput(format!(
-                "project destination changed before atomic install: {error}"
-            ))
-        })?;
-
-    let backup_is_empty = destination_parent
-        .open_dir(&backup_name)
-        .and_then(|backup| backup.is_empty())
-        .map_err(|error| {
-            InitError::OperationalFailure(format!(
-                "cannot validate moved project destination: {error}"
-            ))
-        })?;
-    if !backup_is_empty {
-        restore_backup(&destination_parent, &backup_name, &destination_name)?;
+    let destination = match destination_parent.open_dir(&destination_name) {
+        Ok(destination) => destination,
+        Err(error) => {
+            return Err(InitError::OperationalFailure(format!(
+                "cannot safely open project destination for initialization: {error}"
+            )));
+        }
+    };
+    let destination_is_empty = match destination.is_empty() {
+        Ok(is_empty) => is_empty,
+        Err(error) => {
+            return Err(InitError::OperationalFailure(format!(
+                "cannot verify project destination before publication: {error}"
+            )));
+        }
+    };
+    if !destination_is_empty {
         return Err(InitError::InvalidInput(
             "project destination became nonempty after planning".to_owned(),
         ));
     }
-    if let Err(error) = before_publish() {
-        restore_backup(&destination_parent, &backup_name, &destination_name)?;
-        return Err(error);
-    }
-    if let Err(error) = stage.parent.rename_noreplace_to(
-        &stage.name,
-        &destination_parent,
-        &destination_name,
-    ) {
-        restore_backup(&destination_parent, &backup_name, &destination_name)?;
-        return Err(InitError::OperationalFailure(format!(
-            "cannot publish staged project tree: {error}"
-        )));
-    }
-    destination_parent
-        .remove_dir(&backup_name)
-        .map_err(|error| InitError::OperationalFailure(format!(
-            "project initialized, but the empty destination backup could not be removed: {error}"
-        )))?;
-    Ok(())
-}
 
-fn restore_backup(
-    parent: &ConfinedDir,
-    backup_name: &OsStr,
-    destination_name: &OsStr,
-) -> Result<(), InitError> {
-    parent
-        .rename_noreplace_to(backup_name, parent, destination_name)
-        .map_err(|error| InitError::OperationalFailure(format!(
-            "cannot restore the original empty destination after failed project installation: {error}"
-        )))
+    match publish_staged_tree(plan, &destination, &mut after_create) {
+        Ok(()) => Ok(()),
+        Err(error) if !created_destination => Err(error),
+        Err(error) => {
+            drop(destination);
+            match destination_parent.remove_dir(&destination_name) {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => Err(InitError::OperationalFailure(format!(
+                    "{error}; empty project destination rollback failed: {cleanup_error}"
+                ))),
+            }
+        }
+    }
 }
 
 fn recheck_destination(
@@ -605,23 +615,228 @@ fn recheck_destination(
     }
 }
 
-fn cleanup_stage(stage: &InitStage, plan: &InitPlan) {
-    if let Ok(src) = stage.directory.open_dir("src") {
-        if let Ok(package) = src.open_dir(&plan.package_name) {
-            let _ = package.remove_file(OsStr::new("main.vib"));
+fn publish_staged_tree(
+    plan: &InitPlan,
+    destination: &ConfinedDir,
+    after_create: &mut impl FnMut(usize) -> Result<(), InitError>,
+) -> Result<(), InitError> {
+    let mut journal = PublishJournal::default();
+    let publish = (|| {
+        destination
+            .write_new_file(
+                OsStr::new("project.vibon"),
+                plan.project_text.as_bytes(),
+                None,
+            )
+            .map_err(|error| {
+                InitError::OperationalFailure(format!(
+                    "cannot publish project manifest: {error}"
+                ))
+            })?;
+        journal.project_file = true;
+        after_create(0)?;
+
+        destination.create_dir(OsStr::new("src")).map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot publish project source root: {error}"
+            ))
+        })?;
+        journal.source_root = true;
+        after_create(1)?;
+
+        let source_root = destination.open_dir("src").map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot open published project source root: {error}"
+            ))
+        })?;
+        source_root
+            .create_dir(OsStr::new(&plan.package_name))
+            .map_err(|error| {
+                InitError::OperationalFailure(format!(
+                    "cannot publish package source directory: {error}"
+                ))
+            })?;
+        journal.package_root = true;
+        after_create(2)?;
+
+        let package = source_root.open_dir(&plan.package_name).map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot open published package source directory: {error}"
+            ))
+        })?;
+        package
+            .write_new_file(OsStr::new("main.vib"), plan.source_text.as_bytes(), None)
+            .map_err(|error| {
+                InitError::OperationalFailure(format!(
+                    "cannot publish project entry source: {error}"
+                ))
+            })?;
+        journal.entry_source = true;
+        drop(package);
+        drop(source_root);
+        after_create(3)?;
+
+        destination
+            .create_dir(OsStr::new("tests"))
+            .map_err(|error| {
+                InitError::OperationalFailure(format!(
+                    "cannot publish project tests directory: {error}"
+                ))
+            })?;
+        journal.tests_root = true;
+        after_create(4)
+    })();
+
+    match publish {
+        Ok(()) => Ok(()),
+        Err(error) => match rollback_published_tree(destination, plan, &journal) {
+            Ok(()) => Err(error),
+            Err(rollback_error) => Err(InitError::OperationalFailure(format!(
+                "{error}; published project rollback failed: {rollback_error}"
+            ))),
+        },
+    }
+}
+
+#[derive(Default)]
+struct PublishJournal {
+    project_file: bool,
+    source_root: bool,
+    package_root: bool,
+    entry_source: bool,
+    tests_root: bool,
+}
+
+fn rollback_published_tree(
+    destination: &ConfinedDir,
+    plan: &InitPlan,
+    journal: &PublishJournal,
+) -> Result<(), InitError> {
+    if journal.tests_root {
+        remove_staged_dir(destination, OsStr::new("tests"))?;
+    }
+    if journal.entry_source {
+        let source_root = destination.open_dir("src").map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot reopen project source root during rollback: {error}"
+            ))
+        })?;
+        let package = source_root.open_dir(&plan.package_name).map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot reopen package source directory during rollback: {error}"
+            ))
+        })?;
+        remove_staged_file(&package, OsStr::new("main.vib"))?;
+    }
+    if journal.package_root {
+        let source_root = destination.open_dir("src").map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot reopen project source root during rollback: {error}"
+            ))
+        })?;
+        remove_staged_dir(&source_root, OsStr::new(&plan.package_name))?;
+    }
+    if journal.source_root {
+        remove_staged_dir(destination, OsStr::new("src"))?;
+    }
+    if journal.project_file {
+        remove_staged_file(destination, OsStr::new("project.vibon"))?;
+    }
+    Ok(())
+}
+
+fn cleanup_stage(stage: InitStage, plan: &InitPlan) -> Result<(), InitError> {
+    let InitStage {
+        parent,
+        name,
+        directory,
+    } = stage;
+    let same_stage = parent
+        .is_same_directory(&name, &directory)
+        .map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot verify initialization staging directory during cleanup: {error}"
+            ))
+        })?;
+    if !same_stage {
+        return Err(InitError::InvalidInput(
+            "initialization staging path changed before cleanup".to_owned(),
+        ));
+    }
+
+    match directory.open_dir("src") {
+        Ok(source_root) => {
+            match source_root.open_dir(&plan.package_name) {
+                Ok(package) => {
+                    remove_file_if_present(&package, OsStr::new("main.vib"))?;
+                    drop(package);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(InitError::OperationalFailure(format!(
+                        "cannot open staged package directory during cleanup: {error}"
+                    )));
+                }
+            }
+            remove_dir_if_present(&source_root, OsStr::new(&plan.package_name))?;
+            drop(source_root);
+            remove_dir_if_present(&directory, OsStr::new("src"))?;
         }
-        let _ = src.remove_dir(OsStr::new(&plan.package_name));
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(InitError::OperationalFailure(format!(
+                "cannot open staged source root during cleanup: {error}"
+            )));
+        }
     }
-    let _ = stage.directory.remove_dir(OsStr::new("src"));
-    let _ = stage.directory.remove_dir(OsStr::new("tests"));
-    let _ = stage.directory.remove_file(OsStr::new("project.vibon"));
-    if stage
-        .parent
-        .is_same_directory(&stage.name, &stage.directory)
-        .unwrap_or(false)
-    {
-        let _ = stage.parent.remove_dir(&stage.name);
+    remove_dir_if_present(&directory, OsStr::new("tests"))?;
+    remove_file_if_present(&directory, OsStr::new("project.vibon"))?;
+    drop(directory);
+    parent.remove_dir(&name).map_err(|error| {
+        InitError::OperationalFailure(format!(
+            "cannot remove initialization staging directory: {error}"
+        ))
+    })
+}
+
+fn remove_file_if_present(parent: &ConfinedDir, name: &OsStr) -> Result<(), InitError> {
+    match parent.remove_file(name) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(InitError::OperationalFailure(format!(
+            "cannot remove staged file {}: {error}",
+            parent.path().join(name).display()
+        ))),
     }
+}
+
+fn remove_dir_if_present(parent: &ConfinedDir, name: &OsStr) -> Result<(), InitError> {
+    match parent.remove_dir(name) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(InitError::OperationalFailure(format!(
+            "cannot remove staged directory {}: {error}",
+            parent.path().join(name).display()
+        ))),
+    }
+}
+
+fn remove_staged_file(parent: &ConfinedDir, name: &OsStr) -> Result<(), InitError> {
+    parent.remove_file(name).map_err(|error| {
+        InitError::OperationalFailure(format!(
+            "cannot remove published file {} during rollback: {error}",
+            parent.path().join(name).display()
+        ))
+    })
+}
+
+fn remove_staged_dir(parent: &ConfinedDir, name: &OsStr) -> Result<(), InitError> {
+    parent.remove_dir(name).map_err(|error| {
+        InitError::OperationalFailure(format!(
+            "cannot remove published directory {} during rollback: {error}",
+            parent.path().join(name).display()
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -633,8 +848,8 @@ fn cleanup_stage(stage: &InitStage, plan: &InitPlan) {
 )]
 mod tests {
     use super::{
-        InitError, apply_init, cleanup_stage, create_stage, install_stage_with_hook,
-        plan_init,
+        InitError, apply_init, cleanup_stage, create_stage,
+        install_stage_with_creation_hook, install_stage_with_hook, plan_init,
     };
     use std::fs;
     use std::path::Path;
@@ -674,10 +889,8 @@ mod tests {
                 "injected pre-publish failure".to_owned(),
             ))
         });
-        if result.is_err() {
-            cleanup_stage(&stage, &plan);
-        }
         let error = result.expect_err("injected install failure is reported");
+        cleanup_stage(stage, &plan).expect("remove the failed staging tree");
 
         assert!(matches!(error, InitError::OperationalFailure(_)));
         assert_eq!(
@@ -695,12 +908,89 @@ mod tests {
     }
 
     #[test]
+    fn partial_current_root_publication_rolls_back_created_entries() {
+        let root = TempWorkspace::new();
+        let original_root = root.0.canonicalize().expect("canonical workspace root");
+        let plan = plan_init(&root.0, None)
+            .expect("plan initialization into the current empty workspace");
+        let stage = create_stage(&plan).expect("prepare initialization staging tree");
+
+        let result = install_stage_with_creation_hook(
+            &plan,
+            &stage,
+            || Ok(()),
+            |index| {
+                if index == 0 {
+                    Err(InitError::OperationalFailure(
+                        "injected failure after first published entry".to_owned(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        cleanup_stage(stage, &plan).expect("remove staged files after rollback");
+
+        assert!(matches!(result, Err(InitError::OperationalFailure(_))));
+        assert_eq!(
+            root.0
+                .canonicalize()
+                .expect("workspace root remains in place"),
+            original_root
+        );
+        assert_eq!(
+            fs::read_dir(&root.0)
+                .expect("read rolled-back workspace")
+                .count(),
+            0,
+            "partial publication is fully removed"
+        );
+    }
+
+    #[test]
+    fn partial_absent_destination_publication_removes_the_new_directory() {
+        let root = TempWorkspace::new();
+        let destination = root.0.join("demo");
+        let plan = plan_init(&root.0, Some(Path::new("demo")))
+            .expect("plan initialization into an absent destination");
+        let stage = create_stage(&plan).expect("prepare initialization staging tree");
+
+        let result = install_stage_with_creation_hook(
+            &plan,
+            &stage,
+            || Ok(()),
+            |index| {
+                if index == 0 {
+                    Err(InitError::OperationalFailure(
+                        "injected failure after first published entry".to_owned(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        cleanup_stage(stage, &plan).expect("remove staged files after rollback");
+
+        assert!(matches!(result, Err(InitError::OperationalFailure(_))));
+        assert!(
+            !destination.exists(),
+            "failed publication removes its new root"
+        );
+        assert_eq!(
+            fs::read_dir(&root.0)
+                .expect("read workspace after rollback")
+                .count(),
+            0
+        );
+    }
+
+    #[test]
     fn apply_init_wrapper_still_installs_a_prepared_project() {
         let root = TempWorkspace::new();
         let plan = plan_init(&root.0, Some(Path::new("demo")))
             .expect("plan initialization into an absent destination");
 
-        apply_init(&plan).expect("install staged project atomically");
+        apply_init(&plan).expect("publish staged project with rollback on failure");
 
         assert!(root.0.join("demo/project.vibon").is_file());
         assert!(root.0.join("demo/src/demo/main.vib").is_file());

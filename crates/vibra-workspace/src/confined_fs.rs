@@ -335,22 +335,44 @@ impl ConfinedDir {
 
     /// Reports whether the directory represented by this handle is empty.
     pub fn is_empty(&self) -> io::Result<bool> {
+        self.is_empty_except_name(None)
+    }
+
+    /// Reports whether the directory is empty apart from one named child.
+    pub fn is_empty_except(&self, name: &OsStr) -> io::Result<bool> {
+        validate_name(name)?;
+        self.is_empty_except_name(Some(name))
+    }
+
+    fn is_empty_except_name(&self, allowed: Option<&OsStr>) -> io::Result<bool> {
         #[cfg(unix)]
         {
             let entries =
                 rustix::fs::Dir::read_from(&self.handle).map_err(to_io_error)?;
-            Ok(entries
-                .filter_map(Result::ok)
-                .all(|entry| entry.file_name() == "." || entry.file_name() == ".."))
+            entries_are_empty(entries.map(|entry| {
+                entry.map(|entry| {
+                    let name = entry.file_name();
+                    name == "."
+                        || name == ".."
+                        || allowed.is_some_and(|allowed| name == allowed)
+                })
+            }))
         }
         #[cfg(windows)]
         {
-            let mut entries = fs::read_dir(&self.path)?;
-            Ok(entries.next().is_none())
+            entries_are_empty(fs::read_dir(&self.path)?.map(|entry| {
+                entry.map(|entry| {
+                    allowed.is_some_and(|allowed| entry.file_name() == allowed)
+                })
+            }))
         }
         #[cfg(not(any(unix, windows)))]
         {
-            Ok(fs::read_dir(&self.path)?.next().is_none())
+            entries_are_empty(fs::read_dir(&self.path)?.map(|entry| {
+                entry.map(|entry| {
+                    allowed.is_some_and(|allowed| entry.file_name() == allowed)
+                })
+            }))
         }
     }
 
@@ -551,6 +573,19 @@ fn validate_name(name: &OsStr) -> io::Result<()> {
     }
 }
 
+fn entries_are_empty<I, E>(entries: I) -> io::Result<bool>
+where
+    I: IntoIterator<Item = Result<bool, E>>,
+    E: std::fmt::Display,
+{
+    for entry in entries {
+        if !entry.map_err(|error| io::Error::other(error.to_string()))? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 #[cfg(unix)]
 fn to_io_error(error: rustix::io::Errno) -> io::Error {
     io::Error::from_raw_os_error(error.raw_os_error())
@@ -597,13 +632,24 @@ mod tests {
         clippy::unwrap_used
     )]
 
-    use super::ConfinedDir;
+    use super::{ConfinedDir, entries_are_empty};
     use std::ffi::OsStr;
     use std::fs;
     use std::io::{self, Write};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn empty_directory_check_propagates_entry_read_failures() {
+        let entries = [Ok(true), Err("injected directory read error")];
+
+        let error =
+            entries_are_empty(entries).expect_err("read errors must not look empty");
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(error.to_string().contains("injected directory read error"));
+    }
 
     struct TempDir(std::path::PathBuf);
 

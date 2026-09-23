@@ -51,6 +51,32 @@ fn run(args: &[&str]) -> Output {
         .expect("run the built vibra binary")
 }
 
+fn run_in(args: &[&str], current_dir: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_vibra"))
+        .current_dir(current_dir)
+        .args(args)
+        .output()
+        .expect("run the built vibra binary in the requested directory")
+}
+
+#[cfg(unix)]
+fn directory_identity(path: &Path) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = fs::metadata(path).expect("read workspace directory identity");
+    (metadata.dev(), metadata.ino())
+}
+
+#[cfg(windows)]
+fn directory_identity(path: &Path) -> same_file::Handle {
+    same_file::Handle::from_path(path).expect("open workspace directory identity")
+}
+
+#[cfg(not(any(unix, windows)))]
+fn directory_identity(path: &Path) -> PathBuf {
+    path.canonicalize().expect("canonical workspace directory")
+}
+
 fn json(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).expect("stdout is one JSON document")
 }
@@ -145,6 +171,54 @@ fn init_accepts_an_empty_workspace_relative_destination() {
     assert!(destination.join("project.vibon").is_file());
     assert!(destination.join("src/hello-app/main.vib").is_file());
     assert!(destination.join("tests").is_dir());
+}
+
+#[test]
+fn default_init_populates_the_empty_current_directory_without_replacing_it() {
+    let root = TempDir::new("init-current-dir");
+    let workspace_path = root.path().join("workspace");
+    fs::create_dir(&workspace_path).expect("create empty current directory");
+    let original_root = workspace_path.canonicalize().expect("canonical workspace");
+    let original_identity = directory_identity(&workspace_path);
+
+    let output = run_in(&["--format", "json", "project", "init"], &workspace_path);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.ok");
+    assert_eq!(
+        envelope["payload"]["workspace"].as_str(),
+        original_root.to_str()
+    );
+    assert_eq!(
+        workspace_path
+            .canonicalize()
+            .expect("workspace remains present"),
+        original_root,
+        "initialization preserves the current-directory root"
+    );
+    assert_eq!(
+        directory_identity(&workspace_path),
+        original_identity,
+        "initialization preserves the workspace directory identity"
+    );
+    assert!(workspace_path.join("project.vibon").is_file());
+    assert!(workspace_path.join("src/workspace/main.vib").is_file());
+    assert!(workspace_path.join("tests").is_dir());
+    assert_eq!(
+        fs::read_dir(&workspace_path)
+            .expect("read initialized workspace")
+            .count(),
+        3,
+        "successful init removes its in-workspace staging directory"
+    );
 }
 
 #[test]

@@ -90,6 +90,7 @@ pub struct FormatPlan {
     diagnostics: Vec<Diagnostic>,
     mode: DocumentMode,
     source_was_checked: bool,
+    snapshot_bindings_authorized: bool,
 }
 
 impl FormatPlan {
@@ -198,9 +199,10 @@ pub fn plan_format(
     let source_was_checked = source_check
         .as_ref()
         .is_some_and(|checked| checked.accepted());
+    let snapshot_bindings_authorized = snapshot_document.is_some();
     let bindings = source_check
         .as_ref()
-        .filter(|checked| checked.accepted() && snapshot_document.is_some())
+        .filter(|checked| checked.accepted() && snapshot_bindings_authorized)
         .map_or(&[][..], |checked| checked.application_bindings());
     let formatted = format_source_with_bindings(&relative_path, text, bindings)
         .map_err(|error| FormatPlanError::Format(error.to_string()))?;
@@ -227,6 +229,7 @@ pub fn plan_format(
         formatted.text(),
         mode,
         source_was_checked,
+        snapshot_bindings_authorized,
         false,
     )?;
 
@@ -245,6 +248,7 @@ pub fn plan_format(
         diagnostics,
         mode,
         source_was_checked,
+        snapshot_bindings_authorized,
     })
 }
 
@@ -287,6 +291,7 @@ pub fn apply_format(plan: &FormatPlan) -> Result<(), FormatPlanError> {
         &plan.formatted_text,
         plan.mode,
         plan.source_was_checked,
+        plan.snapshot_bindings_authorized,
         true,
     )?;
 
@@ -471,6 +476,7 @@ fn validate_postcondition(
     formatted: &str,
     mode: DocumentMode,
     source_was_checked: bool,
+    snapshot_bindings_authorized: bool,
     require_accepted_source: bool,
 ) -> Result<(), FormatPlanError> {
     let original_document = parse_by_mode(path, original, mode)?;
@@ -501,7 +507,7 @@ fn validate_postcondition(
     }
     let bindings = checked
         .as_ref()
-        .filter(|value| value.accepted())
+        .filter(|value| value.accepted() && snapshot_bindings_authorized)
         .map_or(&[][..], |value| value.application_bindings());
     let idempotent = format_source_with_bindings(path, formatted, bindings)
         .map_err(|error| FormatPlanError::Postcondition(error.to_string()))?;

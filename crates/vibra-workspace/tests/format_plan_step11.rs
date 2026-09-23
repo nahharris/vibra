@@ -122,6 +122,25 @@ fn plan_uses_snapshot_binding_facts_and_apply_writes_the_canonical_result() {
 }
 
 #[test]
+fn untracked_source_keeps_label_order_without_snapshot_binding_facts() {
+    let root = TempDir::project("untracked-binding", "(defn main () void (do))\n");
+    let untracked = root.path().join("untracked.vib");
+    let source = "(defn answer () i32 (let f choose (f 3i32 second: 11i32 first: 9i32)))\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n";
+    fs::write(&untracked, source).expect("write accepted untracked source");
+
+    let plan = plan_format(root.path(), Path::new("untracked.vib"))
+        .expect("preview accepted untracked source without snapshot binding facts");
+
+    assert!(plan.changed());
+    assert!(
+        plan.formatted_text()
+            .contains("(f 3i32 second: 11i32 first: 9i32)"),
+        "untracked source must preserve labelled argument order; got:\n{}",
+        plan.formatted_text()
+    );
+}
+
+#[test]
 fn stale_plan_is_refused_without_overwriting_the_newer_bytes() {
     let root = TempDir::project("stale", "(defn main () void (do))\n");
     let plan = plan_format(root.path(), Path::new("src/hello/main.vib"))

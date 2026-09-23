@@ -25,6 +25,7 @@ path = "src/main.rs"
 
 [dev-dependencies]
 jsonschema.workspace = true
+same-file = "1.0.6"
 
 [lints]
 workspace = true
