@@ -1,7 +1,9 @@
 //! Directory-handle operations for confined workspace mutations.
 
 use std::ffi::OsStr;
-use std::fs::{self, File, OpenOptions, Permissions};
+#[cfg(not(unix))]
+use std::fs::{self, OpenOptions};
+use std::fs::{File, Permissions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -347,14 +349,16 @@ impl ConfinedDir {
     fn is_empty_except_name(&self, allowed: Option<&OsStr>) -> io::Result<bool> {
         #[cfg(unix)]
         {
+            use std::os::unix::ffi::OsStrExt;
+
             let entries =
                 rustix::fs::Dir::read_from(&self.handle).map_err(to_io_error)?;
             entries_are_empty(entries.map(|entry| {
                 entry.map(|entry| {
-                    let name = entry.file_name();
-                    name == "."
-                        || name == ".."
-                        || allowed.is_some_and(|allowed| name == allowed)
+                    let name = entry.file_name().to_bytes();
+                    name == b"."
+                        || name == b".."
+                        || allowed.is_some_and(|allowed| name == allowed.as_bytes())
                 })
             }))
         }

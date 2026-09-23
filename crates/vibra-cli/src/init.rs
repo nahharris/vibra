@@ -974,7 +974,7 @@ mod tests {
             let path = std::env::temp_dir()
                 .join(format!("vibra-init-unit-{}-{nonce}", std::process::id()));
             fs::create_dir_all(&path).expect("create workspace");
-            Self(path)
+            Self(fs::canonicalize(path).expect("canonicalize workspace"))
         }
     }
 
