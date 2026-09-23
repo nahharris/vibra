@@ -1,9 +1,9 @@
 # Vibra v1 CLI, MCP, and code tooling
 
 Status: normative target
-Implementation status: Milestone 1 step 10 provides the structural
-source-position query library and schema adapter; CLI and MCP surfaces remain
-unimplemented.
+Implementation status: M2 provides `project init`, `fmt`, `check`, `run`, and
+`test` through the shared workspace engine. MCP and the remaining v1 tooling
+commands remain unavailable.
 
 ## One workspace engine
 

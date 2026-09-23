@@ -1,7 +1,9 @@
 # Vibra v1 runtime and WebAssembly
 
 Status: normative target
-Implementation status: not started
+Implementation status: M2 executes successfully checked IR for its supported
+pure subset, including tail calls and isolated tests. WebAssembly and complete
+v1 interpreter parity remain unimplemented.
 
 ## Semantic reference
 

@@ -1,7 +1,10 @@
 # Vibra v1 programs and packages
 
 Status: normative target
-Implementation status: milestone 1 steps 7 and 10 complete for generic VIBON grammar, canonical data, and structural query metadata; project schemas and resolution remain later work
+Implementation status: M1 supplies generic VIBON data and structural query
+metadata; M2 decodes projects, resolves local modules, and supports init,
+check, run, and test for its pure subset. Ordinary dependency delivery remains
+deferred.
 
 ## VIBON data documents
 

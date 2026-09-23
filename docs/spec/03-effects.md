@@ -1,7 +1,8 @@
 # Vibra v1 effects
 
 Status: normative target
-Implementation status: not started
+Implementation status: M2 admits empty effect ceilings and pure execution;
+nonempty effect checking and host operations remain unimplemented.
 
 ## Static contract
 

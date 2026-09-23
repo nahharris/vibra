@@ -1,7 +1,9 @@
 # Vibra v1 diagnostics and conformance
 
 Status: normative target
-Implementation status: milestone 1 step 10 complete (declaration/type/expression diagnostics, structural query snapshots, and reader-v1 corpus); the executable milestone exit gate is recorded by Step 11
+Implementation status: M1 reader diagnostics and M2 static, interpreter, and
+tooling observations have conformance coverage. The M2 exit evidence and exact
+profile counts are recorded in Step 14.
 
 ## Diagnostics are a language surface
 

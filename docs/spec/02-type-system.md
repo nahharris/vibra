@@ -1,7 +1,9 @@
 # Vibra v1 type system
 
 Status: normative target
-Implementation status: milestone 1 step 9 complete for written declaration, type, expression, and pattern structure; resolution and checking remain later work
+Implementation status: M2 resolves and checks the documented primitive,
+binding, fixed and labelled call, and monomorphic empty-effect function subset.
+Nominal/generic types and exhaustive matching remain deferred.
 
 ## Model
 

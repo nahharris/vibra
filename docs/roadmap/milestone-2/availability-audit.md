@@ -94,5 +94,5 @@ IDs; the nominal-name observation in the deferred matrix does not make
 signature is monomorphic, nonvariadic, and has an empty effect row. `@compiler`
 externals remain tied to the verified bootstrap and closed registry. The M1
 reader example inventory at `docs/roadmap/milestone-1/syntax-examples.tsv` was
-mechanically refreshed for the tooling-prose addition; its semantic
-classifications and coverage remain unchanged.
+mechanically refreshed for the implementation-status and tooling-prose
+updates; its classifications and reader-example coverage remain unchanged.
