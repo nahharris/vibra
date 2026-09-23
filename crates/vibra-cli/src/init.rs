@@ -507,7 +507,22 @@ fn install_stage_with_creation_hook(
     }
 
     if plan.relative_destination.as_os_str().is_empty() {
-        if !stage.parent.is_empty_except(&stage.name).map_err(|error| {
+        before_publish()?;
+        let destination = ConfinedDir::open(&plan.workspace_root).map_err(|error| {
+            InitError::InvalidInput(format!(
+                "cannot safely reopen workspace before initialization: {error}"
+            ))
+        })?;
+        if !destination.same_as(&stage.parent).map_err(|error| {
+            InitError::OperationalFailure(format!(
+                "cannot verify the current workspace identity: {error}"
+            ))
+        })? {
+            return Err(InitError::InvalidInput(
+                "workspace root changed after initialization planning".to_owned(),
+            ));
+        }
+        if !destination.is_empty_except(&stage.name).map_err(|error| {
             InitError::OperationalFailure(format!(
                 "cannot recheck the current workspace before initialization: {error}"
             ))
@@ -517,8 +532,7 @@ fn install_stage_with_creation_hook(
                 plan.destination.display()
             )));
         }
-        before_publish()?;
-        return publish_staged_tree(plan, &stage.parent, &mut after_create);
+        return publish_staged_tree(plan, &destination, &mut after_create);
     }
 
     let (destination_parent, destination_name) = destination_parent(plan)?;
@@ -544,27 +558,13 @@ fn install_stage_with_creation_hook(
                 ))
             })?;
     }
-    let destination = match destination_parent.open_dir(&destination_name) {
-        Ok(destination) => destination,
-        Err(error) => {
-            return Err(InitError::OperationalFailure(format!(
-                "cannot safely open project destination for initialization: {error}"
-            )));
-        }
-    };
-    let destination_is_empty = match destination.is_empty() {
-        Ok(is_empty) => is_empty,
-        Err(error) => {
-            return Err(InitError::OperationalFailure(format!(
-                "cannot verify project destination before publication: {error}"
-            )));
-        }
-    };
-    if !destination_is_empty {
-        return Err(InitError::InvalidInput(
-            "project destination became nonempty after planning".to_owned(),
-        ));
-    }
+    let destination = open_created_destination(
+        &destination_parent,
+        &destination_name,
+        created_destination,
+        |parent, name| parent.open_dir(name),
+        |directory| directory.is_empty(),
+    )?;
 
     match publish_staged_tree(plan, &destination, &mut after_create) {
         Ok(()) => Ok(()),
@@ -612,6 +612,89 @@ fn recheck_destination(
         (_, Err(error)) => Err(InitError::InvalidInput(format!(
             "project destination changed after planning: {error}"
         ))),
+    }
+}
+
+fn open_created_destination(
+    parent: &ConfinedDir,
+    name: &OsStr,
+    created_destination: bool,
+    open: impl FnOnce(&ConfinedDir, &OsStr) -> std::io::Result<ConfinedDir>,
+    is_empty: impl FnOnce(&ConfinedDir) -> std::io::Result<bool>,
+) -> Result<ConfinedDir, InitError> {
+    let destination = match open(parent, name) {
+        Ok(destination) => destination,
+        Err(error) => {
+            let failure = InitError::OperationalFailure(format!(
+                "cannot safely open project destination for initialization: {error}"
+            ));
+            return rollback_new_empty_destination(
+                parent,
+                name,
+                created_destination,
+                failure,
+            );
+        }
+    };
+    let destination_is_empty = match is_empty(&destination) {
+        Ok(is_empty) => is_empty,
+        Err(error) => {
+            drop(destination);
+            let failure = InitError::OperationalFailure(format!(
+                "cannot verify project destination before publication: {error}"
+            ));
+            return rollback_new_empty_destination(
+                parent,
+                name,
+                created_destination,
+                failure,
+            );
+        }
+    };
+    if !destination_is_empty {
+        return Err(InitError::InvalidInput(
+            "project destination became nonempty after planning".to_owned(),
+        ));
+    }
+    Ok(destination)
+}
+
+fn rollback_new_empty_destination(
+    parent: &ConfinedDir,
+    name: &OsStr,
+    created_destination: bool,
+    failure: InitError,
+) -> Result<ConfinedDir, InitError> {
+    if !created_destination {
+        return Err(failure);
+    }
+    match remove_destination_if_empty(parent, name) {
+        Ok(()) => Err(failure),
+        Err(cleanup_error) => Err(InitError::OperationalFailure(format!(
+            "{failure}; cannot clean up the new empty project destination: {cleanup_error}"
+        ))),
+    }
+}
+
+fn remove_destination_if_empty(
+    parent: &ConfinedDir,
+    name: &OsStr,
+) -> std::io::Result<()> {
+    let destination = match parent.open_dir(name) {
+        Ok(destination) => destination,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let is_empty = destination.is_empty();
+    drop(destination);
+    match is_empty {
+        Ok(false) => Ok(()),
+        Ok(true) => match parent.remove_dir(name) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
     }
 }
 
@@ -751,6 +834,17 @@ fn cleanup_stage(stage: InitStage, plan: &InitPlan) -> Result<(), InitError> {
         name,
         directory,
     } = stage;
+    let expected_parent = stage_parent(plan)?;
+    if !parent.same_as(&expected_parent).map_err(|error| {
+        InitError::OperationalFailure(format!(
+            "cannot verify initialization stage parent during cleanup: {error}"
+        ))
+    })? {
+        return Err(InitError::InvalidInput(
+            "initialization stage parent moved outside the current workspace"
+                .to_owned(),
+        ));
+    }
     let same_stage = parent
         .is_same_directory(&name, &directory)
         .map_err(|error| {
@@ -797,6 +891,18 @@ fn cleanup_stage(stage: InitStage, plan: &InitPlan) -> Result<(), InitError> {
             "cannot remove initialization staging directory: {error}"
         ))
     })
+}
+
+fn stage_parent(plan: &InitPlan) -> Result<ConfinedDir, InitError> {
+    if plan.relative_destination.as_os_str().is_empty() {
+        ConfinedDir::open(&plan.workspace_root).map_err(|error| {
+            InitError::InvalidInput(format!(
+                "cannot safely reopen workspace before stage cleanup: {error}"
+            ))
+        })
+    } else {
+        destination_parent(plan).map(|(parent, _)| parent)
+    }
 }
 
 fn remove_file_if_present(parent: &ConfinedDir, name: &OsStr) -> Result<(), InitError> {
@@ -849,11 +955,14 @@ fn remove_staged_dir(parent: &ConfinedDir, name: &OsStr) -> Result<(), InitError
 mod tests {
     use super::{
         InitError, apply_init, cleanup_stage, create_stage,
-        install_stage_with_creation_hook, install_stage_with_hook, plan_init,
+        install_stage_with_creation_hook, install_stage_with_hook,
+        open_created_destination, plan_init,
     };
+    use std::ffi::OsStr;
     use std::fs;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use vibra_workspace::confined_fs::ConfinedDir;
 
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
 
@@ -947,6 +1056,75 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn moved_current_root_is_neither_published_into_nor_cleaned() {
+        let root = TempWorkspace::new();
+        let moved = root.0.with_file_name(format!(
+            "vibra-init-moved-root-{}-{}",
+            std::process::id(),
+            NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let plan = plan_init(&root.0, None)
+            .expect("plan initialization into the current empty workspace");
+        let stage = create_stage(&plan).expect("prepare initialization staging tree");
+
+        let installation = install_stage_with_hook(&plan, &stage, || {
+            fs::rename(&root.0, &moved).expect("move the planned workspace root");
+            fs::create_dir(&root.0)
+                .expect("replace the workspace path with an empty directory");
+            Ok(())
+        });
+        let cleanup = cleanup_stage(stage, &plan);
+        let moved_entry_count = fs::read_dir(&moved)
+            .expect("read the detached workspace")
+            .count();
+        let published_into_moved_root = moved.join("project.vibon").exists();
+        fs::remove_dir_all(&moved).expect("remove detached test workspace");
+
+        assert!(installation.is_err(), "moved workspace must be refused");
+        assert!(cleanup.is_err(), "detached stage must be left untouched");
+        assert_eq!(moved_entry_count, 1, "only the unmodified stage remains");
+        assert!(
+            !published_into_moved_root,
+            "project files must not be written into the moved workspace"
+        );
+        assert_eq!(
+            fs::read_dir(&root.0)
+                .expect("read replacement workspace")
+                .count(),
+            0,
+            "replacement workspace remains untouched"
+        );
+    }
+
+    #[test]
+    fn changed_current_root_identity_is_neither_published_into_nor_cleaned() {
+        let workspace = TempWorkspace::new();
+        let replacement = TempWorkspace::new();
+        let mut plan = plan_init(&workspace.0, None)
+            .expect("plan initialization into the current empty workspace");
+        let stage = create_stage(&plan).expect("prepare initialization staging tree");
+        plan.workspace_root = replacement
+            .0
+            .canonicalize()
+            .expect("canonical replacement workspace");
+
+        let installation = install_stage_with_hook(&plan, &stage, || Ok(()));
+        let cleanup = cleanup_stage(stage, &plan);
+        let detached_entry_count = fs::read_dir(&workspace.0)
+            .expect("read the original workspace directory")
+            .count();
+        let replacement_entry_count = fs::read_dir(&replacement.0)
+            .expect("read the replacement workspace")
+            .count();
+
+        assert!(installation.is_err(), "changed workspace must be refused");
+        assert!(cleanup.is_err(), "detached stage must be left untouched");
+        assert_eq!(detached_entry_count, 1, "only the unmodified stage remains");
+        assert_eq!(replacement_entry_count, 0, "replacement remains untouched");
+    }
+
     #[test]
     fn partial_absent_destination_publication_removes_the_new_directory() {
         let root = TempWorkspace::new();
@@ -981,6 +1159,76 @@ mod tests {
                 .expect("read workspace after rollback")
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn failed_destination_open_removes_the_new_empty_directory() {
+        let root = TempWorkspace::new();
+        let destination = root.0.join("demo");
+        fs::create_dir(&destination).expect("create destination after planning");
+        let parent = ConfinedDir::open(&root.0).expect("open workspace parent");
+
+        let result = open_created_destination(
+            &parent,
+            OsStr::new("demo"),
+            true,
+            |_, _| Err(std::io::Error::other("injected destination open failure")),
+            |_| unreachable!("emptiness check follows a successful open"),
+        );
+
+        assert!(matches!(result, Err(InitError::OperationalFailure(_))));
+        assert!(
+            !destination.exists(),
+            "the empty destination created by this attempt is removed"
+        );
+    }
+
+    #[test]
+    fn failed_destination_empty_check_removes_the_new_empty_directory() {
+        let root = TempWorkspace::new();
+        let destination = root.0.join("demo");
+        fs::create_dir(&destination).expect("create destination after planning");
+        let parent = ConfinedDir::open(&root.0).expect("open workspace parent");
+
+        let result = open_created_destination(
+            &parent,
+            OsStr::new("demo"),
+            true,
+            |parent, name| parent.open_dir(name),
+            |_| Err(std::io::Error::other("injected destination read failure")),
+        );
+
+        assert!(matches!(result, Err(InitError::OperationalFailure(_))));
+        assert!(
+            !destination.exists(),
+            "the empty destination created by this attempt is removed"
+        );
+    }
+
+    #[test]
+    fn failed_destination_empty_check_preserves_concurrent_content() {
+        let root = TempWorkspace::new();
+        let destination = root.0.join("demo");
+        fs::create_dir(&destination).expect("create destination after planning");
+        let parent = ConfinedDir::open(&root.0).expect("open workspace parent");
+
+        let result = open_created_destination(
+            &parent,
+            OsStr::new("demo"),
+            true,
+            |parent, name| parent.open_dir(name),
+            |directory| {
+                fs::write(directory.path().join("concurrent.txt"), b"keep")?;
+                Err(std::io::Error::other("injected destination read failure"))
+            },
+        );
+
+        assert!(matches!(result, Err(InitError::OperationalFailure(_))));
+        assert_eq!(
+            fs::read(destination.join("concurrent.txt"))
+                .expect("preserve content created concurrently"),
+            b"keep"
         );
     }
 
