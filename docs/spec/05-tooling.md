@@ -55,8 +55,10 @@ vibra [--format human|json] [--workspace PATH] test [TEST]
 ```
 
 `--format` defaults to `human` and may occur once before the command. The
-default workspace is the current directory; `PATH`, `DEST`, `TARGET`, and
-`TEST` are workspace-relative and may not escape its canonical root. `DEST`
+default workspace is the current directory. `PATH` and `DEST` are
+workspace-relative and may not escape its canonical root. `TARGET` is relative
+to the discovered project root and may not escape it. `TEST` is an exact
+module-qualified test name, not a path. `DEST`
 defaults to the workspace for `project init`; it must be absent or empty, and
 the command creates only the canonical `project.vibon`, `src/`, and `tests/`
 layout. `fmt` previews by default; `--write` is its only mutating flag. `check`
@@ -66,8 +68,26 @@ module-qualified test name. Options after the command are limited to the
 explicit `fmt --write` spelling; unknown options, extra positionals, and
 alternate spellings are invalid input.
 
-M2 Step 11 implements only `project init` and `fmt`; valid `check`, `run`, and
-`test` requests still return `@command.unavailable` until their later steps.
+`TARGET` is a relative filesystem path. After canonicalization beneath the
+discovered project root, it MUST identify exactly one validated local target's
+canonical root; target names and target-name atoms are not selectors. Pairwise
+disjoint roots make this match unique. A path that does not identify a target
+and a library selected by `run` are `@command.invalid-input` with process exit
+2 and an empty diagnostic array. Omitting the required `run TARGET` is also
+invalid input.
+
+`check TARGET` checks every source declaration in that target and in every
+local target unit reached through its imports, recursively. It checks all
+modules and declarations in those units, including declarations unreachable
+from the selected entry. Errors in an unrelated local target do not affect an
+explicitly selected target. Without `TARGET`, `check` covers every local
+target. `run TARGET` uses the same checking scope, then executes only the
+selected binary target. Workspace discovery, source-graph, ordinary dependency,
+and bootstrap-provenance diagnostics still apply to the whole captured
+workspace snapshot and block checking or execution.
+
+M2 Step 12 implements `check` and pure `run` over a captured project snapshot.
+Valid `test` requests still return `@command.unavailable` until Step 13.
 The default init destination is the workspace root. Otherwise `DEST` names a
 workspace-relative directory whose parent directories already exist. The
 package and binary target name comes from the destination directory name (or

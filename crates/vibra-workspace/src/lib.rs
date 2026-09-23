@@ -23,9 +23,11 @@ pub mod discovery;
 pub mod format_plan;
 pub mod project;
 pub mod query;
+pub mod semantic;
 pub mod snapshot;
 pub mod source_graph;
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use vibra_diagnostics::Diagnostic;
@@ -35,6 +37,7 @@ use vibra_diagnostics::Diagnostic;
 pub struct WorkspaceError {
     message: String,
     diagnostics: Vec<Diagnostic>,
+    source_texts: BTreeMap<String, String>,
 }
 
 impl WorkspaceError {
@@ -44,7 +47,19 @@ impl WorkspaceError {
         Self {
             message: message.into(),
             diagnostics,
+            source_texts: BTreeMap::new(),
         }
+    }
+
+    /// Adds captured source text used to render this error's byte spans.
+    #[must_use]
+    pub fn with_source_text(
+        mut self,
+        source_id: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Self {
+        self.source_texts.insert(source_id.into(), text.into());
+        self
     }
 
     /// Creates a failure with no structured diagnostic.
@@ -57,6 +72,12 @@ impl WorkspaceError {
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    /// Captured source documents that own diagnostics in this error.
+    #[must_use]
+    pub fn source_texts(&self) -> &BTreeMap<String, String> {
+        &self.source_texts
     }
 }
 
@@ -122,6 +143,37 @@ impl WorkspaceSnapshot {
     /// Resolves the immutable local source graph without reading the filesystem.
     pub fn resolve(&self) -> Result<vibra_resolve::ResolvedSnapshot, WorkspaceError> {
         let graph = self.source_graph()?;
+        self.resolve_graph(&graph, None)
+    }
+
+    /// Resolves the captured local source graph with an already verified M2
+    /// bootstrap package overlay.
+    pub fn resolve_with_bootstrap(
+        &self,
+        verification: &vibra_types::BootstrapVerification,
+    ) -> Result<vibra_resolve::ResolvedSnapshot, WorkspaceError> {
+        let graph = self.source_graph()?;
+        self.resolve_graph(&graph, Some(verification))
+    }
+
+    /// Whether this immutable workspace contains an exact mapped bootstrap
+    /// import that requires signed provenance before checking.
+    ///
+    /// The scan resolves only the already captured source graph. It does not
+    /// inspect dependencies or consult the filesystem.
+    pub fn requires_bootstrap_verification(&self) -> Result<bool, WorkspaceError> {
+        let resolved = self.resolve()?;
+        Ok(resolved
+            .imports()
+            .iter()
+            .any(|import| semantic::is_bootstrap_import_path(import.written())))
+    }
+
+    pub(crate) fn resolve_graph(
+        &self,
+        graph: &source_graph::SourceGraph,
+        verification: Option<&vibra_types::BootstrapVerification>,
+    ) -> Result<vibra_resolve::ResolvedSnapshot, WorkspaceError> {
         let package = self.project.project().package();
         let units = graph
             .units()
@@ -161,13 +213,24 @@ impl WorkspaceSnapshot {
                 vibra_resolve::SourceUnit::new(unit.name(), kind, entry, modules)
             })
             .collect();
-        Ok(vibra_resolve::Resolver::resolve(
-            vibra_resolve::ResolveInput::new(
-                package.name().value(),
-                package.version().value(),
-                units,
-            ),
-        ))
+        let mut input = vibra_resolve::ResolveInput::new(
+            package.name().value(),
+            package.version().value(),
+            units,
+        )
+        .with_reserved_import_paths([
+            ("std".to_owned(), vec!["text".to_owned()]),
+            ("std".to_owned(), vec!["assert".to_owned()]),
+        ]);
+        if let Some(verification) = verification {
+            let (overlay_package, modules) = verification.resolver_overlay();
+            input = input.with_verified_overlay(
+                overlay_package.name(),
+                overlay_package.version(),
+                modules,
+            );
+        }
+        Ok(vibra_resolve::Resolver::resolve(input))
     }
 
     /// Queries semantic and structural facts at one captured source position.

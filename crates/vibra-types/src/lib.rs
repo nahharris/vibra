@@ -36,6 +36,10 @@ use vibra_syntax::{
     SourceAst, TypeExpr,
 };
 
+mod resolved;
+
+pub use resolved::{ResolvedCheckResult, check_resolved};
+
 /// The result of checking one source document.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckResult {
@@ -358,6 +362,9 @@ const BOOTSTRAP_TEXT_BYTES: &[u8] =
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BootstrapVerification {
     artifact: Vec<u8>,
+    package: vibra_resolve::PackageId,
+    text_module: Vec<u8>,
+    assert_module: Vec<u8>,
 }
 
 impl BootstrapVerification {
@@ -365,6 +372,44 @@ impl BootstrapVerification {
     #[must_use]
     pub fn artifact(&self) -> &[u8] {
         &self.artifact
+    }
+
+    /// The exact package identity selected by the pinned bootstrap manifest.
+    #[must_use]
+    pub const fn package(&self) -> &vibra_resolve::PackageId {
+        &self.package
+    }
+
+    /// Verified source modules for the resolver's separate bootstrap overlay.
+    #[must_use]
+    pub fn resolver_overlay(
+        &self,
+    ) -> (vibra_resolve::PackageId, Vec<vibra_resolve::SourceModule>) {
+        (
+            self.package.clone(),
+            vec![
+                vibra_resolve::SourceModule::new(
+                    "std",
+                    ["text"],
+                    BOOTSTRAP_TEXT_SOURCE_ID,
+                    &self.text_module,
+                ),
+                vibra_resolve::SourceModule::new(
+                    "std",
+                    ["assert"],
+                    "stdlib/m2/src/std/assert.vib",
+                    &self.assert_module,
+                ),
+            ],
+        )
+    }
+
+    pub(crate) fn trusts_module(&self, module: &vibra_resolve::ModuleRecord) -> bool {
+        module.package() == &self.package
+            && ((module.source_id() == BOOTSTRAP_TEXT_SOURCE_ID
+                && module.bytes() == self.text_module)
+                || (module.source_id() == "stdlib/m2/src/std/assert.vib"
+                    && module.bytes() == self.assert_module))
     }
 }
 
@@ -459,7 +504,12 @@ pub fn verify_bootstrap(
             "M2 bootstrap Ed25519 signature is invalid".to_owned(),
         )
     })?;
-    Ok(BootstrapVerification { artifact })
+    Ok(BootstrapVerification {
+        artifact,
+        package: vibra_resolve::PackageId::new("vibra-stdlib", "0.1.0"),
+        text_module,
+        assert_module,
+    })
 }
 
 fn validate_signed_bootstrap_map(
@@ -469,6 +519,7 @@ fn validate_signed_bootstrap_map(
         BootstrapVerificationError("bootstrap artifact is not UTF-8".to_owned())
     })?;
     for fragment in [
+        "package: \"vibra-stdlib\"",
         "@std.text",
         "stdlib/m2/src/std/text.vib",
         "sha256:c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44",
@@ -600,6 +651,8 @@ struct GlobalHeader {
     value_type: PrimitiveType,
     expression: Expression,
     span: ByteSpan,
+    source_id: String,
+    module_index: usize,
     function_index: Option<usize>,
     function_targets: FunctionTargetSet,
 }
@@ -652,6 +705,8 @@ impl FunctionTargetSet {
 #[derive(Clone)]
 struct FunctionHeader {
     declaration_index: usize,
+    module_index: usize,
+    source_id: String,
     name: String,
     signature: FunctionSignature,
     external: Option<CompilerIntrinsic>,
@@ -748,6 +803,8 @@ impl<'a> Checker<'a> {
                         value_type,
                         expression: definition.expression().clone(),
                         span: definition.span(),
+                        source_id: self.source_id.to_owned(),
+                        module_index: 0,
                         function_index: None,
                         function_targets: FunctionTargetSet::default(),
                     });
@@ -775,6 +832,8 @@ impl<'a> Checker<'a> {
                     self.function_indices.insert(name.clone(), index);
                     self.functions.push(FunctionHeader {
                         declaration_index,
+                        module_index: 0,
+                        source_id: self.source_id.to_owned(),
                         name,
                         signature,
                         external: compiler_intrinsic(
@@ -833,6 +892,8 @@ impl<'a> Checker<'a> {
                 self.function_indices.insert(name.to_owned(), index);
                 self.functions.push(FunctionHeader {
                     declaration_index: IMPORTED_FUNCTION_DECLARATION,
+                    module_index: 0,
+                    source_id: self.source_id.to_owned(),
                     name: name.to_owned(),
                     signature: intrinsic.signature(),
                     external: Some(intrinsic),
@@ -1271,6 +1332,15 @@ struct CheckEnvironment<'a> {
     next_slot: usize,
     current_function: Option<usize>,
     recursive_group: Option<Vec<usize>>,
+    resolved_targets:
+        Option<&'a BTreeMap<(String, usize, usize), ResolvedReferenceTarget>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResolvedReferenceTarget {
+    Global(usize),
+    Function(usize),
+    Unresolved,
 }
 
 #[derive(Clone)]
@@ -1329,6 +1399,7 @@ impl<'a> CheckEnvironment<'a> {
             next_slot: 0,
             current_function,
             recursive_group,
+            resolved_targets: None,
         }
     }
 
@@ -2725,12 +2796,12 @@ fn compiler_intrinsic(
         }
     });
     let provider = provider?;
-    if !trusted_bootstrap {
+    if provider == "host" {
         unavailable(
             diagnostics,
             source_id,
             function.span(),
-            "external declarations require the verified M2 bootstrap module",
+            "the recognized @host provider remains unavailable until M4",
         );
         return None;
     }
@@ -2745,6 +2816,15 @@ fn compiler_intrinsic(
         );
         return None;
     }
+    if !trusted_bootstrap {
+        unavailable(
+            diagnostics,
+            source_id,
+            function.span(),
+            "@compiler declarations require the verified M2 bootstrap module",
+        );
+        return None;
+    }
     let symbol = function.attributes().items().iter().find_map(|attribute| {
         if let Attribute::Symbol(Literal::String(value)) = attribute {
             Some(value.value())
@@ -2752,7 +2832,17 @@ fn compiler_intrinsic(
             None
         }
     });
-    let symbol = symbol?;
+    let Some(symbol) = symbol else {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalUnknownSymbol,
+                function.span(),
+                "a compiler external declaration requires a registered symbol",
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    };
     let Some(intrinsic) = CompilerIntrinsic::from_symbol(symbol) else {
         diagnostics.push(
             Diagnostic::new(
@@ -3057,6 +3147,15 @@ fn check_expression_in_position(
         }
         ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => {
             if name.segments().len() != 1 {
+                if let Some(target) = resolved_reference_target(environment, expression)
+                {
+                    return check_resolved_reference(
+                        environment,
+                        expression,
+                        expected,
+                        target,
+                    );
+                }
                 if let Some(index) =
                     environment.function_indices.get(name.value()).copied()
                     && let Some(header) = environment.functions.get(index)
@@ -3130,6 +3229,14 @@ fn check_expression_in_position(
                     binding.value_type,
                     SourceOrigin::new(environment.source_id, expression.span()),
                 ));
+            }
+            if let Some(target) = resolved_reference_target(environment, expression) {
+                return check_resolved_reference(
+                    environment,
+                    expression,
+                    expected,
+                    target,
+                );
             }
             if let Some(index) = environment.global_indices.get(name.value()).copied() {
                 let global = environment.globals.get(index)?;
@@ -3368,6 +3475,7 @@ fn check_expression_in_position(
                 next_slot: environment.next_slot,
                 current_function: environment.current_function,
                 recursive_group: environment.recursive_group.clone(),
+                resolved_targets: environment.resolved_targets,
             };
             let slot = match pattern.kind() {
                 PatternKind::Binding(name) if name.is_discard() => None,
@@ -3471,6 +3579,7 @@ fn check_expression_in_position(
                 None,
                 None,
             );
+            nested.resolved_targets = environment.resolved_targets;
             nested.outer = Some(outer);
             let mut referenced_names = Vec::new();
             for expression in lambda.body() {
@@ -3592,6 +3701,67 @@ fn check_expression_in_position(
         ExpressionKind::Name(_) => {
             unknown_name(environment, expression, "<invalid name>");
             None
+        }
+    }
+}
+
+fn resolved_reference_target(
+    environment: &CheckEnvironment<'_>,
+    expression: &Expression,
+) -> Option<ResolvedReferenceTarget> {
+    let references = environment.resolved_targets?;
+    references
+        .get(&(
+            environment.source_id.to_owned(),
+            expression.span().start(),
+            expression.span().end(),
+        ))
+        .copied()
+}
+
+fn check_resolved_reference(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    expected: Option<PrimitiveType>,
+    target: ResolvedReferenceTarget,
+) -> Option<Expr> {
+    match target {
+        ResolvedReferenceTarget::Unresolved => None,
+        ResolvedReferenceTarget::Global(index) => {
+            let global = environment.globals.get(index)?;
+            let actual = global.value_type.clone();
+            ensure_expected(
+                environment,
+                expression.span(),
+                expected.clone(),
+                actual.clone(),
+            );
+            (expected
+                .as_ref()
+                .is_none_or(|expected| types_match(expected, &actual)))
+            .then_some(Expr::global(
+                index,
+                actual,
+                SourceOrigin::new(environment.source_id, expression.span()),
+            ))
+        }
+        ResolvedReferenceTarget::Function(index) => {
+            let function = environment.functions.get(index)?;
+            let actual = PrimitiveType::Function(Box::new(function.signature.clone()));
+            ensure_expected(
+                environment,
+                expression.span(),
+                expected.clone(),
+                actual.clone(),
+            );
+            (expected
+                .as_ref()
+                .is_none_or(|expected| types_match(expected, &actual)))
+            .then_some(Expr::function(
+                index,
+                function.signature.clone(),
+                SourceOrigin::new(environment.source_id, expression.span()),
+            ))
         }
     }
 }
@@ -4256,10 +4426,18 @@ mod tests {
                 &mut diagnostics,
                 true,
             );
-            assert!(diagnostics.iter().any(|diagnostic| {
-                diagnostic.code() == DiagnosticCode::ExternalUnknownSymbol
-                    || diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
-            }));
+            let expected = if source.contains("@host") {
+                DiagnosticCode::ToolUnavailable
+            } else if source.contains("text.unknown") {
+                DiagnosticCode::ExternalUnknownSymbol
+            } else {
+                DiagnosticCode::TypeArgumentMismatch
+            };
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code() == expected)
+            );
         }
     }
 

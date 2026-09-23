@@ -117,6 +117,10 @@ pub enum ConformanceOperation {
     Query,
     /// Format one source document using bindings from its confined snapshot.
     Format,
+    /// Check every declaration in one confined workspace snapshot.
+    WorkspaceCheck,
+    /// Check and interpret the unique binary target in a confined workspace.
+    WorkspaceRun,
 }
 
 impl ConformanceOperation {
@@ -132,6 +136,8 @@ impl ConformanceOperation {
             Self::Interpret => "interpret",
             Self::Query => "query",
             Self::Format => "format",
+            Self::WorkspaceCheck => "workspace-check",
+            Self::WorkspaceRun => "workspace-run",
         }
     }
 }
@@ -350,6 +356,26 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 "format cases must declare a formatted snapshot".to_owned(),
             ));
         }
+        if operation == ConformanceOperation::WorkspaceRun {
+            if expectations.accepted
+                && expectations.interpreter.as_ref().is_none_or(|execution| {
+                    execution.result.is_none() || execution.audit_trace.is_none()
+                })
+            {
+                return Err(ManifestError::Invalid(
+                    "workspace-run cases require interpreter result and audit snapshots"
+                        .to_owned(),
+                ));
+            }
+            if expectations.interpreter.as_ref().is_some_and(|execution| {
+                execution.result.is_none() || execution.audit_trace.is_none()
+            }) {
+                return Err(ManifestError::Invalid(
+                    "workspace-run execution snapshots must include result and audit trace"
+                        .to_owned(),
+                ));
+            }
+        }
         {
             for diagnostic in &expectations.diagnostics {
                 if let Some(source_id) = &diagnostic.source_id
@@ -420,6 +446,8 @@ fn decode_operation(
         Some("interpret") => ConformanceOperation::Interpret,
         Some("query") => ConformanceOperation::Query,
         Some("format") => ConformanceOperation::Format,
+        Some("workspace-check") => ConformanceOperation::WorkspaceCheck,
+        Some("workspace-run") => ConformanceOperation::WorkspaceRun,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
@@ -535,6 +563,51 @@ fn decode_operation(
             ));
         }
         validate_tree_source_input(tree, source, "format")?;
+    }
+    if matches!(
+        operation,
+        ConformanceOperation::WorkspaceCheck | ConformanceOperation::WorkspaceRun
+    ) {
+        let required_profile = match operation {
+            ConformanceOperation::WorkspaceCheck => ConformanceProfile::StaticV1,
+            ConformanceOperation::WorkspaceRun => ConformanceProfile::InterpreterV1,
+            _ => {
+                return Err(ManifestError::Invalid(
+                    "workspace operation profile validation was misrouted".to_owned(),
+                ));
+            }
+        };
+        if profile != required_profile {
+            return Err(ManifestError::Invalid(format!(
+                "{} cases require the {required_profile} profile",
+                operation.as_str()
+            )));
+        }
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(format!(
+                "{} requires one confined tree input",
+                operation.as_str()
+            )));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(format!(
+                "{} requires one project input",
+                operation.as_str()
+            )));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "{} project input must be exactly `{expected_project}`",
+                operation.as_str()
+            )));
+        }
+        if inputs.source.is_some() || !inputs.data.is_empty() {
+            return Err(ManifestError::Invalid(format!(
+                "{} cases use only the confined tree as their source input",
+                operation.as_str()
+            )));
+        }
     }
     Ok(operation)
 }

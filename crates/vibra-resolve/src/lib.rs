@@ -247,6 +247,18 @@ impl SourceUnit {
 pub struct ResolveInput {
     package: PackageId,
     units: Vec<SourceUnit>,
+    overlay: Option<PackageOverlay>,
+    reserved_import_paths: Vec<(String, Vec<String>)>,
+}
+
+/// A verified package whose source modules are overlaid on the local graph.
+///
+/// The resolver does not establish trust for this input. Callers must only
+/// provide an overlay after verifying its provenance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PackageOverlay {
+    package: PackageId,
+    modules: Vec<SourceModule>,
 }
 
 impl ResolveInput {
@@ -260,7 +272,45 @@ impl ResolveInput {
         Self {
             package: PackageId::new(package_name, package_version),
             units,
+            overlay: None,
+            reserved_import_paths: Vec::new(),
         }
+    }
+
+    /// Reserves exact module paths for a separately verified package overlay.
+    ///
+    /// A reserved path never falls back to the local package when the overlay
+    /// is absent. This lets callers report unavailable verified provenance
+    /// without accidentally binding an untrusted local module with the same
+    /// spelling. The resolver itself performs no trust or filesystem checks.
+    #[must_use]
+    pub fn with_reserved_import_paths(
+        mut self,
+        paths: impl IntoIterator<Item = (String, Vec<String>)>,
+    ) -> Self {
+        self.reserved_import_paths.extend(paths);
+        self.reserved_import_paths.sort();
+        self.reserved_import_paths.dedup();
+        self
+    }
+
+    /// Adds modules from a separately verified package to the source graph.
+    ///
+    /// The modules retain this package identity in their declaration IDs.
+    /// The caller is responsible for verifying the package before creating
+    /// this input; ordinary dependency delivery remains outside the resolver.
+    #[must_use]
+    pub fn with_verified_overlay(
+        mut self,
+        package_name: impl Into<String>,
+        package_version: impl Into<String>,
+        modules: Vec<SourceModule>,
+    ) -> Self {
+        self.overlay = Some(PackageOverlay {
+            package: PackageId::new(package_name, package_version),
+            modules,
+        });
+        self
     }
 
     /// Creates a one-unit, one-module input useful for focused host tests.
@@ -642,6 +692,7 @@ pub struct ResolvedSnapshot {
     package: PackageId,
     modules: Vec<ModuleRecord>,
     declarations: Vec<ResolvedDeclaration>,
+    entries: Vec<ResolvedEntry>,
     imports: Vec<ResolvedImport>,
     references: Vec<ResolvedReference>,
     diagnostics: Vec<Diagnostic>,
@@ -672,6 +723,12 @@ impl ResolvedSnapshot {
     #[must_use]
     pub fn declarations(&self) -> &[ResolvedDeclaration] {
         &self.declarations
+    }
+
+    /// Project entries after the shared unit-rooted atom-path walk.
+    #[must_use]
+    pub fn entries(&self) -> &[ResolvedEntry] {
+        &self.entries
     }
 
     /// Import edges in deterministic source order.
@@ -771,12 +828,21 @@ impl ResolvedSnapshot {
 /// One source module identity and provenance record.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleRecord {
+    package: PackageId,
     unit: String,
     segments: Vec<String>,
     source_id: String,
+    bytes: Vec<u8>,
+    ast: Option<vibra_syntax::SourceAst>,
 }
 
 impl ModuleRecord {
+    /// Package provenance carried by declarations in this module.
+    #[must_use]
+    pub const fn package(&self) -> &PackageId {
+        &self.package
+    }
+
     /// Unit name.
     #[must_use]
     pub fn unit(&self) -> &str {
@@ -794,6 +860,53 @@ impl ModuleRecord {
     pub fn source_id(&self) -> &str {
         &self.source_id
     }
+
+    /// Exact immutable source bytes supplied to the resolver.
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Parsed source AST retained from this resolution snapshot, if valid UTF-8.
+    #[must_use]
+    pub const fn ast(&self) -> Option<&vibra_syntax::SourceAst> {
+        self.ast.as_ref()
+    }
+}
+
+/// One project entry after atom-path resolution and entity-kind validation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedEntry {
+    unit: String,
+    source_id: String,
+    span: ByteSpan,
+    declaration: Option<DeclarationId>,
+}
+
+impl ResolvedEntry {
+    /// Binary target unit that owns this entry.
+    #[must_use]
+    pub fn unit(&self) -> &str {
+        &self.unit
+    }
+
+    /// Project document that contains the entry reference.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// Half-open span of the entry atom.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// Resolved declaration identity when the path names one.
+    #[must_use]
+    pub const fn declaration(&self) -> Option<&DeclarationId> {
+        self.declaration.as_ref()
+    }
 }
 
 /// Stateless resolver over one explicit input snapshot.
@@ -810,12 +923,14 @@ impl Resolver {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct ModuleKey {
+    package: PackageId,
     unit: String,
     segments: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
 struct ParsedModule {
+    package: PackageId,
     module: SourceModule,
     ast: Option<vibra_syntax::SourceAst>,
 }
@@ -849,6 +964,7 @@ struct Resolution {
     module_bindings: BTreeMap<ModuleKey, BTreeMap<String, (ByteSpan, String)>>,
     declarations: Vec<DeclarationWork>,
     declaration_indexes: BTreeMap<(ModuleKey, Vec<String>), usize>,
+    entries: Vec<ResolvedEntry>,
     imports: Vec<(ModuleKey, ImportWork)>,
     imports_by_module: BTreeMap<ModuleKey, Vec<usize>>,
     references: Vec<ResolvedReference>,
@@ -864,6 +980,7 @@ impl Resolution {
             module_bindings: BTreeMap::new(),
             declarations: Vec::new(),
             declaration_indexes: BTreeMap::new(),
+            entries: Vec::new(),
             imports: Vec::new(),
             imports_by_module: BTreeMap::new(),
             references: Vec::new(),
@@ -880,6 +997,18 @@ impl Resolution {
         self.resolve_bodies();
 
         self.diagnostics.sort_by_key(diagnostic_key);
+        self.entries.sort_by(|left, right| {
+            (
+                left.unit.as_str(),
+                left.source_id.as_str(),
+                left.span.start(),
+            )
+                .cmp(&(
+                    right.unit.as_str(),
+                    right.source_id.as_str(),
+                    right.span.start(),
+                ))
+        });
         self.references.sort_by(|left, right| {
             (
                 left.source_id.as_str(),
@@ -905,11 +1034,7 @@ impl Resolution {
                 written: import.written.clone(),
                 module: import.module.as_ref().and_then(|module| {
                     self.module_indexes.contains_key(module).then(|| {
-                        ModuleId::new(
-                            &self.input.package,
-                            &module.unit,
-                            &module.segments,
-                        )
+                        ModuleId::new(&module.package, &module.unit, &module.segments)
                     })
                 }),
                 source_id: import.source_id.clone(),
@@ -925,15 +1050,20 @@ impl Resolution {
             .modules
             .iter()
             .map(|module| ModuleRecord {
+                package: module.package.clone(),
                 unit: module.module.unit.clone(),
                 segments: module.module.segments.clone(),
                 source_id: module.module.source_id.clone(),
+                bytes: module.module.bytes.clone(),
+                ast: module.ast.clone(),
             })
             .collect::<Vec<_>>();
+        let entries = self.entries;
         ResolvedSnapshot {
             package: self.input.package,
             modules,
             declarations,
+            entries,
             imports,
             references: self.references,
             diagnostics: self.diagnostics,
@@ -946,21 +1076,35 @@ impl Resolution {
             .units
             .iter()
             .flat_map(|unit| unit.modules.iter().cloned())
+            .map(|module| (self.input.package.clone(), module))
             .collect::<Vec<_>>();
+        if let Some(overlay) = &self.input.overlay {
+            modules.extend(
+                overlay
+                    .modules
+                    .iter()
+                    .cloned()
+                    .map(|module| (overlay.package.clone(), module)),
+            );
+        }
         modules.sort_by(|left, right| {
             (
-                left.unit.as_str(),
-                left.segments.as_slice(),
-                left.source_id.as_str(),
+                &left.0,
+                left.1.unit.as_str(),
+                left.1.segments.as_slice(),
+                left.1.source_id.as_str(),
             )
                 .cmp(&(
-                    right.unit.as_str(),
-                    right.segments.as_slice(),
-                    right.source_id.as_str(),
+                    &right.0,
+                    right.1.unit.as_str(),
+                    right.1.segments.as_slice(),
+                    right.1.source_id.as_str(),
                 ))
         });
-        for module in modules {
+        let mut source_owners = BTreeMap::<String, ModuleKey>::new();
+        for (package, module) in modules {
             let key = ModuleKey {
+                package: package.clone(),
                 unit: module.unit.clone(),
                 segments: module.segments.clone(),
             };
@@ -974,6 +1118,28 @@ impl Resolution {
                     .with_source_id(module.source_id.clone()),
                 );
                 continue;
+            }
+            if let Some(earlier) = source_owners.get(&module.source_id) {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::ModuleSourceIdCollision,
+                        ByteSpan::empty_at(0),
+                        format!(
+                            "source identity `{}` belongs to more than one module",
+                            module.source_id
+                        ),
+                    )
+                    .with_source_id(module.source_id.clone())
+                    .with_note(format!(
+                        "conflicting package identities: `{}@{}` and `{}@{}`",
+                        earlier.package.name(),
+                        earlier.package.version(),
+                        key.package.name(),
+                        key.package.version()
+                    )),
+                );
+            } else {
+                source_owners.insert(module.source_id.clone(), key.clone());
             }
             let index = self.modules.len();
             self.module_indexes.insert(key, index);
@@ -1016,7 +1182,11 @@ impl Resolution {
                     None
                 }
             };
-            self.modules.push(ParsedModule { module, ast });
+            self.modules.push(ParsedModule {
+                package,
+                module,
+                ast,
+            });
         }
     }
 
@@ -1203,7 +1373,7 @@ impl Resolution {
             }
         }
         let id = DeclarationId::with_package(
-            &self.input.package,
+            &module.package,
             &module.unit,
             &module.segments,
             &path,
@@ -1338,7 +1508,7 @@ impl Resolution {
             let mut path = owner.clone();
             path.push(field_name.to_owned());
             let id = DeclarationId::with_package(
-                &self.input.package,
+                &module.package,
                 &module.unit,
                 &module.segments,
                 path,
@@ -1397,7 +1567,7 @@ impl Resolution {
         let mut path = owner.to_vec();
         path.push(function.name().value().to_owned());
         let id = DeclarationId::with_package(
-            &self.input.package,
+            &module.package,
             &module.unit,
             &module.segments,
             path,
@@ -1441,7 +1611,53 @@ impl Resolution {
                     target_segments.iter().skip(1).cloned().collect::<Vec<_>>();
                 let target_span = import.target().span_or(import.span());
                 let mut resolved_module = None;
-                let Some(module_len) = self.longest_module_prefix(unit, &target_path)
+                let overlay_package = self
+                    .input
+                    .overlay
+                    .as_ref()
+                    .filter(|overlay| {
+                        overlay.modules.iter().any(|module| {
+                            module.unit == *unit
+                                && target_path.starts_with(&module.segments)
+                        })
+                    })
+                    .map(|overlay| overlay.package.clone());
+                let reserved_import = self.input.reserved_import_paths.iter().any(
+                    |(reserved_unit, reserved_segments)| {
+                        reserved_unit == unit
+                            && target_path.starts_with(reserved_segments)
+                    },
+                );
+                let package = match overlay_package {
+                    Some(package) => package,
+                    None if reserved_import => {
+                        self.diagnostics.push(
+                            Diagnostic::new(
+                                DiagnosticCode::ModuleUnknownPath,
+                                target_span,
+                                "reserved import requires its verified package overlay",
+                            )
+                            .with_source_id(parsed.module.source_id.clone()),
+                        );
+                        let work = ImportWork {
+                            module: None,
+                            alias: import.alias().value().to_owned(),
+                            written: target.value().to_owned(),
+                            source_id: parsed.module.source_id.clone(),
+                            span: import.span(),
+                        };
+                        let index = self.imports.len();
+                        self.imports.push((module_key.clone(), work));
+                        self.imports_by_module
+                            .entry(module_key.clone())
+                            .or_default()
+                            .push(index);
+                        continue;
+                    }
+                    None => module_key.package.clone(),
+                };
+                let Some(module_len) =
+                    self.longest_module_prefix(&package, unit, &target_path)
                 else {
                     self.diagnostics.push(
                         Diagnostic::new(
@@ -1473,6 +1689,7 @@ impl Resolution {
                     continue;
                 };
                 let module = ModuleKey {
+                    package,
                     unit: unit.clone(),
                     segments: module_segments.to_vec(),
                 };
@@ -1616,6 +1833,12 @@ impl Resolution {
                     )
                     .with_source_id(entry.source_id.clone()),
                 );
+                self.entries.push(ResolvedEntry {
+                    unit: unit.name.clone(),
+                    source_id: entry.source_id.clone(),
+                    span: entry.span,
+                    declaration: None,
+                });
                 continue;
             }
             if entry.segments.first().map(String::as_str) != Some(unit.name.as_str()) {
@@ -1627,11 +1850,21 @@ impl Resolution {
                     )
                     .with_source_id(entry.source_id.clone()),
                 );
+                self.entries.push(ResolvedEntry {
+                    unit: unit.name.clone(),
+                    source_id: entry.source_id.clone(),
+                    span: entry.span,
+                    declaration: None,
+                });
                 continue;
             }
             let target_path =
                 entry.segments.iter().skip(1).cloned().collect::<Vec<_>>();
-            let module_len = self.longest_module_prefix(&unit.name, &target_path);
+            let module_len = self.longest_module_prefix(
+                &self.input.package,
+                &unit.name,
+                &target_path,
+            );
             let Some(module_len) = module_len else {
                 self.diagnostics.push(
                     Diagnostic::new(
@@ -1641,6 +1874,12 @@ impl Resolution {
                     )
                     .with_source_id(entry.source_id.clone()),
                 );
+                self.entries.push(ResolvedEntry {
+                    unit: unit.name.clone(),
+                    source_id: entry.source_id.clone(),
+                    span: entry.span,
+                    declaration: None,
+                });
                 continue;
             };
             let Some(module_segments) = target_path.get(..module_len) else {
@@ -1650,6 +1889,7 @@ impl Resolution {
                 continue;
             };
             let module = ModuleKey {
+                package: self.input.package.clone(),
                 unit: unit.name.clone(),
                 segments: module_segments.to_vec(),
             };
@@ -1670,6 +1910,12 @@ impl Resolution {
                     );
                 }
                 self.diagnostics.push(diagnostic);
+                self.entries.push(ResolvedEntry {
+                    unit: unit.name.clone(),
+                    source_id: entry.source_id.clone(),
+                    span: entry.span,
+                    declaration: None,
+                });
                 continue;
             }
             let declaration_path = declaration_segments.to_vec();
@@ -1686,11 +1932,23 @@ impl Resolution {
                     )
                     .with_source_id(entry.source_id.clone()),
                 );
+                self.entries.push(ResolvedEntry {
+                    unit: unit.name.clone(),
+                    source_id: entry.source_id.clone(),
+                    span: entry.span,
+                    declaration: None,
+                });
                 continue;
             };
             let Some(target) = self.declarations.get(index) else {
                 continue;
             };
+            self.entries.push(ResolvedEntry {
+                unit: unit.name.clone(),
+                source_id: entry.source_id.clone(),
+                span: entry.span,
+                declaration: Some(target.declaration.id.clone()),
+            });
             if target.declaration.id.kind() != EntityKind::Function
                 || target.declaration.id.path().len() != 1
             {
@@ -1728,6 +1986,7 @@ impl Resolution {
                 continue;
             };
             let module = ModuleKey {
+                package: from.package().clone(),
                 unit: from.unit.clone(),
                 segments: from.module.clone(),
             };
@@ -2034,7 +2293,7 @@ impl Resolution {
             && let Some(module_index) = self.module_indexes.get(target_module).copied()
         {
             let target = DeclarationId::with_package(
-                &self.input.package,
+                &target_module.package,
                 target_module.unit.clone(),
                 target_module.segments.iter().cloned(),
                 std::iter::empty::<String>(),
@@ -2125,25 +2384,34 @@ impl Resolution {
 
     fn resolve_module_path(
         &self,
+        package: &PackageId,
         unit: &str,
         segments: &[String],
     ) -> Option<ModuleKey> {
         let key = ModuleKey {
+            package: package.clone(),
             unit: unit.to_owned(),
             segments: segments.to_vec(),
         };
         self.module_indexes.contains_key(&key).then_some(key)
     }
 
-    fn longest_module_prefix(&self, unit: &str, path: &[String]) -> Option<usize> {
+    fn longest_module_prefix(
+        &self,
+        package: &PackageId,
+        unit: &str,
+        path: &[String],
+    ) -> Option<usize> {
         (1..=path.len()).rev().find(|length| {
-            path.get(..*length)
-                .is_some_and(|prefix| self.resolve_module_path(unit, prefix).is_some())
+            path.get(..*length).is_some_and(|prefix| {
+                self.resolve_module_path(package, unit, prefix).is_some()
+            })
         })
     }
 
     fn module_key(&self, index: usize) -> Option<ModuleKey> {
         self.modules.get(index).map(|work| ModuleKey {
+            package: work.package.clone(),
             unit: work.module.unit.clone(),
             segments: work.module.segments.clone(),
         })

@@ -29,6 +29,147 @@ fn same_module_forward_reference_resolves_to_a_provenanced_id() {
 }
 
 #[test]
+fn resolved_snapshot_retains_parsed_modules_and_the_shared_entry_target() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            Some("app.main.execute"),
+            vec![vibra_resolve::SourceModule::new(
+                "app",
+                ["main"],
+                "src/main.vib",
+                b"(defn execute () void (do))",
+            )],
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(snapshot.accepted(), "{:?}", snapshot.diagnostics());
+    let module = snapshot.modules().first().expect("resolved source module");
+    assert_eq!(module.source_id(), "src/main.vib");
+    assert_eq!(module.bytes(), b"(defn execute () void (do))");
+    assert_eq!(
+        module
+            .ast()
+            .expect("parsed source AST")
+            .declarations()
+            .len(),
+        1
+    );
+    let entry = snapshot.entries().first().expect("resolved binary entry");
+    let target = entry.declaration().expect("resolved entry function");
+    assert_eq!(target.kind(), EntityKind::Function);
+    assert_eq!(target.name(), "execute");
+    assert_eq!(entry.unit(), "app");
+}
+
+#[test]
+fn verified_overlay_keeps_distinct_package_identity_across_imports() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![vibra_resolve::SourceUnit::bin(
+            "app",
+            Some("app.main.execute"),
+            vec![vibra_resolve::SourceModule::new(
+                "app",
+                ["main"],
+                "src/main.vib",
+                b"(import text @std.text)\n(defn execute () str (text.concat \"a\" \"b\"))",
+            )],
+        )],
+    )
+    .with_verified_overlay(
+        "vibra-stdlib",
+        "0.1.0",
+        vec![vibra_resolve::SourceModule::new(
+            "std",
+            ["text"],
+            "stdlib/m2/src/std/text.vib",
+            include_bytes!("../../../stdlib/m2/src/std/text.vib"),
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(snapshot.accepted(), "{:?}", snapshot.diagnostics());
+    let module = snapshot
+        .modules()
+        .iter()
+        .find(|module| module.source_id() == "stdlib/m2/src/std/text.vib")
+        .expect("bootstrap module in overlay");
+    assert_eq!(module.package().name(), "vibra-stdlib");
+    assert_eq!(module.package().version(), "0.1.0");
+    assert_eq!(
+        snapshot.imports()[0]
+            .module()
+            .expect("resolved import")
+            .package()
+            .name(),
+        "vibra-stdlib"
+    );
+    let target = snapshot
+        .references()
+        .iter()
+        .find(|reference| reference.written() == "text.concat")
+        .and_then(|reference| reference.target())
+        .expect("resolved bootstrap declaration");
+    assert_eq!(target.package().name(), "vibra-stdlib");
+    assert_eq!(target.package().version(), "0.1.0");
+}
+
+#[test]
+fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
+    let input = ResolveInput::new(
+        "demo",
+        "1.0.0",
+        vec![
+            vibra_resolve::SourceUnit::bin(
+                "app",
+                Some("app.main.execute"),
+                vec![vibra_resolve::SourceModule::new(
+                    "app",
+                    ["main"],
+                    "src/app/main.vib",
+                    b"(import text @std.text)\n(defn execute () str (text.concat \"a\" \"b\"))",
+                )],
+            ),
+            vibra_resolve::SourceUnit::lib(
+                "std",
+                vec![vibra_resolve::SourceModule::new(
+                    "std",
+                    ["text"],
+                    "src/std/text.vib",
+                    b"(defn concat (left str right str) str visibility: @public \"local\")",
+                )],
+            ),
+        ],
+    )
+    .with_verified_overlay(
+        "vibra-stdlib",
+        "0.1.0",
+        vec![vibra_resolve::SourceModule::new(
+            "std",
+            ["text"],
+            "stdlib/m2/src/std/text.vib",
+            include_bytes!("../../../stdlib/m2/src/std/text.vib"),
+        )],
+    );
+    let snapshot = Resolver::resolve(input);
+
+    assert!(snapshot.accepted(), "{:?}", snapshot.diagnostics());
+    let target = snapshot.imports()[0].module().expect("resolved import");
+    assert_eq!(target.package().name(), "vibra-stdlib");
+    assert_eq!(target.unit(), "std");
+    assert_eq!(target.segments(), ["text"]);
+    assert!(snapshot.modules().iter().any(|module| {
+        module.source_id() == "stdlib/m2/src/std/text.vib"
+            && module.package().name() == "vibra-stdlib"
+    }));
+}
+
+#[test]
 fn imported_private_declaration_reports_access_with_stable_span() {
     let input = ResolveInput::new(
         "demo",

@@ -310,9 +310,9 @@ fn validate_target_roots(
         }
     }
     if !diagnostics.is_empty() {
-        return Err(WorkspaceError::new(
-            "one or more target roots are invalid",
-            diagnostics,
+        return Err(with_project_source(
+            WorkspaceError::new("one or more target roots are invalid", diagnostics),
+            project,
         ));
     }
 
@@ -342,7 +342,10 @@ fn validate_target_roots(
         }
     }
     if !diagnostics.is_empty() {
-        return Err(WorkspaceError::new("target roots overlap", diagnostics));
+        return Err(with_project_source(
+            WorkspaceError::new("target roots overlap", diagnostics),
+            project,
+        ));
     }
     Ok(roots)
 }
@@ -422,16 +425,19 @@ fn invalid_root(
     target: &Target,
     message: &str,
 ) -> WorkspaceError {
-    WorkspaceError::new(
-        message,
-        vec![
-            Diagnostic::new(
-                DiagnosticCode::ProjectInvalidTargetRoot,
-                target.root().span(),
-                message,
-            )
-            .with_source_id(project.project().origin().source_id()),
-        ],
+    with_project_source(
+        WorkspaceError::new(
+            message,
+            vec![
+                Diagnostic::new(
+                    DiagnosticCode::ProjectInvalidTargetRoot,
+                    target.root().span(),
+                    message,
+                )
+                .with_source_id(project.project().origin().source_id()),
+            ],
+        ),
+        project,
     )
 }
 
@@ -440,17 +446,30 @@ fn root_io_error(
     target: &Target,
     message: String,
 ) -> WorkspaceError {
-    WorkspaceError::new(
-        message.clone(),
-        vec![
-            Diagnostic::new(
-                DiagnosticCode::ProjectIoError,
-                target.root().span(),
-                message.clone(),
-            )
-            .with_source_id(project.project().origin().source_id())
-            .with_note(format!("target root: {}", target.root().value())),
-        ],
+    with_project_source(
+        WorkspaceError::new(
+            message.clone(),
+            vec![
+                Diagnostic::new(
+                    DiagnosticCode::ProjectIoError,
+                    target.root().span(),
+                    message.clone(),
+                )
+                .with_source_id(project.project().origin().source_id())
+                .with_note(format!("target root: {}", target.root().value())),
+            ],
+        ),
+        project,
+    )
+}
+
+fn with_project_source(
+    error: WorkspaceError,
+    project: &DiscoveredProject,
+) -> WorkspaceError {
+    error.with_source_text(
+        project.project_source_id(),
+        String::from_utf8_lossy(project.project_bytes()).into_owned(),
     )
 }
 

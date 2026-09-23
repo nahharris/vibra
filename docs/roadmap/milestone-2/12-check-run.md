@@ -8,13 +8,20 @@ errors**, projects **Packages and targets**, runtime **Semantic reference**,
 ## Implementation sequence
 
 1. Add `check` and `run` argument/target selection adapters over the same
-   workspace snapshot. Honor C3's checking scope, not only reachable entry code.
+   workspace snapshot. `TARGET` selects the canonical root path of a local
+   target. Add the verified bootstrap modules to resolver input with their
+   manifest-owned package identity; ordinary dependencies remain unavailable.
+   Honor C3's selected-target and transitive-import scope, not only reachable
+   entry code.
 2. Validate entry using the shared atom walker, then separately its entity kind
    and signature. Only the C1-admitted entry subset executes; valid deferred
    `result void e` is not reported as malformed syntax.
 3. Reject all errors and unavailable execution before starting the interpreter.
    `check` does not execute bodies or initialization, invoke providers, sync
    dependencies, or mutate project data.
+   A selected resolver graph also rejects repeated source IDs across the local
+   package and verified bootstrap overlay with `@module.source-id-collision`
+   before type checking or execution.
 4. Execute the admitted pure target through the existing checked IR/interpreter.
    Keep command result, program result and trap distinct using C10/C11. Handle
    `--format json` exactly as specified without stealing program-owned stdout.
@@ -24,9 +31,10 @@ errors**, projects **Packages and targets**, runtime **Semantic reference**,
 
 | Positive | Negative / boundary |
 | --- | --- |
-| Init output checks/runs from nested project directory | Missing project; missing/ambiguous target per C2; library selected for run |
+| Init output checks/runs from nested project directory | Missing project; omitted required run target; unknown target root; library selected for run |
 | Pure multi-module program; private non-main entry | Outside-target entry; unknown path; wrong entity kind; invalid signature |
 | Named/lambda calls, constants, recursion and stdlib | Type error anywhere in required checking scope prevents execution |
+| Explicit selection checks every declaration in its import closure | Unrelated local target errors do not block explicit selection; omitted `check TARGET` checks every target |
 | Stable values/results/empty program output and events | Deferred effects/dependencies, unknown providers, Wasm/WASI source FFI |
 | JSON and human classification of same failure | Distinguish availability, source errors, operational failure and trap |
 

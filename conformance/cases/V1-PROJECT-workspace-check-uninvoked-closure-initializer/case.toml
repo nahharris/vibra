@@ -1,0 +1,12 @@
+id = "V1-PROJECT-workspace-check-uninvoked-closure-initializer"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A library initializer does not execute an uninvoked closure body that reads a global."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

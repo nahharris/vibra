@@ -37,6 +37,7 @@ table governs.
 | `@name.reserved-declaration` | `@error` |
 | `@name.reserved-value-spelling` | `@error` |
 | `@module.file-directory-collision` | `@error` |
+| `@module.source-id-collision` | `@error` |
 | `@module.unknown-path` | `@error` |
 | `@module.import-cycle` | `@error` |
 | `@module.invalid-segment` | `@error` |
@@ -161,6 +162,13 @@ is deterministic by source ID, primary span, and registry order. Resolution
 consumes only an explicit immutable source graph and performs no filesystem,
 dependency, lock, cache, or network access.
 
+A resolver graph uses source IDs as document identities, so one source ID MUST
+refer to only one module in that graph, including when a verified package
+overlay is present. A repeated source ID emits `@module.source-id-collision`
+at the empty span `0..0` of that source ID. The affected graph is not type
+checked or executed because diagnostics and source text would otherwise be
+ambiguous across packages.
+
 ## Recovery
 
 The parser retains a lossless concrete syntax tree and recovers after malformed
@@ -184,7 +192,8 @@ specification rule, not compiler module. Each case records:
 
 - normative rule ID;
 - a closed operation selector (`reader`, `project-decode`, `source-graph`,
-  `resolve`, `type-check`, `interpret`, `query`, or `format`);
+  `resolve`, `type-check`, `interpret`, `query`, `format`, `workspace-check`,
+  or `workspace-run`);
   `project-decode` requires exactly one project input, and a
   `source-graph` case requires one confined `tree` directory and a `project`
   input whose path is exactly `<tree>/project.vibon`; the corpus loader MUST
@@ -196,6 +205,13 @@ specification rule, not compiler module. Each case records:
   `<tree>/project.vibon` input, and one `.vib` source beneath that tree; it
   compares the snapshot-backed formatter result with a required formatted
   source snapshot;
+  `workspace-check` requires the static profile, one confined tree, and its
+  exact `<tree>/project.vibon` input, with no source input; it checks the whole
+  workspace snapshot through the workspace semantic API;
+  `workspace-run` requires the interpreter profile, the same project/tree
+  binding and no source input; it requires exactly one binary target and
+  compares its checked pure execution with the required result and VIBON audit
+  trace snapshots;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
 - an optional `.vibon` `graph` snapshot path for source-graph cases; when present it

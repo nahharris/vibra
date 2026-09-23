@@ -253,6 +253,8 @@ diagnostic_registry! {
         "a module-level value is spelled `map`, `array`, or `tuple`";
     ModuleFileDirectoryCollision => "@module.file-directory-collision", Module, Error, None,
         "a module path is claimed by both a file and a directory";
+    ModuleSourceIdCollision => "@module.source-id-collision", Module, Error, None,
+        "one source identity belongs to multiple modules in a resolver graph";
     ModuleUnknownPath => "@module.unknown-path", Module, Error, None,
         "a module path does not resolve to a source unit";
     ModuleImportCycle => "@module.import-cycle", Module, Error, None,
@@ -367,7 +369,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 71;
+    const REGISTERED_CODES: usize = 72;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

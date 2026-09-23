@@ -1,0 +1,2 @@
+(import text @std.text)
+(defn execute () void (let - (text.length "x") (do)))

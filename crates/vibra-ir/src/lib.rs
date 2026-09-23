@@ -1470,6 +1470,46 @@ impl CheckedFunction {
     }
 }
 
+/// Validates entry-independent IR structure and module initializer cycles.
+///
+/// A program entry affects indirect call-flow analysis, so callers that do not
+/// have an executable entry can still validate structural references and
+/// initializer dependencies without choosing an arbitrary function. An
+/// initializer that reaches an unbounded indirect call returns
+/// [`IrError::RecursiveCall`].
+pub fn validate_global_initializer_cycles(
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+) -> Result<(), IrError> {
+    let mut calls = vec![BTreeSet::new(); functions.len()];
+    let mut dependencies = vec![BTreeSet::new(); globals.len() + functions.len()];
+    for (index, global) in globals.iter().enumerate() {
+        validate_program_expr(
+            global.initializer(),
+            globals,
+            functions,
+            Some(DependencyNode::Global(index)),
+            &mut calls,
+            &mut dependencies,
+        )?;
+    }
+    for (index, function) in functions.iter().enumerate() {
+        validate_program_expr(
+            function.body(),
+            globals,
+            functions,
+            Some(DependencyNode::Function(index)),
+            &mut calls,
+            &mut dependencies,
+        )?;
+    }
+    let flow = analyze_initializer_call_flow(globals, functions)?;
+    for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow.dependencies) {
+        dependencies.extend(flow_edges);
+    }
+    reject_global_initializer_cycles(&dependencies, globals.len())
+}
+
 /// A complete immutable program that crossed the checker boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckedProgram {
@@ -1584,7 +1624,10 @@ impl CheckedProgram {
         {
             dependencies.extend(flow_edges);
         }
-        let recursive_groups = find_recursive_groups(&flow.calls, &functions);
+        for (static_calls, flow_calls) in calls.iter_mut().zip(&flow.calls) {
+            static_calls.extend(flow_calls);
+        }
+        let recursive_groups = find_recursive_groups(&calls, &functions);
         for global in &globals {
             validate_tail_calls(
                 global.initializer(),
@@ -1597,6 +1640,9 @@ impl CheckedProgram {
             )?;
         }
         for (index, function) in functions.iter().enumerate() {
+            if !flow.reachable.contains(&DependencyNode::Function(index)) {
+                continue;
+            }
             let aliases = parameter_aliases(
                 index,
                 &functions,
@@ -1835,7 +1881,9 @@ fn validate_program_expr(
                 body,
                 globals,
                 functions,
-                owner,
+                // Validate the body structurally, but its effects and reads
+                // belong to an invocation site, not closure creation.
+                None,
                 calls,
                 dependencies,
             )?;
@@ -2328,8 +2376,22 @@ struct FlowTargetSummary {
     known: BTreeSet<usize>,
     unknown: bool,
     is_function: bool,
-    closures: Vec<Self>,
+    closures: Vec<FlowClosure>,
     closure_defaults: Vec<Vec<bool>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FlowClosure {
+    origin: SourceOrigin,
+    signature: FunctionSignature,
+    body: Box<Expr>,
+    captures: Vec<FlowTargetSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FlowCallId {
+    Function(usize),
+    Closure(SourceOrigin),
 }
 
 impl FlowTargetSummary {
@@ -2357,9 +2419,26 @@ impl FlowTargetSummary {
         self.known.extend(&other.known);
         self.unknown |= other.unknown;
         self.is_function |= other.is_function;
-        self.closures.extend(other.closures.iter().cloned());
-        self.closure_defaults
-            .extend(other.closure_defaults.iter().cloned());
+        for closure in &other.closures {
+            if let Some(existing) = self
+                .closures
+                .iter_mut()
+                .find(|existing| existing.origin == closure.origin)
+            {
+                for (capture, additional) in
+                    existing.captures.iter_mut().zip(&closure.captures)
+                {
+                    capture.union(additional);
+                }
+            } else {
+                self.closures.push(closure.clone());
+            }
+        }
+        for defaults in &other.closure_defaults {
+            if !self.closure_defaults.contains(defaults) {
+                self.closure_defaults.push(defaults.clone());
+            }
+        }
     }
 }
 
@@ -2372,7 +2451,8 @@ struct CallFlow<'a> {
     parameter_sources: Vec<Vec<bool>>,
     calls: Vec<BTreeSet<usize>>,
     dependencies: Vec<BTreeSet<DependencyNode>>,
-    unresolved: bool,
+    unresolved: BTreeSet<DependencyNode>,
+    active_closures: BTreeSet<SourceOrigin>,
 }
 
 struct CallAnalysis {
@@ -2380,12 +2460,49 @@ struct CallAnalysis {
     dependencies: Vec<BTreeSet<DependencyNode>>,
     parameter_targets: Vec<Vec<FlowTargetSummary>>,
     parameter_sources: Vec<Vec<bool>>,
+    unresolved: BTreeSet<DependencyNode>,
+    reachable: BTreeSet<DependencyNode>,
 }
 
 fn analyze_call_flow(
     globals: &[CheckedGlobal],
     functions: &[CheckedFunction],
     entry: usize,
+) -> Result<CallAnalysis, IrError> {
+    let analysis = analyze_call_flow_with_entry(globals, functions, Some(entry))?;
+    if analysis
+        .unresolved
+        .iter()
+        .any(|dependency| analysis.reachable.contains(dependency))
+    {
+        return Err(IrError::RecursiveCall(
+            "indirect call target is not statically bounded before Step 9".to_owned(),
+        ));
+    }
+    Ok(analysis)
+}
+
+fn analyze_initializer_call_flow(
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+) -> Result<CallAnalysis, IrError> {
+    let analysis = analyze_call_flow_with_entry(globals, functions, None)?;
+    if analysis
+        .unresolved
+        .iter()
+        .any(|dependency| analysis.reachable.contains(dependency))
+    {
+        return Err(IrError::RecursiveCall(
+            "module initializer call flow is not statically bounded".to_owned(),
+        ));
+    }
+    Ok(analysis)
+}
+
+fn analyze_call_flow_with_entry(
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+    entry: Option<usize>,
 ) -> Result<CallAnalysis, IrError> {
     let mut flow = CallFlow {
         globals,
@@ -2407,10 +2524,22 @@ fn analyze_call_flow(
             .collect(),
         calls: vec![BTreeSet::new(); functions.len()],
         dependencies: vec![BTreeSet::new(); globals.len() + functions.len()],
-        unresolved: false,
+        unresolved: BTreeSet::new(),
+        active_closures: BTreeSet::new(),
     };
+    let roots = (0..globals.len())
+        .map(DependencyNode::Global)
+        .chain(entry.map(DependencyNode::Function))
+        .collect::<Vec<_>>();
+    let mut reachable = dependency_closure_from_roots(
+        &flow.dependencies,
+        globals.len(),
+        roots.iter().copied(),
+    )?;
 
-    if let Some(function) = functions.get(entry) {
+    if let Some((entry, function)) =
+        entry.and_then(|entry| functions.get(entry).map(|function| (entry, function)))
+    {
         for (slot, value_type) in
             function_signature_types(function.signature()).enumerate()
         {
@@ -2443,7 +2572,8 @@ fn analyze_call_flow(
         let returns_changed = flow.refresh_returns();
         flow.calls = vec![BTreeSet::new(); functions.len()];
         flow.dependencies = vec![BTreeSet::new(); globals.len() + functions.len()];
-        flow.unresolved = false;
+        flow.unresolved.clear();
+        flow.active_closures.clear();
         for (global_index, global) in globals.iter().enumerate() {
             flow.collect_expr(
                 global.initializer(),
@@ -2453,6 +2583,9 @@ fn analyze_call_flow(
             )?;
         }
         for (index, function) in functions.iter().enumerate() {
+            if !reachable.contains(&DependencyNode::Function(index)) {
+                continue;
+            }
             let environment = flow.parameter_environment(index);
             flow.collect_expr(
                 function.body(),
@@ -2463,32 +2596,53 @@ fn analyze_call_flow(
         }
         let parameters_changed = previous_parameters != flow.parameter_targets
             || previous_sources != flow.parameter_sources;
-        if !returns_changed && !parameters_changed {
-            if flow.unresolved {
-                return Err(IrError::RecursiveCall(
-                    "indirect call target is not statically bounded before Step 9"
-                        .to_owned(),
-                ));
-            }
+        let next_reachable = dependency_closure_from_roots(
+            &flow.dependencies,
+            globals.len(),
+            roots.iter().copied(),
+        )?;
+        let reachability_changed = next_reachable != reachable;
+        reachable = next_reachable;
+        if !returns_changed && !parameters_changed && !reachability_changed {
             return Ok(CallAnalysis {
                 calls: flow.calls,
                 dependencies: flow.dependencies,
                 parameter_targets: flow.parameter_targets,
                 parameter_sources: flow.parameter_sources,
+                unresolved: flow.unresolved,
+                reachable,
             });
         }
-    }
-    if flow.unresolved {
-        return Err(IrError::RecursiveCall(
-            "indirect call target analysis did not reach a bounded result".to_owned(),
-        ));
     }
     Ok(CallAnalysis {
         calls: flow.calls,
         dependencies: flow.dependencies,
         parameter_targets: flow.parameter_targets,
         parameter_sources: flow.parameter_sources,
+        unresolved: flow.unresolved,
+        reachable,
     })
+}
+
+fn dependency_closure_from_roots(
+    dependencies: &[BTreeSet<DependencyNode>],
+    global_count: usize,
+    roots: impl IntoIterator<Item = DependencyNode>,
+) -> Result<BTreeSet<DependencyNode>, IrError> {
+    let mut reachable = BTreeSet::new();
+    let mut pending = roots.into_iter().collect::<Vec<_>>();
+    while let Some(dependency) = pending.pop() {
+        if !reachable.insert(dependency) {
+            continue;
+        }
+        let Some(edges) = dependencies.get(dependency.node_index(global_count)) else {
+            return Err(IrError::InvalidExpression(format!(
+                "dependency graph references node {dependency:?}"
+            )));
+        };
+        pending.extend(edges.iter().copied());
+    }
+    Ok(reachable)
 }
 
 fn parameter_aliases(
@@ -2542,6 +2696,21 @@ fn function_signature_types(
             .iter()
             .map(LabelledParameter::value_type),
     )
+}
+
+fn function_argument_environment(
+    signature: &FunctionSignature,
+    arguments: &[FlowTargetSummary],
+) -> BTreeMap<usize, FlowTargetSummary> {
+    arguments
+        .iter()
+        .zip(function_signature_types(signature))
+        .enumerate()
+        .filter_map(|(slot, (argument, value_type))| {
+            matches!(value_type, PrimitiveType::Function(_))
+                .then(|| (slot, argument.clone()))
+        })
+        .collect()
 }
 
 impl<'a> CallFlow<'a> {
@@ -2621,7 +2790,7 @@ impl<'a> CallFlow<'a> {
         expression: &Expr,
         environment: &BTreeMap<usize, FlowTargetSummary>,
         captures: &[FlowTargetSummary],
-        visiting: &mut BTreeSet<usize>,
+        visiting: &mut BTreeSet<FlowCallId>,
     ) -> FlowTargetSummary {
         match expression {
             Expr::Function { function, .. } => {
@@ -2631,6 +2800,7 @@ impl<'a> CallFlow<'a> {
                 signature,
                 body,
                 captures: closure_captures,
+                origin,
                 ..
             } => {
                 let closure_capture_summaries = closure_captures
@@ -2644,23 +2814,14 @@ impl<'a> CallFlow<'a> {
                         )
                     })
                     .collect::<Vec<_>>();
-                let mut closure_environment = BTreeMap::new();
-                for (slot, value_type) in
-                    function_signature_types(signature).enumerate()
-                {
-                    if matches!(value_type, PrimitiveType::Function(_)) {
-                        closure_environment
-                            .insert(slot, FlowTargetSummary::unknown_function());
-                    }
-                }
                 FlowTargetSummary {
                     is_function: true,
-                    closures: vec![self.summary_expr_with_stack(
-                        body,
-                        &closure_environment,
-                        &closure_capture_summaries,
-                        visiting,
-                    )],
+                    closures: vec![FlowClosure {
+                        origin: origin.clone(),
+                        signature: signature.clone(),
+                        body: body.clone(),
+                        captures: closure_capture_summaries,
+                    }],
                     closure_defaults: vec![
                         signature
                             .labelled()
@@ -2781,9 +2942,6 @@ impl<'a> CallFlow<'a> {
                     unknown: targets.unknown,
                     ..FlowTargetSummary::default()
                 };
-                for closure in &targets.closures {
-                    summary.union(closure);
-                }
                 let argument_summaries = arguments
                     .iter()
                     .map(|argument| {
@@ -2795,8 +2953,28 @@ impl<'a> CallFlow<'a> {
                         )
                     })
                     .collect::<Vec<_>>();
+                for closure in &targets.closures {
+                    let closure_environment = function_argument_environment(
+                        &closure.signature,
+                        &argument_summaries,
+                    );
+                    let closure_id = FlowCallId::Closure(closure.origin.clone());
+                    if !visiting.insert(closure_id.clone()) {
+                        summary.unknown = true;
+                        continue;
+                    }
+                    let returned = self.summary_expr_with_stack(
+                        &closure.body,
+                        &closure_environment,
+                        &closure.captures,
+                        visiting,
+                    );
+                    summary.union(&returned);
+                    visiting.remove(&closure_id);
+                }
                 for target in targets.known {
-                    if !visiting.insert(target) {
+                    let function_id = FlowCallId::Function(target);
+                    if !visiting.insert(function_id.clone()) {
                         if let Some(returned) = self.function_returns.get(target) {
                             summary.union(returned);
                         } else {
@@ -2806,7 +2984,7 @@ impl<'a> CallFlow<'a> {
                     }
                     let Some(function) = self.functions.get(target) else {
                         summary.unknown = true;
-                        visiting.remove(&target);
+                        visiting.remove(&function_id);
                         continue;
                     };
                     let mut target_environment = BTreeMap::new();
@@ -2826,7 +3004,7 @@ impl<'a> CallFlow<'a> {
                         visiting,
                     );
                     summary.union(&returned);
-                    visiting.remove(&target);
+                    visiting.remove(&function_id);
                 }
                 summary
             }
@@ -2857,32 +3035,11 @@ impl<'a> CallFlow<'a> {
             }
             Expr::Closure {
                 captures: closure_captures,
-                body,
-                signature,
                 ..
             } => {
                 for capture in closure_captures {
                     self.collect_expr(capture, owner, environment, captures)?;
                 }
-                let closure_capture_summaries = closure_captures
-                    .iter()
-                    .map(|capture| self.summary_expr(capture, environment, captures))
-                    .collect::<Vec<_>>();
-                let mut closure_environment = BTreeMap::new();
-                for (slot, value_type) in
-                    function_signature_types(signature).enumerate()
-                {
-                    if matches!(value_type, PrimitiveType::Function(_)) {
-                        closure_environment
-                            .insert(slot, FlowTargetSummary::unknown_function());
-                    }
-                }
-                self.collect_expr(
-                    body,
-                    owner,
-                    &closure_environment,
-                    &closure_capture_summaries,
-                )?;
             }
             Expr::Sequence { expressions, .. } => {
                 for expression in expressions {
@@ -2932,38 +3089,35 @@ impl<'a> CallFlow<'a> {
                     target_summary.known.insert(*function_hint);
                     target_summary.is_function = true;
                 }
-                if target_summary.unknown {
-                    self.unresolved = true;
+                if target_summary.unknown
+                    && let Some(owner) = owner
+                {
+                    self.unresolved.insert(owner);
                 }
                 let argument_summaries = arguments
                     .iter()
                     .map(|argument| self.summary_expr(argument, environment, captures))
                     .collect::<Vec<_>>();
                 for closure in &target_summary.closures {
-                    if closure.unknown {
-                        self.unresolved = true;
-                    }
-                    if let Some(owner) = owner {
-                        let Some(dependencies) = self
-                            .dependencies
-                            .get_mut(owner.node_index(self.globals.len()))
-                        else {
-                            return Err(IrError::InvalidExpression(format!(
-                                "dependency owner {owner:?} is outside the program"
-                            )));
-                        };
-                        for target in &closure.known {
-                            dependencies.insert(DependencyNode::Function(*target));
+                    let closure_id = closure.origin.clone();
+                    if !self.active_closures.insert(closure_id.clone()) {
+                        if let Some(owner) = owner {
+                            self.unresolved.insert(owner);
                         }
-                        if let DependencyNode::Function(owner) = owner {
-                            let Some(edges) = self.calls.get_mut(owner) else {
-                                return Err(IrError::InvalidExpression(format!(
-                                    "function owner index {owner} is outside the program"
-                                )));
-                            };
-                            edges.extend(&closure.known);
-                        }
+                        continue;
                     }
+                    let closure_environment = function_argument_environment(
+                        &closure.signature,
+                        &argument_summaries,
+                    );
+                    let closure_result = self.collect_expr(
+                        &closure.body,
+                        owner,
+                        &closure_environment,
+                        &closure.captures,
+                    );
+                    self.active_closures.remove(&closure_id);
+                    closure_result?;
                 }
                 if !target_summary.closure_defaults.is_empty()
                     && let Some(callee) = callee.as_deref()
