@@ -19,6 +19,7 @@
 )]
 
 pub mod discovery;
+pub mod format_plan;
 pub mod project;
 pub mod query;
 pub mod snapshot;

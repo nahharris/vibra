@@ -67,7 +67,7 @@ Run only commands for crates introduced by the selected or preceding step:
 | Step 6 | `cargo test --locked --offline -p vibra-types -p vibra-ir -p vibra-interp`<br>`cargo test --locked --offline -p vibra-conformance --test bindings_step6` |
 | Step 7 | `cargo test --locked --offline -p vibra-types -p vibra-ir -p vibra-interp`<br>`cargo test --locked --offline -p vibra-conformance --test functions_step7`<br>`cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases` |
 | Step 10 | `cargo test --locked --offline -p vibra-workspace -p vibra-schema` |
-| Step 11 | `cargo test --locked --offline -p vibra-cli -p vibra-workspace -p vibra-fmt` |
+| Step 11 | `cargo test --locked --offline -p vibra-cli -p vibra-workspace -p vibra-fmt -p vibra-schema -p vibra-conformance` |
 
 Append an actual test filter only after confirming its name. Each step records
 the concrete test files and case IDs it added. Proposed module/test names in a
@@ -103,10 +103,23 @@ not asserted; an explicitly empty event trace must assert no events occurred.
 
 ## CLI demo commands
 
-The binary and argument grammar do not exist at this planning baseline. Step 1
-freezes the grammar; Steps 11–13 must add the exact verified init/fmt/check/run/
-test invocations here and a repeatable temporary-project driver. Do not publish
-an invented `--project`, target flag, or JSON stream contract in advance.
+The Step 11 binary supports project initialization and formatting. These exact
+init/fmt invocations are exercised against the real process in
+`crates/vibra-cli/tests/process_step11.rs`:
+
+```powershell
+vibra --format json --workspace <empty-dir> project init
+vibra --format json --workspace <project-dir> fmt src/hello/main.vib
+vibra --format json --workspace <project-dir> fmt src/hello/main.vib --write
+vibra --format json --workspace <project-dir> fmt project.vibon
+vibra --format json --workspace <project-dir> fmt project.vibon --write
+```
+
+`project init` names the generated package from the initialized directory;
+use a directory named `hello` for the shown source path. The source and VIBON
+format commands preview by default. Step 11 returns `@command.unavailable` for valid
+`check`, `run`, and `test` requests and does not execute them. Do not publish an
+invented `--project`, target flag, or JSON stream contract.
 
 The build command after Step 11 is:
 

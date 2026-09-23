@@ -39,7 +39,7 @@ contracts. Do not fork the neutral manifest into a second M2 test framework.
 | `vibra-interp` | Values, closures, activations, evaluation and intrinsic semantics | ir, diagnostics |
 | `vibra-workspace` | Project decoder, filesystem snapshot, orchestration, semantic queries, format plans | syntax, resolve, types, ir, interp, fmt, diagnostics |
 | `vibra-schema` | Versioned serialization of service facts/results | existing inputs plus workspace/semantic result types as needed |
-| `vibra-cli` | Arguments, output routing, exit mapping, explicit write/run entrypoints | workspace, schema, diagnostics |
+| `vibra-cli` | Arguments, output routing, exit mapping, project init, explicit formatter writes | workspace, schema, fmt, syntax, types, diagnostics |
 | `vibra-conformance` | Independent observations and cross-workspace invariants | required library nodes; CLI through process tests |
 
 The IR crate owns the semantic type representation so the checker can produce

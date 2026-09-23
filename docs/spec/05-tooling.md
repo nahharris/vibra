@@ -66,6 +66,36 @@ module-qualified test name. Options after the command are limited to the
 explicit `fmt --write` spelling; unknown options, extra positionals, and
 alternate spellings are invalid input.
 
+M2 Step 11 implements only `project init` and `fmt`; valid `check`, `run`, and
+`test` requests still return `@command.unavailable` until their later steps.
+The default init destination is the workspace root. Otherwise `DEST` names a
+workspace-relative directory whose parent directories already exist. The
+package and binary target name comes from the destination directory name (or
+the workspace name when `DEST` is omitted): lowercase the Unicode text, keep
+ASCII letters and digits, replace each run of other characters with one
+hyphen, and trim edge hyphens. Use `hello` when no ASCII letter or digit
+remains, and prefix `project-` when the result starts with a digit.
+
+The initialized package is version `0.1.0` with no dependencies, one binary
+target rooted at `src/<name>` with entry `@<name>.main.main`, and source
+`src/<name>/main.vib` containing a pure `void` `main`. It also creates `src/`
+and `tests/`. The generated entry imports no standard-library module, so C8's
+stdlib bootstrap is unnecessary for this pure project. Init rejects a
+nonempty destination and any path that escapes the canonical workspace. Its
+`workspace` result is the canonical initialized root; `created` lists every
+created file and directory relative to that root, in creation-plan order.
+
+For `fmt`, the successful payload path is the canonical slash-separated
+workspace-relative path. `changed` compares the input bytes with the planned
+canonical UTF-8 bytes. Preview returns the formatted text and leaves the file
+untouched. `--write` returns `written: true` only when a changed file was
+replaced successfully; a successful write response has `text: null`. If
+diagnostics prevent application, `written` is false and the planned text is
+returned. A recovered document is preserved byte-for-byte. The formatter may
+reorder labelled arguments only when an accepted checker result for that exact
+source in the captured workspace snapshot supplies their binding facts; absent
+facts never authorize an inferred reorder.
+
 JSON mode emits exactly one versioned envelope to stdout and sends diagnostics
 and operational logs to stderr. The envelope always has these fields:
 
@@ -392,10 +422,10 @@ returned by a prior plan call.
 
 ## Schemas and errors
 
-The v1 implementation publishes JSON Schemas for CLI and MCP project
-inspection, diagnostics, normalized query results and expansions, edit
-plans/results, test reports, command results, external-registry inspection, and
-MCP envelopes. Persistent project, lock, and build-data record schemas are
+The v1 implementation publishes JSON Schemas for CLI command results, MCP
+project inspection, diagnostics, normalized query results and expansions, edit
+plans/results, test reports, external-registry inspection, and MCP envelopes.
+Persistent project, lock, and build-data record schemas are
 defined as VIBON data contracts and tested through their typed decoders, not
 duplicated as normative JSON files.
 
