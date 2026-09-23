@@ -161,6 +161,11 @@ returned. A recovered document is preserved byte-for-byte. The formatter may
 reorder labelled arguments only when an accepted checker result for that exact
 source in the captured workspace snapshot supplies their binding facts; absent
 facts never authorize an inferred reorder.
+If the single-source checker reports `@tool.unavailable`, `fmt` discards that
+incomplete check result and continues with syntax-only formatting. It uses no
+binding facts and must preserve labelled argument order; the unavailable
+semantic check does not make formatting unavailable. Parser and formatter
+diagnostics still apply to preview and write.
 
 JSON mode emits exactly one versioned envelope to stdout and sends diagnostics
 and operational logs to stderr. The envelope always has these fields:

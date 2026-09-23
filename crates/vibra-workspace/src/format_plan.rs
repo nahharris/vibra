@@ -90,6 +90,7 @@ pub struct FormatPlan {
     diagnostics: Vec<Diagnostic>,
     mode: DocumentMode,
     source_was_checked: bool,
+    source_checker_unavailable: bool,
     snapshot_bindings_authorized: bool,
 }
 
@@ -189,13 +190,23 @@ pub fn plan_format(
         .collect::<Vec<_>>();
     let source_check =
         (mode == DocumentMode::Source).then(|| check_source(&relative_path, text));
-    diagnostics.extend(source_check.iter().flat_map(|checked| {
+    let source_checker_unavailable = source_check.as_ref().is_some_and(|checked| {
         checked
             .diagnostics()
             .iter()
-            .cloned()
-            .map(|diagnostic| diagnostic.with_source_id(&relative_path))
-    }));
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+    });
+    // Incomplete standalone checking cannot authorize reordering or block a
+    // syntax-only format; its cascaded semantic diagnostics are not facts.
+    if !source_checker_unavailable {
+        diagnostics.extend(source_check.iter().flat_map(|checked| {
+            checked
+                .diagnostics()
+                .iter()
+                .cloned()
+                .map(|diagnostic| diagnostic.with_source_id(&relative_path))
+        }));
+    }
     let source_was_checked = source_check
         .as_ref()
         .is_some_and(|checked| checked.accepted());
@@ -209,6 +220,7 @@ pub fn plan_format(
     for diagnostic in formatted.diagnostics() {
         let checker_reported_order = diagnostic.code()
             == DiagnosticCode::StyleArgumentOrder
+            && !source_checker_unavailable
             && source_check.as_ref().is_some_and(|checked| {
                 checked.diagnostics().iter().any(|checked_diagnostic| {
                     checked_diagnostic.code() == diagnostic.code()
@@ -248,6 +260,7 @@ pub fn plan_format(
         diagnostics,
         mode,
         source_was_checked,
+        source_checker_unavailable,
         snapshot_bindings_authorized,
     })
 }
@@ -292,7 +305,7 @@ pub fn apply_format(plan: &FormatPlan) -> Result<(), FormatPlanError> {
         plan.mode,
         plan.source_was_checked,
         plan.snapshot_bindings_authorized,
-        true,
+        !plan.source_checker_unavailable,
     )?;
 
     let target_permissions =

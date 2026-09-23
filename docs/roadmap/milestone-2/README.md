@@ -103,7 +103,7 @@ steps additionally exercise real processes. Step 14 adds reproducible evidence.
 | One typed IR and reference interpreter, no adapter dependency | 5–9, 14; architecture tests and interpreter corpus |
 | Mandatory tail calls | 9, 14; source workload plus activation-depth evidence |
 | Type-aware position metadata, visible names, primitive expectations | 10; recovery, Unicode, identities, schema consumer tests |
-| `project init`, `fmt`, `check`, `run`, `test` | 11–13; actual binary, JSON, exits, writes, clean demo |
+| `project init`, `fmt`, `check`, `run`, `test` | 11–14; actual binary, JSON, exits, writes, clean demo; imported-source format fallback |
 | Static/interpreter profiles for implemented subset | Every behavior step, 14; explicit scope and zero failed/unavailable in gate corpus |
 | Pure execution has no host events or ambient observations | 5, 8–9, 12–14; empty audit traces and isolated-input tests |
 | Unsupported later-v1 forms have explicit availability diagnostics | 1 and every widening step; availability inventory swept by 14 |
