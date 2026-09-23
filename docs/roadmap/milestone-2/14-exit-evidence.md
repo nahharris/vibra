@@ -51,9 +51,19 @@ use `.vibon` `@source-graph.v1`, and pure runtime trace snapshots use `.vibon`
 `@audit-trace.v1`; there are no text graph or trace snapshots in the active
 conformance tree.
 
+A post-merge review found that the manifest decoder did not enforce the
+specified `.vibon` extension for interpreter and Wasm audit-trace paths.
+Commit `0e89b56d275058f016e9684a7aaa36b56d59d86f` closes that gap. The
+`corpus_step3::execution_audit_snapshots_require_vibon_extensions` regression
+accepts `.vibon` and rejects `.txt` for both expectation fields. The updated
+full workspace suite reports 527 passed, 0 failed, and 5 ignored; cumulative
+M2 CI on head `0e89b56d275058f016e9684a7aaa36b56d59d86f` passed all five jobs in
+[run 35928991639](https://github.com/nahharris/vibra/actions/runs/35928991639).
+
 ## Gate-to-test map
 
-Every row uses the final Step 14 PR check page linked above; that suite runs the
+The final Step 14 PR run covers its candidate head; the snapshot-extension row
+also links cumulative M2 CI after the post-merge guard. Both runs include the
 three platform checks, independent reader corpus, and archive boundary check.
 
 | Roadmap obligation | Conformance cases and host tests | Final-head PR CI |
@@ -70,6 +80,7 @@ three platform checks, independent reader corpus, and archive boundary check.
 | Static/interpreter/tooling profile dispatch | Full corpus command below: reader 73, static 97, interpreter 24, tooling 4; `architecture_boundary` and conformance host suites | [PR #302 checks](https://github.com/nahharris/vibra/pull/302/checks) |
 | Pure execution has no host events or ambient reads | `V1-RUNTIME-tail-*`, `V1-RUNTIME-workspace-run-*`, and workspace test cases; tail and process tests assert stable results and empty event arrays | [PR #302 checks](https://github.com/nahharris/vibra/pull/302/checks) |
 | Deferred forms remain explicit availability results | All rows in [availability-audit.md](availability-audit.md); `evidence_step11` and full corpus | [PR #302 checks](https://github.com/nahharris/vibra/pull/302/checks) |
+| Graph and audit snapshots use only canonical VIBON paths | `V1-PROJECT-graph-static-*`, `V1-RUNTIME-workspace-run-*`; `corpus_step3::execution_audit_snapshots_require_vibon_extensions` rejects `.txt` for interpreter and Wasm traces | [PR #302 checks](https://github.com/nahharris/vibra/pull/302/checks); cumulative [M2 run 35928991639](https://github.com/nahharris/vibra/actions/runs/35928991639) |
 | Clean repeated multi-module CLI demo | `process_step14::actual_binary_positive_demo_repeats_in_two_fresh_hello_workspaces`; `process_step14::actual_binary_run_preflight_failures_never_produce_a_program_result`; `process_step14::actual_binary_failing_assertion_is_a_structured_test_failure` | [PR #302 checks](https://github.com/nahharris/vibra/pull/302/checks) |
 | Architecture, archive, and interchange schema boundary | `architecture_boundary` checks the workspace dependency graph, archive exclusion, and archive references; all process tests validate one command envelope against `COMMAND_RESULT_SCHEMA` | [PR #302 checks](https://github.com/nahharris/vibra/pull/302/checks) |
 
@@ -84,7 +95,7 @@ expects a nonzero process exit.
 | --- | --- |
 | `cargo fmt --all --check` | Pass |
 | `cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings` | Pass |
-| `cargo test --locked --offline --workspace --all-targets --all-features` | 526 passed, 0 failed, 5 ignored across 64 targets; the ignored tests require symlink privileges unavailable on this ordinary Windows host. Platform CI supplies the cross-platform checks. |
+| `cargo test --locked --offline --workspace --all-targets --all-features` | 527 passed, 0 failed, 5 ignored across 64 targets; the ignored tests require symlink privileges unavailable on this ordinary Windows host. Platform CI supplies the cross-platform checks. |
 | `RUSTDOCFLAGS="-D warnings" cargo doc --locked --offline --workspace --no-deps --all-features` | Pass |
 | `cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases` | 198 passed: reader 73, static 97, interpreter 24, tooling 4; 0 failed and 0 unavailable. |
 | `cargo test --locked --offline -p vibra-cli --test process_step14` | 3 passed; actual-binary demo and negative outcomes. |
