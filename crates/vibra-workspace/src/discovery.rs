@@ -264,7 +264,8 @@ fn load_project(
         return Err(WorkspaceError::new(
             "project document was not accepted",
             diagnostics,
-        ));
+        )
+        .with_source_text(source_id, source.clone()));
     };
     let decoded = ProjectDecoder::decode(data, ProjectOrigin::new(source_id));
     diagnostics.extend(decoded.diagnostics().iter().cloned());
@@ -272,13 +273,15 @@ fn load_project(
         return Err(WorkspaceError::new(
             "project schema was not accepted",
             diagnostics,
-        ));
+        )
+        .with_source_text(source_id, source.clone()));
     };
     if !diagnostics.is_empty() {
         return Err(WorkspaceError::new(
             "project document was not accepted",
             diagnostics,
-        ));
+        )
+        .with_source_text(source_id, source));
     }
     Ok(DiscoveredProject {
         root: root.to_path_buf(),

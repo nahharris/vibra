@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 vibra-diagnostics.workspace = true
 vibra-ir.workspace = true
+vibra-resolve.workspace = true
 vibra-syntax.workspace = true
 base64.workspace = true
 ring.workspace = true
