@@ -684,8 +684,8 @@ pub fn check_resolved(
     if let (Some(globals), Some(functions)) = (&globals, &functions) {
         match vibra_ir::validate_global_initializer_cycles(globals, functions) {
             Ok(()) => {}
-            Err(IrError::GlobalInitializerCycle(_)) => {
-                if let Some(global) = globals.first() {
+            Err(IrError::GlobalInitializerCycle(global_index)) => {
+                if let Some(global) = globals.get(global_index) {
                     diagnostics.push(
                         Diagnostic::new(
                             vibra_diagnostics::DiagnosticCode::TypeInitializerCycle,
@@ -731,8 +731,8 @@ pub fn check_resolved(
                 Ok(program) => {
                     programs.insert(declaration.clone(), program);
                 }
-                Err(IrError::GlobalInitializerCycle(_)) => {
-                    if let Some(global) = globals.first() {
+                Err(IrError::GlobalInitializerCycle(global_index)) => {
+                    if let Some(global) = globals.get(global_index) {
                         diagnostics.push(
                             Diagnostic::new(
                                 vibra_diagnostics::DiagnosticCode::TypeInitializerCycle,

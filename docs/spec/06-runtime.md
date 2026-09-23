@@ -47,6 +47,26 @@ Evaluation is strict and deterministic:
 - a tail-position call to a function in the same recursive group reuses the
   current activation instead of growing language-level stack.
 
+### M2 module-value initialization
+
+Before accepting an M2 checked program, the checker MUST build the dependency
+graph of its immutable module-level `def` initializers. An
+initializer may depend on a module value directly or through a function call
+or callable alias reached while evaluating that initializer. A cycle is
+rejected only when the dependency cycle contains a module-level `def`; a
+function-only recursion cycle reached from an initializer is not a module
+initializer cycle. A module-value cycle is rejected with the error-level
+`@type.initializer-cycle` before an executable checked program is produced or
+any initializer is evaluated or program executed; no checked program is
+produced. Its primary span is the complete source form of a `def` participating
+in the cycle, selected by the deterministic dependency traversal. Acyclic
+forward references remain valid. Type checking never evaluates an initializer
+to infer its written type.
+
+For an accepted program, a module value is evaluated lazily on its first read
+and exactly once during that execution. Later reads reuse that value. A new
+execution starts with fresh module-value state.
+
 `map.of` and map variadic tails share one construction rule. Every key and
 value is evaluated even if a key repeats; the later pair replaces the earlier
 value. Map iteration order is canonical key order, not insertion or hash-table
@@ -190,6 +210,8 @@ complete values for a supplied path; console, environment, clock, and random
 operations likewise exchange ordinary typed values. There are no user-visible
 file or stream handles, scoped resources, close operations, or resource
 lifetime semantics in v1.
+
+## Traps
 
 Host responses that are ordinary environmental outcomes use typed `result`
 errors. ABI mismatch, impossible typed IR, invalid host value IDs, and runtime

@@ -1,0 +1,4 @@
+(def unrelated i32 1i32)
+(def first i32 second)
+(def second i32 first)
+(defn execute () void (do))

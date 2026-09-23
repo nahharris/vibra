@@ -35,6 +35,13 @@ ascription, widening, narrowing, and conversion remain valid syntax but are
 outside that profile and produce `@tool.unavailable` when semantic support is
 requested. This is an implementation capability boundary, not a second sourcedialect; the full rules below remain the v1 authority for later milestones.
 
+M2 function declarations and `fn` types have no variadic slot. A variadic
+parameter declaration or variadic function type is valid v1 syntax but is
+outside the M2 profile and produces `@tool.unavailable`. Applications of a
+variadic signature are likewise unavailable, including calls with no tail
+operands. Extra operands supplied to a fixed signature remain ordinary
+argument-binding errors; they do not make that fixed signature variadic.
+
 A numeric suffix is a complete type annotation on its literal. Integer
 suffixes select one of `i8` through `i64` or `u8` through `u64`; float suffixes
 select `f32` or `f64`. A suffixed literal MUST fit the selected type. An
