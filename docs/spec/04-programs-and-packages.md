@@ -545,6 +545,12 @@ canonical module identity and are not user-definable external declarations:
 | `assert.equal-i32` | `i32 i32 -> void` | succeeds when both operands have the same signed value |
 | `assert.equal-u64` | `u64 u64 -> void` | succeeds when both operands have the same unsigned value |
 
+These callable members are admitted only from declarations in the reserved
+`@tests` unit. A reference to one from a local target declaration emits
+`@tool.unavailable` at the reference span and prevents target execution;
+importing `@std.assert` without referencing a member does not by itself make a
+target unavailable.
+
 The table is closed: another assertion name, generic assertion, implicit
 conversion, collection assertion, or deferred operand type is
 `@tool.unavailable` in M2. Assertion operands are checked and evaluated
