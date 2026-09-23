@@ -39,6 +39,7 @@ table governs.
 | `@module.file-directory-collision` | `@error` |
 | `@module.source-id-collision` | `@error` |
 | `@module.unknown-path` | `@error` |
+| `@module.missing-required-import` | `@error` |
 | `@module.import-cycle` | `@error` |
 | `@module.invalid-segment` | `@error` |
 | `@module.path-escape` | `@error` |
@@ -150,6 +151,12 @@ roots nesting or coinciding with each other,
 `@project.overlapping-target-roots` is attached to a target's `root` value
 when that root equals or is nested beneath the reserved `tests/` root; this
 case has no related span for the synthetic test root.
+
+`@module.missing-required-import` is emitted once in a module that declares
+tests but has no import targeting exactly `@std.assert`. Its primary span is
+the string name of the module's first test declaration. It is an ordinary
+source diagnostic, so the selected suite is invalid and no selected test
+executes.
 
 `@runtime.invalid-checked-program` identifies an M2 execution-boundary trap
 when a checked program has no executable entry or its body violates checked-IR

@@ -85,9 +85,11 @@ Any diagnostic from that required source parsing yields
 empty `tests` array. After these checks, an unknown module or test name is
 `@command.invalid-input` with exit 2 and no diagnostics; semantic checking of a
 nonexistent selection is not performed. A selected suite is fully checked
-before any test body runs. Ordinary syntax, import, type, or duplicate test
-identity diagnostics found during that check yield `@command.diagnostics`
-(exit 1), mark every selected item `@test.invalid`, and prevent all execution.
+before any test body runs. Error-level ordinary syntax, import, type, or
+duplicate test identity diagnostics found during that check yield
+`@command.diagnostics` (exit 1), mark every selected item `@test.invalid`, and
+prevent all execution. Warning-level diagnostics remain in the envelope and
+are attributed to affected test items without blocking execution.
 An otherwise valid selected test whose declaration-dependency closure contains
 an M2-unavailable form is `@test.unavailable` with `@tool.unavailable`; other
 selected tests whose dependency closures do not contain that form still run.

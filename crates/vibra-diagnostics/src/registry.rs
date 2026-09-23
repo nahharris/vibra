@@ -257,6 +257,8 @@ diagnostic_registry! {
         "one source identity belongs to multiple modules in a resolver graph";
     ModuleUnknownPath => "@module.unknown-path", Module, Error, None,
         "a module path does not resolve to a source unit";
+    ModuleMissingRequiredImport => "@module.missing-required-import", Module, Error, None,
+        "a module declaring tests omits its required `@std.assert` import";
     ModuleImportCycle => "@module.import-cycle", Module, Error, None,
         "module imports form a cycle";
     ModuleInvalidSegment => "@module.invalid-segment", Module, Error, None,
@@ -339,6 +341,8 @@ diagnostic_registry! {
         "an `entry` declaration does not have the required signature";
     ProjectAmbiguousDependencyTarget => "@project.ambiguous-dependency-target", Project, Error, None,
         "a dependency alias does not bind exactly one `@lib` target";
+    ProjectReservedUnitName => "@project.reserved-unit-name", Project, Error, None,
+        "a target or dependency name collides with the reserved `@tests` unit";
     ProjectOverlappingTargetRoots => "@project.overlapping-target-roots", Project, Error, None,
         "two target roots nest or coincide";
     ProjectNotFound => "@project.not-found", Project, Error, None,
@@ -349,6 +353,8 @@ diagnostic_registry! {
         "a project filesystem operation failed";
     RuntimeInvalidHostValue => "@runtime.invalid-host-value", Runtime, Error, None,
         "a host operation received or returned a value its ABI does not admit";
+    RuntimeInvalidCheckedProgram => "@runtime.invalid-checked-program", Runtime, Error, None,
+        "checked program execution violated an M2 runtime invariant";
     StyleArgumentOrder => "@style.argument-order", Style, Warning, Safe,
         "operands are in a noncanonical but unambiguous order";
     ContractUnusedEffect => "@contract.unused-effect", Contract, Warning, None,
@@ -369,7 +375,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 72;
+    const REGISTERED_CODES: usize = 75;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

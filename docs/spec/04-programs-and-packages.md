@@ -476,7 +476,9 @@ module cannot import `@tests`; that import path emits `@module.unknown-path`.
 Modules within `@tests` may import other `@tests` modules under the ordinary
 module-resolution, cycle, and public-visibility rules.
 
-Tests are declarations in those modules:
+Tests are declarations in those modules. A `test` declaration outside the
+reserved `@tests` unit emits `@tool.unavailable` in M2 and is never admitted
+into a target program:
 
 ```vibra
 (import assert @std.assert)
@@ -531,9 +533,13 @@ effect consent and cannot add effects to a test declaration.
 
 ### M2 assertion contract
 
-An M2 test module MUST import `@std.assert` explicitly. The verified bootstrap
-exports exactly these test-only assertion members; they are resolved by their
-canonical module identity and are not user-definable external declarations:
+An M2 test module MUST import `@std.assert` explicitly. If a module declares
+one or more tests but has no import targeting exactly `@std.assert`, emit one
+`@module.missing-required-import` diagnostic at the string name of its first
+test declaration. This is an ordinary source error: all selected tests are
+invalid and none execute. The verified bootstrap exports exactly these
+test-only assertion members; they are resolved by their canonical module
+identity and are not user-definable external declarations:
 
 | Member | Exact signature | Passing behavior |
 | --- | --- | --- |
@@ -569,9 +575,11 @@ emit a host event, or become a runtime trap. The runner continues with the
 next selected test using a fresh value state and empty audit trace. A test item
 therefore has exactly one of `@test.passed`, `@test.assertion-failed`,
 `@test.invalid`, `@test.unavailable`, or `@test.trap`. `@test.invalid` means
-duplicate test identities or ordinary syntax, import, or type diagnostics
+duplicate test identities or error-level syntax, import, or type diagnostics
 prevented the selected suite from executing; every selected item is invalid
-in that case, and none executes.
+in that case, and none executes. Warning-level diagnostics remain attached to
+the suite and to each selected test whose module or import closure contains
+their primary source, but do not prevent execution or change a test outcome.
 Suite-wide static diagnostics are attributed to each selected test whose module
 or import closure contains the diagnostic's primary source; the same diagnostic
 may occur in multiple test items. Item-owned diagnostics are attributed by the

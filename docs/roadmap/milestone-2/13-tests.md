@@ -31,10 +31,10 @@ Requires Step 12 and C8/C9/C10/C11. Read projects **Tests**, source
 | Multiple files and identical test names in different modules | Duplicate decoded name within a module; damaged/type-invalid test body |
 | Reserved `@tests` unit, explicit public imports to targets, and test helper modules | Target/dependency name collision, `tests/` root collision/escape, private import, target import of `@tests` |
 | Canonical module-plus-string selector and exact selection | Noncanonical selector, another unit, unknown test, omitted selector with empty suite |
-| Explicit assertion imports and supported primitive assertions | Missing import; spoofed trusted assertion external; deferred operand types |
-| Test-only assertion calls in `@tests` | Target declaration references an assertion member and becomes unavailable |
+| Explicit assertion imports and supported primitive assertions | Missing import (`@module.missing-required-import`); spoofed trusted assertion external; deferred operand types |
+| Test-only assertion calls in `@tests` | Target declaration references an assertion member and becomes unavailable; test declarations outside `@tests` are unavailable and never enter target programs |
 | Passing assertion and a deliberately failing assertion | Failure must not become success, generic trap, or host-effect operation |
-| Repeated isolated execution with empty event lists | Values or results leaking across tests, order-dependent success |
+| Repeated isolated execution with empty event lists; warning-level diagnostics retained without blocking execution | Values or results leaking across tests, order-dependent success |
 | Selection and empty-suite behavior from C9 | Unknown filter/target, nonempty test effects, unavailable selected form |
 
 The illustrative generic `assert.equal` example is not authority to implement
