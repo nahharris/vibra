@@ -16,6 +16,7 @@ formatted = "formatted.vib"
 [[expect.diagnostics]]
 code = "@style.argument-order"
 level = "@warning"
+source = "src/hello/main.vib"
 
 [expect.diagnostics.span]
 start = 18

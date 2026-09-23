@@ -1,17 +1,18 @@
 //! Confined, revision-checked canonical formatting plans.
 
+use std::ffi::OsString;
 use std::fmt;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
-use vibra_diagnostics::{Diagnostic, DocumentRevision};
+use vibra_diagnostics::{Diagnostic, DiagnosticCode, DocumentRevision};
 use vibra_fmt::format_source_with_bindings;
 use vibra_syntax::{DocumentMode, parse_data, parse_source};
 use vibra_types::check_source;
 
+use crate::confined_fs::ConfinedDir;
 use crate::{WorkspaceError, WorkspaceSnapshot};
 
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
@@ -77,6 +78,8 @@ impl std::error::Error for FormatPlanError {
 pub struct FormatPlan {
     workspace_root: PathBuf,
     path: PathBuf,
+    parent_relative: PathBuf,
+    file_name: OsString,
     relative_path: String,
     workspace_revision: DocumentRevision,
     document_revision: DocumentRevision,
@@ -141,10 +144,22 @@ pub fn plan_format(
     let workspace_root = canonical_workspace_root(workspace_root.as_ref())?;
     let requested = relative_path.as_ref();
     let mode = document_mode(requested)?;
-    let (path, relative_path) = resolve_target(&workspace_root, requested)?;
+    let (path, relative_path, parent_relative, file_name) =
+        resolve_target(&workspace_root, requested)?;
     let workspace = WorkspaceSnapshot::load_confined(&workspace_root)
         .map_err(FormatPlanError::Workspace)?;
-    let original_bytes = fs::read(&path).map_err(|error| {
+    let root_dir = ConfinedDir::open(&workspace_root).map_err(|error| {
+        FormatPlanError::InvalidPath(format!(
+            "cannot open workspace without following links {}: {error}",
+            workspace_root.display()
+        ))
+    })?;
+    let parent_dir = root_dir.open_dir(&parent_relative).map_err(|error| {
+        FormatPlanError::InvalidPath(format!(
+            "formatter parent path is no longer confined: {error}"
+        ))
+    })?;
+    let original_bytes = parent_dir.read_file(&file_name).map_err(|error| {
         FormatPlanError::Io(format!("cannot read {}: {error}", path.display()))
     })?;
     let text = std::str::from_utf8(&original_bytes).map_err(|error| {
@@ -171,18 +186,39 @@ pub fn plan_format(
         .cloned()
         .map(|diagnostic| diagnostic.with_source_id(&relative_path))
         .collect::<Vec<_>>();
-    let source_check = (mode == DocumentMode::Source && snapshot_document.is_some())
-        .then(|| check_source(&relative_path, text));
+    let source_check =
+        (mode == DocumentMode::Source).then(|| check_source(&relative_path, text));
+    diagnostics.extend(source_check.iter().flat_map(|checked| {
+        checked
+            .diagnostics()
+            .iter()
+            .cloned()
+            .map(|diagnostic| diagnostic.with_source_id(&relative_path))
+    }));
     let source_was_checked = source_check
         .as_ref()
         .is_some_and(|checked| checked.accepted());
     let bindings = source_check
         .as_ref()
-        .filter(|checked| checked.accepted())
+        .filter(|checked| checked.accepted() && snapshot_document.is_some())
         .map_or(&[][..], |checked| checked.application_bindings());
     let formatted = format_source_with_bindings(&relative_path, text, bindings)
         .map_err(|error| FormatPlanError::Format(error.to_string()))?;
-    diagnostics.extend(formatted.diagnostics().iter().cloned());
+    for diagnostic in formatted.diagnostics() {
+        let checker_reported_order = diagnostic.code()
+            == DiagnosticCode::StyleArgumentOrder
+            && source_check.as_ref().is_some_and(|checked| {
+                checked.diagnostics().iter().any(|checked_diagnostic| {
+                    checked_diagnostic.code() == diagnostic.code()
+                        && checked_diagnostic.primary_span()
+                            == diagnostic.primary_span()
+                })
+            });
+        if !checker_reported_order {
+            diagnostics.push(diagnostic.clone());
+        }
+    }
+    deduplicate_diagnostics(&mut diagnostics);
     let original_text = text.to_owned();
 
     validate_postcondition(
@@ -191,11 +227,14 @@ pub fn plan_format(
         formatted.text(),
         mode,
         source_was_checked,
+        false,
     )?;
 
     Ok(FormatPlan {
         workspace_root,
         path,
+        parent_relative,
+        file_name,
         relative_path,
         workspace_revision: workspace.revision().clone(),
         document_revision: document_revision(&original_bytes),
@@ -214,6 +253,21 @@ pub fn plan_format(
 /// The workspace and document revisions are checked immediately before the
 /// replacement. A stale plan leaves all workspace bytes untouched.
 pub fn apply_format(plan: &FormatPlan) -> Result<(), FormatPlanError> {
+    if is_vendor_path(Path::new(&plan.relative_path)) {
+        return Err(FormatPlanError::InvalidPath(
+            "formatter may not write vendored dependencies".to_owned(),
+        ));
+    }
+    let root_dir = ConfinedDir::open(&plan.workspace_root).map_err(|error| {
+        FormatPlanError::InvalidPath(format!(
+            "cannot reopen workspace without following links: {error}"
+        ))
+    })?;
+    let parent_dir = root_dir.open_dir(&plan.parent_relative).map_err(|error| {
+        FormatPlanError::InvalidPath(format!(
+            "format target parent is no longer confined: {error}"
+        ))
+    })?;
     let current_workspace = WorkspaceSnapshot::load_confined(&plan.workspace_root)
         .map_err(FormatPlanError::Workspace)?;
     if current_workspace.revision() != &plan.workspace_revision {
@@ -222,7 +276,7 @@ pub fn apply_format(plan: &FormatPlan) -> Result<(), FormatPlanError> {
             actual: current_workspace.revision().as_str().to_owned(),
         });
     }
-    ensure_current_target(plan)?;
+    ensure_current_target(plan, &parent_dir)?;
     if !plan.changed {
         return Ok(());
     }
@@ -233,16 +287,58 @@ pub fn apply_format(plan: &FormatPlan) -> Result<(), FormatPlanError> {
         &plan.formatted_text,
         plan.mode,
         plan.source_was_checked,
+        true,
     )?;
 
-    let temporary_path = write_temporary(plan)?;
-    let final_check = recheck_revisions(plan);
+    let target_permissions =
+        parent_dir
+            .file_permissions(&plan.file_name)
+            .map_err(|error| {
+                FormatPlanError::Io(format!(
+                    "cannot inspect target permissions: {error}"
+                ))
+            })?;
+    let temporary_name = write_temporary(
+        &parent_dir,
+        &plan.file_name,
+        &plan.formatted_text,
+        &target_permissions,
+    )?;
+    let final_check = recheck_revisions(plan, &parent_dir, &temporary_name);
     if let Err(error) = final_check {
-        let _ = fs::remove_file(&temporary_path);
+        let _ = parent_dir.remove_file(&temporary_name);
         return Err(error);
     }
-    if let Err(error) = fs::rename(&temporary_path, &plan.path) {
-        let _ = fs::remove_file(&temporary_path);
+    let final_parent = match ConfinedDir::open(&plan.workspace_root)
+        .and_then(|root| root.open_dir(&plan.parent_relative))
+    {
+        Ok(parent) => parent,
+        Err(error) => {
+            let _ = parent_dir.remove_file(&temporary_name);
+            return Err(FormatPlanError::InvalidPath(format!(
+                "format target parent changed before replacement: {error}"
+            )));
+        }
+    };
+    let same_parent = match final_parent.same_as(&parent_dir) {
+        Ok(same) => same,
+        Err(error) => {
+            let _ = parent_dir.remove_file(&temporary_name);
+            return Err(FormatPlanError::Io(format!(
+                "cannot verify format target parent before replacement: {error}"
+            )));
+        }
+    };
+    if !same_parent {
+        let _ = parent_dir.remove_file(&temporary_name);
+        return Err(FormatPlanError::InvalidPath(
+            "format target parent changed before replacement".to_owned(),
+        ));
+    }
+    if let Err(error) =
+        parent_dir.rename_to(&temporary_name, &parent_dir, &plan.file_name)
+    {
+        let _ = parent_dir.remove_file(&temporary_name);
         return Err(FormatPlanError::Io(format!(
             "cannot atomically replace {}: {error}",
             plan.path.display()
@@ -280,13 +376,12 @@ fn document_mode(path: &Path) -> Result<DocumentMode, FormatPlanError> {
 fn resolve_target(
     root: &Path,
     requested: &Path,
-) -> Result<(PathBuf, String), FormatPlanError> {
+) -> Result<(PathBuf, String, PathBuf, OsString), FormatPlanError> {
     if requested.as_os_str().is_empty() || requested.is_absolute() {
         return Err(FormatPlanError::InvalidPath(
             "formatter path must be a non-empty workspace-relative path".to_owned(),
         ));
     }
-    let mut path = root.to_path_buf();
     let components = requested
         .components()
         .filter(|component| !matches!(component, Component::CurDir))
@@ -296,50 +391,31 @@ fn resolve_target(
             "formatter path must name a file".to_owned(),
         ));
     }
-    for (index, component) in components.iter().enumerate() {
+    let mut relative = PathBuf::new();
+    for component in components.iter() {
         match component {
-            Component::CurDir => continue,
-            Component::Normal(name) => path.push(name),
+            Component::CurDir => {}
+            Component::Normal(name) => relative.push(name),
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
                 return Err(FormatPlanError::InvalidPath(
                     "formatter path may not escape the workspace root".to_owned(),
                 ));
             }
         }
-        let metadata = fs::symlink_metadata(&path).map_err(|error| {
-            FormatPlanError::Io(format!("cannot inspect {}: {error}", path.display()))
-        })?;
-        if metadata.file_type().is_symlink() {
-            return Err(FormatPlanError::InvalidPath(format!(
-                "formatter path contains a symbolic link: {}",
-                path.display()
-            )));
-        }
-        let final_component = index == components.len().saturating_sub(1);
-        if (!final_component && !metadata.is_dir())
-            || (final_component && !metadata.is_file())
-        {
-            return Err(FormatPlanError::InvalidPath(format!(
-                "formatter path does not name a regular file: {}",
-                path.display()
-            )));
-        }
     }
-    let canonical = fs::canonicalize(&path).map_err(|error| {
-        FormatPlanError::Io(format!("cannot resolve {}: {error}", path.display()))
-    })?;
-    if !canonical.starts_with(root) {
+    if is_vendor_path(&relative) {
         return Err(FormatPlanError::InvalidPath(
-            "formatter path resolves outside the workspace root".to_owned(),
+            "formatter may not target vendored dependencies".to_owned(),
         ));
     }
-    let relative = canonical
-        .strip_prefix(root)
-        .map_err(|_| {
-            FormatPlanError::InvalidPath(
-                "formatter path resolves outside the workspace root".to_owned(),
-            )
-        })?
+    let file_name = relative.file_name().map(OsString::from).ok_or_else(|| {
+        FormatPlanError::InvalidPath("formatter path must name a file".to_owned())
+    })?;
+    let parent_relative = relative
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_path_buf();
+    let relative_string = relative
         .to_str()
         .ok_or_else(|| {
             FormatPlanError::InvalidPath(
@@ -347,7 +423,34 @@ fn resolve_target(
             )
         })?
         .replace('\\', "/");
-    Ok((canonical, relative))
+    let path = root.join(&relative);
+    let root_dir = ConfinedDir::open(root).map_err(|error| {
+        FormatPlanError::InvalidPath(format!(
+            "cannot safely open workspace root: {error}"
+        ))
+    })?;
+    let parent_dir = root_dir.open_dir(&parent_relative).map_err(|error| {
+        FormatPlanError::InvalidPath(format!(
+            "formatter path contains a link or invalid parent: {error}"
+        ))
+    })?;
+    parent_dir.read_file(&file_name).map_err(|error| {
+        FormatPlanError::Io(format!("cannot read {}: {error}", path.display()))
+    })?;
+    Ok((path, relative_string, parent_relative, file_name))
+}
+
+fn is_vendor_path(relative: &Path) -> bool {
+    relative
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("dep") || name.eq_ignore_ascii_case("vendor")
+        })
 }
 
 fn parse_by_mode(
@@ -368,6 +471,7 @@ fn validate_postcondition(
     formatted: &str,
     mode: DocumentMode,
     source_was_checked: bool,
+    require_accepted_source: bool,
 ) -> Result<(), FormatPlanError> {
     let original_document = parse_by_mode(path, original, mode)?;
     if original_document.recovered() {
@@ -385,9 +489,14 @@ fn validate_postcondition(
         ));
     }
     let checked = (mode == DocumentMode::Source).then(|| check_source(path, formatted));
-    if source_was_checked && !checked.as_ref().is_some_and(|value| value.accepted()) {
+    let formatted_source_accepted =
+        checked.as_ref().is_some_and(|value| value.accepted());
+    if mode == DocumentMode::Source
+        && ((require_accepted_source && !source_was_checked)
+            || (source_was_checked && !formatted_source_accepted))
+    {
         return Err(FormatPlanError::Postcondition(
-            "formatted source failed its semantic recheck".to_owned(),
+            "source must pass semantic checks before and after formatting".to_owned(),
         ));
     }
     let bindings = checked
@@ -404,19 +513,33 @@ fn validate_postcondition(
     Ok(())
 }
 
-fn ensure_current_target(plan: &FormatPlan) -> Result<(), FormatPlanError> {
-    let metadata = fs::symlink_metadata(&plan.path).map_err(|error| {
-        FormatPlanError::StaleRevision {
-            expected: plan.document_revision.as_str().to_owned(),
-            actual: format!("target unavailable: {error}"),
+fn deduplicate_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
+    let mut unique = Vec::<Diagnostic>::with_capacity(diagnostics.len());
+    for diagnostic in diagnostics.drain(..) {
+        let duplicate = unique.iter().position(|existing| {
+            existing.code() == diagnostic.code()
+                && existing.primary_span() == diagnostic.primary_span()
+                && existing.message() == diagnostic.message()
+        });
+        if let Some(index) = duplicate {
+            if let Some(existing) = unique.get_mut(index)
+                && existing.source_id().is_none()
+                && diagnostic.source_id().is_some()
+            {
+                *existing = diagnostic;
+            }
+        } else {
+            unique.push(diagnostic);
         }
-    })?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err(FormatPlanError::InvalidPath(
-            "format target is no longer a regular file".to_owned(),
-        ));
     }
-    let current = fs::read(&plan.path).map_err(|error| {
+    *diagnostics = unique;
+}
+
+fn ensure_current_target(
+    plan: &FormatPlan,
+    parent: &ConfinedDir,
+) -> Result<(), FormatPlanError> {
+    let current = parent.read_file(&plan.file_name).map_err(|error| {
         FormatPlanError::Io(format!("cannot reread {}: {error}", plan.path.display()))
     })?;
     let actual_revision = document_revision(&current);
@@ -429,7 +552,35 @@ fn ensure_current_target(plan: &FormatPlan) -> Result<(), FormatPlanError> {
     Ok(())
 }
 
-fn recheck_revisions(plan: &FormatPlan) -> Result<(), FormatPlanError> {
+fn recheck_revisions(
+    plan: &FormatPlan,
+    expected_parent: &ConfinedDir,
+    temporary_name: &std::ffi::OsStr,
+) -> Result<(), FormatPlanError> {
+    if is_vendor_path(Path::new(&plan.relative_path)) {
+        return Err(FormatPlanError::InvalidPath(
+            "formatter may not write vendored dependencies".to_owned(),
+        ));
+    }
+    let root_dir = ConfinedDir::open(&plan.workspace_root).map_err(|error| {
+        FormatPlanError::InvalidPath(format!(
+            "workspace path changed before formatter write: {error}"
+        ))
+    })?;
+    let parent_dir = root_dir.open_dir(&plan.parent_relative).map_err(|error| {
+        FormatPlanError::InvalidPath(format!(
+            "format target parent changed before write: {error}"
+        ))
+    })?;
+    if !parent_dir.same_as(expected_parent).map_err(|error| {
+        FormatPlanError::Io(format!(
+            "cannot verify format target parent identity: {error}"
+        ))
+    })? {
+        return Err(FormatPlanError::InvalidPath(
+            "format target parent changed before write".to_owned(),
+        ));
+    }
     let current_workspace = WorkspaceSnapshot::load_confined(&plan.workspace_root)
         .map_err(FormatPlanError::Workspace)?;
     if current_workspace.revision() != &plan.workspace_revision {
@@ -438,66 +589,44 @@ fn recheck_revisions(plan: &FormatPlan) -> Result<(), FormatPlanError> {
             actual: current_workspace.revision().as_str().to_owned(),
         });
     }
-    ensure_current_target(plan)
+    ensure_current_target(plan, &parent_dir)?;
+    let temporary = parent_dir.read_file(temporary_name).map_err(|error| {
+        FormatPlanError::Io(format!("format temporary file moved or changed: {error}"))
+    })?;
+    if temporary != plan.formatted_text.as_bytes() {
+        return Err(FormatPlanError::Io(
+            "format temporary file content changed before replacement".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
-fn write_temporary(plan: &FormatPlan) -> Result<PathBuf, FormatPlanError> {
-    let parent = plan.path.parent().ok_or_else(|| {
-        FormatPlanError::InvalidPath("format target has no parent directory".to_owned())
+fn write_temporary(
+    parent: &ConfinedDir,
+    target_name: &std::ffi::OsStr,
+    contents: &str,
+    permissions: &fs::Permissions,
+) -> Result<OsString, FormatPlanError> {
+    let file_name = target_name.to_str().ok_or_else(|| {
+        FormatPlanError::InvalidPath("format target has no Unicode filename".to_owned())
     })?;
-    let file_name = plan
-        .path
-        .file_name()
-        .and_then(std::ffi::OsStr::to_str)
-        .ok_or_else(|| {
-            FormatPlanError::InvalidPath(
-                "format target has no Unicode filename".to_owned(),
-            )
-        })?;
     for _ in 0..32 {
         let nonce = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
-        let temporary = parent.join(format!(
+        let temporary = OsString::from(format!(
             ".{file_name}.vibra-{}-{nonce}.tmp",
             std::process::id()
         ));
-        let mut file = match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
+        match parent.write_new_file(&temporary, contents.as_bytes(), Some(permissions))
         {
-            Ok(file) => file,
+            Ok(()) => return Ok(temporary),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
                 return Err(FormatPlanError::Io(format!(
-                    "cannot create temporary file {}: {error}",
-                    temporary.display()
+                    "cannot create or write temporary file for {}: {error}",
+                    target_name.to_string_lossy()
                 )));
             }
-        };
-        if let Ok(metadata) = fs::metadata(&plan.path)
-            && let Err(error) = file.set_permissions(metadata.permissions())
-        {
-            let _ = fs::remove_file(&temporary);
-            return Err(FormatPlanError::Io(format!(
-                "cannot preserve permissions for {}: {error}",
-                plan.path.display()
-            )));
         }
-        if let Err(error) = file.write_all(plan.formatted_text.as_bytes()) {
-            let _ = fs::remove_file(&temporary);
-            return Err(FormatPlanError::Io(format!(
-                "cannot write temporary file {}: {error}",
-                temporary.display()
-            )));
-        }
-        if let Err(error) = file.sync_all() {
-            let _ = fs::remove_file(&temporary);
-            return Err(FormatPlanError::Io(format!(
-                "cannot flush temporary file {}: {error}",
-                temporary.display()
-            )));
-        }
-        return Ok(temporary);
     }
     Err(FormatPlanError::Io(
         "cannot allocate a unique format temporary file".to_owned(),
@@ -521,5 +650,63 @@ fn stale_document(
     FormatPlanError::StaleRevision {
         expected: workspace_revision.as_str().to_owned(),
         actual: document_revision(bytes).as_str().to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FormatPlanError, apply_format, plan_format};
+    use std::fs;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
+
+    struct TempWorkspace(std::path::PathBuf);
+
+    impl TempWorkspace {
+        fn new() -> Self {
+            let nonce = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "vibra-format-plan-unit-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(path.join("src/hello")).expect("create source root");
+            fs::write(
+                path.join("project.vibon"),
+                "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/hello\" entry: @app.main.main effects: (array))) dependencies: (map))\n",
+            )
+            .expect("write project marker");
+            fs::write(
+                path.join("src/hello/main.vib"),
+                "(defn main () void    (do))\n",
+            )
+            .expect("write source");
+            Self(path)
+        }
+    }
+
+    impl Drop for TempWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn apply_rejects_a_plan_with_a_vendored_dependency_path() {
+        let root = TempWorkspace::new();
+        let mut plan = plan_format(&root.0, Path::new("src/hello/main.vib"))
+            .expect("create a regular format plan");
+        plan.relative_path = "dep/std/src/main.vib".to_owned();
+
+        let error =
+            apply_format(&plan).expect_err("apply must reject vendored paths too");
+
+        assert!(matches!(error, FormatPlanError::InvalidPath(_)));
+        assert_eq!(
+            fs::read_to_string(root.0.join("src/hello/main.vib"))
+                .expect("read source after refusal"),
+            "(defn main () void    (do))\n"
+        );
     }
 }

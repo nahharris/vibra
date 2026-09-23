@@ -18,6 +18,7 @@
     )
 )]
 
+pub mod confined_fs;
 pub mod discovery;
 pub mod format_plan;
 pub mod project;

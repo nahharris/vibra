@@ -241,6 +241,47 @@ fn fmt_previews_without_writing_then_writes_canonical_source() {
 }
 
 #[test]
+fn fmt_write_reports_checker_errors_and_preserves_ill_typed_source() {
+    let root = TempDir::new("fmt-ill-typed");
+    let workspace_path = root.path().join("hello");
+    fs::create_dir(&workspace_path).expect("create hello workspace");
+    let workspace = workspace_path.to_string_lossy().into_owned();
+    let init = run(&[
+        "--format",
+        "json",
+        "--workspace",
+        &workspace,
+        "project",
+        "init",
+    ]);
+    assert_eq!(init.status.code(), Some(0));
+
+    let source_path = workspace_path.join("src/hello/main.vib");
+    let original = "(defn main () str  1i32)\n";
+    fs::write(&source_path, original).expect("write ill-typed source");
+    let output = run(&[
+        "--format",
+        "json",
+        "--workspace",
+        &workspace,
+        "fmt",
+        "src/hello/main.vib",
+        "--write",
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.diagnostics");
+    assert_eq!(envelope["payload"]["written"], false);
+    assert!(!envelope["diagnostics"].as_array().unwrap().is_empty());
+    assert_eq!(
+        fs::read_to_string(source_path).expect("read source after fmt"),
+        original
+    );
+}
+
+#[test]
 fn fmt_selects_vibon_from_the_exact_extension_and_writes_only_with_flag() {
     let root = TempDir::new("fmt-vibon");
     let workspace_path = root.path().join("hello");
@@ -337,4 +378,69 @@ fn later_step_commands_are_unavailable_without_running_them() {
     assert_eq!(envelope["result"], "@command.unavailable");
     assert_eq!(envelope["payload"]["accepted"], false);
     assert_eq!(envelope["diagnostics"][0]["code"], "@tool.unavailable");
+}
+
+#[test]
+fn unavailable_commands_validate_the_frozen_argument_grammar_first() {
+    let root = TempDir::new("unavailable-grammar");
+    let workspace = root.path().to_string_lossy().into_owned();
+    let invalid: &[&[&str]] = &[
+        &["check", "one", "two"],
+        &["check", "--all"],
+        &["check", "../outside"],
+        &["run"],
+        &["run", "app", "extra"],
+        &["run", "../outside"],
+        &["test", "module.case", "extra"],
+        &["test", "--all"],
+        &["test", "../outside"],
+    ];
+    for arguments in invalid {
+        let mut command = vec!["--format", "json", "--workspace", workspace.as_str()];
+        command.extend_from_slice(arguments);
+        let output = run(&command);
+
+        assert_eq!(output.status.code(), Some(2), "arguments: {arguments:?}");
+        let envelope = json(&output);
+        assert_envelope_schema(&envelope);
+        assert_eq!(envelope["command"], arguments[0]);
+        assert_eq!(envelope["result"], "@command.invalid-input");
+    }
+
+    for command_name in ["check", "run", "test"] {
+        let mut command = vec!["--format", "json", "--workspace", workspace.as_str()];
+        command.push(command_name);
+        command.push(workspace.as_str());
+        let output = run(&command);
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "absolute {command_name} argument"
+        );
+        let envelope = json(&output);
+        assert_envelope_schema(&envelope);
+        assert_eq!(envelope["command"], command_name);
+        assert_eq!(envelope["result"], "@command.invalid-input");
+    }
+
+    let valid: &[&[&str]] = &[
+        &["check"],
+        &["check", "app"],
+        &["run", "app"],
+        &["test"],
+        &["test", "app.main.case"],
+    ];
+    for arguments in valid {
+        let mut command = vec!["--format", "json", "--workspace", workspace.as_str()];
+        command.extend_from_slice(arguments);
+        let output = run(&command);
+
+        assert_eq!(output.status.code(), Some(4), "arguments: {arguments:?}");
+        let envelope = json(&output);
+        assert_envelope_schema(&envelope);
+        assert_eq!(envelope["command"], arguments[0]);
+        assert_eq!(envelope["result"], "@command.unavailable");
+        assert_eq!(envelope["diagnostics"][0]["code"], "@tool.unavailable");
+    }
 }

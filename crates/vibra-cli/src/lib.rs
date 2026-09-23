@@ -5,7 +5,7 @@ pub mod init;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level, LineIndex};
@@ -468,16 +468,20 @@ fn parse_invocation(
     match command_name {
         "project" => parse_project_command(output_format, workspace, remaining),
         "fmt" => parse_fmt_command(output_format, workspace, remaining),
-        "check" | "run" | "test" | "lint" | "build" | "query" | "edit" | "mcp" => {
-            Invocation {
-                output_format,
-                workspace,
-                command: command_name.to_owned(),
-                action: Action::Unavailable {
-                    arguments: remaining.to_vec(),
-                },
-            }
-        }
+        "check" | "run" | "test" => parse_unavailable_target_command(
+            output_format,
+            workspace,
+            command_name,
+            remaining,
+        ),
+        "lint" | "build" | "query" | "edit" | "mcp" => Invocation {
+            output_format,
+            workspace,
+            command: command_name.to_owned(),
+            action: Action::Unavailable {
+                arguments: remaining.to_vec(),
+            },
+        },
         _ => invalid_invocation(
             output_format,
             workspace,
@@ -486,6 +490,60 @@ fn parse_invocation(
             None,
         ),
     }
+}
+
+fn parse_unavailable_target_command(
+    output_format: OutputFormat,
+    workspace: PathBuf,
+    command_name: &str,
+    arguments: &[OsString],
+) -> Invocation {
+    let (minimum, maximum, usage) = match command_name {
+        "check" => (0, 1, "`check` accepts at most one target"),
+        "run" => (1, 1, "`run` requires exactly one target"),
+        "test" => (0, 1, "`test` accepts at most one test name"),
+        _ => unreachable!("only deferred target commands use this parser"),
+    };
+    if arguments.len() < minimum
+        || arguments.len() > maximum
+        || arguments
+            .iter()
+            .any(|argument| !is_confined_workspace_argument(argument))
+    {
+        return invalid_invocation(output_format, workspace, command_name, usage, None);
+    }
+    Invocation {
+        output_format,
+        workspace,
+        command: command_name.to_owned(),
+        action: Action::Unavailable {
+            arguments: arguments.to_vec(),
+        },
+    }
+}
+
+fn is_confined_workspace_argument(argument: &OsStr) -> bool {
+    let Some(value) = argument.to_str() else {
+        return false;
+    };
+    if value.is_empty() || value.starts_with('-') {
+        return false;
+    }
+    let path = Path::new(value);
+    if path.is_absolute() {
+        return false;
+    }
+    let mut has_name = false;
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => has_name = true,
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return false;
+            }
+        }
+    }
+    has_name
 }
 
 fn parse_project_command(
@@ -705,6 +763,21 @@ fn invalid_envelope(invocation: &Invocation, path: Option<PathBuf>) -> CommandEn
             written: false,
             text: None,
         }),
+        "check" => Payload::Check(CheckPayload { accepted: false }),
+        "run" => Payload::Run(RunPayload {
+            target: String::new(),
+            program_result: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            audit_trace: Vec::new(),
+            trap: None,
+        }),
+        "test" => Payload::Test(TestPayload {
+            selected: 0,
+            passed: 0,
+            failed: 0,
+            tests: Vec::new(),
+        }),
         _ => Payload::Empty(EmptyPayload {}),
     };
     CommandEnvelope {
@@ -790,4 +863,48 @@ fn render_diagnostics<E: Write>(
         writeln!(stderr, "{}: {}", diagnostic.code, diagnostic.message)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_used
+    )]
+
+    use super::is_confined_workspace_argument;
+    use std::ffi::{OsStr, OsString};
+
+    #[test]
+    fn deferred_arguments_are_confined_workspace_paths() {
+        for invalid in ["", "-all", "../outside", "/outside"] {
+            assert!(
+                !is_confined_workspace_argument(OsStr::new(invalid)),
+                "{invalid:?}"
+            );
+        }
+        assert!(is_confined_workspace_argument(OsStr::new("app")));
+        assert!(is_confined_workspace_argument(OsStr::new("app.main.case")));
+        assert!(is_confined_workspace_argument(OsStr::new("./app")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn deferred_arguments_reject_invalid_unicode() {
+        use std::os::windows::ffi::OsStringExt;
+
+        let invalid_unicode = OsString::from_wide(&[0xD800]);
+        assert!(!is_confined_workspace_argument(&invalid_unicode));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deferred_arguments_reject_invalid_unicode() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let invalid_unicode = OsString::from_vec(vec![0xFF]);
+        assert!(!is_confined_workspace_argument(&invalid_unicode));
+    }
 }
