@@ -8,7 +8,9 @@ errors**, projects **Packages and targets**, runtime **Semantic reference**,
 ## Implementation sequence
 
 1. Add `check` and `run` argument/target selection adapters over the same
-   workspace snapshot. Honor C3's checking scope, not only reachable entry code.
+   workspace snapshot. Add the verified bootstrap modules to resolver input
+   with their manifest-owned package identity; ordinary dependencies remain
+   unavailable. Honor C3's checking scope, not only reachable entry code.
 2. Validate entry using the shared atom walker, then separately its entity kind
    and signature. Only the C1-admitted entry subset executes; valid deferred
    `result void e` is not reported as malformed syntax.

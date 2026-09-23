@@ -374,11 +374,15 @@ Before ordinary dependency delivery exists, M2 has one offline standard-library
 input. The input is the repository-owned byte file
 `stdlib/m2/bootstrap.vibon`, and its authority is the adjacent
 `stdlib/m2/bootstrap-manifest.vibon`. The manifest is the only source of the
-bootstrap identity: it records the artifact's exact `sha256:` digest, an
-Ed25519 public key, a detached signature over the artifact bytes, and the
-ordered import map. The checked-in public key is the toolchain key for this
-repository; a project file, package name, filename, source annotation,
-conformance profile, or copied declaration never supplies authority.
+bootstrap identity: it records the fixed package name `vibra-stdlib`, exact
+package version `0.1.0`, the artifact's exact `sha256:` digest, an Ed25519
+public key, a detached signature over the artifact bytes, and the ordered
+import map. The manifest bytes are pinned to the reviewed build-time trust
+input. Its package name MUST match the `package` string inside the signed
+artifact; its package version is the exact M2 bootstrap package version. The
+checked-in public key is the toolchain key for this repository; a project
+file, filename, source annotation, conformance profile, or copied declaration
+never supplies authority.
 
 The Step 1 artifact identity is fixed at
 `sha256:8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103`.
@@ -411,7 +415,13 @@ signed artifact before admitting any declaration or test registry member. An
 import is accepted only when its resolved module identity is exactly the
 mapped identity; users must write the import explicitly. No standard-library
 module is an ambient prelude, and ordinary packages cannot add, replace, or
-rebind a bootstrap map entry.
+rebind a bootstrap map entry. After verification, the mapped modules enter the
+resolver as a distinct `vibra-stdlib@0.1.0` package with unit `@std` and their
+canonical module paths. The resolver MUST retain that package provenance in
+their declaration identities. The overlay is added only from the verified
+manifest; it is not loaded through a project dependency edge, vendor directory,
+cache, or fallback search. Ordinary project dependency edges remain explicit
+and unavailable in M2.
 
 The bootstrap record contains the C7 pure text symbols and the C9 assertion
 member names. It is an allowlist and provenance input, not a second language

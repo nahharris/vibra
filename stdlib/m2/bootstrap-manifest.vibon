@@ -1,5 +1,7 @@
 (record
   format: @stdlib-bootstrap-manifest.v1
+  package-name: "vibra-stdlib"
+  package-version: "0.1.0"
   artifact: "stdlib/m2/bootstrap.vibon"
   artifact-sha256: "sha256:8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103"
   signature: "stdlib/m2/bootstrap.vibon.sig"

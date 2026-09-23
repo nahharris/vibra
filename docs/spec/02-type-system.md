@@ -266,12 +266,15 @@ forms, never collection value constructors.
 ## Namespaces and resolution
 
 A declaration's identity is its package provenance, unit, module path, owner
-path, declaration kind, and name. Package provenance is the package name and
-exact version from the project record. A resolver MUST preserve those fields
-in the identity; source order, a vector position, and spelling alone are not
-identities. Source imports bind one explicit module alias from an atom entity
-reference. An atom is resolved only in a position whose grammar or data schema
-expects an entity reference; it remains an ordinary `atom` value in expression
+path, declaration kind, and name. Ordinary local package provenance is the
+package name and exact version from the project record. The verified M2
+bootstrap package instead takes its fixed package name and exact version from
+the trusted bootstrap manifest; project data cannot supply or override either
+value. A resolver MUST preserve those fields in the identity; source order, a
+vector position, and spelling alone are not identities. Source imports bind
+one explicit module alias from an atom entity reference. An atom is resolved
+only in a position whose grammar or data schema expects an entity reference;
+it remains an ordinary `atom` value in expression
 position. Wildcard imports, re-exports, open namespaces, implicit prelude
 names, and filesystem-dependent fallback resolution are forbidden.
 
