@@ -423,6 +423,12 @@ manifest; it is not loaded through a project dependency edge, vendor directory,
 cache, or fallback search. Ordinary project dependency edges remain explicit
 and unavailable in M2.
 
+The combined project and overlay graph MUST keep source IDs unique across all
+packages because a source ID selects the document used for diagnostic spans.
+If a project module and a verified module use the same source ID, resolution
+emits `@module.source-id-collision`; the affected selected graph is not type
+checked or executed.
+
 The bootstrap record contains the C7 pure text symbols and the C9 assertion
 member names. It is an allowlist and provenance input, not a second language
 grammar. `stdlib/m2/src/std/text.vib` is the signed pure declaration module;

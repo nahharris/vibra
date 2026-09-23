@@ -659,10 +659,11 @@ fn render_workspace_diagnostics(
     if let Some(verification) = verification {
         let (_, bootstrap_modules) = verification.resolver_overlay();
         for module in bootstrap_modules {
-            sources.insert(
-                module.source_id().to_owned(),
-                String::from_utf8_lossy(module.bytes()).into_owned(),
-            );
+            sources
+                .entry(module.source_id().to_owned())
+                .or_insert_with(|| {
+                    String::from_utf8_lossy(module.bytes()).into_owned()
+                });
         }
     }
     render_diagnostics_with_sources(diagnostics, &sources)

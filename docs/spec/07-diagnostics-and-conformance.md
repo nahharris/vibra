@@ -37,6 +37,7 @@ table governs.
 | `@name.reserved-declaration` | `@error` |
 | `@name.reserved-value-spelling` | `@error` |
 | `@module.file-directory-collision` | `@error` |
+| `@module.source-id-collision` | `@error` |
 | `@module.unknown-path` | `@error` |
 | `@module.import-cycle` | `@error` |
 | `@module.invalid-segment` | `@error` |
@@ -160,6 +161,13 @@ earlier declaration or edge is a related span when available. Resolver output
 is deterministic by source ID, primary span, and registry order. Resolution
 consumes only an explicit immutable source graph and performs no filesystem,
 dependency, lock, cache, or network access.
+
+A resolver graph uses source IDs as document identities, so one source ID MUST
+refer to only one module in that graph, including when a verified package
+overlay is present. A repeated source ID emits `@module.source-id-collision`
+at the empty span `0..0` of that source ID. The affected graph is not type
+checked or executed because diagnostics and source text would otherwise be
+ambiguous across packages.
 
 ## Recovery
 

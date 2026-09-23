@@ -511,6 +511,46 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
 }
 
 #[test]
+fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @local kind: @lib root: \"stdlib/m2/src/std\")) dependencies: (map))\n";
+    let project = TempProject::with_project(
+        "bootstrap-source-id-collision",
+        project_text,
+        &[
+            (
+                "src/app/main.vib",
+                "(import text @std.text)\n(defn execute () void (let - (text.length \"x\") (do)))\n",
+            ),
+            (
+                "stdlib/m2/src/std/text.vib",
+                "(defn local () i32 \"wrong type\")\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let verification =
+        vibra_types::verify_bootstrap(repository).expect("bootstrap verification");
+
+    let checked = vibra_workspace::semantic::check_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&verification),
+    );
+
+    assert_ne!(checked.status(), CheckStatus::Accepted);
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_atom() == "@module.source-id-collision"
+    }));
+}
+
+#[test]
 fn bootstrap_spelling_without_verification_is_unavailable_and_never_runs() {
     let project = TempProject::new(
         "unverified-stdlib",

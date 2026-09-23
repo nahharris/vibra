@@ -299,6 +299,12 @@ fn check_resolved_scope(
             })
             .cloned(),
     );
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == DiagnosticCode::ModuleSourceIdCollision)
+    {
+        return finish_result(diagnostics);
+    }
     diagnostics.extend(validate_entries(resolved, &units));
 
     let selected_sources = source_ids.iter().cloned().collect::<Vec<_>>();

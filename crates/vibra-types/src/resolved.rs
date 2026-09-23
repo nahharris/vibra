@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use vibra_diagnostics::{ByteSpan, Diagnostic, Level};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_ir::{CheckedFunction, CheckedGlobal, CheckedProgram, IrError, SourceOrigin};
 use vibra_resolve::{DeclarationId, ResolvedSnapshot};
 use vibra_syntax::{ApplicationBinding, Declaration, SourceAst};
@@ -79,6 +79,37 @@ pub fn check_resolved(
     verification: Option<&crate::BootstrapVerification>,
 ) -> ResolvedCheckResult {
     let selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let mut seen_source_ids = BTreeSet::new();
+    let mut duplicate_source_ids = BTreeSet::new();
+    for module in snapshot
+        .modules()
+        .iter()
+        .filter(|module| selected.contains(module.source_id()))
+    {
+        if !seen_source_ids.insert(module.source_id().to_owned()) {
+            duplicate_source_ids.insert(module.source_id().to_owned());
+        }
+    }
+    if !duplicate_source_ids.is_empty() {
+        return ResolvedCheckResult {
+            programs: BTreeMap::new(),
+            diagnostics: duplicate_source_ids
+                .into_iter()
+                .map(|source_id| {
+                    Diagnostic::new(
+                        DiagnosticCode::ModuleSourceIdCollision,
+                        ByteSpan::empty_at(0),
+                        format!(
+                            "source identity `{source_id}` belongs to more than one module"
+                        ),
+                    )
+                    .with_source_id(source_id)
+                })
+                .collect(),
+            bindings: Vec::new(),
+            function_indices: BTreeMap::new(),
+        };
+    }
     let mut modules = snapshot
         .modules()
         .iter()

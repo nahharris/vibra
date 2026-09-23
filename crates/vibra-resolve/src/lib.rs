@@ -1101,6 +1101,7 @@ impl Resolution {
                     right.1.source_id.as_str(),
                 ))
         });
+        let mut source_owners = BTreeMap::<String, ModuleKey>::new();
         for (package, module) in modules {
             let key = ModuleKey {
                 package: package.clone(),
@@ -1117,6 +1118,28 @@ impl Resolution {
                     .with_source_id(module.source_id.clone()),
                 );
                 continue;
+            }
+            if let Some(earlier) = source_owners.get(&module.source_id) {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::ModuleSourceIdCollision,
+                        ByteSpan::empty_at(0),
+                        format!(
+                            "source identity `{}` belongs to more than one module",
+                            module.source_id
+                        ),
+                    )
+                    .with_source_id(module.source_id.clone())
+                    .with_note(format!(
+                        "conflicting package identities: `{}@{}` and `{}@{}`",
+                        earlier.package.name(),
+                        earlier.package.version(),
+                        key.package.name(),
+                        key.package.version()
+                    )),
+                );
+            } else {
+                source_owners.insert(module.source_id.clone(), key.clone());
             }
             let index = self.modules.len();
             self.module_indexes.insert(key, index);

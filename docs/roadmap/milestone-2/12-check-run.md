@@ -19,6 +19,9 @@ errors**, projects **Packages and targets**, runtime **Semantic reference**,
 3. Reject all errors and unavailable execution before starting the interpreter.
    `check` does not execute bodies or initialization, invoke providers, sync
    dependencies, or mutate project data.
+   A selected resolver graph also rejects repeated source IDs across the local
+   package and verified bootstrap overlay with `@module.source-id-collision`
+   before type checking or execution.
 4. Execute the admitted pure target through the existing checked IR/interpreter.
    Keep command result, program result and trap distinct using C10/C11. Handle
    `--format json` exactly as specified without stealing program-owned stdout.

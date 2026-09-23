@@ -234,4 +234,21 @@ fn workspace_cases_cover_higher_order_entry_selection_and_library_cycles() {
         .expect("library check with an uninvoked closure");
     assert!(checked.accepted, "{:?}", checked.diagnostics);
     assert!(checked.diagnostics.is_empty());
+
+    let collision_case = corpus
+        .cases()
+        .iter()
+        .find(|case| {
+            case.manifest().id()
+                == "V1-PROJECT-workspace-check-bootstrap-source-id-collision"
+        })
+        .expect("bootstrap source identity collision case");
+    let checked = StaticV1WorkspaceCheckHandler
+        .run(collision_case)
+        .expect("workspace check with a source identity collision");
+    assert!(!checked.accepted);
+    assert!(checked.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code() == vibra_diagnostics::DiagnosticCode::ModuleSourceIdCollision
+            && diagnostic.source_id() == Some("stdlib/m2/src/std/text.vib")
+    }));
 }
