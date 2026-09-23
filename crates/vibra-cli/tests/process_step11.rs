@@ -440,23 +440,67 @@ fn process_exit_codes_and_json_envelopes_are_stable_for_invalid_input() {
 }
 
 #[test]
-fn later_step_commands_are_unavailable_without_running_them() {
+fn step12_commands_run_while_the_later_test_command_remains_unavailable() {
     let root = TempDir::new("unavailable");
+    fs::create_dir_all(root.path().join("src/app")).expect("create source root");
+    fs::write(
+        root.path().join("project.vibon"),
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map))\n",
+    )
+    .expect("write project marker");
+    fs::write(
+        root.path().join("src/app/main.vib"),
+        "(defn execute () void (do))\n",
+    )
+    .expect("write entry source");
     let workspace = root.path().to_string_lossy().into_owned();
-    let output = run(&["--format", "json", "--workspace", &workspace, "check"]);
+    let check = run(&["--format", "json", "--workspace", &workspace, "check"]);
 
-    assert_eq!(output.status.code(), Some(4));
-    let envelope = json(&output);
-    assert_envelope_schema(&envelope);
-    assert_eq!(envelope["command"], "check");
-    assert_eq!(envelope["result"], "@command.unavailable");
-    assert_eq!(envelope["payload"]["accepted"], false);
-    assert_eq!(envelope["diagnostics"][0]["code"], "@tool.unavailable");
+    assert_eq!(check.status.code(), Some(0));
+    let check_envelope = json(&check);
+    assert_envelope_schema(&check_envelope);
+    assert_eq!(check_envelope["command"], "check");
+    assert_eq!(check_envelope["result"], "@command.ok");
+    assert_eq!(check_envelope["payload"]["accepted"], true);
+    assert_eq!(check_envelope["diagnostics"], serde_json::json!([]));
+
+    let run_output = run(&[
+        "--format",
+        "json",
+        "--workspace",
+        &workspace,
+        "run",
+        "src/app",
+    ]);
+    assert_eq!(run_output.status.code(), Some(0));
+    let run_envelope = json(&run_output);
+    assert_envelope_schema(&run_envelope);
+    assert_eq!(run_envelope["command"], "run");
+    assert_eq!(run_envelope["result"], "@command.ok");
+
+    let test = run(&["--format", "json", "--workspace", &workspace, "test"]);
+    assert_eq!(test.status.code(), Some(4));
+    let test_envelope = json(&test);
+    assert_envelope_schema(&test_envelope);
+    assert_eq!(test_envelope["command"], "test");
+    assert_eq!(test_envelope["result"], "@command.unavailable");
+    assert_eq!(test_envelope["diagnostics"][0]["code"], "@tool.unavailable");
 }
 
 #[test]
-fn unavailable_commands_validate_the_frozen_argument_grammar_first() {
+fn valid_or_unavailable_commands_validate_the_frozen_argument_grammar_first() {
     let root = TempDir::new("unavailable-grammar");
+    fs::create_dir_all(root.path().join("src/app")).expect("create source root");
+    fs::write(
+        root.path().join("project.vibon"),
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map))\n",
+    )
+    .expect("write project marker");
+    fs::write(
+        root.path().join("src/app/main.vib"),
+        "(defn execute () void (do))\n",
+    )
+    .expect("write entry source");
     let workspace = root.path().to_string_lossy().into_owned();
     let invalid: &[&[&str]] = &[
         &["check", "one", "two"],
@@ -500,8 +544,8 @@ fn unavailable_commands_validate_the_frozen_argument_grammar_first() {
 
     let valid: &[&[&str]] = &[
         &["check"],
-        &["check", "app"],
-        &["run", "app"],
+        &["check", "src/app"],
+        &["run", "src/app"],
         &["test"],
         &["test", "app.main.case"],
     ];
@@ -510,11 +554,17 @@ fn unavailable_commands_validate_the_frozen_argument_grammar_first() {
         command.extend_from_slice(arguments);
         let output = run(&command);
 
-        assert_eq!(output.status.code(), Some(4), "arguments: {arguments:?}");
         let envelope = json(&output);
         assert_envelope_schema(&envelope);
         assert_eq!(envelope["command"], arguments[0]);
-        assert_eq!(envelope["result"], "@command.unavailable");
-        assert_eq!(envelope["diagnostics"][0]["code"], "@tool.unavailable");
+        if arguments[0] == "test" {
+            assert_eq!(output.status.code(), Some(4), "arguments: {arguments:?}");
+            assert_eq!(envelope["result"], "@command.unavailable");
+            assert_eq!(envelope["diagnostics"][0]["code"], "@tool.unavailable");
+        } else {
+            assert_eq!(output.status.code(), Some(0), "arguments: {arguments:?}");
+            assert_eq!(envelope["result"], "@command.ok");
+            assert_eq!(envelope["diagnostics"], serde_json::json!([]));
+        }
     }
 }
