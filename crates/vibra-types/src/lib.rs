@@ -931,15 +931,17 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
-        if let Err(IrError::GlobalInitializerCycle(index)) =
-            vibra_ir::validate_global_initializer_cycles(&globals, &functions)
-        {
-            if let Some(global) = globals.get(index) {
-                self.diagnostics.push(initializer_cycle_diagnostic(global));
-            }
-            return None;
-        }
+        let global_origins = globals
+            .iter()
+            .map(|global| global.origin().clone())
+            .collect::<Vec<_>>();
         match CheckedProgram::try_new_with_globals(globals, functions, 0) {
+            Err(IrError::GlobalInitializerCycle(index)) => {
+                if let Some(origin) = global_origins.get(index) {
+                    self.diagnostics.push(initializer_cycle_diagnostic(origin));
+                }
+                None
+            }
             Ok(program) => Some(program),
             Err(error) => {
                 unavailable(
@@ -954,16 +956,15 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// The diagnostic for a checked-IR initializer cycle through `global`.
-pub(crate) fn initializer_cycle_diagnostic(
-    global: &vibra_ir::CheckedGlobal,
-) -> Diagnostic {
+/// The diagnostic for a checked-IR initializer cycle through the global
+/// declared at `global`.
+pub(crate) fn initializer_cycle_diagnostic(global: &SourceOrigin) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::TypeInitializerCycle,
-        global.origin().span(),
+        global.span(),
         "module value initializers form a cycle",
     )
-    .with_source_id(global.origin().source_id())
+    .with_source_id(global.source_id())
 }
 
 struct CheckEnvironment<'a> {

@@ -421,14 +421,16 @@ impl TestAssertion {
 /// A source identity and span carried by checked operands.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceOrigin {
-    source_id: String,
+    /// Shared so that cloning an origin, which every checked node carries,
+    /// never copies the source ID.
+    source_id: Arc<str>,
     span: ByteSpan,
 }
 
 impl SourceOrigin {
     /// Creates an origin for one source document span.
     #[must_use]
-    pub fn new(source_id: impl Into<String>, span: ByteSpan) -> Self {
+    pub fn new(source_id: impl Into<Arc<str>>, span: ByteSpan) -> Self {
         Self {
             source_id: source_id.into(),
             span,
@@ -1641,6 +1643,20 @@ pub fn validate_global_initializer_cycles(
     globals: &[CheckedGlobal],
     functions: &[CheckedFunction],
 ) -> Result<(), IrError> {
+    let (_, dependencies) = static_program_edges(globals, functions)?;
+    reject_entry_free_initializer_cycles(globals, functions, dependencies)
+}
+
+/// Outgoing static call edges of each function.
+type CallEdges = Vec<BTreeSet<usize>>;
+/// Outgoing dependency edges of each global and function node.
+type DependencyEdges = Vec<BTreeSet<DependencyNode>>;
+
+/// Direct call and dependency edges from every global and function body.
+fn static_program_edges(
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+) -> Result<(CallEdges, DependencyEdges), IrError> {
     let mut calls = vec![BTreeSet::new(); functions.len()];
     let mut dependencies = vec![BTreeSet::new(); globals.len() + functions.len()];
     for (index, global) in globals.iter().enumerate() {
@@ -1663,6 +1679,14 @@ pub fn validate_global_initializer_cycles(
             &mut dependencies,
         )?;
     }
+    Ok((calls, dependencies))
+}
+
+fn reject_entry_free_initializer_cycles(
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+    mut dependencies: DependencyEdges,
+) -> Result<(), IrError> {
     let flow = analyze_initializer_call_flow(globals, functions)?;
     for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow.dependencies) {
         dependencies.extend(flow_edges);
@@ -1670,46 +1694,34 @@ pub fn validate_global_initializer_cycles(
     reject_global_initializer_cycles(&dependencies, globals.len())
 }
 
-/// A complete immutable program that crossed the checker boundary.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckedProgram {
+/// Module values and functions validated once and shared by the program of
+/// every entry and test in one checking scope.
+///
+/// Construction checks everything that does not depend on an entry: names,
+/// signature and body shapes, static references, and initializer cycles.
+/// [`CheckedProgram::for_entry`] then adds only the entry-rooted call-flow
+/// analysis, so a scope with many entries is neither deep-copied nor
+/// revalidated per entry.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CheckedModuleSet {
     globals: Vec<CheckedGlobal>,
     functions: Vec<CheckedFunction>,
-    entry: usize,
-    recursive_groups: RecursiveGroups,
+    static_calls: CallEdges,
+    static_dependencies: DependencyEdges,
 }
 
-impl CheckedProgram {
-    /// Creates a checked program from already checked functions.
-    ///
-    /// This constructor accepts semantic IR only. It does not accept a
-    /// parsed AST, and it revalidates entry and function-body invariants so a
-    /// caller cannot accidentally execute an arbitrary syntax tree.
+impl CheckedModuleSet {
+    /// Validates a complete set of checked globals and functions.
     pub fn try_new(
-        functions: Vec<CheckedFunction>,
-        entry: usize,
-    ) -> Result<Self, IrError> {
-        Self::try_new_with_globals(Vec::new(), functions, entry)
-    }
-
-    /// Creates a checked program containing immutable module values.
-    pub fn try_new_with_globals(
         globals: Vec<CheckedGlobal>,
         functions: Vec<CheckedFunction>,
-        entry: usize,
-    ) -> Result<Self, IrError> {
+    ) -> Result<Arc<Self>, IrError> {
         if functions.is_empty() {
             return Err(IrError::NoFunctions);
         }
-        if entry >= functions.len() {
-            return Err(IrError::InvalidEntry(entry));
-        }
-        for (left, function) in functions.iter().enumerate() {
-            if functions
-                .iter()
-                .enumerate()
-                .any(|(right, other)| left != right && function.name == other.name)
-            {
+        let mut names = BTreeSet::new();
+        for function in &functions {
+            if !names.insert(function.name.as_str()) {
                 return Err(IrError::DuplicateFunction(function.name.clone()));
             }
             if let Err(message) = validate_signature_shape(function.signature()) {
@@ -1757,75 +1769,19 @@ impl CheckedProgram {
                 });
             }
         }
-        let mut calls = vec![BTreeSet::new(); functions.len()];
-        let mut dependencies = vec![BTreeSet::new(); globals.len() + functions.len()];
-        for (index, global) in globals.iter().enumerate() {
-            validate_program_expr(
-                global.initializer(),
-                &globals,
-                &functions,
-                Some(DependencyNode::Global(index)),
-                &mut calls,
-                &mut dependencies,
-            )?;
-        }
-        for (index, function) in functions.iter().enumerate() {
-            validate_program_expr(
-                function.body(),
-                &globals,
-                &functions,
-                Some(DependencyNode::Function(index)),
-                &mut calls,
-                &mut dependencies,
-            )?;
-        }
-        let flow = analyze_call_flow(&globals, &functions, entry)?;
-        for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow.dependencies)
-        {
-            dependencies.extend(flow_edges);
-        }
-        for (static_calls, flow_calls) in calls.iter_mut().zip(&flow.calls) {
-            static_calls.extend(flow_calls);
-        }
-        let recursive_groups = RecursiveGroups::new(&calls, &functions);
-        for global in &globals {
-            validate_tail_calls(
-                global.initializer(),
-                false,
-                None,
-                &recursive_groups,
-                &globals,
-                &functions,
-                &BTreeMap::new(),
-            )?;
-        }
-        for (index, function) in functions.iter().enumerate() {
-            if !flow.reachable.contains(&DependencyNode::Function(index)) {
-                continue;
-            }
-            let aliases = parameter_aliases(
-                index,
-                &functions,
-                &flow.parameter_targets,
-                &flow.parameter_sources,
-            );
-            validate_tail_calls(
-                function.body(),
-                true,
-                Some(index),
-                &recursive_groups,
-                &globals,
-                &functions,
-                &aliases,
-            )?;
-        }
-        reject_global_initializer_cycles(&dependencies, globals.len())?;
-        Ok(Self {
+        let (static_calls, static_dependencies) =
+            static_program_edges(&globals, &functions)?;
+        reject_entry_free_initializer_cycles(
+            &globals,
+            &functions,
+            static_dependencies.clone(),
+        )?;
+        Ok(Arc::new(Self {
             globals,
             functions,
-            entry,
-            recursive_groups,
-        })
+            static_calls,
+            static_dependencies,
+        }))
     }
 
     /// Immutable module values in deterministic checked order.
@@ -1839,6 +1795,120 @@ impl CheckedProgram {
     pub fn functions(&self) -> &[CheckedFunction] {
         &self.functions
     }
+}
+
+/// A complete immutable program that crossed the checker boundary: a shared
+/// [`CheckedModuleSet`] and one validated entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckedProgram {
+    set: Arc<CheckedModuleSet>,
+    entry: usize,
+    recursive_groups: RecursiveGroups,
+}
+
+impl CheckedProgram {
+    /// Creates a checked program from already checked functions.
+    ///
+    /// This constructor accepts semantic IR only. It does not accept a
+    /// parsed AST, and it revalidates entry and function-body invariants so a
+    /// caller cannot accidentally execute an arbitrary syntax tree.
+    pub fn try_new(
+        functions: Vec<CheckedFunction>,
+        entry: usize,
+    ) -> Result<Self, IrError> {
+        Self::try_new_with_globals(Vec::new(), functions, entry)
+    }
+
+    /// Creates a checked program containing immutable module values.
+    pub fn try_new_with_globals(
+        globals: Vec<CheckedGlobal>,
+        functions: Vec<CheckedFunction>,
+        entry: usize,
+    ) -> Result<Self, IrError> {
+        Self::for_entry(CheckedModuleSet::try_new(globals, functions)?, entry)
+    }
+
+    /// Selects one entry of an already validated module set.
+    ///
+    /// Only entry-dependent analysis runs here: indirect call flow rooted at
+    /// the globals and `entry`, recursive groups, tail-transfer validation,
+    /// and initializer cycles through that flow.
+    pub fn for_entry(
+        set: Arc<CheckedModuleSet>,
+        entry: usize,
+    ) -> Result<Self, IrError> {
+        if entry >= set.functions.len() {
+            return Err(IrError::InvalidEntry(entry));
+        }
+        let globals = &set.globals;
+        let functions = &set.functions;
+        let mut calls = set.static_calls.clone();
+        let mut dependencies = set.static_dependencies.clone();
+        let flow = analyze_call_flow(globals, functions, entry)?;
+        for (dependencies, flow_edges) in dependencies.iter_mut().zip(flow.dependencies)
+        {
+            dependencies.extend(flow_edges);
+        }
+        for (static_calls, flow_calls) in calls.iter_mut().zip(&flow.calls) {
+            static_calls.extend(flow_calls);
+        }
+        let recursive_groups = RecursiveGroups::new(&calls, functions);
+        for global in globals {
+            validate_tail_calls(
+                global.initializer(),
+                false,
+                None,
+                &recursive_groups,
+                globals,
+                functions,
+                &BTreeMap::new(),
+            )?;
+        }
+        for (index, function) in functions.iter().enumerate() {
+            if !flow.reachable.contains(&DependencyNode::Function(index)) {
+                continue;
+            }
+            let aliases = parameter_aliases(
+                index,
+                functions,
+                &flow.parameter_targets,
+                &flow.parameter_sources,
+            );
+            validate_tail_calls(
+                function.body(),
+                true,
+                Some(index),
+                &recursive_groups,
+                globals,
+                functions,
+                &aliases,
+            )?;
+        }
+        reject_global_initializer_cycles(&dependencies, globals.len())?;
+        Ok(Self {
+            set,
+            entry,
+            recursive_groups,
+        })
+    }
+
+    /// The validated module set this program's entry selects from.
+    #[must_use]
+    pub const fn module_set(&self) -> &Arc<CheckedModuleSet> {
+        &self.set
+    }
+
+    /// Immutable module values in deterministic checked order.
+    #[must_use]
+    pub fn globals(&self) -> &[CheckedGlobal] {
+        &self.set.globals
+    }
+
+    /// Functions in deterministic source order.
+    #[must_use]
+    pub fn functions(&self) -> &[CheckedFunction] {
+        &self.set.functions
+    }
 
     /// Same-module recursive groups, in deterministic function-index order.
     ///
@@ -1846,7 +1916,7 @@ impl CheckedProgram {
     /// tests; execution uses [`Self::in_recursive_group`].
     #[must_use]
     pub fn recursive_groups(&self) -> Vec<Vec<usize>> {
-        (0..self.functions.len())
+        (0..self.functions().len())
             .map(|function| self.recursive_groups.members(function))
             .collect()
     }
@@ -1860,7 +1930,7 @@ impl CheckedProgram {
     /// Returns the recursive group of `function`, if it is in the program.
     #[must_use]
     pub fn recursive_group(&self, function: usize) -> Option<Vec<usize>> {
-        (function < self.functions.len())
+        (function < self.functions().len())
             .then(|| self.recursive_groups.members(function))
     }
 
@@ -1874,17 +1944,17 @@ impl CheckedProgram {
     #[must_use]
     #[allow(clippy::indexing_slicing)]
     pub fn entry(&self) -> &CheckedFunction {
-        // `try_new` proves this index is below the immutable function count.
-        &self.functions[self.entry]
+        // `for_entry` proves this index is below the immutable function count.
+        &self.set.functions[self.entry]
     }
 
     /// Canonical typed-program observation used by static-v1.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
         let mut output = String::from("(record\n  format: @types.v1\n");
-        if !self.globals.is_empty() {
+        if !self.set.globals.is_empty() {
             output.push_str("  globals: (array\n");
-            for global in &self.globals {
+            for global in &self.set.globals {
                 output.push_str(&format!(
                     "    (record name: @{} type: {} body: {})\n",
                     global.name,
@@ -1895,7 +1965,7 @@ impl CheckedProgram {
             output.push_str("  )\n");
         }
         output.push_str("  functions: (array\n");
-        for function in &self.functions {
+        for function in &self.set.functions {
             let parameters = function
                 .signature
                 .parameters()
@@ -5042,5 +5112,36 @@ mod tests {
         assert!(groups.contains(3, 65));
         assert!(!groups.contains(65, 3));
         assert!(!groups.contains(0, 70));
+    }
+
+    #[test]
+    fn entries_share_one_validated_module_set() {
+        let functions = ["first", "second"]
+            .into_iter()
+            .map(|name| {
+                CheckedFunction::new(
+                    name,
+                    FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+                    Expr::literal(Value::I32(0), origin()),
+                    origin(),
+                )
+                .expect("function")
+            })
+            .collect::<Vec<_>>();
+        let set = super::CheckedModuleSet::try_new(Vec::new(), functions).expect("set");
+        let first = CheckedProgram::for_entry(std::sync::Arc::clone(&set), 0)
+            .expect("first entry");
+        let second = CheckedProgram::for_entry(std::sync::Arc::clone(&set), 1)
+            .expect("second entry");
+        assert!(std::sync::Arc::ptr_eq(
+            first.module_set(),
+            second.module_set()
+        ));
+        assert_eq!(first.entry().name(), "first");
+        assert_eq!(second.entry().name(), "second");
+        assert_eq!(
+            CheckedProgram::for_entry(set, 2),
+            Err(IrError::InvalidEntry(2))
+        );
     }
 }

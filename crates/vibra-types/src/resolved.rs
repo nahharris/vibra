@@ -1,11 +1,12 @@
 //! Type checking for one resolver-owned multi-module snapshot.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_ir::{
-    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
-    PrimitiveType, SourceOrigin, TestAssertion, Value,
+    CheckedFunction, CheckedGlobal, CheckedModuleSet, CheckedProgram, Expr,
+    FunctionSignature, IrError, PrimitiveType, SourceOrigin, TestAssertion, Value,
 };
 use vibra_resolve::{DeclarationId, ResolvedSnapshot};
 use vibra_syntax::{ApplicationBinding, Declaration, SourceAst};
@@ -393,7 +394,7 @@ pub fn check_resolved(
         ) else {
             continue;
         };
-        let origin = SourceOrigin::new(&header.source_id, header.span);
+        let origin = SourceOrigin::new(header.source_id.as_str(), header.span);
         match CheckedGlobal::new(header.name, header.value_type, expression, origin) {
             Ok(global) => {
                 if let Some(slot) = checked_globals.get_mut(index) {
@@ -413,7 +414,8 @@ pub fn check_resolved(
     let mut checked_functions = vec![None; functions.len()];
     for (index, header) in functions.iter().cloned().enumerate() {
         if let Some(assertion) = header.test_assertion {
-            let origin = SourceOrigin::new(&header.source_id, ByteSpan::empty_at(0));
+            let origin =
+                SourceOrigin::new(header.source_id.as_str(), ByteSpan::empty_at(0));
             match CheckedFunction::new_test_assertion(header.name, assertion, origin) {
                 Ok(checked) => {
                     if let Some(slot) = checked_functions.get_mut(index) {
@@ -451,7 +453,7 @@ pub fn check_resolved(
             ) else {
                 continue;
             };
-            let origin = SourceOrigin::new(&header.source_id, test.span());
+            let origin = SourceOrigin::new(header.source_id.as_str(), test.span());
             match CheckedFunction::with_slots(
                 header.name,
                 header.signature,
@@ -495,7 +497,7 @@ pub fn check_resolved(
             continue;
         }
         if let Some(intrinsic) = header.external {
-            let origin = SourceOrigin::new(&header.source_id, function.span());
+            let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
             match CheckedFunction::new_external(
                 header.name,
                 header.signature,
@@ -588,7 +590,7 @@ pub fn check_resolved(
         ) else {
             continue;
         };
-        let origin = SourceOrigin::new(&header.source_id, function.span());
+        let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
         match CheckedFunction::with_slots(
             header.name,
             header.signature,
@@ -622,7 +624,7 @@ pub fn check_resolved(
             let Some(header) = globals.get(index) else {
                 continue;
             };
-            let origin = SourceOrigin::new(&header.source_id, header.span);
+            let origin = SourceOrigin::new(header.source_id.as_str(), header.span);
             let Some(initializer) =
                 default_expression(&header.value_type, origin.clone())
             else {
@@ -647,7 +649,7 @@ pub fn check_resolved(
                 .test
                 .as_ref()
                 .map_or(ByteSpan::empty_at(0), vibra_syntax::TestDeclaration::span);
-            let origin = SourceOrigin::new(&header.source_id, span);
+            let origin = SourceOrigin::new(header.source_id.as_str(), span);
             let body = if header.test.is_some() {
                 Some(Expr::sequence(Vec::new(), origin.clone()))
             } else {
@@ -667,12 +669,25 @@ pub fn check_resolved(
     }
     let globals = checked_globals.into_iter().collect::<Option<Vec<_>>>();
     let functions = checked_functions.into_iter().collect::<Option<Vec<_>>>();
-    if let (Some(globals), Some(functions)) = (&globals, &functions) {
-        match vibra_ir::validate_global_initializer_cycles(globals, functions) {
-            Ok(()) => {}
+    // One validated module set serves every entry and test program; entries
+    // add only their own call-flow analysis and share the checked IR.
+    let mut module_set = None;
+    if let (Some(globals), Some(functions)) = (globals, functions) {
+        let global_origins = globals
+            .iter()
+            .map(|global| global.origin().clone())
+            .collect::<Vec<_>>();
+        let validated = if functions.is_empty() {
+            vibra_ir::validate_global_initializer_cycles(&globals, &functions)
+                .map(|()| None)
+        } else {
+            CheckedModuleSet::try_new(globals, functions).map(Some)
+        };
+        match validated {
+            Ok(set) => module_set = set,
             Err(IrError::GlobalInitializerCycle(global_index)) => {
-                if let Some(global) = globals.get(global_index) {
-                    diagnostics.push(crate::initializer_cycle_diagnostic(global));
+                if let Some(origin) = global_origins.get(global_index) {
+                    diagnostics.push(crate::initializer_cycle_diagnostic(origin));
                 }
             }
             Err(error) => {
@@ -692,83 +707,58 @@ pub fn check_resolved(
             && diagnostic.code() != DiagnosticCode::ToolUnavailable
     });
     let mut programs = BTreeMap::new();
-    if !has_blocking_error
-        && let (Some(globals), Some(functions)) = (&globals, &functions)
-    {
-        for entry in snapshot.entries() {
-            let Some(declaration) = entry.declaration() else {
-                continue;
-            };
-            let Some(index) = function_indices.get(declaration).copied() else {
-                continue;
-            };
-            match CheckedProgram::try_new_with_globals(
-                globals.clone(),
-                functions.clone(),
-                index,
-            ) {
-                Ok(program) => {
-                    programs.insert(declaration.clone(), program);
-                }
-                Err(IrError::GlobalInitializerCycle(global_index)) => {
-                    if let Some(global) = globals.get(global_index) {
-                        diagnostics.push(crate::initializer_cycle_diagnostic(global));
-                    }
-                    break;
-                }
-                Err(error) => {
-                    if let Some(declaration) = snapshot
-                        .declarations()
-                        .iter()
-                        .find(|candidate| candidate.id() == declaration)
-                    {
-                        unavailable(
-                            &mut diagnostics,
-                            declaration.source_id(),
-                            declaration.span(),
-                            format!("checked IR construction failed: {error}"),
-                        );
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
-    if !has_blocking_error
-        && let (Some(globals), Some(functions)) = (&globals, &functions)
-    {
-        for declaration in function_indices
+    if !has_blocking_error && let Some(set) = &module_set {
+        let entries = snapshot
+            .entries()
+            .iter()
+            .filter_map(|entry| entry.declaration())
+            .map(|declaration| (declaration, "checked IR construction failed"));
+        let tests = function_indices
             .keys()
             .filter(|declaration| declaration.kind() == vibra_resolve::EntityKind::Test)
-        {
+            .map(|declaration| {
+                (declaration, "checked test program construction failed")
+            });
+        let mut failed_entry = false;
+        for (declaration, failure) in entries.chain(tests) {
+            let is_test = declaration.kind() == vibra_resolve::EntityKind::Test;
+            if failed_entry && !is_test {
+                continue;
+            }
             let Some(index) = function_indices.get(declaration).copied() else {
                 continue;
             };
-            match CheckedProgram::try_new_with_globals(
-                globals.clone(),
-                functions.clone(),
-                index,
-            ) {
+            match CheckedProgram::for_entry(Arc::clone(set), index) {
                 Ok(program) => {
                     programs.insert(declaration.clone(), program);
                 }
                 Err(error) => {
-                    if let Some(declaration) = snapshot
+                    if let IrError::GlobalInitializerCycle(global_index) = error
+                        && !is_test
+                    {
+                        if let Some(global) = set.globals().get(global_index) {
+                            diagnostics.push(crate::initializer_cycle_diagnostic(
+                                global.origin(),
+                            ));
+                        }
+                    } else if let Some(resolved) = snapshot
                         .declarations()
                         .iter()
                         .find(|candidate| candidate.id() == declaration)
                     {
                         unavailable(
                             &mut diagnostics,
-                            declaration.source_id(),
-                            declaration.span(),
-                            format!(
-                                "checked test program construction failed: {error}"
-                            ),
+                            resolved.source_id(),
+                            resolved.span(),
+                            format!("{failure}: {error}"),
                         );
                     }
-                    break;
+                    // Stop building programs of this kind after one failure,
+                    // as each failure describes the shared module set.
+                    if is_test {
+                        break;
+                    }
+                    failed_entry = true;
                 }
             }
         }
