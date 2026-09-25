@@ -777,8 +777,7 @@ fn canonical_target_root(
 }
 
 fn verify_toolchain_bootstrap() -> Result<vibra_types::BootstrapVerification, String> {
-    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    vibra_types::verify_bootstrap(repository_root).map_err(|error| error.to_string())
+    vibra_types::verify_bootstrap().map_err(|error| error.to_string())
 }
 
 fn verify_workspace_bootstrap(

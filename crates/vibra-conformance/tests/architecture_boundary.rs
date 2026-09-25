@@ -310,3 +310,72 @@ fn the_workspace_excludes_the_archived_tree() {
         "`archive/pre-v1/Cargo.toml` must stay outside the workspace"
     );
 }
+
+/// Crates that implement language semantics. The M2 plan says they accept
+/// explicit inputs and never search disk; filesystem acquisition belongs to
+/// `vibra-workspace`.
+const SEMANTIC_CRATES: &[&str] = &[
+    "vibra-diagnostics",
+    "vibra-syntax",
+    "vibra-resolve",
+    "vibra-types",
+    "vibra-ir",
+    "vibra-interp",
+    "vibra-fmt",
+];
+
+/// Filesystem entry points a semantic crate must not name.
+const FILESYSTEM_PATTERNS: &[&str] = &["std::fs", "fs::", "File::open", "read_dir("];
+
+fn rust_sources(directory: &Path, found: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(directory).expect("readable source directory") {
+        let path = entry.expect("readable directory entry").path();
+        if path.is_dir() {
+            rust_sources(&path, found);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            found.push(path);
+        }
+    }
+}
+
+fn filesystem_references(source: &str) -> Vec<&'static str> {
+    FILESYSTEM_PATTERNS
+        .iter()
+        .copied()
+        .filter(|pattern| source.contains(pattern))
+        .collect()
+}
+
+#[test]
+fn semantic_crates_do_not_touch_the_filesystem() {
+    let root = workspace_root();
+    let mut found = Vec::new();
+    for crate_name in SEMANTIC_CRATES {
+        let mut sources = Vec::new();
+        rust_sources(
+            &root.join("crates").join(crate_name).join("src"),
+            &mut sources,
+        );
+        assert!(!sources.is_empty(), "{crate_name} has no sources");
+        for path in sources {
+            let source = std::fs::read_to_string(&path).expect("readable source");
+            for pattern in filesystem_references(&source) {
+                found.push(format!("{} names `{pattern}`", path.display()));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "semantic crates must accept explicit inputs:\n{}",
+        found.join("\n")
+    );
+}
+
+#[test]
+fn a_filesystem_reference_is_reported() {
+    assert_eq!(
+        filesystem_references("use std::fs;\nfs::read(path)"),
+        ["std::fs", "fs::"]
+    );
+    assert!(filesystem_references("let bytes = include_bytes!(\"x\");").is_empty());
+}

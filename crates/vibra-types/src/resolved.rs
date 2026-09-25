@@ -696,14 +696,7 @@ pub fn check_resolved(
             Ok(()) => {}
             Err(IrError::GlobalInitializerCycle(global_index)) => {
                 if let Some(global) = globals.get(global_index) {
-                    diagnostics.push(
-                        Diagnostic::new(
-                            vibra_diagnostics::DiagnosticCode::TypeInitializerCycle,
-                            global.origin().span(),
-                            "module value initializers form a cycle",
-                        )
-                        .with_source_id(global.origin().source_id()),
-                    );
+                    diagnostics.push(crate::initializer_cycle_diagnostic(global));
                 }
             }
             Err(error) => {
@@ -743,14 +736,7 @@ pub fn check_resolved(
                 }
                 Err(IrError::GlobalInitializerCycle(global_index)) => {
                     if let Some(global) = globals.get(global_index) {
-                        diagnostics.push(
-                            Diagnostic::new(
-                                vibra_diagnostics::DiagnosticCode::TypeInitializerCycle,
-                                global.origin().span(),
-                                "module value initializers form a cycle",
-                            )
-                            .with_source_id(global.origin().source_id()),
-                        );
+                        diagnostics.push(crate::initializer_cycle_diagnostic(global));
                     }
                     break;
                 }

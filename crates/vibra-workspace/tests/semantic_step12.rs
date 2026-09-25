@@ -538,9 +538,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
         .targets()
         .first()
         .expect("target");
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let verification =
-        vibra_types::verify_bootstrap(repository).expect("bootstrap verification");
+    let verification = vibra_types::verify_bootstrap().expect("bootstrap verification");
 
     let checked = vibra_workspace::semantic::check_target_with_bootstrap(
         &snapshot,
@@ -596,9 +594,7 @@ fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
         .targets()
         .first()
         .expect("binary target");
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let verification =
-        vibra_types::verify_bootstrap(repository).expect("bootstrap verification");
+    let verification = vibra_types::verify_bootstrap().expect("bootstrap verification");
 
     let checked = vibra_workspace::semantic::check_target_with_bootstrap(
         &snapshot,
@@ -700,9 +696,7 @@ fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_lo
         .targets()
         .first()
         .expect("target");
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let verification =
-        vibra_types::verify_bootstrap(repository).expect("bootstrap verification");
+    let verification = vibra_types::verify_bootstrap().expect("bootstrap verification");
 
     let checked = vibra_workspace::semantic::check_target_with_bootstrap(
         &snapshot,

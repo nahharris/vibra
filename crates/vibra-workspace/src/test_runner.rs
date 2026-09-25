@@ -889,7 +889,6 @@ fn canonical_assertion_value(value: &Value) -> String {
 
 #[cfg(test)]
 mod provenance_tests {
-    use std::path::Path;
 
     use vibra_resolve::{ResolveInput, Resolver, SourceModule, SourceUnit};
 
@@ -923,9 +922,8 @@ mod provenance_tests {
                 ),
             ],
         ));
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = vibra_types::verify_bootstrap(repository)
-            .expect("signed bootstrap verification");
+        let verification =
+            vibra_types::verify_bootstrap().expect("signed bootstrap verification");
 
         let result = select_tests(&resolved, None, Some(&verification));
 

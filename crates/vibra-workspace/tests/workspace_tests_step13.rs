@@ -117,9 +117,8 @@ fn target_may_import_assertion_module_without_referencing_it() {
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let verification = vibra_types::verify_bootstrap(repository)
-        .expect("signed bootstrap verification");
+    let verification =
+        vibra_types::verify_bootstrap().expect("signed bootstrap verification");
 
     let resolved = snapshot
         .resolve_with_bootstrap(&verification)
@@ -164,9 +163,8 @@ fn target_reference_to_assertion_is_unavailable_at_the_reference() {
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let verification = vibra_types::verify_bootstrap(repository)
-        .expect("signed bootstrap verification");
+    let verification =
+        vibra_types::verify_bootstrap().expect("signed bootstrap verification");
 
     let checked = vibra_workspace::semantic::check_all_with_bootstrap(
         &snapshot,
@@ -207,9 +205,8 @@ fn local_std_assert_functions_are_not_promoted_to_trusted_assertions() {
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let verification = vibra_types::verify_bootstrap(repository)
-        .expect("signed bootstrap verification");
+    let verification =
+        vibra_types::verify_bootstrap().expect("signed bootstrap verification");
     let target = snapshot
         .project()
         .project()
@@ -340,9 +337,8 @@ fn test_import_bootstrap_requires_verified_check_and_run_without_becoming_target
     assert_eq!(unverified_run.check().status(), CheckStatus::Unavailable);
     assert!(unverified_run.outcome().is_none());
 
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let verification = vibra_types::verify_bootstrap(repository)
-        .expect("signed bootstrap verification");
+    let verification =
+        vibra_types::verify_bootstrap().expect("signed bootstrap verification");
     let checked = vibra_workspace::semantic::check_target_with_bootstrap(
         &snapshot,
         target,

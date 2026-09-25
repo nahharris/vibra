@@ -17,16 +17,11 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-use std::fs;
 use std::path::Path;
 
-use base64::Engine;
-use ring::signature;
-use sha2::{Digest, Sha256};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature,
+    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
     LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin,
     TestAssertion, Value, external::CompilerIntrinsic,
 };
@@ -36,8 +31,14 @@ use vibra_syntax::{
     SourceAst, TypeExpr,
 };
 
+mod bootstrap;
 mod resolved;
 
+pub use bootstrap::{
+    BOOTSTRAP_ASSERT_SOURCE_ID, BOOTSTRAP_TEXT_SOURCE_ID, BootstrapInputs,
+    BootstrapVerification, BootstrapVerificationError, verify_bootstrap,
+    verify_bootstrap_bytes,
+};
 pub use resolved::{ResolvedCheckResult, check_resolved};
 
 /// The result of checking one source document.
@@ -186,8 +187,8 @@ pub fn check_bootstrap_source(
 ) -> CheckResult {
     let source_id = source_id.as_ref();
     if source_id != BOOTSTRAP_TEXT_SOURCE_ID
-        || source.as_bytes() != BOOTSTRAP_TEXT_BYTES
-        || verification.artifact.is_empty()
+        || source.as_bytes() != bootstrap::EMBEDDED_TEXT_MODULE
+        || !verification.maps("std.text", BOOTSTRAP_TEXT_SOURCE_ID)
     {
         let diagnostic = Diagnostic::new(
             DiagnosticCode::ToolUnavailable,
@@ -305,9 +306,7 @@ pub fn check_bootstrap_text_import(
             "only the exact `(import text @std.text)` import is available",
         );
     }
-    if verification.artifact.is_empty()
-        || validate_signed_bootstrap_map(&verification.artifact).is_err()
-    {
+    if !verification.maps("std.text", BOOTSTRAP_TEXT_SOURCE_ID) {
         return bootstrap_import_unavailable(
             source_id,
             import.span(),
@@ -380,266 +379,6 @@ fn bootstrap_import_unavailable(
     CheckResult::new(None, vec![diagnostic])
 }
 
-/// The canonical path of the signed M2 text bootstrap module.
-pub const BOOTSTRAP_TEXT_SOURCE_ID: &str = "stdlib/m2/src/std/text.vib";
-const BOOTSTRAP_TEXT_BYTES: &[u8] =
-    include_bytes!("../../../stdlib/m2/src/std/text.vib");
-
-/// The result of verifying the repository's signed M2 bootstrap input.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BootstrapVerification {
-    artifact: Vec<u8>,
-    package: vibra_resolve::PackageId,
-    text_module: Vec<u8>,
-    assert_module: Vec<u8>,
-}
-
-impl BootstrapVerification {
-    /// The exact signed artifact bytes.
-    #[must_use]
-    pub fn artifact(&self) -> &[u8] {
-        &self.artifact
-    }
-
-    /// The exact package identity selected by the pinned bootstrap manifest.
-    #[must_use]
-    pub const fn package(&self) -> &vibra_resolve::PackageId {
-        &self.package
-    }
-
-    /// Verified source modules for the resolver's separate bootstrap overlay.
-    #[must_use]
-    pub fn resolver_overlay(
-        &self,
-    ) -> (vibra_resolve::PackageId, Vec<vibra_resolve::SourceModule>) {
-        (
-            self.package.clone(),
-            vec![
-                vibra_resolve::SourceModule::new(
-                    "std",
-                    ["text"],
-                    BOOTSTRAP_TEXT_SOURCE_ID,
-                    &self.text_module,
-                ),
-                vibra_resolve::SourceModule::new(
-                    "std",
-                    ["assert"],
-                    "stdlib/m2/src/std/assert.vib",
-                    &self.assert_module,
-                ),
-            ],
-        )
-    }
-
-    pub(crate) fn trusts_module(&self, module: &vibra_resolve::ModuleRecord) -> bool {
-        module.package() == &self.package
-            && ((module.source_id() == BOOTSTRAP_TEXT_SOURCE_ID
-                && module.bytes() == self.text_module)
-                || (module.source_id() == "stdlib/m2/src/std/assert.vib"
-                    && module.bytes() == self.assert_module))
-    }
-}
-
-/// A failure while checking the fixed offline bootstrap provenance.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BootstrapVerificationError(String);
-
-impl fmt::Display for BootstrapVerificationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for BootstrapVerificationError {}
-
-const BOOTSTRAP_ARTIFACT_SHA256: &str =
-    "8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103";
-const BOOTSTRAP_SIGNATURE_SHA256: &str =
-    "f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63";
-const BOOTSTRAP_PUBLIC_KEY_SHA256: &str =
-    "fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509";
-const BOOTSTRAP_TEXT_SHA256: &str =
-    "c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44";
-const BOOTSTRAP_ASSERT_SHA256: &str =
-    "746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007";
-const BOOTSTRAP_MANIFEST: &[u8] =
-    include_bytes!("../../../stdlib/m2/bootstrap-manifest.vibon");
-const BOOTSTRAP_SIGNATURE: &[u8] =
-    include_bytes!("../../../stdlib/m2/bootstrap.vibon.sig");
-const BOOTSTRAP_PUBLIC_KEY: &[u8] =
-    include_bytes!("../../../stdlib/m2/toolchain-ed25519.pub");
-
-/// Verifies the exact checked-in M2 artifact, manifest, key, and signature.
-///
-/// All paths are fixed relative paths under `root`. The manifest is itself
-/// pinned to the reviewed bytes, and Ed25519 verification is performed over
-/// the artifact bytes before any source declaration is admitted.
-pub fn verify_bootstrap(
-    root: impl AsRef<Path>,
-) -> Result<BootstrapVerification, BootstrapVerificationError> {
-    let root = root.as_ref();
-    let manifest = read_bootstrap_file(root, "stdlib/m2/bootstrap-manifest.vibon")?;
-    if manifest != BOOTSTRAP_MANIFEST {
-        return Err(BootstrapVerificationError(
-            "M2 bootstrap manifest bytes do not match the reviewed manifest".to_owned(),
-        ));
-    }
-    let artifact = read_bootstrap_file(root, "stdlib/m2/bootstrap.vibon")?;
-    let signature_bytes = read_bootstrap_file(root, "stdlib/m2/bootstrap.vibon.sig")?;
-    let public_key = read_bootstrap_file(root, "stdlib/m2/toolchain-ed25519.pub")?;
-    check_digest("artifact", &artifact, BOOTSTRAP_ARTIFACT_SHA256)?;
-    check_digest("signature", &signature_bytes, BOOTSTRAP_SIGNATURE_SHA256)?;
-    check_digest("public key", &public_key, BOOTSTRAP_PUBLIC_KEY_SHA256)?;
-    let text_module = read_bootstrap_file(root, BOOTSTRAP_TEXT_SOURCE_ID)?;
-    let assert_module = read_bootstrap_file(root, "stdlib/m2/src/std/assert.vib")?;
-    check_digest("text module", &text_module, BOOTSTRAP_TEXT_SHA256)?;
-    check_digest("assertion module", &assert_module, BOOTSTRAP_ASSERT_SHA256)?;
-    validate_signed_bootstrap_map(&artifact)?;
-    if signature_bytes != BOOTSTRAP_SIGNATURE || public_key != BOOTSTRAP_PUBLIC_KEY {
-        return Err(BootstrapVerificationError(
-            "M2 bootstrap trust inputs do not match the reviewed bytes".to_owned(),
-        ));
-    }
-    let signature_text = std::str::from_utf8(&signature_bytes).map_err(|_| {
-        BootstrapVerificationError("bootstrap signature is not UTF-8".to_owned())
-    })?;
-    let signature = base64::engine::general_purpose::STANDARD
-        .decode(signature_text.trim())
-        .map_err(|_| {
-            BootstrapVerificationError("bootstrap signature is not base64".to_owned())
-        })?;
-    let key_text = std::str::from_utf8(&public_key).map_err(|_| {
-        BootstrapVerificationError("bootstrap public key is not UTF-8".to_owned())
-    })?;
-    let key_text = key_text
-        .lines()
-        .filter(|line| !line.starts_with("---"))
-        .collect::<String>();
-    let key = base64::engine::general_purpose::STANDARD
-        .decode(key_text)
-        .map_err(|_| {
-            BootstrapVerificationError("bootstrap public key is not base64".to_owned())
-        })?;
-    let key = key.get(key.len().saturating_sub(32)..).ok_or_else(|| {
-        BootstrapVerificationError(
-            "bootstrap public key has no Ed25519 key bytes".to_owned(),
-        )
-    })?;
-    let verifier = signature::UnparsedPublicKey::new(&signature::ED25519, key);
-    verifier.verify(&artifact, &signature).map_err(|_| {
-        BootstrapVerificationError(
-            "M2 bootstrap Ed25519 signature is invalid".to_owned(),
-        )
-    })?;
-    Ok(BootstrapVerification {
-        artifact,
-        package: vibra_resolve::PackageId::new("vibra-stdlib", "0.1.0"),
-        text_module,
-        assert_module,
-    })
-}
-
-fn validate_signed_bootstrap_map(
-    artifact: &[u8],
-) -> Result<(), BootstrapVerificationError> {
-    let text = std::str::from_utf8(artifact).map_err(|_| {
-        BootstrapVerificationError("bootstrap artifact is not UTF-8".to_owned())
-    })?;
-    for fragment in [
-        "package: \"vibra-stdlib\"",
-        "@std.text",
-        "stdlib/m2/src/std/text.vib",
-        "sha256:c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44",
-        "@std.assert",
-        "stdlib/m2/src/std/assert.vib",
-        "sha256:746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007",
-        "text.concat",
-        "text.length",
-        "assert.equal-u64",
-    ] {
-        if !text.contains(fragment) {
-            return Err(BootstrapVerificationError(format!(
-                "signed bootstrap import map is missing `{fragment}`"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn read_bootstrap_file(
-    root: &Path,
-    relative: &str,
-) -> Result<Vec<u8>, BootstrapVerificationError> {
-    if path_contains_link(root) {
-        return Err(BootstrapVerificationError(
-            "bootstrap root contains a symlink or junction".to_owned(),
-        ));
-    }
-    let root = fs::canonicalize(root).map_err(|error| {
-        BootstrapVerificationError(format!("cannot resolve bootstrap root: {error}"))
-    })?;
-    let candidate = root.join(relative);
-    if path_contains_link(&candidate) {
-        return Err(BootstrapVerificationError(format!(
-            "bootstrap path `{relative}` contains a symlink or junction"
-        )));
-    }
-    let resolved = fs::canonicalize(&candidate).map_err(|error| {
-        BootstrapVerificationError(format!(
-            "cannot read bootstrap `{relative}`: {error}"
-        ))
-    })?;
-    if !resolved.starts_with(&root) {
-        return Err(BootstrapVerificationError(format!(
-            "bootstrap path `{relative}` escapes its root"
-        )));
-    }
-    fs::read(resolved).map_err(|error| {
-        BootstrapVerificationError(format!(
-            "cannot read bootstrap `{relative}`: {error}"
-        ))
-    })
-}
-
-fn path_contains_link(path: &Path) -> bool {
-    let mut current = Path::new("").to_path_buf();
-    for component in path.components() {
-        current.push(component.as_os_str());
-        let Ok(metadata) = fs::symlink_metadata(&current) else {
-            continue;
-        };
-        if metadata.file_type().is_symlink() || is_windows_reparse_point(&metadata) {
-            return true;
-        }
-    }
-    false
-}
-
-#[cfg(windows)]
-fn is_windows_reparse_point(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    metadata.file_attributes() & 0x400 != 0
-}
-
-#[cfg(not(windows))]
-const fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
-    false
-}
-
-fn check_digest(
-    label: &str,
-    bytes: &[u8],
-    expected: &str,
-) -> Result<(), BootstrapVerificationError> {
-    let actual = format!("{:x}", Sha256::digest(bytes));
-    if actual != expected {
-        return Err(BootstrapVerificationError(format!(
-            "M2 bootstrap {label} digest mismatch: expected sha256:{expected}, got sha256:{actual}"
-        )));
-    }
-    Ok(())
-}
-
 fn check_ast_with_bindings_authority(
     source_id: &str,
     ast: &SourceAst,
@@ -648,7 +387,6 @@ fn check_ast_with_bindings_authority(
 ) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
     let mut checker = Checker::new(source_id, diagnostics, ast, trusted_bootstrap);
     checker.collect_headers();
-    checker.check_initializer_cycles();
     checker.check_function_cycles();
     checker.check_globals();
     checker.check_functions();
@@ -664,7 +402,6 @@ fn check_ast_with_text_import_authority(
     let mut checker = Checker::new(source_id, diagnostics, ast, true);
     checker.text_import_authorized = true;
     checker.collect_headers();
-    checker.check_initializer_cycles();
     checker.check_function_cycles();
     checker.check_globals();
     checker.check_functions();
@@ -973,13 +710,6 @@ impl<'a> Checker<'a> {
         self.checked_functions = vec![None; self.functions.len()];
     }
 
-    fn check_initializer_cycles(&mut self) {
-        let mut states = vec![VisitState::Unvisited; self.globals.len()];
-        for index in 0..self.globals.len() {
-            self.visit_global(index, &mut states);
-        }
-    }
-
     fn check_function_cycles(&mut self) {
         let mut dependencies = vec![BTreeSet::new(); self.functions.len()];
         for (index, header) in self.functions.iter().enumerate() {
@@ -1013,60 +743,6 @@ impl<'a> Checker<'a> {
             .collect::<Vec<_>>();
         self.recursive_groups =
             find_recursive_groups(&dependencies, &module_definitions);
-    }
-
-    fn visit_global(&mut self, index: usize, states: &mut [VisitState]) {
-        match states.get(index).copied() {
-            Some(VisitState::Done) => return,
-            Some(VisitState::Visiting) => {
-                let Some(header) = self.globals.get(index) else {
-                    return;
-                };
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::TypeInitializerCycle,
-                        header.span,
-                        "module value initializers form a cycle",
-                    )
-                    .with_source_id(self.source_id),
-                );
-                return;
-            }
-            Some(VisitState::Unvisited) => {}
-            None => return,
-        }
-        let Some(state) = states.get_mut(index) else {
-            return;
-        };
-        *state = VisitState::Visiting;
-        let mut dependencies = BTreeSet::new();
-        let Some(expression) = self.globals.get(index).map(|header| &header.expression)
-        else {
-            return;
-        };
-        collect_global_dependencies(
-            expression,
-            &self.global_indices,
-            &self.function_indices,
-            &self.functions,
-            self.ast,
-            &mut dependencies,
-        );
-        collect_global_alias_dependencies(
-            expression,
-            &self.global_indices,
-            &self.function_indices,
-            &self.globals,
-            &self.functions,
-            self.ast,
-            &mut dependencies,
-        );
-        for dependency in dependencies {
-            self.visit_global(dependency, states);
-        }
-        if let Some(state) = states.get_mut(index) {
-            *state = VisitState::Done;
-        }
     }
 
     fn check_globals(&mut self) {
@@ -1296,6 +972,14 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
+        if let Err(IrError::GlobalInitializerCycle(index)) =
+            vibra_ir::validate_global_initializer_cycles(&globals, &functions)
+        {
+            if let Some(global) = globals.get(index) {
+                self.diagnostics.push(initializer_cycle_diagnostic(global));
+            }
+            return None;
+        }
         match CheckedProgram::try_new_with_globals(globals, functions, 0) {
             Ok(program) => Some(program),
             Err(error) => {
@@ -1311,11 +995,16 @@ impl<'a> Checker<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VisitState {
-    Unvisited,
-    Visiting,
-    Done,
+/// The diagnostic for a checked-IR initializer cycle through `global`.
+pub(crate) fn initializer_cycle_diagnostic(
+    global: &vibra_ir::CheckedGlobal,
+) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::TypeInitializerCycle,
+        global.origin().span(),
+        "module value initializers form a cycle",
+    )
+    .with_source_id(global.origin().source_id())
 }
 
 fn find_recursive_groups(
@@ -1830,88 +1519,6 @@ fn callable_default_is_missing(expression: &Expr, label: &str) -> bool {
     }
 }
 
-fn syntax_function_index(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    aliases: &BTreeMap<String, usize>,
-) -> Option<usize> {
-    match expression.kind() {
-        ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => aliases
-            .get(name.value())
-            .copied()
-            .or_else(|| function_indices.get(name.value()).copied())
-            .or_else(|| {
-                global_indices
-                    .get(name.value())
-                    .and_then(|index| globals.get(*index))
-                    .and_then(|global| global.function_index)
-            }),
-        ExpressionKind::Do(expressions) => expressions.last().and_then(|expression| {
-            syntax_function_index(
-                expression,
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            )
-        }),
-        ExpressionKind::Let {
-            pattern,
-            value,
-            body,
-        } => {
-            let mut scoped = aliases.clone();
-            if let PatternKind::Binding(name) = pattern.kind()
-                && !name.is_discard()
-                && let Some(function) = syntax_function_index(
-                    value,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                )
-            {
-                scoped.insert(name.value().to_owned(), function);
-            }
-            body.last().and_then(|expression| {
-                syntax_function_index(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    &scoped,
-                )
-            })
-        }
-        ExpressionKind::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
-            let then_function = syntax_function_index(
-                then_branch,
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            );
-            let else_function = syntax_function_index(
-                else_branch,
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            );
-            (then_function == else_function)
-                .then_some(then_function)
-                .flatten()
-        }
-        _ => None,
-    }
-}
-
 fn syntax_function_targets(
     expression: &Expression,
     global_indices: &BTreeMap<String, usize>,
@@ -2004,204 +1611,6 @@ fn syntax_function_targets(
         ExpressionKind::Lambda(_) => FunctionTargetSet::closure(),
         ExpressionKind::Application(_) => FunctionTargetSet::unknown(),
         _ => FunctionTargetSet::default(),
-    }
-}
-
-fn collect_global_dependencies(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    functions: &[FunctionHeader],
-    ast: &SourceAst,
-    dependencies: &mut BTreeSet<usize>,
-) {
-    let mut visited_functions = BTreeSet::new();
-    collect_global_dependencies_inner(
-        expression,
-        global_indices,
-        function_indices,
-        functions,
-        ast,
-        dependencies,
-        &mut visited_functions,
-    );
-}
-
-fn collect_global_dependencies_inner(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    functions: &[FunctionHeader],
-    ast: &SourceAst,
-    dependencies: &mut BTreeSet<usize>,
-    visited_functions: &mut BTreeSet<usize>,
-) {
-    match expression.kind() {
-        ExpressionKind::Name(name)
-            if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
-        {
-            if let Some(index) = global_indices.get(name.value()).copied() {
-                dependencies.insert(index);
-            }
-        }
-        ExpressionKind::Application(application) => {
-            if let ExpressionKind::Name(name) = application.callee().kind()
-                && name.kind() == NameKind::Symbol
-                && let Some(function_index) =
-                    function_indices.get(name.value()).copied()
-                && visited_functions.insert(function_index)
-                && let Some(header) = functions.get(function_index)
-                && let Some(Declaration::Defn(function)) =
-                    ast.declarations().get(header.declaration_index)
-            {
-                for expression in function.expressions() {
-                    collect_global_dependencies_inner(
-                        expression,
-                        global_indices,
-                        function_indices,
-                        functions,
-                        ast,
-                        dependencies,
-                        visited_functions,
-                    );
-                }
-            }
-            collect_global_dependencies_inner(
-                application.callee(),
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            for argument in application.arguments() {
-                collect_global_dependencies_inner(
-                    argument.value(),
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_global_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::Let { value, body, .. } => {
-            collect_global_dependencies_inner(
-                value,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            for expression in body {
-                collect_global_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_global_dependencies_inner(
-                condition,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            collect_global_dependencies_inner(
-                then_branch,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            collect_global_dependencies_inner(
-                else_branch,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_global_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_global_dependencies_inner(
-                scrutinee,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            for arm in arms {
-                collect_global_dependencies_inner(
-                    arm.result(),
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_global_dependencies_inner(
-                operand,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-        }
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
     }
 }
 
@@ -2461,235 +1870,6 @@ fn collect_function_alias_dependencies_inner(
                 function_indices,
                 globals,
                 dependencies,
-                aliases,
-            );
-        }
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
-    }
-}
-
-fn collect_global_alias_dependencies(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    functions: &[FunctionHeader],
-    ast: &SourceAst,
-    dependencies: &mut BTreeSet<usize>,
-) {
-    let mut visited_functions = BTreeSet::new();
-    collect_global_alias_dependencies_inner(
-        expression,
-        global_indices,
-        function_indices,
-        globals,
-        functions,
-        ast,
-        dependencies,
-        &mut visited_functions,
-        &BTreeMap::new(),
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn collect_global_alias_dependencies_inner(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    functions: &[FunctionHeader],
-    ast: &SourceAst,
-    dependencies: &mut BTreeSet<usize>,
-    visited_functions: &mut BTreeSet<usize>,
-    aliases: &BTreeMap<String, usize>,
-) {
-    match expression.kind() {
-        ExpressionKind::Name(name)
-            if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
-        {
-            if let Some(index) = global_indices.get(name.value()).copied() {
-                dependencies.insert(index);
-            }
-        }
-        ExpressionKind::Application(application) => {
-            if let Some(function_index) = syntax_function_index(
-                application.callee(),
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            ) && visited_functions.insert(function_index)
-                && let Some(header) = functions.get(function_index)
-                && let Some(Declaration::Defn(function)) =
-                    ast.declarations().get(header.declaration_index)
-            {
-                for expression in function.expressions() {
-                    collect_global_alias_dependencies_inner(
-                        expression,
-                        global_indices,
-                        function_indices,
-                        globals,
-                        functions,
-                        ast,
-                        dependencies,
-                        visited_functions,
-                        &BTreeMap::new(),
-                    );
-                }
-            }
-            collect_global_alias_dependencies_inner(
-                application.callee(),
-                global_indices,
-                function_indices,
-                globals,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-                aliases,
-            );
-            for argument in application.arguments() {
-                collect_global_alias_dependencies_inner(
-                    argument.value(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_global_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Let {
-            pattern,
-            value,
-            body,
-        } => {
-            collect_global_alias_dependencies_inner(
-                value,
-                global_indices,
-                function_indices,
-                globals,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-                aliases,
-            );
-            let mut scoped = aliases.clone();
-            if let PatternKind::Binding(name) = pattern.kind()
-                && !name.is_discard()
-                && let Some(function) = syntax_function_index(
-                    value,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                )
-            {
-                scoped.insert(name.value().to_owned(), function);
-            }
-            for expression in body {
-                collect_global_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    &scoped,
-                );
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            for expression in [condition, then_branch, else_branch] {
-                collect_global_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_global_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_global_alias_dependencies_inner(
-                scrutinee,
-                global_indices,
-                function_indices,
-                globals,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-                aliases,
-            );
-            for arm in arms {
-                collect_global_alias_dependencies_inner(
-                    arm.result(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_global_alias_dependencies_inner(
-                operand,
-                global_indices,
-                function_indices,
-                globals,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
                 aliases,
             );
         }
@@ -4329,8 +3509,7 @@ mod tests {
     #[test]
     fn the_exact_bootstrap_text_module_admits_only_closed_intrinsics() {
         let source = include_str!("../../../stdlib/m2/src/std/text.vib");
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         let checked =
             check_bootstrap_source(&verification, BOOTSTRAP_TEXT_SOURCE_ID, source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -4340,48 +3519,11 @@ mod tests {
 
     #[test]
     fn signed_bootstrap_verifies_exact_bytes_and_ed25519_signature() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification =
-            verify_bootstrap(repository).expect("checked-in bootstrap provenance");
+        let verification = verify_bootstrap().expect("checked-in bootstrap provenance");
         assert_eq!(
             verification.artifact(),
             include_bytes!("../../../stdlib/m2/bootstrap.vibon")
         );
-    }
-
-    #[test]
-    fn bootstrap_rejects_tampered_declared_module_bytes() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        // macOS exposes the temporary directory through `/var`, a symlink to
-        // `/private/var`.  Canonicalize the parent so the verifier can inspect
-        // this fixture without mistaking the ambient path for a fixture link.
-        let temporary_directory =
-            std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
-        let root = temporary_directory
-            .join(format!("vibra-bootstrap-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        for relative in [
-            "stdlib/m2/bootstrap-manifest.vibon",
-            "stdlib/m2/bootstrap.vibon",
-            "stdlib/m2/bootstrap.vibon.sig",
-            "stdlib/m2/toolchain-ed25519.pub",
-            "stdlib/m2/src/std/text.vib",
-            "stdlib/m2/src/std/assert.vib",
-        ] {
-            let destination = root.join(relative);
-            std::fs::create_dir_all(destination.parent().expect("module parent"))
-                .expect("module directory");
-            std::fs::copy(repository.join(relative), &destination)
-                .expect("module copy");
-        }
-        std::fs::write(
-            root.join("stdlib/m2/src/std/text.vib"),
-            b"; modified trusted module\n",
-        )
-        .expect("tamper module");
-        let error = verify_bootstrap(&root).expect_err("tampered module");
-        assert!(error.to_string().contains("text module digest mismatch"));
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -4415,8 +3557,7 @@ mod tests {
         let source = r#"(import text @std.text)
 (defn answer () u64
   (text.length (text.concat "A😀" "")))"#;
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         let checked =
             check_bootstrap_text_import(&verification, "app/main.vib", source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -4428,8 +3569,7 @@ mod tests {
 
     #[test]
     fn text_import_rejects_alias_target_and_extra_imports() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         for source in [
             "(import wrong @std.text)\n(defn answer () u64 1u64)",
             "(import text @std.assert)\n(defn answer () u64 1u64)",
@@ -4451,8 +3591,7 @@ mod tests {
 
     #[test]
     fn unavailable_explicit_text_import_uses_import_span() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         let source = "(import wrong @std.text)\n(defn answer () u64 1u64)";
         let checked =
             check_bootstrap_text_import(&verification, "app/main.vib", source);
@@ -4472,8 +3611,7 @@ mod tests {
 
     #[test]
     fn trusted_text_alias_collisions_report_the_import_span() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         let module = check_bootstrap_text_import(
             &verification,
             "app/main.vib",
@@ -4543,8 +3681,7 @@ mod tests {
 
     #[test]
     fn trusted_text_import_rejects_source_body_and_effect_external_declarations() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         for source in [
             r#"(import text @std.text)
 (defn answer () str "spoof"

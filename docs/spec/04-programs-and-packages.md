@@ -414,15 +414,24 @@ The Step 1 artifact identity is fixed at
 The toolchain public-key file is
 `stdlib/m2/toolchain-ed25519.pub` with fixed digest
 `sha256:fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509`.
-The detached signature is base64 Ed25519 over the artifact bytes; its checked
+The key file is one PEM `PUBLIC KEY` block whose DER body is exactly the
+RFC 8410 Ed25519 `SubjectPublicKeyInfo` prefix followed by 32 key bytes; any
+other key shape is rejected. The detached signature is base64 Ed25519 over the
+artifact bytes; its checked
 in file has digest
 `sha256:f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63`.
 These values are part of the M2 contract and may change only with a reviewed
 bootstrap-contract change that replaces the signature and all dependent
 evidence together.
 
-The verifier reads the manifest and artifact as bytes, checks the manifest's
-format and field types, computes SHA-256 over the exact artifact bytes, and
+The toolchain embeds these reviewed files, including both mapped modules, at
+build time. `check`, `run`, and `test` verify the embedded bytes; they never
+read the bootstrap from the project, the build checkout, or the installation
+directory, so a relocated toolchain binary behaves identically. The verifier
+is a pure function of those bytes.
+
+The verifier reads the manifest and artifact as bytes, decodes the manifest
+through a closed typed record and checks its format and field types, computes SHA-256 over the exact artifact bytes, and
 rejects a digest mismatch before parsing or resolving any bootstrap record. It
 then verifies the detached Ed25519 signature with the fixed public key whose
 digest is above and rejects an invalid signature. The manifest's key path and
@@ -435,8 +444,11 @@ must not fall back to a vendored or ambient standard library.
 The manifest's import map is closed in M2. `@std.text` maps to the trusted text
 module and `@std.assert` maps to the trusted assertion module. Each map value
 contains the canonical relative path and SHA-256 of that module's exact bytes;
-the verifier hashes those bytes and compares them with the records inside the
-signed artifact before admitting any declaration or test registry member. An
+the verifier decodes the signed artifact through its own closed typed record,
+requires its `package`, import map, and symbol lists to equal the manifest's
+structurally (the same module atom, path, digest, and role in each entry, in
+order), and hashes each module's bytes against its entry before admitting any
+declaration or test registry member. An
 import is accepted only when its resolved module identity is exactly the
 mapped identity; users must write the import explicitly. No standard-library
 module is an ambient prelude, and ordinary packages cannot add, replace, or

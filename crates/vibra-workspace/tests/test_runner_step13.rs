@@ -52,8 +52,7 @@ impl Drop for TempProject {
 }
 
 fn verified_bootstrap() -> vibra_types::BootstrapVerification {
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    verify_bootstrap(repository).expect("signed bootstrap verification")
+    verify_bootstrap().expect("signed bootstrap verification")
 }
 
 #[test]

@@ -1893,6 +1893,9 @@ pub enum IrError {
     RecursiveCall(String),
     /// A module initializer dependency graph contains a cycle.
     GlobalInitializerCycle(usize),
+    /// Indirect call-flow analysis reached its iteration bound without a
+    /// fixed point; its call and dependency sets would be unsound.
+    CallFlowDidNotConverge,
 }
 
 impl fmt::Display for IrError {
@@ -1929,6 +1932,9 @@ impl fmt::Display for IrError {
                     formatter,
                     "global initializer cycle involving global {global}"
                 )
+            }
+            Self::CallFlowDidNotConverge => {
+                formatter.write_str("indirect call-flow analysis did not converge")
             }
         }
     }
@@ -2740,14 +2746,10 @@ fn analyze_call_flow_with_entry(
             });
         }
     }
-    Ok(CallAnalysis {
-        calls: flow.calls,
-        dependencies: flow.dependencies,
-        parameter_targets: flow.parameter_targets,
-        parameter_sources: flow.parameter_sources,
-        unresolved: flow.unresolved,
-        reachable,
-    })
+    // Returning the last iteration here would under-approximate call and
+    // dependency edges, which can hide an initializer cycle or shrink a tail
+    // group. Fail closed instead.
+    Err(IrError::CallFlowDidNotConverge)
 }
 
 fn dependency_closure_from_roots(
@@ -3151,9 +3153,25 @@ impl<'a> CallFlow<'a> {
             Expr::Literal { .. }
             | Expr::Default { .. }
             | Expr::Variable { .. }
-            | Expr::Global { .. }
             | Expr::Function { .. }
             | Expr::Captured { .. } => {}
+            Expr::Global { index, .. } => {
+                // A module read inside an invoked closure body belongs to the
+                // caller: `(def x i32 (h))` depends on every global that the
+                // closure stored in `h` reads. The static pass deliberately
+                // skips closure bodies, so the flow pass records the edge.
+                if let Some(owner) = owner {
+                    let Some(dependencies) = self
+                        .dependencies
+                        .get_mut(owner.node_index(self.globals.len()))
+                    else {
+                        return Err(IrError::InvalidExpression(format!(
+                            "dependency owner {owner:?} is outside the program"
+                        )));
+                    };
+                    dependencies.insert(DependencyNode::Global(*index));
+                }
+            }
             Expr::External { arguments, .. } => {
                 for argument in arguments {
                     self.collect_expr(argument, owner, environment, captures)?;

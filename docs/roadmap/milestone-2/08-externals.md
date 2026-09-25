@@ -56,9 +56,15 @@ scalar length for `text.length`.
 | `text.concat` | `str str -> str` | `vibra-interp` intrinsic execution test and `V1-RUNTIME-external-std-text-concat`, including an empty operand |
 | `text.length` | `str -> u64` | `vibra-interp` intrinsic execution test and `V1-RUNTIME-external-std-text-length`, counting scalars rather than UTF-8 bytes |
 
-`vibra-types::verify_bootstrap` resolves only the fixed files under the supplied
-repository root, checks the reviewed SHA-256 values, and verifies the detached
-Ed25519 signature over the exact artifact bytes. `check_bootstrap_source` then
+`vibra-types::verify_bootstrap_bytes` is a pure function over explicit
+`BootstrapInputs`; `verify_bootstrap` applies it to the files embedded at build
+time, so the checker performs no filesystem I/O and an installed binary does not
+depend on its build checkout. It decodes the manifest and signed artifact into
+closed typed records, checks the reviewed SHA-256 values, requires the exact
+Ed25519 `SubjectPublicKeyInfo` prefix, verifies the detached signature over the
+exact artifact bytes, and compares the two import maps structurally. (The
+original Step 8 verifier read these files from a repository root; the M2 review
+replaced it.) `check_bootstrap_source` then
 admits only the exact `stdlib/m2/src/std/text.vib` bytes and canonical source ID;
 ordinary `check_source` reports `@tool.unavailable` for copied declarations.
 `check_bootstrap_text_import` is the narrow source-module seam: it requires one

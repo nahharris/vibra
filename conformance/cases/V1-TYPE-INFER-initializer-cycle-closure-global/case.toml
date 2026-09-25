@@ -1,0 +1,17 @@
+id = "V1-TYPE-INFER-initializer-cycle-closure-global"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "A module value that calls a closure stored in another global depends on every global the closure body reads, so the cycle is rejected statically."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.initializer-cycle"
+level = "@error"
+source = "input.vib"
+span = [38, 53]

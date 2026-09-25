@@ -1,7 +1,5 @@
 //! Static and interpreter handlers for immutable Step 12 workspace snapshots.
 
-use std::path::Path;
-
 use vibra_diagnostics::Diagnostic;
 use vibra_types::{BootstrapVerification, verify_bootstrap};
 use vibra_workspace::{WorkspaceSnapshot, project::TargetKind};
@@ -271,8 +269,7 @@ fn verified_bootstrap_if_used(
     if !requires_verification {
         return Ok(None);
     }
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    verify_bootstrap(repository).map(Some).map_err(|error| {
+    verify_bootstrap().map(Some).map_err(|error| {
         HandlerError::new(format!("{BOOTSTRAP_PROVENANCE_FAILURE}: {error}"))
     })
 }
