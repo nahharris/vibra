@@ -161,3 +161,35 @@ checks page tracks the final report head. The standing
 [M2-to-main PR #295](https://github.com/nahharris/vibra/pull/295) remains the
 single release-review vehicle; its live base, head, and review status are shown
 by GitHub.
+
+## Post-review remediation
+
+The owner review of [PR #295](https://github.com/nahharris/vibra/pull/295)
+found six defects, three plan or specification gaps, and several performance
+and structure issues. Each was addressed on `m2` after the Step 14 exit
+evidence above:
+
+- The toolchain verifies bootstrap bytes embedded at build time. The pure
+  verifier decodes the manifest and signed artifact into typed records and
+  requires the exact Ed25519 SPKI prefix. `vibra-types` performs no filesystem
+  I/O, and an architecture test enforces this for every semantic crate.
+- An initializer cycle through a closure-valued global is a static
+  `@type.initializer-cycle`
+  (`V1-TYPE-INFER-initializer-cycle-closure-global`,
+  `V1-PROJECT-workspace-check-closure-global-initializer-cycle`). Checked IR is
+  the single initializer-cycle and recursive-group authority, and call-flow
+  analysis fails closed if it does not converge.
+- Human `vibra test` reports each non-passing item and a summary. `vibra help`
+  prints the closed grammar.
+- Non-tail recursion stops at the interpreter's host budget with
+  `@runtime.host-stack-exhausted` (exit 3) instead of aborting the process.
+- The interpreter threads one frame by reference and shares closure bodies.
+  One validated `CheckedModuleSet` serves every entry and test. Recursive
+  groups use an SCC condensation. Call-flow analysis runs on a dependency
+  worklist, and the test runner uses indexed worklist closures.
+
+After remediation, the full workspace suite reports 557 passed, 0 failed, and
+0 ignored across 66 targets on Linux. The independent corpus reports 200
+passed (reader 73, static 99, interpreter 24, tooling 4) with 0 failed or
+unavailable. `check_paths_agree` compares both check paths over the
+single-source corpus.
