@@ -7,6 +7,7 @@
 //! sequences, conditionals, first-class function paths, owned closures, and
 //! fixed/labelled calls; effects and collections belong to later steps.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
@@ -2635,18 +2636,34 @@ struct FlowTargetSummary {
     closure_defaults: Vec<Vec<bool>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One closure value a callable summary may denote.
+#[derive(Clone, Debug)]
 struct FlowClosure {
-    origin: SourceOrigin,
+    /// Stable identity of the closure expression: the address of its shared
+    /// body, which every copy of that expression shares. Summaries compare
+    /// closures by this identity, never by walking the body.
+    id: usize,
     signature: FunctionSignature,
     body: Arc<Expr>,
     captures: Vec<FlowTargetSummary>,
 }
 
+impl PartialEq for FlowClosure {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.captures == other.captures
+    }
+}
+
+impl Eq for FlowClosure {}
+
+fn closure_id(body: &Arc<Expr>) -> usize {
+    Arc::as_ptr(body).addr()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum FlowCallId {
     Function(usize),
-    Closure(SourceOrigin),
+    Closure(usize),
 }
 
 impl FlowTargetSummary {
@@ -2678,7 +2695,7 @@ impl FlowTargetSummary {
             if let Some(existing) = self
                 .closures
                 .iter_mut()
-                .find(|existing| existing.origin == closure.origin)
+                .find(|existing| existing.id == closure.id)
             {
                 for (capture, additional) in
                     existing.captures.iter_mut().zip(&closure.captures)
@@ -2707,7 +2724,13 @@ struct CallFlow<'a> {
     calls: Vec<BTreeSet<usize>>,
     dependencies: Vec<BTreeSet<DependencyNode>>,
     unresolved: BTreeSet<DependencyNode>,
-    active_closures: BTreeSet<SourceOrigin>,
+    active_closures: BTreeSet<usize>,
+    /// Return summaries read while analyzing the current owner:
+    /// `Global(g)` for a global's value and `Function(f)` for a function's
+    /// result. The worklist re-analyzes an owner when one of them changes.
+    reads: RefCell<BTreeSet<DependencyNode>>,
+    /// Functions whose parameter summaries the current owner widened.
+    widened_parameters: BTreeSet<usize>,
 }
 
 struct CallAnalysis {
@@ -2781,6 +2804,8 @@ fn analyze_call_flow_with_entry(
         dependencies: vec![BTreeSet::new(); globals.len() + functions.len()],
         unresolved: BTreeSet::new(),
         active_closures: BTreeSet::new(),
+        reads: RefCell::new(BTreeSet::new()),
+        widened_parameters: BTreeSet::new(),
     };
     let roots = (0..globals.len())
         .map(DependencyNode::Global)
@@ -2816,63 +2841,98 @@ fn analyze_call_flow_with_entry(
         }
     }
 
-    let iteration_limit = functions
+    // Worklist over owners. An owner's return summary and its call and
+    // dependency edges are recomputed only when something it read changed:
+    // another owner's return summary, or its own parameter summaries.
+    let owners = (0..globals.len())
+        .map(DependencyNode::Global)
+        .chain((0..functions.len()).map(DependencyNode::Function))
+        .collect::<Vec<_>>();
+    let mut dirty = owners.iter().copied().collect::<BTreeSet<_>>();
+    let mut readers = BTreeMap::<DependencyNode, BTreeSet<DependencyNode>>::new();
+    // Every re-analysis follows a strict widening of a finite summary; the
+    // budget only guards against a defect in that argument.
+    let mut budget = owners
         .len()
-        .saturating_mul(functions.len().saturating_add(1))
-        .saturating_add(globals.len())
-        .saturating_add(8);
-    for _ in 0..iteration_limit.max(1) {
-        let previous_parameters = flow.parameter_targets.clone();
-        let previous_sources = flow.parameter_sources.clone();
-        let returns_changed = flow.refresh_returns();
-        flow.calls = vec![BTreeSet::new(); functions.len()];
-        flow.dependencies = vec![BTreeSet::new(); globals.len() + functions.len()];
-        flow.unresolved.clear();
-        flow.active_closures.clear();
-        for (global_index, global) in globals.iter().enumerate() {
-            flow.collect_expr(
-                global.initializer(),
-                Some(DependencyNode::Global(global_index)),
-                &BTreeMap::new(),
-                &[],
-            )?;
+        .saturating_add(1)
+        .saturating_mul(owners.len().saturating_add(1))
+        .saturating_mul(8)
+        .saturating_add(64);
+    while let Some(owner) = dirty.pop_first() {
+        budget = budget
+            .checked_sub(1)
+            .ok_or(IrError::CallFlowDidNotConverge)?;
+        let (body, environment) = match owner {
+            DependencyNode::Global(index) => (
+                globals.get(index).map(CheckedGlobal::initializer),
+                BTreeMap::new(),
+            ),
+            DependencyNode::Function(index) => (
+                functions.get(index).map(CheckedFunction::body),
+                flow.parameter_environment(index),
+            ),
+        };
+        let Some(body) = body else {
+            return Err(IrError::InvalidExpression(format!(
+                "call-flow owner {owner:?} is outside the program"
+            )));
+        };
+
+        flow.reads.borrow_mut().clear();
+        let returned = flow.summary_expr(body, &environment, &[]);
+        let slot = match owner {
+            DependencyNode::Global(index) => flow.global_returns.get_mut(index),
+            DependencyNode::Function(index) => flow.function_returns.get_mut(index),
+        };
+        if let Some(slot) = slot
+            && *slot != returned
+        {
+            *slot = returned;
+            dirty.extend(readers.get(&owner).into_iter().flatten().copied());
         }
-        for (index, function) in functions.iter().enumerate() {
-            if !reachable.contains(&DependencyNode::Function(index)) {
-                continue;
-            }
-            let environment = flow.parameter_environment(index);
-            flow.collect_expr(
-                function.body(),
-                Some(DependencyNode::Function(index)),
-                &environment,
-                &[],
-            )?;
+        for read in flow.reads.take() {
+            readers.entry(read).or_default().insert(owner);
         }
-        let parameters_changed = previous_parameters != flow.parameter_targets
-            || previous_sources != flow.parameter_sources;
-        let next_reachable = dependency_closure_from_roots(
-            &flow.dependencies,
-            globals.len(),
-            roots.iter().copied(),
-        )?;
-        let reachability_changed = next_reachable != reachable;
-        reachable = next_reachable;
-        if !returns_changed && !parameters_changed && !reachability_changed {
-            return Ok(CallAnalysis {
-                calls: flow.calls,
-                dependencies: flow.dependencies,
-                parameter_targets: flow.parameter_targets,
-                parameter_sources: flow.parameter_sources,
-                unresolved: flow.unresolved,
-                reachable,
-            });
+
+        if matches!(owner, DependencyNode::Function(_)) && !reachable.contains(&owner) {
+            continue;
+        }
+        let row = owner.node_index(globals.len());
+        let previous_dependencies = flow.dependencies.get_mut(row).map(std::mem::take);
+        if let DependencyNode::Function(index) = owner
+            && let Some(calls) = flow.calls.get_mut(index)
+        {
+            calls.clear();
+        }
+        flow.unresolved.remove(&owner);
+        flow.widened_parameters.clear();
+        flow.collect_expr(body, Some(owner), &environment, &[])?;
+        for read in flow.reads.take() {
+            readers.entry(read).or_default().insert(owner);
+        }
+        dirty.extend(
+            std::mem::take(&mut flow.widened_parameters)
+                .into_iter()
+                .map(DependencyNode::Function),
+        );
+        if previous_dependencies.as_ref() != flow.dependencies.get(row) {
+            let next_reachable = dependency_closure_from_roots(
+                &flow.dependencies,
+                globals.len(),
+                roots.iter().copied(),
+            )?;
+            dirty.extend(next_reachable.difference(&reachable).copied());
+            reachable = next_reachable;
         }
     }
-    // Returning the last iteration here would under-approximate call and
-    // dependency edges, which can hide an initializer cycle or shrink a tail
-    // group. Fail closed instead.
-    Err(IrError::CallFlowDidNotConverge)
+    Ok(CallAnalysis {
+        calls: flow.calls,
+        dependencies: flow.dependencies,
+        parameter_targets: flow.parameter_targets,
+        parameter_sources: flow.parameter_sources,
+        unresolved: flow.unresolved,
+        reachable,
+    })
 }
 
 fn dependency_closure_from_roots(
@@ -2928,6 +2988,26 @@ fn parameter_aliases(
         aliases.insert(slot, summary);
     }
     aliases
+}
+
+/// The environment for a `let` body. Call-flow environments track only
+/// function-typed slots, and slots are never reused within an activation, so
+/// a non-callable binding leaves the environment unchanged and is not copied.
+fn bind_callable_slot<T>(
+    environment: &BTreeMap<usize, T>,
+    slot: Option<usize>,
+    value: &Expr,
+    summary: T,
+) -> Option<BTreeMap<usize, T>>
+where
+    T: Clone,
+{
+    let slot = slot?;
+    matches!(value.result_type(), PrimitiveType::Function(_)).then(|| {
+        let mut nested = environment.clone();
+        nested.insert(slot, summary);
+        nested
+    })
 }
 
 fn flow_target_summary(summary: &FlowTargetSummary) -> FunctionTargetSummary {
@@ -2998,30 +3078,6 @@ impl<'a> CallFlow<'a> {
         environment
     }
 
-    fn refresh_returns(&mut self) -> bool {
-        let new_globals = self
-            .globals
-            .iter()
-            .map(|global| {
-                self.summary_expr(global.initializer(), &BTreeMap::new(), &[])
-            })
-            .collect::<Vec<_>>();
-        let new_functions = self
-            .functions
-            .iter()
-            .enumerate()
-            .map(|(index, function)| {
-                let environment = self.parameter_environment(index);
-                self.summary_expr(function.body(), &environment, &[])
-            })
-            .collect::<Vec<_>>();
-        let changed = new_globals != self.global_returns
-            || new_functions != self.function_returns;
-        self.global_returns = new_globals;
-        self.function_returns = new_functions;
-        changed
-    }
-
     fn summary_expr(
         &self,
         expression: &Expr,
@@ -3051,7 +3107,6 @@ impl<'a> CallFlow<'a> {
                 signature,
                 body,
                 captures: closure_captures,
-                origin,
                 ..
             } => {
                 let closure_capture_summaries = closure_captures
@@ -3068,7 +3123,7 @@ impl<'a> CallFlow<'a> {
                 FlowTargetSummary {
                     is_function: true,
                     closures: vec![FlowClosure {
-                        origin: origin.clone(),
+                        id: closure_id(body),
                         signature: signature.clone(),
                         body: Arc::clone(body),
                         captures: closure_capture_summaries,
@@ -3111,6 +3166,9 @@ impl<'a> CallFlow<'a> {
                 if !matches!(value_type, PrimitiveType::Function(_)) {
                     return FlowTargetSummary::default();
                 }
+                self.reads
+                    .borrow_mut()
+                    .insert(DependencyNode::Global(*index));
                 self.global_returns
                     .get(*index)
                     .cloned()
@@ -3125,11 +3183,17 @@ impl<'a> CallFlow<'a> {
                     captures,
                     visiting,
                 );
-                let mut nested = environment.clone();
-                if let Some(slot) = slot {
-                    nested.insert(*slot, value_summary);
+                match bind_callable_slot(environment, *slot, value, value_summary) {
+                    Some(nested) => {
+                        self.summary_expr_with_stack(body, &nested, captures, visiting)
+                    }
+                    None => self.summary_expr_with_stack(
+                        body,
+                        environment,
+                        captures,
+                        visiting,
+                    ),
                 }
-                self.summary_expr_with_stack(body, &nested, captures, visiting)
             }
             Expr::If {
                 then_branch,
@@ -3207,7 +3271,7 @@ impl<'a> CallFlow<'a> {
                         &closure.signature,
                         &argument_summaries,
                     );
-                    let closure_id = FlowCallId::Closure(closure.origin.clone());
+                    let closure_id = FlowCallId::Closure(closure.id);
                     if !visiting.insert(closure_id.clone()) {
                         summary.unknown = true;
                         continue;
@@ -3224,6 +3288,9 @@ impl<'a> CallFlow<'a> {
                 for target in targets.known {
                     let function_id = FlowCallId::Function(target);
                     if !visiting.insert(function_id.clone()) {
+                        self.reads
+                            .borrow_mut()
+                            .insert(DependencyNode::Function(target));
                         if let Some(returned) = self.function_returns.get(target) {
                             summary.union(returned);
                         } else {
@@ -3316,11 +3383,12 @@ impl<'a> CallFlow<'a> {
             } => {
                 self.collect_expr(value, owner, environment, captures)?;
                 let value_summary = self.summary_expr(value, environment, captures);
-                let mut nested = environment.clone();
-                if let Some(slot) = slot {
-                    nested.insert(*slot, value_summary);
+                match bind_callable_slot(environment, *slot, value, value_summary) {
+                    Some(nested) => {
+                        self.collect_expr(body, owner, &nested, captures)?
+                    }
+                    None => self.collect_expr(body, owner, environment, captures)?,
                 }
-                self.collect_expr(body, owner, &nested, captures)?;
             }
             Expr::If {
                 condition,
@@ -3364,8 +3432,8 @@ impl<'a> CallFlow<'a> {
                     .map(|argument| self.summary_expr(argument, environment, captures))
                     .collect::<Vec<_>>();
                 for closure in &target_summary.closures {
-                    let closure_id = closure.origin.clone();
-                    if !self.active_closures.insert(closure_id.clone()) {
+                    let closure_id = closure.id;
+                    if !self.active_closures.insert(closure_id) {
                         if let Some(owner) = owner {
                             self.unresolved.insert(owner);
                         }
@@ -3476,6 +3544,7 @@ impl<'a> CallFlow<'a> {
                             .and_then(|parameters| parameters.get(slot))
                             .copied()
                             .unwrap_or(false);
+                        let before = target_parameter.clone();
                         target_parameter.union(argument);
                         if let Some(source) = self
                             .parameter_sources
@@ -3486,6 +3555,9 @@ impl<'a> CallFlow<'a> {
                         }
                         if !was_source && argument.unknown {
                             target_parameter.unknown = true;
+                        }
+                        if !was_source || *target_parameter != before {
+                            self.widened_parameters.insert(target);
                         }
                     }
                 }
@@ -3756,10 +3828,8 @@ fn validate_tail_calls(
                 &mut BTreeSet::new(),
                 &mut BTreeSet::new(),
             );
-            let mut nested_aliases = aliases.clone();
-            if let Some(slot) = slot {
-                nested_aliases.insert(*slot, value_targets);
-            }
+            let nested_aliases =
+                bind_callable_slot(aliases, *slot, value, value_targets);
             validate_tail_calls(
                 body,
                 tail_position,
@@ -3767,7 +3837,7 @@ fn validate_tail_calls(
                 recursive_groups,
                 globals,
                 functions,
-                &nested_aliases,
+                nested_aliases.as_ref().unwrap_or(aliases),
             )?;
         }
         Expr::If {

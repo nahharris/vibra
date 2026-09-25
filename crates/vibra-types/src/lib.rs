@@ -3439,4 +3439,30 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn higher_order_call_flow_converges_through_a_long_chain() {
+        // Each function forwards its callable parameter to the next, so the
+        // entry's argument must flow through every parameter summary.
+        // The single-source entry is the first function.
+        let depth = 200;
+        let mut source = format!(
+            "(defn answer () i32 (f{} leaf))\n(defn leaf () i32 1i32)\n(defn f0 (g (fn () i32)) i32 (g))\n",
+            depth - 1
+        );
+        for index in 1..depth {
+            source.push_str(&format!(
+                "(defn f{index} (g (fn () i32)) i32 (f{} g))\n",
+                index - 1
+            ));
+        }
+        let started = std::time::Instant::now();
+        let result = check_source("chain.vib", &source);
+        assert!(result.accepted(), "{:?}", result.diagnostics());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(30),
+            "call-flow analysis took {:?}",
+            started.elapsed()
+        );
+    }
 }
