@@ -1,7 +1,9 @@
 # Vibra v1 type system
 
 Status: normative target
-Implementation status: milestone 1 step 9 complete for written declaration, type, expression, and pattern structure; resolution and checking remain later work
+Implementation status: M2 resolves and checks the documented primitive,
+binding, fixed and labelled call, and monomorphic empty-effect function subset.
+Nominal/generic types and exhaustive matching remain deferred.
 
 ## Model
 
@@ -34,6 +36,13 @@ destructuring/constructor patterns, `match`, `try`, `option`, `result`,
 ascription, widening, narrowing, and conversion remain valid syntax but are
 outside that profile and produce `@tool.unavailable` when semantic support is
 requested. This is an implementation capability boundary, not a second sourcedialect; the full rules below remain the v1 authority for later milestones.
+
+M2 function declarations and `fn` types have no variadic slot. A variadic
+parameter declaration or variadic function type is valid v1 syntax but is
+outside the M2 profile and produces `@tool.unavailable`. Applications of a
+variadic signature are likewise unavailable, including calls with no tail
+operands. Extra operands supplied to a fixed signature remain ordinary
+argument-binding errors; they do not make that fixed signature variadic.
 
 A numeric suffix is a complete type annotation on its literal. Integer
 suffixes select one of `i8` through `i64` or `u8` through `u64`; float suffixes
@@ -266,12 +275,15 @@ forms, never collection value constructors.
 ## Namespaces and resolution
 
 A declaration's identity is its package provenance, unit, module path, owner
-path, declaration kind, and name. Package provenance is the package name and
-exact version from the project record. A resolver MUST preserve those fields
-in the identity; source order, a vector position, and spelling alone are not
-identities. Source imports bind one explicit module alias from an atom entity
-reference. An atom is resolved only in a position whose grammar or data schema
-expects an entity reference; it remains an ordinary `atom` value in expression
+path, declaration kind, and name. Ordinary local package provenance is the
+package name and exact version from the project record. The verified M2
+bootstrap package instead takes its fixed package name and exact version from
+the trusted bootstrap manifest; project data cannot supply or override either
+value. A resolver MUST preserve those fields in the identity; source order, a
+vector position, and spelling alone are not identities. Source imports bind
+one explicit module alias from an atom entity reference. An atom is resolved
+only in a position whose grammar or data schema expects an entity reference;
+it remains an ordinary `atom` value in expression
 position. Wildcard imports, re-exports, open namespaces, implicit prelude
 names, and filesystem-dependent fallback resolution are forbidden.
 
@@ -323,7 +335,13 @@ and names the entity it found, rather than reporting the path as unknown.
 
 Name shadowing is forbidden. A repeated top-level declaration, import alias,
 or lexical binding emits `@name.redeclaration` at the later introduction and
-relates the earlier introduction. Members of one owner's flat namespace use
+relates the earlier introduction. Each later introduction emits exactly one
+such diagnostic. A lexical binding's primary span is its binder name, not the
+enclosing parameter, labelled entry, or `let` form. The related span is the
+nearest earlier visible introduction's binder: the innermost enclosing lexical
+binder, including one a lambda captures, else the module-level declaration.
+The shadowing binder still binds for the rest of its scope, so a further
+repetition relates it instead. Members of one owner's flat namespace use
 `@name.member-collision` instead. Every name introduced anywhere inside a
 positional-parameter, `let`, or `match` pattern MUST NOT reuse any visible
 lexical name. Labelled and variadic parameter names follow the same rule. A

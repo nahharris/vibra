@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 
 use vibra_conformance::{
     Case, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus,
-    DispatchResult, HandlerError, InterpreterV1Handler, ProfileDispatcher,
-    ProfileHandler, ReaderV1Handler, StaticV1ProjectHandler, StaticV1ResolveHandler,
-    StaticV1SourceGraphHandler, StaticV1TypeHandler, ToolingV1QueryHandler,
+    DispatchResult, HandlerError, InterpreterV1Handler,
+    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
+    ProfileDispatcher, ProfileHandler, ReaderV1Handler, StaticV1ProjectHandler,
+    StaticV1ResolveHandler, StaticV1SourceGraphHandler, StaticV1TypeHandler,
+    StaticV1WorkspaceCheckHandler, ToolingV1FormatHandler, ToolingV1QueryHandler,
 };
 
 fn workspace_root() -> PathBuf {
@@ -39,11 +41,24 @@ fn static_project_cases_are_executed_by_the_real_handler() {
         );
     let dispatcher = dispatcher
         .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler);
+        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler)
+        .with_additional_handler(
+            ConformanceProfile::StaticV1,
+            StaticV1WorkspaceCheckHandler,
+        );
     let dispatcher = dispatcher
-        .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler);
-    let dispatcher =
-        dispatcher.with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler);
+        .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler)
+        .with_additional_handler(
+            ConformanceProfile::InterpreterV1,
+            InterpreterV1WorkspaceRunHandler,
+        )
+        .with_additional_handler(
+            ConformanceProfile::InterpreterV1,
+            InterpreterV1WorkspaceTestHandler,
+        );
+    let dispatcher = dispatcher
+        .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)
+        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1FormatHandler);
     let report = ConformanceRunner::new(dispatcher).run(&corpus);
     assert_eq!(report.failed(), 0, "static project cases must pass");
     assert_eq!(report.unavailable(), 0);

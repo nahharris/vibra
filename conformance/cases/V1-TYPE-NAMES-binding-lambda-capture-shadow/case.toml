@@ -1,0 +1,21 @@
+id = "V1-TYPE-NAMES-binding-lambda-capture-shadow"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A nested lambda parameter that shadows a captured outer binder relates that binder, not the capturing lambda."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [88, 93]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [13, 18]

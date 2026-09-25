@@ -1,7 +1,9 @@
 # Vibra v1 diagnostics and conformance
 
 Status: normative target
-Implementation status: milestone 1 step 10 complete (declaration/type/expression diagnostics, structural query snapshots, and reader-v1 corpus); the executable milestone exit gate is recorded by Step 11
+Implementation status: M1 reader diagnostics and M2 static, interpreter, and
+tooling observations have conformance coverage. The M2 exit evidence and exact
+profile counts are recorded in Step 14.
 
 ## Diagnostics are a language surface
 
@@ -37,7 +39,9 @@ table governs.
 | `@name.reserved-declaration` | `@error` |
 | `@name.reserved-value-spelling` | `@error` |
 | `@module.file-directory-collision` | `@error` |
+| `@module.source-id-collision` | `@error` |
 | `@module.unknown-path` | `@error` |
+| `@module.missing-required-import` | `@error` |
 | `@module.import-cycle` | `@error` |
 | `@module.invalid-segment` | `@error` |
 | `@module.path-escape` | `@error` |
@@ -79,11 +83,14 @@ table governs.
 | `@project.entry-on-library` | `@error` |
 | `@project.invalid-entry-signature` | `@error` |
 | `@project.ambiguous-dependency-target` | `@error` |
+| `@project.reserved-unit-name` | `@error` |
 | `@project.overlapping-target-roots` | `@error` |
 | `@project.not-found` | `@error` |
 | `@project.invalid-target-root` | `@error` |
 | `@project.io-error` | `@error` |
 | `@runtime.invalid-host-value` | `@error` |
+| `@runtime.invalid-checked-program` | `@error` |
+| `@runtime.host-stack-exhausted` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
@@ -127,24 +134,63 @@ malformed-input diagnostic and from the conformance runner's `unavailable`
 status: a real handler reports the diagnostic through its result contract,
 while a missing handler remains an unavailable corpus observation.
 
+### M2 unavailable-form spans
+
+For an unavailable source-language construct, the primary span MUST be the
+complete half-open UTF-8 span of the owning source form represented by the AST
+node that the checker rejects. A rejected declaration uses its complete
+declaration form. If unsupported semantics occur in a nested type or another
+child not represented by a separately spanned node used by the checker, the
+diagnostic uses the complete source form of its owning parameter or
+declaration. A rejected expression uses its complete expression form; a
+nonempty effect ceiling uses the complete effect-row form; and a reference
+that is unavailable because of its resolved entity uses the complete
+reference. List forms include their opening and closing delimiters. The
+diagnostic retains the owning source ID, and a source-form diagnostic never
+uses an invented or empty `0..0` span. A command-level availability diagnostic
+follows the process contract in `05-tooling.md`.
+
 The workspace boundary uses the following additional codes. Discovery emits
 `@project.not-found` when no exact `project.vibon` is found within the allowed
 ancestor search, and emits the nearest document's normal data or syntax
 diagnostics when that exact file exists but is malformed; it MUST NOT continue
 to an older ancestor after a malformed nearest project. A legacy `project.vib`
 or any other candidate is rejected by the extension-selected loader with
-`@data.invalid-extension` and is never content-sniffed. `@project.invalid-target-root`
-is attached to a target `root` value for an empty, absolute, parent-traversing,
-missing, non-directory, or otherwise non-confined root. `@project.io-error` is
+`@data.invalid-extension` and is never content-sniffed.
+`@project.invalid-target-root` is attached to a target `root` value for an
+empty, absolute, parent-traversing, missing, non-directory, or otherwise
+non-confined root; an invalid reserved `tests/` root uses the empty span of
+project-relative path `tests`. `@project.io-error` is
 attached to an available project/root span when a non-security filesystem
 operation fails and carries the operation and path as a note. When no project
 document exists, the primary span is the empty span `0..0` with no source ID.
+`@project.reserved-unit-name` is attached to a target name or dependency alias
+that collides with the runner-reserved `@tests` unit. In addition to target
+roots nesting or coinciding with each other,
+`@project.overlapping-target-roots` is attached to a target's `root` value
+when that root equals or is nested beneath the reserved `tests/` root; this
+case has no related span for the synthetic test root.
+
+`@module.missing-required-import` is emitted once in a module that declares
+tests but has no import targeting exactly `@std.assert`. Its primary span is
+the string name of the module's first test declaration. It is an ordinary
+source diagnostic, so the selected suite is invalid and no selected test
+executes.
+
+`@runtime.invalid-checked-program` identifies an M2 execution-boundary trap
+when a checked program has no executable entry or its body violates checked-IR
+invariants. Its diagnostic has no source ID and an empty primary span `0..0`;
+the corresponding CLI `trapCode` and VIBON `trap-code` are the exact string
+`"@runtime.invalid-checked-program"`, with no source origin (`null` in JSON
+and omitted from the closed VIBON trap record). `@runtime.invalid-host-value`
+remains reserved for invalid host-value IDs and does not describe these
+checked-program failures.
 
 During source enumeration, `@module.invalid-segment` is attached to the empty
 span `0..0` of the affected project-relative path when a directory or file
 segment is not a single kebab-name component. `@module.path-escape` is used
-for a symlink or junction whose canonical target leaves the project or target
-root; its primary span is the affected project/root field when one exists,
+for a symlink or junction whose canonical target leaves the project, target,
+or test root; its primary span is the affected project/root field when one exists,
 otherwise the empty span of the project-relative path. `@module.io-error` is
 used for a dangling or otherwise unreadable link/entry and for a source read
 failure, with the same path-span rule. These diagnostics are emitted before
@@ -153,13 +199,24 @@ contract. All filesystem diagnostics are errors with no fixes.
 
 Resolution diagnostics retain the referring source ID and half-open span. A
 private imported declaration is `@name.private-access`; a repeated top-level,
-import-alias, or lexical binding name is `@name.redeclaration`; a repeated
-member in one owner's flat namespace is `@name.member-collision`; and an
-import back edge is `@module.import-cycle`. The later span is primary and the
-earlier declaration or edge is a related span when available. Resolver output
-is deterministic by source ID, primary span, and registry order. Resolution
-consumes only an explicit immutable source graph and performs no filesystem,
-dependency, lock, cache, or network access.
+import-alias, lexical binding, or decoded module-local test name is
+`@name.redeclaration`; a repeated member in one owner's flat namespace is
+`@name.member-collision`; and an import back edge is `@module.import-cycle`.
+The later span is primary and the earlier declaration or edge is a related
+span when available. Each repeated introduction has exactly one owning
+diagnostic: resolution owns lexical redeclaration, and later checking stages
+MUST NOT report the same introduction again. The single-source and workspace
+check paths report identical primary and related spans for it, as
+`02-type-system.md` states. Diagnostics are deterministic by source ID, primary span,
+and registry order. Resolution consumes only an explicit immutable source
+graph and performs no filesystem, dependency, lock, cache, or network access.
+
+A resolver graph uses source IDs as document identities, so one source ID MUST
+refer to only one module in that graph, including when a verified package
+overlay is present. A repeated source ID emits `@module.source-id-collision`
+at the empty span `0..0` of that source ID. The affected graph is not type
+checked or executed because diagnostics and source text would otherwise be
+ambiguous across packages.
 
 ## Recovery
 
@@ -184,7 +241,8 @@ specification rule, not compiler module. Each case records:
 
 - normative rule ID;
 - a closed operation selector (`reader`, `project-decode`, `source-graph`,
-  `resolve`, `type-check`, or `interpret`);
+  `resolve`, `type-check`, `interpret`, `query`, `format`, `workspace-check`,
+  `workspace-run`, or `workspace-test`);
   `project-decode` requires exactly one project input, and a
   `source-graph` case requires one confined `tree` directory and a `project`
   input whose path is exactly `<tree>/project.vibon`; the corpus loader MUST
@@ -192,6 +250,21 @@ specification rule, not compiler module. Each case records:
   exact marker, never an ancestor or sibling;
   `resolve` has the same confined `tree`/`project` binding and consumes the
   already acquired graph through the filesystem-free `vibra-resolve` input;
+  `format` requires the tooling profile, one confined tree, its exact
+  `<tree>/project.vibon` input, and one `.vib` source beneath that tree; it
+  compares the snapshot-backed formatter result with a required formatted
+  source snapshot;
+  `workspace-check` requires the static profile, one confined tree, and its
+  exact `<tree>/project.vibon` input, with no source input; it checks the whole
+  workspace snapshot through the workspace semantic API;
+  `workspace-run` requires the interpreter profile, the same project/tree
+  binding and no source input; it requires exactly one binary target and
+  compares its checked pure execution with the required result and VIBON audit
+  trace snapshots;
+  `workspace-test` requires the interpreter profile, the same project/tree
+  binding and no source input; it runs all tests and compares one canonical
+  `@test-run.v1` observation. The observation contains a separate
+  `@audit-trace.v1` record for each test; M2 test traces are empty;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
 - an optional `.vibon` `graph` snapshot path for source-graph cases; when present it
@@ -202,7 +275,9 @@ specification rule, not compiler module. Each case records:
   module record has canonical module atom `path` (for example
   `@hello.nested.a`), project-relative `source`, and `bytes-hex`.
   `bytes-hex` is the lowercase, two-digit-per-byte encoding of
-  the exact immutable source bytes. Each dependency record has its `alias`,
+  the exact immutable source bytes. Every project graph includes one reserved
+  `@tests` unit, even when it has no modules; its `name` is `@tests` and its
+  `kind` is `@lib`. Each dependency record has its `alias`,
   `kind`, declared `source`, optional `target`, delivery `status`, owning
   `source-id`, and half-open `span`. Arrays are sorted by their canonical
   identity and source identity. The graph record contains no parsed or
@@ -222,12 +297,49 @@ specification rule, not compiler module. Each case records:
 - expected acceptance or diagnostics;
 - expected canonical formatting;
 - expected resolved identities, types, and effects where relevant;
-- interpreter result and ordered audit trace where executable; the expected
+- interpreter result and ordered audit trace where the operation exposes a
+  separate trace; the expected
   audit trace is a `.vibon` snapshot whose canonical root is
   `(record format: @audit-trace.v1 events: (array ...))`, with event strings in
   execution order;
+- for `workspace-test`, an interpreter result snapshot whose canonical root is
+  `(record format: @test-run.v1 result: @command.ok tests: (array ...))`; this
+  snapshot embeds one `@audit-trace.v1` per test and replaces the separate
+  `interpreter.audit_trace` snapshot;
 - Wasm result and ordered audit trace where executable; and
 - deterministic build hashes for artifact cases.
+
+Every `workspace-test` case, accepted or rejected, MUST supply exactly one
+`interpreter.result` snapshot and MUST omit `interpreter.audit_trace`. The
+result is a closed VIBON record with fields `format`, `result`, and `tests`;
+`format` is exactly `@test-run.v1`, `result` is one of
+`@command.ok`, `@command.diagnostics`, `@command.test-failed`,
+`@command.trap`, or `@command.unavailable`, and `tests` is an array with one
+record per selected test in canonical test order. Each test record has required
+fields `name` (the canonical selector string), `result` (one of the five
+`@test.*` atoms), and `audit-trace` (a complete `@audit-trace.v1` record).
+Top-level field order is `format`, `result`, `tests`; test-record field order
+is `name`, `result`, optional `failure` or `trap`, then `audit-trace`.
+`failure` is present only for `@test.assertion-failed` and is a record with
+`assertion` (canonical assertion atom), `expected` and `actual` (canonical
+literal strings), and `primary-span` (a record with `source-id` (a
+project-relative slash path), `start`, and `end` as unsigned, half-open UTF-8
+byte offsets). Failure-record field
+order is `assertion`, `expected`, `actual`, `primary-span`; span-record field
+order is `source-id`, `start`, `end`. `trap` is present only for `@test.trap`
+and is a closed record with `trap-code` (a string equal to the CLI `trapCode`)
+and optional `origin`, whose value has the same source-id/start/end span shape.
+Trap-record field order is `trap-code`, then `origin` when present; no other
+fields are permitted. Neither conditional field is represented as null. No
+test record contains diagnostics; the case's ordinary diagnostic expectations
+carry those independently. No other fields are permitted. The
+`audit-trace` record has exactly `format: @audit-trace.v1` and `events: (array)`;
+M2 events are empty for every test result, including invalid, unavailable, and
+trap outcomes. For M2 checked-program execution-boundary traps, `trap-code` is
+the exact string `"@runtime.invalid-checked-program"` and `origin` is omitted.
+The test records contain all per-test traces, so a second
+suite-level audit snapshot is forbidden. An empty suite is `tests: (array)`
+with result `@command.ok`.
 
 The source graph has one representation: the structured `@source-graph.v1`
 VIBON record described above. Every graph consumer and corpus fixture MUST

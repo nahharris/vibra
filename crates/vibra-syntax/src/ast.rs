@@ -870,6 +870,7 @@ impl FunctionDeclaration {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestDeclaration {
     name: Literal,
+    name_span: ByteSpan,
     effects: Option<EffectRow>,
     body: Vec<RawNode>,
     expressions: Vec<Expression>,
@@ -881,6 +882,12 @@ impl TestDeclaration {
     #[must_use]
     pub const fn name(&self) -> &Literal {
         &self.name
+    }
+
+    /// Span of the source literal that names this test.
+    #[must_use]
+    pub const fn name_span(&self) -> ByteSpan {
+        self.name_span
     }
 
     /// An explicit effect ceiling, if written.
@@ -986,6 +993,7 @@ pub struct LabelledParameter {
     name: Name,
     value_type: TypeExpr,
     default: Literal,
+    name_span: ByteSpan,
     span: ByteSpan,
 }
 
@@ -1006,6 +1014,12 @@ impl LabelledParameter {
     #[must_use]
     pub const fn default(&self) -> &Literal {
         &self.default
+    }
+
+    /// The source span of the parameter name alone.
+    #[must_use]
+    pub const fn name_span(&self) -> ByteSpan {
+        self.name_span
     }
 
     /// The source span.
@@ -1706,6 +1720,7 @@ impl AstParser {
             .collect::<Option<Vec<_>>>()?;
         Some(Declaration::Test(TestDeclaration {
             name,
+            name_span: forms[1].span(),
             effects,
             body: forms[index..]
                 .iter()
@@ -2949,6 +2964,7 @@ impl AstParser {
                 name,
                 value_type,
                 default,
+                name_span: triple[0].span(),
                 span: ByteSpan::new(triple[0].span().start(), triple[2].span().end()),
             });
         }

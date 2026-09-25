@@ -8,7 +8,8 @@ use crate::runner::{
 use std::path::Path;
 
 use vibra_types::{
-    BootstrapVerification, check_bootstrap_text_import, check_source, verify_bootstrap,
+    BootstrapInputs, BootstrapVerification, check_bootstrap_text_import, check_source,
+    verify_bootstrap_bytes,
 };
 
 const BOOTSTRAP_PROVENANCE_FAILURE: &str = "bootstrap provenance verification failed";
@@ -17,14 +18,13 @@ fn check_case_source(
     source_id: &str,
     source: &str,
 ) -> Result<vibra_types::CheckResult, HandlerError> {
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    check_case_source_at_root(source_id, source, &repository)
+    check_case_source_with(source_id, source, &BootstrapInputs::embedded())
 }
 
-fn check_case_source_at_root(
+fn check_case_source_with(
     source_id: &str,
     source: &str,
-    repository: &Path,
+    bootstrap: &BootstrapInputs<'_>,
 ) -> Result<vibra_types::CheckResult, HandlerError> {
     let document =
         vibra_syntax::parse_source(Path::new(source_id), source).map_err(|error| {
@@ -43,7 +43,7 @@ fn check_case_source_at_root(
         })
     });
     if exact_import {
-        let verification = verified_bootstrap(repository)?;
+        let verification = verified_bootstrap(bootstrap)?;
         return Ok(check_bootstrap_text_import(
             &verification,
             source_id,
@@ -54,9 +54,9 @@ fn check_case_source_at_root(
 }
 
 fn verified_bootstrap(
-    repository: &Path,
+    bootstrap: &BootstrapInputs<'_>,
 ) -> Result<BootstrapVerification, HandlerError> {
-    verify_bootstrap(repository).map_err(|error| {
+    verify_bootstrap_bytes(bootstrap).map_err(|error| {
         HandlerError::new(format!("{BOOTSTRAP_PROVENANCE_FAILURE}: {error}"))
     })
 }
@@ -93,71 +93,41 @@ impl ProfileHandler for StaticV1TypeHandler {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
-    use super::{BOOTSTRAP_PROVENANCE_FAILURE, check_case_source_at_root};
-    use std::path::Path;
+    use super::{BOOTSTRAP_PROVENANCE_FAILURE, check_case_source_with};
+    use vibra_types::BootstrapInputs;
+
+    const SOURCE: &str =
+        "(import text @std.text)\n(defn answer () u64 (text.length \"x\"))";
 
     #[test]
     fn dispatch_parses_comments_and_multiline_imports() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let source = "; leading comment\n\n(import\n text\n @std.text)\n(defn answer () u64 (text.length \"😀\"))";
-        let checked = check_case_source_at_root("app/main.vib", source, &repository)
-            .expect("dispatch should verify bootstrap");
+        let checked = check_case_source_with(
+            "app/main.vib",
+            source,
+            &BootstrapInputs::embedded(),
+        )
+        .expect("dispatch should verify bootstrap");
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
     }
 
     #[test]
     fn dispatch_propagates_bootstrap_verification_failure() {
-        let root = std::env::temp_dir().join(format!(
-            "vibra-conformance-bootstrap-missing-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).expect("temporary root");
-        let source =
-            "(import text @std.text)\n(defn answer () u64 (text.length \"x\"))";
-        let error = check_case_source_at_root("app/main.vib", source, &root)
+        let mut inputs = BootstrapInputs::embedded();
+        inputs.manifest = b"";
+        let error = check_case_source_with("app/main.vib", SOURCE, &inputs)
             .expect_err("bootstrap failure must cross the handler boundary");
         assert!(error.message().starts_with(BOOTSTRAP_PROVENANCE_FAILURE));
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn dispatch_propagates_tampered_bootstrap_artifact_failure() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        // macOS exposes the temporary directory through `/var`, a symlink to
-        // `/private/var`.  The bootstrap verifier intentionally rejects
-        // symlinked roots, so canonicalize the parent before constructing the
-        // fixture to exercise the intended artifact-digest failure.
-        let temporary_directory =
-            std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
-        let root = temporary_directory.join(format!(
-            "vibra-conformance-bootstrap-tamper-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        for relative in [
-            "stdlib/m2/bootstrap-manifest.vibon",
-            "stdlib/m2/bootstrap.vibon",
-            "stdlib/m2/bootstrap.vibon.sig",
-            "stdlib/m2/toolchain-ed25519.pub",
-            "stdlib/m2/src/std/text.vib",
-            "stdlib/m2/src/std/assert.vib",
-        ] {
-            let destination = root.join(relative);
-            std::fs::create_dir_all(destination.parent().expect("bootstrap parent"))
-                .expect("bootstrap directory");
-            std::fs::copy(repository.join(relative), destination)
-                .expect("bootstrap input copy");
-        }
-        std::fs::write(root.join("stdlib/m2/bootstrap.vibon"), b"tampered")
-            .expect("tamper bootstrap artifact");
-        let source =
-            "(import text @std.text)\n(defn answer () u64 (text.length \"x\"))";
-        let error = check_case_source_at_root("app/main.vib", source, &root)
+        let mut inputs = BootstrapInputs::embedded();
+        inputs.artifact = b"tampered";
+        let error = check_case_source_with("app/main.vib", SOURCE, &inputs)
             .expect_err("tampered bootstrap must cross the handler boundary");
         assert!(error.message().starts_with(BOOTSTRAP_PROVENANCE_FAILURE));
         assert!(error.message().contains("artifact digest mismatch"));
-        let _ = std::fs::remove_dir_all(root);
     }
 }
 

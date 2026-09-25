@@ -1,0 +1,3 @@
+(def h (fn () i32) (lambda () i32 x))
+(def x i32 (h))
+(defn main () void (let - x (do)))

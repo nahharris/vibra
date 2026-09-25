@@ -9,8 +9,10 @@ use std::process::ExitCode;
 
 use vibra_conformance::{
     ConformanceProfile, ConformanceRunner, Corpus, InterpreterV1Handler,
+    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
     ProfileDispatcher, ReaderV1Handler, StaticV1ProjectHandler, StaticV1ResolveHandler,
-    StaticV1SourceGraphHandler, StaticV1TypeHandler, ToolingV1QueryHandler,
+    StaticV1SourceGraphHandler, StaticV1TypeHandler, StaticV1WorkspaceCheckHandler,
+    ToolingV1FormatHandler, ToolingV1QueryHandler,
 };
 
 fn main() -> ExitCode {
@@ -46,9 +48,22 @@ fn run() -> Result<(), String> {
         )
         .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
         .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler)
+        .with_additional_handler(
+            ConformanceProfile::StaticV1,
+            StaticV1WorkspaceCheckHandler,
+        )
         .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler);
-    let dispatcher =
-        dispatcher.with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler);
+    let dispatcher = dispatcher.with_additional_handler(
+        ConformanceProfile::InterpreterV1,
+        InterpreterV1WorkspaceRunHandler,
+    );
+    let dispatcher = dispatcher.with_additional_handler(
+        ConformanceProfile::InterpreterV1,
+        InterpreterV1WorkspaceTestHandler,
+    );
+    let dispatcher = dispatcher
+        .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)
+        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1FormatHandler);
     let report = ConformanceRunner::new(dispatcher).run(&corpus);
 
     for case in report.cases() {

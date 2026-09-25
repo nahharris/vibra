@@ -1,13 +1,15 @@
 # Milestone 2 step plan
 
-Status: implementation in progress; Steps 1–10 are integrated
+Status: All 14 steps are merged to `m2`; M2 exit evidence is complete
 Milestone: [Milestone 2 — executable pure core](../v1.md#milestone-2--executable-pure-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m2`
 
 M2 delivers project initialization, formatting, checking, testing, and reference
-execution for the pure subset. Each numbered row below is exactly one PR into
-`m2`. This planning change is the branch bootstrap, not an implemented step.
+execution for the pure subset. The plan requires one PR per numbered step into
+`m2`. Steps 1–8 were integrated directly before that process was enforced;
+Steps 9–14 each have a step PR. Step 14 records this historical deviation.
+This planning change is the branch bootstrap, not an implemented step.
 
 ## Start here
 
@@ -79,10 +81,10 @@ path named `std` cannot confer external-declaration authority.
 | 8 | [Validate compiler externals and bootstrap pure stdlib](08-externals.md) | 7 | landed | `m2` merge `73592be`; versioned registry metadata, direct `@std.text` imports, independent concat/length cases, and 160-case corpus evidence |
 | 9 | [Guarantee tail calls](09-tail-calls.md) | 8 | landed | `m2` merge `5392ad0`; PR #296, platform CI green including macOS |
 | 10 | [Expose semantic position facts](10-queries.md) | 9 | landed | `m2` merge `fdbf6d2`; PR #297, all platform CI green including macOS |
-| 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | not started | — |
-| 12 | [Ship check and interpreter run](12-check-run.md) | 11 | not started | — |
-| 13 | [Ship pure tests and assertions](13-tests.md) | 12 | not started | — |
-| 14 | [Audit the demo and exit gate](14-evidence.md) — evidence step | 13 | not started | — |
+| 11 | [Ship project init and safe formatting](11-init-fmt.md) | 10 | landed | `m2` merge `c624c3d`; PR #299, all platform CI and reader corpus green |
+| 12 | [Ship check and interpreter run](12-check-run.md) | 11 | landed | `m2` merge `ed1b7ae`; PR #300; 173-case corpus and all CI jobs green |
+| 13 | [Ship pure tests and assertions](13-tests.md) | 12 | landed | `m2` merge `d12cb6c`; PR #301; 178-case corpus |
+| 14 | [Audit the demo and exit gate](14-evidence.md) — evidence step | 13 | landed | PR #302 merged as `6132925`; 198-case corpus and all five final-head CI jobs passed in run `35927423703`; [exit evidence](14-exit-evidence.md) |
 
 Step 1 is explicitly a specification and test-infrastructure prerequisite, not
 a language-feature completion claim. Steps 2–13 each deliver their complete
@@ -103,7 +105,7 @@ steps additionally exercise real processes. Step 14 adds reproducible evidence.
 | One typed IR and reference interpreter, no adapter dependency | 5–9, 14; architecture tests and interpreter corpus |
 | Mandatory tail calls | 9, 14; source workload plus activation-depth evidence |
 | Type-aware position metadata, visible names, primitive expectations | 10; recovery, Unicode, identities, schema consumer tests |
-| `project init`, `fmt`, `check`, `run`, `test` | 11–13; actual binary, JSON, exits, writes, clean demo |
+| `project init`, `fmt`, `check`, `run`, `test` | 11–14; actual binary, JSON, exits, writes, clean demo; imported-source format fallback |
 | Static/interpreter profiles for implemented subset | Every behavior step, 14; explicit scope and zero failed/unavailable in gate corpus |
 | Pure execution has no host events or ambient observations | 5, 8–9, 12–14; empty audit traces and isolated-input tests |
 | Unsupported later-v1 forms have explicit availability diagnostics | 1 and every widening step; availability inventory swept by 14 |
@@ -246,8 +248,44 @@ pass, and the complete locked/offline corpus reports 164 cases with zero failed
 or unavailable. The repaired CI run is green on Ubuntu, Windows, and macOS;
 the macOS check is job `107000055216` in run `35803840805`.
 
+## Step 11 handoff (integrated on `m2`)
+
+Step 11's verified merge commit is `c624c3d` (PR #299). It adds the actual
+`vibra project init` and `fmt` commands over the workspace engine, confined
+staging and rollback, revision-checked writes, JSON command results, and
+process-level coverage. Its merge-head validation recorded 429 workspace tests,
+165 corpus cases, the Step 11 evidence checks, and the 6-target/96-case fuzz
+smoke. All attached platform and corpus checks passed.
+
+Step 14 adds `V1-TOOL-format-imported-source`: when standalone semantic checking
+cannot resolve workspace imports, source formatting proceeds from syntax and
+preserves labelled order without binding facts. The checked-in actual-binary
+suite also verifies preview bytes equal the `--write` result.
+
+## Step 12 handoff (integrated on `m2`)
+
+Step 12's verified merge commit is `ed1b7ae` (PR #300). It adds project-level
+`check` and pure interpreter-backed `run` over one captured snapshot, rejects
+local/bootstrap source-ID collisions before checking or execution, and keeps
+program result, trap, diagnostics, and command outcome distinct. The merged
+PR reports 173 corpus cases with zero failed or unavailable. Its attached
+checks passed on Ubuntu, Windows, and macOS in run `35878876006`.
+
+## Step 13 handoff (integrated on `m2`)
+
+Step 13's verified merge commit is `d12cb6c` (PR #301). It adds the confined
+`@tests` unit, canonical selectors, isolated pure assertions, structured
+assertion/trap/unavailable outcomes, `@test-run.v1` data, and the `vibra test`
+command. Its merged validation reports 178 corpus cases, all host suites,
+schema consumers, and the 96-case fuzz smoke passing. All attached platform and
+corpus checks passed in run `35903397276`.
+
 ## Exit evidence
 
-Not run for M2. Planning and a passing M1 baseline do not complete any M2 gate.
-Step 14 records tested commits, case counts by profile, demo artifacts, tail
-depth, pure-event evidence, platform CI, and the final milestone PR state here.
+Step 14's complete record is [14-exit-evidence.md](14-exit-evidence.md). It
+records the exact candidate/base revisions, predecessor PR merge evidence,
+supported/deferred surface audit, local command results and profile counts,
+actual-binary demo outcomes, two-size tail depth, architecture/schema checks,
+platform CI, and the standing milestone PR state. The historical direct
+integration of Steps 1–8 is called out there; their implementation remains in
+the tested `m2` history, but no individual step PRs exist for those rows.

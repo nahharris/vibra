@@ -31,6 +31,10 @@ illustrative.
 - [Beyond v1: long-term release lines and design tracks](roadmap/beyond-v1/README.md)
   (non-normative direction)
 
+The M2 [supported and deferred surface inventory](roadmap/milestone-2/supported-surface.md)
+and [Step 14 exit-evidence report](roadmap/milestone-2/14-exit-evidence.md)
+record the implemented subset, implementation revisions, and gate results.
+
 The roadmap orders implementation. It cannot weaken the specification. If a
 milestone exposes a missing or incoherent design, the specification is changed
 and reviewed before implementation continues.

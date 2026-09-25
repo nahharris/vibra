@@ -10,7 +10,7 @@ use std::fmt;
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, DocumentRevision};
-use vibra_ir::{Expr, FunctionSignature, PrimitiveType};
+use vibra_ir::{CallTarget, Expr, FunctionSignature, PrimitiveType};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedReference, ResolvedSnapshot};
 use vibra_syntax::{
     Application, Attribute, Declaration, Expression, ExpressionKind, FloatSuffix,
@@ -1157,7 +1157,7 @@ impl<'a> SemanticCollector<'a> {
     fn collect_ir(&mut self, expression: &Expr) {
         let application = ir_application_contract(expression);
         if let Expr::Call {
-            callee: Some(callee),
+            target: CallTarget::Indirect { callee, .. },
             arguments,
             ..
         } = expression
@@ -1217,9 +1217,9 @@ impl<'a> SemanticCollector<'a> {
                 self.collect_ir(else_branch);
             }
             Expr::Call {
-                arguments, callee, ..
+                arguments, target, ..
             } => {
-                if let Some(callee) = callee {
+                if let Some(callee) = target.callee() {
                     self.collect_ir(callee);
                 }
                 for argument in arguments {
@@ -1643,7 +1643,7 @@ fn float_expected_name(value: &SemanticType) -> Option<&str> {
 
 fn ir_application_contract(expression: &Expr) -> Option<ApplicationContract> {
     let Expr::Call {
-        callee: Some(callee),
+        target: CallTarget::Indirect { callee, .. },
         ..
     } = expression
     else {

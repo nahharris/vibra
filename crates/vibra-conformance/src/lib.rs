@@ -21,9 +21,11 @@
 //! adds structural query snapshots to that same neutral path. M2 Step 3 adds
 //! confined source-graph observations, and M2 Step 4 adds the filesystem-free
 //! resolver observation and its `@resolved.v1` artifact. Later language
-//! backends remain unavailable until their milestones land.
+//! backends remain unavailable until their milestones land. M2 Step 11 adds
+//! the tooling-profile snapshot-backed formatter observation.
 
 mod corpus;
+mod format;
 mod graph;
 mod manifest;
 mod profile;
@@ -33,8 +35,10 @@ mod resolve;
 mod runner;
 mod types;
 mod workspace_query;
+mod workspace_semantic;
 
 pub use corpus::{Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError};
+pub use format::ToolingV1FormatHandler;
 pub use graph::StaticV1SourceGraphHandler;
 pub use manifest::{
     CaseExpectations, CaseInputs, CaseManifest, ConformanceOperation,
@@ -52,3 +56,7 @@ pub use runner::{
 };
 pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
 pub use workspace_query::ToolingV1QueryHandler;
+pub use workspace_semantic::{
+    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
+    StaticV1WorkspaceCheckHandler,
+};

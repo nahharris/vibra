@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vibra:schema:v1:command-result",
+  "title": "Vibra command result",
+  "description": "One versioned result envelope emitted by the vibra process.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "command", "result", "diagnostics", "payload"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "command": {
+      "enum": ["help", "init", "fmt", "check", "run", "test", "inspect", "add", "remove", "sync", "lint", "build", "query", "edit", "mcp", "invalid"]
+    },
+    "result": {
+      "enum": [
+        "@command.ok",
+        "@command.diagnostics",
+        "@command.test-failed",
+        "@command.invalid-input",
+        "@command.operational-failure",
+        "@command.trap",
+        "@command.unavailable"
+      ]
+    },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "command": { "const": "init" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["workspace", "created"],
+            "properties": {
+              "workspace": { "type": "string", "minLength": 1 },
+              "created": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "command": { "const": "fmt" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "changed", "written", "text"],
+            "properties": {
+              "path": { "type": "string" },
+              "changed": { "type": "boolean" },
+              "written": { "type": "boolean" },
+              "text": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "command": { "const": "check" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["accepted"],
+            "properties": { "accepted": { "type": "boolean" } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "command": { "const": "run" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target", "programResult", "stdout", "stderr", "auditTrace", "trap"],
+            "properties": {
+              "target": { "type": "string" },
+              "programResult": { "type": ["string", "null"] },
+              "stdout": { "type": "string" },
+              "stderr": { "type": "string" },
+              "auditTrace": { "type": "array", "items": { "type": "string" } },
+              "trap": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["trapCode", "origin"],
+                    "properties": {
+                      "trapCode": { "type": "string", "minLength": 1 },
+                      "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "command": { "const": "help" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["usage"],
+            "properties": { "usage": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "command": { "const": "test" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["selected", "passed", "failed", "tests"],
+            "properties": {
+              "selected": { "type": "integer", "minimum": 0 },
+              "passed": { "type": "integer", "minimum": 0 },
+              "failed": { "type": "integer", "minimum": 0 },
+              "tests": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "result", "failure", "trap", "auditTrace", "diagnostics"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "result": {
+                      "enum": [
+                        "@test.passed",
+                        "@test.assertion-failed",
+                        "@test.invalid",
+                        "@test.unavailable",
+                        "@test.trap"
+                      ]
+                    },
+                    "failure": {
+                      "oneOf": [
+                        { "type": "null" },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["assertion", "expected", "actual", "primarySpan"],
+                          "properties": {
+                            "assertion": {
+                              "type": "string",
+                              "pattern": "^@std\\.assert\\.(true|false|equal-bool|equal-char|equal-str|equal-i32|equal-u64)$"
+                            },
+                            "expected": { "type": "string" },
+                            "actual": { "type": "string" },
+                            "primarySpan": { "$ref": "#/$defs/span" }
+                          }
+                        }
+                      ]
+                    },
+                    "trap": {
+                      "oneOf": [
+                        { "type": "null" },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["trapCode", "origin"],
+                          "properties": {
+                            "trapCode": { "const": "@runtime.invalid-checked-program" },
+                            "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+                          }
+                        }
+                      ]
+                    },
+                    "auditTrace": { "type": "array", "maxItems": 0 },
+                    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+                  },
+                  "allOf": [
+                    {
+                      "if": { "properties": { "result": { "const": "@test.assertion-failed" } } },
+                      "then": {
+                        "properties": {
+                          "failure": { "type": "object" },
+                          "trap": { "type": "null" }
+                        }
+                      },
+                      "else": { "properties": { "failure": { "type": "null" } } }
+                    },
+                    {
+                      "if": { "properties": { "result": { "const": "@test.trap" } } },
+                      "then": {
+                        "properties": {
+                          "trap": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["trapCode", "origin"],
+                            "properties": {
+                              "trapCode": { "const": "@runtime.invalid-checked-program" },
+                              "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+                            }
+                          },
+                          "failure": { "type": "null" }
+                        }
+                      },
+                      "else": { "properties": { "trap": { "type": "null" } } }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "enum": ["inspect", "add", "remove", "sync", "lint", "build", "query", "edit", "mcp", "invalid"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": { "type": "object", "maxProperties": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "column"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "start", "end", "startPosition", "endPosition"],
+      "properties": {
+        "sourceId": { "type": ["string", "null"], "minLength": 1 },
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "startPosition": { "$ref": "#/$defs/position" },
+        "endPosition": { "$ref": "#/$defs/position" }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "code", "level", "message", "primarySpan", "related", "notes", "fixes"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "code": { "type": "string", "pattern": "^@[a-z][a-z0-9-]*\\.[a-z][a-z0-9-]*$" },
+        "level": { "enum": ["@error", "@warning"] },
+        "message": { "type": "string" },
+        "primarySpan": { "$ref": "#/$defs/span" },
+        "related": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["span", "message"],
+            "properties": { "span": { "$ref": "#/$defs/span" }, "message": { "type": "string" } }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "fixes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["description", "safe", "expectedRevision"],
+            "properties": {
+              "description": { "type": "string" },
+              "safe": { "type": "boolean" },
+              "expectedRevision": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

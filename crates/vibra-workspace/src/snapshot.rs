@@ -151,13 +151,14 @@ pub struct SourceSnapshot {
     project_path: PathBuf,
     project: Project,
     units: Vec<SourceUnitSnapshot>,
+    test_modules: Vec<SourceDocument>,
     revision: DocumentRevision,
 }
 
 impl SourceSnapshot {
     /// Validates roots and captures all local `.vib` modules.
     pub fn capture(project: &DiscoveredProject) -> Result<Self, WorkspaceError> {
-        let roots = validate_target_roots(project)?;
+        let (roots, test_root) = validate_source_roots(project)?;
         let mut units = Vec::with_capacity(roots.len());
         for root in roots {
             let modules = collect_modules(project.root(), &root)?;
@@ -169,12 +170,18 @@ impl SourceSnapshot {
                 modules,
             });
         }
-        let revision = compute_revision(project.project_bytes(), &units);
+        let test_modules = test_root
+            .as_ref()
+            .map(|root| collect_modules(project.root(), root))
+            .transpose()?
+            .unwrap_or_default();
+        let revision = compute_revision(project.project_bytes(), &units, &test_modules);
         Ok(Self {
             project_root: project.root().to_path_buf(),
             project_path: project.project_path().to_path_buf(),
             project: project.project().clone(),
             units,
+            test_modules,
             revision,
         })
     }
@@ -209,15 +216,25 @@ impl SourceSnapshot {
         &self.units
     }
 
+    /// Test-only source modules under the optional project `tests/` root.
+    #[must_use]
+    pub fn test_modules(&self) -> &[SourceDocument] {
+        &self.test_modules
+    }
+
     /// All source documents in deterministic unit and path order.
     pub fn documents(&self) -> impl Iterator<Item = &SourceDocument> {
-        self.units.iter().flat_map(|unit| unit.modules.iter())
+        self.units
+            .iter()
+            .flat_map(|unit| unit.modules.iter())
+            .chain(self.test_modules.iter())
     }
 }
 
 fn compute_revision(
     project_bytes: &[u8],
     units: &[SourceUnitSnapshot],
+    test_modules: &[SourceDocument],
 ) -> DocumentRevision {
     let mut hasher = Sha256::new();
     hasher.update(b"vibra-workspace-revision-v1");
@@ -228,6 +245,7 @@ fn compute_revision(
     let mut documents = units
         .iter()
         .flat_map(SourceUnitSnapshot::modules)
+        .chain(test_modules.iter())
         .collect::<Vec<_>>();
     documents.sort_by(|left, right| left.source_id.cmp(&right.source_id));
     for document in documents {
@@ -274,7 +292,7 @@ mod tests {
             modules: vec![document.clone()],
         }];
         assert_eq!(
-            compute_revision(b"project", &units).as_str(),
+            compute_revision(b"project", &units, &[]).as_str(),
             "sha256:292c672b9ced8e6e02fbb3768f658fb52880ffd43b624c591b18e77fb083b996"
         );
 
@@ -285,8 +303,8 @@ mod tests {
             ..units[0].clone()
         }];
         assert_ne!(
-            compute_revision(b"project", &units),
-            compute_revision(b"project", &changed_units)
+            compute_revision(b"project", &units, &[]),
+            compute_revision(b"project", &changed_units, &[])
         );
     }
 }
@@ -298,21 +316,53 @@ pub fn capture_snapshot(
     SourceSnapshot::capture(project)
 }
 
-fn validate_target_roots(
+fn validate_source_roots(
     project: &DiscoveredProject,
-) -> Result<Vec<TargetRoot>, WorkspaceError> {
+) -> Result<(Vec<TargetRoot>, Option<TargetRoot>), WorkspaceError> {
     let mut roots = Vec::with_capacity(project.project().targets().len());
     let mut diagnostics = Vec::new();
     for (target_index, target) in project.project().targets().iter().enumerate() {
+        if target.name().atom().value() == "tests" {
+            diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::ProjectReservedUnitName,
+                    target.name().span(),
+                    "target name `tests` is reserved for the test unit",
+                )
+                .with_source_id(target.origin().source_id().to_owned()),
+            );
+        }
         match validate_target_root(project, target_index, target) {
             Ok(root) => roots.push(root),
             Err(error) => diagnostics.extend(error.diagnostics().iter().cloned()),
         }
     }
+    for dependency in project.project().dependencies() {
+        if dependency.alias().atom().value() == "tests" {
+            diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::ProjectReservedUnitName,
+                    dependency.alias().span(),
+                    "dependency alias `tests` is reserved for the test unit",
+                )
+                .with_source_id(dependency.alias().origin().source_id().to_owned()),
+            );
+        }
+    }
+    let test_root = match validate_test_root(project) {
+        Ok(root) => root,
+        Err(error) => {
+            diagnostics.extend(error.diagnostics().iter().cloned());
+            None
+        }
+    };
     if !diagnostics.is_empty() {
-        return Err(WorkspaceError::new(
-            "one or more target roots are invalid",
-            diagnostics,
+        return Err(with_project_source(
+            WorkspaceError::new(
+                "one or more source roots or unit names are invalid",
+                diagnostics,
+            ),
+            project,
         ));
     }
 
@@ -341,10 +391,147 @@ fn validate_target_roots(
             }
         }
     }
-    if !diagnostics.is_empty() {
-        return Err(WorkspaceError::new("target roots overlap", diagnostics));
+    if let Some(test_root) = &test_root {
+        for target_root in &roots {
+            if test_root.path.starts_with(&target_root.path)
+                || target_root.path.starts_with(&test_root.path)
+            {
+                diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::ProjectOverlappingTargetRoots,
+                        target_root.span,
+                        "the test root must be disjoint from every target root",
+                    )
+                    .with_source_id(target_root.source_id.clone()),
+                );
+            }
+        }
     }
-    Ok(roots)
+    if !diagnostics.is_empty() {
+        return Err(with_project_source(
+            WorkspaceError::new("source roots overlap", diagnostics),
+            project,
+        ));
+    }
+    Ok((roots, test_root))
+}
+
+fn validate_test_root(
+    project: &DiscoveredProject,
+) -> Result<Option<TargetRoot>, WorkspaceError> {
+    let lexical = project.root().join("tests");
+    let metadata = match fs::symlink_metadata(&lexical) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(test_root_io_error(
+                project,
+                format!("cannot inspect tests root: {error}"),
+            ));
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        let canonical = fs::canonicalize(&lexical).map_err(|error| {
+            test_root_invalid_error(
+                project,
+                format!("tests root symlink cannot be resolved: {error}"),
+            )
+        })?;
+        if !canonical.starts_with(project.root()) {
+            return Err(test_root_escape_error(
+                project,
+                "tests root symlink resolves outside the project",
+            ));
+        }
+        return Err(test_root_invalid_error(
+            project,
+            "tests root must be a directory and cannot be a link".to_owned(),
+        ));
+    }
+    if !metadata.is_dir() {
+        return Err(test_root_invalid_error(
+            project,
+            "tests root must be a directory".to_owned(),
+        ));
+    }
+    let canonical = fs::canonicalize(&lexical).map_err(|error| {
+        test_root_io_error(project, format!("cannot canonicalize tests root: {error}"))
+    })?;
+    if !canonical.starts_with(project.root()) {
+        return Err(test_root_escape_error(
+            project,
+            "tests root resolves outside the project",
+        ));
+    }
+    Ok(Some(TargetRoot {
+        target_index: usize::MAX,
+        name: "tests".to_owned(),
+        kind: TargetKind::Lib,
+        path: canonical,
+        root_value: "tests".to_owned(),
+        span: ByteSpan::empty_at(0),
+        source_id: "tests".to_owned(),
+    }))
+}
+
+fn test_root_invalid_error(
+    project: &DiscoveredProject,
+    message: String,
+) -> WorkspaceError {
+    WorkspaceError::new(
+        message.clone(),
+        vec![
+            Diagnostic::new(
+                DiagnosticCode::ProjectInvalidTargetRoot,
+                ByteSpan::empty_at(0),
+                message,
+            )
+            .with_source_id("tests"),
+        ],
+    )
+    .with_source_text(
+        project.project_source_id(),
+        String::from_utf8_lossy(project.project_bytes()).into_owned(),
+    )
+}
+
+fn test_root_io_error(project: &DiscoveredProject, message: String) -> WorkspaceError {
+    WorkspaceError::new(
+        message.clone(),
+        vec![
+            Diagnostic::new(
+                DiagnosticCode::ProjectIoError,
+                ByteSpan::empty_at(0),
+                message,
+            )
+            .with_source_id("tests"),
+        ],
+    )
+    .with_source_text(
+        project.project_source_id(),
+        String::from_utf8_lossy(project.project_bytes()).into_owned(),
+    )
+}
+
+fn test_root_escape_error(
+    project: &DiscoveredProject,
+    message: &str,
+) -> WorkspaceError {
+    WorkspaceError::new(
+        message,
+        vec![
+            Diagnostic::new(
+                DiagnosticCode::ModulePathEscape,
+                ByteSpan::empty_at(0),
+                message,
+            )
+            .with_source_id("tests"),
+        ],
+    )
+    .with_source_text(
+        project.project_source_id(),
+        String::from_utf8_lossy(project.project_bytes()).into_owned(),
+    )
 }
 
 fn validate_target_root(
@@ -422,16 +609,19 @@ fn invalid_root(
     target: &Target,
     message: &str,
 ) -> WorkspaceError {
-    WorkspaceError::new(
-        message,
-        vec![
-            Diagnostic::new(
-                DiagnosticCode::ProjectInvalidTargetRoot,
-                target.root().span(),
-                message,
-            )
-            .with_source_id(project.project().origin().source_id()),
-        ],
+    with_project_source(
+        WorkspaceError::new(
+            message,
+            vec![
+                Diagnostic::new(
+                    DiagnosticCode::ProjectInvalidTargetRoot,
+                    target.root().span(),
+                    message,
+                )
+                .with_source_id(project.project().origin().source_id()),
+            ],
+        ),
+        project,
     )
 }
 
@@ -440,17 +630,30 @@ fn root_io_error(
     target: &Target,
     message: String,
 ) -> WorkspaceError {
-    WorkspaceError::new(
-        message.clone(),
-        vec![
-            Diagnostic::new(
-                DiagnosticCode::ProjectIoError,
-                target.root().span(),
-                message.clone(),
-            )
-            .with_source_id(project.project().origin().source_id())
-            .with_note(format!("target root: {}", target.root().value())),
-        ],
+    with_project_source(
+        WorkspaceError::new(
+            message.clone(),
+            vec![
+                Diagnostic::new(
+                    DiagnosticCode::ProjectIoError,
+                    target.root().span(),
+                    message.clone(),
+                )
+                .with_source_id(project.project().origin().source_id())
+                .with_note(format!("target root: {}", target.root().value())),
+            ],
+        ),
+        project,
+    )
+}
+
+fn with_project_source(
+    error: WorkspaceError,
+    project: &DiscoveredProject,
+) -> WorkspaceError {
+    error.with_source_text(
+        project.project_source_id(),
+        String::from_utf8_lossy(project.project_bytes()).into_owned(),
     )
 }
 

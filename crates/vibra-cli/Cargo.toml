@@ -1,0 +1,31 @@
+[package]
+name = "vibra-cli"
+description = "The Vibra command-line services and process interface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+vibra-diagnostics.workspace = true
+vibra-fmt.workspace = true
+vibra-schema.workspace = true
+vibra-syntax.workspace = true
+vibra-types.workspace = true
+vibra-workspace.workspace = true
+
+[[bin]]
+name = "vibra"
+path = "src/main.rs"
+
+[dev-dependencies]
+jsonschema.workspace = true
+same-file = "1.0.6"
+
+[lints]
+workspace = true

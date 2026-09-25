@@ -1,7 +1,9 @@
 # Vibra v1 runtime and WebAssembly
 
 Status: normative target
-Implementation status: not started
+Implementation status: M2 executes successfully checked IR for its supported
+pure subset, including tail calls and isolated tests. WebAssembly and complete
+v1 interpreter parity remain unimplemented.
 
 ## Semantic reference
 
@@ -46,6 +48,26 @@ Evaluation is strict and deterministic:
 - `try` performs only its specified early-exit propagation; and
 - a tail-position call to a function in the same recursive group reuses the
   current activation instead of growing language-level stack.
+
+### M2 module-value initialization
+
+Before accepting an M2 checked program, the checker MUST build the dependency
+graph of its immutable module-level `def` initializers. An
+initializer may depend on a module value directly or through a function call
+or callable alias reached while evaluating that initializer. A cycle is
+rejected only when the dependency cycle contains a module-level `def`; a
+function-only recursion cycle reached from an initializer is not a module
+initializer cycle. A module-value cycle is rejected with the error-level
+`@type.initializer-cycle` before an executable checked program is produced or
+any initializer is evaluated or program executed; no checked program is
+produced. Its primary span is the complete source form of a `def` participating
+in the cycle, selected by the deterministic dependency traversal. Acyclic
+forward references remain valid. Type checking never evaluates an initializer
+to infer its written type.
+
+For an accepted program, a module value is evaluated lazily on its first read
+and exactly once during that execution. Later reads reuse that value. A new
+execution starts with fresh module-value state.
 
 `map.of` and map variadic tails share one construction rule. Every key and
 value is evaluated even if a key repeats; the later pair replaces the earlier
@@ -131,7 +153,13 @@ on such tail recursion.
 
 V1 defines no portable stack-depth limit. Non-tail recursion and non-tail calls
 that exhaust an embedding host's stack are host events, not portable semantic
-results, and are outside interpreter/Wasm parity. Default `iter` method bodies
+results, and are outside interpreter/Wasm parity. The M2 reference interpreter
+runs on a host thread with a fixed stack and bounds live language activations
+so that exhaustion never aborts the process. Reaching that bound stops
+execution with the unlocated error diagnostic
+`@runtime.host-stack-exhausted` (primary span `0..0`, no source ID). It is not
+a trap: `run` and `test` report it as `@command.operational-failure` (exit 3),
+and `test` then reports zero selected, passed, and failed tests. Default `iter` method bodies
 MAY lower to internal loops; that mutation is not a source feature.
 
 ## M2 compiler intrinsic profile
@@ -191,10 +219,18 @@ operations likewise exchange ordinary typed values. There are no user-visible
 file or stream handles, scoped resources, close operations, or resource
 lifetime semantics in v1.
 
+## Traps
+
 Host responses that are ordinary environmental outcomes use typed `result`
 errors. ABI mismatch, impossible typed IR, invalid host value IDs, and runtime
-invariant violation are traps. A trap has a stable code and source origin but
-is not catchable by user code.
+invariant violation are traps. A trap has a stable code and a source origin
+when its failing source span is known; otherwise it has no origin. M2 failures
+at the checked-program execution boundary (no executable entry or a body that
+violates checked-IR invariants) use `@runtime.invalid-checked-program`. These
+failures have no source origin and use an unlocated diagnostic primary at
+`0..0` with no source ID. The CLI `trapCode` is the exact diagnostic-code
+spelling as a string, and its `origin` is `null`. Traps are not catchable by
+user code.
 
 ## WebAssembly boundary
 

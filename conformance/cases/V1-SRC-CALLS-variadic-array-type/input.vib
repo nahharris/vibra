@@ -1,0 +1,2 @@
+(defn accept-array (callback (fn (i32) i32 variadic: (array i32))) i32
+  (callback 1i32 2i32))

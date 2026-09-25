@@ -1,0 +1,2 @@
+(def value i32 (let unused (lambda () i32 (read)) 0i32))
+(defn read () i32 value)

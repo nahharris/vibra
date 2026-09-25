@@ -17,24 +17,29 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-use std::fs;
 use std::path::Path;
 
-use base64::Engine;
-use ring::signature;
-use sha2::{Digest, Sha256};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature,
-    LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin, Value,
-    external::CompilerIntrinsic,
+    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
+    LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin,
+    TestAssertion, Value, external::CompilerIntrinsic,
 };
 use vibra_syntax::{
     ApplicationBinding, Attribute, BindingFacts, Declaration, Expression,
     ExpressionKind, FloatSuffix, IntegerSuffix, Literal, NameKind, PatternKind,
     SourceAst, TypeExpr,
 };
+
+mod bootstrap;
+mod resolved;
+
+pub use bootstrap::{
+    BOOTSTRAP_ASSERT_SOURCE_ID, BOOTSTRAP_TEXT_SOURCE_ID, BootstrapInputs,
+    BootstrapVerification, BootstrapVerificationError, verify_bootstrap,
+    verify_bootstrap_bytes,
+};
+pub use resolved::{ResolvedCheckResult, check_resolved};
 
 /// The result of checking one source document.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -182,8 +187,8 @@ pub fn check_bootstrap_source(
 ) -> CheckResult {
     let source_id = source_id.as_ref();
     if source_id != BOOTSTRAP_TEXT_SOURCE_ID
-        || source.as_bytes() != BOOTSTRAP_TEXT_BYTES
-        || verification.artifact.is_empty()
+        || source.as_bytes() != bootstrap::EMBEDDED_TEXT_MODULE
+        || !verification.maps("std.text", BOOTSTRAP_TEXT_SOURCE_ID)
     {
         let diagnostic = Diagnostic::new(
             DiagnosticCode::ToolUnavailable,
@@ -244,18 +249,14 @@ pub fn check_bootstrap_text_import(
     source: &str,
 ) -> CheckResult {
     let source_id = source_id.as_ref();
-    if verification.artifact.is_empty()
-        || validate_signed_bootstrap_map(&verification.artifact).is_err()
-    {
-        return bootstrap_import_unavailable(
-            source_id,
-            "the @std.text import requires the verified M2 bootstrap map",
-        );
-    }
     let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
         Ok(document) => document,
         Err(error) => {
-            return bootstrap_import_unavailable(source_id, error.to_string());
+            return bootstrap_import_unavailable(
+                source_id,
+                ByteSpan::empty_at(0),
+                error.to_string(),
+            );
         }
     };
     let mut diagnostics = document
@@ -270,6 +271,7 @@ pub fn check_bootstrap_text_import(
     let Some(ast) = document.ast() else {
         return bootstrap_import_unavailable(
             source_id,
+            ByteSpan::empty_at(0),
             "the @std.text adapter requires a source module",
         );
     };
@@ -284,6 +286,7 @@ pub fn check_bootstrap_text_import(
     let Some(import) = imports.first() else {
         return bootstrap_import_unavailable(
             source_id,
+            ByteSpan::empty_at(0),
             "the source must explicitly import `(import text @std.text)`",
         );
     };
@@ -292,9 +295,22 @@ pub fn check_bootstrap_text_import(
         && import.target().kind() == NameKind::Atom
         && import.target().value() == "std.text";
     if imports.len() != 1 || !exact_import {
+        let rejected_import = if exact_import {
+            imports.get(1).copied().unwrap_or(import)
+        } else {
+            import
+        };
         return bootstrap_import_unavailable(
             source_id,
+            rejected_import.span(),
             "only the exact `(import text @std.text)` import is available",
+        );
+    }
+    if !verification.maps("std.text", BOOTSTRAP_TEXT_SOURCE_ID) {
+        return bootstrap_import_unavailable(
+            source_id,
+            import.span(),
+            "the @std.text import requires the verified M2 bootstrap map",
         );
     }
     if ast.declarations().iter().any(|declaration| {
@@ -308,8 +324,22 @@ pub fn check_bootstrap_text_import(
                     .any(|attribute| matches!(attribute, Attribute::External(_)))
         )
     }) {
+        let source_external = ast.declarations().iter().find_map(|declaration| {
+            if let Declaration::Defn(function) = declaration
+                && function
+                    .attributes()
+                    .items()
+                    .iter()
+                    .any(|attribute| matches!(attribute, Attribute::External(_)))
+            {
+                Some(function.span())
+            } else {
+                None
+            }
+        });
         return bootstrap_import_unavailable(
             source_id,
+            source_external.unwrap_or(import.span()),
             "source external declarations cannot acquire bootstrap authority",
         );
     }
@@ -320,6 +350,9 @@ pub fn check_bootstrap_text_import(
     {
         return bootstrap_import_unavailable(
             source_id,
+            ast.declarations()
+                .first()
+                .map_or(import.span(), Declaration::span),
             "the @std.text adapter requires a source function entry",
         );
     }
@@ -338,228 +371,12 @@ pub fn check_bootstrap_text_import(
 
 fn bootstrap_import_unavailable(
     source_id: &str,
+    span: ByteSpan,
     message: impl Into<String>,
 ) -> CheckResult {
-    let diagnostic = Diagnostic::new(
-        DiagnosticCode::ToolUnavailable,
-        ByteSpan::empty_at(0),
-        message,
-    )
-    .with_source_id(source_id);
+    let diagnostic = Diagnostic::new(DiagnosticCode::ToolUnavailable, span, message)
+        .with_source_id(source_id);
     CheckResult::new(None, vec![diagnostic])
-}
-
-/// The canonical path of the signed M2 text bootstrap module.
-pub const BOOTSTRAP_TEXT_SOURCE_ID: &str = "stdlib/m2/src/std/text.vib";
-const BOOTSTRAP_TEXT_BYTES: &[u8] =
-    include_bytes!("../../../stdlib/m2/src/std/text.vib");
-
-/// The result of verifying the repository's signed M2 bootstrap input.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BootstrapVerification {
-    artifact: Vec<u8>,
-}
-
-impl BootstrapVerification {
-    /// The exact signed artifact bytes.
-    #[must_use]
-    pub fn artifact(&self) -> &[u8] {
-        &self.artifact
-    }
-}
-
-/// A failure while checking the fixed offline bootstrap provenance.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BootstrapVerificationError(String);
-
-impl fmt::Display for BootstrapVerificationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for BootstrapVerificationError {}
-
-const BOOTSTRAP_ARTIFACT_SHA256: &str =
-    "8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103";
-const BOOTSTRAP_SIGNATURE_SHA256: &str =
-    "f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63";
-const BOOTSTRAP_PUBLIC_KEY_SHA256: &str =
-    "fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509";
-const BOOTSTRAP_TEXT_SHA256: &str =
-    "c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44";
-const BOOTSTRAP_ASSERT_SHA256: &str =
-    "746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007";
-const BOOTSTRAP_MANIFEST: &[u8] =
-    include_bytes!("../../../stdlib/m2/bootstrap-manifest.vibon");
-const BOOTSTRAP_SIGNATURE: &[u8] =
-    include_bytes!("../../../stdlib/m2/bootstrap.vibon.sig");
-const BOOTSTRAP_PUBLIC_KEY: &[u8] =
-    include_bytes!("../../../stdlib/m2/toolchain-ed25519.pub");
-
-/// Verifies the exact checked-in M2 artifact, manifest, key, and signature.
-///
-/// All paths are fixed relative paths under `root`. The manifest is itself
-/// pinned to the reviewed bytes, and Ed25519 verification is performed over
-/// the artifact bytes before any source declaration is admitted.
-pub fn verify_bootstrap(
-    root: impl AsRef<Path>,
-) -> Result<BootstrapVerification, BootstrapVerificationError> {
-    let root = root.as_ref();
-    let manifest = read_bootstrap_file(root, "stdlib/m2/bootstrap-manifest.vibon")?;
-    if manifest != BOOTSTRAP_MANIFEST {
-        return Err(BootstrapVerificationError(
-            "M2 bootstrap manifest bytes do not match the reviewed manifest".to_owned(),
-        ));
-    }
-    let artifact = read_bootstrap_file(root, "stdlib/m2/bootstrap.vibon")?;
-    let signature_bytes = read_bootstrap_file(root, "stdlib/m2/bootstrap.vibon.sig")?;
-    let public_key = read_bootstrap_file(root, "stdlib/m2/toolchain-ed25519.pub")?;
-    check_digest("artifact", &artifact, BOOTSTRAP_ARTIFACT_SHA256)?;
-    check_digest("signature", &signature_bytes, BOOTSTRAP_SIGNATURE_SHA256)?;
-    check_digest("public key", &public_key, BOOTSTRAP_PUBLIC_KEY_SHA256)?;
-    let text_module = read_bootstrap_file(root, BOOTSTRAP_TEXT_SOURCE_ID)?;
-    let assert_module = read_bootstrap_file(root, "stdlib/m2/src/std/assert.vib")?;
-    check_digest("text module", &text_module, BOOTSTRAP_TEXT_SHA256)?;
-    check_digest("assertion module", &assert_module, BOOTSTRAP_ASSERT_SHA256)?;
-    validate_signed_bootstrap_map(&artifact)?;
-    if signature_bytes != BOOTSTRAP_SIGNATURE || public_key != BOOTSTRAP_PUBLIC_KEY {
-        return Err(BootstrapVerificationError(
-            "M2 bootstrap trust inputs do not match the reviewed bytes".to_owned(),
-        ));
-    }
-    let signature_text = std::str::from_utf8(&signature_bytes).map_err(|_| {
-        BootstrapVerificationError("bootstrap signature is not UTF-8".to_owned())
-    })?;
-    let signature = base64::engine::general_purpose::STANDARD
-        .decode(signature_text.trim())
-        .map_err(|_| {
-            BootstrapVerificationError("bootstrap signature is not base64".to_owned())
-        })?;
-    let key_text = std::str::from_utf8(&public_key).map_err(|_| {
-        BootstrapVerificationError("bootstrap public key is not UTF-8".to_owned())
-    })?;
-    let key_text = key_text
-        .lines()
-        .filter(|line| !line.starts_with("---"))
-        .collect::<String>();
-    let key = base64::engine::general_purpose::STANDARD
-        .decode(key_text)
-        .map_err(|_| {
-            BootstrapVerificationError("bootstrap public key is not base64".to_owned())
-        })?;
-    let key = key.get(key.len().saturating_sub(32)..).ok_or_else(|| {
-        BootstrapVerificationError(
-            "bootstrap public key has no Ed25519 key bytes".to_owned(),
-        )
-    })?;
-    let verifier = signature::UnparsedPublicKey::new(&signature::ED25519, key);
-    verifier.verify(&artifact, &signature).map_err(|_| {
-        BootstrapVerificationError(
-            "M2 bootstrap Ed25519 signature is invalid".to_owned(),
-        )
-    })?;
-    Ok(BootstrapVerification { artifact })
-}
-
-fn validate_signed_bootstrap_map(
-    artifact: &[u8],
-) -> Result<(), BootstrapVerificationError> {
-    let text = std::str::from_utf8(artifact).map_err(|_| {
-        BootstrapVerificationError("bootstrap artifact is not UTF-8".to_owned())
-    })?;
-    for fragment in [
-        "@std.text",
-        "stdlib/m2/src/std/text.vib",
-        "sha256:c796489f44636b7856c6ce21a12a753f95e59a5204a028e1ce2697afa6a28e44",
-        "@std.assert",
-        "stdlib/m2/src/std/assert.vib",
-        "sha256:746e2f3152caf3f80026531385d7364a8457e5310cbc599e15b7fdbf3bc65007",
-        "text.concat",
-        "text.length",
-        "assert.equal-u64",
-    ] {
-        if !text.contains(fragment) {
-            return Err(BootstrapVerificationError(format!(
-                "signed bootstrap import map is missing `{fragment}`"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn read_bootstrap_file(
-    root: &Path,
-    relative: &str,
-) -> Result<Vec<u8>, BootstrapVerificationError> {
-    if path_contains_link(root) {
-        return Err(BootstrapVerificationError(
-            "bootstrap root contains a symlink or junction".to_owned(),
-        ));
-    }
-    let root = fs::canonicalize(root).map_err(|error| {
-        BootstrapVerificationError(format!("cannot resolve bootstrap root: {error}"))
-    })?;
-    let candidate = root.join(relative);
-    if path_contains_link(&candidate) {
-        return Err(BootstrapVerificationError(format!(
-            "bootstrap path `{relative}` contains a symlink or junction"
-        )));
-    }
-    let resolved = fs::canonicalize(&candidate).map_err(|error| {
-        BootstrapVerificationError(format!(
-            "cannot read bootstrap `{relative}`: {error}"
-        ))
-    })?;
-    if !resolved.starts_with(&root) {
-        return Err(BootstrapVerificationError(format!(
-            "bootstrap path `{relative}` escapes its root"
-        )));
-    }
-    fs::read(resolved).map_err(|error| {
-        BootstrapVerificationError(format!(
-            "cannot read bootstrap `{relative}`: {error}"
-        ))
-    })
-}
-
-fn path_contains_link(path: &Path) -> bool {
-    let mut current = Path::new("").to_path_buf();
-    for component in path.components() {
-        current.push(component.as_os_str());
-        let Ok(metadata) = fs::symlink_metadata(&current) else {
-            continue;
-        };
-        if metadata.file_type().is_symlink() || is_windows_reparse_point(&metadata) {
-            return true;
-        }
-    }
-    false
-}
-
-#[cfg(windows)]
-fn is_windows_reparse_point(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    metadata.file_attributes() & 0x400 != 0
-}
-
-#[cfg(not(windows))]
-const fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
-    false
-}
-
-fn check_digest(
-    label: &str,
-    bytes: &[u8],
-    expected: &str,
-) -> Result<(), BootstrapVerificationError> {
-    let actual = format!("{:x}", Sha256::digest(bytes));
-    if actual != expected {
-        return Err(BootstrapVerificationError(format!(
-            "M2 bootstrap {label} digest mismatch: expected sha256:{expected}, got sha256:{actual}"
-        )));
-    }
-    Ok(())
 }
 
 fn check_ast_with_bindings_authority(
@@ -570,8 +387,6 @@ fn check_ast_with_bindings_authority(
 ) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
     let mut checker = Checker::new(source_id, diagnostics, ast, trusted_bootstrap);
     checker.collect_headers();
-    checker.check_initializer_cycles();
-    checker.check_function_cycles();
     checker.check_globals();
     checker.check_functions();
     let program = checker.finish();
@@ -586,8 +401,6 @@ fn check_ast_with_text_import_authority(
     let mut checker = Checker::new(source_id, diagnostics, ast, true);
     checker.text_import_authorized = true;
     checker.collect_headers();
-    checker.check_initializer_cycles();
-    checker.check_function_cycles();
     checker.check_globals();
     checker.check_functions();
     let program = checker.finish();
@@ -600,6 +413,8 @@ struct GlobalHeader {
     value_type: PrimitiveType,
     expression: Expression,
     span: ByteSpan,
+    source_id: String,
+    module_index: usize,
     function_index: Option<usize>,
     function_targets: FunctionTargetSet,
 }
@@ -652,10 +467,15 @@ impl FunctionTargetSet {
 #[derive(Clone)]
 struct FunctionHeader {
     declaration_index: usize,
+    module_index: usize,
+    source_id: String,
     name: String,
     signature: FunctionSignature,
+    variadic: bool,
     external: Option<CompilerIntrinsic>,
     external_declared: bool,
+    test: Option<vibra_syntax::TestDeclaration>,
+    test_assertion: Option<TestAssertion>,
 }
 
 const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
@@ -683,7 +503,6 @@ struct Checker<'a> {
     trusted_bootstrap: bool,
     text_import_authorized: bool,
     text_import_span: Option<ByteSpan>,
-    recursive_groups: Vec<Vec<usize>>,
 }
 
 impl<'a> Checker<'a> {
@@ -708,7 +527,6 @@ impl<'a> Checker<'a> {
             trusted_bootstrap,
             text_import_authorized: false,
             text_import_span: None,
-            recursive_groups: Vec::new(),
         }
     }
 
@@ -748,6 +566,8 @@ impl<'a> Checker<'a> {
                         value_type,
                         expression: definition.expression().clone(),
                         span: definition.span(),
+                        source_id: self.source_id.to_owned(),
+                        module_index: 0,
                         function_index: None,
                         function_targets: FunctionTargetSet::default(),
                     });
@@ -775,8 +595,13 @@ impl<'a> Checker<'a> {
                     self.function_indices.insert(name.clone(), index);
                     self.functions.push(FunctionHeader {
                         declaration_index,
+                        module_index: 0,
+                        source_id: self.source_id.to_owned(),
                         name,
                         signature,
+                        variadic: function.attributes().items().iter().any(
+                            |attribute| matches!(attribute, Attribute::Variadic(_)),
+                        ),
                         external: compiler_intrinsic(
                             self.source_id,
                             function,
@@ -786,6 +611,8 @@ impl<'a> Checker<'a> {
                         external_declared: function.attributes().items().iter().any(
                             |attribute| matches!(attribute, Attribute::External(_)),
                         ),
+                        test: None,
+                        test_assertion: None,
                     });
                 }
                 Declaration::Import(import)
@@ -833,10 +660,15 @@ impl<'a> Checker<'a> {
                 self.function_indices.insert(name.to_owned(), index);
                 self.functions.push(FunctionHeader {
                     declaration_index: IMPORTED_FUNCTION_DECLARATION,
+                    module_index: 0,
+                    source_id: self.source_id.to_owned(),
                     name: name.to_owned(),
                     signature: intrinsic.signature(),
+                    variadic: false,
                     external: Some(intrinsic),
                     external_declared: true,
+                    test: None,
+                    test_assertion: None,
                 });
             }
             self.text_import_span = Some(import_span);
@@ -874,102 +706,6 @@ impl<'a> Checker<'a> {
         self.checked_functions = vec![None; self.functions.len()];
     }
 
-    fn check_initializer_cycles(&mut self) {
-        let mut states = vec![VisitState::Unvisited; self.globals.len()];
-        for index in 0..self.globals.len() {
-            self.visit_global(index, &mut states);
-        }
-    }
-
-    fn check_function_cycles(&mut self) {
-        let mut dependencies = vec![BTreeSet::new(); self.functions.len()];
-        for (index, header) in self.functions.iter().enumerate() {
-            let Some(Declaration::Defn(function)) =
-                self.ast.declarations().get(header.declaration_index)
-            else {
-                continue;
-            };
-            let Some(function_dependencies) = dependencies.get_mut(index) else {
-                continue;
-            };
-            for expression in function.expressions() {
-                collect_function_dependencies(
-                    expression,
-                    &self.function_indices,
-                    function_dependencies,
-                );
-                collect_function_alias_dependencies(
-                    expression,
-                    &self.global_indices,
-                    &self.function_indices,
-                    &self.globals,
-                    function_dependencies,
-                );
-            }
-        }
-        let module_definitions = self
-            .functions
-            .iter()
-            .map(|function| function.declaration_index != IMPORTED_FUNCTION_DECLARATION)
-            .collect::<Vec<_>>();
-        self.recursive_groups =
-            find_recursive_groups(&dependencies, &module_definitions);
-    }
-
-    fn visit_global(&mut self, index: usize, states: &mut [VisitState]) {
-        match states.get(index).copied() {
-            Some(VisitState::Done) => return,
-            Some(VisitState::Visiting) => {
-                let Some(header) = self.globals.get(index) else {
-                    return;
-                };
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::TypeInitializerCycle,
-                        header.span,
-                        "module value initializers form a cycle",
-                    )
-                    .with_source_id(self.source_id),
-                );
-                return;
-            }
-            Some(VisitState::Unvisited) => {}
-            None => return,
-        }
-        let Some(state) = states.get_mut(index) else {
-            return;
-        };
-        *state = VisitState::Visiting;
-        let mut dependencies = BTreeSet::new();
-        let Some(expression) = self.globals.get(index).map(|header| &header.expression)
-        else {
-            return;
-        };
-        collect_global_dependencies(
-            expression,
-            &self.global_indices,
-            &self.function_indices,
-            &self.functions,
-            self.ast,
-            &mut dependencies,
-        );
-        collect_global_alias_dependencies(
-            expression,
-            &self.global_indices,
-            &self.function_indices,
-            &self.globals,
-            &self.functions,
-            self.ast,
-            &mut dependencies,
-        );
-        for dependency in dependencies {
-            self.visit_global(dependency, states);
-        }
-        if let Some(state) = states.get_mut(index) {
-            *state = VisitState::Done;
-        }
-    }
-
     fn check_globals(&mut self) {
         for index in 0..self.globals.len() {
             let Some(header) = self.globals.get(index).cloned() else {
@@ -984,7 +720,6 @@ impl<'a> Checker<'a> {
                 &self.function_indices,
                 &self.module_names,
                 &mut self.bindings,
-                None,
                 None,
             );
             let Some(expression) = check_expression(
@@ -1088,7 +823,6 @@ impl<'a> Checker<'a> {
                 &self.module_names,
                 &mut self.bindings,
                 Some(index),
-                self.recursive_groups.get(index).cloned(),
             );
             let mut parameters_valid = true;
             for (parameter_index, parameter) in function.parameters().iter().enumerate()
@@ -1100,6 +834,7 @@ impl<'a> Checker<'a> {
                             name.value(),
                             parameter.value_type(),
                             parameter.span(),
+                            parameter.parsed_pattern().span(),
                         ) {
                             parameters_valid = false;
                         }
@@ -1131,7 +866,7 @@ impl<'a> Checker<'a> {
                     if !environment.add_binding_type(
                         labelled.name(),
                         labelled.value_type(),
-                        entry.span(),
+                        entry.name_span(),
                     ) {
                         parameters_valid = false;
                     }
@@ -1197,7 +932,17 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
+        let global_origins = globals
+            .iter()
+            .map(|global| global.origin().clone())
+            .collect::<Vec<_>>();
         match CheckedProgram::try_new_with_globals(globals, functions, 0) {
+            Err(IrError::GlobalInitializerCycle(index)) => {
+                if let Some(origin) = global_origins.get(index) {
+                    self.diagnostics.push(initializer_cycle_diagnostic(origin));
+                }
+                None
+            }
             Ok(program) => Some(program),
             Err(error) => {
                 unavailable(
@@ -1212,47 +957,15 @@ impl<'a> Checker<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VisitState {
-    Unvisited,
-    Visiting,
-    Done,
-}
-
-fn find_recursive_groups(
-    dependencies: &[BTreeSet<usize>],
-    module_definitions: &[bool],
-) -> Vec<Vec<usize>> {
-    (0..dependencies.len())
-        .map(|start| {
-            if !module_definitions.get(start).copied().unwrap_or(false) {
-                return Vec::new();
-            }
-            reachable_functions(start, dependencies)
-                .into_iter()
-                .filter(|target| {
-                    module_definitions.get(*target).copied().unwrap_or(false)
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn reachable_functions(
-    start: usize,
-    dependencies: &[BTreeSet<usize>],
-) -> BTreeSet<usize> {
-    let mut reached = BTreeSet::new();
-    let mut pending = vec![start];
-    while let Some(index) = pending.pop() {
-        if !reached.insert(index) {
-            continue;
-        }
-        if let Some(next) = dependencies.get(index) {
-            pending.extend(next.iter().copied());
-        }
-    }
-    reached
+/// The diagnostic for a checked-IR initializer cycle through the global
+/// declared at `global`.
+pub(crate) fn initializer_cycle_diagnostic(global: &SourceOrigin) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::TypeInitializerCycle,
+        global.span(),
+        "module value initializers form a cycle",
+    )
+    .with_source_id(global.source_id())
 }
 
 struct CheckEnvironment<'a> {
@@ -1270,7 +983,19 @@ struct CheckEnvironment<'a> {
     outer: Option<VisibleBindings>,
     next_slot: usize,
     current_function: Option<usize>,
-    recursive_group: Option<Vec<usize>>,
+    resolved_targets:
+        Option<&'a BTreeMap<(String, usize, usize), ResolvedReferenceTarget>>,
+    /// Whether this checker reports lexical `@name.redeclaration`. The
+    /// workspace path leaves that to the resolver, which owns name
+    /// introduction there, so each introduction is reported exactly once.
+    reports_redeclarations: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResolvedReferenceTarget {
+    Global(usize),
+    Function(usize),
+    Unresolved,
 }
 
 #[derive(Clone)]
@@ -1278,6 +1003,7 @@ struct CaptureBinding {
     slot: usize,
     value_type: PrimitiveType,
     span: ByteSpan,
+    function_targets: Option<FunctionTargetSet>,
 }
 
 #[derive(Clone)]
@@ -1286,11 +1012,13 @@ enum VisibleStorage {
         slot: usize,
         value_type: PrimitiveType,
         span: ByteSpan,
+        function_targets: Option<FunctionTargetSet>,
     },
     Closure {
         slot: usize,
         value_type: PrimitiveType,
         span: ByteSpan,
+        function_targets: Option<FunctionTargetSet>,
     },
 }
 
@@ -1311,7 +1039,6 @@ impl<'a> CheckEnvironment<'a> {
         module_names: &'a BTreeMap<String, ByteSpan>,
         bindings: &'a mut Vec<ApplicationBinding>,
         current_function: Option<usize>,
-        recursive_group: Option<Vec<usize>>,
     ) -> Self {
         Self {
             source_id,
@@ -1328,26 +1055,30 @@ impl<'a> CheckEnvironment<'a> {
             outer: None,
             next_slot: 0,
             current_function,
-            recursive_group,
+            resolved_targets: None,
+            reports_redeclarations: true,
         }
     }
 
+    /// Binds a parameter: `parameter_span` locates an unavailable type and
+    /// `binder_span` is the introduced name.
     fn add_binding(
         &mut self,
         name: &str,
         value_type: &TypeExpr,
-        span: ByteSpan,
+        parameter_span: ByteSpan,
+        binder_span: ByteSpan,
     ) -> bool {
         let Some(value_type) = primitive_type(value_type) else {
             unavailable(
                 self.diagnostics,
                 self.source_id,
-                span,
+                parameter_span,
                 "only monomorphic binding types are available in Step 7",
             );
             return false;
         };
-        self.add_binding_type(name, value_type, span)
+        self.add_binding_type(name, value_type, binder_span)
     }
 
     fn add_binding_type(
@@ -1384,41 +1115,14 @@ impl<'a> CheckEnvironment<'a> {
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
     ) -> bool {
-        if let Some(earlier) = self.module_names.get(name).copied() {
-            redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
-            return false;
-        }
-        if let Some(earlier) = self.locals.get(name) {
-            redeclaration(
-                self.diagnostics,
-                self.source_id,
-                name,
-                name,
-                span,
-                earlier.span,
-            );
-            return false;
-        }
-        if let Some(earlier) = self.captures.get(name) {
-            redeclaration(
-                self.diagnostics,
-                self.source_id,
-                name,
-                name,
-                span,
-                earlier.span,
-            );
-            return false;
-        }
-        if let Some(outer) = &self.outer
-            && let Some(storage) = outer.values.get(name)
+        // A repeated introduction relates the nearest earlier one: the
+        // innermost lexical binding, else the module binding. The shadowing
+        // binder is still bound so the rest of the scope keeps checking and
+        // every later introduction is reported, as the resolver does.
+        if self.reports_redeclarations
+            && let Some(earlier) = self.earlier_introduction(name)
         {
-            let earlier = match storage {
-                VisibleStorage::Activation { span, .. }
-                | VisibleStorage::Closure { span, .. } => *span,
-            };
             redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
-            return false;
         }
         let slot = self.next_slot;
         self.locals.insert(
@@ -1434,6 +1138,24 @@ impl<'a> CheckEnvironment<'a> {
         true
     }
 
+    fn earlier_introduction(&self, name: &str) -> Option<ByteSpan> {
+        if let Some(earlier) = self.locals.get(name) {
+            return Some(earlier.span);
+        }
+        if let Some(earlier) = self.captures.get(name) {
+            return Some(earlier.span);
+        }
+        if let Some(storage) =
+            self.outer.as_ref().and_then(|outer| outer.values.get(name))
+        {
+            return Some(match storage {
+                VisibleStorage::Activation { span, .. }
+                | VisibleStorage::Closure { span, .. } => *span,
+            });
+        }
+        self.module_names.get(name).copied()
+    }
+
     fn visible_bindings(&self) -> VisibleBindings {
         let mut values = BTreeMap::new();
         for (name, binding) in &self.locals {
@@ -1443,6 +1165,7 @@ impl<'a> CheckEnvironment<'a> {
                     slot: binding.slot,
                     value_type: binding.value_type.clone(),
                     span: binding.span,
+                    function_targets: binding.function_targets.clone(),
                 },
             );
         }
@@ -1453,6 +1176,7 @@ impl<'a> CheckEnvironment<'a> {
                     slot: binding.slot,
                     value_type: binding.value_type.clone(),
                     span: binding.span,
+                    function_targets: binding.function_targets.clone(),
                 },
             );
         }
@@ -1476,11 +1200,16 @@ impl<'a> CheckEnvironment<'a> {
             return Some(binding.clone());
         }
         let slot = self.capture_sources.len();
-        let (value_type, source) = match storage {
+        let (value_type, function_targets, introduction, source) = match storage {
             VisibleStorage::Activation {
-                slot, value_type, ..
+                slot,
+                value_type,
+                span: introduction,
+                function_targets,
             } => (
                 value_type.clone(),
+                function_targets.clone(),
+                introduction,
                 Expr::variable(
                     slot,
                     value_type,
@@ -1488,9 +1217,14 @@ impl<'a> CheckEnvironment<'a> {
                 ),
             ),
             VisibleStorage::Closure {
-                slot, value_type, ..
+                slot,
+                value_type,
+                span: introduction,
+                function_targets,
             } => (
                 value_type.clone(),
+                function_targets.clone(),
+                introduction,
                 Expr::captured(
                     slot,
                     value_type,
@@ -1499,10 +1233,13 @@ impl<'a> CheckEnvironment<'a> {
             ),
         };
         self.capture_sources.push(source);
+        // The capture keeps the outer binder's introduction span so a
+        // redeclaration relates the binder, not the capturing lambda.
         let binding = CaptureBinding {
             slot,
             value_type,
-            span,
+            span: introduction,
+            function_targets,
         };
         self.captures.insert(name.to_owned(), binding.clone());
         Some(binding)
@@ -1518,59 +1255,69 @@ fn types_match(left: &PrimitiveType, right: &PrimitiveType) -> bool {
     }
 }
 
+/// Visits `expression` and every nested expression in pre-order.
+///
+/// This is the one syntax traversal the checker needs before lowering;
+/// dependency, cycle, and recursive-group analysis happen once, over checked
+/// IR, in `vibra-ir`.
+fn walk_expressions<'e>(
+    expression: &'e Expression,
+    visit: &mut impl FnMut(&'e Expression),
+) {
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        visit(expression);
+        let first_child = pending.len();
+        match expression.kind() {
+            ExpressionKind::Name(_) | ExpressionKind::Literal(_) => {}
+            ExpressionKind::Application(application) => {
+                pending.push(application.callee());
+                pending.extend(
+                    application
+                        .arguments()
+                        .iter()
+                        .map(|argument| argument.value()),
+                );
+            }
+            ExpressionKind::Do(expressions) => pending.extend(expressions),
+            ExpressionKind::Let { value, body, .. } => {
+                pending.push(value);
+                pending.extend(body);
+            }
+            ExpressionKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => pending.extend([&**condition, &**then_branch, &**else_branch]),
+            ExpressionKind::Lambda(lambda) => pending.extend(lambda.body()),
+            ExpressionKind::Match { scrutinee, arms } => {
+                pending.push(scrutinee);
+                pending.extend(arms.iter().map(|arm| arm.result()));
+            }
+            ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
+                pending.push(operand);
+            }
+        }
+        // Children were pushed in source order; reverse them so they pop in
+        // source order and the visit stays pre-order.
+        if let Some(children) = pending.get_mut(first_child..) {
+            children.reverse();
+        }
+    }
+}
+
+/// Distinct single-segment symbol names used anywhere in `expression`, in
+/// first-use order.
 fn collect_value_names(expression: &Expression, names: &mut Vec<String>) {
-    let add_name = |name: &vibra_syntax::Name, names: &mut Vec<String>| {
-        if name.kind() == NameKind::Symbol
+    walk_expressions(expression, &mut |expression| {
+        if let ExpressionKind::Name(name) = expression.kind()
+            && name.kind() == NameKind::Symbol
             && name.segments().len() == 1
             && !names.iter().any(|known| known == name.value())
         {
             names.push(name.value().to_owned());
         }
-    };
-    match expression.kind() {
-        ExpressionKind::Name(name) => add_name(name, names),
-        ExpressionKind::Application(application) => {
-            collect_value_names(application.callee(), names);
-            for argument in application.arguments() {
-                collect_value_names(argument.value(), names);
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_value_names(expression, names);
-            }
-        }
-        ExpressionKind::Let { value, body, .. } => {
-            collect_value_names(value, names);
-            for expression in body {
-                collect_value_names(expression, names);
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_value_names(condition, names);
-            collect_value_names(then_branch, names);
-            collect_value_names(else_branch, names);
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_value_names(expression, names);
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_value_names(scrutinee, names);
-            for arm in arms {
-                collect_value_names(arm.result(), names);
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_value_names(operand, names);
-        }
-        ExpressionKind::Literal(_) => {}
-    }
+    });
 }
 
 fn function_index_from_expr(
@@ -1652,7 +1399,20 @@ fn function_targets_from_expr(
             targets
         }
         Expr::Closure { .. } => FunctionTargetSet::closure(),
-        Expr::Captured { .. } => FunctionTargetSet::unknown(),
+        Expr::Captured {
+            slot, value_type, ..
+        } => environment
+            .captures
+            .values()
+            .find(|binding| binding.slot == *slot)
+            .and_then(|binding| binding.function_targets.clone())
+            .unwrap_or_else(|| {
+                if matches!(value_type, PrimitiveType::Function(_)) {
+                    FunctionTargetSet::unknown()
+                } else {
+                    FunctionTargetSet::default()
+                }
+            }),
         // A call's result may itself be a function value.  The checker does
         // not have a recursive return-summary environment here, so preserve
         // the function-typed boundary conservatively instead of dropping it
@@ -1691,88 +1451,6 @@ fn callable_default_is_missing(expression: &Expr, label: &str) -> bool {
             .last()
             .is_some_and(|expression| callable_default_is_missing(expression, label)),
         _ => false,
-    }
-}
-
-fn syntax_function_index(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    aliases: &BTreeMap<String, usize>,
-) -> Option<usize> {
-    match expression.kind() {
-        ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => aliases
-            .get(name.value())
-            .copied()
-            .or_else(|| function_indices.get(name.value()).copied())
-            .or_else(|| {
-                global_indices
-                    .get(name.value())
-                    .and_then(|index| globals.get(*index))
-                    .and_then(|global| global.function_index)
-            }),
-        ExpressionKind::Do(expressions) => expressions.last().and_then(|expression| {
-            syntax_function_index(
-                expression,
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            )
-        }),
-        ExpressionKind::Let {
-            pattern,
-            value,
-            body,
-        } => {
-            let mut scoped = aliases.clone();
-            if let PatternKind::Binding(name) = pattern.kind()
-                && !name.is_discard()
-                && let Some(function) = syntax_function_index(
-                    value,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                )
-            {
-                scoped.insert(name.value().to_owned(), function);
-            }
-            body.last().and_then(|expression| {
-                syntax_function_index(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    &scoped,
-                )
-            })
-        }
-        ExpressionKind::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
-            let then_function = syntax_function_index(
-                then_branch,
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            );
-            let else_function = syntax_function_index(
-                else_branch,
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            );
-            (then_function == else_function)
-                .then_some(then_function)
-                .flatten()
-        }
-        _ => None,
     }
 }
 
@@ -1868,696 +1546,6 @@ fn syntax_function_targets(
         ExpressionKind::Lambda(_) => FunctionTargetSet::closure(),
         ExpressionKind::Application(_) => FunctionTargetSet::unknown(),
         _ => FunctionTargetSet::default(),
-    }
-}
-
-fn collect_global_dependencies(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    functions: &[FunctionHeader],
-    ast: &SourceAst,
-    dependencies: &mut BTreeSet<usize>,
-) {
-    let mut visited_functions = BTreeSet::new();
-    collect_global_dependencies_inner(
-        expression,
-        global_indices,
-        function_indices,
-        functions,
-        ast,
-        dependencies,
-        &mut visited_functions,
-    );
-}
-
-fn collect_global_dependencies_inner(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    functions: &[FunctionHeader],
-    ast: &SourceAst,
-    dependencies: &mut BTreeSet<usize>,
-    visited_functions: &mut BTreeSet<usize>,
-) {
-    match expression.kind() {
-        ExpressionKind::Name(name)
-            if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
-        {
-            if let Some(index) = global_indices.get(name.value()).copied() {
-                dependencies.insert(index);
-            }
-        }
-        ExpressionKind::Application(application) => {
-            if let ExpressionKind::Name(name) = application.callee().kind()
-                && name.kind() == NameKind::Symbol
-                && let Some(function_index) =
-                    function_indices.get(name.value()).copied()
-                && visited_functions.insert(function_index)
-                && let Some(header) = functions.get(function_index)
-                && let Some(Declaration::Defn(function)) =
-                    ast.declarations().get(header.declaration_index)
-            {
-                for expression in function.expressions() {
-                    collect_global_dependencies_inner(
-                        expression,
-                        global_indices,
-                        function_indices,
-                        functions,
-                        ast,
-                        dependencies,
-                        visited_functions,
-                    );
-                }
-            }
-            collect_global_dependencies_inner(
-                application.callee(),
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            for argument in application.arguments() {
-                collect_global_dependencies_inner(
-                    argument.value(),
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_global_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::Let { value, body, .. } => {
-            collect_global_dependencies_inner(
-                value,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            for expression in body {
-                collect_global_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_global_dependencies_inner(
-                condition,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            collect_global_dependencies_inner(
-                then_branch,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            collect_global_dependencies_inner(
-                else_branch,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_global_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_global_dependencies_inner(
-                scrutinee,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-            for arm in arms {
-                collect_global_dependencies_inner(
-                    arm.result(),
-                    global_indices,
-                    function_indices,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                );
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_global_dependencies_inner(
-                operand,
-                global_indices,
-                function_indices,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-            );
-        }
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
-    }
-}
-
-fn collect_function_dependencies(
-    expression: &Expression,
-    function_indices: &BTreeMap<String, usize>,
-    dependencies: &mut BTreeSet<usize>,
-) {
-    match expression.kind() {
-        ExpressionKind::Application(application) => {
-            if let ExpressionKind::Name(name) = application.callee().kind()
-                && name.kind() == NameKind::Symbol
-                && let Some(index) = function_indices.get(name.value()).copied()
-            {
-                dependencies.insert(index);
-            }
-            collect_function_dependencies(
-                application.callee(),
-                function_indices,
-                dependencies,
-            );
-            for argument in application.arguments() {
-                collect_function_dependencies(
-                    argument.value(),
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_function_dependencies(
-                    expression,
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::Let { value, body, .. } => {
-            collect_function_dependencies(value, function_indices, dependencies);
-            for expression in body {
-                collect_function_dependencies(
-                    expression,
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_function_dependencies(condition, function_indices, dependencies);
-            collect_function_dependencies(then_branch, function_indices, dependencies);
-            collect_function_dependencies(else_branch, function_indices, dependencies);
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_function_dependencies(
-                    expression,
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_function_dependencies(scrutinee, function_indices, dependencies);
-            for arm in arms {
-                collect_function_dependencies(
-                    arm.result(),
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_function_dependencies(operand, function_indices, dependencies);
-        }
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
-    }
-}
-
-fn collect_function_alias_dependencies(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    dependencies: &mut BTreeSet<usize>,
-) {
-    collect_function_alias_dependencies_inner(
-        expression,
-        global_indices,
-        function_indices,
-        globals,
-        dependencies,
-        &BTreeMap::new(),
-    );
-}
-
-fn collect_function_alias_dependencies_inner(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    dependencies: &mut BTreeSet<usize>,
-    aliases: &BTreeMap<String, FunctionTargetSet>,
-) {
-    match expression.kind() {
-        ExpressionKind::Application(application) => {
-            dependencies.extend(
-                syntax_function_targets(
-                    application.callee(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                )
-                .known,
-            );
-            collect_function_alias_dependencies_inner(
-                application.callee(),
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            for argument in application.arguments() {
-                collect_function_alias_dependencies_inner(
-                    argument.value(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_function_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Let {
-            pattern,
-            value,
-            body,
-        } => {
-            collect_function_alias_dependencies_inner(
-                value,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            let mut scoped = aliases.clone();
-            if let PatternKind::Binding(name) = pattern.kind()
-                && !name.is_discard()
-            {
-                let targets = syntax_function_targets(
-                    value,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                );
-                if !targets.known.is_empty() || targets.unknown || targets.has_closure {
-                    scoped.insert(name.value().to_owned(), targets);
-                }
-            }
-            for expression in body {
-                collect_function_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    &scoped,
-                );
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_function_alias_dependencies_inner(
-                condition,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            collect_function_alias_dependencies_inner(
-                then_branch,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            collect_function_alias_dependencies_inner(
-                else_branch,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_function_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_function_alias_dependencies_inner(
-                scrutinee,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            for arm in arms {
-                collect_function_alias_dependencies_inner(
-                    arm.result(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_function_alias_dependencies_inner(
-                operand,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-        }
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
-    }
-}
-
-fn collect_global_alias_dependencies(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    functions: &[FunctionHeader],
-    ast: &SourceAst,
-    dependencies: &mut BTreeSet<usize>,
-) {
-    let mut visited_functions = BTreeSet::new();
-    collect_global_alias_dependencies_inner(
-        expression,
-        global_indices,
-        function_indices,
-        globals,
-        functions,
-        ast,
-        dependencies,
-        &mut visited_functions,
-        &BTreeMap::new(),
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn collect_global_alias_dependencies_inner(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    functions: &[FunctionHeader],
-    ast: &SourceAst,
-    dependencies: &mut BTreeSet<usize>,
-    visited_functions: &mut BTreeSet<usize>,
-    aliases: &BTreeMap<String, usize>,
-) {
-    match expression.kind() {
-        ExpressionKind::Name(name)
-            if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
-        {
-            if let Some(index) = global_indices.get(name.value()).copied() {
-                dependencies.insert(index);
-            }
-        }
-        ExpressionKind::Application(application) => {
-            if let Some(function_index) = syntax_function_index(
-                application.callee(),
-                global_indices,
-                function_indices,
-                globals,
-                aliases,
-            ) && visited_functions.insert(function_index)
-                && let Some(header) = functions.get(function_index)
-                && let Some(Declaration::Defn(function)) =
-                    ast.declarations().get(header.declaration_index)
-            {
-                for expression in function.expressions() {
-                    collect_global_alias_dependencies_inner(
-                        expression,
-                        global_indices,
-                        function_indices,
-                        globals,
-                        functions,
-                        ast,
-                        dependencies,
-                        visited_functions,
-                        &BTreeMap::new(),
-                    );
-                }
-            }
-            collect_global_alias_dependencies_inner(
-                application.callee(),
-                global_indices,
-                function_indices,
-                globals,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-                aliases,
-            );
-            for argument in application.arguments() {
-                collect_global_alias_dependencies_inner(
-                    argument.value(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_global_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Let {
-            pattern,
-            value,
-            body,
-        } => {
-            collect_global_alias_dependencies_inner(
-                value,
-                global_indices,
-                function_indices,
-                globals,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-                aliases,
-            );
-            let mut scoped = aliases.clone();
-            if let PatternKind::Binding(name) = pattern.kind()
-                && !name.is_discard()
-                && let Some(function) = syntax_function_index(
-                    value,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                )
-            {
-                scoped.insert(name.value().to_owned(), function);
-            }
-            for expression in body {
-                collect_global_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    &scoped,
-                );
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            for expression in [condition, then_branch, else_branch] {
-                collect_global_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_global_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_global_alias_dependencies_inner(
-                scrutinee,
-                global_indices,
-                function_indices,
-                globals,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-                aliases,
-            );
-            for arm in arms {
-                collect_global_alias_dependencies_inner(
-                    arm.result(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    functions,
-                    ast,
-                    dependencies,
-                    visited_functions,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_global_alias_dependencies_inner(
-                operand,
-                global_indices,
-                function_indices,
-                globals,
-                functions,
-                ast,
-                dependencies,
-                visited_functions,
-                aliases,
-            );
-        }
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
     }
 }
 
@@ -2725,12 +1713,12 @@ fn compiler_intrinsic(
         }
     });
     let provider = provider?;
-    if !trusted_bootstrap {
+    if provider == "host" {
         unavailable(
             diagnostics,
             source_id,
             function.span(),
-            "external declarations require the verified M2 bootstrap module",
+            "the recognized @host provider remains unavailable until M4",
         );
         return None;
     }
@@ -2745,6 +1733,15 @@ fn compiler_intrinsic(
         );
         return None;
     }
+    if !trusted_bootstrap {
+        unavailable(
+            diagnostics,
+            source_id,
+            function.span(),
+            "@compiler declarations require the verified M2 bootstrap module",
+        );
+        return None;
+    }
     let symbol = function.attributes().items().iter().find_map(|attribute| {
         if let Attribute::Symbol(Literal::String(value)) = attribute {
             Some(value.value())
@@ -2752,7 +1749,17 @@ fn compiler_intrinsic(
             None
         }
     });
-    let symbol = symbol?;
+    let Some(symbol) = symbol else {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalUnknownSymbol,
+                function.span(),
+                "a compiler external declaration requires a registered symbol",
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    };
     let Some(intrinsic) = CompilerIntrinsic::from_symbol(symbol) else {
         diagnostics.push(
             Diagnostic::new(
@@ -3057,6 +2064,15 @@ fn check_expression_in_position(
         }
         ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => {
             if name.segments().len() != 1 {
+                if let Some(target) = resolved_reference_target(environment, expression)
+                {
+                    return check_resolved_reference(
+                        environment,
+                        expression,
+                        expected,
+                        target,
+                    );
+                }
                 if let Some(index) =
                     environment.function_indices.get(name.value()).copied()
                     && let Some(header) = environment.functions.get(index)
@@ -3131,6 +2147,14 @@ fn check_expression_in_position(
                     SourceOrigin::new(environment.source_id, expression.span()),
                 ));
             }
+            if let Some(target) = resolved_reference_target(environment, expression) {
+                return check_resolved_reference(
+                    environment,
+                    expression,
+                    expected,
+                    target,
+                );
+            }
             if let Some(index) = environment.global_indices.get(name.value()).copied() {
                 let global = environment.globals.get(index)?;
                 let actual = global.value_type.clone();
@@ -3200,19 +2224,36 @@ fn check_expression_in_position(
             };
             let function_targets =
                 function_targets_from_expr(&callee, environment, &BTreeMap::new());
+            if function_targets.known.iter().any(|index| {
+                environment
+                    .functions
+                    .get(*index)
+                    .is_some_and(|function| function.variadic)
+            }) {
+                unavailable(
+                    environment.diagnostics,
+                    environment.source_id,
+                    application.span(),
+                    "applications of variadic function signatures are unavailable in M2",
+                );
+                return None;
+            }
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
-            let has_recursive_target =
-                environment.recursive_group.as_ref().is_some_and(|group| {
-                    function_targets
-                        .known
-                        .iter()
-                        .any(|index| group.contains(index))
-                });
+            // A call's own targets are reachable from the caller, so they are
+            // in its recursive group unless they are compiler-intrinsic
+            // wrappers. Checked IR computes the groups and decides whether a
+            // marked transfer reuses the activation; the checker only marks
+            // tail-position calls that can reach source code.
+            let has_source_target = function_targets.known.iter().any(|index| {
+                environment
+                    .functions
+                    .get(*index)
+                    .is_some_and(|function| function.external.is_none())
+            });
             let tail_transfer = tail_position
                 && environment.current_function.is_some()
-                && (!function_targets.known.is_empty() || function_targets.unknown)
-                && (has_recursive_target || function_targets.unknown);
+                && (has_source_target || function_targets.unknown);
             let facts = BindingFacts::new(
                 signature.parameters().len(),
                 signature
@@ -3367,7 +2408,8 @@ fn check_expression_in_position(
                 outer: environment.outer.clone(),
                 next_slot: environment.next_slot,
                 current_function: environment.current_function,
-                recursive_group: environment.recursive_group.clone(),
+                resolved_targets: environment.resolved_targets,
+                reports_redeclarations: environment.reports_redeclarations,
             };
             let slot = match pattern.kind() {
                 PatternKind::Binding(name) if name.is_discard() => None,
@@ -3469,8 +2511,9 @@ fn check_expression_in_position(
                 environment.module_names,
                 &mut *environment.bindings,
                 None,
-                None,
             );
+            nested.resolved_targets = environment.resolved_targets;
+            nested.reports_redeclarations = environment.reports_redeclarations;
             nested.outer = Some(outer);
             let mut referenced_names = Vec::new();
             for expression in lambda.body() {
@@ -3506,7 +2549,7 @@ fn check_expression_in_position(
                         if !nested.add_binding_type(
                             name.value(),
                             value_type,
-                            parameter.span(),
+                            parameter.parsed_pattern().span(),
                         ) {
                             parameters_valid = false;
                         }
@@ -3537,7 +2580,7 @@ fn check_expression_in_position(
                     if !nested.add_binding_type(
                         labelled.name(),
                         labelled.value_type(),
-                        entry.span(),
+                        entry.name_span(),
                     ) {
                         parameters_valid = false;
                     }
@@ -3592,6 +2635,67 @@ fn check_expression_in_position(
         ExpressionKind::Name(_) => {
             unknown_name(environment, expression, "<invalid name>");
             None
+        }
+    }
+}
+
+fn resolved_reference_target(
+    environment: &CheckEnvironment<'_>,
+    expression: &Expression,
+) -> Option<ResolvedReferenceTarget> {
+    let references = environment.resolved_targets?;
+    references
+        .get(&(
+            environment.source_id.to_owned(),
+            expression.span().start(),
+            expression.span().end(),
+        ))
+        .copied()
+}
+
+fn check_resolved_reference(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    expected: Option<PrimitiveType>,
+    target: ResolvedReferenceTarget,
+) -> Option<Expr> {
+    match target {
+        ResolvedReferenceTarget::Unresolved => None,
+        ResolvedReferenceTarget::Global(index) => {
+            let global = environment.globals.get(index)?;
+            let actual = global.value_type.clone();
+            ensure_expected(
+                environment,
+                expression.span(),
+                expected.clone(),
+                actual.clone(),
+            );
+            (expected
+                .as_ref()
+                .is_none_or(|expected| types_match(expected, &actual)))
+            .then_some(Expr::global(
+                index,
+                actual,
+                SourceOrigin::new(environment.source_id, expression.span()),
+            ))
+        }
+        ResolvedReferenceTarget::Function(index) => {
+            let function = environment.functions.get(index)?;
+            let actual = PrimitiveType::Function(Box::new(function.signature.clone()));
+            ensure_expected(
+                environment,
+                expression.span(),
+                expected.clone(),
+                actual.clone(),
+            );
+            (expected
+                .as_ref()
+                .is_none_or(|expected| types_match(expected, &actual)))
+            .then_some(Expr::function(
+                index,
+                function.signature.clone(),
+                SourceOrigin::new(environment.source_id, expression.span()),
+            ))
         }
     }
 }
@@ -4080,8 +3184,7 @@ mod tests {
     #[test]
     fn the_exact_bootstrap_text_module_admits_only_closed_intrinsics() {
         let source = include_str!("../../../stdlib/m2/src/std/text.vib");
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         let checked =
             check_bootstrap_source(&verification, BOOTSTRAP_TEXT_SOURCE_ID, source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -4091,48 +3194,11 @@ mod tests {
 
     #[test]
     fn signed_bootstrap_verifies_exact_bytes_and_ed25519_signature() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification =
-            verify_bootstrap(repository).expect("checked-in bootstrap provenance");
+        let verification = verify_bootstrap().expect("checked-in bootstrap provenance");
         assert_eq!(
             verification.artifact(),
             include_bytes!("../../../stdlib/m2/bootstrap.vibon")
         );
-    }
-
-    #[test]
-    fn bootstrap_rejects_tampered_declared_module_bytes() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        // macOS exposes the temporary directory through `/var`, a symlink to
-        // `/private/var`.  Canonicalize the parent so the verifier can inspect
-        // this fixture without mistaking the ambient path for a fixture link.
-        let temporary_directory =
-            std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
-        let root = temporary_directory
-            .join(format!("vibra-bootstrap-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        for relative in [
-            "stdlib/m2/bootstrap-manifest.vibon",
-            "stdlib/m2/bootstrap.vibon",
-            "stdlib/m2/bootstrap.vibon.sig",
-            "stdlib/m2/toolchain-ed25519.pub",
-            "stdlib/m2/src/std/text.vib",
-            "stdlib/m2/src/std/assert.vib",
-        ] {
-            let destination = root.join(relative);
-            std::fs::create_dir_all(destination.parent().expect("module parent"))
-                .expect("module directory");
-            std::fs::copy(repository.join(relative), &destination)
-                .expect("module copy");
-        }
-        std::fs::write(
-            root.join("stdlib/m2/src/std/text.vib"),
-            b"; modified trusted module\n",
-        )
-        .expect("tamper module");
-        let error = verify_bootstrap(&root).expect_err("tampered module");
-        assert!(error.to_string().contains("text module digest mismatch"));
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -4145,7 +3211,7 @@ mod tests {
         let program = result.program().expect("recursive program");
         assert_eq!(
             program.recursive_groups(),
-            &[vec![0, 1], vec![0, 1], vec![0, 1, 2]]
+            [vec![0, 1], vec![0, 1], vec![0, 1, 2]]
         );
         assert!(program.canonical_vibon().contains("tail: true"));
     }
@@ -4166,8 +3232,7 @@ mod tests {
         let source = r#"(import text @std.text)
 (defn answer () u64
   (text.length (text.concat "A😀" "")))"#;
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         let checked =
             check_bootstrap_text_import(&verification, "app/main.vib", source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -4179,8 +3244,7 @@ mod tests {
 
     #[test]
     fn text_import_rejects_alias_target_and_extra_imports() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         for source in [
             "(import wrong @std.text)\n(defn answer () u64 1u64)",
             "(import text @std.assert)\n(defn answer () u64 1u64)",
@@ -4201,9 +3265,28 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_explicit_text_import_uses_import_span() {
+        let verification = verify_bootstrap().expect("bootstrap provenance");
+        let source = "(import wrong @std.text)\n(defn answer () u64 1u64)";
+        let checked =
+            check_bootstrap_text_import(&verification, "app/main.vib", source);
+        let diagnostic = checked
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+            .expect("unavailable import diagnostic");
+
+        assert!(!checked.accepted());
+        assert_eq!(diagnostic.source_id(), Some("app/main.vib"));
+        assert_eq!(
+            diagnostic.primary_span(),
+            ByteSpan::new(0, source.find('\n').unwrap())
+        );
+    }
+
+    #[test]
     fn trusted_text_alias_collisions_report_the_import_span() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         let module = check_bootstrap_text_import(
             &verification,
             "app/main.vib",
@@ -4256,17 +3339,24 @@ mod tests {
                 &mut diagnostics,
                 true,
             );
-            assert!(diagnostics.iter().any(|diagnostic| {
-                diagnostic.code() == DiagnosticCode::ExternalUnknownSymbol
-                    || diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
-            }));
+            let expected = if source.contains("@host") {
+                DiagnosticCode::ToolUnavailable
+            } else if source.contains("text.unknown") {
+                DiagnosticCode::ExternalUnknownSymbol
+            } else {
+                DiagnosticCode::TypeArgumentMismatch
+            };
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code() == expected)
+            );
         }
     }
 
     #[test]
     fn trusted_text_import_rejects_source_body_and_effect_external_declarations() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let verification = verify_bootstrap(repository).expect("bootstrap provenance");
+        let verification = verify_bootstrap().expect("bootstrap provenance");
         for source in [
             r#"(import text @std.text)
 (defn answer () str "spoof"
@@ -4291,5 +3381,94 @@ mod tests {
                 checked.diagnostics()
             );
         }
+    }
+
+    #[test]
+    fn variadic_array_and_map_calls_are_unavailable_at_the_application() {
+        let sources = [
+            (
+                "array",
+                "(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-array () i32\n  (do (collect-array 1i32) (collect-array 1i32 2i32)))",
+                ["(collect-array 1i32)", "(collect-array 1i32 2i32)"],
+            ),
+            (
+                "map",
+                "(defn collect-map (first i32) i32\n  variadic: (rest (map str i32))\n  first)\n(defn use-map () i32\n  (do (collect-map 1i32) (collect-map 1i32 \"key\" 2i32)))",
+                ["(collect-map 1i32)", "(collect-map 1i32 \"key\" 2i32)"],
+            ),
+        ];
+
+        for (label, source, calls) in sources {
+            let result = check_source(format!("{label}.vib"), source);
+            for call in calls {
+                let start = source.find(call).expect("call source span");
+                let span = ByteSpan::new(start, start + call.len());
+                assert!(
+                    result.diagnostics().iter().any(|diagnostic| {
+                        diagnostic.code() == DiagnosticCode::ToolUnavailable
+                            && diagnostic.primary_span() == span
+                    }),
+                    "{label} call must be unavailable at {span:?}: {:?}",
+                    result.diagnostics()
+                );
+                assert!(
+                    !result.diagnostics().iter().any(|diagnostic| {
+                        diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+                            && diagnostic.primary_span() == span
+                    }),
+                    "{label} call must not be reclassified as a fixed-arity mismatch: {:?}",
+                    result.diagnostics()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn variadic_targets_survive_lambda_alias_captures() {
+        let source = "(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-alias () i32\n  (let alias collect-array (alias 1i32)))\n(defn use-direct () (fn () i32)\n  (let alias collect-array\n    (lambda () i32 (alias 1i32))))\n(defn use-nested () (fn () (fn () i32))\n  (let alias collect-array\n    (lambda () (fn () i32)\n      (lambda () i32 (alias 1i32)))))";
+        let result = check_source("captured-variadic.vib", source);
+        let call = "(alias 1i32)";
+        let expected_spans = source
+            .match_indices(call)
+            .map(|(start, _)| ByteSpan::new(start, start + call.len()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(expected_spans.len(), 3);
+        for span in expected_spans {
+            assert!(
+                result.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.code() == DiagnosticCode::ToolUnavailable
+                        && diagnostic.primary_span() == span
+                }),
+                "captured variadic call must be unavailable at {span:?}: {:?}",
+                result.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn higher_order_call_flow_converges_through_a_long_chain() {
+        // Each function forwards its callable parameter to the next, so the
+        // entry's argument must flow through every parameter summary.
+        // The single-source entry is the first function.
+        let depth = 200;
+        let mut source = format!(
+            "(defn answer () i32 (f{} leaf))\n(defn leaf () i32 1i32)\n(defn f0 (g (fn () i32)) i32 (g))\n",
+            depth - 1
+        );
+        for index in 1..depth {
+            source.push_str(&format!(
+                "(defn f{index} (g (fn () i32)) i32 (f{} g))\n",
+                index - 1
+            ));
+        }
+        let started = std::time::Instant::now();
+        let result = check_source("chain.vib", &source);
+        assert!(result.accepted(), "{:?}", result.diagnostics());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(30),
+            "call-flow analysis took {:?}",
+            started.elapsed()
+        );
     }
 }

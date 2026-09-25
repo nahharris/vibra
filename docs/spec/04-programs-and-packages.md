@@ -1,7 +1,10 @@
 # Vibra v1 programs and packages
 
 Status: normative target
-Implementation status: milestone 1 steps 7 and 10 complete for generic VIBON grammar, canonical data, and structural query metadata; project schemas and resolution remain later work
+Implementation status: M1 supplies generic VIBON data and structural query
+metadata; M2 decodes projects, resolves local modules, and supports init,
+check, run, and test for its pure subset. Ordinary dependency delivery remains
+deferred.
 
 ## VIBON data documents
 
@@ -174,15 +177,33 @@ bytes are read.
 
 Source walking uses `symlink_metadata` and canonical path components. A
 symlink or junction encountered at a target root or below it MUST resolve to a
-canonical path inside both the project root and the owning target root; an
+canonical path inside both the project root and the owning source root; an
 escaping link emits `@module.path-escape`, and a dangling or unreadable link
 emits `@module.io-error`. In-root links are allowed, but canonical directory
 identity is tracked: a cycle is reported as `@module.path-escape`, and an
 already visited canonical directory is skipped so aliases cannot duplicate a
 module. A linked file is admitted once, at the lexicographically first
-project-relative path. The root directory itself MUST NOT be a link; the target
-root is canonicalized as part of root validation. No source byte is read until
-these confinement checks pass.
+project-relative path. A source root itself MUST NOT be a link; a target root
+is canonicalized as part of target-root validation. No source byte is read
+until these confinement checks pass.
+
+The project also reserves the optional top-level `tests/` directory as the
+source root of one test-only unit named `@tests`. If the directory is absent,
+the unit has no modules. If present, it MUST be a directory and is canonicalized
+and walked with the same confinement, link, ordering, extension, and segment
+rules as a target root. A non-directory or invalid root emits
+`@project.invalid-target-root` at the empty span of project-relative path
+`tests`; a test root that escapes the project emits `@module.path-escape`.
+An in-project `tests/` root that is itself a symlink emits
+`@project.invalid-target-root` at that same empty path span. The test root MUST
+be disjoint from
+every target root. A target root equal to or nested under `tests/` emits
+`@project.overlapping-target-roots` at that target's `root` field, with no
+related span for the synthetic test root. Validate the test root and its
+disjointness from all target roots before enumerating any source. The
+synthetic `@tests` unit is always reserved, including when the directory is
+absent. A target name or dependency alias `tests` emits
+`@project.reserved-unit-name` at the declared name or alias span.
 
 Within each target, entries are sorted by their `/`-separated project-relative
 path before descent. A regular file is a source module only when its extension
@@ -196,8 +217,10 @@ any module is parsed. Source IDs are stable project-relative paths, bytes are
 copied exactly into an immutable snapshot, and repeated snapshots from an
 unchanged tree have identical unit/module order, IDs, and bytes.
 
-The Step 3 source graph contains one explicit unit for each local target and
-one explicit, unresolved dependency edge for each declared dependency. A
+The source graph contains one explicit unit for each local target, the
+reserved `@tests` unit, and one explicit, unresolved dependency edge for each
+declared dependency. The `@tests` unit has kind `@lib` in the graph snapshot,
+but it is not a project target or a dependency and has no target entry. A
 dependency edge retains its alias, kind, target value, and source span. Graph
 construction MUST NOT resolve, fetch, inspect, or silently discard a dependency;
 because ordinary dependency delivery is deferred to M5, each unsupported edge
@@ -219,9 +242,11 @@ therefore belongs to exactly one target and has exactly one canonical path.
 Overlapping roots emit `@project.overlapping-target-roots`. Target and
 dependency names share one project namespace and cannot collide.
 
-A *unit* is one local target or one dependency alias. The unit is the root of
-code reference: the first component of every code-reference atom names a unit,
-and the remaining components address an entity beneath it.
+A *unit* is one local target, the reserved test unit `@tests`, or one dependency
+alias. The unit is the root of code reference: the first component of every
+code-reference atom names a unit, and the remaining components address an
+entity beneath it. Only the test runner and `@tests` modules may resolve the
+`@tests` unit; a local target's import graph does not contain it.
 
 A binary target record MUST contain `entry` and `effects`; a library target
 record MUST omit both. A library has no execution entry and no index module: its
@@ -374,26 +399,39 @@ Before ordinary dependency delivery exists, M2 has one offline standard-library
 input. The input is the repository-owned byte file
 `stdlib/m2/bootstrap.vibon`, and its authority is the adjacent
 `stdlib/m2/bootstrap-manifest.vibon`. The manifest is the only source of the
-bootstrap identity: it records the artifact's exact `sha256:` digest, an
-Ed25519 public key, a detached signature over the artifact bytes, and the
-ordered import map. The checked-in public key is the toolchain key for this
-repository; a project file, package name, filename, source annotation,
-conformance profile, or copied declaration never supplies authority.
+bootstrap identity: it records the fixed package name `vibra-stdlib`, exact
+package version `0.1.0`, the artifact's exact `sha256:` digest, an Ed25519
+public key, a detached signature over the artifact bytes, and the ordered
+import map. The manifest bytes are pinned to the reviewed build-time trust
+input. Its package name MUST match the `package` string inside the signed
+artifact; its package version is the exact M2 bootstrap package version. The
+checked-in public key is the toolchain key for this repository; a project
+file, filename, source annotation, conformance profile, or copied declaration
+never supplies authority.
 
 The Step 1 artifact identity is fixed at
 `sha256:8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103`.
 The toolchain public-key file is
 `stdlib/m2/toolchain-ed25519.pub` with fixed digest
 `sha256:fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509`.
-The detached signature is base64 Ed25519 over the artifact bytes; its checked
+The key file is one PEM `PUBLIC KEY` block whose DER body is exactly the
+RFC 8410 Ed25519 `SubjectPublicKeyInfo` prefix followed by 32 key bytes; any
+other key shape is rejected. The detached signature is base64 Ed25519 over the
+artifact bytes; its checked
 in file has digest
 `sha256:f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63`.
 These values are part of the M2 contract and may change only with a reviewed
 bootstrap-contract change that replaces the signature and all dependent
 evidence together.
 
-The verifier reads the manifest and artifact as bytes, checks the manifest's
-format and field types, computes SHA-256 over the exact artifact bytes, and
+The toolchain embeds these reviewed files, including both mapped modules, at
+build time. `check`, `run`, and `test` verify the embedded bytes; they never
+read the bootstrap from the project, the build checkout, or the installation
+directory, so a relocated toolchain binary behaves identically. The verifier
+is a pure function of those bytes.
+
+The verifier reads the manifest and artifact as bytes, decodes the manifest
+through a closed typed record and checks its format and field types, computes SHA-256 over the exact artifact bytes, and
 rejects a digest mismatch before parsing or resolving any bootstrap record. It
 then verifies the detached Ed25519 signature with the fixed public key whose
 digest is above and rejects an invalid signature. The manifest's key path and
@@ -406,12 +444,27 @@ must not fall back to a vendored or ambient standard library.
 The manifest's import map is closed in M2. `@std.text` maps to the trusted text
 module and `@std.assert` maps to the trusted assertion module. Each map value
 contains the canonical relative path and SHA-256 of that module's exact bytes;
-the verifier hashes those bytes and compares them with the records inside the
-signed artifact before admitting any declaration or test registry member. An
+the verifier decodes the signed artifact through its own closed typed record,
+requires its `package`, import map, and symbol lists to equal the manifest's
+structurally (the same module atom, path, digest, and role in each entry, in
+order), and hashes each module's bytes against its entry before admitting any
+declaration or test registry member. An
 import is accepted only when its resolved module identity is exactly the
 mapped identity; users must write the import explicitly. No standard-library
 module is an ambient prelude, and ordinary packages cannot add, replace, or
-rebind a bootstrap map entry.
+rebind a bootstrap map entry. After verification, the mapped modules enter the
+resolver as a distinct `vibra-stdlib@0.1.0` package with unit `@std` and their
+canonical module paths. The resolver MUST retain that package provenance in
+their declaration identities. The overlay is added only from the verified
+manifest; it is not loaded through a project dependency edge, vendor directory,
+cache, or fallback search. Ordinary project dependency edges remain explicit
+and unavailable in M2.
+
+The combined project and overlay graph MUST keep source IDs unique across all
+packages because a source ID selects the document used for diagnostic spans.
+If a project module and a verified module use the same source ID, resolution
+emits `@module.source-id-collision`; the affected selected graph is not type
+checked or executed.
 
 The bootstrap record contains the C7 pure text symbols and the C9 assertion
 member names. It is an allowlist and provenance input, not a second language
@@ -427,25 +480,81 @@ dependency-provided executable in v1.
 
 ## Tests
 
-Tests are declarations in `.vib` modules under `tests/`:
+Every `.vib` file under the project `tests/` root is a module in the reserved
+`@tests` unit. Its canonical module identity is `@tests` followed by the
+slash-separated project-relative path beneath `tests/`, without `.vib`, with
+slashes replaced by dots. For example, `tests/math/add.vib` is `@tests.math.add`.
+There is no root/index module. Test modules are captured into the same immutable
+workspace snapshot as target modules, with their exact project-relative source
+IDs and bytes. They are not part of a target's module closure. A local target
+module cannot import `@tests`; that import path emits `@module.unknown-path`.
+Modules within `@tests` may import other `@tests` modules under the ordinary
+module-resolution, cycle, and public-visibility rules.
+
+Tests are declarations in those modules. A `test` declaration outside the
+reserved `@tests` unit emits `@tool.unavailable` in M2 and is never admitted
+into a target program:
 
 ```vibra
 (import assert @std.assert)
 
 (test "greets by name"
-  (assert.equal (greet "Ada") "hello, Ada"))
+  (assert.equal-str (greet "Ada") "hello, Ada"))
 ```
 
-A test has a unique module-local string name. Its omitted `effects:` is empty;
-an effectful test writes its complete ceiling. Selecting and running an
-effectful test is consent to those roots. Test selection never adds effects
-that are not written in the test declaration.
+A test's identity is its canonical module identity and decoded string name.
+Names compare by exact Unicode scalar sequence without normalization and MUST
+be unique within one module; repeating a name emits `@name.redeclaration` at
+the later test name and relates the earlier name. The same string name in a
+different test module is distinct. Test discovery order is ascending canonical
+module identity by UTF-8 bytes, then source declaration order within a module.
+The canonical string-literal spelling used for selectors and string values is
+double-quoted; `\"` escapes a quote, `\\` escapes a backslash, and `\n`, `\r`,
+and `\t` escape line feed, carriage return, and tab. Other C0 controls and DEL
+use `\u{hex}`, where `hex` has one
+to six lowercase hexadecimal digits and no leading zero. All other Unicode
+scalars appear literally. Booleans use `true` or `false`; `i32` and `u64`
+values use base-10 digits with their `i32` or `u64` suffix and no leading
+zeroes or plus sign; zero is `0i32` or `0u64`. Characters use the canonical
+EDN spelling: `\newline`, `\return`, `\space`, and `\tab`; other controls and
+BMP whitespace use `\u` plus four uppercase hexadecimal digits; other scalars
+use a backslash followed by the scalar. Assertion names in failures are canonical
+`@std.assert.<member>` atoms. The same literal spelling rules apply to the
+`expected` and `actual` strings in structured assertion failures.
+The runner checks every selected test module and the modules in its import
+closure for ordinary syntax, import, and type diagnostics before executing any
+selected test. With no selector, all discovered tests are selected. An
+explicit selector does not check unrelated test modules or target modules. For
+availability checking, each selected test has a declaration-dependency closure:
+start with the test declaration and its body, follow every resolved declaration
+reference in that body, then recursively follow references in each reached
+declaration's type, signature, and body until no new declaration is reached.
+An M2-unavailable form produces `@tool.unavailable` for each selected test
+whose declaration-dependency closure contains that form. Merely importing a
+module does not make every declaration in it a dependency; a valid unavailable
+form outside every selected test's declaration-dependency closure does not
+affect that `test` command. A shared helper's unavailable form can therefore
+make the tests that reference it unavailable while leaving other selected
+tests runnable. A module that declares a test MUST explicitly import
+`@std.assert`; helper modules without tests do not need that import. Test
+imports use ordinary unit aliases and ordinary public-visibility rules; no
+test-only prelude or private-access exception exists.
+
+The full v1 test language permits declared effect ceilings, but M2 admits only
+tests whose computed effects are empty. An omitted `effects:` is empty; an
+explicit nonempty row or a test that performs an effect is unavailable in M2
+and emits `@tool.unavailable` before execution. M2 test selection grants no
+effect consent and cannot add effects to a test declaration.
 
 ### M2 assertion contract
 
-An M2 test module MUST import `@std.assert` explicitly. The verified bootstrap
-exports exactly these test-only assertion members; they are resolved by their
-canonical module identity and are not user-definable external declarations:
+An M2 test module MUST import `@std.assert` explicitly. If a module declares
+one or more tests but has no import targeting exactly `@std.assert`, emit one
+`@module.missing-required-import` diagnostic at the string name of its first
+test declaration. This is an ordinary source error: all selected tests are
+invalid and none execute. The verified bootstrap exports exactly these
+test-only assertion members; they are resolved by their canonical module
+identity and are not user-definable external declarations:
 
 | Member | Exact signature | Passing behavior |
 | --- | --- | --- |
@@ -456,6 +565,12 @@ canonical module identity and are not user-definable external declarations:
 | `assert.equal-str` | `str str -> void` | succeeds when both operands have the same Unicode scalar sequence |
 | `assert.equal-i32` | `i32 i32 -> void` | succeeds when both operands have the same signed value |
 | `assert.equal-u64` | `u64 u64 -> void` | succeeds when both operands have the same unsigned value |
+
+These callable members are admitted only from declarations in the reserved
+`@tests` unit. A reference to one from a local target declaration emits
+`@tool.unavailable` at the reference span and prevents target execution;
+importing `@std.assert` without referencing a member does not by itself make a
+target unavailable.
 
 The table is closed: another assertion name, generic assertion, implicit
 conversion, collection assertion, or deferred operand type is
@@ -474,16 +589,31 @@ does not throw, create a `result` value,
 emit a host event, or become a runtime trap. The runner continues with the
 next selected test using a fresh value state and empty audit trace. A test item
 therefore has exactly one of `@test.passed`, `@test.assertion-failed`,
-`@test.invalid`, `@test.unavailable`, or `@test.trap`; only the first two are
-ordinary assertion outcomes, and a suite containing any non-passing item is not
-`@command.ok`.
+`@test.invalid`, `@test.unavailable`, or `@test.trap`. `@test.invalid` means
+duplicate test identities or error-level syntax, import, or type diagnostics
+prevented the selected suite from executing; every selected item is invalid
+in that case, and none executes. Warning-level diagnostics remain attached to
+the suite and to each selected test whose module or import closure contains
+their primary source, but do not prevent execution or change a test outcome.
+Suite-wide static diagnostics are attributed to each selected test whose module
+or import closure contains the diagnostic's primary source; the same diagnostic
+may occur in multiple test items. Item-owned diagnostics are attributed by the
+test declaration that produced them, even when selected tests share a module:
+an unavailable-form diagnostic belongs to each test whose declaration-
+dependency closure contains the form, and a runtime trap diagnostic belongs
+only to the test that trapped. `@test.unavailable` means the selected test's
+declaration-dependency closure contains a valid but M2-unavailable form; that
+item does not execute, but other selected tests may run after preflight when no
+ordinary diagnostics block the suite. Invalid and unavailable items have empty
+audit traces. A suite containing any non-passing item is not `@command.ok`.
 
 Static type or import errors are reported before any selected test executes.
 An unavailable assertion or test form retains its source span and reports
 `@tool.unavailable`; it is never silently skipped. A runtime trap remains the
-separate `@test.trap` outcome with its structured trap diagnostic. Empty test
-selection is a successful empty suite only when the selector is omitted; an
-unknown explicit selector is invalid input.
+separate `@test.trap` outcome with its structured trap diagnostic and stops only
+that test. The runner then starts the next selected test with fresh value state
+and an empty audit trace. Empty test selection is a successful empty suite only
+when the selector is omitted; an unknown explicit selector is invalid input.
 
 The runner isolates each test's values and host event log. Time and random
 operations use deterministic providers by default. An unconsumed failure or

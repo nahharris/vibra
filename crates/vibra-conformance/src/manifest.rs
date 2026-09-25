@@ -115,6 +115,14 @@ pub enum ConformanceOperation {
     Interpret,
     /// Render semantic facts from one immutable workspace snapshot.
     Query,
+    /// Format one source document using bindings from its confined snapshot.
+    Format,
+    /// Check every declaration in one confined workspace snapshot.
+    WorkspaceCheck,
+    /// Check and interpret the unique binary target in a confined workspace.
+    WorkspaceRun,
+    /// Discover, check, and run all tests in a confined workspace.
+    WorkspaceTest,
 }
 
 impl ConformanceOperation {
@@ -129,6 +137,10 @@ impl ConformanceOperation {
             Self::TypeCheck => "type-check",
             Self::Interpret => "interpret",
             Self::Query => "query",
+            Self::Format => "format",
+            Self::WorkspaceCheck => "workspace-check",
+            Self::WorkspaceRun => "workspace-run",
+            Self::WorkspaceTest => "workspace-test",
         }
     }
 }
@@ -341,6 +353,42 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 "query cases must declare at least one expected query".to_owned(),
             ));
         }
+        if operation == ConformanceOperation::Format && expectations.formatted.is_none()
+        {
+            return Err(ManifestError::Invalid(
+                "format cases must declare a formatted snapshot".to_owned(),
+            ));
+        }
+        if operation == ConformanceOperation::WorkspaceRun {
+            if expectations.accepted
+                && expectations.interpreter.as_ref().is_none_or(|execution| {
+                    execution.result.is_none() || execution.audit_trace.is_none()
+                })
+            {
+                return Err(ManifestError::Invalid(
+                    "workspace-run cases require interpreter result and audit snapshots"
+                        .to_owned(),
+                ));
+            }
+            if expectations.interpreter.as_ref().is_some_and(|execution| {
+                execution.result.is_none() || execution.audit_trace.is_none()
+            }) {
+                return Err(ManifestError::Invalid(
+                    "workspace-run execution snapshots must include result and audit trace"
+                        .to_owned(),
+                ));
+            }
+        }
+        if operation == ConformanceOperation::WorkspaceTest
+            && expectations.interpreter.as_ref().is_none_or(|execution| {
+                execution.result.is_none() || execution.audit_trace.is_some()
+            })
+        {
+            return Err(ManifestError::Invalid(
+                "workspace-test cases require one result snapshot and no audit trace"
+                    .to_owned(),
+            ));
+        }
         {
             for diagnostic in &expectations.diagnostics {
                 if let Some(source_id) = &diagnostic.source_id
@@ -410,6 +458,10 @@ fn decode_operation(
         Some("type-check") => ConformanceOperation::TypeCheck,
         Some("interpret") => ConformanceOperation::Interpret,
         Some("query") => ConformanceOperation::Query,
+        Some("format") => ConformanceOperation::Format,
+        Some("workspace-check") => ConformanceOperation::WorkspaceCheck,
+        Some("workspace-run") => ConformanceOperation::WorkspaceRun,
+        Some("workspace-test") => ConformanceOperation::WorkspaceTest,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
@@ -492,6 +544,88 @@ fn decode_operation(
             ));
         }
     }
+    if operation == ConformanceOperation::Format {
+        if profile != ConformanceProfile::ToolingV1 {
+            return Err(ManifestError::Invalid(
+                "format cases require the tooling-v1 profile".to_owned(),
+            ));
+        }
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one confined tree input".to_owned(),
+            ));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one project input".to_owned(),
+            ));
+        };
+        let Some(source) = inputs.source.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one source input".to_owned(),
+            ));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "format project input must be exactly `{expected_project}`"
+            )));
+        }
+        if !inputs.data.is_empty() {
+            return Err(ManifestError::Invalid(
+                "format cases may not declare additional data inputs".to_owned(),
+            ));
+        }
+        validate_tree_source_input(tree, source, "format")?;
+    }
+    if matches!(
+        operation,
+        ConformanceOperation::WorkspaceCheck
+            | ConformanceOperation::WorkspaceRun
+            | ConformanceOperation::WorkspaceTest
+    ) {
+        let required_profile = match operation {
+            ConformanceOperation::WorkspaceCheck => ConformanceProfile::StaticV1,
+            ConformanceOperation::WorkspaceRun
+            | ConformanceOperation::WorkspaceTest => ConformanceProfile::InterpreterV1,
+            _ => {
+                return Err(ManifestError::Invalid(
+                    "workspace operation profile validation was misrouted".to_owned(),
+                ));
+            }
+        };
+        if profile != required_profile {
+            return Err(ManifestError::Invalid(format!(
+                "{} cases require the {required_profile} profile",
+                operation.as_str()
+            )));
+        }
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(format!(
+                "{} requires one confined tree input",
+                operation.as_str()
+            )));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(format!(
+                "{} requires one project input",
+                operation.as_str()
+            )));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "{} project input must be exactly `{expected_project}`",
+                operation.as_str()
+            )));
+        }
+        if inputs.source.is_some() || !inputs.data.is_empty() {
+            return Err(ManifestError::Invalid(format!(
+                "{} cases use only the confined tree as their source input",
+                operation.as_str()
+            )));
+        }
+    }
     Ok(operation)
 }
 
@@ -517,10 +651,18 @@ fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
 }
 
 fn validate_query_input(tree: &str, input: &str) -> Result<(), ManifestError> {
+    validate_tree_source_input(tree, input, "query")
+}
+
+fn validate_tree_source_input(
+    tree: &str,
+    input: &str,
+    operation: &str,
+) -> Result<(), ManifestError> {
     let prefix = format!("{tree}/");
     let Some(source_id) = input.strip_prefix(&prefix) else {
         return Err(ManifestError::Invalid(format!(
-            "query input `{input}` must be beneath the declared tree `{tree}`"
+            "{operation} input `{input}` must be beneath the declared tree `{tree}`"
         )));
     };
     let path = Path::new(source_id);
@@ -537,7 +679,7 @@ fn validate_query_input(tree: &str, input: &str) -> Result<(), ManifestError> {
         || path.extension().and_then(|extension| extension.to_str()) != Some("vib")
     {
         return Err(ManifestError::Invalid(format!(
-            "query input `{input}` must be a relative `.vib` file beneath `{tree}`"
+            "{operation} input `{input}` must be a relative `.vib` file beneath `{tree}`"
         )));
     }
     Ok(())
@@ -620,8 +762,8 @@ fn decode_expectations(
             "source-graph snapshots must use the .vibon extension".to_owned(),
         ));
     }
-    let interpreter = raw.interpreter.map(decode_execution);
-    let wasm = raw.wasm.map(decode_execution);
+    let interpreter = raw.interpreter.map(decode_execution).transpose()?;
+    let wasm = raw.wasm.map(decode_execution).transpose()?;
     let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);
 
     Ok(CaseExpectations {
@@ -647,11 +789,22 @@ fn decode_expectations(
     })
 }
 
-fn decode_execution(raw: RawExecution) -> ExpectedExecution {
-    ExpectedExecution {
+fn decode_execution(raw: RawExecution) -> Result<ExpectedExecution, ManifestError> {
+    if raw.audit_trace.as_deref().is_some_and(|audit_trace| {
+        Path::new(audit_trace)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("vibon")
+    }) {
+        return Err(ManifestError::Invalid(
+            "audit-trace snapshots must use the .vibon extension".to_owned(),
+        ));
+    }
+
+    Ok(ExpectedExecution {
         result: raw.result,
         audit_trace: raw.audit_trace,
-    }
+    })
 }
 
 fn decode_diagnostic(

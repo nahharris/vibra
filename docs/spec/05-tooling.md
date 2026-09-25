@@ -1,9 +1,9 @@
 # Vibra v1 CLI, MCP, and code tooling
 
 Status: normative target
-Implementation status: Milestone 1 step 10 provides the structural
-source-position query library and schema adapter; CLI and MCP surfaces remain
-unimplemented.
+Implementation status: M2 provides `project init`, `fmt`, `check`, `run`, and
+`test` through the shared workspace engine. MCP and the remaining v1 tooling
+commands remain unavailable.
 
 ## One workspace engine
 
@@ -52,19 +52,126 @@ vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
 vibra [--format human|json] [--workspace PATH] check [TARGET]
 vibra [--format human|json] [--workspace PATH] run TARGET
 vibra [--format human|json] [--workspace PATH] test [TEST]
+vibra [--format human|json] help
 ```
 
+`help` may also be spelled `--help` or `-h` in the command position. It takes
+no arguments, prints this grammar to stdout in human mode, and succeeds with
+`@command.ok`; its JSON payload is `{ "usage": string }` and its `command` is
+`help`. `help` followed by any argument is invalid input.
+
 `--format` defaults to `human` and may occur once before the command. The
-default workspace is the current directory; `PATH`, `DEST`, `TARGET`, and
-`TEST` are workspace-relative and may not escape its canonical root. `DEST`
-defaults to the workspace for `project init`; it must be absent or empty, and
-the command creates only the canonical `project.vibon`, `src/`, and `tests/`
-layout. `fmt` previews by default; `--write` is its only mutating flag. `check`
+default workspace is the current directory. `PATH` and `DEST` are
+workspace-relative and may not escape its canonical root. `TARGET` is relative
+to the discovered project root and may not escape it. `TEST` is an exact
+test selector, not a path. Its grammar is a canonical test-module atom, then
+`::`, then one canonical Vibra string literal containing the decoded test
+name; for example, `@tests.math::"adds one"`. The module atom MUST begin with
+`@tests.` and contain the test module's full dotted path. The selector string
+literal uses the canonical string-literal spelling defined by the projects
+chapter. No whitespace is permitted outside the atom and string literal. A
+malformed or noncanonical selector is
+`@command.invalid-input` with process exit 2 and an empty diagnostic array.
+`DEST` defaults to the workspace for `project init`; it must be absent or
+empty, and the command creates only the canonical `project.vibon`, `src/`, and
+`tests/` layout. `fmt` previews by default; `--write` is its only mutating
+flag. `check`
 checks every target when `TARGET` is omitted. `run` requires one binary target.
-`test` runs every test when `TEST` is omitted and otherwise selects one exact
-module-qualified test name. Options after the command are limited to the
-explicit `fmt --write` spelling; unknown options, extra positionals, and
-alternate spellings are invalid input.
+`test` runs every test in canonical discovery order when `TEST` is omitted and
+otherwise selects the declaration or declarations with exactly that module and
+decoded name; a valid workspace has one because duplicate names are errors. A
+missing or empty `tests/` root is an empty suite; it succeeds only when `TEST`
+is omitted. Project, root, or source-graph diagnostics yield
+`@command.diagnostics` (exit 1), zero selected/passed/failed counts, and an
+empty `tests` array before selector lookup. With no selector, all test modules
+are parsed to discover declarations;
+with an explicit selector, its module is parsed to resolve the literal name.
+Any diagnostic from that required source parsing yields
+`@command.diagnostics` (exit 1) with zero selected/passed/failed counts and an
+empty `tests` array. After these checks, an unknown module or test name is
+`@command.invalid-input` with exit 2 and no diagnostics; semantic checking of a
+nonexistent selection is not performed. A selected suite is fully checked
+before any test body runs. Error-level ordinary syntax, import, type, or
+duplicate test identity diagnostics found during that check yield
+`@command.diagnostics` (exit 1), mark every selected item `@test.invalid`, and
+prevent all execution. Warning-level diagnostics remain in the envelope and
+are attributed to affected test items without blocking execution.
+An otherwise valid selected test whose declaration-dependency closure contains
+an M2-unavailable form is `@test.unavailable` with `@tool.unavailable`; other
+selected tests whose dependency closures do not contain that form still run.
+Overall result precedence is `@command.trap`, then `@command.unavailable`, then
+`@command.test-failed`, then `@command.ok`, after the preflight diagnostic
+cases above. Thus any trap wins over unavailable forms, and any unavailable
+form wins over assertion failures.
+
+The `tests[].name` payload field is the exact canonical selector spelling.
+`tests[].result` is one of the five `@test.*` result atoms defined by the
+projects chapter. `tests[].failure` is non-null only for
+`@test.assertion-failed`; `tests[].trap` is non-null only for `@test.trap`;
+`tests[].auditTrace` is an event-string array and is empty for every M2 test.
+`tests[].diagnostics` contains suite-wide static diagnostics attributed through
+the test's module/import closure and item-owned diagnostics attributed by test
+identity and declaration-dependency closure. The same diagnostic documents also
+appear once in the envelope's `diagnostics` array. Each diagnostic appears at
+most once in the envelope array, in canonical diagnostic order, even if shared
+by multiple test items. `selected` is the
+number of selected test items, `passed` counts
+`@test.passed`, and `failed` is `selected - passed`. Options after the command
+are limited to the explicit `fmt --write` spelling; unknown options, extra
+positionals, and alternate spellings are invalid input.
+
+`TARGET` is a relative filesystem path. After canonicalization beneath the
+discovered project root, it MUST identify exactly one validated local target's
+canonical root; target names and target-name atoms are not selectors. Pairwise
+disjoint roots make this match unique. A path that does not identify a target
+and a library selected by `run` are `@command.invalid-input` with process exit
+2 and an empty diagnostic array. Omitting the required `run TARGET` is also
+invalid input.
+
+`check TARGET` checks every source declaration in that target and in every
+local target unit reached through its imports, recursively. It checks all
+modules and declarations in those units, including declarations unreachable
+from the selected entry. Errors in an unrelated local target do not affect an
+explicitly selected target. Without `TARGET`, `check` covers every local
+target. `run TARGET` uses the same checking scope, then executes only the
+selected binary target. Workspace discovery, source-graph, ordinary dependency,
+and bootstrap-provenance diagnostics still apply to the whole captured
+workspace snapshot and block checking or execution.
+
+M2 Step 12 implements `check` and pure `run` over a captured project snapshot.
+Step 13 implements `test` over the same snapshot and test-unit contract.
+The default init destination is the workspace root. Otherwise `DEST` names a
+workspace-relative directory whose parent directories already exist. The
+package and binary target name comes from the destination directory name (or
+the workspace name when `DEST` is omitted): lowercase the Unicode text, keep
+ASCII letters and digits, replace each run of other characters with one
+hyphen, and trim edge hyphens. Use `hello` when no ASCII letter or digit
+remains, and prefix `project-` when the result starts with a digit.
+
+The initialized package is version `0.1.0` with no dependencies, one binary
+target rooted at `src/<name>` with entry `@<name>.main.main`, and source
+`src/<name>/main.vib` containing a pure `void` `main`. It also creates `src/`
+and `tests/`. The generated entry imports no standard-library module, so C8's
+stdlib bootstrap is unnecessary for this pure project. Init rejects a
+nonempty destination and any path that escapes the canonical workspace. Its
+`workspace` result is the canonical initialized root; `created` lists every
+created file and directory relative to that root, in creation-plan order.
+
+For `fmt`, the successful payload path is the canonical slash-separated
+workspace-relative path. `changed` compares the input bytes with the planned
+canonical UTF-8 bytes. Preview returns the formatted text and leaves the file
+untouched. `--write` returns `written: true` only when a changed file was
+replaced successfully; a successful write response has `text: null`. If
+diagnostics prevent application, `written` is false and the planned text is
+returned. A recovered document is preserved byte-for-byte. The formatter may
+reorder labelled arguments only when an accepted checker result for that exact
+source in the captured workspace snapshot supplies their binding facts; absent
+facts never authorize an inferred reorder.
+If the single-source checker reports `@tool.unavailable`, `fmt` discards that
+incomplete check result and continues with syntax-only formatting. It uses no
+binding facts and must preserve labelled argument order; the unavailable
+semantic check does not make formatting unavailable. Parser and formatter
+diagnostics still apply to preview and write.
 
 JSON mode emits exactly one versioned envelope to stdout and sends diagnostics
 and operational logs to stderr. The envelope always has these fields:
@@ -83,7 +190,8 @@ and operational logs to stderr. The envelope always has these fields:
 `@command.test-failed`, `@command.invalid-input`,
 `@command.operational-failure`, `@command.trap`, or `@command.unavailable`.
 `diagnostics` is always an array of the versioned diagnostic documents. Payloads are closed by
-command: `init` has `{ "workspace": string, "created": string[] }`; `fmt`
+command: `help` has `{ "usage": string }`; `init` has
+`{ "workspace": string, "created": string[] }`; `fmt`
 has `{ "path": string, "changed": boolean, "written": boolean,
 "text": string|null }`; `check` has `{ "accepted": boolean }`; `run` has
 `{ "target": string, "programResult": string|null, "stdout": string,
@@ -92,7 +200,9 @@ has `{ "path": string, "changed": boolean, "written": boolean,
 `{ "selected": integer, "passed": integer, "failed": integer,
 "tests": [{ "name": string, "result": string, "failure":
 { "assertion": string, "expected": string, "actual": string,
-"primarySpan": SpanDocument }|null, "diagnostics": [] }] }`.
+"primarySpan": SpanDocument }|null, "trap": { "trapCode": string,
+"origin": SpanDocument|null }|null, "auditTrace": string[],
+"diagnostics": DiagnosticDocument[] }] }`.
 `programResult` is the pure value result; a runtime trap is represented by
 `@command.trap` and its structured diagnostic, never as a successful value.
 The trap payload has `trapCode: string` and `origin: SpanDocument|null` when
@@ -100,6 +210,16 @@ the command owns a program result. In JSON mode
 `stdout` captures program output in the envelope, preserving one machine
 document on the process stdout. Human `run` writes the program's stdout bytes
 directly and keeps command diagnostics on stderr.
+Human `test` keeps diagnostics on stderr and reports on stdout. A fully passing
+suite prints `test suite passed: N test(s)`. Otherwise every non-passing item
+prints `FAIL <selector> <@test.* result>`, followed by an indented
+`assertion <member> expected=<value> actual=<value> at <source>:<line>:<column>`
+or `trap <trap code> at <source>:<line>:<column>` line when the item has one,
+and the report ends with `test suite <@command.* result>: P passed, F failed,
+N selected`.
+For M2 checked-program execution failures, `trapCode` is exactly the string
+`"@runtime.invalid-checked-program"`; their diagnostic uses that code with
+primary span `0..0` and no source ID, and the CLI trap `origin` is `null`.
 
 The process exit mapping is fixed: `0` for `@command.ok`, `1` for
 `@command.diagnostics` or `@command.test-failed`, `2` for
@@ -392,10 +512,10 @@ returned by a prior plan call.
 
 ## Schemas and errors
 
-The v1 implementation publishes JSON Schemas for CLI and MCP project
-inspection, diagnostics, normalized query results and expansions, edit
-plans/results, test reports, command results, external-registry inspection, and
-MCP envelopes. Persistent project, lock, and build-data record schemas are
+The v1 implementation publishes JSON Schemas for CLI command results, MCP
+project inspection, diagnostics, normalized query results and expansions, edit
+plans/results, test reports, external-registry inspection, and MCP envelopes.
+Persistent project, lock, and build-data record schemas are
 defined as VIBON data contracts and tested through their typed decoders, not
 duplicated as normative JSON files.
 
