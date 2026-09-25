@@ -93,6 +93,13 @@ no language behavior:
 Each must say so explicitly in the step plan. A specification prerequisite
 does not count as implementation of the language behavior it defines.
 
+When a roadmap milestone names ordered **stages**, its steps are grouped by
+stage. Every step of an earlier stage lands before the first step of a later
+one. A stage ends with its stage demo and a corpus sub-gate recorded in the
+milestone `README.md`. Stages share the milestone's integration branch and
+standing draft PR. A stage is never merged to `main` on its own, and the
+milestone exit gate remains the only merge gate.
+
 ## Definition of done for a step
 
 A step is done when all of the following are true for the behavior it claims:
