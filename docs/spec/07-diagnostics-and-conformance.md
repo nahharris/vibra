@@ -203,7 +203,11 @@ import-alias, lexical binding, or decoded module-local test name is
 `@name.redeclaration`; a repeated member in one owner's flat namespace is
 `@name.member-collision`; and an import back edge is `@module.import-cycle`.
 The later span is primary and the earlier declaration or edge is a related
-span when available. Diagnostics are deterministic by source ID, primary span,
+span when available. Each repeated introduction has exactly one owning
+diagnostic: resolution owns lexical redeclaration, and later checking stages
+MUST NOT report the same introduction again. The single-source and workspace
+check paths report identical primary and related spans for it, as
+`02-type-system.md` states. Diagnostics are deterministic by source ID, primary span,
 and registry order. Resolution consumes only an explicit immutable source
 graph and performs no filesystem, dependency, lock, cache, or network access.
 

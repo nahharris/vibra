@@ -834,6 +834,7 @@ impl<'a> Checker<'a> {
                             name.value(),
                             parameter.value_type(),
                             parameter.span(),
+                            parameter.parsed_pattern().span(),
                         ) {
                             parameters_valid = false;
                         }
@@ -984,6 +985,10 @@ struct CheckEnvironment<'a> {
     current_function: Option<usize>,
     resolved_targets:
         Option<&'a BTreeMap<(String, usize, usize), ResolvedReferenceTarget>>,
+    /// Whether this checker reports lexical `@name.redeclaration`. The
+    /// workspace path leaves that to the resolver, which owns name
+    /// introduction there, so each introduction is reported exactly once.
+    reports_redeclarations: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1051,25 +1056,29 @@ impl<'a> CheckEnvironment<'a> {
             next_slot: 0,
             current_function,
             resolved_targets: None,
+            reports_redeclarations: true,
         }
     }
 
+    /// Binds a parameter: `parameter_span` locates an unavailable type and
+    /// `binder_span` is the introduced name.
     fn add_binding(
         &mut self,
         name: &str,
         value_type: &TypeExpr,
-        span: ByteSpan,
+        parameter_span: ByteSpan,
+        binder_span: ByteSpan,
     ) -> bool {
         let Some(value_type) = primitive_type(value_type) else {
             unavailable(
                 self.diagnostics,
                 self.source_id,
-                span,
+                parameter_span,
                 "only monomorphic binding types are available in Step 7",
             );
             return false;
         };
-        self.add_binding_type(name, value_type, span)
+        self.add_binding_type(name, value_type, binder_span)
     }
 
     fn add_binding_type(
@@ -1106,41 +1115,14 @@ impl<'a> CheckEnvironment<'a> {
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
     ) -> bool {
-        if let Some(earlier) = self.module_names.get(name).copied() {
-            redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
-            return false;
-        }
-        if let Some(earlier) = self.locals.get(name) {
-            redeclaration(
-                self.diagnostics,
-                self.source_id,
-                name,
-                name,
-                span,
-                earlier.span,
-            );
-            return false;
-        }
-        if let Some(earlier) = self.captures.get(name) {
-            redeclaration(
-                self.diagnostics,
-                self.source_id,
-                name,
-                name,
-                span,
-                earlier.span,
-            );
-            return false;
-        }
-        if let Some(outer) = &self.outer
-            && let Some(storage) = outer.values.get(name)
+        // A repeated introduction relates the nearest earlier one: the
+        // innermost lexical binding, else the module binding. The shadowing
+        // binder is still bound so the rest of the scope keeps checking and
+        // every later introduction is reported, as the resolver does.
+        if self.reports_redeclarations
+            && let Some(earlier) = self.earlier_introduction(name)
         {
-            let earlier = match storage {
-                VisibleStorage::Activation { span, .. }
-                | VisibleStorage::Closure { span, .. } => *span,
-            };
             redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
-            return false;
         }
         let slot = self.next_slot;
         self.locals.insert(
@@ -1154,6 +1136,24 @@ impl<'a> CheckEnvironment<'a> {
         );
         self.next_slot = self.next_slot.saturating_add(1);
         true
+    }
+
+    fn earlier_introduction(&self, name: &str) -> Option<ByteSpan> {
+        if let Some(earlier) = self.locals.get(name) {
+            return Some(earlier.span);
+        }
+        if let Some(earlier) = self.captures.get(name) {
+            return Some(earlier.span);
+        }
+        if let Some(storage) =
+            self.outer.as_ref().and_then(|outer| outer.values.get(name))
+        {
+            return Some(match storage {
+                VisibleStorage::Activation { span, .. }
+                | VisibleStorage::Closure { span, .. } => *span,
+            });
+        }
+        self.module_names.get(name).copied()
     }
 
     fn visible_bindings(&self) -> VisibleBindings {
@@ -2405,6 +2405,7 @@ fn check_expression_in_position(
                 next_slot: environment.next_slot,
                 current_function: environment.current_function,
                 resolved_targets: environment.resolved_targets,
+                reports_redeclarations: environment.reports_redeclarations,
             };
             let slot = match pattern.kind() {
                 PatternKind::Binding(name) if name.is_discard() => None,
@@ -2508,6 +2509,7 @@ fn check_expression_in_position(
                 None,
             );
             nested.resolved_targets = environment.resolved_targets;
+            nested.reports_redeclarations = environment.reports_redeclarations;
             nested.outer = Some(outer);
             let mut referenced_names = Vec::new();
             for expression in lambda.body() {
@@ -2543,7 +2545,7 @@ fn check_expression_in_position(
                         if !nested.add_binding_type(
                             name.value(),
                             value_type,
-                            parameter.span(),
+                            parameter.parsed_pattern().span(),
                         ) {
                             parameters_valid = false;
                         }

@@ -387,6 +387,7 @@ pub fn check_resolved(
             None,
         );
         environment.resolved_targets = Some(&resolved_targets);
+        environment.reports_redeclarations = false;
         let Some(expression) = check_expression(
             &mut environment,
             &header.expression,
@@ -444,6 +445,7 @@ pub fn check_resolved(
                 Some(index),
             );
             environment.resolved_targets = Some(&resolved_targets);
+            environment.reports_redeclarations = false;
             let Some(body) = crate::check_sequence(
                 &mut environment,
                 test.expressions(),
@@ -533,6 +535,7 @@ pub fn check_resolved(
             Some(index),
         );
         environment.resolved_targets = Some(&resolved_targets);
+        environment.reports_redeclarations = false;
         let mut parameters_valid = true;
         for (parameter_index, parameter) in function.parameters().iter().enumerate() {
             match parameter.parsed_pattern().kind() {
@@ -542,6 +545,7 @@ pub fn check_resolved(
                         name.value(),
                         parameter.value_type(),
                         parameter.span(),
+                        parameter.parsed_pattern().span(),
                     ) {
                         parameters_valid = false;
                     }

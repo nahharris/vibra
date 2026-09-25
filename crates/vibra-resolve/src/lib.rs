@@ -2195,7 +2195,25 @@ impl Resolution {
             if name == "-" || name == "@-" || name == "-:" {
                 continue;
             }
-            if let Some((earlier_span, earlier_source)) = self
+            // One diagnostic per introduction, relating the nearest earlier
+            // one: the innermost lexical binding, else the module binding.
+            if let Some((_, earlier_span)) =
+                scope.iter().rev().find(|(bound, _)| bound == &name)
+            {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::NameRedeclaration,
+                        span,
+                        "a lexical name is introduced more than once",
+                    )
+                    .with_source_id(source_id)
+                    .with_related_source(
+                        source_id,
+                        *earlier_span,
+                        "the earlier lexical binding is here",
+                    ),
+                );
+            } else if let Some((earlier_span, earlier_source)) = self
                 .module_bindings
                 .get(module)
                 .and_then(|bindings| bindings.get(&name))
@@ -2212,23 +2230,6 @@ impl Resolution {
                         earlier_source,
                         earlier_span,
                         "the visible module binding is here",
-                    ),
-                );
-            }
-            if let Some((_, earlier_span)) =
-                scope.iter().find(|(bound, _)| bound == &name)
-            {
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::NameRedeclaration,
-                        span,
-                        "a lexical name is introduced more than once",
-                    )
-                    .with_source_id(source_id)
-                    .with_related_source(
-                        source_id,
-                        *earlier_span,
-                        "the earlier lexical binding is here",
                     ),
                 );
             }
