@@ -4,7 +4,7 @@
 //!
 //! Every type-check and interpret case in the corpus is checked both ways:
 //! directly, and as the only module of a fresh one-library workspace. The two
-//! paths must agree on acceptance and on the set of error codes. Every
+//! paths must agree on acceptance and on the multiset of error codes. Every
 //! permitted difference is listed in [`EXPECTED_DIFFERENCES`] with its reason.
 
 #![allow(
@@ -14,7 +14,7 @@
     clippy::unwrap_used
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -23,10 +23,16 @@ use vibra_types::{check_bootstrap_text_import, check_source, verify_bootstrap};
 
 /// Cases whose two verdicts legitimately differ, with the reason.
 ///
-/// Both are profile scope, not rule disagreements: the single-source adapter
+/// All are profile scope, not rule disagreements: the single-source adapter
 /// admits only one exact `@std.text` import and requires an executable
-/// declaration, and reports anything else as `@tool.unavailable`.
+/// declaration, reports anything else as `@tool.unavailable`, and reports an
+/// unavailable effect declaration once where the workspace path's resolver
+/// and checker each report their own unavailable stage.
 const EXPECTED_DIFFERENCES: &[(&str, &str)] = &[
+    (
+        "V1-EFFECT-availability-host-member",
+        "the workspace path reports one @tool.unavailable per unavailable stage; check_source reports one",
+    ),
     (
         "V1-TYPE-INFER-bootstrap-extra-import",
         "the single-source adapter admits only the exact (import text @std.text)",
@@ -64,19 +70,22 @@ fn single_source_cases() -> Vec<(String, String)> {
     cases
 }
 
-/// Acceptance and the distinct error codes. Codes are compared as a set: the
-/// workspace path may repeat a diagnostic that the single-source path reports
-/// once, which is a reporting difference rather than a different verdict.
-type Verdict = (bool, BTreeSet<String>);
+/// Acceptance and the error codes with their counts. Codes are compared as a
+/// multiset: each introduction has one owning diagnostic, so a path that
+/// repeats a diagnostic the other reports once disagrees.
+type Verdict = (bool, BTreeMap<String, usize>);
 
 fn verdict<'a>(
     diagnostics: impl IntoIterator<Item = &'a vibra_diagnostics::Diagnostic>,
 ) -> Verdict {
-    let codes = diagnostics
-        .into_iter()
-        .filter(|diagnostic| diagnostic.level() == Level::Error)
-        .map(|diagnostic| diagnostic.code().as_atom().to_owned())
-        .collect::<BTreeSet<_>>();
+    let mut codes = BTreeMap::new();
+    for diagnostic in diagnostics {
+        if diagnostic.level() == Level::Error {
+            *codes
+                .entry(diagnostic.code().as_atom().to_owned())
+                .or_insert(0) += 1;
+        }
+    }
     (codes.is_empty(), codes)
 }
 

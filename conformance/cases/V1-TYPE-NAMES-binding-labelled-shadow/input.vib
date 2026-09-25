@@ -1,0 +1,4 @@
+(def limit i32 1)
+(defn answer (count i32) i32
+  labelled: (count i32 0i32 limit i32 2i32)
+  count)

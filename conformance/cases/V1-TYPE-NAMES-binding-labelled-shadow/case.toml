@@ -1,8 +1,8 @@
-id = "V1-TYPE-NAMES-binding-shadow"
+id = "V1-TYPE-NAMES-binding-labelled-shadow"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
 operation = "type-check"
-description = "A let binder cannot shadow a visible parameter or module value."
+description = "A labelled parameter name that shadows a positional parameter or module value is reported at the name alone."
 
 [inputs]
 source = "input.vib"
@@ -14,18 +14,18 @@ accepted = false
 code = "@name.redeclaration"
 level = "@error"
 source = "input.vib"
-span = [32, 37]
+span = [60, 65]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
-  span = [0, 17]
+  span = [32, 37]
 
 [[expect.diagnostics]]
 code = "@name.redeclaration"
 level = "@error"
 source = "input.vib"
-span = [52, 57]
+span = [75, 80]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
-  span = [32, 37]
+  span = [0, 17]
