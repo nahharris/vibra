@@ -52,7 +52,13 @@ vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
 vibra [--format human|json] [--workspace PATH] check [TARGET]
 vibra [--format human|json] [--workspace PATH] run TARGET
 vibra [--format human|json] [--workspace PATH] test [TEST]
+vibra [--format human|json] help
 ```
+
+`help` may also be spelled `--help` or `-h` in the command position. It takes
+no arguments, prints this grammar to stdout in human mode, and succeeds with
+`@command.ok`; its JSON payload is `{ "usage": string }` and its `command` is
+`help`. `help` followed by any argument is invalid input.
 
 `--format` defaults to `human` and may occur once before the command. The
 default workspace is the current directory. `PATH` and `DEST` are
@@ -184,7 +190,8 @@ and operational logs to stderr. The envelope always has these fields:
 `@command.test-failed`, `@command.invalid-input`,
 `@command.operational-failure`, `@command.trap`, or `@command.unavailable`.
 `diagnostics` is always an array of the versioned diagnostic documents. Payloads are closed by
-command: `init` has `{ "workspace": string, "created": string[] }`; `fmt`
+command: `help` has `{ "usage": string }`; `init` has
+`{ "workspace": string, "created": string[] }`; `fmt`
 has `{ "path": string, "changed": boolean, "written": boolean,
 "text": string|null }`; `check` has `{ "accepted": boolean }`; `run` has
 `{ "target": string, "programResult": string|null, "stdout": string,
@@ -203,6 +210,13 @@ the command owns a program result. In JSON mode
 `stdout` captures program output in the envelope, preserving one machine
 document on the process stdout. Human `run` writes the program's stdout bytes
 directly and keeps command diagnostics on stderr.
+Human `test` keeps diagnostics on stderr and reports on stdout. A fully passing
+suite prints `test suite passed: N test(s)`. Otherwise every non-passing item
+prints `FAIL <selector> <@test.* result>`, followed by an indented
+`assertion <member> expected=<value> actual=<value> at <source>:<line>:<column>`
+or `trap <trap code> at <source>:<line>:<column>` line when the item has one,
+and the report ends with `test suite <@command.* result>: P passed, F failed,
+N selected`.
 For M2 checked-program execution failures, `trapCode` is exactly the string
 `"@runtime.invalid-checked-program"`; their diagnostic uses that code with
 primary span `0..0` and no source ID, and the CLI trap `origin` is `null`.

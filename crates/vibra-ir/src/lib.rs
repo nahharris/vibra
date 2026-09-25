@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
 
 use vibra_diagnostics::ByteSpan;
 
@@ -649,7 +650,10 @@ pub enum Expr {
         /// Static types of the closure-environment slots.
         capture_types: Vec<PrimitiveType>,
         /// The lambda body, whose free names use [`Self::Captured`].
-        body: Box<Self>,
+        ///
+        /// Shared so that creating a closure value, or summarizing one during
+        /// call-flow analysis, never copies the body tree.
+        body: Arc<Self>,
         /// Activation slots needed by the lambda body.
         slot_count: usize,
         /// The source origin of the lambda form.
@@ -798,7 +802,7 @@ impl Expr {
             parameters,
             captures,
             capture_types,
-            body: Box::new(body),
+            body: Arc::new(body),
             slot_count,
             origin,
         }
@@ -1639,7 +1643,7 @@ pub struct CheckedProgram {
     globals: Vec<CheckedGlobal>,
     functions: Vec<CheckedFunction>,
     entry: usize,
-    recursive_groups: Vec<Vec<usize>>,
+    recursive_groups: RecursiveGroups,
 }
 
 impl CheckedProgram {
@@ -1750,7 +1754,7 @@ impl CheckedProgram {
         for (static_calls, flow_calls) in calls.iter_mut().zip(&flow.calls) {
             static_calls.extend(flow_calls);
         }
-        let recursive_groups = find_recursive_groups(&calls, &functions);
+        let recursive_groups = RecursiveGroups::new(&calls, &functions);
         for global in &globals {
             validate_tail_calls(
                 global.initializer(),
@@ -1804,15 +1808,33 @@ impl CheckedProgram {
     }
 
     /// Same-module recursive groups, in deterministic function-index order.
+    ///
+    /// This materializes every group and is intended for observation and
+    /// tests; execution uses [`Self::in_recursive_group`].
     #[must_use]
-    pub fn recursive_groups(&self) -> &[Vec<usize>] {
-        &self.recursive_groups
+    pub fn recursive_groups(&self) -> Vec<Vec<usize>> {
+        (0..self.functions.len())
+            .map(|function| self.recursive_groups.members(function))
+            .collect()
     }
 
-    /// Returns the recursive group containing `function`, if any.
+    /// Whether `target` is in `function`'s recursive group, in constant time.
     #[must_use]
-    pub fn recursive_group(&self, function: usize) -> Option<&[usize]> {
-        self.recursive_groups.get(function).map(Vec::as_slice)
+    pub fn in_recursive_group(&self, function: usize, target: usize) -> bool {
+        self.recursive_groups.contains(function, target)
+    }
+
+    /// Returns the recursive group of `function`, if it is in the program.
+    #[must_use]
+    pub fn recursive_group(&self, function: usize) -> Option<Vec<usize>> {
+        (function < self.functions.len())
+            .then(|| self.recursive_groups.members(function))
+    }
+
+    /// The validated entry function index.
+    #[must_use]
+    pub const fn entry_index(&self) -> usize {
+        self.entry
     }
 
     /// The selected entry function.
@@ -2516,7 +2538,7 @@ struct FlowTargetSummary {
 struct FlowClosure {
     origin: SourceOrigin,
     signature: FunctionSignature,
-    body: Box<Expr>,
+    body: Arc<Expr>,
     captures: Vec<FlowTargetSummary>,
 }
 
@@ -2947,7 +2969,7 @@ impl<'a> CallFlow<'a> {
                     closures: vec![FlowClosure {
                         origin: origin.clone(),
                         signature: signature.clone(),
-                        body: body.clone(),
+                        body: Arc::clone(body),
                         captures: closure_capture_summaries,
                     }],
                     closure_defaults: vec![
@@ -3415,48 +3437,147 @@ enum CallState {
     Done,
 }
 
-fn find_recursive_groups(
-    calls: &[BTreeSet<usize>],
-    functions: &[CheckedFunction],
-) -> Vec<Vec<usize>> {
-    (0..calls.len())
-        .map(|start| {
-            if !is_module_definition(functions, start) {
-                return Vec::new();
-            }
-            reachable_functions(start, calls)
+/// Recursive groups as a condensation of the static call graph.
+///
+/// The recursive group of a module definition is every module definition
+/// reachable from it (06-runtime). Strongly connected components are found
+/// once with an iterative Tarjan pass; each component stores a bitset of the
+/// components reachable from it, so membership is a constant-time bit test
+/// and storage is quadratic in components over 64 rather than a separate
+/// ordered set per function.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RecursiveGroups {
+    /// The component of each function; `None` for external wrappers, which
+    /// belong to no group.
+    component: Vec<Option<usize>>,
+    /// For each component, the components reachable from it (itself included).
+    reachable: Vec<Vec<u64>>,
+}
+
+impl RecursiveGroups {
+    // Every index below is a function index filtered to `< count` or a
+    // component id allocated in this function, so indexing cannot panic.
+    #[allow(clippy::indexing_slicing)]
+    fn new(calls: &[BTreeSet<usize>], functions: &[CheckedFunction]) -> Self {
+        let count = calls.len();
+        let edges = |node: usize| {
+            calls
+                .get(node)
                 .into_iter()
-                .filter(|target| is_module_definition(functions, *target))
-                .collect()
-        })
-        .collect()
-}
-
-fn is_module_definition(functions: &[CheckedFunction], index: usize) -> bool {
-    functions
-        .get(index)
-        .is_some_and(|function| !function.is_external_wrapper())
-}
-
-fn reachable_functions(start: usize, calls: &[BTreeSet<usize>]) -> BTreeSet<usize> {
-    let mut reached = BTreeSet::new();
-    let mut pending = vec![start];
-    while let Some(index) = pending.pop() {
-        if !reached.insert(index) {
-            continue;
+                .flatten()
+                .copied()
+                .filter(|target| *target < count)
+        };
+        let mut component_of = vec![usize::MAX; count];
+        let mut index_of = vec![usize::MAX; count];
+        let mut lowlink = vec![0; count];
+        let mut on_stack = vec![false; count];
+        let mut stack = Vec::new();
+        let mut components: Vec<Vec<usize>> = Vec::new();
+        let mut next_index = 0;
+        for root in 0..count {
+            if index_of.get(root).copied() != Some(usize::MAX) {
+                continue;
+            }
+            // Each work item is a node and the successors still to visit.
+            let mut work = vec![(root, edges(root).collect::<Vec<_>>().into_iter())];
+            index_of[root] = next_index;
+            lowlink[root] = next_index;
+            next_index += 1;
+            stack.push(root);
+            on_stack[root] = true;
+            while let Some((node, successors)) = work.last_mut() {
+                let node = *node;
+                if let Some(next) = successors.next() {
+                    if index_of[next] == usize::MAX {
+                        index_of[next] = next_index;
+                        lowlink[next] = next_index;
+                        next_index += 1;
+                        stack.push(next);
+                        on_stack[next] = true;
+                        work.push((next, edges(next).collect::<Vec<_>>().into_iter()));
+                    } else if on_stack[next] {
+                        lowlink[node] = lowlink[node].min(index_of[next]);
+                    }
+                    continue;
+                }
+                work.pop();
+                if let Some((parent, _)) = work.last() {
+                    lowlink[*parent] = lowlink[*parent].min(lowlink[node]);
+                }
+                if lowlink[node] == index_of[node] {
+                    let id = components.len();
+                    let mut members = Vec::new();
+                    while let Some(member) = stack.pop() {
+                        on_stack[member] = false;
+                        component_of[member] = id;
+                        members.push(member);
+                        if member == node {
+                            break;
+                        }
+                    }
+                    components.push(members);
+                }
+            }
         }
-        if let Some(dependencies) = calls.get(index) {
-            pending.extend(dependencies.iter().copied());
+        // Tarjan emits a component only after every component reachable from
+        // it, so one forward pass completes each reachability set.
+        let words = components.len().div_ceil(64);
+        let mut reachable = vec![vec![0u64; words]; components.len()];
+        for (id, members) in components.iter().enumerate() {
+            let mut bits = vec![0u64; words];
+            bits[id / 64] |= 1 << (id % 64);
+            for member in members {
+                for target in edges(*member) {
+                    let successor = component_of[target];
+                    if successor != id {
+                        for (word, other) in bits.iter_mut().zip(&reachable[successor])
+                        {
+                            *word |= other;
+                        }
+                    }
+                }
+            }
+            reachable[id] = bits;
+        }
+        let component = (0..count)
+            .map(|function| {
+                functions
+                    .get(function)
+                    .is_some_and(|function| !function.is_external_wrapper())
+                    .then(|| component_of[function])
+            })
+            .collect();
+        Self {
+            component,
+            reachable,
         }
     }
-    reached
+
+    fn contains(&self, function: usize, target: usize) -> bool {
+        let (Some(Some(from)), Some(Some(to))) =
+            (self.component.get(function), self.component.get(target))
+        else {
+            return false;
+        };
+        self.reachable
+            .get(*from)
+            .and_then(|bits| bits.get(to / 64))
+            .is_some_and(|word| word & (1 << (to % 64)) != 0)
+    }
+
+    fn members(&self, function: usize) -> Vec<usize> {
+        (0..self.component.len())
+            .filter(|target| self.contains(function, *target))
+            .collect()
+    }
 }
 
 fn validate_tail_calls(
     expression: &Expr,
     tail_position: bool,
     current_function: Option<usize>,
-    recursive_groups: &[Vec<usize>],
+    recursive_groups: &RecursiveGroups,
     globals: &[CheckedGlobal],
     functions: &[CheckedFunction],
     aliases: &BTreeMap<usize, FunctionTargetSummary>,
@@ -3659,18 +3780,20 @@ fn validate_tail_calls(
                     "tail call hint does not match indirect callee".to_owned(),
                 ));
             }
-            let Some(group) = recursive_groups.get(current_function) else {
+            if current_function >= functions.len() {
                 return Err(IrError::InvalidExpression(format!(
                     "tail call owner {current_function} is outside the program"
                 )));
-            };
+            }
             for target in targets.known {
                 if functions.get(target).is_none() {
                     return Err(IrError::InvalidExpression(format!(
                         "tail call target {target} is outside the program"
                     )));
                 }
-                if callee.is_none() && !group.contains(&target) {
+                if callee.is_none()
+                    && !recursive_groups.contains(current_function, target)
+                {
                     return Err(IrError::InvalidExpression(format!(
                         "tail call target {target} is outside function {current_function}'s recursive group"
                     )));
@@ -4045,7 +4168,7 @@ mod tests {
         .expect("call shape is valid before program binding");
         let program = CheckedProgram::try_new(vec![function], 0)
             .expect("recursive calls are admitted for tail-call analysis");
-        assert_eq!(program.recursive_groups(), &[vec![0]]);
+        assert_eq!(program.recursive_groups(), [vec![0]]);
     }
 
     #[test]
@@ -4068,9 +4191,9 @@ mod tests {
         .expect("leaf function");
         let program = CheckedProgram::try_new(vec![answer, leaf], 0)
             .expect("reachable groups are valid");
-        assert_eq!(program.recursive_groups(), &[vec![0, 1], vec![1]]);
-        assert_eq!(program.recursive_group(0), Some(&[0, 1][..]));
-        assert_eq!(program.recursive_group(1), Some(&[1][..]));
+        assert_eq!(program.recursive_groups(), [vec![0, 1], vec![1]]);
+        assert_eq!(program.recursive_group(0), Some(vec![0, 1]));
+        assert_eq!(program.recursive_group(1), Some(vec![1]));
     }
 
     #[test]
@@ -4089,7 +4212,7 @@ mod tests {
             .expect("indirect call shape is valid before program binding");
         let program = CheckedProgram::try_new(vec![function], 0)
             .expect("recursive function values are admitted for tail-call analysis");
-        assert_eq!(program.recursive_groups(), &[vec![0]]);
+        assert_eq!(program.recursive_groups(), [vec![0]]);
     }
 
     #[test]
@@ -4276,7 +4399,7 @@ mod tests {
             .expect("source function with an intrinsic operand");
         let program = CheckedProgram::try_new(vec![function], 0)
             .expect("recursive external operands are valid");
-        assert_eq!(program.recursive_groups(), &[vec![0]]);
+        assert_eq!(program.recursive_groups(), [vec![0]]);
     }
 
     #[test]
@@ -4359,7 +4482,7 @@ mod tests {
         .expect("caller shape");
         let program = CheckedProgram::try_new(vec![target, caller], 1)
             .expect("a named branch remains a bounded runtime tail candidate");
-        assert_eq!(program.recursive_group(1), Some(&[0, 1][..]));
+        assert_eq!(program.recursive_group(1), Some(vec![0, 1]));
     }
 
     #[test]
@@ -4866,5 +4989,33 @@ mod tests {
             2,
         );
         assert!(matches!(result, Err(IrError::GlobalInitializerCycle(_))));
+    }
+
+    #[test]
+    fn recursive_groups_are_reachability_across_many_components() {
+        let functions = (0..70)
+            .map(|index| {
+                CheckedFunction::new(
+                    format!("f{index}"),
+                    FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+                    Expr::literal(Value::I32(0), origin()),
+                    origin(),
+                )
+                .expect("function")
+            })
+            .collect::<Vec<_>>();
+        // A chain 0 -> 1 -> ... -> 69 with a cycle between 67 and 69.
+        let mut calls = vec![std::collections::BTreeSet::new(); 70];
+        for (index, edges) in calls.iter_mut().enumerate().take(69) {
+            edges.insert(index + 1);
+        }
+        calls.last_mut().expect("last function").insert(67);
+        let groups = super::RecursiveGroups::new(&calls, &functions);
+        assert_eq!(groups.members(0), (0..70).collect::<Vec<_>>());
+        assert_eq!(groups.members(66), (66..70).collect::<Vec<_>>());
+        assert_eq!(groups.members(69), vec![67, 68, 69]);
+        assert!(groups.contains(3, 65));
+        assert!(!groups.contains(65, 3));
+        assert!(!groups.contains(0, 70));
     }
 }

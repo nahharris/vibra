@@ -153,7 +153,13 @@ on such tail recursion.
 
 V1 defines no portable stack-depth limit. Non-tail recursion and non-tail calls
 that exhaust an embedding host's stack are host events, not portable semantic
-results, and are outside interpreter/Wasm parity. Default `iter` method bodies
+results, and are outside interpreter/Wasm parity. The M2 reference interpreter
+runs on a host thread with a fixed stack and bounds live language activations
+so that exhaustion never aborts the process. Reaching that bound stops
+execution with the unlocated error diagnostic
+`@runtime.host-stack-exhausted` (primary span `0..0`, no source ID). It is not
+a trap: `run` and `test` report it as `@command.operational-failure` (exit 3),
+and `test` then reports zero selected, passed, and failed tests. Default `iter` method bodies
 MAY lower to internal loops; that mutation is not a source feature.
 
 ## M2 compiler intrinsic profile

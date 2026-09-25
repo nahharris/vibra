@@ -274,6 +274,9 @@ pub enum TestSuiteStatus {
     Unavailable,
     /// At least one selected test trapped, which takes precedence.
     Trap,
+    /// The host stopped execution (for example, the interpreter's activation
+    /// budget was exhausted). No test result is reported.
+    OperationalFailure,
 }
 
 impl TestSuiteStatus {
@@ -287,6 +290,7 @@ impl TestSuiteStatus {
             Self::InvalidInput => "@command.invalid-input",
             Self::Unavailable => "@command.unavailable",
             Self::Trap => "@command.trap",
+            Self::OperationalFailure => "@command.operational-failure",
         }
     }
 }
@@ -664,6 +668,20 @@ fn select_tests(
                         diagnostics: item_diagnostics.clone(),
                     });
                 }
+            }
+            Err(error) if error.is_host_event() => {
+                let diagnostic = error.host_diagnostic().unwrap_or_else(|| {
+                    Diagnostic::new(
+                        DiagnosticCode::ProjectIoError,
+                        ByteSpan::empty_at(0),
+                        error.to_string(),
+                    )
+                });
+                return WorkspaceTestResult {
+                    status: TestSuiteStatus::OperationalFailure,
+                    diagnostics: vec![diagnostic],
+                    items: Vec::new(),
+                };
             }
             Err(error) => {
                 let mut item = trap_item(test_name(test), error);

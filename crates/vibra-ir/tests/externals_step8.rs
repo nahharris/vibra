@@ -77,5 +77,5 @@ fn external_operands_remain_in_recursive_call_analysis() {
     .expect("valid shape");
     let program = CheckedProgram::try_new(vec![function], 0)
         .expect("external operand must remain visible to recursive-group analysis");
-    assert_eq!(program.recursive_groups(), &[vec![0]]);
+    assert_eq!(program.recursive_groups(), [vec![0]]);
 }

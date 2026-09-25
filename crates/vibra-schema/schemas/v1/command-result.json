@@ -9,7 +9,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "command": {
-      "enum": ["init", "fmt", "check", "run", "test", "inspect", "add", "remove", "sync", "lint", "build", "query", "edit", "mcp", "invalid"]
+      "enum": ["help", "init", "fmt", "check", "run", "test", "inspect", "add", "remove", "sync", "lint", "build", "query", "edit", "mcp", "invalid"]
     },
     "result": {
       "enum": [
@@ -102,6 +102,19 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "command": { "const": "help" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["usage"],
+            "properties": { "usage": { "type": "string", "minLength": 1 } }
           }
         }
       }

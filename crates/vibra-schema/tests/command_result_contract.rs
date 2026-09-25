@@ -88,3 +88,22 @@ fn test_result_schema_closes_items_and_rejects_m2_trace_events() {
     wrong_outcome["payload"]["tests"][0]["result"] = json!("@test.passed");
     assert!(!validator.is_valid(&wrong_outcome));
 }
+
+#[test]
+fn help_payload_carries_only_the_usage_text() {
+    let validator = validator();
+    let help = json!({
+        "schemaVersion": 1,
+        "command": "help",
+        "result": "@command.ok",
+        "diagnostics": [],
+        "payload": { "usage": "vibra [--format human|json] ..." }
+    });
+    assert!(validator.is_valid(&help));
+    let mut extra = help.clone();
+    extra["payload"]["commands"] = json!([]);
+    assert!(!validator.is_valid(&extra));
+    let mut empty = help;
+    empty["payload"] = json!({});
+    assert!(!validator.is_valid(&empty));
+}

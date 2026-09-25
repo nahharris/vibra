@@ -379,3 +379,43 @@ fn a_filesystem_reference_is_reported() {
     );
     assert!(filesystem_references("let bytes = include_bytes!(\"x\");").is_empty());
 }
+
+/// Crates compiled into the shipped `vibra` binary.
+const SHIPPED_CRATES: &[&str] = &[
+    "vibra-diagnostics",
+    "vibra-syntax",
+    "vibra-resolve",
+    "vibra-types",
+    "vibra-ir",
+    "vibra-interp",
+    "vibra-fmt",
+    "vibra-schema",
+    "vibra-workspace",
+    "vibra-cli",
+];
+
+#[test]
+fn shipped_crates_do_not_depend_on_their_build_checkout() {
+    // `env!("CARGO_MANIFEST_DIR")` is an absolute build-host path; a binary
+    // that reads through it breaks once installed or relocated.
+    let root = workspace_root();
+    let mut found = Vec::new();
+    for crate_name in SHIPPED_CRATES {
+        let mut sources = Vec::new();
+        rust_sources(
+            &root.join("crates").join(crate_name).join("src"),
+            &mut sources,
+        );
+        for path in sources {
+            let source = std::fs::read_to_string(&path).expect("readable source");
+            if source.contains("CARGO_MANIFEST_DIR") {
+                found.push(path.display().to_string());
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "build-checkout paths in:\n{}",
+        found.join("\n")
+    );
+}

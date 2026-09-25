@@ -355,6 +355,8 @@ diagnostic_registry! {
         "a host operation received or returned a value its ABI does not admit";
     RuntimeInvalidCheckedProgram => "@runtime.invalid-checked-program", Runtime, Error, None,
         "checked program execution violated an M2 runtime invariant";
+    RuntimeHostStackExhausted => "@runtime.host-stack-exhausted", Runtime, Error, None,
+        "non-tail activations exhausted the reference interpreter's host stack budget";
     StyleArgumentOrder => "@style.argument-order", Style, Warning, Safe,
         "operands are in a noncanonical but unambiguous order";
     ContractUnusedEffect => "@contract.unused-effect", Contract, Warning, None,
@@ -375,7 +377,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 75;
+    const REGISTERED_CODES: usize = 76;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

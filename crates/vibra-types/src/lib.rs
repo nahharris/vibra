@@ -3536,7 +3536,7 @@ mod tests {
         let program = result.program().expect("recursive program");
         assert_eq!(
             program.recursive_groups(),
-            &[vec![0, 1], vec![0, 1], vec![0, 1, 2]]
+            [vec![0, 1], vec![0, 1], vec![0, 1, 2]]
         );
         assert!(program.canonical_vibon().contains("tail: true"));
     }

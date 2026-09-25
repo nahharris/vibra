@@ -92,6 +92,7 @@ struct CommandEnvelope {
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 enum Payload {
+    Help(HelpPayload),
     Init(InitPayload),
     Fmt(FmtPayload),
     Check(CheckPayload),
@@ -99,6 +100,25 @@ enum Payload {
     Test(TestPayload),
     Empty(EmptyPayload),
 }
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HelpPayload {
+    usage: String,
+}
+
+/// The closed M2 process grammar printed by `vibra help`.
+const USAGE: &str = "\
+usage:
+  vibra [--format human|json] [--workspace PATH] project init [DEST]
+  vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
+  vibra [--format human|json] [--workspace PATH] check [TARGET]
+  vibra [--format human|json] [--workspace PATH] run TARGET
+  vibra [--format human|json] [--workspace PATH] test [TEST]
+  vibra [--format human|json] help
+
+TEST is a canonical selector such as @tests.math::\"adds one\".
+";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -156,6 +176,7 @@ struct Invocation {
 
 #[derive(Clone, Debug)]
 enum Action {
+    Help,
     Init(Option<PathBuf>),
     Fmt {
         path: PathBuf,
@@ -218,6 +239,20 @@ fn execute<W: Write, E: Write>(
     stderr: &mut E,
 ) -> CommandEnvelope {
     match invocation.action.clone() {
+        Action::Help => {
+            if invocation.output_format == OutputFormat::Human {
+                let _ = stdout.write_all(USAGE.as_bytes());
+            }
+            CommandEnvelope {
+                schema_version: SCHEMA_VERSION,
+                command: invocation.command,
+                result: CommandResult::Ok,
+                diagnostics: Vec::new(),
+                payload: Payload::Help(HelpPayload {
+                    usage: USAGE.to_owned(),
+                }),
+            }
+        }
         Action::Init(destination) => {
             match plan_init(&invocation.workspace, destination.as_deref()) {
                 Ok(plan) => execute_init(plan, invocation, stdout, stderr),
@@ -250,6 +285,7 @@ fn execute<W: Write, E: Write>(
         Action::Invalid { message, path } => {
             if invocation.output_format == OutputFormat::Human {
                 let _ = writeln!(stderr, "invalid input: {message}");
+                let _ = writeln!(stderr, "run `vibra help` for usage");
             }
             invalid_envelope(&invocation, path)
         }
@@ -547,6 +583,13 @@ fn execute_run<E: Write>(
             None => CommandResult::OperationalFailure,
         },
     };
+    let mut diagnostics = diagnostics;
+    if let Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) =
+        outcome.outcome()
+        && let Some(diagnostic) = error.host_diagnostic()
+    {
+        diagnostics.extend(render_unlocated_diagnostics(&[diagnostic]));
+    }
     let (program_result, stdout, program_stderr, audit_trace) = match outcome.outcome()
     {
         Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => (
@@ -556,7 +599,9 @@ fn execute_run<E: Write>(
             execution.audit_trace().to_vec(),
         ),
         Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) => {
-            let _ = writeln!(stderr, "interpreter invariant failure: {error}");
+            if error.host_diagnostic().is_none() {
+                let _ = writeln!(stderr, "interpreter invariant failure: {error}");
+            }
             (None, String::new(), String::new(), Vec::new())
         }
         None => {
@@ -622,7 +667,16 @@ fn execute_test<W: Write, E: Write>(
         Ok(diagnostics) => diagnostics,
         Err(message) => return operational_test_envelope(invocation, message, stderr),
     };
+    let source_text = |source_id: &str| {
+        snapshot
+            .source()
+            .documents()
+            .find(|document| document.source_id() == source_id)
+            .map(|document| String::from_utf8_lossy(document.bytes()).into_owned())
+            .unwrap_or_default()
+    };
     let mut tests = Vec::with_capacity(result.items().len());
+    let mut report = Vec::new();
     for item in result.items() {
         let item_diagnostics = match render_workspace_diagnostics(
             &snapshot,
@@ -634,14 +688,20 @@ fn execute_test<W: Write, E: Write>(
                 return operational_test_envelope(invocation, message, stderr);
             }
         };
+        if item.status() != vibra_workspace::semantic::TestItemStatus::Passed {
+            report.push(format!("FAIL {} {}", item.name(), item.status().as_atom()));
+        }
         let failure = item.failure().map(|failure| {
-            let source = snapshot
-                .source()
-                .documents()
-                .find(|document| document.source_id() == failure.source_id())
-                .map(|document| String::from_utf8_lossy(document.bytes()).into_owned())
-                .unwrap_or_default();
+            let source = source_text(failure.source_id());
             let source_index = LineIndex::new(&source);
+            report.push(format!(
+                "  assertion {} expected={} actual={} at {}:{}",
+                failure.assertion(),
+                failure.expected(),
+                failure.actual(),
+                failure.source_id(),
+                source_index.position(failure.primary_span().start()),
+            ));
             serde_json::json!({
                 "assertion": failure.assertion(),
                 "expected": failure.expected(),
@@ -654,15 +714,14 @@ fn execute_test<W: Write, E: Write>(
             })
         });
         let trap = item.trap().map(|trap| {
+            let location = trap.origin().map_or_else(String::new, |origin| {
+                let source = source_text(origin.source_id());
+                let position = LineIndex::new(&source).position(origin.span().start());
+                format!(" at {}:{position}", origin.source_id())
+            });
+            report.push(format!("  trap {}{location}", trap.trap_code()));
             let origin = trap.origin().map(|origin| {
-                let source = snapshot
-                    .source()
-                    .documents()
-                    .find(|document| document.source_id() == origin.source_id())
-                    .map(|document| {
-                        String::from_utf8_lossy(document.bytes()).into_owned()
-                    })
-                    .unwrap_or_default();
+                let source = source_text(origin.source_id());
                 let source_index = LineIndex::new(&source);
                 vibra_schema::SpanDocument::render_with_source(
                     origin.span(),
@@ -689,14 +748,27 @@ fn execute_test<W: Write, E: Write>(
         TestSuiteStatus::InvalidInput => CommandResult::InvalidInput,
         TestSuiteStatus::Unavailable => CommandResult::Unavailable,
         TestSuiteStatus::Trap => CommandResult::Trap,
+        TestSuiteStatus::OperationalFailure => CommandResult::OperationalFailure,
     };
     if command_result == CommandResult::InvalidInput {
         return invalid_envelope(invocation, None);
     }
-    if command_result == CommandResult::Ok
-        && invocation.output_format == OutputFormat::Human
-    {
-        let _ = writeln!(stdout, "test suite passed: {} test(s)", result.selected());
+    if invocation.output_format == OutputFormat::Human {
+        if command_result == CommandResult::Ok {
+            let _ =
+                writeln!(stdout, "test suite passed: {} test(s)", result.selected());
+        } else {
+            for line in &report {
+                let _ = writeln!(stdout, "{line}");
+            }
+            let _ = writeln!(
+                stdout,
+                "test suite {command_result}: {} passed, {} failed, {} selected",
+                result.passed(),
+                result.failed(),
+                result.selected()
+            );
+        }
     }
     CommandEnvelope {
         schema_version: SCHEMA_VERSION,
@@ -1053,6 +1125,19 @@ fn parse_invocation(
         .get(cursor.saturating_add(1)..)
         .unwrap_or_default();
     match command_name {
+        "help" | "--help" | "-h" if remaining.is_empty() => Invocation {
+            output_format,
+            workspace,
+            command: "help".to_owned(),
+            action: Action::Help,
+        },
+        "help" | "--help" | "-h" => invalid_invocation(
+            output_format,
+            workspace,
+            "invalid",
+            "`help` accepts no arguments",
+            None,
+        ),
         "project" => parse_project_command(output_format, workspace, remaining),
         "fmt" => parse_fmt_command(output_format, workspace, remaining),
         "check" => parse_check_command(output_format, workspace, remaining),

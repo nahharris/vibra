@@ -161,6 +161,12 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 ("@command.unavailable", false)
             }
             vibra_workspace::semantic::TestSuiteStatus::Trap => ("@command.trap", true),
+            vibra_workspace::semantic::TestSuiteStatus::OperationalFailure => {
+                return Err(HandlerError::new(format!(
+                    "workspace-test stopped on a host event: {:?}",
+                    result.diagnostics()
+                )));
+            }
         };
         Ok(CaseObservation {
             accepted,

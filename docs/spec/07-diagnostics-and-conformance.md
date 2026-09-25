@@ -90,6 +90,7 @@ table governs.
 | `@project.io-error` | `@error` |
 | `@runtime.invalid-host-value` | `@error` |
 | `@runtime.invalid-checked-program` | `@error` |
+| `@runtime.host-stack-exhausted` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
