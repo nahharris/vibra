@@ -471,15 +471,13 @@ fn select_tests(
             empty_result(TestSuiteStatus::Ok)
         };
     }
-    let module_closures = tests
-        .iter()
-        .map(|test| {
-            (
-                test.module.source_id().to_owned(),
-                module_import_closure(resolved, test.module),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    let index = SnapshotIndex::new(resolved);
+    let mut module_closures = BTreeMap::new();
+    for test in &tests {
+        module_closures
+            .entry(test.module.source_id().to_owned())
+            .or_insert_with(|| index.module_import_closure(test.module.source_id()));
+    }
     let checking_sources = module_closures
         .values()
         .flat_map(|sources| sources.iter().cloned())
@@ -495,9 +493,7 @@ fn select_tests(
                     .source_id()
                     .is_some_and(|source_id| checking_sources.contains(source_id))
             })
-            .filter(|diagnostic| {
-                !is_missing_assertion_bootstrap_diagnostic(resolved, diagnostic)
-            })
+            .filter(|diagnostic| !index.is_missing_assertion_diagnostic(diagnostic))
             .cloned(),
     );
 
@@ -567,6 +563,14 @@ fn select_tests(
         .filter(|diagnostic| diagnostic.code() != DiagnosticCode::ToolUnavailable)
         .cloned()
         .collect::<Vec<_>>();
+    // Owners are found once per unavailable diagnostic, not once per test.
+    let unavailable = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+        .filter_map(|diagnostic| {
+            diagnostic_owner(resolved, diagnostic).map(|owner| (owner, diagnostic))
+        })
+        .collect::<Vec<_>>();
     let static_errors = module_diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.level() == Level::Error)
@@ -588,11 +592,7 @@ fn select_tests(
                     })
                     .cloned()
                     .collect::<Vec<_>>();
-                item_diagnostics.extend(item_unavailable_diagnostics(
-                    resolved,
-                    test,
-                    &diagnostics,
-                ));
+                item_diagnostics.extend(index.unavailable_for(&test.id, &unavailable));
                 envelope_diagnostics.extend(item_diagnostics.iter().cloned());
                 sort_and_deduplicate(&mut item_diagnostics);
                 invalid_item(test, &item_diagnostics)
@@ -617,8 +617,7 @@ fn select_tests(
             .filter(|diagnostic| diagnostic_in_source_closure(diagnostic, &closure))
             .cloned()
             .collect::<Vec<_>>();
-        let unavailable_diagnostics =
-            item_unavailable_diagnostics(resolved, test, &diagnostics);
+        let unavailable_diagnostics = index.unavailable_for(&test.id, &unavailable);
         if !unavailable_diagnostics.is_empty() {
             item_diagnostics.extend(unavailable_diagnostics);
             sort_and_deduplicate(&mut item_diagnostics);
@@ -770,105 +769,139 @@ fn module_has_verified_assertion_import(
     })
 }
 
-fn module_import_closure(
-    resolved: &ResolvedSnapshot,
-    start: &vibra_resolve::ModuleRecord,
-) -> BTreeSet<String> {
-    let mut sources = BTreeSet::from([start.source_id().to_owned()]);
-    loop {
-        let before = sources.len();
-        let current = sources.clone();
-        for import in resolved
-            .imports()
-            .iter()
-            .filter(|import| current.contains(import.source_id()))
-        {
-            let Some(target) = import.module() else {
-                continue;
-            };
-            if let Some(module) = resolved.modules().iter().find(|candidate| {
-                candidate.package() == target.package()
-                    && candidate.unit() == target.unit()
-                    && candidate.segments() == target.segments()
-            }) {
-                sources.insert(module.source_id().to_owned());
-            }
-        }
-        if sources.len() == before {
-            break;
-        }
-    }
-    sources
+/// Lookups over one resolved snapshot, built once per test run so that
+/// closures are worklist searches over indexed edges instead of repeated
+/// scans of every import and reference.
+struct SnapshotIndex<'a> {
+    /// Resolved reference targets of each declaration.
+    references: BTreeMap<&'a DeclarationId, Vec<&'a DeclarationId>>,
+    /// Source IDs of the modules each source imports.
+    imports: BTreeMap<&'a str, Vec<&'a str>>,
+    /// `(source, code, start, end)` of resolver diagnostics caused only by
+    /// an unresolved `@std.assert` import, which test checking reports as a
+    /// provenance diagnostic instead.
+    missing_assertion: BTreeSet<(&'a str, DiagnosticCode, usize, usize)>,
 }
 
-fn is_missing_assertion_bootstrap_diagnostic(
-    resolved: &ResolvedSnapshot,
-    diagnostic: &Diagnostic,
-) -> bool {
-    let missing_imports = resolved
-        .imports()
-        .iter()
-        .filter(|import| {
-            import.written().trim_start_matches('@') == "std.assert"
-                && import.module().is_none()
-                && diagnostic.source_id() == Some(import.source_id())
-        })
-        .collect::<Vec<_>>();
-    missing_imports.iter().any(|import| {
-        (diagnostic.code() == DiagnosticCode::ModuleUnknownPath
-            && diagnostic.primary_span() == import.span())
-            || (diagnostic.code() == DiagnosticCode::NameUnknownSymbol
-                && resolved.references().iter().any(|reference| {
+impl<'a> SnapshotIndex<'a> {
+    fn new(resolved: &'a ResolvedSnapshot) -> Self {
+        let mut references = BTreeMap::<_, Vec<_>>::new();
+        for reference in resolved.references() {
+            if let Some(target) = reference.target() {
+                references.entry(reference.from()).or_default().push(target);
+            }
+        }
+        let modules = resolved
+            .modules()
+            .iter()
+            .map(|module| {
+                (
+                    (module.package(), module.unit(), module.segments()),
+                    module.source_id(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut imports = BTreeMap::<_, Vec<_>>::new();
+        let mut missing_assertion = BTreeSet::new();
+        for import in resolved.imports() {
+            if let Some(target) = import.module() {
+                if let Some(source) =
+                    modules.get(&(target.package(), target.unit(), target.segments()))
+                {
+                    imports.entry(import.source_id()).or_default().push(*source);
+                }
+            } else if import.written().trim_start_matches('@') == "std.assert" {
+                let span = import.span();
+                missing_assertion.insert((
+                    import.source_id(),
+                    DiagnosticCode::ModuleUnknownPath,
+                    span.start(),
+                    span.end(),
+                ));
+                for reference in resolved.references().iter().filter(|reference| {
                     reference.source_id() == import.source_id()
                         && reference.target().is_none()
-                        && reference.span() == diagnostic.primary_span()
                         && reference
                             .written()
                             .strip_prefix(import.alias())
                             .is_some_and(|suffix| suffix.starts_with('.'))
-                }))
-    })
-}
-
-fn declaration_dependency_closure(
-    resolved: &ResolvedSnapshot,
-    start: &DeclarationId,
-) -> BTreeSet<DeclarationId> {
-    let mut closure = BTreeSet::from([start.clone()]);
-    loop {
-        let before = closure.len();
-        let current = closure.clone();
-        for reference in resolved
-            .references()
-            .iter()
-            .filter(|reference| current.contains(reference.from()))
-        {
-            if let Some(target) = reference.target() {
-                closure.insert(target.clone());
+                }) {
+                    let span = reference.span();
+                    missing_assertion.insert((
+                        import.source_id(),
+                        DiagnosticCode::NameUnknownSymbol,
+                        span.start(),
+                        span.end(),
+                    ));
+                }
             }
         }
-        if closure.len() == before {
-            break;
+        Self {
+            references,
+            imports,
+            missing_assertion,
         }
     }
-    closure
-}
 
-fn item_unavailable_diagnostics(
-    resolved: &ResolvedSnapshot,
-    test: &TestRef<'_>,
-    diagnostics: &[Diagnostic],
-) -> Vec<Diagnostic> {
-    let dependency_closure = declaration_dependency_closure(resolved, &test.id);
-    diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-        .filter(|diagnostic| {
-            diagnostic_owner(resolved, diagnostic)
-                .is_some_and(|owner| dependency_closure.contains(owner))
+    /// Source IDs reachable from `start` through resolved imports.
+    fn module_import_closure(&self, start: &str) -> BTreeSet<String> {
+        let mut sources = BTreeSet::from([start.to_owned()]);
+        let mut pending = vec![start];
+        while let Some(source) = pending.pop() {
+            for target in self.imports.get(source).into_iter().flatten() {
+                if sources.insert((*target).to_owned()) {
+                    pending.push(target);
+                }
+            }
+        }
+        sources
+    }
+
+    /// Declarations reachable from `start` through resolved references.
+    fn declaration_closure(
+        &self,
+        start: &'a DeclarationId,
+    ) -> BTreeSet<&'a DeclarationId> {
+        let mut closure = BTreeSet::from([start]);
+        let mut pending = vec![start];
+        while let Some(declaration) = pending.pop() {
+            for target in self.references.get(declaration).into_iter().flatten() {
+                if closure.insert(*target) {
+                    pending.push(target);
+                }
+            }
+        }
+        closure
+    }
+
+    fn is_missing_assertion_diagnostic(&self, diagnostic: &Diagnostic) -> bool {
+        let span = diagnostic.primary_span();
+        diagnostic.source_id().is_some_and(|source| {
+            self.missing_assertion.contains(&(
+                source,
+                diagnostic.code(),
+                span.start(),
+                span.end(),
+            ))
         })
-        .cloned()
-        .collect()
+    }
+
+    /// Unavailable diagnostics owned by a declaration in `test`'s closure.
+    fn unavailable_for(
+        &self,
+        test: &'a DeclarationId,
+        unavailable: &[(&DeclarationId, &Diagnostic)],
+    ) -> Vec<Diagnostic> {
+        if unavailable.is_empty() {
+            return Vec::new();
+        }
+        let closure = self.declaration_closure(test);
+        unavailable
+            .iter()
+            .filter(|(owner, _)| closure.contains(owner))
+            .map(|(_, diagnostic)| (*diagnostic).clone())
+            .collect()
+    }
 }
 
 fn diagnostic_owner<'a>(

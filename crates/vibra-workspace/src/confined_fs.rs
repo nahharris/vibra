@@ -207,59 +207,6 @@ impl ConfinedDir {
         }
     }
 
-    /// Renames a direct child only if the destination does not already exist.
-    pub fn rename_noreplace_to(
-        &self,
-        from: &OsStr,
-        destination: &Self,
-        to: &OsStr,
-    ) -> io::Result<()> {
-        validate_name(from)?;
-        validate_name(to)?;
-        #[cfg(all(
-            unix,
-            any(target_os = "linux", target_os = "macos", target_os = "redox")
-        ))]
-        {
-            rustix::fs::renameat_with(
-                &self.handle,
-                from,
-                &destination.handle,
-                to,
-                rustix::fs::RenameFlags::NOREPLACE,
-            )
-            .map_err(to_io_error)
-        }
-        #[cfg(all(
-            unix,
-            not(any(target_os = "linux", target_os = "macos", target_os = "redox"))
-        ))]
-        {
-            if destination.open_dir(to).is_ok() || destination.open_file(to).is_ok() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "destination already exists",
-                ));
-            }
-            rustix::fs::renameat(&self.handle, from, &destination.handle, to)
-                .map_err(to_io_error)
-        }
-        #[cfg(windows)]
-        {
-            fs::rename(self.path.join(from), destination.path.join(to))
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            if destination.path.join(to).exists() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "destination already exists",
-                ));
-            }
-            fs::rename(self.path.join(from), destination.path.join(to))
-        }
-    }
-
     /// Checks whether a direct child entry names the same directory as an
     /// already opened handle.
     pub fn is_same_directory(&self, name: &OsStr, other: &Self) -> io::Result<bool> {
