@@ -19,7 +19,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use vibra_ir::{
-    CheckedProgram, Expr, FunctionSignature, PrimitiveType, SourceOrigin,
+    CallTarget, CheckedProgram, Expr, FunctionSignature, PrimitiveType, SourceOrigin,
     TestAssertion, Value,
 };
 
@@ -638,22 +638,13 @@ impl<'a> Machine<'a> {
                 ..
             } => self.evaluate_if(condition, then_branch, else_branch, slots, captures),
             Expr::Call {
-                function,
+                target,
                 arguments,
                 result,
-                callee,
                 tail,
                 origin,
-                ..
             } => self.evaluate_call(
-                *function,
-                callee.as_deref(),
-                arguments,
-                result,
-                *tail,
-                origin,
-                slots,
-                captures,
+                target, arguments, result, *tail, origin, slots, captures,
             ),
         }
     }
@@ -790,8 +781,7 @@ impl<'a> Machine<'a> {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_call(
         &mut self,
-        function: usize,
-        callee: Option<&Expr>,
+        target: &CallTarget,
         arguments: &[Expr],
         result: &PrimitiveType,
         tail: bool,
@@ -799,15 +789,16 @@ impl<'a> Machine<'a> {
         slots: &mut Frame,
         captures: &[RuntimeValue],
     ) -> Option<Evaluation> {
-        let callable = if let Some(callee) = callee {
-            let RuntimeValue::Function(callable) =
-                self.evaluate_value(callee, slots, captures)?
-            else {
-                return None;
-            };
-            callable
-        } else {
-            self.named_callable(function)?
+        let callable = match target {
+            CallTarget::Direct(function) => self.named_callable(*function)?,
+            CallTarget::Indirect { callee, .. } => {
+                let RuntimeValue::Function(callable) =
+                    self.evaluate_value(callee, slots, captures)?
+                else {
+                    return None;
+                };
+                callable
+            }
         };
         let callable_signature = match &callable {
             Callable::Named { signature, .. } | Callable::Lambda { signature, .. } => {

@@ -690,31 +690,66 @@ pub enum Expr {
         /// The source origin of the complete form.
         origin: SourceOrigin,
     },
-    /// A fixed positional call to a checked function.
+    /// A fixed positional call.
     Call {
-        /// The function index in the containing checked program.
-        function: usize,
+        /// What the call invokes.
+        target: CallTarget,
         /// Arguments in declaration order.
         arguments: Vec<Self>,
-        /// An indirect callee expression.  `None` preserves the compact
-        /// direct-call representation used by the M2 Step 6 IR.
-        callee: Option<Box<Self>>,
-        /// A statically known target for an indirect call, when one exists.
-        /// This preserves recursive-call dependency checking through a local
-        /// function alias without treating an arbitrary lambda as a call to
-        /// function zero.
-        function_hint: Option<usize>,
         /// The statically checked result type.
         result: PrimitiveType,
-        /// Whether this call is an explicit tail transfer in the checked IR.
+        /// Whether this call is an explicit tail transfer candidate.
         ///
-        /// The checker sets this only when every statically bounded target is
-        /// in the current module function's recursive group and the call is
-        /// in a syntactic tail position.
+        /// The checker sets this for a call in an activation-relative tail
+        /// position of a module-level function body when at least one
+        /// statically known target is a source function (not a compiler
+        /// intrinsic wrapper) or the target set is not statically bounded.
+        /// A call's own targets are reachable from the caller, so every such
+        /// source target is in the caller's recursive group. Checked-program
+        /// validation requires a [`CallTarget::Direct`] tail target to be in
+        /// that group. At run time a transfer reuses the current activation
+        /// exactly when the evaluated callee is a named function in the
+        /// group; any other callee is invoked as an ordinary call.
         tail: bool,
         /// The source origin of the complete application.
         origin: SourceOrigin,
     },
+}
+
+/// What a checked call invokes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CallTarget {
+    /// A module-level function of the containing program, by index.
+    Direct(usize),
+    /// A function value computed by evaluating `callee` exactly once.
+    Indirect {
+        /// The callee expression, of function type.
+        callee: Box<Expr>,
+        /// The one module function the callee is statically known to denote,
+        /// when it denotes exactly one and no closure. Validation re-derives
+        /// the target set from `callee` and rejects a hint that disagrees.
+        hint: Option<usize>,
+    },
+}
+
+impl CallTarget {
+    /// The indirect callee expression, if this is an indirect call.
+    #[must_use]
+    pub fn callee(&self) -> Option<&Expr> {
+        match self {
+            Self::Direct(_) => None,
+            Self::Indirect { callee, .. } => Some(callee),
+        }
+    }
+
+    /// The statically known function hint of an indirect call.
+    #[must_use]
+    pub const fn hint(&self) -> Option<usize> {
+        match self {
+            Self::Direct(_) => None,
+            Self::Indirect { hint, .. } => *hint,
+        }
+    }
 }
 
 impl Expr {
@@ -863,10 +898,8 @@ impl Expr {
         origin: SourceOrigin,
     ) -> Self {
         Self::Call {
-            function,
+            target: CallTarget::Direct(function),
             arguments,
-            callee: None,
-            function_hint: None,
             result,
             tail: false,
             origin,
@@ -882,10 +915,8 @@ impl Expr {
         origin: SourceOrigin,
     ) -> Self {
         Self::Call {
-            function,
+            target: CallTarget::Direct(function),
             arguments,
-            callee: None,
-            function_hint: None,
             result,
             tail: true,
             origin,
@@ -902,10 +933,11 @@ impl Expr {
         origin: SourceOrigin,
     ) -> Self {
         Self::Call {
-            function: function_hint.unwrap_or_default(),
+            target: CallTarget::Indirect {
+                callee: Box::new(callee),
+                hint: function_hint,
+            },
             arguments,
-            callee: Some(Box::new(callee)),
-            function_hint,
             result,
             tail: false,
             origin,
@@ -943,10 +975,11 @@ impl Expr {
         origin: SourceOrigin,
     ) -> Self {
         Self::Call {
-            function: function_hint.unwrap_or_default(),
+            target: CallTarget::Indirect {
+                callee: Box::new(callee),
+                hint: function_hint,
+            },
             arguments,
-            callee: Some(Box::new(callee)),
-            function_hint,
             result,
             tail: true,
             origin,
@@ -1080,9 +1113,9 @@ impl Expr {
                 .max(then_branch.slot_count())
                 .max(else_branch.slot_count()),
             Self::Call {
-                arguments, callee, ..
-            } => callee
-                .as_deref()
+                arguments, target, ..
+            } => target
+                .callee()
                 .map_or(0, Self::slot_count)
                 .max(arguments.iter().map(Self::slot_count).max().unwrap_or(0)),
             Self::Closure { captures, .. } => {
@@ -1304,10 +1337,10 @@ impl Expr {
             Self::Call {
                 arguments,
                 result,
-                callee,
+                target,
                 ..
             } => {
-                if let Some(callee) = callee {
+                if let Some(callee) = target.callee() {
                     let callee_type =
                         callee.validate_shape_with_captures(slots, capture_types)?;
                     if !matches!(callee_type, PrimitiveType::Function(_)) {
@@ -2128,37 +2161,39 @@ fn validate_program_expr(
             )?;
         }
         Expr::Call {
-            function,
+            target,
             arguments,
             result,
-            callee: callee_expression,
-            function_hint,
             ..
         } => {
-            let signature = if let Some(callee_expression) = callee_expression {
-                validate_program_expr(
-                    callee_expression,
-                    globals,
-                    functions,
-                    owner,
-                    calls,
-                    dependencies,
-                )?;
-                match callee_expression.result_type() {
-                    PrimitiveType::Function(signature) => *signature,
-                    actual => {
+            let callee_expression = target.callee();
+            let signature = match target {
+                CallTarget::Direct(function) => {
+                    let Some(callee) = functions.get(*function) else {
                         return Err(IrError::InvalidExpression(format!(
-                            "indirect callee has non-function type {actual}"
+                            "function index {function} is outside the program"
                         )));
+                    };
+                    callee.signature().clone()
+                }
+                CallTarget::Indirect { callee, .. } => {
+                    validate_program_expr(
+                        callee,
+                        globals,
+                        functions,
+                        owner,
+                        calls,
+                        dependencies,
+                    )?;
+                    match callee.result_type() {
+                        PrimitiveType::Function(signature) => *signature,
+                        actual => {
+                            return Err(IrError::InvalidExpression(format!(
+                                "indirect callee has non-function type {actual}"
+                            )));
+                        }
                     }
                 }
-            } else {
-                let Some(callee) = functions.get(*function) else {
-                    return Err(IrError::InvalidExpression(format!(
-                        "function index {function} is outside the program"
-                    )));
-                };
-                callee.signature().clone()
             };
             if arguments.len() != signature.fixed_parameter_count() {
                 return Err(IrError::InvalidExpression(format!(
@@ -2250,7 +2285,9 @@ fn validate_program_expr(
                 )));
             }
             let mut targets = BTreeSet::new();
-            if let Some(callee_expression) = callee_expression {
+            if let CallTarget::Direct(function) = target {
+                targets.insert(*function);
+            } else if let Some(callee_expression) = callee_expression {
                 let summary = possible_function_targets(
                     callee_expression,
                     &BTreeMap::new(),
@@ -2259,22 +2296,20 @@ fn validate_program_expr(
                     &mut BTreeSet::new(),
                     &mut BTreeSet::new(),
                 );
-                if let Some(function_hint) = function_hint {
+                if let Some(function_hint) = target.hint() {
                     if summary.has_closure
                         || (!summary.known.is_empty()
                             && (summary.unknown
-                                || summary.known != BTreeSet::from([*function_hint])))
+                                || summary.known != BTreeSet::from([function_hint])))
                     {
                         return Err(IrError::InvalidExpression(
                             "function hint does not match indirect callee".to_owned(),
                         ));
                     }
-                    targets.insert(*function_hint);
+                    targets.insert(function_hint);
                 } else {
                     targets.extend(summary.known);
                 }
-            } else {
-                targets.insert(*function);
             }
             for dependency_target in targets {
                 if functions.get(dependency_target).is_none() {
@@ -2450,22 +2485,18 @@ fn possible_function_targets(
             result
         }
         Expr::Call {
-            function,
-            arguments,
-            callee,
-            ..
+            target, arguments, ..
         } => {
-            let target_summary = if let Some(callee) = callee {
-                possible_function_targets(
+            let target_summary = match target {
+                CallTarget::Indirect { callee, .. } => possible_function_targets(
                     callee,
                     aliases,
                     globals,
                     functions,
                     visiting,
                     visiting_globals,
-                )
-            } else {
-                FunctionTargetSummary::known(*function)
+                ),
+                CallTarget::Direct(function) => FunctionTargetSummary::known(*function),
             };
             if target_summary.unknown || target_summary.has_closure {
                 return target_summary;
@@ -3061,30 +3092,28 @@ impl<'a> CallFlow<'a> {
                 },
             ),
             Expr::Call {
-                function,
+                target,
                 arguments,
-                callee,
-                function_hint,
                 result,
                 ..
             } => {
                 if !matches!(result, PrimitiveType::Function(_)) {
                     return FlowTargetSummary::default();
                 }
-                let callee_summary = callee.as_deref().map_or_else(
-                    || FlowTargetSummary::known_function(*function),
-                    |callee| {
-                        self.summary_expr_with_stack(
+                let mut targets = match target {
+                    CallTarget::Direct(function) => {
+                        FlowTargetSummary::known_function(*function)
+                    }
+                    CallTarget::Indirect { callee, .. } => self
+                        .summary_expr_with_stack(
                             callee,
                             environment,
                             captures,
                             visiting,
-                        )
-                    },
-                );
-                let mut targets = callee_summary.clone();
-                if let Some(function_hint) = function_hint {
-                    targets.known.insert(*function_hint);
+                        ),
+                };
+                if let Some(function_hint) = target.hint() {
+                    targets.known.insert(function_hint);
                     targets.is_function = true;
                 }
                 let mut summary = FlowTargetSummary {
@@ -3234,25 +3263,25 @@ impl<'a> CallFlow<'a> {
                 self.collect_expr(else_branch, owner, environment, captures)?;
             }
             Expr::Call {
-                function,
-                arguments,
-                callee,
-                function_hint,
-                ..
+                target, arguments, ..
             } => {
+                let callee = target.callee();
                 if let Some(callee) = callee {
                     self.collect_expr(callee, owner, environment, captures)?;
                 }
                 for argument in arguments {
                     self.collect_expr(argument, owner, environment, captures)?;
                 }
-                let callee_summary = callee.as_deref().map_or_else(
-                    || FlowTargetSummary::known_function(*function),
-                    |callee| self.summary_expr(callee, environment, captures),
-                );
-                let mut target_summary = callee_summary;
-                if let Some(function_hint) = function_hint {
-                    target_summary.known.insert(*function_hint);
+                let mut target_summary = match target {
+                    CallTarget::Direct(function) => {
+                        FlowTargetSummary::known_function(*function)
+                    }
+                    CallTarget::Indirect { callee, .. } => {
+                        self.summary_expr(callee, environment, captures)
+                    }
+                };
+                if let Some(function_hint) = target.hint() {
+                    target_summary.known.insert(function_hint);
                     target_summary.is_function = true;
                 }
                 if target_summary.unknown
@@ -3286,7 +3315,7 @@ impl<'a> CallFlow<'a> {
                     closure_result?;
                 }
                 if !target_summary.closure_defaults.is_empty()
-                    && let Some(callee) = callee.as_deref()
+                    && let Some(callee) = callee
                     && let PrimitiveType::Function(signature) = callee.result_type()
                 {
                     for (index, argument) in arguments.iter().enumerate() {
@@ -3706,13 +3735,12 @@ fn validate_tail_calls(
             )?;
         }
         Expr::Call {
-            function,
+            target,
             arguments,
-            callee,
-            function_hint,
             tail,
             ..
         } => {
+            let callee = target.callee();
             if let Some(callee) = callee {
                 validate_tail_calls(
                     callee,
@@ -3749,21 +3777,20 @@ fn validate_tail_calls(
                     "tail call has no module-level function activation".to_owned(),
                 ));
             };
-            let targets = if let Some(callee) = callee {
-                possible_function_targets(
+            let targets = match target {
+                CallTarget::Indirect { callee, .. } => possible_function_targets(
                     callee,
                     aliases,
                     globals,
                     functions,
                     &mut BTreeSet::new(),
                     &mut BTreeSet::new(),
-                )
-            } else {
-                FunctionTargetSummary::known(*function)
+                ),
+                CallTarget::Direct(function) => FunctionTargetSummary::known(*function),
             };
             if targets.known.is_empty()
                 && !(targets.has_closure
-                    && callee.as_deref().is_some_and(|expression| {
+                    && callee.is_some_and(|expression| {
                         !matches!(expression, Expr::Closure { .. })
                     }))
             {
@@ -3771,10 +3798,10 @@ fn validate_tail_calls(
                     "tail call target is not statically bounded".to_owned(),
                 ));
             }
-            if let Some(function_hint) = function_hint
+            if let Some(function_hint) = target.hint()
                 && (targets.unknown
                     || targets.has_closure
-                    || targets.known != BTreeSet::from([*function_hint]))
+                    || targets.known != BTreeSet::from([function_hint]))
             {
                 return Err(IrError::InvalidExpression(
                     "tail call hint does not match indirect callee".to_owned(),
@@ -3785,17 +3812,17 @@ fn validate_tail_calls(
                     "tail call owner {current_function} is outside the program"
                 )));
             }
-            for target in targets.known {
-                if functions.get(target).is_none() {
+            for known in targets.known {
+                if functions.get(known).is_none() {
                     return Err(IrError::InvalidExpression(format!(
-                        "tail call target {target} is outside the program"
+                        "tail call target {known} is outside the program"
                     )));
                 }
-                if callee.is_none()
-                    && !recursive_groups.contains(current_function, target)
+                if matches!(target, CallTarget::Direct(_))
+                    && !recursive_groups.contains(current_function, known)
                 {
                     return Err(IrError::InvalidExpression(format!(
-                        "tail call target {target} is outside function {current_function}'s recursive group"
+                        "tail call target {known} is outside function {current_function}'s recursive group"
                     )));
                 }
             }
@@ -3971,19 +3998,17 @@ fn canonical_expr(expression: &Expr) -> String {
             canonical_expr(else_branch)
         ),
         Expr::Call {
-            function,
+            target,
             arguments,
             result,
-            callee,
-            function_hint,
             tail,
             ..
         } => {
             let values = arguments.iter().map(canonical_expr).collect::<Vec<_>>();
             let tail_field = if *tail { " tail: true" } else { "" };
-            match callee {
-                Some(callee) => {
-                    let function_field = function_hint
+            match target {
+                CallTarget::Indirect { callee, hint } => {
+                    let function_field = hint
                         .map(|function| format!(" function: {function}u64"))
                         .unwrap_or_default();
                     format!(
@@ -3995,7 +4020,7 @@ fn canonical_expr(expression: &Expr) -> String {
                         canonical_array(&values)
                     )
                 }
-                None => format!(
+                CallTarget::Direct(function) => format!(
                     "(record kind: @call function: {}u64{} result: {} arguments: {})",
                     function,
                     tail_field,
