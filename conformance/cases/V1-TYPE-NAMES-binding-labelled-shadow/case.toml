@@ -1,0 +1,31 @@
+id = "V1-TYPE-NAMES-binding-labelled-shadow"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A labelled parameter name that shadows a positional parameter or module value is reported at the name alone."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [60, 65]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [32, 37]
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [75, 80]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [0, 17]

@@ -866,7 +866,7 @@ impl<'a> Checker<'a> {
                     if !environment.add_binding_type(
                         labelled.name(),
                         labelled.value_type(),
-                        entry.span(),
+                        entry.name_span(),
                     ) {
                         parameters_valid = false;
                     }
@@ -1200,15 +1200,16 @@ impl<'a> CheckEnvironment<'a> {
             return Some(binding.clone());
         }
         let slot = self.capture_sources.len();
-        let (value_type, function_targets, source) = match storage {
+        let (value_type, function_targets, introduction, source) = match storage {
             VisibleStorage::Activation {
                 slot,
                 value_type,
+                span: introduction,
                 function_targets,
-                ..
             } => (
                 value_type.clone(),
                 function_targets.clone(),
+                introduction,
                 Expr::variable(
                     slot,
                     value_type,
@@ -1218,11 +1219,12 @@ impl<'a> CheckEnvironment<'a> {
             VisibleStorage::Closure {
                 slot,
                 value_type,
+                span: introduction,
                 function_targets,
-                ..
             } => (
                 value_type.clone(),
                 function_targets.clone(),
+                introduction,
                 Expr::captured(
                     slot,
                     value_type,
@@ -1231,10 +1233,12 @@ impl<'a> CheckEnvironment<'a> {
             ),
         };
         self.capture_sources.push(source);
+        // The capture keeps the outer binder's introduction span so a
+        // redeclaration relates the binder, not the capturing lambda.
         let binding = CaptureBinding {
             slot,
             value_type,
-            span,
+            span: introduction,
             function_targets,
         };
         self.captures.insert(name.to_owned(), binding.clone());
@@ -2576,7 +2580,7 @@ fn check_expression_in_position(
                     if !nested.add_binding_type(
                         labelled.name(),
                         labelled.value_type(),
-                        entry.span(),
+                        entry.name_span(),
                     ) {
                         parameters_valid = false;
                     }

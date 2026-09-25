@@ -576,7 +576,7 @@ pub fn check_resolved(
                 if !environment.add_binding_type(
                     labelled.name(),
                     labelled.value_type(),
-                    entry.span(),
+                    entry.name_span(),
                 ) {
                     parameters_valid = false;
                 }

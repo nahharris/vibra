@@ -993,6 +993,7 @@ pub struct LabelledParameter {
     name: Name,
     value_type: TypeExpr,
     default: Literal,
+    name_span: ByteSpan,
     span: ByteSpan,
 }
 
@@ -1013,6 +1014,12 @@ impl LabelledParameter {
     #[must_use]
     pub const fn default(&self) -> &Literal {
         &self.default
+    }
+
+    /// The source span of the parameter name alone.
+    #[must_use]
+    pub const fn name_span(&self) -> ByteSpan {
+        self.name_span
     }
 
     /// The source span.
@@ -2957,6 +2964,7 @@ impl AstParser {
                 name,
                 value_type,
                 default,
+                name_span: triple[0].span(),
                 span: ByteSpan::new(triple[0].span().start(), triple[2].span().end()),
             });
         }

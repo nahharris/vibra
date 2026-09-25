@@ -336,12 +336,12 @@ and names the entity it found, rather than reporting the path as unknown.
 Name shadowing is forbidden. A repeated top-level declaration, import alias,
 or lexical binding emits `@name.redeclaration` at the later introduction and
 relates the earlier introduction. Each later introduction emits exactly one
-such diagnostic. For a lexical binding, the primary span is the binder name
-itself, not the enclosing parameter or `let` form, and the related span is the
-nearest earlier visible introduction: the innermost enclosing lexical binder,
-else the module-level declaration. The shadowing binder still binds for the
-rest of its scope, so a further repetition of the name relates it instead.
-Members of one owner's flat namespace use
+such diagnostic. A lexical binding's primary span is its binder name, not the
+enclosing parameter, labelled entry, or `let` form. The related span is the
+nearest earlier visible introduction's binder: the innermost enclosing lexical
+binder, including one a lambda captures, else the module-level declaration.
+The shadowing binder still binds for the rest of its scope, so a further
+repetition relates it instead. Members of one owner's flat namespace use
 `@name.member-collision` instead. Every name introduced anywhere inside a
 positional-parameter, `let`, or `match` pattern MUST NOT reuse any visible
 lexical name. Labelled and variadic parameter names follow the same rule. A

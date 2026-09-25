@@ -2157,7 +2157,10 @@ impl Resolution {
                         self.bind_names(
                             module,
                             scope,
-                            [(parameter.name().value().to_owned(), parameter.span())],
+                            [(
+                                parameter.name().value().to_owned(),
+                                parameter.name_span(),
+                            )],
                             source_id,
                         );
                     }
