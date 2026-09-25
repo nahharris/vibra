@@ -28,6 +28,8 @@ illustrative.
 - [Milestone execution model](roadmap/execution.md)
 - [Milestone 1 step plan](roadmap/milestone-1/README.md)
 - [Milestone 2 step plan](roadmap/milestone-2/README.md)
+- [Beyond v1: long-term release lines and design tracks](roadmap/beyond-v1/README.md)
+  (non-normative direction)
 
 The M2 [supported and deferred surface inventory](roadmap/milestone-2/supported-surface.md)
 and [Step 14 exit-evidence report](roadmap/milestone-2/14-exit-evidence.md)
@@ -39,7 +41,9 @@ and reviewed before implementation continues.
 
 The execution model and the per-milestone step plans record how roadmap work
 is decomposed, branched, and tracked. They are process guidance and carry no
-normative weight over `spec/`.
+normative weight over `spec/`. The beyond-v1 documents record post-v1 direction
+and design sketches only; nothing in them is part of v1 or authorizes
+implementation.
 
 ## Historical material
 
