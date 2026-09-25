@@ -366,26 +366,6 @@ pub fn check_resolved(
         );
     }
 
-    let mut recursive_groups = vec![BTreeSet::new(); functions.len()];
-    for reference in snapshot
-        .references()
-        .iter()
-        .filter(|reference| selected.contains(reference.source_id()))
-    {
-        let (Some(from), Some(target)) =
-            (function_indices.get(reference.from()), reference.target())
-        else {
-            continue;
-        };
-        if let Some(to) = function_indices.get(target)
-            && let Some(group) = recursive_groups.get_mut(*from)
-        {
-            group.insert(*to);
-        }
-    }
-    let recursive_groups =
-        crate::find_recursive_groups(&recursive_groups, &vec![true; functions.len()]);
-
     let empty_indices = BTreeMap::new();
     let empty_names = BTreeMap::new();
     let mut bindings = Vec::new();
@@ -403,7 +383,6 @@ pub fn check_resolved(
             &empty_indices,
             &empty_names,
             &mut bindings,
-            None,
             None,
         );
         environment.resolved_targets = Some(&resolved_targets);
@@ -461,7 +440,6 @@ pub fn check_resolved(
                 &empty_names,
                 &mut bindings,
                 Some(index),
-                recursive_groups.get(index).cloned(),
             );
             environment.resolved_targets = Some(&resolved_targets);
             let Some(body) = crate::check_sequence(
@@ -541,7 +519,6 @@ pub fn check_resolved(
         if header.external_declared {
             continue;
         }
-        let recursive_group = recursive_groups.get(index).cloned();
         let mut environment = CheckEnvironment::new(
             &header.source_id,
             &mut diagnostics,
@@ -552,7 +529,6 @@ pub fn check_resolved(
             &empty_names,
             &mut bindings,
             Some(index),
-            recursive_group,
         );
         environment.resolved_targets = Some(&resolved_targets);
         let mut parameters_valid = true;

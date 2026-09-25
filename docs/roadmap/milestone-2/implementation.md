@@ -58,11 +58,14 @@ program boundary. `CheckedProgram::try_new` accepts checked functions, while
 `try_new_with_globals` additionally admits typed immutable module values; both
 revalidate entry, unique names, and body/result invariants. `vibra-types`
 consumes an explicit source ID and the shared syntax AST; it does not read the
-filesystem or call the interpreter. The Step 6 checker validates global
-initializer dependencies and rejects cycles before lowering, then lowers direct
+filesystem or call the interpreter. The checker lowers direct
 parameter/`let` slots, `do` sequences, boolean `if`, and fixed positional calls
-to the same IR; Step 9 adds same-module recursive groups and explicit tail
-transfer validation.
+to checked IR; initializer dependencies, initializer cycles, and Step 9's
+same-module recursive groups are computed once, over that IR, by `vibra-ir`, so
+`check_source` and `check_resolved` share one analysis. (The original Step 6
+and Step 9 checkers also ran syntax-level dependency walkers; the M2 review
+removed them, and `check_paths_agree` compares both check paths over the static
+corpus.)
 `vibra-interp::run` accepts only a `CheckedProgram`, evaluates
 literal, binding, branch, global, and call expressions deterministically, and
 returns a typed value plus an empty pure audit trace. Its `@types.v1` output is

@@ -387,7 +387,6 @@ fn check_ast_with_bindings_authority(
 ) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
     let mut checker = Checker::new(source_id, diagnostics, ast, trusted_bootstrap);
     checker.collect_headers();
-    checker.check_function_cycles();
     checker.check_globals();
     checker.check_functions();
     let program = checker.finish();
@@ -402,7 +401,6 @@ fn check_ast_with_text_import_authority(
     let mut checker = Checker::new(source_id, diagnostics, ast, true);
     checker.text_import_authorized = true;
     checker.collect_headers();
-    checker.check_function_cycles();
     checker.check_globals();
     checker.check_functions();
     let program = checker.finish();
@@ -505,7 +503,6 @@ struct Checker<'a> {
     trusted_bootstrap: bool,
     text_import_authorized: bool,
     text_import_span: Option<ByteSpan>,
-    recursive_groups: Vec<Vec<usize>>,
 }
 
 impl<'a> Checker<'a> {
@@ -530,7 +527,6 @@ impl<'a> Checker<'a> {
             trusted_bootstrap,
             text_import_authorized: false,
             text_import_span: None,
-            recursive_groups: Vec::new(),
         }
     }
 
@@ -710,41 +706,6 @@ impl<'a> Checker<'a> {
         self.checked_functions = vec![None; self.functions.len()];
     }
 
-    fn check_function_cycles(&mut self) {
-        let mut dependencies = vec![BTreeSet::new(); self.functions.len()];
-        for (index, header) in self.functions.iter().enumerate() {
-            let Some(Declaration::Defn(function)) =
-                self.ast.declarations().get(header.declaration_index)
-            else {
-                continue;
-            };
-            let Some(function_dependencies) = dependencies.get_mut(index) else {
-                continue;
-            };
-            for expression in function.expressions() {
-                collect_function_dependencies(
-                    expression,
-                    &self.function_indices,
-                    function_dependencies,
-                );
-                collect_function_alias_dependencies(
-                    expression,
-                    &self.global_indices,
-                    &self.function_indices,
-                    &self.globals,
-                    function_dependencies,
-                );
-            }
-        }
-        let module_definitions = self
-            .functions
-            .iter()
-            .map(|function| function.declaration_index != IMPORTED_FUNCTION_DECLARATION)
-            .collect::<Vec<_>>();
-        self.recursive_groups =
-            find_recursive_groups(&dependencies, &module_definitions);
-    }
-
     fn check_globals(&mut self) {
         for index in 0..self.globals.len() {
             let Some(header) = self.globals.get(index).cloned() else {
@@ -759,7 +720,6 @@ impl<'a> Checker<'a> {
                 &self.function_indices,
                 &self.module_names,
                 &mut self.bindings,
-                None,
                 None,
             );
             let Some(expression) = check_expression(
@@ -863,7 +823,6 @@ impl<'a> Checker<'a> {
                 &self.module_names,
                 &mut self.bindings,
                 Some(index),
-                self.recursive_groups.get(index).cloned(),
             );
             let mut parameters_valid = true;
             for (parameter_index, parameter) in function.parameters().iter().enumerate()
@@ -1007,42 +966,6 @@ pub(crate) fn initializer_cycle_diagnostic(
     .with_source_id(global.origin().source_id())
 }
 
-fn find_recursive_groups(
-    dependencies: &[BTreeSet<usize>],
-    module_definitions: &[bool],
-) -> Vec<Vec<usize>> {
-    (0..dependencies.len())
-        .map(|start| {
-            if !module_definitions.get(start).copied().unwrap_or(false) {
-                return Vec::new();
-            }
-            reachable_functions(start, dependencies)
-                .into_iter()
-                .filter(|target| {
-                    module_definitions.get(*target).copied().unwrap_or(false)
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn reachable_functions(
-    start: usize,
-    dependencies: &[BTreeSet<usize>],
-) -> BTreeSet<usize> {
-    let mut reached = BTreeSet::new();
-    let mut pending = vec![start];
-    while let Some(index) = pending.pop() {
-        if !reached.insert(index) {
-            continue;
-        }
-        if let Some(next) = dependencies.get(index) {
-            pending.extend(next.iter().copied());
-        }
-    }
-    reached
-}
-
 struct CheckEnvironment<'a> {
     source_id: &'a str,
     diagnostics: &'a mut Vec<Diagnostic>,
@@ -1058,7 +981,6 @@ struct CheckEnvironment<'a> {
     outer: Option<VisibleBindings>,
     next_slot: usize,
     current_function: Option<usize>,
-    recursive_group: Option<Vec<usize>>,
     resolved_targets:
         Option<&'a BTreeMap<(String, usize, usize), ResolvedReferenceTarget>>,
 }
@@ -1111,7 +1033,6 @@ impl<'a> CheckEnvironment<'a> {
         module_names: &'a BTreeMap<String, ByteSpan>,
         bindings: &'a mut Vec<ApplicationBinding>,
         current_function: Option<usize>,
-        recursive_group: Option<Vec<usize>>,
     ) -> Self {
         Self {
             source_id,
@@ -1128,7 +1049,6 @@ impl<'a> CheckEnvironment<'a> {
             outer: None,
             next_slot: 0,
             current_function,
-            recursive_group,
             resolved_targets: None,
         }
     }
@@ -1330,59 +1250,69 @@ fn types_match(left: &PrimitiveType, right: &PrimitiveType) -> bool {
     }
 }
 
+/// Visits `expression` and every nested expression in pre-order.
+///
+/// This is the one syntax traversal the checker needs before lowering;
+/// dependency, cycle, and recursive-group analysis happen once, over checked
+/// IR, in `vibra-ir`.
+fn walk_expressions<'e>(
+    expression: &'e Expression,
+    visit: &mut impl FnMut(&'e Expression),
+) {
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        visit(expression);
+        let first_child = pending.len();
+        match expression.kind() {
+            ExpressionKind::Name(_) | ExpressionKind::Literal(_) => {}
+            ExpressionKind::Application(application) => {
+                pending.push(application.callee());
+                pending.extend(
+                    application
+                        .arguments()
+                        .iter()
+                        .map(|argument| argument.value()),
+                );
+            }
+            ExpressionKind::Do(expressions) => pending.extend(expressions),
+            ExpressionKind::Let { value, body, .. } => {
+                pending.push(value);
+                pending.extend(body);
+            }
+            ExpressionKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => pending.extend([&**condition, &**then_branch, &**else_branch]),
+            ExpressionKind::Lambda(lambda) => pending.extend(lambda.body()),
+            ExpressionKind::Match { scrutinee, arms } => {
+                pending.push(scrutinee);
+                pending.extend(arms.iter().map(|arm| arm.result()));
+            }
+            ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
+                pending.push(operand);
+            }
+        }
+        // Children were pushed in source order; reverse them so they pop in
+        // source order and the visit stays pre-order.
+        if let Some(children) = pending.get_mut(first_child..) {
+            children.reverse();
+        }
+    }
+}
+
+/// Distinct single-segment symbol names used anywhere in `expression`, in
+/// first-use order.
 fn collect_value_names(expression: &Expression, names: &mut Vec<String>) {
-    let add_name = |name: &vibra_syntax::Name, names: &mut Vec<String>| {
-        if name.kind() == NameKind::Symbol
+    walk_expressions(expression, &mut |expression| {
+        if let ExpressionKind::Name(name) = expression.kind()
+            && name.kind() == NameKind::Symbol
             && name.segments().len() == 1
             && !names.iter().any(|known| known == name.value())
         {
             names.push(name.value().to_owned());
         }
-    };
-    match expression.kind() {
-        ExpressionKind::Name(name) => add_name(name, names),
-        ExpressionKind::Application(application) => {
-            collect_value_names(application.callee(), names);
-            for argument in application.arguments() {
-                collect_value_names(argument.value(), names);
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_value_names(expression, names);
-            }
-        }
-        ExpressionKind::Let { value, body, .. } => {
-            collect_value_names(value, names);
-            for expression in body {
-                collect_value_names(expression, names);
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_value_names(condition, names);
-            collect_value_names(then_branch, names);
-            collect_value_names(else_branch, names);
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_value_names(expression, names);
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_value_names(scrutinee, names);
-            for arm in arms {
-                collect_value_names(arm.result(), names);
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_value_names(operand, names);
-        }
-        ExpressionKind::Literal(_) => {}
-    }
+    });
 }
 
 fn function_index_from_expr(
@@ -1611,269 +1541,6 @@ fn syntax_function_targets(
         ExpressionKind::Lambda(_) => FunctionTargetSet::closure(),
         ExpressionKind::Application(_) => FunctionTargetSet::unknown(),
         _ => FunctionTargetSet::default(),
-    }
-}
-
-fn collect_function_dependencies(
-    expression: &Expression,
-    function_indices: &BTreeMap<String, usize>,
-    dependencies: &mut BTreeSet<usize>,
-) {
-    match expression.kind() {
-        ExpressionKind::Application(application) => {
-            if let ExpressionKind::Name(name) = application.callee().kind()
-                && name.kind() == NameKind::Symbol
-                && let Some(index) = function_indices.get(name.value()).copied()
-            {
-                dependencies.insert(index);
-            }
-            collect_function_dependencies(
-                application.callee(),
-                function_indices,
-                dependencies,
-            );
-            for argument in application.arguments() {
-                collect_function_dependencies(
-                    argument.value(),
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_function_dependencies(
-                    expression,
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::Let { value, body, .. } => {
-            collect_function_dependencies(value, function_indices, dependencies);
-            for expression in body {
-                collect_function_dependencies(
-                    expression,
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_function_dependencies(condition, function_indices, dependencies);
-            collect_function_dependencies(then_branch, function_indices, dependencies);
-            collect_function_dependencies(else_branch, function_indices, dependencies);
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_function_dependencies(
-                    expression,
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_function_dependencies(scrutinee, function_indices, dependencies);
-            for arm in arms {
-                collect_function_dependencies(
-                    arm.result(),
-                    function_indices,
-                    dependencies,
-                );
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_function_dependencies(operand, function_indices, dependencies);
-        }
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
-    }
-}
-
-fn collect_function_alias_dependencies(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    dependencies: &mut BTreeSet<usize>,
-) {
-    collect_function_alias_dependencies_inner(
-        expression,
-        global_indices,
-        function_indices,
-        globals,
-        dependencies,
-        &BTreeMap::new(),
-    );
-}
-
-fn collect_function_alias_dependencies_inner(
-    expression: &Expression,
-    global_indices: &BTreeMap<String, usize>,
-    function_indices: &BTreeMap<String, usize>,
-    globals: &[GlobalHeader],
-    dependencies: &mut BTreeSet<usize>,
-    aliases: &BTreeMap<String, FunctionTargetSet>,
-) {
-    match expression.kind() {
-        ExpressionKind::Application(application) => {
-            dependencies.extend(
-                syntax_function_targets(
-                    application.callee(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                )
-                .known,
-            );
-            collect_function_alias_dependencies_inner(
-                application.callee(),
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            for argument in application.arguments() {
-                collect_function_alias_dependencies_inner(
-                    argument.value(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Do(expressions) => {
-            for expression in expressions {
-                collect_function_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Let {
-            pattern,
-            value,
-            body,
-        } => {
-            collect_function_alias_dependencies_inner(
-                value,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            let mut scoped = aliases.clone();
-            if let PatternKind::Binding(name) = pattern.kind()
-                && !name.is_discard()
-            {
-                let targets = syntax_function_targets(
-                    value,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                );
-                if !targets.known.is_empty() || targets.unknown || targets.has_closure {
-                    scoped.insert(name.value().to_owned(), targets);
-                }
-            }
-            for expression in body {
-                collect_function_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    &scoped,
-                );
-            }
-        }
-        ExpressionKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_function_alias_dependencies_inner(
-                condition,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            collect_function_alias_dependencies_inner(
-                then_branch,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            collect_function_alias_dependencies_inner(
-                else_branch,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-        }
-        ExpressionKind::Lambda(lambda) => {
-            for expression in lambda.body() {
-                collect_function_alias_dependencies_inner(
-                    expression,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::Match { scrutinee, arms } => {
-            collect_function_alias_dependencies_inner(
-                scrutinee,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-            for arm in arms {
-                collect_function_alias_dependencies_inner(
-                    arm.result(),
-                    global_indices,
-                    function_indices,
-                    globals,
-                    dependencies,
-                    aliases,
-                );
-            }
-        }
-        ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
-            collect_function_alias_dependencies_inner(
-                operand,
-                global_indices,
-                function_indices,
-                globals,
-                dependencies,
-                aliases,
-            );
-        }
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
     }
 }
 
@@ -2568,17 +2235,20 @@ fn check_expression_in_position(
             }
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
-            let has_recursive_target =
-                environment.recursive_group.as_ref().is_some_and(|group| {
-                    function_targets
-                        .known
-                        .iter()
-                        .any(|index| group.contains(index))
-                });
+            // A call's own targets are reachable from the caller, so they are
+            // in its recursive group unless they are compiler-intrinsic
+            // wrappers. Checked IR computes the groups and decides whether a
+            // marked transfer reuses the activation; the checker only marks
+            // tail-position calls that can reach source code.
+            let has_source_target = function_targets.known.iter().any(|index| {
+                environment
+                    .functions
+                    .get(*index)
+                    .is_some_and(|function| function.external.is_none())
+            });
             let tail_transfer = tail_position
                 && environment.current_function.is_some()
-                && (!function_targets.known.is_empty() || function_targets.unknown)
-                && (has_recursive_target || function_targets.unknown);
+                && (has_source_target || function_targets.unknown);
             let facts = BindingFacts::new(
                 signature.parameters().len(),
                 signature
@@ -2733,7 +2403,6 @@ fn check_expression_in_position(
                 outer: environment.outer.clone(),
                 next_slot: environment.next_slot,
                 current_function: environment.current_function,
-                recursive_group: environment.recursive_group.clone(),
                 resolved_targets: environment.resolved_targets,
             };
             let slot = match pattern.kind() {
@@ -2835,7 +2504,6 @@ fn check_expression_in_position(
                 environment.function_indices,
                 environment.module_names,
                 &mut *environment.bindings,
-                None,
                 None,
             );
             nested.resolved_targets = environment.resolved_targets;
