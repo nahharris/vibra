@@ -1,0 +1,19 @@
+id = "V1-RUNTIME-workspace-test-unavailable-assertion"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A generic assertion member is unavailable and is not executed."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+interpreter = { result = "result.vibon" }
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "tests/math.vib"
+span = [45, 57]

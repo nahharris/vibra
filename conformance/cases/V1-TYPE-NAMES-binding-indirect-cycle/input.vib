@@ -1,0 +1,4 @@
+(def first i32 (read))
+(def second i32 first)
+(defn read () i32 second)
+(defn answer () i32 first)

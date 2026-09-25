@@ -1,0 +1,1 @@
+(defn length (value str) u64 external: @compiler symbol: "text.length")

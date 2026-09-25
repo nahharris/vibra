@@ -1,0 +1,9 @@
+(record
+  format: @types.v1
+  functions: (array
+    (record name: @f32-tie params: (array) result: @f32 body: (record kind: @sequence type: @f32 values: (array (record kind: @literal type: @f32 value: 1.0000001f32))))
+    (record name: @f64-tie params: (array) result: @f64 body: (record kind: @sequence type: @f64 values: (array (record kind: @literal type: @f64 value: 1f64))))
+    (record name: @f32-max params: (array) result: @f32 body: (record kind: @sequence type: @f32 values: (array (record kind: @literal type: @f32 value: 340282350000000000000000000000000000000f32))))
+    (record name: @f64-max params: (array) result: @f64 body: (record kind: @sequence type: @f64 values: (array (record kind: @literal type: @f64 value: 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f64))))
+  )
+)

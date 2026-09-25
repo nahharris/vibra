@@ -1,0 +1,24 @@
+id = "V1-PROJECT-static-duplicate-target"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "Target names are unique within the project namespace."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.member-collision"
+level = "@error"
+source = "project.vibon"
+[expect.diagnostics.span]
+start = 152
+end = 158
+
+[[expect.diagnostics.related]]
+source = "project.vibon"
+[expect.diagnostics.related.span]
+start = 107
+end = 113

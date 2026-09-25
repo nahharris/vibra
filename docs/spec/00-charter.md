@@ -1,7 +1,8 @@
 # Vibra v1 charter
 
 Status: normative target
-Implementation status: not started
+Implementation status: M1's lossless reader and M2's executable pure subset
+are implemented; the full v1 target remains incomplete.
 Version: 1.0 design line
 
 ## Mission

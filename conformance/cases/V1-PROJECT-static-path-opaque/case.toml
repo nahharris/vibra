@@ -1,0 +1,10 @@
+id = "V1-PROJECT-static-path-opaque"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "M2 retains root and path strings without filesystem or path normalization."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = true

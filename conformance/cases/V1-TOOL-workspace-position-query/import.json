@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:cad1de46d849d1f71e8955b66e21725ead26f58b5f51183736125d96c44ce3d6",
+  "sourceId": "src/main.vib",
+  "offset": 20,
+  "nodeId": "src/main.vib#15-26",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 20,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 15,
+      "end": 26,
+      "startPosition": {
+        "line": 1,
+        "column": 16
+      },
+      "endPosition": {
+        "line": 1,
+        "column": 27
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "atom",
+    "category": "declaration",
+    "status": "exact",
+    "permittedForms": [
+      "import",
+      "deftype",
+      "defint",
+      "deffect",
+      "def",
+      "defn",
+      "test"
+    ],
+    "permittedLabels": []
+  },
+  "role": {
+    "status": "exact",
+    "value": "@entity-reference"
+  },
+  "context": {
+    "status": "exact",
+    "value": "module"
+  },
+  "identity": {
+    "status": "exact",
+    "value": {
+      "kind": "module",
+      "canonical": "@app@0.1.0/app.helper"
+    }
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": []
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "helper",
+        "module": "@app.helper",
+        "sourceId": "src/main.vib",
+        "span": {
+          "sourceId": "src/main.vib",
+          "start": 0,
+          "end": 27,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 28
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": [
+      {
+        "kind": "module",
+        "canonical": "@app@0.1.0/app.helper"
+      }
+    ]
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  }
+}

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-unicode"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Unicode scalar values survive checking and execution without byte-oriented rewriting."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

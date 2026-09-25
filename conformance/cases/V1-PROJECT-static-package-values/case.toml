@@ -1,0 +1,18 @@
+id = "V1-PROJECT-static-package-values"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "Package names and versions use their closed value contracts."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@data.invalid-value"
+level = "@error"
+source = "project.vibon"
+[expect.diagnostics.span]
+start = 51
+end = 58

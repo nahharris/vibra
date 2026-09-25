@@ -1,0 +1,10 @@
+(record
+  format: @types.v1
+  globals: (array
+    (record name: @second type: @i32 body: (record kind: @global index: 1u64 type: @i32))
+    (record name: @first type: @i32 body: (record kind: @literal type: @i32 value: 41i32))
+  )
+  functions: (array
+    (record name: @answer params: (array) result: @i32 body: (record kind: @sequence type: @i32 values: (array (record kind: @global index: 0u64 type: @i32))))
+  )
+)

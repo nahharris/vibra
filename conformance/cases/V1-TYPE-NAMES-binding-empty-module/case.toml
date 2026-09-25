@@ -1,0 +1,17 @@
+id = "V1-TYPE-NAMES-binding-empty-module"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "An empty source document is unavailable rather than being mistaken for a successful constant-only module."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [0, 0]

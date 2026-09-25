@@ -1,0 +1,13 @@
+id = "V1-TYPE-NAMES-resolve-public-forward"
+rule = "V1-TYPE-NAMES-resolution"
+profile = "static-v1"
+operation = "resolve"
+description = "Resolution collects headers before binding a public imported forward reference."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+resolved = "resolved.vibon"

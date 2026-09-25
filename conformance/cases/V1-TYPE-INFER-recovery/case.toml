@@ -1,0 +1,29 @@
+id = "V1-TYPE-INFER-recovery"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "Recovered malformed source is rejected before typed IR lowering."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+source = "input.vib"
+span = [17, 30]
+
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+source = "input.vib"
+span = [30, 30]
+
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+source = "input.vib"
+span = [30, 30]

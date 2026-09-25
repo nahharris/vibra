@@ -1,0 +1,17 @@
+id = "V1-TYPE-NAMES-binding-initializer-mismatch"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "An immutable value initializer must satisfy its written primitive type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [15, 22]

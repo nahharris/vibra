@@ -1,0 +1,6 @@
+(defn answer () i32
+  (let f choose
+    (f 3i32 second: 11i32 first: 9i32)))
+(defn choose (fallback i32) i32
+  labelled: (first i32 7i32 second i32 8i32)
+  first)

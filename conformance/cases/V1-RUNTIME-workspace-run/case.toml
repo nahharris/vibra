@@ -1,0 +1,13 @@
+id = "V1-RUNTIME-workspace-run"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The workspace runner checks an imported library before interpreting a pure binary target."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

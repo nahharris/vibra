@@ -1,0 +1,18 @@
+id = "V1-PROJECT-resolve-entry-missing-member"
+rule = "V1-PROJECT-resolution"
+profile = "static-v1"
+operation = "resolve"
+description = "A known entry module with a missing member reports an unknown symbol."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "project.vibon"
+span = [141, 158]

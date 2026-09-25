@@ -1,0 +1,3 @@
+(def h (fn () i32) (lambda () i32 x))
+(def x i32 (h))
+(defn answer () i32 x)

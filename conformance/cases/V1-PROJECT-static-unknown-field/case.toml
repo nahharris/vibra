@@ -1,0 +1,18 @@
+id = "V1-PROJECT-static-unknown-field"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "Typed records reject unknown nested fields."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@data.invalid-shape"
+level = "@error"
+source = "project.vibon"
+[expect.diagnostics.span]
+start = 83
+end = 86

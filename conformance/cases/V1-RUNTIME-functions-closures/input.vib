@@ -1,0 +1,5 @@
+(defn answer () i32
+  ((make)))
+(defn make () (fn () i32)
+  (let value 41i32
+    (lambda () i32 value)))

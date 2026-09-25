@@ -1,0 +1,12 @@
+id = "V1-TYPE-NAMES-resolve-literals"
+rule = "V1-TYPE-NAMES-resolution"
+profile = "static-v1"
+operation = "resolve"
+description = "Step 4 resolution matrix case: V1-TYPE-NAMES-resolve-literals."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

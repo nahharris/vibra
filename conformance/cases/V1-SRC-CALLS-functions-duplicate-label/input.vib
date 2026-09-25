@@ -1,0 +1,4 @@
+(defn answer () i32 (choose 1i32 known: 2i32 known: 3i32))
+(defn choose (value i32) i32
+  labelled: (known i32 0i32)
+  value)

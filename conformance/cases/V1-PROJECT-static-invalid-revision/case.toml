@@ -1,0 +1,18 @@
+id = "V1-PROJECT-static-invalid-revision"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "Git revisions must be exactly forty lowercase hexadecimal characters."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@data.invalid-value"
+level = "@error"
+source = "project.vibon"
+[expect.diagnostics.span]
+start = 226
+end = 231

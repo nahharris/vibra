@@ -1,0 +1,1 @@
+(record format: @project.v1 package: (record name: "hello" version: "0.1.0") targets: (array (record name: @std kind: @lib root: "src")) dependencies: (map @std (record kind: @path path: "../std")))

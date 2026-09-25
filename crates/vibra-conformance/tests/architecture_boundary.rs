@@ -29,11 +29,58 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-diagnostics", &[]),
     // The reader. Emits diagnostics; must not reach the formatter or schemas.
     ("vibra-syntax", &["vibra-diagnostics"]),
+    // Checked semantic IR is independent of syntax and wire formats.
+    ("vibra-ir", &["vibra-diagnostics"]),
+    // The checker lowers syntax and resolved identities to checked IR.
+    (
+        "vibra-types",
+        &[
+            "vibra-diagnostics",
+            "vibra-ir",
+            "vibra-resolve",
+            "vibra-syntax",
+        ],
+    ),
+    // The interpreter consumes checked IR and has no frontend dependency.
+    ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
     // Consumes the reader's tree; nothing in the language depends on it.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
-    // The wire format. The Step 10 adapter consumes syntax facts; no phase
-    // depends on the wire crate.
-    ("vibra-schema", &["vibra-diagnostics", "vibra-syntax"]),
+    // The wire format. The Step 10 adapter consumes syntax and workspace
+    // facts; no phase depends on the wire crate.
+    (
+        "vibra-schema",
+        &["vibra-diagnostics", "vibra-syntax", "vibra-workspace"],
+    ),
+    // Project schema decoding sits above syntax and diagnostics. Later
+    // workspace phases may widen this row when their inputs exist.
+    (
+        "vibra-workspace",
+        &[
+            "vibra-diagnostics",
+            "vibra-fmt",
+            "vibra-interp",
+            "vibra-ir",
+            "vibra-resolve",
+            "vibra-syntax",
+            "vibra-types",
+        ],
+    ),
+    // Command services consume the workspace plan and render schema facts;
+    // no language phase depends on the process interface.
+    (
+        "vibra-cli",
+        &[
+            "vibra-diagnostics",
+            "vibra-fmt",
+            "vibra-schema",
+            "vibra-syntax",
+            "vibra-types",
+            "vibra-workspace",
+        ],
+    ),
+    // Resolution owns its neutral graph input and depends only on language
+    // structure; workspace and conformance adapt filesystem snapshots into it.
+    ("vibra-resolve", &["vibra-diagnostics", "vibra-syntax"]),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -41,7 +88,12 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-diagnostics",
             "vibra-fmt",
             "vibra-schema",
+            "vibra-resolve",
             "vibra-syntax",
+            "vibra-workspace",
+            "vibra-interp",
+            "vibra-ir",
+            "vibra-types",
         ],
     ),
 ];
@@ -256,5 +308,114 @@ fn the_workspace_excludes_the_archived_tree() {
             .filter_map(toml::Value::as_str)
             .any(|path| path == "archive"),
         "`archive/pre-v1/Cargo.toml` must stay outside the workspace"
+    );
+}
+
+/// Crates that implement language semantics. The M2 plan says they accept
+/// explicit inputs and never search disk; filesystem acquisition belongs to
+/// `vibra-workspace`.
+const SEMANTIC_CRATES: &[&str] = &[
+    "vibra-diagnostics",
+    "vibra-syntax",
+    "vibra-resolve",
+    "vibra-types",
+    "vibra-ir",
+    "vibra-interp",
+    "vibra-fmt",
+];
+
+/// Filesystem entry points a semantic crate must not name.
+const FILESYSTEM_PATTERNS: &[&str] = &["std::fs", "fs::", "File::open", "read_dir("];
+
+fn rust_sources(directory: &Path, found: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(directory).expect("readable source directory") {
+        let path = entry.expect("readable directory entry").path();
+        if path.is_dir() {
+            rust_sources(&path, found);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            found.push(path);
+        }
+    }
+}
+
+fn filesystem_references(source: &str) -> Vec<&'static str> {
+    FILESYSTEM_PATTERNS
+        .iter()
+        .copied()
+        .filter(|pattern| source.contains(pattern))
+        .collect()
+}
+
+#[test]
+fn semantic_crates_do_not_touch_the_filesystem() {
+    let root = workspace_root();
+    let mut found = Vec::new();
+    for crate_name in SEMANTIC_CRATES {
+        let mut sources = Vec::new();
+        rust_sources(
+            &root.join("crates").join(crate_name).join("src"),
+            &mut sources,
+        );
+        assert!(!sources.is_empty(), "{crate_name} has no sources");
+        for path in sources {
+            let source = std::fs::read_to_string(&path).expect("readable source");
+            for pattern in filesystem_references(&source) {
+                found.push(format!("{} names `{pattern}`", path.display()));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "semantic crates must accept explicit inputs:\n{}",
+        found.join("\n")
+    );
+}
+
+#[test]
+fn a_filesystem_reference_is_reported() {
+    assert_eq!(
+        filesystem_references("use std::fs;\nfs::read(path)"),
+        ["std::fs", "fs::"]
+    );
+    assert!(filesystem_references("let bytes = include_bytes!(\"x\");").is_empty());
+}
+
+/// Crates compiled into the shipped `vibra` binary.
+const SHIPPED_CRATES: &[&str] = &[
+    "vibra-diagnostics",
+    "vibra-syntax",
+    "vibra-resolve",
+    "vibra-types",
+    "vibra-ir",
+    "vibra-interp",
+    "vibra-fmt",
+    "vibra-schema",
+    "vibra-workspace",
+    "vibra-cli",
+];
+
+#[test]
+fn shipped_crates_do_not_depend_on_their_build_checkout() {
+    // `env!("CARGO_MANIFEST_DIR")` is an absolute build-host path; a binary
+    // that reads through it breaks once installed or relocated.
+    let root = workspace_root();
+    let mut found = Vec::new();
+    for crate_name in SHIPPED_CRATES {
+        let mut sources = Vec::new();
+        rust_sources(
+            &root.join("crates").join(crate_name).join("src"),
+            &mut sources,
+        );
+        for path in sources {
+            let source = std::fs::read_to_string(&path).expect("readable source");
+            if source.contains("CARGO_MANIFEST_DIR") {
+                found.push(path.display().to_string());
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "build-checkout paths in:\n{}",
+        found.join("\n")
     );
 }

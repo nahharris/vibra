@@ -1,0 +1,12 @@
+id = "V1-PROJECT-workspace-check-import-closure"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "The workspace checker checks imported local target units in one immutable project snapshot."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

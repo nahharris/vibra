@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:8e4b8bc6328530239df7b06feddf95936b69f3ffa5a9ec0881c8d4d0708bace6",
+  "sourceId": "src/damaged.vib",
+  "offset": 41,
+  "nodeId": "src/damaged.vib#41-41",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 41,
+    "sourceId": "src/damaged.vib",
+    "span": {
+      "sourceId": "src/damaged.vib",
+      "start": 41,
+      "end": 41,
+      "startPosition": {
+        "line": 1,
+        "column": 42
+      },
+      "endPosition": {
+        "line": 1,
+        "column": 42
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "error",
+    "category": "recovery",
+    "status": "recovered",
+    "permittedForms": null,
+    "permittedLabels": null
+  },
+  "role": {
+    "status": "recovered",
+    "value": "@unknown"
+  },
+  "context": {
+    "status": "recovered",
+    "value": "recovery"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "visibleLocals": {
+    "status": "unavailable",
+    "value": null
+  },
+  "visibleImports": {
+    "status": "unavailable",
+    "value": null
+  },
+  "declarationCandidates": {
+    "status": "unavailable",
+    "value": null
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  }
+}

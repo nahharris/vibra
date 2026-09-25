@@ -1,0 +1,12 @@
+id = "V1-TYPE-INFER-boundaries"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "Signed extrema and the unsigned maximum remain exact at their declared widths."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"

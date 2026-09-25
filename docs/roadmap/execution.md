@@ -19,7 +19,8 @@ first, then that milestone's step plan.
    step before editing code. Archived code is not an implementation template.
 2. Inspect the working tree; preserve unrelated work. Fetch the integration
    branch and create a short-lived branch from its refreshed remote head.
-   Milestone 1 starts from `origin/m1`, not `main` or an old local `m1`.
+   Milestone 1 starts from `origin/m1`; Milestone 2 starts from `origin/m2`.
+   Only the initial integration-branch bootstrap starts from refreshed `main`.
 3. Select the earliest unfinished step whose prerequisites are satisfied.
    Verify the prerequisite code and merge history; a status row alone is not
    evidence. Run the existing focused tests and the independent corpus runner.
@@ -81,13 +82,16 @@ cases in the same change, is a step. "The whole lexer" and "the whole
 formatter" are not steps, because they defer the conformance evidence that
 proves them.
 
-Two kinds of step are exempt from the vertical-slice rule because they carry
+Three kinds of step are exempt from the vertical-slice rule because they carry
 no language behavior:
 
-- infrastructure steps, which create the workspace, CI, or a harness; and
+- infrastructure steps, which create the workspace, CI, or a harness;
+- specification prerequisites, which close explicitly listed contracts before
+  dependent implementation and include applicable registry/schema evidence; and
 - evidence steps, which run a fuzz campaign or sweep the exit gate.
 
-Both must say so explicitly in the step plan.
+Each must say so explicitly in the step plan. A specification prerequisite
+does not count as implementation of the language behavior it defines.
 
 ## Definition of done for a step
 
@@ -131,6 +135,17 @@ needed for the integration branch, and none is configured: the draft pull
 request already covers it, and a second trigger would only duplicate runs.
 
 A step pull request is not merged with red CI.
+
+### Milestone 2 handoff
+
+The [M2 plan](milestone-2/README.md) fixes the default sequence at one PR per
+numbered step, each based on the refreshed `origin/m2` after its predecessor
+merges. The branch bootstrap contains planning documents only; no step is
+landed by creating the branch. Its standing draft into `main` may open at that
+bootstrap so the documentation and all later integration pushes receive CI.
+Do not stack the next implementation on an unmerged feature branch or combine
+several rows into one PR. If a slice needs a different decomposition, revise
+the plan explicitly before starting it and preserve complete vertical coverage.
 
 ## Progress tracking
 

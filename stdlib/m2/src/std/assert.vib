@@ -1,0 +1,2 @@
+; M2 assertion members are test-runner registry entries listed in the signed
+; bootstrap record. This marker module has no user-definable declarations.

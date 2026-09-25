@@ -1,0 +1,12 @@
+id = "V1-PROJECT-workspace-check-recursive-global-helper"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A global initializer may call a terminating recursive helper without being an initializer cycle."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

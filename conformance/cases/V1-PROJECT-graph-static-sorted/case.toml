@@ -1,0 +1,12 @@
+id = "V1-PROJECT-graph-static-sorted"
+rule = "V1-PROJECT-source-graph"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+graph = "graph.vibon"

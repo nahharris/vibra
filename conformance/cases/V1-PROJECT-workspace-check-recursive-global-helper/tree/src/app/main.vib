@@ -1,0 +1,3 @@
+(def value i32 (helper false))
+(defn helper (again bool) i32 (if again (helper false) 1i32))
+(defn execute () void (let - value (do)))

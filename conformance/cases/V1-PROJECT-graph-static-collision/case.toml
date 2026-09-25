@@ -1,0 +1,21 @@
+id = "V1-PROJECT-graph-static-collision"
+rule = "V1-PROJECT-source-graph"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@module.file-directory-collision"
+level = "@error"
+source = "src/text.vib"
+span = [0, 0]
+
+  [[expect.diagnostics.related]]
+  source = "src/text"
+  span = [0, 0]

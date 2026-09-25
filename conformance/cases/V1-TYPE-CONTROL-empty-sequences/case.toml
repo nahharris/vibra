@@ -1,0 +1,12 @@
+id = "V1-TYPE-CONTROL-empty-sequences"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "Empty do forms and empty let bodies produce void while retaining a typed discarded initializer."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"

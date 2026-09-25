@@ -1,0 +1,2 @@
+(defn empty () void (do))
+(defn let-empty () void (let - 1i32 (do)))

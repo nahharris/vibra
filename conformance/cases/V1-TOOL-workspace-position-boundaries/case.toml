@@ -1,0 +1,34 @@
+id = "V1-TOOL-workspace-position-boundaries"
+rule = "V1-TOOL-workspace-position-query"
+profile = "tooling-v1"
+operation = "query"
+description = "Rejected workspaces still expose immutable recovery and unresolved-name query facts."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.unmatched-delimiter"
+level = "@error"
+source = "src/damaged.vib"
+span = [41, 41]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "src/unresolved.vib"
+span = [21, 28]
+
+[[expect.queries]]
+input = "tree/src/unresolved.vib"
+offset = 21
+snapshot = "unresolved.json"
+
+[[expect.queries]]
+input = "tree/src/damaged.vib"
+offset = 41
+snapshot = "recovery.json"

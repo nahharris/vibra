@@ -1,0 +1,24 @@
+id = "V1-PROJECT-static-namespace-collision"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "Target names and dependency aliases share one project namespace."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.member-collision"
+level = "@error"
+source = "project.vibon"
+[expect.diagnostics.span]
+start = 156
+end = 160
+
+[[expect.diagnostics.related]]
+source = "project.vibon"
+[expect.diagnostics.related.span]
+start = 107
+end = 111

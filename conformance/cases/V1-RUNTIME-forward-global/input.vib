@@ -1,0 +1,3 @@
+(def second i32 first)
+(def first i32 41i32)
+(defn answer () i32 (do second second))

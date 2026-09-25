@@ -1,0 +1,11 @@
+id = "V1-SRC-CALLS-functions-value-default"
+rule = "V1-SRC-CALLS"
+profile = "static-v1"
+operation = "type-check"
+description = "An indirect function type obtains an omitted labelled default from the selected function value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

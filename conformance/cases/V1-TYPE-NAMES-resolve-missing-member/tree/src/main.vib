@@ -1,0 +1,2 @@
+(import lib @app.lib.missing)
+(defn run () void (do))

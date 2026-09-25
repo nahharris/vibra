@@ -1,0 +1,5 @@
+(defn answer () i32 (first true))
+(defn first (flag bool) i32
+  (if flag (second false) 1i32))
+(defn second (flag bool) i32
+  (if flag (first false) 2i32))

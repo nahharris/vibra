@@ -1,0 +1,1 @@
+(defn answer () i32 (do 1i8 42))

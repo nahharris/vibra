@@ -52,7 +52,11 @@ snapshot = "query.json"
     let document =
         parse_source(PathBuf::from("input.vib"), source).expect("source loader");
     let query = document.query_position(16).expect("query result");
-    let rendered = SourcePositionQueryDocument::render(&query, &LineIndex::new(source));
+    let rendered = SourcePositionQueryDocument::render_with_source(
+        &query,
+        &LineIndex::new(source),
+        Some("input.vib"),
+    );
     let snapshot = format!(
         "{}\n",
         serde_json::to_string_pretty(&rendered).expect("query serializes")

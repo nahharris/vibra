@@ -1,0 +1,21 @@
+id = "V1-TYPE-NAMES-binding-local-shadow"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A nested let binder reports the real earlier local binder span when shadowing is rejected."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [51, 56]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [34, 39]

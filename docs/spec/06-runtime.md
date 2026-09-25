@@ -1,7 +1,9 @@
 # Vibra v1 runtime and WebAssembly
 
 Status: normative target
-Implementation status: not started
+Implementation status: M2 executes successfully checked IR for its supported
+pure subset, including tail calls and isolated tests. WebAssembly and complete
+v1 interpreter parity remain unimplemented.
 
 ## Semantic reference
 
@@ -14,6 +16,12 @@ behavior for the conformance corpus.
 The interpreter is not a second frontend: it consumes the same resolved typed
 IR as the Wasm backend. Parsing, name resolution, type checking, performed-row
 calculation, and external-registry validation are shared.
+
+The M2 interpreter consumes only successfully checked IR from the M2 supported
+surface. It has no host provider execution, ambient filesystem/environment/time
+reads, or Wasm path. A valid later-v1 operation that is outside this profile is
+reported as `@tool.unavailable` before lowering; it is never reinterpreted as a
+generic application.
 
 WebAssembly is a compiler output backend, not a source interoperability
 surface. V1 source cannot import a `.wasm` module or name a WebAssembly
@@ -40,6 +48,26 @@ Evaluation is strict and deterministic:
 - `try` performs only its specified early-exit propagation; and
 - a tail-position call to a function in the same recursive group reuses the
   current activation instead of growing language-level stack.
+
+### M2 module-value initialization
+
+Before accepting an M2 checked program, the checker MUST build the dependency
+graph of its immutable module-level `def` initializers. An
+initializer may depend on a module value directly or through a function call
+or callable alias reached while evaluating that initializer. A cycle is
+rejected only when the dependency cycle contains a module-level `def`; a
+function-only recursion cycle reached from an initializer is not a module
+initializer cycle. A module-value cycle is rejected with the error-level
+`@type.initializer-cycle` before an executable checked program is produced or
+any initializer is evaluated or program executed; no checked program is
+produced. Its primary span is the complete source form of a `def` participating
+in the cycle, selected by the deterministic dependency traversal. Acyclic
+forward references remain valid. Type checking never evaluates an initializer
+to infer its written type.
+
+For an accepted program, a module value is evaluated lazily on its first read
+and exactly once during that execution. Later reads reuse that value. A new
+execution starts with fresh module-value state.
 
 `map.of` and map variadic tails share one construction rule. Every key and
 value is evaluated even if a key repeats; the later pair replaces the earlier
@@ -125,8 +153,43 @@ on such tail recursion.
 
 V1 defines no portable stack-depth limit. Non-tail recursion and non-tail calls
 that exhaust an embedding host's stack are host events, not portable semantic
-results, and are outside interpreter/Wasm parity. Default `iter` method bodies
+results, and are outside interpreter/Wasm parity. The M2 reference interpreter
+runs on a host thread with a fixed stack and bounds live language activations
+so that exhaustion never aborts the process. Reaching that bound stops
+execution with the unlocated error diagnostic
+`@runtime.host-stack-exhausted` (primary span `0..0`, no source ID). It is not
+a trap: `run` and `test` report it as `@command.operational-failure` (exit 3),
+and `test` then reports zero selected, passed, and failed tests. Default `iter` method bodies
 MAY lower to internal loops; that mutation is not a source feature.
+
+## M2 compiler intrinsic profile
+
+The M2 `@compiler` registry is closed to two pure operations; its versioned
+identity is `vibra_v1`. A trusted standard-library declaration may bind
+`text.concat` with signature `str str -> str` and `text.length` with signature
+`str -> u64`. Concatenation preserves Unicode scalar order; length counts
+Unicode scalars rather than UTF-8 bytes. Both operations are total,
+deterministic, and host-event free.
+They accept no ambient input and have no runtime trap outcome.
+
+No integer or floating compiler operation is admitted in M2. The v1
+`integer.add-checked` declaration remains a valid source spelling but is
+`@tool.unavailable` until its nominal `result` contract and overflow behavior
+are implemented. `integer.increment` and `integer.to-str` likewise require
+their own reviewed signatures. The checker must report availability before
+lowering instead of wrapping, trapping, or fabricating a private result type.
+
+Adding a compiler symbol requires a specification change to this table and its
+registry tests; a string in source or a copied declaration cannot authorize an
+operation.
+
+M2 test assertions are a separate closed test-runner outcome surface described
+in the projects chapter. They evaluate through the ordinary typed call path,
+perform no host operation, and have no compiler or host registry symbol. A
+false assertion records `@test.assertion-failed` and stops only its current
+test; it is not a trap and cannot be caught or converted into a Vibra
+`result`. A trap raised by another runtime invariant remains `@test.trap` (or
+`@command.trap` at the CLI boundary) with its origin and stable trap code.
 
 ## External providers
 
@@ -156,10 +219,18 @@ operations likewise exchange ordinary typed values. There are no user-visible
 file or stream handles, scoped resources, close operations, or resource
 lifetime semantics in v1.
 
+## Traps
+
 Host responses that are ordinary environmental outcomes use typed `result`
 errors. ABI mismatch, impossible typed IR, invalid host value IDs, and runtime
-invariant violation are traps. A trap has a stable code and source origin but
-is not catchable by user code.
+invariant violation are traps. A trap has a stable code and a source origin
+when its failing source span is known; otherwise it has no origin. M2 failures
+at the checked-program execution boundary (no executable entry or a body that
+violates checked-IR invariants) use `@runtime.invalid-checked-program`. These
+failures have no source origin and use an unlocated diagnostic primary at
+`0..0` with no source ID. The CLI `trapCode` is the exact diagnostic-code
+spelling as a string, and its `origin` is `null`. Traps are not catchable by
+user code.
 
 ## WebAssembly boundary
 

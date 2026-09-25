@@ -1,0 +1,2 @@
+(def value i32 "wrong")
+(defn answer () i32 value)

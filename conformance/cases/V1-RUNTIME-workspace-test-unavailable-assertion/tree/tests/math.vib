@@ -1,0 +1,2 @@
+(import assert @std.assert)
+(test "generic" (assert.equal 1i32 1i32))

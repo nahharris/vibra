@@ -1,0 +1,7 @@
+(record
+  format: @test-run.v1
+  result: @command.diagnostics
+  tests: (array
+    (record name: "@tests.math::\"missing-import\"" result: @test.invalid audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

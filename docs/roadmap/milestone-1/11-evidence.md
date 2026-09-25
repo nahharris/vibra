@@ -48,7 +48,7 @@ baseline; this guide is not evidence of a completed campaign.
 
 The tracked inventory is [`syntax-examples.tsv`](syntax-examples.tsv). The
 `evidence_step11` host test scans all active `docs/spec/*.md` chapters, checks
-42 fenced fragments and 1,408 inline code spans against stable section
+45 fenced fragments and 2,087 inline code spans against stable section
 digests, rejects missing or stale rows, and losslessly exercises source and
 VIBON fragments. Source examples retain their exact text; the inventory marks
 type, effect, runtime, and resolution claims as deferred rather than silently

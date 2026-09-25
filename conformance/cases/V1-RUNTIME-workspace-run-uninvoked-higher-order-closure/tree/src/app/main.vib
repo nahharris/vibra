@@ -1,0 +1,1 @@
+(defn execute () void (let unused (lambda (f (fn () void)) void (f)) (do)))

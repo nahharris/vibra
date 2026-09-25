@@ -1,0 +1,113 @@
+id = "V1-TYPE-INFER-range-errors"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "Every fixed-width primitive range rejects one value below and above its boundary, including negative unsigned and oversized digits."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [21, 25]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [48, 51]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [76, 82]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [107, 112]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [137, 148]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [173, 183]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [208, 228]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [253, 272]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [295, 297]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [320, 323]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [348, 350]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [375, 380]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [405, 407]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [432, 442]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [467, 469]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [494, 514]
+
+[[expect.diagnostics]]
+code = "@type.numeric-out-of-range"
+level = "@error"
+source = "input.vib"
+span = [534, 574]

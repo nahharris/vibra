@@ -1,0 +1,1 @@
+(record format: @project.v1 package: (record name: "hello" version: "0.1.0") targets: (array (record name: @hello kind: @lib root: "/outside/../src")) dependencies: (map @local (record kind: @path path: "../../missing")))

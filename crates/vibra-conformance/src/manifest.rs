@@ -91,11 +91,71 @@ pub struct CaseInputs {
     pub project: Option<String>,
     /// Additional data documents, normally `.vibon` files.
     pub data: Vec<String>,
+    /// Optional confined directory tree acquired by source-graph cases.
+    pub tree: Option<String>,
+}
+
+/// The closed operation selected by a conformance case.
+///
+/// Later slices add their operation to this enum before registering a handler;
+/// input presence alone never selects a semantic implementation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConformanceOperation {
+    /// Run the reader/data grammar handler.
+    Reader,
+    /// Decode one project VIBON document without resolution or I/O.
+    ProjectDecode,
+    /// Acquire a confined project tree and build its immutable source graph.
+    SourceGraph,
+    /// Resolve declarations/imports from a confined source graph.
+    Resolve,
+    /// Check one source document into typed IR.
+    TypeCheck,
+    /// Execute one checked source document through the reference interpreter.
+    Interpret,
+    /// Render semantic facts from one immutable workspace snapshot.
+    Query,
+    /// Format one source document using bindings from its confined snapshot.
+    Format,
+    /// Check every declaration in one confined workspace snapshot.
+    WorkspaceCheck,
+    /// Check and interpret the unique binary target in a confined workspace.
+    WorkspaceRun,
+    /// Discover, check, and run all tests in a confined workspace.
+    WorkspaceTest,
+}
+
+impl ConformanceOperation {
+    /// The stable manifest spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reader => "reader",
+            Self::ProjectDecode => "project-decode",
+            Self::SourceGraph => "source-graph",
+            Self::Resolve => "resolve",
+            Self::TypeCheck => "type-check",
+            Self::Interpret => "interpret",
+            Self::Query => "query",
+            Self::Format => "format",
+            Self::WorkspaceCheck => "workspace-check",
+            Self::WorkspaceRun => "workspace-run",
+            Self::WorkspaceTest => "workspace-test",
+        }
+    }
+}
+
+impl fmt::Display for ConformanceOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
 }
 
 /// One expected source span attached to a diagnostic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedRelatedSpan {
+    /// The input path owning the related span, when known.
+    pub source_id: Option<String>,
     /// The half-open UTF-8 byte span.
     pub span: ByteSpan,
     /// An optional expected explanation. Omitted explanations are not
@@ -112,6 +172,8 @@ pub struct ExpectedDiagnostic {
     pub level: Level,
     /// Optional human-facing message assertion.
     pub message: Option<String>,
+    /// The input path owning the primary span, when known.
+    pub source_id: Option<String>,
     /// The primary half-open UTF-8 byte span.
     pub primary_span: ByteSpan,
     /// Related spans in their expected order.
@@ -138,7 +200,7 @@ pub struct ExpectedFix {
 pub struct ExpectedExecution {
     /// A relative path to the expected result snapshot.
     pub result: Option<String>,
-    /// A relative path to the expected ordered audit-trace snapshot.
+    /// A relative path to the expected ordered `.vibon` audit-trace snapshot.
     pub audit_trace: Option<String>,
 }
 
@@ -162,6 +224,8 @@ pub struct CaseExpectations {
     pub diagnostics: Vec<ExpectedDiagnostic>,
     /// A relative path to the canonical formatting snapshot.
     pub formatted: Option<String>,
+    /// A relative path to the canonical source-graph snapshot.
+    pub graph: Option<String>,
     /// A relative path to resolved-identity output.
     pub resolved: Option<String>,
     /// A relative path to type output.
@@ -188,6 +252,8 @@ pub struct CaseManifest {
     pub rule_id: String,
     /// Minimum profile required to execute the case.
     pub profile: ConformanceProfile,
+    /// Closed operation selected by the case inputs and operation field.
+    pub operation: ConformanceOperation,
     /// Optional maintainer-facing description.
     pub description: Option<String>,
     /// Case inputs.
@@ -237,6 +303,12 @@ impl CaseManifest {
     pub const fn profile(&self) -> ConformanceProfile {
         self.profile
     }
+
+    /// The closed operation selected for this case.
+    #[must_use]
+    pub const fn operation(&self) -> ConformanceOperation {
+        self.operation
+    }
 }
 
 impl FromStr for CaseManifest {
@@ -271,24 +343,84 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             source: raw.inputs.source,
             project: raw.inputs.project,
             data: raw.inputs.data,
+            tree: raw.inputs.tree,
         };
+        let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
+        if operation == ConformanceOperation::Query && expectations.queries.is_empty() {
+            return Err(ManifestError::Invalid(
+                "query cases must declare at least one expected query".to_owned(),
+            ));
+        }
+        if operation == ConformanceOperation::Format && expectations.formatted.is_none()
+        {
+            return Err(ManifestError::Invalid(
+                "format cases must declare a formatted snapshot".to_owned(),
+            ));
+        }
+        if operation == ConformanceOperation::WorkspaceRun {
+            if expectations.accepted
+                && expectations.interpreter.as_ref().is_none_or(|execution| {
+                    execution.result.is_none() || execution.audit_trace.is_none()
+                })
+            {
+                return Err(ManifestError::Invalid(
+                    "workspace-run cases require interpreter result and audit snapshots"
+                        .to_owned(),
+                ));
+            }
+            if expectations.interpreter.as_ref().is_some_and(|execution| {
+                execution.result.is_none() || execution.audit_trace.is_none()
+            }) {
+                return Err(ManifestError::Invalid(
+                    "workspace-run execution snapshots must include result and audit trace"
+                        .to_owned(),
+                ));
+            }
+        }
+        if operation == ConformanceOperation::WorkspaceTest
+            && expectations.interpreter.as_ref().is_none_or(|execution| {
+                execution.result.is_none() || execution.audit_trace.is_some()
+            })
+        {
+            return Err(ManifestError::Invalid(
+                "workspace-test cases require one result snapshot and no audit trace"
+                    .to_owned(),
+            ));
+        }
+        {
+            for diagnostic in &expectations.diagnostics {
+                if let Some(source_id) = &diagnostic.source_id
+                    && !is_declared_input(&inputs, source_id)
+                {
+                    return Err(ManifestError::Invalid(format!(
+                        "diagnostic source `{source_id}` is not declared by case `{}`",
+                        raw.id
+                    )));
+                }
+                for related in &diagnostic.related {
+                    if let Some(source_id) = &related.source_id
+                        && !is_declared_input(&inputs, source_id)
+                    {
+                        return Err(ManifestError::Invalid(format!(
+                            "related diagnostic source `{source_id}` is not declared by case `{}`",
+                            raw.id
+                        )));
+                    }
+                }
+            }
+        }
         for query in &expectations.queries {
-            let declared = inputs
-                .source
-                .as_ref()
-                .is_some_and(|input| input == &query.input)
-                || inputs
-                    .project
-                    .as_ref()
-                    .is_some_and(|input| input == &query.input)
-                || inputs.data.iter().any(|input| input == &query.input);
-            if !declared {
+            if !is_declared_input(&inputs, &query.input) {
                 return Err(ManifestError::Invalid(format!(
                     "query expectation input `{}` is not declared by case `{}`",
                     query.input, raw.id
                 )));
+            }
+            if operation == ConformanceOperation::Query {
+                let tree = inputs.tree.as_deref().unwrap_or_default();
+                validate_query_input(tree, &query.input)?;
             }
         }
 
@@ -296,11 +428,261 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             id: raw.id,
             rule_id,
             profile,
+            operation,
             description: raw.description,
             inputs,
             expectations,
         })
     }
+}
+
+fn decode_operation(
+    raw: Option<&str>,
+    profile: ConformanceProfile,
+    inputs: &CaseInputs,
+) -> Result<ConformanceOperation, ManifestError> {
+    let input_kinds = usize::from(inputs.source.is_some())
+        + usize::from(inputs.project.is_some())
+        + usize::from(!inputs.data.is_empty());
+    if raw.is_none() && profile != ConformanceProfile::ReaderV1 && input_kinds > 1 {
+        return Err(ManifestError::Invalid(
+            "an operation is required when a non-reader case has multiple input kinds"
+                .to_owned(),
+        ));
+    }
+    let operation = match raw {
+        Some("reader") => ConformanceOperation::Reader,
+        Some("project-decode") => ConformanceOperation::ProjectDecode,
+        Some("source-graph") => ConformanceOperation::SourceGraph,
+        Some("resolve") => ConformanceOperation::Resolve,
+        Some("type-check") => ConformanceOperation::TypeCheck,
+        Some("interpret") => ConformanceOperation::Interpret,
+        Some("query") => ConformanceOperation::Query,
+        Some("format") => ConformanceOperation::Format,
+        Some("workspace-check") => ConformanceOperation::WorkspaceCheck,
+        Some("workspace-run") => ConformanceOperation::WorkspaceRun,
+        Some("workspace-test") => ConformanceOperation::WorkspaceTest,
+        Some(value) => {
+            return Err(ManifestError::Invalid(format!(
+                "unknown conformance operation `{value}`"
+            )));
+        }
+        None if profile != ConformanceProfile::ReaderV1
+            && inputs.project.is_some()
+            && inputs.tree.is_some() =>
+        {
+            ConformanceOperation::SourceGraph
+        }
+        None if profile != ConformanceProfile::ReaderV1 && inputs.project.is_some() => {
+            ConformanceOperation::ProjectDecode
+        }
+        None => ConformanceOperation::Reader,
+    };
+    if operation == ConformanceOperation::ProjectDecode
+        && (inputs.project.is_none()
+            || inputs.source.is_some()
+            || !inputs.data.is_empty()
+            || inputs.tree.is_some())
+    {
+        return Err(ManifestError::Invalid(
+            "project-decode requires exactly one project input".to_owned(),
+        ));
+    }
+    if matches!(
+        operation,
+        ConformanceOperation::TypeCheck | ConformanceOperation::Interpret
+    ) && (inputs.source.is_none()
+        || inputs.project.is_some()
+        || !inputs.data.is_empty()
+        || inputs.tree.is_some())
+    {
+        return Err(ManifestError::Invalid(
+            "type-check and interpret require exactly one source input".to_owned(),
+        ));
+    }
+    if matches!(
+        operation,
+        ConformanceOperation::SourceGraph | ConformanceOperation::Resolve
+    ) {
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "source-graph and resolve require one confined tree input".to_owned(),
+            ));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "source-graph and resolve require one project input".to_owned(),
+            ));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "source-graph project input must be exactly `{expected_project}`"
+            )));
+        }
+    }
+    if operation == ConformanceOperation::Query {
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "query requires one confined tree input".to_owned(),
+            ));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "query requires one project input".to_owned(),
+            ));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "query project input must be exactly `{expected_project}`"
+            )));
+        }
+        if inputs.source.is_some() || !inputs.data.is_empty() {
+            return Err(ManifestError::Invalid(
+                "query cases use the confined tree as their source input".to_owned(),
+            ));
+        }
+    }
+    if operation == ConformanceOperation::Format {
+        if profile != ConformanceProfile::ToolingV1 {
+            return Err(ManifestError::Invalid(
+                "format cases require the tooling-v1 profile".to_owned(),
+            ));
+        }
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one confined tree input".to_owned(),
+            ));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one project input".to_owned(),
+            ));
+        };
+        let Some(source) = inputs.source.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "format requires one source input".to_owned(),
+            ));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "format project input must be exactly `{expected_project}`"
+            )));
+        }
+        if !inputs.data.is_empty() {
+            return Err(ManifestError::Invalid(
+                "format cases may not declare additional data inputs".to_owned(),
+            ));
+        }
+        validate_tree_source_input(tree, source, "format")?;
+    }
+    if matches!(
+        operation,
+        ConformanceOperation::WorkspaceCheck
+            | ConformanceOperation::WorkspaceRun
+            | ConformanceOperation::WorkspaceTest
+    ) {
+        let required_profile = match operation {
+            ConformanceOperation::WorkspaceCheck => ConformanceProfile::StaticV1,
+            ConformanceOperation::WorkspaceRun
+            | ConformanceOperation::WorkspaceTest => ConformanceProfile::InterpreterV1,
+            _ => {
+                return Err(ManifestError::Invalid(
+                    "workspace operation profile validation was misrouted".to_owned(),
+                ));
+            }
+        };
+        if profile != required_profile {
+            return Err(ManifestError::Invalid(format!(
+                "{} cases require the {required_profile} profile",
+                operation.as_str()
+            )));
+        }
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(format!(
+                "{} requires one confined tree input",
+                operation.as_str()
+            )));
+        };
+        let Some(project) = inputs.project.as_deref() else {
+            return Err(ManifestError::Invalid(format!(
+                "{} requires one project input",
+                operation.as_str()
+            )));
+        };
+        let expected_project = format!("{tree}/project.vibon");
+        if project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "{} project input must be exactly `{expected_project}`",
+                operation.as_str()
+            )));
+        }
+        if inputs.source.is_some() || !inputs.data.is_empty() {
+            return Err(ManifestError::Invalid(format!(
+                "{} cases use only the confined tree as their source input",
+                operation.as_str()
+            )));
+        }
+    }
+    Ok(operation)
+}
+
+fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
+    inputs
+        .source
+        .as_deref()
+        .is_some_and(|input| input == source_id)
+        || inputs
+            .project
+            .as_deref()
+            .is_some_and(|input| input == source_id)
+        || inputs.data.iter().any(|input| input == source_id)
+        || inputs.tree.as_deref().is_some_and(|tree| {
+            source_id == tree
+                || source_id
+                    .strip_prefix(tree)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+                || (!source_id.is_empty()
+                    && !source_id.starts_with('/')
+                    && !source_id.contains(".."))
+        })
+}
+
+fn validate_query_input(tree: &str, input: &str) -> Result<(), ManifestError> {
+    validate_tree_source_input(tree, input, "query")
+}
+
+fn validate_tree_source_input(
+    tree: &str,
+    input: &str,
+    operation: &str,
+) -> Result<(), ManifestError> {
+    let prefix = format!("{tree}/");
+    let Some(source_id) = input.strip_prefix(&prefix) else {
+        return Err(ManifestError::Invalid(format!(
+            "{operation} input `{input}` must be beneath the declared tree `{tree}`"
+        )));
+    };
+    let path = Path::new(source_id);
+    if source_id.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+        || path.extension().and_then(|extension| extension.to_str()) != Some("vib")
+    {
+        return Err(ManifestError::Invalid(format!(
+            "{operation} input `{input}` must be a relative `.vib` file beneath `{tree}`"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_case_id(id: &str) -> Result<(), ManifestError> {
@@ -370,14 +752,25 @@ fn decode_expectations(
     }
 
     let formatted = raw.formatted;
-    let interpreter = raw.interpreter.map(decode_execution);
-    let wasm = raw.wasm.map(decode_execution);
+    if let Some(graph) = raw.graph.as_deref()
+        && Path::new(graph)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("vibon")
+    {
+        return Err(ManifestError::Invalid(
+            "source-graph snapshots must use the .vibon extension".to_owned(),
+        ));
+    }
+    let interpreter = raw.interpreter.map(decode_execution).transpose()?;
+    let wasm = raw.wasm.map(decode_execution).transpose()?;
     let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);
 
     Ok(CaseExpectations {
         accepted,
         diagnostics,
         formatted,
+        graph: raw.graph,
         resolved: raw.resolved,
         types: raw.types,
         effects: raw.effects,
@@ -396,11 +789,22 @@ fn decode_expectations(
     })
 }
 
-fn decode_execution(raw: RawExecution) -> ExpectedExecution {
-    ExpectedExecution {
+fn decode_execution(raw: RawExecution) -> Result<ExpectedExecution, ManifestError> {
+    if raw.audit_trace.as_deref().is_some_and(|audit_trace| {
+        Path::new(audit_trace)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("vibon")
+    }) {
+        return Err(ManifestError::Invalid(
+            "audit-trace snapshots must use the .vibon extension".to_owned(),
+        ));
+    }
+
+    Ok(ExpectedExecution {
         result: raw.result,
         audit_trace: raw.audit_trace,
-    }
+    })
 }
 
 fn decode_diagnostic(
@@ -438,6 +842,7 @@ fn decode_diagnostic(
         .into_iter()
         .map(|related| {
             Ok(ExpectedRelatedSpan {
+                source_id: related.source,
                 span: decode_span(related.span, code.as_atom())?,
                 message: related.message,
             })
@@ -459,6 +864,7 @@ fn decode_diagnostic(
         code,
         level,
         message: raw.message,
+        source_id: raw.source,
         primary_span,
         related,
         notes: raw.notes,
@@ -493,6 +899,8 @@ pub(crate) struct RawCaseManifest {
     pub(crate) rule: String,
     pub(crate) profile: String,
     #[serde(default)]
+    pub(crate) operation: Option<String>,
+    #[serde(default)]
     pub(crate) description: Option<String>,
     #[serde(default)]
     pub(crate) inputs: RawInputs,
@@ -508,6 +916,8 @@ pub(crate) struct RawInputs {
     pub(crate) project: Option<String>,
     #[serde(default)]
     pub(crate) data: Vec<String>,
+    #[serde(default)]
+    pub(crate) tree: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -518,6 +928,8 @@ pub(crate) struct RawExpectations {
     pub(crate) diagnostics: Vec<RawExpectedDiagnostic>,
     #[serde(default)]
     pub(crate) formatted: Option<String>,
+    #[serde(default)]
+    pub(crate) graph: Option<String>,
     #[serde(default)]
     pub(crate) resolved: Option<String>,
     #[serde(default)]
@@ -541,6 +953,8 @@ pub(crate) struct RawExpectedDiagnostic {
     pub(crate) level: String,
     #[serde(default)]
     pub(crate) message: Option<String>,
+    #[serde(default, alias = "sourceId")]
+    pub(crate) source: Option<String>,
     pub(crate) span: RawSpan,
     #[serde(default)]
     pub(crate) related: Vec<RawRelatedSpan>,
@@ -553,6 +967,8 @@ pub(crate) struct RawExpectedDiagnostic {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawRelatedSpan {
+    #[serde(default, alias = "sourceId")]
+    pub(crate) source: Option<String>,
     pub(crate) span: RawSpan,
     #[serde(default)]
     pub(crate) message: Option<String>,

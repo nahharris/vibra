@@ -1,0 +1,17 @@
+id = "V1-SRC-CALLS-functions-not-applicable"
+rule = "V1-SRC-CALLS"
+profile = "static-v1"
+operation = "type-check"
+description = "A primitive expression in callee position is rejected as a non-function."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.not-applicable"
+level = "@error"
+source = "input.vib"
+span = [21, 25]

@@ -1,0 +1,10 @@
+id = "V1-PROJECT-static-library"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "A library target omits executable-only fields."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = true

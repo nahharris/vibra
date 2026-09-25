@@ -1,0 +1,7 @@
+(record
+  format: @test-run.v1
+  result: @command.test-failed
+  tests: (array
+    (record name: "@tests.math::\"fails\"" result: @test.assertion-failed failure: (record assertion: @std.assert.equal-i32 expected: "4i32" actual: "5i32" primary-span: (record source-id: "tests/math.vib" start: 42u64 end: 70u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

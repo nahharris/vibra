@@ -1,7 +1,8 @@
 # Vibra v1 effects
 
 Status: normative target
-Implementation status: not started
+Implementation status: M2 admits empty effect ceilings and pure execution;
+nonempty effect checking and host operations remain unimplemented.
 
 ## Static contract
 
@@ -19,6 +20,17 @@ The runtime receives no grant table and performs no path-level effect check. If
 a user runs a target that declares `fs.read`, that run consents to `fs.read`
 operations for every path the program supplies. Operating-system access rules
 and failures still apply, but they are not Vibra effect grants.
+
+### M2 executable effects
+
+M2 checking and execution admit only declarations and call graphs with empty
+written effect ceilings and empty computed performed rows. This rule applies
+to function types, `defn`, `lambda`, tests, and external declarations; an
+omitted row is empty as specified below. A valid nonempty ceiling or a body
+whose performed row is nonempty is outside M2 and emits `@tool.unavailable`
+before lowering or execution. M2 does not execute `@host` operations. A
+project target's effect-consent array cannot make an effectful source program
+available in M2.
 
 ## Nominal effects
 

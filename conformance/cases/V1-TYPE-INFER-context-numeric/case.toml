@@ -1,0 +1,12 @@
+id = "V1-TYPE-INFER-context-numeric"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "Unsuffixed numeric literals use the written primitive result context."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"

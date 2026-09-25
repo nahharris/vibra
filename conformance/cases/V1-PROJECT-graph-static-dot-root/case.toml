@@ -1,0 +1,17 @@
+id = "V1-PROJECT-graph-static-dot-root"
+rule = "V1-PROJECT-source-graph"
+profile = "static-v1"
+operation = "source-graph"
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@project.invalid-target-root"
+level = "@error"
+source = "project.vibon"
+span = [131, 145]
