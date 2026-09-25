@@ -131,7 +131,7 @@ through a generic, effect-polymorphic pipeline, and ships property tests whose
 failing inputs shrink to a reported minimal counterexample.
 
 Component impact: source minor, registry minor within `vibra_v1`, project
-schema minor (see [decisions](#decisions-to-close-before-10)).
+schema minor (see [what v1 carries](#what-v1-carries-for-later-lines)).
 
 ### Vibra 2 — Concurrent services
 
@@ -225,39 +225,24 @@ Macros, reader extensions, and runtime plugins remain excluded. They weaken the
 canonical-spelling and local-reasoning guarantees that agents depend on. The
 bar for reopening them is higher than for any track above.
 
-## Decisions to close before 1.0
+## What v1 carries for later lines
 
 The pre-1.0 policy allows deliberate breaks, which later lines will not have.
-The M7 forward-compatibility review MUST close each item below, either by
-changing the v1 specification or by recording why the item can wait for a
-major version.
+The obligations that keep these lines additive are therefore part of the v1
+milestones themselves, not a separate list:
 
-1. **Additive evolution of persistent formats.** `@project.v1`,
-   `@project-lock.v1`, and `@build.v1` reject unknown fields and newer majors.
-   Nothing yet defines how a 1.x toolchain adds an optional field or a target
-   kind (`@service`, `@app`) without a major bump. Decide on minor versions or
-   explicitly accept a major bump per addition.
-2. **Registry evolution within `vibra_v1`.** Decide whether adding a `@host`
-   or `@compiler` registry entry is a registry minor version, and how a build
-   records the minimum registry version it needs.
-3. **Audit-trace extensibility.** The ordered audit trace becomes the replay
-   log for scheduling and network delivery in line 2. Decide now that its
-   encoding is versioned and tolerates new event kinds.
-4. **Effect-row representation.** The effects chapter already notes that flat
-   rows relax additively. Keep typed IR, query schemas, and build metadata
-   free of assumptions that a row is always a closed literal set, so row
-   variables can be added in 1.x.
-5. **Reserved expression spellings.** New expression forms need a source major.
-   Record that post-v1 tracks use library entities, and list any spelling the
-   maintainers still want reserved. Candidates are none by default.
-6. **Interface laws.** Confirm that the laws M3 documents for `equatable`,
-   `ordered`, `hashable`, and `iter` are the ones line 3 will turn into
-   obligations.
-7. **Value-arena transfer.** Confirm that opaque value indices never leak
-   instance identity into typed IR or build output, so line 2 can move values
-   between instances and threads.
-8. **Test grammar.** Confirm that labelled additions to `test` (`for-all:`)
-   stay additive under the canonical formatter.
+| Later need | V1 obligation | Milestone |
+| --- | --- | --- |
+| Interface laws become proof obligations | Laws for `equatable`, `ordered`, `hashable`, and `iter` are written and exercised | [M3](../v1.md#milestone-3--complete-nominal-static-core) |
+| Values move between instances and threads | Value indices never reach typed IR or build output | [M4](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations) |
+| New host operations in 1.x | Registry minor-version rule and recorded registry requirement | M4 |
+| Scheduling and delivery replay | Versioned audit encoding that tolerates new event kinds | M4 |
+| Effect-row polymorphism | No closed-literal assumption on rows in IR, queries, or build data | M4 |
+| New target kinds and fields | Evolution rule for project, lock, and build formats | [M5](../v1.md#milestone-5--reproducible-projects-and-dependencies) |
+| New expression forms | Decision on reserved spellings, defaulting to none | [M7](../v1.md#milestone-7--webassembly-products-and-v1-release) |
+
+Labelled additions such as `for-all:` on `test` need no reservation, because
+an unknown label is already rejected and accepting it later is additive.
 
 ## Evaluating and scheduling a track
 

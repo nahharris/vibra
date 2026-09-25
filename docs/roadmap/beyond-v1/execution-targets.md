@@ -75,7 +75,7 @@ instance-owned arena. Line 2 extends it, as the `vibra_v2` ABI, with:
 
 The v1 rule that value indices never leak instance identity into typed IR or
 build output is what makes transfer possible. It is one of the
-[pre-1.0 decisions](README.md#decisions-to-close-before-10).
+[obligations v1 carries for later lines](README.md#what-v1-carries-for-later-lines).
 
 ## Parallel pure computation
 
