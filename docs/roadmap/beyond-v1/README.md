@@ -2,7 +2,7 @@
 
 Status: long-term direction; not normative
 Applies after: the 1.0 release gate in [`../v1.md`](../v1.md)
-Last updated: 2026-09-23
+Last updated: 2026-09-25
 
 This directory records where Vibra goes after v1 and why, so the v1 design can
 avoid closing doors that later lines need. It ranks below the specification
@@ -65,6 +65,10 @@ These follow from the charter and constrain every track below.
 - **Agent-facing evidence.** Every new check reports through the diagnostic
   registry, every new fact is available to `vibra query`, and every new failure
   mode has a structured counterexample or trace, never only prose.
+- **Decodable types.** Prefer type-system features whose well-typed
+  continuations stay cheap to compute from a source prefix. Explicit
+  signatures and closed dispatch keep that search small; a feature that makes
+  it expensive needs evidence that outweighs the loss.
 
 ## Release lines
 
@@ -218,6 +222,10 @@ These tracks are unscheduled. Each needs evidence before it gets a line:
 - a Lean bridge for obligations that the SMT solver cannot discharge;
 - automatic parallel evaluation of pure code in the style of interaction-net
   runtimes such as HVM and Bend;
+- a type-constrained decoding service that answers which continuations of a
+  source prefix are well-typed, built on the M6 source-position query and
+  measured by the reduction in rejected generations against an unconstrained
+  baseline;
 - verified or translation-validated compilation; and
 - self-hosting.
 

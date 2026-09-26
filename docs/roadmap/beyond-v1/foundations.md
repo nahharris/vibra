@@ -109,6 +109,13 @@ implicit root process.
 logic error, such as a one-shot reply. It would be a checked refinement on top
 of the ownership model above, not a replacement.
 
+**Study item:** a static use-after-close check by in-danger propagation, which
+taints every value that may share a closed handle and rejects its later use.
+It would move some `@closed` results from test time to check time without
+linearity. It starts with a spike on whether the sharing analysis stays
+tractable over Vibra's value semantics, and it too refines the ownership model
+rather than replacing it.
+
 ## Network and child processes as values
 
 The first network and process effects need no handles and fit the v1 ABI:
