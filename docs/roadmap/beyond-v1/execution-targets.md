@@ -109,3 +109,21 @@ It would carry the same obligations as Wasm: consuming only typed IR, lowering
 the same closed registries, meeting the tail-call and reduction rules, and
 matching the interpreter across the whole corpus. It is a third backend under
 one semantics, not an escape hatch to native FFI.
+
+## Pass ordering
+
+V1 ships no optimization or hardening pass. When either arrives, on any
+backend, two constraints apply from the start because they are cheap to adopt
+and expensive to retrofit:
+
+- **Hardening runs last.** Composing passes preserves only the intersection of
+  the properties each one preserves, so a hardening pass placed before an
+  optimizing pass can be silently undone. The pipeline order is recorded and a
+  test fails when it changes.
+- **Two claims stay separate.** A pass may claim that it preserves conformance
+  observations. It never claims, and documentation never implies, that it stops
+  an attack. The v1 runtime chapter already makes no verified-compilation or
+  host-safety claim.
+
+The scalar-only ABI that such work would rely on is already a v1 rule in the
+runtime chapter.

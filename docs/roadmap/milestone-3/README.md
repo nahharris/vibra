@@ -83,7 +83,7 @@ the Stage 3A items; Step 10 closes the Stage 3B items.
 | G6 | Canonical value observations (typed/execution snapshots, assertion `expected`/`actual`) are defined only for primitives; the assertion registry is monomorphic. | Every Stage 3A execution case observes records, enums, and collections. | Step 1 |
 | G7 | The `iter` default-member table is malformed (`(value self f (fn (item) item) (iter item))` merges parameters and result), and `map` cannot change the element type. | The roadmap requires this review before Stage 3B implementation. | Step 10 |
 | G8 | Editorial defects in `02-type-system.md`: two joined lines in **Model**, and the **Generics** example bound `storable`, which is not declared anywhere. | The chapter is the exit gate's coverage reference. | Step 1 |
-| G9 | The resolved symbol/reference/index record schema, including the type-keyed `impl` block and member spelling, is not defined. | Needed before Step 15 can emit it. | Step 10 |
+| G9 | The resolved symbol/reference/index record schema, including the type-keyed `impl` block and member spelling, is not defined. The schema should let an external retrieval consumer read, per declaration, its canonical identity and module, signature, effect row, error types, outgoing application edges, and formatter-normalized source, with byte-identical output for an identical snapshot. The toolchain emits records only; embedding and ranking stay outside it. | Needed before Step 15 can emit it. | Step 10 |
 
 ## Steps
 
