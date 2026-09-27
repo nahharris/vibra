@@ -12,7 +12,8 @@ Prerequisite: Step 4 merged. Stage 3A behavior step.
 
 ## Scope
 
-Literal, constructor (record, enum, newtype), tuple, and array patterns in
+Literal, declared constructor (record, tuple, enum, newtype), anonymous
+`tupleof`, `recordof`, and `enumof`, and array patterns in
 `let`, fixed positional parameters, lambda parameters, and `match`; one
 exhaustiveness engine answering both "does this arm set cover the type" and
 "is this single pattern irrefutable"; unreachable-arm detection; the canonical

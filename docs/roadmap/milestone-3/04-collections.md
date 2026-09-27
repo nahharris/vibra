@@ -24,9 +24,10 @@ Two parts in one PR, because lookups return `(option t)`:
    dependency if nothing else uses it; move `text.vib` and `assert.vib` under
    `stdlib/src/std/`; add `@std.option`. Update every M2 case and test whose
    provenance observation names `0.1.0` or the old paths.
-2. `tuple`, `array`, and `map` types; the static methods `tuple.of`,
-   `array.of`, `map.of`, and the `array` operations in `@std.builtin` (ordinary variadic methods except `tuple.of`); tuple
-   projection; array, map, `str`, and `bytes` lookups returning `option`;
+2. Anonymous and declared tuples with `tupleof` and the `(z f g)`
+   constructor; `array` and `map` as builtin generic types declared by
+   `intrinsic-type` in `@std.builtin`, with `array.of`, `map.of`, and the array
+   operations as static methods; tuple projection; array, map, `str`, and `bytes` lookups returning `option`;
    variadic array and map declarations, function types, and operands; map-key
    admissibility; canonical key order in the interpreter's map representation.
 
@@ -38,9 +39,9 @@ User-declared map types whose key is a generic parameter stay
 1. Standard-library input replacement with host tests for a digest mismatch, a
    manifest symbol absent from the registry, and a project-declared `external:`.
 2. Builtin constructor types and admissible-key checks.
-3. The `@std.builtin` collection methods, projection, and lookups; empty
-   collections need an expected type; `tuple.of` as a value is
-   `@name.wrong-entity-kind`; `array.of` passed as a function value works.
+3. The `@std.builtin` declarations, `tupleof`, projection, and lookups; empty
+   collections need an expected type; `array.of` passed as a function value
+   works.
 4. Variadic slots and operands, including the M2 variadic availability cases,
    which become positive and negative cases.
 5. Interpreter map representation ordered by canonical key order, with a host
@@ -48,7 +49,7 @@ User-declared map types whose key is a generic parameter stay
 
 ## Test matrix
 
-- Positive: heterogeneous `tuple.of`; `array.of` with an expected empty type;
+- Positive: heterogeneous `tupleof` and a declared tuple constructor; `array.of` with an expected empty type;
   duplicate-key `map.of` keeps the later value; each lookup present and absent;
   a nested tuple key; variadic calls with zero and several tail operands.
 - Negative: odd `map.of` and heterogeneous `array.of`

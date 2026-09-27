@@ -15,9 +15,10 @@ Prerequisite: Step 5 merged. Stage 3A behavior step.
 
 ## Scope
 
-Union `deftype`s with the too-few, overlap (Step 3 unifier), and concreteness
-checks; atom singleton types; member-to-union and singleton-to-`atom` widening
-at exactly the written expected types the chapter lists, applied once; `as`
+Declared and anonymous unions with the too-few, overlap (Step 3 unifier),
+and concreteness checks, order-insensitive anonymous identity, and the declared
+union constructor `(z f)`; atom singleton types; member-to-union and
+singleton-to-`atom` widening at exactly the written expected types the chapter lists, applied once; `as`
 ascription (no-op, widening, inference constraint); `as` narrowing patterns in
 the Step 5 engine with union members as a constructor space. Interface widening
 is Step 12.

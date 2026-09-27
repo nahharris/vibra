@@ -44,8 +44,8 @@ Evaluation is strict and deterministic:
 - `if` evaluates only the selected branch;
 - `match` evaluates its subject once and selects the first matching arm, and an
   `as` arm tests only the union discriminant;
-- `tuple.of` operands evaluate from left to right, and `array.of` and
-  `map.of` follow the ordinary variadic order;
+- `tupleof`, `recordof`, and `enumof` operands evaluate from left to right,
+  and `array.of` and `map.of` follow the ordinary variadic order;
 - `try` performs only its specified early-exit propagation; and
 - a tail-position call to a function in the same recursive group reuses the
   current activation instead of growing language-level stack.
@@ -75,7 +75,8 @@ value is evaluated even if a key repeats; the later pair replaces the earlier
 value. Map iteration order is canonical key order, not insertion or hash-table
 order.
 
-Nominal constructor applications and `tuple.of` assemble immutable values;
+Constructor applications and the anonymous value forms assemble immutable
+values;
 they do not invoke a function body, add a function-call edge, or emit a host
 event. Effects from evaluating their operands remain observable.
 
@@ -185,6 +186,14 @@ registry tests; a string in source or a copied declaration cannot authorize an
 operation. The M3 registry below replaces this profile as the Stage 3A steps
 implement it; until then these two symbols are the implemented set.
 
+M2 test assertions are a separate closed test-runner outcome surface described
+in the projects chapter. They evaluate through the ordinary typed call path,
+perform no host operation, and have no compiler or host registry symbol. A
+false assertion records `@test.assertion-failed` and stops only its current
+test; it is not a trap and cannot be caught or converted into a Vibra
+`result`. A trap raised by another runtime invariant remains `@test.trap` (or
+`@command.trap` at the CLI boundary) with its origin and stable trap code.
+
 ## M3 compiler intrinsic registry
 
 The Stage 3A `@compiler` registry is closed to the operations below, all under
@@ -263,8 +272,8 @@ The remaining operations are bound by modules, except the `array.*` rows:
 | `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `text.slice`, over elements |
 
 The numeric rows and the `array.*` rows are static methods of builtin types,
-declared by the toolchain together with `array.of`, `map.of`, and `tuple.of` in
-the embedded module `@std.builtin`. They are reached through the type path with
+declared by the toolchain together with `array.of` and `map.of` in the
+`intrinsic-type` declarations of the embedded module `@std.builtin`. They are reached through the type path with
 no import, exactly as the builtin types themselves need none, so
 `(i32.add-checked left right)` needs no `import`.
 
@@ -284,35 +293,33 @@ Execution results, assertion failure `expected` and `actual` strings, and the
 `programResult` of `run` use one canonical VIBON encoding of a value. A
 primitive value is its canonical literal. `bytes` is
 `(record kind: @bytes values: (array b...))` with `u8` literals. Every other
-value is a `record` whose first field is `kind:`:
+value is a `record` whose first field is `kind:`. A value of a declared type
+carries `type: P` as its second field; an anonymous structural value omits it:
 
 | Value | Encoding |
 | --- | --- |
-| tuple | `(record kind: @tuple values: (array v...))` |
+| tuple | `(record kind: @tuple type: P values: (array v...))` |
 | array | `(record kind: @array values: (array v...))` |
 | map | `(record kind: @map entries: (array (tuple k v)...))`, in canonical key order |
-| record | `(record kind: @record type: P fields: (record name: v...))`, in declaration order |
+| record | `(record kind: @record type: P fields: (record name: v...))` |
 | enum | `(record kind: @enum type: P variant: @name)`, adding `payload: v` for a non-`void` slot |
 | newtype | `(record kind: @newtype type: P value: v)` |
 | union | `(record kind: @union type: P member: T value: v)` |
 
+Declared record fields appear in declaration order and anonymous record fields
+in canonical order.
+
 `P` is the declaration's canonical atom path, and `T` is the canonical type
-encoding: a primitive's atom such as `@i32`; a nominal declaration's canonical
-atom path; `(record type: P arguments: (array T...))` for an applied generic
-type; `(record type: @tuple arguments: (array T...))`, and likewise `@array`
-and `@map`, for the builtin constructors; and
-`(record type: @fn parameters: (array T...) labelled: (record name: T...)
-result: T)` for a function type. A result observation is
+encoding: a primitive's atom such as `@i32`; a declared type's canonical atom
+path; `(record type: P arguments: (array T...))` for an applied generic type,
+including `@array` and `@map`; `(record type: @tuple arguments: (array T...))`
+for an anonymous tuple; `(record type: @record fields: (record name: T...))`,
+`(record type: @enum variants: (record name: T...))`, and
+`(record type: @union members: (array T...))` for the other anonymous types,
+in canonical order; and `(record type: @fn parameters: (array T...) labelled:
+(record name: T...) result: T)` for a function type. A result observation is
 `(record type: T value: v)`. Function values have no value encoding and are
 never an observable result.
-
-M2 test assertions are a separate closed test-runner outcome surface described
-in the projects chapter. They evaluate through the ordinary typed call path,
-perform no host operation, and have no compiler or host registry symbol. A
-false assertion records `@test.assertion-failed` and stops only its current
-test; it is not a trap and cannot be caught or converted into a Vibra
-`result`. A trap raised by another runtime invariant remains `@test.trap` (or
-`@command.trap` at the CLI boundary) with its origin and stable trap code.
 
 ## External providers
 

@@ -12,7 +12,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | --- | --- | --- | --- |
 | `ExpressionKind::Literal` | M2 | — | Atom singleton types: Step 6 |
 | `ExpressionKind::Name` | M2 | — | Nominal constructors and methods as names: Step 2 |
-| `ExpressionKind::Application` | M2 | — | Constructors and projection: Step 2; lookups and `tuple.of`/`array.of`/`map.of`: Step 4; `types:`: Step 3 |
+| `ExpressionKind::Application` | M2 | — | Constructors and projection: Step 2; lookups, `tupleof`, `array.of`, and `map.of`: Step 4; `recordof` and `enumof`: Step 2; `types:`: Step 3 |
 | `ExpressionKind::Lambda` | M2 | — | Destructuring parameters: Step 5 |
 | `ExpressionKind::Do` | M2 | — | Unhandled-fallible positions: Step 7 |
 | `ExpressionKind::Let` | M2 | — | Destructuring patterns: Step 5 |
@@ -23,7 +23,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `PatternKind::Binding` | M2 | — | — |
 | `PatternKind::Literal` | Stage 3A | Step 5 | — |
 | `PatternKind::Constructor` | Stage 3A | Step 5 | Record, enum, and newtype constructors |
-| `PatternKind::Tuple` | Stage 3A | Step 5 | — |
+| `PatternKind::Tuple` | Stage 3A | Step 5 | Spelled `(tupleof …)` from Step 2 |
 | `PatternKind::Array` | Stage 3A | Step 5 | — |
 | `PatternKind::As` | Stage 3A | Step 6 | — |
 | `VariadicBinding::Array` | Stage 3A | Step 4 | — |

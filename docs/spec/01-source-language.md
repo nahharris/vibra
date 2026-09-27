@@ -282,9 +282,9 @@ lambda-attribute = "labelled:", labelled-parameters
 ```
 
 `deftype-body` is the type chapter's production for a declaration body. It is
-`type-expr` plus the four identity-introducing forms `record`, `enum`, `union`,
-and `newtype`, and it is the only position in the grammar that admits any of
-them.
+`type-expr`, which includes the structural `tuple`, `record`, `enum`, and
+`union` forms, plus `newtype` and the toolchain-only `intrinsic-type`, which
+are admissible nowhere else.
 
 `def` introduces an immutable module value. There is no separate `const` form
 in v1.
@@ -460,8 +460,10 @@ in its owner's scope; a reference is a dotted path through owners, so
 `user.name-length` and `printable.render` are resolved paths at a use site and
 never the spelling of a declaration.
 
-Records are constructed by applying their nominal type to labelled fields.
-Enum tags and newtypes expose qualified constructors. A record value is
+Declared records and tuples are constructed by applying their type to their
+fields, and declared unions and newtypes by applying it to one value. Enum
+tags expose qualified constructors. Anonymous values use the reserved forms
+`tupleof`, `recordof`, and `enumof` that the type chapter defines. A record value is
 applied to an atom selector to read one statically known field; there is no
 `field` form and no generated source accessor function.
 
@@ -476,8 +478,8 @@ denotes a `fn` value. Application is `(f …)` when `f` has a function type.
 Constructors, projections, and lookups are not `fn` values; reifying one as a
 higher-order value requires an explicit `lambda`.
 
-A module-level `def`, `defn`, or import alias MUST NOT be spelled `map`,
-`array`, or `tuple`. Those spellings are reserved for type and pattern forms.
+A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
+type name, because builtin types own static methods reached by the same path.
 A nested method named `map` on some other owner is allowed; the associative
 `map` type MUST NOT declare a method named `map`.
 
@@ -501,13 +503,18 @@ expr = atom | application | lambda
      | "(", "if", expr, expr, expr, ")"
      | "(", "match", expr, pattern, expr, { pattern, expr }, ")"
      | "(", "as", type-expr, expr, ")"
-     | "(", "try", expr, ")" ;
+     | "(", "try", expr, ")"
+     | "(", "tupleof", { expr }, ")"
+     | "(", "recordof", label, expr, { label, expr }, ")"
+     | "(", "enumof", label, expr, ")" ;
 application = "(", expr, { expr }, ")" ;
 lambda = "(", "lambda", parameters, type-expr,
          { lambda-attribute }, { expr }, ")" ;
 pattern = binding-name | literal
         | "(", symbol, { pattern | label, pattern }, ")"
-        | "(", "tuple", { pattern }, ")"
+        | "(", "tupleof", { pattern }, ")"
+        | "(", "recordof", label, pattern, { label, pattern }, ")"
+        | "(", "enumof", label, pattern, ")"
         | "(", "array", { pattern }, ")"
         | "(", "as", type-expr, pattern, ")" ;
 ```
@@ -536,36 +543,36 @@ because it creates no declaration to redeclare or shadow. There is no `bind`
 pattern form and no compatibility spelling for it.
 
 ```vibra
-(let (tuple name id) pair
+(let (tupleof name id) pair
   (text.concat name (i32.to-str id)))
 
-(lambda ((tuple left right) (tuple i32 i32)) (result i32 core.arithmetic-error)
+(lambda ((tupleof left right) (tuple i32 i32)) (result i32 core.arithmetic-error)
   (i32.add-checked left right))
 ```
 
 Collections have immutable value semantics. Pure iteration uses the standard
 `iter` interface; the type chapter defines `iter.next` and its default methods.
 Effectful walks are recursive functions over `iter.next` with an explicit
-written effect ceiling. Source values are built by the static methods
-`tuple.of`, `array.of`, and `map.of` of the builtin collection types; the
-unqualified `tuple`, `array`, and `map` forms are reserved for types and
-patterns. There is no source
-collection-literal form and no `entry` wrapper.
+written effect ceiling. Arrays and maps are built by the static methods
+`array.of` and `map.of` of the builtin `array` and `map` types, and anonymous
+tuples and records by the reserved forms `tupleof` and `recordof`. There is no
+other collection-literal form and no `entry` wrapper.
 
 ```vibra
-(tuple.of "Ada" 42u64)
+(tupleof "Ada" 42u64)
+(recordof name: "Ada" id: 42u64)
 (array.of 1i32 2i32 3i32)
 (map.of "name" "Ada" "role" "maintainer")
 ```
 
-`tuple.of` may contain heterogeneous values. Every `array.of` element has one
-exact type. `map.of` contains alternating key and value expressions and MUST
-have even arity; its keys share one exact type and its values share one exact
+`tupleof` and `recordof` may contain heterogeneous values. Every `array.of`
+element has one exact type. `map.of` contains alternating key and value
+expressions and MUST have even arity; its keys share one exact type and its values share one exact
 type. An empty `array.of` or `map.of` requires an expected collection type.
 All operands are evaluated, and a later duplicate map key replaces the earlier
 value. `array.of` and `map.of` are ordinary variadic methods and first-class
-function values; `tuple.of` is typed by its own closed rule and is not a
-function value. Users cannot declare members on the builtin collection types.
+function values; `tupleof` and `recordof` are reserved forms, not functions.
+Users cannot declare members on the builtin types.
 
 `match` contains alternating pattern/result forms directly; there is no `case`
 wrapper. Every arm has exactly one result expression, so `do` groups multiple
@@ -577,8 +584,9 @@ expressions. Arms are checked for reachability and exhaustiveness.
   (option.none) 0)
 ```
 
-A tuple pattern has exact arity. A named-record pattern uses labelled fields;
-omitted fields are ignored. Array patterns have exact length. Irrefutability is
+A tuple pattern, `(tupleof p…)` or a declared tuple's `(z p…)`, has exact
+arity. A record pattern, `(recordof a: p…)` or a declared record's
+`(z a: p…)`, uses labelled fields; omitted fields are ignored. Array patterns have exact length. Irrefutability is
 a type-system property: tuple and record patterns may be irrefutable when all
 of their subpatterns are, while a fixed-length array pattern is refutable for
 the variable-length array type. Enum constructors are normally refutable, but
