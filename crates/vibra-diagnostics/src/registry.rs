@@ -250,7 +250,7 @@ diagnostic_registry! {
     NameReservedDeclaration => "@name.reserved-declaration", Name, Error, None,
         "a declaration or generic name uses a reserved type head";
     NameReservedValueSpelling => "@name.reserved-value-spelling", Name, Error, None,
-        "a module-level value is spelled `map`, `array`, or `tuple`";
+        "a module-level value or import alias is spelled as a builtin type name";
     ModuleFileDirectoryCollision => "@module.file-directory-collision", Module, Error, None,
         "a module path is claimed by both a file and a directory";
     ModuleSourceIdCollision => "@module.source-id-collision", Module, Error, None,

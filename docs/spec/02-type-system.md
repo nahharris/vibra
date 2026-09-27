@@ -412,9 +412,11 @@ equivalent discards, create no binding, and may repeat in the same or nested
 scopes. Sibling scopes may reuse a named symbol when neither declaration is
 visible from the other.
 
-A module-level `def`, `defn`, or import alias MUST NOT be spelled `map`,
-`array`, or `tuple`. A top-level use of one of those spellings as a value or
-alias emits `@name.reserved-value-spelling`.
+A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
+type name: a primitive type, `array`, `map`, or `tuple`. Builtin types own
+static methods reached by dotted path, so such an alias or value would make
+`i32.add-checked` or `array.of` ambiguous. A top-level use of one of those
+spellings as a value or alias emits `@name.reserved-value-spelling`.
 
 ## Functions as values
 

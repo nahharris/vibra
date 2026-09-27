@@ -70,4 +70,4 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | C1.7 — `as`, singleton widening, narrowing | Step 6 |
 | C5.2 — constructor and destructuring patterns | Step 5 |
 | C6.2 — `types:` generic arguments | Step 3 |
-| Unavailable `integer.*` compiler symbols (M2 registry note) | Step 8, as the per-type modules of the M3 registry |
+| Unavailable `integer.*` compiler symbols (M2 registry note) | Step 8, as static methods of the numeric primitive types |

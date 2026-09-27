@@ -41,5 +41,5 @@ Registry signatures are checked exactly against the trusted declarations.
 
 ## Done
 
-The M2 registry note on `integer.*` symbols is closed by the per-type modules;
-all registry rows have evidence; validation passes.
+The M2 registry note on `integer.*` symbols is closed by the static methods of
+the numeric primitive types; all registry rows have evidence; validation passes.

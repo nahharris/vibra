@@ -208,7 +208,8 @@ In the signatures, `R t` abbreviates `(result t arithmetic-error)` and `C t`
 abbreviates `(result t conversion-error)`.
 
 For each integer type `T` among `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
-and `u64`, module `@std.T` binds these symbols spelled `T.<name>`:
+and `u64`, the builtin type `T` has these static methods, with registry symbols
+spelled `T.<name>`:
 
 | Name | Signature | Semantics |
 | --- | --- | --- |
@@ -223,7 +224,7 @@ and `u64`, module `@std.T` binds these symbols spelled `T.<name>`:
 | `to-str` | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
 | `parse` | `str -> C T` | Accepts an optional `-` (signed `T` only) followed by one or more ASCII decimal digits and nothing else; `invalid-format` otherwise, `out-of-range` for a well-formed value outside `T` |
 
-For `F` among `f32` and `f64`, module `@std.F` binds:
+For `F` among `f32` and `f64`, the builtin type `F` has:
 
 | Name | Signature | Semantics |
 | --- | --- | --- |
@@ -234,7 +235,7 @@ For `F` among `f32` and `f64`, module `@std.F` binds:
 | `to-str` | `F -> str` | The canonical float serialization of this chapter, without a suffix |
 | `parse` | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
 
-The remaining modules bind:
+The remaining operations are bound by modules, except the `array.*` rows:
 
 | Symbol | Signature | Semantics |
 | --- | --- | --- |
@@ -261,10 +262,11 @@ The remaining modules bind:
 | `array.concat` | `(array t) (array t) -> (array t)` | Elements of the first, then the second |
 | `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `text.slice`, over elements |
 
-The `array.*` rows are static methods of the builtin `array` type, declared by
-the toolchain together with `array.of`, `map.of`, and `tuple.of` in the embedded
-module `@std.builtin` and reached through the type path with no import, exactly
-as the builtin types themselves need none.
+The numeric rows and the `array.*` rows are static methods of builtin types,
+declared by the toolchain together with `array.of`, `map.of`, and `tuple.of` in
+the embedded module `@std.builtin`. They are reached through the type path with
+no import, exactly as the builtin types themselves need none, so
+`(i32.add-checked left right)` needs no `import`.
 
 `@std.option` declares `(deftype option (enum some t none void) where: (t any))`
 and `@std.result` declares `(deftype result (enum ok t err e) where: (t any)

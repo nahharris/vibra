@@ -509,20 +509,17 @@ with unit `@std`, keep that provenance in every declaration identity, and are
 imported explicitly; there is no ambient prelude. A declaration outside this
 embedded package that writes `external:` is rejected exactly as the M2 input
 rejected an unverified one. The M3 module set is `@std.core`, `@std.option`,
-`@std.result`, the eight integer modules `@std.i8` through `@std.u64`,
-`@std.f32`, `@std.f64`, `@std.bool`, `@std.char`, `@std.text`, `@std.bytes`,
+`@std.result`, `@std.bool`, `@std.char`, `@std.text`, `@std.bytes`,
 the builtin-member module `@std.builtin`, and the test-registry module
 `@std.assert`. `@std.builtin` is never imported: it declares the members of the
-builtin `array`, `map`, and `tuple` types, which are reached through those type
-paths; Stage 3B adds its own
+builtin numeric, `array`, `map`, and `tuple` types, which are reached
+through those type paths; Stage 3B adds its own
 modules by the same rule. Adding a module or symbol is a specification change to
 this list and to the runtime registry.
 
-An import alias is only ever the first component of a dotted reference, so the
-conventional spellings `(import i32 @std.i32)` and `(import f64 @std.f64)` do
-not collide with the primitive type names, which are never aliases. `array`,
-`map`, and `tuple` remain reserved alias spellings because they name builtin
-types whose members are reached by path.
+Builtin type names are reserved alias and module-level value spellings, as the
+type chapter states, because their members are reached by the same dotted path
+an alias would start.
 
 There is no registry, version range, lock auto-upgrade, lifecycle script, or
 dependency-provided executable in v1.
