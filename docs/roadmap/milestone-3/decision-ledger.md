@@ -1,0 +1,40 @@
+# M3 Stage 3A decision ledger
+
+Step 1's record of the contracts closed before Stage 3A implementation. Each
+row has one disposition, its canonical normative anchors, and one downstream
+proof obligation. `new` rows were written into the owning chapter in the Step 1
+PR; `settled` rows were already decided by the specification and are recorded
+only to fix their proof owner; `deferred` rows are Stage 3B work closed by
+Step 10.
+
+| ID | Disposition | Canonical anchors | Contract | Proof owner |
+| --- | --- | --- | --- | --- |
+| D1.1 | new | [Model](../../spec/02-type-system.md#model); [roadmap M3](../v1.md#milestone-3--complete-nominal-static-core) | `any`-bounded generics (applied types, inference, `types:`) are Stage 3A; interface bounds, `defint`, `impl`, interface types, and generic map keys stay `@tool.unavailable` until Stage 3B | Step 3 corpus; M3 inventory test |
+| D1.2 | new | [Model](../../spec/02-type-system.md#model) | Each behavior step moves forms from unavailable to supported and never reclassifies a valid form as malformed | Every Stage 3A step; Step 9 sweep |
+| D2.1 | new | [M3 surface inventory](supported-surface.md) | Every AST variant and every M2 row deferred to M3 has one owning step; M4 rows keep M4 | `m3_contract_inventory` test |
+| D3.1 | new | [Nominal declarations](../../spec/02-type-system.md#nominal-declarations) | Closed builtin conformance of `bool`, `char`, `str`, `bytes`, `atom`, atom singletons, integers, and tuples of those to `equatable`/`ordered`/`hashable`; other key types are `@type.invalid-map-key` | Step 4 corpus |
+| D3.2 | new | [Nominal declarations](../../spec/02-type-system.md#nominal-declarations); [Evaluation](../../spec/06-runtime.md#evaluation) | Canonical key order for the closed key types; hash order never observable | Step 4 interpreter case |
+| D3.3 | new | [Nominal declarations](../../spec/02-type-system.md#nominal-declarations) | Direct infinite expansion is `@type.infinite-size` at the first repeating `deftype`, relating the repeating slot | Step 2 corpus |
+| D4.1 | new | [M3 compiler intrinsic registry](../../spec/06-runtime.md#m3-compiler-intrinsic-registry) | `@std.core` declares `ordering`, `arithmetic-error`, and `conversion-error`; the latter replaces the undeclared `overflow` type | Steps 7–8 |
+| D4.2 | new | [M3 compiler intrinsic registry](../../spec/06-runtime.md#m3-compiler-intrinsic-registry) | Closed checked integer operations per type in `@std.i8`…`@std.u64`, with exact overflow, division, remainder, shift, parse, and `to-str` semantics | Step 8 corpus and host registry tests |
+| D4.3 | new | [M3 compiler intrinsic registry](../../spec/06-runtime.md#m3-compiler-intrinsic-registry) | Closed float, `char`, `text`, `bytes`, and `array` operations; composite behavior is reviewed Vibra source | Step 8 |
+| D4.4 | new | [M3 compiler intrinsic registry](../../spec/06-runtime.md#m3-compiler-intrinsic-registry) | `option` and `result` are recognized by canonical identity of the `@std.option` and `@std.result` declarations | Steps 4 and 7 |
+| D5.1 | new | [Toolchain standard-library input](../../spec/04-programs-and-packages.md#toolchain-standard-library-input) | The signed M2 bootstrap, its key, signature, and digests are retired; authority is build-time embedding of `stdlib/manifest.vibon` and its modules as `vibra-stdlib@0.2.0` | Step 4 host tests |
+| D5.2 | new | [Toolchain standard-library input](../../spec/04-programs-and-packages.md#toolchain-standard-library-input) | M3 module set, alias rule for primitive-named modules, and the import-free `@std.builtin` member module | Steps 4 and 8 |
+| D11.1 | new | [Application](../../spec/02-type-system.md#application); [Functions and expressions](../../spec/01-source-language.md#functions-and-expressions) | `array.of`, `map.of`, and `tuple.of` are static methods of the builtin types, not special entities; `array.of`/`map.of` are ordinary variadic generic methods and first-class values; `tuple.of` alone has a closed typing rule and no `fn` type; array operations are static methods of `array` | Step 4 corpus |
+| D6.1 | new | [Inference and checking](../../spec/02-type-system.md#inference-and-checking) | `@type.ambiguous-inference` for literals, empty collections, and generic arguments; replaces M2's use of `@type.argument-mismatch` for literal ambiguity | Step 2 migration; Steps 3–4 corpus |
+| D6.2 | new | [Inference and checking](../../spec/02-type-system.md#inference-and-checking) | `@type.argument-mismatch` covers application binding, constructor fields, `map.of` arity, and heterogeneous collection operands; `@type.mismatch` covers every other expected-type disagreement | Step 2 migration; every step |
+| D6.3 | new | [Control flow and failure](../../spec/02-type-system.md#control-flow-and-failure) | `@pattern.non-exhaustive` at the `match` form with one canonical uncovered shape; `@pattern.unreachable-arm` at the later arm relating the earliest covering arm | Step 5 corpus |
+| D6.4 | new | [Diagnostics are a language surface](../../spec/07-diagnostics-and-conformance.md#diagnostics-are-a-language-surface) | Eight new registry codes with fixed `@error` level and no fix | `diagnostic_registry` test |
+| D7.1 | new | [Canonical value encoding](../../spec/06-runtime.md#canonical-value-encoding) | One VIBON encoding for every non-function value and type, used by `interpret` snapshots, `run` `programResult`, and assertion failures; maps as entry arrays in canonical key order | Step 2 onward |
+| D7.2 | new | [M3 assertion contract](../../spec/04-programs-and-packages.md#m3-assertion-contract) | Generic test-only `assert.equal` by canonical encoding replaces the five `assert.equal-*` members; `fn` operands are `@type.function-not-equatable` | Step 8 |
+| D8.1 | new | [Control flow and failure](../../spec/02-type-system.md#control-flow-and-failure) | `atom` scrutinees are never closed; singleton types are; literal patterns exclude floats and `void`; only `bool` literals can be exhaustive | Step 5 corpus |
+| D9.1 | new | [Control flow and failure](../../spec/02-type-system.md#control-flow-and-failure) | `try` needs a matching enclosing `option` or same-error `result`; it exits the innermost function, `lambda`, or test; otherwise `@type.invalid-try` | Step 7 corpus |
+| D9.2 | new | [Control flow and failure](../../spec/02-type-system.md#control-flow-and-failure) | Only `result` is fallible; a non-final body position ignoring one is `@type.unhandled-fallible` unless discarded; ignoring an `option` is allowed | Step 7 corpus |
+| D10.1 | new | [Model](../../spec/02-type-system.md#model); [Generics](../../spec/02-type-system.md#generics) | Stray carriage returns removed; the undeclared `storable` bound replaced by `any`; examples renamed to the per-type numeric modules and the `arrays` alias | M1 syntax-example inventory refresh |
+| S1 | settled | [Application](../../spec/02-type-system.md#application) | Closed applicable categories, constructor application, and `tuple.of`/`array.of`/`map.of` | Steps 2 and 4 |
+| S2 | settled | [Type ascription and widening](../../spec/02-type-system.md#type-ascription-and-widening) | Three widening relations at written expected types, no least upper bound, erased `as` | Step 6 |
+| S3 | settled | [Overlap and non-unifiability](../../spec/02-type-system.md#overlap-and-non-unifiability) | Bound-agnostic unification for union members | Steps 3 and 6 |
+| X1 | deferred | [Iteration](../../spec/02-type-system.md#iteration) | `iter` default-member table and `map` element type (G7) | Step 10 |
+| X2 | deferred | [Nominal declarations](../../spec/02-type-system.md#nominal-declarations); [Generics](../../spec/02-type-system.md#generics) | A generic key type needs three conformances but v1 allows one bound per parameter (G10) | Step 10 |
+| X3 | deferred | [Workspace queries](../../spec/05-tooling.md#workspace-queries) | Resolved symbol/reference/index schema (G9) | Step 10 |

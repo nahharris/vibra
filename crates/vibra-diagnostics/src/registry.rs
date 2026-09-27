@@ -313,8 +313,24 @@ diagnostic_registry! {
         "an `as` pattern names a type outside the union's member set";
     TypeRedundantConversion => "@type.redundant-conversion", Type, Error, None,
         "`from` and `try-from` are both implemented for one source";
+    TypeMismatch => "@type.mismatch", Type, Error, None,
+        "an expression's type differs from its written or required expected type";
+    TypeAmbiguousInference => "@type.ambiguous-inference", Type, Error, None,
+        "no unique type follows for a literal, empty collection, or generic argument";
+    TypeInfiniteSize => "@type.infinite-size", Type, Error, None,
+        "a recursive type expands without passing through a variable-size container";
+    TypeInvalidMapKey => "@type.invalid-map-key", Type, Error, None,
+        "a map key type has no `equatable`, `ordered`, and `hashable` conformance";
+    TypeInvalidTry => "@type.invalid-try", Type, Error, None,
+        "`try` is outside a matching `option` or `result` context";
+    TypeUnhandledFallible => "@type.unhandled-fallible", Type, Error, None,
+        "a `result` value is ignored without an explicit discard";
     PatternRefutableBinding => "@pattern.refutable-binding", Pattern, Error, None,
         "a binding pattern is refutable for its expected type";
+    PatternNonExhaustive => "@pattern.non-exhaustive", Pattern, Error, None,
+        "the arms of a `match` do not cover every value of the scrutinee type";
+    PatternUnreachableArm => "@pattern.unreachable-arm", Pattern, Error, None,
+        "earlier arms of a `match` already cover every value this arm matches";
     EffectOutsideCeiling => "@effect.outside-ceiling", Effect, Error, None,
         "a performed effect root lies outside the written or default ceiling";
     EffectInvalidReference => "@effect.invalid-reference", Effect, Error, None,
@@ -377,7 +393,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 76;
+    const REGISTERED_CODES: usize = 84;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

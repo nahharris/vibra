@@ -31,11 +31,28 @@ string conversion.
 The M2 executable subset is deliberately smaller than this complete type
 surface. Its checker admits primitive names, `void`, monomorphic `fn` types,
 direct local-name/discard bindings, immutable `def` values, `defn`, `lambda`,
-`do`, `let`, `if`, and ordinary function application. Generic bounds and`types:` arguments, nominal bodies, collection types and constructors,
+`do`, `let`, `if`, and ordinary function application. Generic bounds and
+`types:` arguments, nominal bodies, collection types and constructors,
 destructuring/constructor patterns, `match`, `try`, `option`, `result`,
 ascription, widening, narrowing, and conversion remain valid syntax but are
 outside that profile and produce `@tool.unavailable` when semantic support is
-requested. This is an implementation capability boundary, not a second sourcedialect; the full rules below remain the v1 authority for later milestones.
+requested. This is an implementation capability boundary, not a second source
+dialect; the full rules below remain the v1 authority for later milestones.
+
+M3 widens the profile in two stages. The Stage 3A profile adds nominal `deftype`
+bodies (type, record, enum, union, and newtype) with their constructors,
+projections, and nested non-interface methods; tuples, arrays, and maps with
+`tuple.of`, `array.of`, `map.of`, lookups, and variadic array and map slots;
+every pattern form with `match` and shared irrefutability; `option`, `result`,
+`try`, and unhandled-failure checking; union and atom-singleton widening, `as`
+ascription, and `as` narrowing; and generics whose every `where:` bound is the
+predeclared `any`, with applied types, inference, and `types:`. Until the
+Stage 3B profile, `defint`, nested `impl` blocks, a `where:` bound naming an
+interface other than `any`, `any` or another interface written as a type, a
+user-declared map type whose key type is a generic parameter, and the
+conversion interfaces remain `@tool.unavailable`. Stage 3B admits the remainder
+of this chapter. Each behavior step moves forms from unavailable to supported;
+none reclassifies a valid form as malformed.
 
 M2 function declarations and `fn` types have no variadic slot. A variadic
 parameter declaration or variadic function type is valid v1 syntax but is
@@ -132,7 +149,34 @@ any other type declares a unary constructor. Tuples, arrays, and maps are
 immutable values. Map keys must implement the standard `hashable`,
 `equatable`, and `ordered` interfaces. Recursive types MUST pass a finite-size
 check; recursion through a variable-size container is permitted, while direct
-infinite expansion is rejected.
+infinite expansion is rejected with `@type.infinite-size` at the `deftype`
+whose expansion first repeats in declaration order, relating the member or
+payload through which it repeats.
+
+The standard library declares `equatable`, `ordered`, and `hashable` as
+ordinary nominal interfaces. The following types receive closed toolchain
+conformance to all three, keyed by type identity in the same way as the closed
+`iter` registry; they are admissible map keys without a written
+implementation:
+
+- `bool`, `char`, `str`, `bytes`, `atom`, and every atom singleton type;
+- `i8` through `i64` and `u8` through `u64`; and
+- `(tuple k0 ... kn)` whose every component is itself an admissible key.
+
+`void`, `f32`, `f64`, `fn` types, arrays, maps, and options are not admissible
+keys. A `deftype` is admissible only through its own written implementations
+of all three interfaces. An inadmissible key type in any written or inferred
+`(map k v)` emits `@type.invalid-map-key` at the key type expression, or at the
+constructor application when the map type is inferred; an `fn` key keeps the
+more specific `@type.function-not-equatable`.
+
+Canonical key order is a total order over admissible key values and is the
+only order in which a map is traversed, rendered, or iterated. For the closed
+key types it is: `false` before `true`; numeric order for integers; Unicode
+scalar value for `char`; lexicographic by scalar for `str` and by byte for
+`bytes`; lexicographic by the UTF-8 bytes of the canonical spelling for atoms;
+and component-wise lexicographic for tuples. A `deftype` key uses its `ordered`
+implementation. Hash-table order is never observable.
 
 Newtypes have a distinct identity and exactly one representation type. Their
 constructor and unwrap operation are available only where visibility permits.
@@ -263,14 +307,32 @@ payload slot or one operand of the written payload type, and newtype
 constructors accept their representation value. Constructor application is
 pure and has kind `@constructor`.
 
-The closed native entities `tuple.of`, `array.of`, and `map.of` construct
-collection values and have application kind `@constructor`. `tuple.of` derives
-one heterogeneous tuple type from its operands. `array.of` requires every
-operand to have one exact element type, and `map.of` requires alternating
-operands of one exact key type and one exact value type. Empty array and map
-construction requires an expected type; an odd map arity is an error. The
-source forms `(tuple ...)`, `(array ...)`, and `(map ...)` are type or pattern
-forms, never collection value constructors.
+Collection values are built by static methods of the builtin `array`, `map`,
+and `tuple` types, reached by path exactly as a `deftype`'s nested method is.
+They are toolchain-declared members, not special syntax, and their
+applications are ordinary `@function` applications:
+
+```vibra
+(defn of () (array t)
+  variadic: (items (array t)))
+```
+
+`array.of` has that signature with the type's `where: (t any)`, and `map.of`
+the corresponding one with `variadic: (entries (map k v))`, so each is a
+first-class `fn` value, its element types come from ordinary generic
+inference, an empty call needs an expected type like any uninferable generic
+result, and an odd map tail is an ordinary variadic-binding error. The key rule
+applies to each instantiated `(map k v)`.
+
+`tuple.of` is the one member no v1 signature can state, because it accepts any
+number of operands of independent types. It is still a static method of
+`tuple` reached by path, but its application is typed by one closed rule —
+the result is the tuple of its operand types, in order — and it has no `fn`
+type, so it is never a first-class value: a `tuple.of` reference anywhere
+but an application head emits `@name.wrong-entity-kind`. Users cannot declare
+further members on `array`, `map`, or `tuple`. The source forms `(tuple ...)`,
+`(array ...)`, and `(map ...)` are type or pattern forms, never collection
+value constructors.
 
 ## Namespaces and resolution
 
@@ -393,6 +455,22 @@ destination-dispatched contract member, defined in the interfaces section,
 resolves its receiver from an expected type that the author wrote. Inference
 MUST NOT synthesize an implementation that no package declared.
 Ambiguous inference is an error with candidate explanations, not a default.
+When no unique type follows for an unsuffixed numeric literal, an empty
+`array.of` or `map.of`, or a generic argument, the checker emits
+`@type.ambiguous-inference` at that literal, application, or generic
+application, with one note per candidate or missing constraint. A
+destination-dispatched call with no written expected type keeps the more
+specific `@type.ambiguous-destination`.
+
+An operand that does not fit the parameter or constructor slot it binds to, a
+wrong arity, an unknown, duplicate, or missing label or record field, an odd
+`map.of` operand count, and `array.of` or `map.of` operands with no single
+element type are `@type.argument-mismatch` at the operand or application.
+Every other disagreement between an expression's type and its written or
+required expected type — a `def` annotation, a result
+type, an `if` condition, differing branch or arm types, a pattern and its
+scrutinee — is `@type.mismatch` at the expression, relating the written type
+when it has a source span.
 
 Every public function, `def`, type parameter, interface member, and effect
 operation has a complete written type. The checker validates a body against
@@ -407,7 +485,7 @@ that constrains nothing.
 
 ```vibra
 (defn first (items (array t)) (option t)
-  where: (t storable)
+  where: (t any)
   visibility: @public
   (array.first items))
 ```
@@ -780,6 +858,42 @@ checked for exhaustiveness over booleans, atoms when statically closed, enums,
 unions, and finite structural patterns. Unreachable arms are errors. One common
 type means one written or already-identical type; the checker MUST NOT search
 for a union or interface that covers two differing branch types.
+
+A scrutinee of type `atom` is never statically closed: its atom-literal arms
+are refutable and a binder or discard must cover the remainder. A scrutinee of
+an atom singleton type is closed by the one arm for that atom. Literal patterns
+are admitted for every primitive except `f32`, `f64`, and `void`, and an arm
+set of literals covers its type only for `bool`; any other literal arm set
+needs a covering binder or discard. The arm set of `str`, `bytes`, and every
+numeric type is therefore never closed by literals alone.
+
+A `match` whose arms do not cover the scrutinee type emits
+`@pattern.non-exhaustive` at the complete `match` form, with one note naming
+one uncovered value shape in canonical pattern spelling, chosen as the first
+uncovered shape in declaration order of variants, members, and fields. An arm
+that no value can reach because earlier arms cover it emits
+`@pattern.unreachable-arm` at that arm's pattern, relating the earliest arm
+that alone covers it when one exists. Arms are examined in source order, so
+only the later of two identical arms is unreachable.
+
+`try` applies to an operand of type `(option t)` or `(result t e)` inside a
+function, `lambda`, or test whose written result type is the same standard
+container: `(option u)` for an `option` operand, or `(result u e)` with the
+identical error type `e` for a `result` operand. The success type `u` of the
+enclosing result need not equal `t`. The `try` expression has type `t`. On
+`none` or `err`, evaluation leaves the innermost enclosing function, `lambda`,
+or test body with that `none` or that error wrapped in the enclosing result
+type. A `try` in any other context, over any other type, or against a
+different container or error type emits `@type.invalid-try` at the `try` form,
+relating the enclosing written result type when there is one. A test body has
+result type `void`, so `try` is always invalid there.
+
+A value whose static type is `(result t e)` is fallible. A fallible value is
+ignored when it is evaluated in a non-final element of a function, `lambda`,
+test, `do`, or `let` body; such an expression emits
+`@type.unhandled-fallible` at the expression unless it is written as
+`(let - expression)` or with another discard spelling. `option` is not
+fallible: absence is a value, and ignoring one needs no discard.
 
 An `(as type-expr pattern)` pattern narrows a union. Its scrutinee MUST have a
 union type, and a scrutinee of any other type emits `@type.narrowing-non-union`.

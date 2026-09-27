@@ -69,7 +69,15 @@ table governs.
 | `@type.narrowing-non-union` | `@error` |
 | `@type.not-a-union-member` | `@error` |
 | `@type.redundant-conversion` | `@error` |
+| `@type.mismatch` | `@error` |
+| `@type.ambiguous-inference` | `@error` |
+| `@type.infinite-size` | `@error` |
+| `@type.invalid-map-key` | `@error` |
+| `@type.invalid-try` | `@error` |
+| `@type.unhandled-fallible` | `@error` |
 | `@pattern.refutable-binding` | `@error` |
+| `@pattern.non-exhaustive` | `@error` |
+| `@pattern.unreachable-arm` | `@error` |
 | `@effect.outside-ceiling` | `@error` |
 | `@effect.invalid-reference` | `@error` |
 | `@external.unknown-symbol` | `@error` |
@@ -455,6 +463,33 @@ rejected with no compatibility bridge. Retired loop and return forms MUST be
 rejected with `@syntax.retired-form`. `@type.not-applicable`,
 `@type.invalid-tuple-index`, `@type.unknown-record-field`, and
 `@pattern.refutable-binding` all have fixed level `@error`.
+
+Match coverage includes a non-exhaustive enum, union, `bool`, tuple, and
+`atom` scrutinee, each rejected with `@pattern.non-exhaustive` naming its first
+uncovered shape; a repeated arm and an arm after a covering binder rejected
+with `@pattern.unreachable-arm`; and literal arm sets over `str` and an integer
+type that need a covering binder. Failure coverage includes `try` over `option`
+and over `result` in matching enclosing results, a `try` whose enclosing error
+type differs, a `try` in a test body, and a `try` over a non-container, each
+invalid case rejected with `@type.invalid-try`; and an ignored `result` in a
+non-final body position rejected with `@type.unhandled-fallible`, accepted when
+written with each discard spelling, and an ignored `option` accepted.
+Inference coverage rejects an unsuffixed literal with no expected numeric type,
+an empty `array.of` with no expected type, and an uninferable generic argument
+with `@type.ambiguous-inference`, and a `def` annotation, `if` condition, and
+differing branch types with `@type.mismatch`. Map coverage accepts every closed
+key type, including a nested tuple key, and rejects `f64`, `void`, array, and
+record keys with `@type.invalid-map-key`; an interpreter case proves that a map
+built in two different insertion orders iterates, renders, and compares
+identically in canonical key order. Nominal coverage rejects a record that
+contains itself directly with `@type.infinite-size` and accepts one that
+contains itself through an array. `@type.mismatch`,
+`@type.ambiguous-inference`, `@type.infinite-size`, `@type.invalid-map-key`,
+`@type.invalid-try`, `@type.unhandled-fallible`, `@pattern.non-exhaustive`,
+and `@pattern.unreachable-arm` all have fixed level `@error`.
+
+An `interpret` result snapshot is the canonical result observation
+`(record type: T value: v)` of the runtime chapter's canonical value encoding.
 
 Interface coverage includes abstract and default contract members, rejection of
 `@type.default-override` and `@type.missing-abstract-member`, the canonical

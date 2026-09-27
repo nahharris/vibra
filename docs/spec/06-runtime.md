@@ -44,7 +44,8 @@ Evaluation is strict and deterministic:
 - `if` evaluates only the selected branch;
 - `match` evaluates its subject once and selects the first matching arm, and an
   `as` arm tests only the union discriminant;
-- `tuple.of`, `array.of`, and `map.of` operands evaluate from left to right;
+- `tuple.of` operands evaluate from left to right, and `array.of` and
+  `map.of` follow the ordinary variadic order;
 - `try` performs only its specified early-exit propagation; and
 - a tail-position call to a function in the same recursive group reuses the
   current activation instead of growing language-level stack.
@@ -74,7 +75,7 @@ value is evaluated even if a key repeats; the later pair replaces the earlier
 value. Map iteration order is canonical key order, not insertion or hash-table
 order.
 
-Nominal and closed native constructor applications assemble immutable values;
+Nominal constructor applications and `tuple.of` assemble immutable values;
 they do not invoke a function body, add a function-call edge, or emit a host
 event. Effects from evaluating their operands remain observable.
 
@@ -181,7 +182,127 @@ lowering instead of wrapping, trapping, or fabricating a private result type.
 
 Adding a compiler symbol requires a specification change to this table and its
 registry tests; a string in source or a copied declaration cannot authorize an
-operation.
+operation. The M3 registry below replaces this profile as the Stage 3A steps
+implement it; until then these two symbols are the implemented set.
+
+## M3 compiler intrinsic registry
+
+The Stage 3A `@compiler` registry is closed to the operations below, all under
+the registry identity `vibra_v1`. Every operation is pure, total,
+deterministic, and host-event free; none traps. A partial operation returns a
+standard `option` or `result` instead. Composite behavior — boolean
+connectives, character classes, searching, splitting, trimming, folds — is
+ordinary standard-library Vibra over these operations and is specified by its
+reviewed source, not by this table.
+
+The error and ordering types are standard-library enums in `@std.core`, each
+variant with a `void` payload:
+
+| Type | Variants, in declaration order |
+| --- | --- |
+| `ordering` | `less`, `equal`, `greater` |
+| `arithmetic-error` | `overflow`, `division-by-zero`, `invalid-shift` |
+| `conversion-error` | `out-of-range`, `invalid-format`, `unrepresentable` |
+
+In the signatures, `R t` abbreviates `(result t arithmetic-error)` and `C t`
+abbreviates `(result t conversion-error)`.
+
+For each integer type `T` among `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
+and `u64`, module `@std.T` binds these symbols spelled `T.<name>`:
+
+| Name | Signature | Semantics |
+| --- | --- | --- |
+| `add-checked`, `sub-checked`, `mul-checked` | `T T -> R T` | Exact result, or `overflow` when it lies outside `T` |
+| `div-checked` | `T T -> R T` | Quotient truncated toward zero; `division-by-zero` for a zero divisor; `overflow` for the signed minimum divided by `-1` |
+| `rem-checked` | `T T -> R T` | Remainder with the dividend's sign, so `left = quotient * right + remainder`; `division-by-zero` for a zero divisor; the signed minimum and `-1` yield `0` |
+| `neg-checked` (signed `T` only) | `T -> R T` | Negation, or `overflow` for the minimum |
+| `shift-left-checked` | `T u32 -> R T` | `left * 2^amount`; `invalid-shift` when the amount is at least the bit width, else `overflow` when the product lies outside `T` |
+| `shift-right` | `T u32 -> R T` | `floor(left / 2^amount)`; `invalid-shift` when the amount is at least the bit width |
+| `equal` | `T T -> bool` | Numeric equality |
+| `compare` | `T T -> ordering` | Numeric order |
+| `to-str` | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
+| `parse` | `str -> C T` | Accepts an optional `-` (signed `T` only) followed by one or more ASCII decimal digits and nothing else; `invalid-format` otherwise, `out-of-range` for a well-formed value outside `T` |
+
+For `F` among `f32` and `f64`, module `@std.F` binds:
+
+| Name | Signature | Semantics |
+| --- | --- | --- |
+| `add`, `sub`, `mul`, `div` | `F F -> F` | IEEE 754 operation in round-to-nearest, ties-to-even |
+| `neg` | `F -> F` | IEEE 754 negation |
+| `equal` | `F F -> bool` | IEEE 754 equality, so NaN is unequal to itself |
+| `compare-total` | `F F -> ordering` | IEEE 754 `totalOrder` over canonicalized values |
+| `to-str` | `F -> str` | The canonical float serialization of this chapter, without a suffix |
+| `parse` | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
+
+The remaining modules bind:
+
+| Symbol | Signature | Semantics |
+| --- | --- | --- |
+| `char.to-u32` | `char -> u32` | Unicode scalar value |
+| `char.from-u32` | `u32 -> (option char)` | `none` for a surrogate or a value above U+10FFFF |
+| `text.concat` | `str str -> str` | Scalar concatenation |
+| `text.length` | `str -> u64` | Scalar count |
+| `text.equal` | `str str -> bool` | Equal scalar sequences |
+| `text.compare` | `str str -> ordering` | Lexicographic by scalar value |
+| `text.slice` | `str u64 u64 -> (option str)` | Scalars in the half-open range; `none` when start exceeds end or end exceeds the length |
+| `text.to-chars` | `str -> (array char)` | Scalars in order |
+| `text.from-chars` | `(array char) -> str` | Scalars in order |
+| `text.to-utf8` | `str -> bytes` | UTF-8 encoding |
+| `text.from-utf8` | `bytes -> C str` | `invalid-format` for ill-formed UTF-8 |
+| `bytes.length` | `bytes -> u64` | Byte count |
+| `bytes.concat` | `bytes bytes -> bytes` | Concatenation |
+| `bytes.equal` | `bytes bytes -> bool` | Equal byte sequences |
+| `bytes.compare` | `bytes bytes -> ordering` | Lexicographic by byte |
+| `bytes.slice` | `bytes u64 u64 -> (option bytes)` | As `text.slice`, over bytes |
+| `bytes.to-array` | `bytes -> (array u8)` | Bytes in order |
+| `bytes.from-array` | `(array u8) -> bytes` | Bytes in order |
+| `array.length` | `(array t) -> u64` | Element count; `where: (t any)` |
+| `array.append` | `(array t) t -> (array t)` | New array with one trailing element |
+| `array.concat` | `(array t) (array t) -> (array t)` | Elements of the first, then the second |
+| `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `text.slice`, over elements |
+
+The `array.*` rows are static methods of the builtin `array` type, declared by
+the toolchain together with `array.of`, `map.of`, and `tuple.of` in the embedded
+module `@std.builtin` and reached through the type path with no import, exactly
+as the builtin types themselves need none.
+
+`@std.option` declares `(deftype option (enum some t none void) where: (t any))`
+and `@std.result` declares `(deftype result (enum ok t err e) where: (t any)
+(e any))`; lookups, `try`, and unhandled-value checking recognize exactly these
+two declarations by canonical identity. Map operations other than `map.of` and
+lookup need a generic key parameter and belong to the Stage 3B registry.
+
+A registry signature is checked exactly, including its generic parameter list,
+against the trusted declaration that binds it. Adding, removing, or changing a
+row is a specification change.
+
+## Canonical value encoding
+
+Execution results, assertion failure `expected` and `actual` strings, and the
+`programResult` of `run` use one canonical VIBON encoding of a value. A
+primitive value is its canonical literal. `bytes` is
+`(record kind: @bytes values: (array b...))` with `u8` literals. Every other
+value is a `record` whose first field is `kind:`:
+
+| Value | Encoding |
+| --- | --- |
+| tuple | `(record kind: @tuple values: (array v...))` |
+| array | `(record kind: @array values: (array v...))` |
+| map | `(record kind: @map entries: (array (tuple k v)...))`, in canonical key order |
+| record | `(record kind: @record type: P fields: (record name: v...))`, in declaration order |
+| enum | `(record kind: @enum type: P variant: @name)`, adding `payload: v` for a non-`void` slot |
+| newtype | `(record kind: @newtype type: P value: v)` |
+| union | `(record kind: @union type: P member: T value: v)` |
+
+`P` is the declaration's canonical atom path, and `T` is the canonical type
+encoding: a primitive's atom such as `@i32`; a nominal declaration's canonical
+atom path; `(record type: P arguments: (array T...))` for an applied generic
+type; `(record type: @tuple arguments: (array T...))`, and likewise `@array`
+and `@map`, for the builtin constructors; and
+`(record type: @fn parameters: (array T...) labelled: (record name: T...)
+result: T)` for a function type. A result observation is
+`(record type: T value: v)`. Function values have no value encoding and are
+never an observable result.
 
 M2 test assertions are a separate closed test-runner outcome surface described
 in the projects chapter. They evaluate through the ordinary typed call path,

@@ -212,8 +212,8 @@ same static rule. A literal-headed form such as `(1 2)` is not applicable.
 
 An array variadic parameter receives every remaining unlabelled form as one
 array. A map variadic parameter receives alternating key and value forms. The
-call MUST contain an even number of remaining forms, and construction follows
-the ordinary `map.of` rules.
+call MUST contain an even number of remaining forms. Every key and value is
+evaluated, and a later duplicate key replaces the earlier value.
 
 ```vibra
 (collect-values v1 v2 v3)
@@ -385,10 +385,10 @@ toolchain-owned declaration binds a signature to one of exactly two providers.
 its body:
 
 ```vibra
-(defn add-checked (left i32 right i32) (result i32 overflow)
+(defn add-checked (left i32 right i32) (result i32 core.arithmetic-error)
   visibility: @public
   external: @compiler
-  symbol: "integer.add-checked")
+  symbol: "i32.add-checked")
 ```
 
 `@compiler` selects a pure compiler intrinsic. Such a declaration MUST have an
@@ -442,7 +442,7 @@ another module by placing an `impl` block in the owning `defint`:
   (defn render (value self) str)
   (impl i32
     (defn render (value self) str
-      (integer.to-str value))))
+      (i32.to-str value))))
 ```
 
 `impl` is valid only as a direct child of the `deftype` that owns the type or
@@ -490,8 +490,8 @@ result, labelled, variadic, and effect syntax, but no name or visibility.
 `fn` is reserved for function types and is never an anonymous declaration.
 
 ```vibra
-(lambda (value i32) i32
-  (integer.increment value))
+(lambda (value i32) (result i32 core.arithmetic-error)
+  (i32.add-checked value 1i32))
 ```
 
 ```ebnf
@@ -537,18 +537,19 @@ pattern form and no compatibility spelling for it.
 
 ```vibra
 (let (tuple name id) pair
-  (text.concat name (integer.to-str id)))
+  (text.concat name (i32.to-str id)))
 
-(lambda ((tuple left right) (tuple i32 i32)) i32
-  (integer.add left right))
+(lambda ((tuple left right) (tuple i32 i32)) (result i32 core.arithmetic-error)
+  (i32.add-checked left right))
 ```
 
 Collections have immutable value semantics. Pure iteration uses the standard
 `iter` interface; the type chapter defines `iter.next` and its default methods.
 Effectful walks are recursive functions over `iter.next` with an explicit
-written effect ceiling. Source values use the closed, pure constructor entities
-`tuple.of`, `array.of`, and `map.of`; the unqualified `tuple`, `array`, and
-`map` forms are reserved for types and patterns. There is no source
+written effect ceiling. Source values are built by the static methods
+`tuple.of`, `array.of`, and `map.of` of the builtin collection types; the
+unqualified `tuple`, `array`, and `map` forms are reserved for types and
+patterns. There is no source
 collection-literal form and no `entry` wrapper.
 
 ```vibra
@@ -561,9 +562,10 @@ collection-literal form and no `entry` wrapper.
 exact type. `map.of` contains alternating key and value expressions and MUST
 have even arity; its keys share one exact type and its values share one exact
 type. An empty `array.of` or `map.of` requires an expected collection type.
-All constructor operands are evaluated, and a later duplicate map key replaces
-the earlier value. These names are closed native constructor entities, not
-ordinary user declarations and not overloadable qualified functions.
+All operands are evaluated, and a later duplicate map key replaces the earlier
+value. `array.of` and `map.of` are ordinary variadic methods and first-class
+function values; `tuple.of` is typed by its own closed rule and is not a
+function value. Users cannot declare members on the builtin collection types.
 
 `match` contains alternating pattern/result forms directly; there is no `case`
 wrapper. Every arm has exactly one result expression, so `do` groups multiple
@@ -623,8 +625,8 @@ segment.
 (defn render (value number) str
   visibility: @public
   (match value
-    (as i32 n) (integer.to-str n)
-    (as f32 x) (float.to-str x)))
+    (as i32 n) (i32.to-str n)
+    (as f32 x) (f32.to-str x)))
 ```
 
 The two positions mirror each other: an expression `as` widens to a written

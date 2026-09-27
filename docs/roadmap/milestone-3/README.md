@@ -1,6 +1,6 @@
 # Milestone 3 step plan
 
-Status: bootstrap — no step has landed
+Status: Step 1 in progress — no step has landed
 Milestone: [Milestone 3 — complete nominal static core](../v1.md#milestone-3--complete-nominal-static-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m3`
@@ -32,7 +32,7 @@ Baseline at `f25bc43`: the independent corpus reports 73 reader, 104 static,
    Every step of Stage 3A lands before the first step of Stage 3B.
 4. Reuse the [M2 validation commands](../milestone-2/validation.md#before-merging-each-step)
    against `origin/m3`, and the [M2 handoff template](../milestone-2/validation.md#step-handoff),
-   until Step 1 replaces them with M3-specific validation.
+   until Step 1 lands [M3 validation](validation.md).
 5. The completing PR sets its row to `landed`, conditional on the merge. Record
    the PR and verified merge commit.
 
@@ -55,8 +55,8 @@ evidences every exit-gate clause.
   key order, never by host hash iteration, so the exit clause on map/hash
   independence holds by construction and is also tested.
 - **Standard library through the trust input.** The standard library still
-  arrives through a signed, toolchain-embedded bootstrap until M5. Step 1 closes
-  how that input is versioned and re-signed. No ambient prelude, no unsigned
+  arrives embedded in the toolchain until M5; Step 1 retires the M2 signature
+  and replaces the M2 artifact (ledger D5.1). No ambient prelude, no unsigned
   fallback, and no compiler-private escape hatch in the demo.
 - **Availability shrinks monotonically.** Each step moves forms from
   `@tool.unavailable` to supported with positive and negative cases. It never
@@ -75,15 +75,16 @@ the Stage 3A items; Step 10 closes the Stage 3B items.
 
 | ID | Gap | Why it blocks | Owner |
 | --- | --- | --- | --- |
-| G1 | The roadmap places all `where:` generics in Stage 3B, but `option` and `result` are generic `deftype`s (`where: (t any)`), every collection lookup returns `(option t)`, and the collection library is generic. | Stage 3A cannot deliver lookups, `try`, or the collection library without parametric generics. Recommendation: move `any`-bounded parametric generics (`where: (t any)`, applied types, inference, and `types:`) into Stage 3A, and keep interface-bounded generics in 3B. That changes `v1.md`'s stage lists and must be reviewed in Step 1. | Step 1 |
+| G1 | The roadmap places all `where:` generics in Stage 3B, but `option` and `result` are generic `deftype`s (`where: (t any)`), every collection lookup returns `(option t)`, and the collection library is generic. | Stage 3A cannot deliver lookups, `try`, or the collection library without parametric generics. Recommendation: move `any`-bounded parametric generics (`where: (t any)`, applied types, inference, and `types:`) into Stage 3A, and keep interface-bounded generics in 3B. That changes `v1.md`'s stage lists and must be reviewed in Step 1. | Step 1 — closed by ledger D1.1 |
 | G2 | Map keys must implement `hashable`, `equatable`, and `ordered`, but those interfaces are never declared, and no rule gives primitive types their conformance. The canonical map key order (runtime, `iter`) depends on `ordered`. | Maps are Stage 3A; interfaces are 3B. Recommendation: declare the three contracts and a closed builtin-conformance registry for primitive keys (like the `iter` registry) in Step 1, and admit user-type keys only with Stage 3B `impl` blocks. | Steps 1, 10 |
 | G3 | The "core/text/bytes/collection/option/result" library and the checked integer operations have no closed symbol list, signatures, or error types. The source chapter's example returns `(result i32 overflow)`, but no `overflow` type exists. | Equality, comparison, and arithmetic exist only as library functions, so even the Stage 3A demo cannot compare characters without them. | Step 1 |
-| G4 | Extending the library changes `stdlib/m2/bootstrap.vibon`, whose digest, signature, and version `vibra-stdlib@0.1.0` are fixed contract values. Only the public key is in the repository; no signing procedure is documented. | Every library step needs a re-signed artifact. Step 1 decides the artifact path and version for M3, the review rule for re-signing, and who holds the private key. | Step 1 (maintainer) |
+| G4 | Extending the library changes `stdlib/m2/bootstrap.vibon`, whose digest, signature, and version `vibra-stdlib@0.1.0` are fixed contract values. Only the public key is in the repository; no signing procedure is documented. | Every library step needs a re-signed artifact. Step 1 decides the artifact path and version for M3, the review rule for re-signing, and who holds the private key. | Step 1 — closed by ledger D5.1: signature retired, artifact replaced |
 | G5 | The diagnostic registry has no code for a non-exhaustive `match`, an unreachable arm, an unhandled fallible value, a `try` container/error mismatch, general ambiguous inference, infinite-size types, missing/duplicate constructor fields, odd `map.of` arity, an empty collection with no expected type, an invalid map key, or extra/duplicate `impl` members. | The exit gate requires stable atom diagnostics for several of these. | Steps 1, 10 |
 | G6 | Canonical value observations (typed/execution snapshots, assertion `expected`/`actual`) are defined only for primitives; the assertion registry is monomorphic. | Every Stage 3A execution case observes records, enums, and collections. | Step 1 |
 | G7 | The `iter` default-member table is malformed (`(value self f (fn (item) item) (iter item))` merges parameters and result), and `map` cannot change the element type. | The roadmap requires this review before Stage 3B implementation. | Step 10 |
 | G8 | Editorial defects in `02-type-system.md`: two joined lines in **Model**, and the **Generics** example bound `storable`, which is not declared anywhere. | The chapter is the exit gate's coverage reference. | Step 1 |
 | G9 | The resolved symbol/reference/index record schema, including the type-keyed `impl` block and member spelling, is not defined. The schema should let an external retrieval consumer read, per declaration, its canonical identity and module, signature, effect row, error types, outgoing application edges, and formatter-normalized source, with byte-identical output for an identical snapshot. The toolchain emits records only; embedding and ranking stay outside it. | Needed before Step 15 can emit it. | Step 10 |
+| G10 | A generic function over `(map k v)` needs `k` to conform to `equatable`, `ordered`, and `hashable`, but v1 allows one bound per generic parameter, and with deterministic ordered maps `hashable` may be unnecessary. | Stage 3B map operations over a generic key cannot be declared. Candidate resolutions: require only `ordered` of map keys, or declare one standard key interface. | Step 10 |
 
 ## Steps
 
@@ -93,15 +94,15 @@ failures through a nominal error union with `try`, with no interfaces.
 
 | Step | One-PR slice | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
-| 1 | [Freeze Stage 3A contracts](01-contracts.md) — specification/infrastructure prerequisite | M2 on `main`; this bootstrap | not started | — |
-| 2 | Nominal declarations: `deftype` type/record/enum/newtype bodies, type-name resolution, flat member namespace, finite-size check, anonymous-body rejection, constructors, record projection, nested non-interface methods | 1 | not started | — |
-| 3 | Parametric generics (scope per G1): `where:` with `any`, applied types, invariant inference, complete `types:` lists including inherited names, reserved `types` label, the shared unifier | 2 | not started | — |
-| 4 | Collections: `tuple`/`array`/`map` types, `tuple.of`/`array.of`/`map.of`, tuple projection, bounds/presence lookups returning `option`, variadic array/map declarations and operands, admissible map keys (per G2), canonical map order | 3 | not started | — |
-| 5 | Patterns and `match`: literal, constructor, tuple, record, and array patterns; destructuring `let`, parameters, and lambdas; the shared exhaustiveness/irrefutability engine; unreachable arms | 4 | not started | — |
-| 6 | Unions, widening, and `as`: union `deftype`s, member overlap and concreteness, union and atom-singleton widening at written expected types, `as` ascription, `as` narrowing patterns | 5 | not started | — |
-| 7 | Typed failure: `result`, `try` propagation, unhandled-fallible-value checks, discard intent | 6 | not started | — |
-| 8 | Core library foundation: checked integer operations and the core/text/bytes/collection/option/result library (per G3/G4), assertion extensions (per G6) | 7 | not started | — |
-| 9 | Stage 3A demo and corpus sub-gate — evidence step | 8 | not started | — |
+| 1 | [Freeze Stage 3A contracts](01-contracts.md) — specification/infrastructure prerequisite | M2 on `main`; this bootstrap | in progress | — |
+| 2 | [Nominal declarations: `deftype` type/record/enum/newtype bodies, type-name resolution, flat member namespace, finite-size check, anonymous-body rejection, constructors, record projection, nested non-interface methods](02-nominal.md) | 1 | not started | — |
+| 3 | [Parametric generics (scope per G1): `where:` with `any`, applied types, invariant inference, complete `types:` lists including inherited names, reserved `types` label, the shared unifier](03-generics.md) | 2 | not started | — |
+| 4 | [Collections: `tuple`/`array`/`map` types, `tuple.of`/`array.of`/`map.of`, tuple projection, bounds/presence lookups returning `option`, variadic array/map declarations and operands, admissible map keys (per G2), canonical map order](04-collections.md) | 3 | not started | — |
+| 5 | [Patterns and `match`: literal, constructor, tuple, record, and array patterns; destructuring `let`, parameters, and lambdas; the shared exhaustiveness/irrefutability engine; unreachable arms](05-patterns.md) | 4 | not started | — |
+| 6 | [Unions, widening, and `as`: union `deftype`s, member overlap and concreteness, union and atom-singleton widening at written expected types, `as` ascription, `as` narrowing patterns](06-unions.md) | 5 | not started | — |
+| 7 | [Typed failure: `result`, `try` propagation, unhandled-fallible-value checks, discard intent](07-failure.md) | 6 | not started | — |
+| 8 | [Core library foundation: checked integer operations and the core/text/bytes/collection/option/result library (per G3/G4), assertion extensions (per G6)](08-library.md) | 7 | not started | — |
+| 9 | [Stage 3A demo and corpus sub-gate — evidence step](09-stage-3a-evidence.md) | 8 | not started | — |
 
 Stage 3B — interfaces, generics, conversion, and iteration.
 
@@ -118,7 +119,9 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 Steps 1 and 10 are specification prerequisites and Steps 9 and 16 are evidence
 steps; they claim no language behavior. Guides for Steps 2–9 are written in
 Step 1 and guides for Steps 11–16 in Step 10, because their content depends on
-the contracts those steps close. No step starts without its guide.
+the contracts those steps close. Step 1 also records the
+[decision ledger](decision-ledger.md) and the
+[M3 surface inventory](supported-surface.md). No step starts without its guide.
 
 ## Deliverable and gate coverage
 
