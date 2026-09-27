@@ -2856,7 +2856,19 @@ fn check_resolved_reference(
     target: ResolvedReferenceTarget,
 ) -> Option<Expr> {
     match target {
-        ResolvedReferenceTarget::Unresolved => None,
+        ResolvedReferenceTarget::Unresolved => {
+            // The resolver reported an unknown path. A path that resolved to a
+            // type or variant is a constructor, which is not a value.
+            if let ExpressionKind::Name(name) = expression.kind()
+                && environment
+                    .types
+                    .constructor(environment.source_id, name)
+                    .is_some()
+            {
+                unknown_name(environment, expression, name.value());
+            }
+            None
+        }
         ResolvedReferenceTarget::Global(index) => {
             let global = environment.globals.get(index)?;
             let actual = global.value_type.clone();

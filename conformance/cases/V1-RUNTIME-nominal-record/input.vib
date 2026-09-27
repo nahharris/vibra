@@ -1,0 +1,5 @@
+(defn main () point (swap (point x: 1i32 y: 2i32)))
+
+(deftype point (record x i32 y i32))
+
+(defn swap (value point) point (point x: (value @y) y: (value @x)))

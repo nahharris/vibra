@@ -1,0 +1,14 @@
+(import assert @std.assert)
+(import shapes @geo.shapes)
+
+(test "constructs and projects"
+  (assert.equal-i32 ((shapes.point x: 1i32 y: 2i32) @y) 2i32))
+
+(test "calls a method by path"
+  (assert.equal-i32 ((shapes.point.flip (shapes.point x: 1i32 y: 2i32)) @x) 2i32))
+
+(test "reads an imported value"
+  (assert.equal-i32 ((shapes.origin) @x) 0i32))
+
+(test "builds a variant"
+  (let - (shapes.size.large 3u64) (assert.true true)))

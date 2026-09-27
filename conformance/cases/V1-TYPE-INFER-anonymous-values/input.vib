@@ -1,0 +1,3 @@
+(defn no-expected () i32 (let e (enumof a: 1i32) 0i32))
+(defn no-variant () (enum a i32) (enumof b: 1i32))
+(defn repeated () (record a i32) (recordof a: 1i32 a: 2i32))

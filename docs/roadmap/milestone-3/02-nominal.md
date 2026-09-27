@@ -85,6 +85,18 @@ Two parts, landing together so no valid form is ever malformed:
   `deftype`s (`@name.reserved-declaration`); `intrinsic-type` outside the
   toolchain package.
 
+## Delivery notes
+
+- The behavior-neutral split of `vibra-types` was not done: new semantics landed
+  in new modules (`nominal.rs`, `construct.rs`) so `lib.rs` did not grow with
+  them, and a wholesale split was judged riskier than it was worth mid-step.
+- Record fields and enum variants take their owning type's visibility; the
+  resolver previously created them private.
+- Calling a function stored in a record field is `@tool.unavailable` until the
+  call-flow gap G12 is closed.
+- Declared and structural type facts are unavailable in position queries until
+  Step 15.
+
 ## Done
 
 Scope implemented through syntax, formatter, checker, IR, interpreter, and

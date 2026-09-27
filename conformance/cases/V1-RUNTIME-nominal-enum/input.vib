@@ -1,0 +1,5 @@
+(defn main () shape (pick false))
+
+(deftype shape (enum empty void circle u32))
+
+(defn pick (full bool) shape (if full (shape.circle 3u32) (shape.empty)))

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-nominal-enum"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An enum is built through a variant constructor; a void payload slot takes no operand and renders without a payload."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

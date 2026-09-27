@@ -1,0 +1,3 @@
+(defn main () shape (shape.circle 3u32))
+
+(deftype shape (enum empty void circle u32))

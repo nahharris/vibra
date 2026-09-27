@@ -182,7 +182,8 @@ An anonymous type has no owner. It declares no methods, receives no `impl`
 block, and conforms to no interface other than `any` and the closed registries
 below. It cannot refer to itself; recursion needs a `deftype` name. Recursive
 declared types MUST pass a finite-size check; recursion through a
-variable-size container is permitted, while direct infinite expansion is
+variable-size container (an array or a map) or through a function type, whose
+values do not embed the type, is permitted, while direct infinite expansion is
 rejected with `@type.infinite-size` at the `deftype` whose expansion first
 repeats in declaration order, relating the member or payload through which it
 repeats.

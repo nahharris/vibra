@@ -46,6 +46,11 @@ User-declared map types whose key is a generic parameter stay
    which become positive and negative cases.
 5. Interpreter map representation ordered by canonical key order, with a host
    test that no host hash order is reachable.
+6. Close gap G12: extend the checked-IR call-flow analysis so an unbounded
+   indirect call target stands for every escaping function and every closure,
+   instead of rejecting the module. Functions stored in records, arrays, maps,
+   and options then remain callable, with recursive groups and initializer
+   cycles computed over that sound over-approximation.
 
 ## Test matrix
 

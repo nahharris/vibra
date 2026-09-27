@@ -1,0 +1,1 @@
+(record type: (record type: @record fields: (record id: @u64 name: @str)) value: (record kind: @record fields: (record id: 7u64 name: "Ada")))

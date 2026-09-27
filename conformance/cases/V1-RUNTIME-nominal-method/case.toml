@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-nominal-method"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A nested method is called by its path and passed as a first-class function value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,0 +1,1 @@
+(record type: @shape value: (record kind: @enum type: @shape variant: @circle payload: 3u32))

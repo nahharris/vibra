@@ -1474,7 +1474,15 @@ impl Resolution {
                     source_id,
                     true,
                 );
-                self.collect_deftype_fields(module, value.body(), path, source_id);
+                // Fields and variants have no visibility syntax of their own;
+                // they are exactly as visible as the type that declares them.
+                self.collect_deftype_fields(
+                    module,
+                    value.body(),
+                    path,
+                    source_id,
+                    visibility,
+                );
             }
             Declaration::Defint(value) => {
                 self.collect_type_members(
@@ -1565,6 +1573,7 @@ impl Resolution {
         body: &DeftypeBody,
         owner: Vec<String>,
         source_id: &str,
+        owner_visibility: Visibility,
     ) {
         let (fields, kind) = match body {
             DeftypeBody::Type(TypeExpr::Record(fields)) => (fields, EntityKind::Field),
@@ -1596,7 +1605,7 @@ impl Resolution {
             self.declarations.push(DeclarationWork {
                 declaration: ResolvedDeclaration {
                     id,
-                    visibility: Visibility::Private,
+                    visibility: owner_visibility,
                     source_id: source_id.to_owned(),
                     span: field_span,
                 },

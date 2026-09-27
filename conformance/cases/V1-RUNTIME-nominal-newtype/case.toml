@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-nominal-newtype"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A newtype constructor wraps its representation value in a distinct identity."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

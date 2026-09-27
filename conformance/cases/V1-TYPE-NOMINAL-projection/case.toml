@@ -1,0 +1,31 @@
+id = "V1-TYPE-NOMINAL-projection"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "A record projection takes one atom selector naming a field; enum and newtype values are not applicable."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+
+
+[[expect.diagnostics]]
+code = "@type.unknown-record-field"
+level = "@error"
+source = "input.vib"
+span = [123, 125]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [181, 185]
+
+[[expect.diagnostics]]
+code = "@type.not-applicable"
+level = "@error"
+source = "input.vib"
+span = [213, 232]
