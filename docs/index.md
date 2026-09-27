@@ -29,7 +29,9 @@ illustrative.
 - [Milestone 1 step plan](roadmap/milestone-1/README.md)
 - [Milestone 2 step plan](roadmap/milestone-2/README.md)
 - [Beyond v1: long-term release lines and design tracks](roadmap/beyond-v1/README.md)
-  (non-normative direction)
+  (non-normative direction), including the
+  [assurance architecture](roadmap/beyond-v1/assurance.md) and staged
+  [verification plan](roadmap/beyond-v1/verification.md)
 
 The M2 [supported and deferred surface inventory](roadmap/milestone-2/supported-surface.md)
 and [Step 14 exit-evidence report](roadmap/milestone-2/14-exit-evidence.md)
