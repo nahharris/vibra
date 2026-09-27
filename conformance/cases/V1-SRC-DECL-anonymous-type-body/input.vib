@@ -1,1 +1,0 @@
-(defn bad (value (record name str)) i32 0i32)

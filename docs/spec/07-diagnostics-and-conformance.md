@@ -57,7 +57,6 @@ table governs.
 | `@type.unknown-record-field` | `@error` |
 | `@type.numeric-out-of-range` | `@error` |
 | `@type.initializer-cycle` | `@error` |
-| `@type.anonymous-type-body` | `@error` |
 | `@type.anonymous-newtype` | `@error` |
 | `@type.undispatchable-contract-member` | `@error` |
 | `@type.union-too-few-members` | `@error` |
@@ -103,11 +102,6 @@ table governs.
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
-
-`@type.anonymous-type-body` is retired: anonymous `tuple`, `record`, `enum`, and
-`union` types are valid type expressions. The M2 reader still emits it for those
-forms; M3 Step 2 replaces that rejection with the structural-type rules and
-removes the code from this table in the same change.
 
 Codes are stable within the v1 line and are atoms in Vibra data. JSON output
 serializes the exact atom spelling as a string. A code need not be renamed if

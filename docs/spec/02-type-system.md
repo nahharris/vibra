@@ -169,10 +169,14 @@ record types are the same when they have the same set of field names with
 equal types, two anonymous enum types when they have the same set of variant
 names with equal payload types, and two anonymous union types when they have
 the same member set, in each case regardless of written order. Their canonical
-spelling orders record fields and enum variants by the UTF-8 bytes of their
-names and union members by the bytes of their canonical type encoding, and the
-formatter rewrites an anonymous type into that order. A declared record, enum,
-or union keeps its declaration order, because its identity is the declaration.
+order, which fixes discriminants, rendering, and key order, sorts record fields
+and enum variants by the UTF-8 bytes of their names and union members by the
+bytes of their canonical type encoding. The formatter works on syntax alone, so
+it rewrites an anonymous type with fields and variants sorted by name and union
+members sorted by the whitespace-normalized text of their canonical spelling;
+an anonymous type containing a comment keeps its written order. A declared
+record, enum, or union keeps its declaration order, because its identity is
+the declaration.
 
 An anonymous type has no owner. It declares no methods, receives no `impl`
 block, and conforms to no interface other than `any` and the closed registries

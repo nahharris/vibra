@@ -1,0 +1,39 @@
+id = "V1-SRC-EXPR-anonymous-value-shapes"
+rule = "V1-SRC-EXPR"
+profile = "reader-v1"
+description = "recordof needs labelled fields, enumof exactly one labelled variant, and the retired (tuple ...) pattern is written tupleof."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 22
+end = 32
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 56
+end = 71
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 99
+end = 123
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 134
+end = 146

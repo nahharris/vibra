@@ -20,7 +20,7 @@ use vibra_syntax::{
 fn formatter_renders_nested_step9_forms_and_is_idempotent() {
     let source = r#"
 (defn run (value (tuple i32 i32)) i32
-  (let (tuple left right) value
+  (let (tupleof left right) value
     (match left
       (as i32 n) (if true n right)
       (option.none) (try right))))
@@ -47,7 +47,7 @@ fn formatter_keeps_multiline_match_arms_as_pattern_result_units() {
     let source = r#"
 (defn choose (value i32) i32
   (match value
-    (constructor.with.a.long.name (tuple first second third fourth fifth sixth))
+    (constructor.with.a.long.name (tupleof first second third fourth fifth sixth))
       (if true first second)
     (another.constructor.with.a.long.name (array first second third fourth fifth sixth))
       (try value)))

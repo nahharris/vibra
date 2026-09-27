@@ -842,6 +842,14 @@ impl<'a> SemanticCollector<'a> {
                     self.collect_pattern_binding(argument.pattern(), locals, context);
                 }
             }
+            PatternKind::RecordOf(fields) => {
+                for field in fields {
+                    self.collect_pattern_binding(field.pattern(), locals, context);
+                }
+            }
+            PatternKind::EnumOf(variant) => {
+                self.collect_pattern_binding(variant.pattern(), locals, context);
+            }
             PatternKind::As { pattern, .. } => {
                 self.collect_pattern_binding(pattern, locals, context);
             }
@@ -1068,6 +1076,19 @@ impl<'a> SemanticCollector<'a> {
                     );
                 }
             }
+            ExpressionKind::TupleOf(values) => {
+                for value in values {
+                    self.collect_expression(value, locals, "argument", None);
+                }
+            }
+            ExpressionKind::RecordOf(fields) => {
+                for field in fields {
+                    self.collect_expression(field.value(), locals, "argument", None);
+                }
+            }
+            ExpressionKind::EnumOf(variant) => {
+                self.collect_expression(variant.value(), locals, "argument", None);
+            }
             ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
         }
     }
@@ -1114,7 +1135,10 @@ impl<'a> SemanticCollector<'a> {
             | ExpressionKind::Lambda(_)
             | ExpressionKind::Match { .. }
             | ExpressionKind::As { .. }
-            | ExpressionKind::Try(_) => ("@unknown".to_owned(), None),
+            | ExpressionKind::Try(_)
+            | ExpressionKind::TupleOf(_)
+            | ExpressionKind::RecordOf(_)
+            | ExpressionKind::EnumOf(_) => ("@unknown".to_owned(), None),
             ExpressionKind::Name(_) => ("@unknown".to_owned(), None),
         }
     }
@@ -1526,6 +1550,9 @@ fn semantic_type_expr(value: &TypeExpr) -> Option<SemanticType> {
         }
         TypeExpr::Applied { .. }
         | TypeExpr::Tuple(_)
+        | TypeExpr::Record(_)
+        | TypeExpr::Enum(_)
+        | TypeExpr::Union(_)
         | TypeExpr::Array(_)
         | TypeExpr::Map(_, _) => None,
     }

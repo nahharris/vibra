@@ -1297,6 +1297,11 @@ fn walk_expressions<'e>(
             ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
                 pending.push(operand);
             }
+            ExpressionKind::TupleOf(values) => pending.extend(values),
+            ExpressionKind::RecordOf(fields) => {
+                pending.extend(fields.iter().map(|field| field.value()));
+            }
+            ExpressionKind::EnumOf(variant) => pending.push(variant.value()),
         }
         // Children were pushed in source order; reverse them so they pop in
         // source order and the visit stays pre-order.
@@ -1938,6 +1943,9 @@ fn primitive_type(value: &TypeExpr) -> Option<PrimitiveType> {
         }
         TypeExpr::Applied { .. }
         | TypeExpr::Tuple(_)
+        | TypeExpr::Record(_)
+        | TypeExpr::Enum(_)
+        | TypeExpr::Union(_)
         | TypeExpr::Array(_)
         | TypeExpr::Map(_, _)
         | TypeExpr::Function(_) => None,
@@ -2623,7 +2631,10 @@ fn check_expression_in_position(
         }
         ExpressionKind::Match { .. }
         | ExpressionKind::As { .. }
-        | ExpressionKind::Try(_) => {
+        | ExpressionKind::Try(_)
+        | ExpressionKind::TupleOf(_)
+        | ExpressionKind::RecordOf(_)
+        | ExpressionKind::EnumOf(_) => {
             unavailable(
                 environment.diagnostics,
                 environment.source_id,
@@ -3453,12 +3464,13 @@ mod tests {
         // The single-source entry is the first function.
         let depth = 200;
         let mut source = format!(
-            "(defn answer () i32 (f{} leaf))\n(defn leaf () i32 1i32)\n(defn f0 (g (fn () i32)) i32 (g))\n",
+            "(defn answer () i32 (step{} leaf))\n(defn leaf () i32 1i32)\n(defn step0 (g (fn () i32)) i32 (g))\n",
             depth - 1
         );
         for index in 1..depth {
+            // `step` rather than `f`: `f32` and `f64` are builtin type names.
             source.push_str(&format!(
-                "(defn f{index} (g (fn () i32)) i32 (f{} g))\n",
+                "(defn step{index} (g (fn () i32)) i32 (step{} g))\n",
                 index - 1
             ));
         }

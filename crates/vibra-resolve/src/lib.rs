@@ -22,7 +22,8 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_syntax::{
     Attribute, Declaration, DeftypeBody, Expression, ExpressionKind,
-    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeMember, parse_source,
+    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeExpr, TypeMember,
+    parse_source,
 };
 
 /// Package provenance carried by every declaration identity.
@@ -1284,12 +1285,12 @@ impl Resolution {
         span: ByteSpan,
         source_id: &str,
     ) {
-        if matches!(name, "map" | "array" | "tuple") {
+        if vibra_syntax::is_reserved_value_spelling(name) {
             self.diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::NameReservedValueSpelling,
                     span,
-                    "a module-level import alias uses a reserved value spelling",
+                    "a module-level import alias uses a builtin type name",
                 )
                 .with_source_id(source_id),
             );
@@ -1433,7 +1434,7 @@ impl Resolution {
                 names.insert(name.to_owned(), (span, source_id.to_owned()));
             }
             if matches!(kind, EntityKind::Value | EntityKind::Function)
-                && matches!(name, "map" | "array" | "tuple")
+                && vibra_syntax::is_reserved_value_spelling(name)
             {
                 self.diagnostics.push(
                     Diagnostic::new(
@@ -1554,17 +1555,12 @@ impl Resolution {
         owner: Vec<String>,
         source_id: &str,
     ) {
-        let fields = match body {
-            DeftypeBody::Record(fields) => fields,
-            DeftypeBody::Enum(fields) => fields,
-            DeftypeBody::Type(_) | DeftypeBody::Union(_) | DeftypeBody::Newtype(_) => {
-                return;
-            }
-        };
-        let kind = match body {
-            DeftypeBody::Record(_) => EntityKind::Field,
-            DeftypeBody::Enum(_) => EntityKind::Variant,
-            DeftypeBody::Type(_) | DeftypeBody::Union(_) | DeftypeBody::Newtype(_) => {
+        let (fields, kind) = match body {
+            DeftypeBody::Type(TypeExpr::Record(fields)) => (fields, EntityKind::Field),
+            DeftypeBody::Type(TypeExpr::Enum(fields)) => (fields, EntityKind::Variant),
+            DeftypeBody::Type(_)
+            | DeftypeBody::Newtype(_)
+            | DeftypeBody::Intrinsic(_) => {
                 return;
             }
         };
@@ -2360,6 +2356,31 @@ impl Resolution {
             ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
                 self.resolve_expression(module, from, operand, scope, source_id);
             }
+            ExpressionKind::TupleOf(values) => {
+                for value in values {
+                    self.resolve_expression(module, from, value, scope, source_id);
+                }
+            }
+            ExpressionKind::RecordOf(fields) => {
+                for field in fields {
+                    self.resolve_expression(
+                        module,
+                        from,
+                        field.value(),
+                        scope,
+                        source_id,
+                    );
+                }
+            }
+            ExpressionKind::EnumOf(variant) => {
+                self.resolve_expression(
+                    module,
+                    from,
+                    variant.value(),
+                    scope,
+                    source_id,
+                );
+            }
         }
     }
 
@@ -2551,6 +2572,12 @@ fn collect_pattern_names(pattern: &Pattern, names: &mut Vec<(String, ByteSpan)>)
                 collect_pattern_names(pattern, names);
             }
         }
+        PatternKind::RecordOf(fields) => {
+            for field in fields {
+                collect_pattern_names(field.pattern(), names);
+            }
+        }
+        PatternKind::EnumOf(variant) => collect_pattern_names(variant.pattern(), names),
         PatternKind::As { pattern, .. } => collect_pattern_names(pattern, names),
         PatternKind::Binding(_) | PatternKind::Literal(_) => {}
     }
