@@ -2,7 +2,7 @@ id = "V1-PROJECT-workspace-check-nominal-availability"
 rule = "V1-PROJECT"
 profile = "static-v1"
 operation = "workspace-check"
-description = "M2 rejects nominal declaration, member, body, and host-effect forms at complete owning declarations."
+description = "After M3 Step 2, a non-structural deftype body, unions, interfaces and implementations, and host effects stay unavailable at their owning forms, and naming an unavailable type is unavailable at its parameter."
 
 [inputs]
 project = "tree/project.vibon"
@@ -21,136 +21,58 @@ span = [0, 20]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [0, 20]
+span = [21, 53]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [21, 64]
+span = [54, 163]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [21, 64]
+span = [54, 163]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [43, 51]
+span = [74, 104]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [52, 62]
+span = [107, 162]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [65, 107]
+span = [121, 161]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [65, 107]
+span = [164, 261]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [87, 95]
+span = [164, 261]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [96, 105]
+span = [181, 260]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
-span = [108, 140]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [108, 140]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [141, 210]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [141, 210]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [174, 209]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [211, 320]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [211, 320]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [231, 261]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [264, 319]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [278, 318]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [321, 418]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [321, 418]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [338, 417]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [437, 449]
+span = [280, 292]

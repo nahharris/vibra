@@ -683,14 +683,16 @@ fn deferred_declaration_forms_and_members_are_explicitly_unavailable() {
     );
     let snapshot = Resolver::resolve(input);
 
-    assert!(
-        snapshot
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-            .count()
-            >= 6
-    );
+    // Declared types, their fields, and nested methods resolve from M3 Step 2;
+    // the interface and effect declarations and their members stay unavailable.
+    let unavailable: Vec<_> = snapshot
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+        .map(vibra_diagnostics::Diagnostic::primary_span)
+        .collect();
+    assert_eq!(unavailable.len(), 4, "{unavailable:?}");
+    assert!(unavailable.iter().all(|span| span.start() >= 60));
 }
 
 #[test]

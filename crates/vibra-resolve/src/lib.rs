@@ -1396,9 +1396,8 @@ impl Resolution {
             Declaration::Test(_) => return,
         };
         let unavailable_message = match declaration {
-            Declaration::Deftype(_) => {
-                Some("nominal type resolution is unavailable in Step 4")
-            }
+            // Declared types resolve from M3 Step 2.
+            Declaration::Deftype(_) => None,
             Declaration::Defint(_) => {
                 Some("interface resolution is unavailable in Step 4")
             }
@@ -1473,11 +1472,18 @@ impl Resolution {
                     value.members(),
                     path.clone(),
                     source_id,
+                    true,
                 );
                 self.collect_deftype_fields(module, value.body(), path, source_id);
             }
             Declaration::Defint(value) => {
-                self.collect_type_members(module, value.members(), path, source_id);
+                self.collect_type_members(
+                    module,
+                    value.members(),
+                    path,
+                    source_id,
+                    false,
+                );
             }
             Declaration::Deffect(value) => {
                 for member in value.members() {
@@ -1506,16 +1512,21 @@ impl Resolution {
         members: &[TypeMember],
         owner: Vec<String>,
         source_id: &str,
+        deftype_owner: bool,
     ) {
         let mut names = BTreeMap::<String, (ByteSpan, String)>::new();
         for member in members {
             match member {
                 TypeMember::Method(function) => {
-                    self.unavailable(
-                        source_id,
-                        function.span(),
-                        "type and interface members are unavailable in Step 4",
-                    );
+                    // Nested `deftype` methods resolve from M3 Step 2; interface
+                    // contract members arrive in Step 11.
+                    if !deftype_owner {
+                        self.unavailable(
+                            source_id,
+                            function.span(),
+                            "interface members are unavailable until M3 Step 11",
+                        );
+                    }
                     self.collect_member(
                         module,
                         function,
@@ -1568,11 +1579,6 @@ impl Resolution {
         for field in fields {
             let field_name = field.name().value();
             let field_span = field.span();
-            self.unavailable(
-                source_id,
-                field_span,
-                "nominal type members are unavailable in Step 4",
-            );
             self.check_member_name(&mut names, field_name, field_span, source_id);
             let mut path = owner.clone();
             path.push(field_name.to_owned());

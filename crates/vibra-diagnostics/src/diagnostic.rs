@@ -176,6 +176,17 @@ impl Diagnostic {
         }
     }
 
+    /// The same diagnostic under another code.
+    ///
+    /// A checker may learn only after emitting a diagnostic which of two
+    /// registered conditions it describes, such as a type disagreement that
+    /// turns out to be an operand binding to a parameter.
+    #[must_use]
+    pub fn with_code(mut self, code: DiagnosticCode) -> Self {
+        self.code = code;
+        self
+    }
+
     /// Attaches the source identity that owns this diagnostic.
     ///
     /// Related spans created before this call inherit the same identity when
