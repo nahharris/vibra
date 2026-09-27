@@ -31,11 +31,29 @@ string conversion.
 The M2 executable subset is deliberately smaller than this complete type
 surface. Its checker admits primitive names, `void`, monomorphic `fn` types,
 direct local-name/discard bindings, immutable `def` values, `defn`, `lambda`,
-`do`, `let`, `if`, and ordinary function application. Generic bounds and`types:` arguments, nominal bodies, collection types and constructors,
+`do`, `let`, `if`, and ordinary function application. Generic bounds and
+`types:` arguments, nominal bodies, collection types and constructors,
 destructuring/constructor patterns, `match`, `try`, `option`, `result`,
 ascription, widening, narrowing, and conversion remain valid syntax but are
 outside that profile and produce `@tool.unavailable` when semantic support is
-requested. This is an implementation capability boundary, not a second sourcedialect; the full rules below remain the v1 authority for later milestones.
+requested. This is an implementation capability boundary, not a second source
+dialect; the full rules below remain the v1 authority for later milestones.
+
+M3 widens the profile in two stages. The Stage 3A profile adds `deftype`
+declarations of every body form with their constructors, projections, and
+nested non-interface methods; anonymous tuple, record, enum, and union types
+with `tupleof`, `recordof`, and `enumof`; arrays and maps with `array.of`,
+`map.of`, lookups, and variadic array and map slots;
+every pattern form with `match` and shared irrefutability; `option`, `result`,
+`try`, and unhandled-failure checking; union and atom-singleton widening, `as`
+ascription, and `as` narrowing; and generics whose every `where:` bound is the
+predeclared `any`, with applied types, inference, and `types:`. Until the
+Stage 3B profile, `defint`, nested `impl` blocks, a `where:` bound naming an
+interface other than `any`, `any` or another interface written as a type, a
+user-declared map type whose key type is a generic parameter, and the
+conversion interfaces remain `@tool.unavailable`. Stage 3B admits the remainder
+of this chapter. Each behavior step moves forms from unavailable to supported;
+none reclassifies a valid form as malformed.
 
 M2 function declarations and `fn` types have no variadic slot. A variadic
 parameter declaration or variadic function type is valid v1 syntax but is
@@ -91,27 +109,31 @@ names its own diagnostic.
 
 ## Nominal declarations
 
-Every `deftype` introduces a new identity. Two types with identical structure
-are different unless they are the same fully resolved declaration.
+Every `deftype` introduces a new identity. Two declared types with identical
+structure are different unless they are the same fully resolved declaration.
+A `deftype` whose body is a structural type expression, such as
+`(deftype pair (tuple i32 str))`, is therefore a new type distinct from that
+structure. There are no transparent aliases and no implicit conversion between
+a declared type and its body.
 
 V1 type constructors are:
 
 ```ebnf
 type-expr = primitive | type-name | "(", type-name, type-expr+, ")"
-          | "(", "tuple", type-expr*, ")"
-          | "(", "array", type-expr, ")"
-          | "(", "map", type-expr, type-expr, ")"
+          | tuple-type | record-type | enum-type | union-type
           | function-type ;
-deftype-body = type-expr | record-type | enum-type | union-type | newtype-type ;
+deftype-body = type-expr | newtype-type | intrinsic-type ;
+tuple-type = "(", "tuple", type-expr*, ")" ;
 record-type = "(", "record", local-name, type-expr,
               { local-name, type-expr }, ")" ;
 enum-type = "(", "enum", local-name, type-expr,
             { local-name, type-expr }, ")" ;
 union-type = "(", "union", type-expr, type-expr+, ")" ;
 newtype-type = "(", "newtype", type-expr, ")" ;
+intrinsic-type = "(", "intrinsic-type", atom, ")" ;
 type-name = symbol - reserved-type-head ;
-reserved-type-head = "record" | "enum" | "union" | "newtype"
-                   | "tuple" | "array" | "map" | "fn" ;
+reserved-type-head = "tuple" | "record" | "enum" | "union" | "newtype"
+                   | "intrinsic-type" | "fn" ;
 function-type = "(", "fn", "(", type-expr*, ")", type-expr,
                 [ "labelled:", "(", { local-name, type-expr }, ")" ],
                 [ "variadic:", variadic-type ],
@@ -125,87 +147,140 @@ effect row. Effect-row entries are lexical symbols resolved in the effect
 namespace to nominal roots. Defaults belong to the function value and are not
 repeated in its type. An omitted function-type `effects:` row is empty.
 
-Record and enum bodies are flat and contain at least one name/type pair.
+`tuple`, `record`, `enum`, and `union` take a variable number of arguments, so
+they are type constructor forms rather than generic types. Each is an ordinary
+type expression and MUST be accepted in every type position: a parameter, a
+result, a record field, an enum payload, a union member, a `def` annotation, an
+`as` type, and a `types:` argument. `array` and `map` take a fixed number of
+arguments, so they are ordinary generic builtin types, and `(array t)` and
+`(map k v)` are ordinary applied types.
+
+Record and enum types are flat and contain at least one name/type pair whose
+names are pairwise distinct; a repeated name emits `@name.member-collision`.
 Records have closed, named fields. Every enum variant has one written payload
-slot; `void` in that slot declares a nullary, payloadless constructor, while
-any other type declares a unary constructor. Tuples, arrays, and maps are
-immutable values. Map keys must implement the standard `hashable`,
-`equatable`, and `ordered` interfaces. Recursive types MUST pass a finite-size
-check; recursion through a variable-size container is permitted, while direct
-infinite expansion is rejected.
+slot; `void` in that slot declares a nullary, payloadless variant, while any
+other type declares a unary one. Tuples, arrays, maps, records, enums, and
+unions are immutable values.
+
+A structural type written outside a `deftype` body is anonymous and its
+identity is its structure. Two anonymous tuple types are the same type when
+they have the same arity and equal component types in order. Two anonymous
+record types are the same when they have the same set of field names with
+equal types, two anonymous enum types when they have the same set of variant
+names with equal payload types, and two anonymous union types when they have
+the same member set, in each case regardless of written order. Their canonical
+spelling orders record fields and enum variants by the UTF-8 bytes of their
+names and union members by the bytes of their canonical type encoding, and the
+formatter rewrites an anonymous type into that order. A declared record, enum,
+or union keeps its declaration order, because its identity is the declaration.
+
+An anonymous type has no owner. It declares no methods, receives no `impl`
+block, and conforms to no interface other than `any` and the closed registries
+below. It cannot refer to itself; recursion needs a `deftype` name. Recursive
+declared types MUST pass a finite-size check; recursion through a
+variable-size container is permitted, while direct infinite expansion is
+rejected with `@type.infinite-size` at the `deftype` whose expansion first
+repeats in declaration order, relating the member or payload through which it
+repeats.
+
+Map keys must implement the standard `hashable`, `equatable`, and `ordered`
+interfaces, which the standard library declares as ordinary nominal
+interfaces. The following types receive closed toolchain conformance to all
+three, keyed by type identity in the same way as the closed `iter` registry;
+they are admissible map keys without a written implementation:
+
+- `bool`, `char`, `str`, `bytes`, `atom`, and every atom singleton type;
+- `i8` through `i64` and `u8` through `u64`; and
+- an anonymous tuple, record, enum, or union type whose every component,
+  field, payload, or member type is itself an admissible key.
+
+`void`, `f32`, `f64`, `fn` types, arrays, maps, and options are not admissible
+keys. A `deftype` is admissible only through its own written implementations
+of all three interfaces. An inadmissible key type in any written or inferred
+`(map k v)` emits `@type.invalid-map-key` at the key type expression, or at the
+constructor application when the map type is inferred; an `fn` key keeps the
+more specific `@type.function-not-equatable`.
+
+Canonical key order is a total order over admissible key values and is the
+only order in which a map is traversed, rendered, or iterated. For the closed
+key types it is: `false` before `true`; numeric order for integers; Unicode
+scalar value for `char`; lexicographic by scalar for `str` and by byte for
+`bytes`; lexicographic by the UTF-8 bytes of the canonical spelling for atoms;
+component-wise lexicographic for tuples and, in canonical field order, for
+records; canonical variant order and then payload for enums; and canonical
+member order and then value for unions. A `deftype` key uses its `ordered`
+implementation. Hash-table order is never observable.
 
 Newtypes have a distinct identity and exactly one representation type. Their
 constructor and unwrap operation are available only where visibility permits.
-There are no structural aliases or transparent public casts.
+A newtype exists only to introduce an identity, so `newtype` is admissible only
+as a `deftype` body; `(newtype t)` in any other type position emits
+`@type.anonymous-newtype`.
 
-The four declaration-body forms — `record`, `enum`, `union`, and `newtype` —
-are admissible only as a `deftype` body, which is why that position has its own
-`deftype-body` production and `type-expr` does not list them. Any of the four
-written in another type position — a parameter, a result, a record field, a
-`def` annotation, an `as` type, an `impl` target, or a `types:` argument —
-emits `@type.anonymous-type-body` and names the form it found.
+The builtin types — every primitive, `array`, and `map` — are declared by the
+toolchain in its embedded standard-library modules with an `intrinsic-type`
+body, which binds the declaration to a closed registry of builtin type
+identities: `(deftype i32 (intrinsic-type @i32) …)`. The atom MUST name a
+registry entry whose spelling is the declaration's own name, otherwise the
+declaration emits `@external.unknown-symbol`. Such a declaration supplies the
+builtin type's static methods as ordinary nested members, which are reached
+through the type path with no import, exactly as the builtin type needs none.
+`intrinsic-type` is admissible only in the toolchain-embedded package, under
+the same rule as `external:`; users cannot declare or extend a builtin type.
 
-This is what nominality means at the level of the grammar: each of the four
-introduces an identity, and an identity needs the `deftype` that declares it. V1
-has no anonymous or structural record, enum, union, or newtype, so each is
-reachable only through the name its `deftype` introduces. `tuple`, `array`,
-`map`, and `fn` remain ordinary `type-expr` constructors, because they build
-values from existing types rather than introducing an identity.
-
-Removing the four from `type-expr` is not by itself enough, because the applied
-form `(symbol type-expr+)` would otherwise readmit each of them as the
-application of a type named `record`, `enum`, `union`, or `newtype`. The head of
-an applied type is therefore `type-name`, written as the exception
-`symbol - reserved-type-head`: any symbol that is not one of those eight
-spellings. This is the grammar's only use of exception notation.
-
-Reserved type forms are recognized before the applied-type production, exactly
-as reserved expression forms are recognized before application, so
-`(union i32 f32)` outside a `deftype` body is `@type.anonymous-type-body` and
-never a type application.
+The applied form `(symbol type-expr+)` would otherwise read `(record …)`,
+`(union …)`, or `(newtype …)` as the application of a type with that name, so
+the head of an applied type is `type-name`, written as the exception
+`symbol - reserved-type-head`: any symbol that is not one of those seven
+spellings. This is the grammar's only use of exception notation. Reserved type
+forms are recognized before the applied-type production, exactly as reserved
+expression forms are recognized before application.
 
 The reservation reaches exactly the declarations that must be usable as a bare
 `type-name` head: a `deftype`, a `defint`, and a generic name in a `where:`
-clause. One of those spelled with a reserved type head emits
+clause. One of those spelled with a reserved type head, or with the name of a
+builtin type outside an `intrinsic-type` declaration, emits
 `@name.reserved-declaration`. It reaches no other namespace and no member,
 because a member is only ever reached through a qualified path and is never a
 bare type head. A nested method named `map` therefore stays legal exactly as the
 source-language chapter states, which the `iter` contract's own default `map`
-member depends on. The separate value-namespace rule on `map`, `array`, and
-`tuple` is unchanged and keeps its own `@name.reserved-value-spelling`.
+member depends on. The separate value-namespace rule on builtin type names
+keeps its own `@name.reserved-value-spelling`.
 
-A union body lists at least two member types and declares no member names. The
-`deftype` supplies the union's identity, and each member type's identity is its
-discriminant, so a union is an enum whose variant names are its member types. A
-member list shorter than two entries emits `@type.union-too-few-members`.
+A union type lists at least two member types and declares no member names. A
+declared union's identity is its `deftype`, an anonymous union's is its member
+set, and each member type's identity is its discriminant, so a union is an enum
+whose variant names are its member types. A member list shorter than two
+entries emits `@type.union-too-few-members`.
 
 Members MUST be pairwise non-unifiable, as the overlap section defines.
 Otherwise `(union (array t) (array i32))` would leave injection ambiguous at
-`t` = `i32`. Overlap emits `@type.union-member-overlap`.
+`t` = `i32`. Overlap emits `@type.union-member-overlap` at the union type
+expression.
 
-A member MUST be a concrete type expression. Another union, an interface, and a
-bare generic parameter each emit `@type.union-member-not-concrete`. Unions do
-not flatten: without this rule a three-way choice would have two spellings,
-which the charter's decision order forbids. An interface member would likewise
-leave injection ambiguous, because a member type that also implements that
-interface could inject under either discriminant.
+A member MUST be a concrete type expression. Another union type, whether
+declared or anonymous, an interface, and a bare generic parameter each emit
+`@type.union-member-not-concrete`. Unions do not flatten: without this rule a
+three-way choice would have two spellings, which the charter's decision order
+forbids. An interface member would likewise leave injection ambiguous, because
+a member type that also implements that interface could inject under either
+discriminant.
 
-Unions widen in and narrow out through the two written forms defined later in
-this chapter: a value of a member type widens to the union at a written typed
-boundary, and `match` narrows a union through `as` patterns. There is no
-subtyping between unions, no subset relation, and no computed least upper
-bound.
+Unions widen in and narrow out through the written forms defined later in this
+chapter: a value of a member type widens to the union at a written typed
+boundary, a declared union's name applied to one member value injects it, and
+`match` narrows a union through `as` patterns. There is no subtyping between
+unions, no subset relation, and no computed least upper bound.
 
 A union `deftype` MAY declare nested methods and `impl` blocks exactly as any
 other `deftype` does. Nothing is lifted from its members: a method, field, or
 implementation common to every member is not thereby a member of the union, and
-a union conforms to an interface other than `any` only by writing that
+a declared union conforms to an interface other than `any` only by writing that
 implementation. `any` is satisfied by every type without one, and the closed
 `iter` registry is keyed by builtin constructor identity and so never covers a
-union. A union is
-a valid `(map k v)` key only when it explicitly implements `hashable`,
-`equatable`, and `ordered`. Unions participate in the finite-size check on the
-same terms as records and enums.
+union. A declared union is a valid `(map k v)` key only when it explicitly
+implements `hashable`, `equatable`, and `ordered`. Unions participate in the
+finite-size check on the same terms as records and enums.
 
 ```vibra
 (deftype number (union i32 f32)
@@ -221,8 +296,8 @@ categories:
 | Callee type | Required operand | Result | Application kind |
 | --- | --- | --- | --- |
 | `fn` | Its written positional, labelled, and variadic signature | Written result | `@function` |
-| `(tuple t0 ... tn)` | One tuple-index literal | Exact selected component | `@tuple-projection` |
-| Record type | One atom field selector | Exact selected field | `@record-projection` |
+| Tuple type, declared or anonymous | One tuple-index literal | Exact selected component | `@tuple-projection` |
+| Record type, declared or anonymous | One atom field selector | Exact selected field | `@record-projection` |
 | `(array t)` | One `u64` index | `(option t)` | `@collection-lookup` |
 | `(map k v)` | One value of exact type `k` | `(option v)` | `@collection-lookup` |
 | `str` | One `u64` scalar index | `(option char)` | `@collection-lookup` |
@@ -249,28 +324,66 @@ no effect and no function-call edge.
 
 An enum value, union value, atom, number, or `void` is not applicable. A newtype
 value does not delegate applicability to its representation, and a union value
-does not delegate applicability to the member it holds. A union type is not a
-constructor entity either: a member value reaches its union by widening at a
-written boundary, never by applying the union. A value whose static type is
-an unconstrained generic is not applicable; v1 has no callable interface or
-user-defined applicability bound. Tuples and records are not subtypes of `fn`;
-producing an accessor as a higher-order value requires an explicit `lambda`.
+does not delegate applicability to the member it holds. A value whose static
+type is an unconstrained generic is not applicable; v1 has no callable
+interface or user-defined applicability bound. Tuples and records are not
+subtypes of `fn`; producing an accessor as a higher-order value requires an
+explicit `lambda`.
 
-Resolved nominal record types, enum variants, and newtype constructors are
-also applicable constructor entities. Record constructors accept their closed
-set of labelled fields, enum constructors accept zero operands for a `void`
-payload slot or one operand of the written payload type, and newtype
-constructors accept their representation value. Constructor application is
-pure and has kind `@constructor`.
+A declared type is also an applicable constructor entity, and its application
+is pure and has kind `@constructor`:
 
-The closed native entities `tuple.of`, `array.of`, and `map.of` construct
-collection values and have application kind `@constructor`. `tuple.of` derives
-one heterogeneous tuple type from its operands. `array.of` requires every
-operand to have one exact element type, and `map.of` requires alternating
-operands of one exact key type and one exact value type. Empty array and map
-construction requires an expected type; an odd map arity is an error. The
-source forms `(tuple ...)`, `(array ...)`, and `(map ...)` are type or pattern
-forms, never collection value constructors.
+| Declaration body | Constructor | Operands |
+| --- | --- | --- |
+| record | `(z a: f b: g)` | Its closed set of labelled fields |
+| tuple | `(z f g h)` | One positional operand per component, in order |
+| enum | `(z.a f)` | Zero operands for a `void` payload, else one of the payload type |
+| union | `(z f)` | One operand whose type is exactly one member; this injects it |
+| newtype | `(z f)` | One operand of the representation type |
+
+A union constructor operand that could inject under more than one member, such
+as an unsuffixed literal, emits `@type.ambiguous-inference`; one whose type is
+no member is `@type.argument-mismatch`.
+
+Anonymous structural values are built by three reserved expression forms,
+recognized before the general application production:
+
+```ebnf
+anonymous-value = "(", "tupleof", { expr }, ")"
+                | "(", "recordof", label, expr, { label, expr }, ")"
+                | "(", "enumof", label, expr, ")" ;
+```
+
+`(tupleof e…)` has the anonymous tuple type of its operand types in order.
+`(recordof a: e …)` has the anonymous record type of its fields, whose labels
+MUST be distinct. `(enumof a: e)` selects one variant and so cannot determine
+the rest of its type: it MUST be checked against a written expected type that
+is an anonymous enum declaring variant `a`, exactly as `as` supplies one, and
+otherwise emits `@type.ambiguous-inference`; a `void` payload is written
+`(enumof a: void)`. An anonymous union has no constructor: a member value
+reaches it by widening at a written boundary or through `as`. All three forms
+are pure, have kind `@constructor`, evaluate their operands from left to right,
+and are mirrored by the patterns `(tupleof p…)`, `(recordof a: p …)`, which
+may omit fields, and `(enumof a: p)`.
+
+Array and map values are built by static methods of the builtin `array` and
+`map` types, reached by path exactly as a `deftype`'s nested method is. They
+are ordinary toolchain-declared members, not special syntax, and their
+applications are ordinary `@function` applications:
+
+```vibra
+(defn of () (array t)
+  variadic: (items (array t)))
+```
+
+`array.of` has that signature with the type's `where: (t any)`, and `map.of`
+the corresponding one with `variadic: (entries (map k v))`, so each is a
+first-class `fn` value, its element types come from ordinary generic
+inference, an empty call needs an expected type like any uninferable generic
+result, and an odd map tail is an ordinary variadic-binding error. The key rule
+applies to each instantiated `(map k v)`. Users cannot declare further members
+on a builtin type. The type forms `(tuple …)`, `(record …)`, `(enum …)`, and
+`(union …)` and the array pattern `(array …)` are never value constructors.
 
 ## Namespaces and resolution
 
@@ -350,9 +463,11 @@ equivalent discards, create no binding, and may repeat in the same or nested
 scopes. Sibling scopes may reuse a named symbol when neither declaration is
 visible from the other.
 
-A module-level `def`, `defn`, or import alias MUST NOT be spelled `map`,
-`array`, or `tuple`. A top-level use of one of those spellings as a value or
-alias emits `@name.reserved-value-spelling`.
+A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
+type name: a primitive type, `array`, `map`, or `tuple`. Builtin types own
+static methods reached by dotted path, so such an alias or value would make
+`i32.add-checked` or `array.of` ambiguous. A top-level use of one of those
+spellings as a value or alias emits `@name.reserved-value-spelling`.
 
 ## Functions as values
 
@@ -393,6 +508,22 @@ destination-dispatched contract member, defined in the interfaces section,
 resolves its receiver from an expected type that the author wrote. Inference
 MUST NOT synthesize an implementation that no package declared.
 Ambiguous inference is an error with candidate explanations, not a default.
+When no unique type follows for an unsuffixed numeric literal, an empty
+`array.of` or `map.of`, or a generic argument, the checker emits
+`@type.ambiguous-inference` at that literal, application, or generic
+application, with one note per candidate or missing constraint. A
+destination-dispatched call with no written expected type keeps the more
+specific `@type.ambiguous-destination`.
+
+An operand that does not fit the parameter or constructor slot it binds to, a
+wrong arity, an unknown, duplicate, or missing label or record field, an odd
+`map.of` operand count, and `array.of` or `map.of` operands with no single
+element type are `@type.argument-mismatch` at the operand or application.
+Every other disagreement between an expression's type and its written or
+required expected type — a `def` annotation, a result
+type, an `if` condition, differing branch or arm types, a pattern and its
+scrutinee — is `@type.mismatch` at the expression, relating the written type
+when it has a source span.
 
 Every public function, `def`, type parameter, interface member, and effect
 operation has a complete written type. The checker validates a body against
@@ -407,7 +538,7 @@ that constrains nothing.
 
 ```vibra
 (defn first (items (array t)) (option t)
-  where: (t storable)
+  where: (t any)
   visibility: @public
   (array.first items))
 ```
@@ -542,7 +673,9 @@ Each target slot requires exactly one entity kind, which the grammar's shared
 to a concrete type; the other kind emits `@name.wrong-entity-kind`. A receiver
 is therefore never an interface value, so an implementation is always selected
 from a concrete type at a widening boundary rather than layered on another
-interface.
+interface. A `defint` target MUST also be a declared type or a builtin
+type: an anonymous structural type has no owner to carry an implementation, so
+writing one as a target emits `@name.wrong-entity-kind`.
 
 These two locations encode the orphan rule directly: an implementation can be
 written only where the package owns the type or owns the interface.
@@ -781,6 +914,42 @@ unions, and finite structural patterns. Unreachable arms are errors. One common
 type means one written or already-identical type; the checker MUST NOT search
 for a union or interface that covers two differing branch types.
 
+A scrutinee of type `atom` is never statically closed: its atom-literal arms
+are refutable and a binder or discard must cover the remainder. A scrutinee of
+an atom singleton type is closed by the one arm for that atom. Literal patterns
+are admitted for every primitive except `f32`, `f64`, and `void`, and an arm
+set of literals covers its type only for `bool`; any other literal arm set
+needs a covering binder or discard. The arm set of `str`, `bytes`, and every
+numeric type is therefore never closed by literals alone.
+
+A `match` whose arms do not cover the scrutinee type emits
+`@pattern.non-exhaustive` at the complete `match` form, with one note naming
+one uncovered value shape in canonical pattern spelling, chosen as the first
+uncovered shape in declaration order of variants, members, and fields. An arm
+that no value can reach because earlier arms cover it emits
+`@pattern.unreachable-arm` at that arm's pattern, relating the earliest arm
+that alone covers it when one exists. Arms are examined in source order, so
+only the later of two identical arms is unreachable.
+
+`try` applies to an operand of type `(option t)` or `(result t e)` inside a
+function, `lambda`, or test whose written result type is the same standard
+container: `(option u)` for an `option` operand, or `(result u e)` with the
+identical error type `e` for a `result` operand. The success type `u` of the
+enclosing result need not equal `t`. The `try` expression has type `t`. On
+`none` or `err`, evaluation leaves the innermost enclosing function, `lambda`,
+or test body with that `none` or that error wrapped in the enclosing result
+type. A `try` in any other context, over any other type, or against a
+different container or error type emits `@type.invalid-try` at the `try` form,
+relating the enclosing written result type when there is one. A test body has
+result type `void`, so `try` is always invalid there.
+
+A value whose static type is `(result t e)` is fallible. A fallible value is
+ignored when it is evaluated in a non-final element of a function, `lambda`,
+test, `do`, or `let` body; such an expression emits
+`@type.unhandled-fallible` at the expression unless it is written as
+`(let - expression)` or with another discard spelling. `option` is not
+fallible: absence is a value, and ignoring one needs no discard.
+
 An `(as type-expr pattern)` pattern narrows a union. Its scrutinee MUST have a
 union type, and a scrutinee of any other type emits `@type.narrowing-non-union`.
 Its written type MUST be one member of that union under the same identity used
@@ -797,9 +966,10 @@ lambda parameter, where it emits the existing `@pattern.refutable-binding`.
 The same exhaustiveness engine determines whether a binding pattern is
 irrefutable: the single pattern MUST cover every value of its expected type.
 `let` and fixed positional function or lambda parameters require an irrefutable
-pattern; `match` permits refutable patterns and checks all arms together. Tuple patterns have exact arity and are irrefutable when every
-component is. Record patterns may omit fields and are irrefutable when every
-written field pattern is. A fixed-length array pattern is refutable for the
+pattern; `match` permits refutable patterns and checks all arms together.
+Tuple patterns, anonymous or declared, have exact arity and are irrefutable
+when every component is. Record patterns may omit fields and are irrefutable
+when every written field pattern is. A fixed-length array pattern is refutable for the
 variable-length array type. A newtype constructor pattern is irrefutable when
 its payload pattern is. An enum constructor pattern is refutable unless its
 expected enum has exactly that one variant and its payload pattern is
@@ -844,8 +1014,9 @@ written expected types is:
 - a fixed positional, labelled, or variadic parameter type;
 - a written result type;
 - a `def` type annotation;
-- a record constructor field type, or an enum or newtype constructor payload
-  type;
+- a declared record or tuple field type, a declared enum payload type, or a
+  newtype representation type at its constructor, and the payload type of an
+  `enumof` variant in the written anonymous enum it is checked against;
 - a type supplied through `types:`; and
 - the type written in an `as` expression.
 

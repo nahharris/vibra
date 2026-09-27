@@ -58,6 +58,7 @@ table governs.
 | `@type.numeric-out-of-range` | `@error` |
 | `@type.initializer-cycle` | `@error` |
 | `@type.anonymous-type-body` | `@error` |
+| `@type.anonymous-newtype` | `@error` |
 | `@type.undispatchable-contract-member` | `@error` |
 | `@type.union-too-few-members` | `@error` |
 | `@type.union-member-overlap` | `@error` |
@@ -69,7 +70,15 @@ table governs.
 | `@type.narrowing-non-union` | `@error` |
 | `@type.not-a-union-member` | `@error` |
 | `@type.redundant-conversion` | `@error` |
+| `@type.mismatch` | `@error` |
+| `@type.ambiguous-inference` | `@error` |
+| `@type.infinite-size` | `@error` |
+| `@type.invalid-map-key` | `@error` |
+| `@type.invalid-try` | `@error` |
+| `@type.unhandled-fallible` | `@error` |
 | `@pattern.refutable-binding` | `@error` |
+| `@pattern.non-exhaustive` | `@error` |
+| `@pattern.unreachable-arm` | `@error` |
 | `@effect.outside-ceiling` | `@error` |
 | `@effect.invalid-reference` | `@error` |
 | `@external.unknown-symbol` | `@error` |
@@ -94,6 +103,11 @@ table governs.
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
+
+`@type.anonymous-type-body` is retired: anonymous `tuple`, `record`, `enum`, and
+`union` types are valid type expressions. The M2 reader still emits it for those
+forms; M3 Step 2 replaces that rejection with the structural-type rules and
+removes the code from this table in the same change.
 
 Codes are stable within the v1 line and are atoms in Vibra data. JSON output
 serializes the exact atom spelling as a string. A code need not be renamed if
@@ -436,9 +450,12 @@ applicable category, constructor applications, rejection of atom and numeric
 callees, tuple literal-index bounds, record selector resolution, optional
 collection lookup, and proof that pure projections and lookups add neither an
 effect nor a function-call edge. Collection construction covers heterogeneous
-`tuple.of`, homogeneous and expected-empty `array.of`, even and duplicate-key
-`map.of`, and rejection of source `(tuple ...)`, `(array ...)`, and `(map ...)`
-value construction.
+`tupleof` and `recordof`, `enumof` against a written anonymous enum and its
+rejection without one, homogeneous and expected-empty `array.of`, `array.of`
+passed as a function value, even and duplicate-key `map.of`, declared tuple,
+record, enum, union, and newtype constructors, and rejection of the type forms
+`(tuple ...)`, `(record ...)`, `(enum ...)`, and `(union ...)` in value
+position.
 
 For the admitted monomorphic function subset, fixed and labelled arity,
 duplicate-label, unknown-label, required-label, and operand-type failures use
@@ -455,6 +472,33 @@ rejected with no compatibility bridge. Retired loop and return forms MUST be
 rejected with `@syntax.retired-form`. `@type.not-applicable`,
 `@type.invalid-tuple-index`, `@type.unknown-record-field`, and
 `@pattern.refutable-binding` all have fixed level `@error`.
+
+Match coverage includes a non-exhaustive enum, union, `bool`, tuple, and
+`atom` scrutinee, each rejected with `@pattern.non-exhaustive` naming its first
+uncovered shape; a repeated arm and an arm after a covering binder rejected
+with `@pattern.unreachable-arm`; and literal arm sets over `str` and an integer
+type that need a covering binder. Failure coverage includes `try` over `option`
+and over `result` in matching enclosing results, a `try` whose enclosing error
+type differs, a `try` in a test body, and a `try` over a non-container, each
+invalid case rejected with `@type.invalid-try`; and an ignored `result` in a
+non-final body position rejected with `@type.unhandled-fallible`, accepted when
+written with each discard spelling, and an ignored `option` accepted.
+Inference coverage rejects an unsuffixed literal with no expected numeric type,
+an empty `array.of` with no expected type, and an uninferable generic argument
+with `@type.ambiguous-inference`, and a `def` annotation, `if` condition, and
+differing branch types with `@type.mismatch`. Map coverage accepts every closed
+key type, including a nested tuple key, and rejects `f64`, `void`, array, and
+record keys with `@type.invalid-map-key`; an interpreter case proves that a map
+built in two different insertion orders iterates, renders, and compares
+identically in canonical key order. Nominal coverage rejects a record that
+contains itself directly with `@type.infinite-size` and accepts one that
+contains itself through an array. `@type.mismatch`,
+`@type.ambiguous-inference`, `@type.infinite-size`, `@type.invalid-map-key`,
+`@type.invalid-try`, `@type.unhandled-fallible`, `@pattern.non-exhaustive`,
+and `@pattern.unreachable-arm` all have fixed level `@error`.
+
+An `interpret` result snapshot is the canonical result observation
+`(record type: T value: v)` of the runtime chapter's canonical value encoding.
 
 Interface coverage includes abstract and default contract members, rejection of
 `@type.default-override` and `@type.missing-abstract-member`, the canonical
@@ -474,28 +518,29 @@ that no member method or implementation is lifted to the union, and that a union
 used as a `(map k v)` key without explicit `hashable`, `equatable`, and
 `ordered` implementations is rejected.
 
-Declaration-body coverage rejects each of `record`, `enum`, `union`, and
-`newtype` written in a parameter, a result, a record field, a `def` annotation,
-an `as` type, an `impl` target, and a `types:` argument, with
-`@type.anonymous-type-body` naming the form it found. The `types:` case is
-written separately for each form so the call-site type-argument parsing and
-binding path is covered rather than assumed. Positive cases confirm that
-`tuple`, `array`, `map`, and `fn` remain admissible in all seven positions.
-
-The applied-type head is covered separately, because removing the four forms
-from `type-expr` does not by itself stop them returning as applications. Each of
-`(record ...)`, `(enum ...)`, `(union ...)`, and `(newtype ...)` outside a
-`deftype` body is rejected as `@type.anonymous-type-body` and MUST NOT be
-reported as an unknown type application, and an ordinary applied type such as
-`(option t)` is accepted in the same position.
+Structural-type coverage accepts anonymous `tuple`, `record`, `enum`, and
+`union` types in a parameter, a result, a record field, an enum payload, a
+union member, a `def` annotation, an `as` type, and a `types:` argument, and
+rejects `(newtype ...)` in each of those positions with
+`@type.anonymous-newtype`. It proves that two anonymous records or enums
+written with the same fields or variants in different orders are one type and
+that the formatter rewrites both to canonical order; that anonymous unions
+with the same member set in different orders are one type; that a declared
+`(deftype pair (tuple i32 str))` is distinct from `(tuple i32 str)`; that an
+anonymous type used as an `impl` target is rejected; and that each reserved
+head outside its admitted position is never reported as an unknown type
+application, while an ordinary applied type such as `(option t)` is accepted.
+Builtin-type coverage accepts `intrinsic-type` declarations only in the
+toolchain-embedded package, rejects one elsewhere, and rejects an unknown
+intrinsic atom with `@external.unknown-symbol`.
 
 The reserved-head reservation is covered on both sides. A `deftype`, a `defint`,
-and a `where:` generic name spelled with a reserved type head are each rejected
-with `@name.reserved-declaration`. A nested method named `map` on an owner other
+and a `where:` generic name spelled with a reserved type head or with a
+builtin type name are each rejected with `@name.reserved-declaration`. A nested method named `map` on an owner other
 than the associative `map` type is accepted, together with the `iter` contract's
 own default `map` member, proving the reservation does not reach members; the
-existing `@name.reserved-value-spelling` cases for module-level `map`, `array`,
-and `tuple` values are unaffected.
+`@name.reserved-value-spelling` cases cover module-level values and aliases
+spelled `i32`, `array`, and `map`.
 
 Unification coverage fixes the bound-agnostic reading: a union whose members are
 `(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not
@@ -558,7 +603,7 @@ member of the same shape, such as a `(defn empty () self)` factory, selected
 from a written expected type and rejected with `@type.ambiguous-destination`
 where none is written.
 
-`@type.anonymous-type-body`, `@type.undispatchable-contract-member`,
+`@type.anonymous-newtype`, `@type.undispatchable-contract-member`,
 `@type.union-too-few-members`,
 `@type.union-member-overlap`, `@type.union-member-not-concrete`,
 `@type.overlapping-implementation`, `@type.ambiguous-implementation`,

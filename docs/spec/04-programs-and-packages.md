@@ -475,6 +475,52 @@ admitting compiler declarations, and Step 13 supplies the assertion behavior.
 M2 never performs Git, registry, or network resolution while loading this
 input.
 
+### Toolchain standard-library input
+
+M3 replaces the M2 bootstrap input, with no transition period and no fallback
+between the two. The signed artifact, detached signature, toolchain public key,
+and their digests are retired. A signature verified against a key that is
+compiled into the same binary as the signed bytes adds no authority: whoever
+can change the embedded modules can change the embedded key. Authority instead
+comes only from embedding: the standard library is part of the toolchain build,
+and nothing a project supplies can add to it.
+
+The input is the repository directory `stdlib/`. Its authority is
+`stdlib/manifest.vibon`, a closed `@stdlib-manifest.v1` record with fields, in
+order, `format`, `package-name`, `package-version`, `modules`, `compiler`, and
+`assertions`. `package-name` is `"vibra-stdlib"` and `package-version` is
+`"0.2.0"`. `modules` is a map from each module atom to a record with `path` (a
+`stdlib/src/`-relative slash path), `sha256` (the `sha256:` digest of the
+module's exact bytes), and `role` (`@source` or `@test-registry`). `compiler`
+lists every `@compiler` symbol the modules may bind, and `assertions` lists the
+test-only assertion members.
+
+The toolchain embeds the manifest and every listed module at build time. At
+load it decodes the manifest through its closed record, hashes each embedded
+module against its entry, and requires every `external: @compiler` declaration
+to name a listed symbol whose signature matches the registry exactly. A
+mismatch is an internal toolchain defect reported as an operational provenance
+diagnostic, never a fallback. `check`, `run`, and `test` never read the
+standard library from the project, the build checkout, the installation
+directory, a vendor tree, a cache, or the network.
+
+The admitted modules enter the resolver as the `vibra-stdlib@0.2.0` package
+with unit `@std`, keep that provenance in every declaration identity, and are
+imported explicitly; there is no ambient prelude. A declaration outside this
+embedded package that writes `external:` is rejected exactly as the M2 input
+rejected an unverified one. The M3 module set is `@std.core`, `@std.option`,
+`@std.result`, `@std.bool`, `@std.char`, `@std.text`, `@std.bytes`,
+the builtin-member module `@std.builtin`, and the test-registry module
+`@std.assert`. `@std.builtin` is never imported: it declares the members of the
+builtin numeric, `array`, `map`, and `tuple` types, which are reached
+through those type paths; Stage 3B adds its own
+modules by the same rule. Adding a module or symbol is a specification change to
+this list and to the runtime registry.
+
+Builtin type names are reserved alias and module-level value spellings, as the
+type chapter states, because their members are reached by the same dotted path
+an alias would start.
+
 There is no registry, version range, lock auto-upgrade, lifecycle script, or
 dependency-provided executable in v1.
 
@@ -618,6 +664,24 @@ when the selector is omitted; an unknown explicit selector is invalid input.
 The runner isolates each test's values and host event log. Time and random
 operations use deterministic providers by default. An unconsumed failure or
 unrecorded dependency on a nondeterministic provider fails the test.
+
+### M3 assertion contract
+
+Stage 3A replaces the five monomorphic `assert.equal-*` members with one
+generic member and keeps `assert.true` and `assert.false` unchanged. The
+removed members are not retained as aliases.
+
+| Member | Exact signature | Passing behavior |
+| --- | --- | --- |
+| `assert.equal` | `(expected t) (actual t) -> void`, `where: (t any)` | succeeds when both operands have the same canonical value encoding |
+
+The comparison is the canonical value encoding of the runtime chapter, so it is
+defined for every value except a function. An operand whose type is or
+contains a `fn` type emits `@type.function-not-equatable` at that operand. The
+encoding also supplies the `expected` and `actual` failure strings. Because it
+compares encodings rather than calling `equatable`, `assert.equal` is a
+test-only surface and grants no equality to ordinary code. Every other part of
+the M2 assertion contract is unchanged.
 
 ## Build products
 

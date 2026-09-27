@@ -203,7 +203,8 @@ has `{ "path": string, "changed": boolean, "written": boolean,
 "primarySpan": SpanDocument }|null, "trap": { "trapCode": string,
 "origin": SpanDocument|null }|null, "auditTrace": string[],
 "diagnostics": DiagnosticDocument[] }] }`.
-`programResult` is the pure value result; a runtime trap is represented by
+`programResult` is the pure value result in the runtime chapter's canonical
+value encoding; a runtime trap is represented by
 `@command.trap` and its structured diagnostic, never as a successful value.
 The trap payload has `trapCode: string` and `origin: SpanDocument|null` when
 the command owns a program result. In JSON mode

@@ -250,7 +250,7 @@ diagnostic_registry! {
     NameReservedDeclaration => "@name.reserved-declaration", Name, Error, None,
         "a declaration or generic name uses a reserved type head";
     NameReservedValueSpelling => "@name.reserved-value-spelling", Name, Error, None,
-        "a module-level value is spelled `map`, `array`, or `tuple`";
+        "a module-level value or import alias is spelled as a builtin type name";
     ModuleFileDirectoryCollision => "@module.file-directory-collision", Module, Error, None,
         "a module path is claimed by both a file and a directory";
     ModuleSourceIdCollision => "@module.source-id-collision", Module, Error, None,
@@ -290,7 +290,9 @@ diagnostic_registry! {
     TypeInitializerCycle => "@type.initializer-cycle", Type, Error, None,
         "module value initializers form a cycle";
     TypeAnonymousTypeBody => "@type.anonymous-type-body", Type, Error, None,
-        "`record`, `enum`, `union`, or `newtype` appears outside a declaration body";
+        "retired: a structural type form the M2 reader does not yet accept";
+    TypeAnonymousNewtype => "@type.anonymous-newtype", Type, Error, None,
+        "`newtype` appears outside a `deftype` body";
     TypeUndispatchableContractMember => "@type.undispatchable-contract-member", Type, Error, None,
         "a contract member does not name `self` in a dispatchable position";
     TypeUnionTooFewMembers => "@type.union-too-few-members", Type, Error, None,
@@ -313,8 +315,24 @@ diagnostic_registry! {
         "an `as` pattern names a type outside the union's member set";
     TypeRedundantConversion => "@type.redundant-conversion", Type, Error, None,
         "`from` and `try-from` are both implemented for one source";
+    TypeMismatch => "@type.mismatch", Type, Error, None,
+        "an expression's type differs from its written or required expected type";
+    TypeAmbiguousInference => "@type.ambiguous-inference", Type, Error, None,
+        "no unique type follows for a literal, empty collection, or generic argument";
+    TypeInfiniteSize => "@type.infinite-size", Type, Error, None,
+        "a recursive type expands without passing through a variable-size container";
+    TypeInvalidMapKey => "@type.invalid-map-key", Type, Error, None,
+        "a map key type has no `equatable`, `ordered`, and `hashable` conformance";
+    TypeInvalidTry => "@type.invalid-try", Type, Error, None,
+        "`try` is outside a matching `option` or `result` context";
+    TypeUnhandledFallible => "@type.unhandled-fallible", Type, Error, None,
+        "a `result` value is ignored without an explicit discard";
     PatternRefutableBinding => "@pattern.refutable-binding", Pattern, Error, None,
         "a binding pattern is refutable for its expected type";
+    PatternNonExhaustive => "@pattern.non-exhaustive", Pattern, Error, None,
+        "the arms of a `match` do not cover every value of the scrutinee type";
+    PatternUnreachableArm => "@pattern.unreachable-arm", Pattern, Error, None,
+        "earlier arms of a `match` already cover every value this arm matches";
     EffectOutsideCeiling => "@effect.outside-ceiling", Effect, Error, None,
         "a performed effect root lies outside the written or default ceiling";
     EffectInvalidReference => "@effect.invalid-reference", Effect, Error, None,
@@ -377,7 +395,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 76;
+    const REGISTERED_CODES: usize = 85;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
