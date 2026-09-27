@@ -6,7 +6,7 @@ use std::sync::Arc;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_ir::{
     CheckedFunction, CheckedGlobal, CheckedModuleSet, CheckedProgram, Expr,
-    FunctionSignature, IrError, PrimitiveType, SourceOrigin, TestAssertion, Value,
+    FunctionSignature, IrError, SourceOrigin, TestAssertion, Type, Value,
 };
 use vibra_resolve::{DeclarationId, ResolvedSnapshot};
 use vibra_syntax::{ApplicationBinding, Declaration, SourceAst};
@@ -269,10 +269,7 @@ pub fn check_resolved(
                         module_index,
                         source_id: module.record.source_id().to_owned(),
                         name: id.canonical(),
-                        signature: FunctionSignature::new(
-                            Vec::new(),
-                            PrimitiveType::Void,
-                        ),
+                        signature: FunctionSignature::new(Vec::new(), Type::Void),
                         variadic: false,
                         external: None,
                         external_declared: false,
@@ -449,7 +446,7 @@ pub fn check_resolved(
             let Some(body) = crate::check_sequence(
                 &mut environment,
                 test.expressions(),
-                Some(PrimitiveType::Void),
+                Some(Type::Void),
                 test.span(),
                 true,
             ) else {
@@ -784,28 +781,27 @@ pub fn check_resolved(
     }
 }
 
-fn default_expression(
-    value_type: &PrimitiveType,
-    origin: SourceOrigin,
-) -> Option<Expr> {
+fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
     let value = match value_type {
-        PrimitiveType::Bool => Some(Value::Bool(false)),
-        PrimitiveType::Void => Some(Value::Void),
-        PrimitiveType::Char => Some(Value::Char('\0')),
-        PrimitiveType::Str => Some(Value::Str(String::new())),
-        PrimitiveType::Bytes => Some(Value::Bytes(Vec::new())),
-        PrimitiveType::Atom => Some(Value::Atom(String::new())),
-        PrimitiveType::I8 => Some(Value::I8(0)),
-        PrimitiveType::I16 => Some(Value::I16(0)),
-        PrimitiveType::I32 => Some(Value::I32(0)),
-        PrimitiveType::I64 => Some(Value::I64(0)),
-        PrimitiveType::U8 => Some(Value::U8(0)),
-        PrimitiveType::U16 => Some(Value::U16(0)),
-        PrimitiveType::U32 => Some(Value::U32(0)),
-        PrimitiveType::U64 => Some(Value::U64(0)),
-        PrimitiveType::F32 => Value::f32(0.0),
-        PrimitiveType::F64 => Value::f64(0.0),
-        PrimitiveType::Function(signature) => {
+        Type::Bool => Some(Value::Bool(false)),
+        Type::Void => Some(Value::Void),
+        Type::Char => Some(Value::Char('\0')),
+        Type::Str => Some(Value::Str(String::new())),
+        Type::Bytes => Some(Value::Bytes(Vec::new())),
+        Type::Atom => Some(Value::Atom(String::new())),
+        Type::I8 => Some(Value::I8(0)),
+        Type::I16 => Some(Value::I16(0)),
+        Type::I32 => Some(Value::I32(0)),
+        Type::I64 => Some(Value::I64(0)),
+        Type::U8 => Some(Value::U8(0)),
+        Type::U16 => Some(Value::U16(0)),
+        Type::U32 => Some(Value::U32(0)),
+        Type::U64 => Some(Value::U64(0)),
+        Type::F32 => Value::f32(0.0),
+        Type::F64 => Value::f64(0.0),
+        // Declared and structural types have no placeholder value.
+        Type::Declared(_) | Type::Record(_) | Type::Enum(_) => None,
+        Type::Function(signature) => {
             let body = default_expression(&signature.result(), origin.clone())?;
             return Some(Expr::closure(
                 (**signature).clone(),

@@ -5,8 +5,7 @@
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::external::{CompilerIntrinsic, REGISTRY_VERSION, SemanticIdentity};
 use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, PrimitiveType,
-    SourceOrigin, Value,
+    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
 };
 
 #[test]
@@ -26,13 +25,13 @@ fn registry_contains_only_the_reviewed_text_operations() {
 fn registry_signatures_are_exact_and_backend_neutral() {
     let concat = CompilerIntrinsic::TextConcat.signature();
     assert_eq!(concat.parameters().len(), 2);
-    assert_eq!(concat.parameters()[0], vibra_ir::PrimitiveType::Str);
-    assert_eq!(concat.parameters()[1], vibra_ir::PrimitiveType::Str);
-    assert_eq!(concat.result(), vibra_ir::PrimitiveType::Str);
+    assert_eq!(concat.parameters()[0], vibra_ir::Type::Str);
+    assert_eq!(concat.parameters()[1], vibra_ir::Type::Str);
+    assert_eq!(concat.result(), vibra_ir::Type::Str);
 
     let length = CompilerIntrinsic::TextLength.signature();
-    assert_eq!(length.parameters(), &[vibra_ir::PrimitiveType::Str]);
-    assert_eq!(length.result(), vibra_ir::PrimitiveType::U64);
+    assert_eq!(length.parameters(), &[vibra_ir::Type::Str]);
+    assert_eq!(length.result(), vibra_ir::Type::U64);
 }
 
 #[test]
@@ -59,7 +58,7 @@ fn registry_entries_expose_the_versioned_semantic_identity() {
 #[test]
 fn external_operands_remain_in_recursive_call_analysis() {
     let origin = SourceOrigin::new("recursive-external.vib", ByteSpan::new(0, 1));
-    let recursive = Expr::call(0, Vec::new(), PrimitiveType::Str, origin.clone());
+    let recursive = Expr::call(0, Vec::new(), Type::Str, origin.clone());
     let body = Expr::external(
         CompilerIntrinsic::TextConcat,
         vec![
@@ -70,7 +69,7 @@ fn external_operands_remain_in_recursive_call_analysis() {
     );
     let function = CheckedFunction::new(
         "loop",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Str),
+        FunctionSignature::new(Vec::new(), Type::Str),
         body,
         origin,
     )

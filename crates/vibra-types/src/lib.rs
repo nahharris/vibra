@@ -22,8 +22,8 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
     CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
-    LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin,
-    TestAssertion, Value, external::CompilerIntrinsic,
+    LabelledParameter as IrLabelledParameter, SourceOrigin, TestAssertion, Type, Value,
+    external::CompilerIntrinsic,
 };
 use vibra_syntax::{
     ApplicationBinding, Attribute, BindingFacts, Declaration, Expression,
@@ -410,7 +410,7 @@ fn check_ast_with_text_import_authority(
 #[derive(Clone)]
 struct GlobalHeader {
     name: String,
-    value_type: PrimitiveType,
+    value_type: Type,
     expression: Expression,
     span: ByteSpan,
     source_id: String,
@@ -483,7 +483,7 @@ const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
 #[derive(Clone)]
 struct LocalBinding {
     slot: usize,
-    value_type: PrimitiveType,
+    value_type: Type,
     span: ByteSpan,
     function_targets: Option<FunctionTargetSet>,
 }
@@ -1001,7 +1001,7 @@ enum ResolvedReferenceTarget {
 #[derive(Clone)]
 struct CaptureBinding {
     slot: usize,
-    value_type: PrimitiveType,
+    value_type: Type,
     span: ByteSpan,
     function_targets: Option<FunctionTargetSet>,
 }
@@ -1010,13 +1010,13 @@ struct CaptureBinding {
 enum VisibleStorage {
     Activation {
         slot: usize,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
     },
     Closure {
         slot: usize,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
     },
@@ -1084,7 +1084,7 @@ impl<'a> CheckEnvironment<'a> {
     fn add_binding_type(
         &mut self,
         name: &str,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
     ) -> bool {
         self.add_binding_type_with_function(name, value_type, span, None)
@@ -1093,11 +1093,11 @@ impl<'a> CheckEnvironment<'a> {
     fn add_binding_type_with_function(
         &mut self,
         name: &str,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
         function_index: Option<usize>,
     ) -> bool {
-        let function_targets = if matches!(&value_type, PrimitiveType::Function(_)) {
+        let function_targets = if matches!(&value_type, Type::Function(_)) {
             Some(
                 function_index
                     .map_or_else(FunctionTargetSet::unknown, FunctionTargetSet::known),
@@ -1111,7 +1111,7 @@ impl<'a> CheckEnvironment<'a> {
     fn add_binding_type_with_targets(
         &mut self,
         name: &str,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
     ) -> bool {
@@ -1246,11 +1246,9 @@ impl<'a> CheckEnvironment<'a> {
     }
 }
 
-fn types_match(left: &PrimitiveType, right: &PrimitiveType) -> bool {
+fn types_match(left: &Type, right: &Type) -> bool {
     match (left, right) {
-        (PrimitiveType::Function(left), PrimitiveType::Function(right)) => {
-            left.same_shape(right)
-        }
+        (Type::Function(left), Type::Function(right)) => left.same_shape(right),
         _ => left == right,
     }
 }
@@ -1341,6 +1339,16 @@ fn function_targets_from_expr(
     aliases: &BTreeMap<usize, FunctionTargetSet>,
 ) -> FunctionTargetSet {
     match expression {
+        Expr::Record { .. } | Expr::Variant { .. } | Expr::Newtype { .. } => {
+            FunctionTargetSet::default()
+        }
+        Expr::Project { value_type, .. } => {
+            if matches!(value_type, Type::Function(_)) {
+                FunctionTargetSet::unknown()
+            } else {
+                FunctionTargetSet::default()
+            }
+        }
         Expr::Function { function, .. } => FunctionTargetSet::known(*function),
         Expr::Variable {
             slot, value_type, ..
@@ -1355,7 +1363,7 @@ fn function_targets_from_expr(
                     .and_then(|binding| binding.function_targets.clone())
             })
             .unwrap_or_else(|| {
-                if matches!(value_type, PrimitiveType::Function(_)) {
+                if matches!(value_type, Type::Function(_)) {
                     FunctionTargetSet::unknown()
                 } else {
                     FunctionTargetSet::default()
@@ -1368,7 +1376,7 @@ fn function_targets_from_expr(
             .get(*index)
             .map(|global| global.function_targets.clone())
             .unwrap_or_else(|| {
-                if matches!(value_type, PrimitiveType::Function(_)) {
+                if matches!(value_type, Type::Function(_)) {
                     FunctionTargetSet::unknown()
                 } else {
                     FunctionTargetSet::default()
@@ -1412,7 +1420,7 @@ fn function_targets_from_expr(
             .find(|binding| binding.slot == *slot)
             .and_then(|binding| binding.function_targets.clone())
             .unwrap_or_else(|| {
-                if matches!(value_type, PrimitiveType::Function(_)) {
+                if matches!(value_type, Type::Function(_)) {
                     FunctionTargetSet::unknown()
                 } else {
                     FunctionTargetSet::default()
@@ -1423,7 +1431,7 @@ fn function_targets_from_expr(
         // the function-typed boundary conservatively instead of dropping it
         // to the empty set and manufacturing a singleton hint from a branch.
         Expr::Call {
-            result: PrimitiveType::Function(_),
+            result: Type::Function(_),
             ..
         } => FunctionTargetSet::unknown(),
         Expr::Call { .. }
@@ -1557,8 +1565,8 @@ fn syntax_function_targets(
 fn ensure_expected(
     environment: &mut CheckEnvironment<'_>,
     span: ByteSpan,
-    expected: Option<PrimitiveType>,
-    actual: PrimitiveType,
+    expected: Option<Type>,
+    actual: Type,
 ) {
     if let Some(expected) = expected
         && !types_match(&expected, &actual)
@@ -1654,7 +1662,7 @@ fn check_signature(
                 function.span(),
                 "only monomorphic result types are available in Step 7",
             );
-            PrimitiveType::Void
+            Type::Void
         }
     };
     let mut labelled = Vec::new();
@@ -1783,7 +1791,7 @@ fn compiler_intrinsic(
             .iter()
             .filter_map(|parameter| primitive_type(parameter.value_type()))
             .collect(),
-        primitive_type(function.result()).unwrap_or(PrimitiveType::Void),
+        primitive_type(function.result()).unwrap_or(Type::Void),
     );
     if !actual.same_shape(&expected) {
         diagnostics.push(
@@ -1896,25 +1904,25 @@ fn check_lambda_signature(
     valid.then(|| FunctionSignature::with_labelled(parameters, labelled, result))
 }
 
-fn primitive_type(value: &TypeExpr) -> Option<PrimitiveType> {
+fn primitive_type(value: &TypeExpr) -> Option<Type> {
     match value {
-        TypeExpr::Void => Some(PrimitiveType::Void),
+        TypeExpr::Void => Some(Type::Void),
         TypeExpr::Name(name) => match name.value() {
-            "bool" => Some(PrimitiveType::Bool),
-            "char" => Some(PrimitiveType::Char),
-            "str" => Some(PrimitiveType::Str),
-            "bytes" => Some(PrimitiveType::Bytes),
-            "atom" => Some(PrimitiveType::Atom),
-            "i8" => Some(PrimitiveType::I8),
-            "i16" => Some(PrimitiveType::I16),
-            "i32" => Some(PrimitiveType::I32),
-            "i64" => Some(PrimitiveType::I64),
-            "u8" => Some(PrimitiveType::U8),
-            "u16" => Some(PrimitiveType::U16),
-            "u32" => Some(PrimitiveType::U32),
-            "u64" => Some(PrimitiveType::U64),
-            "f32" => Some(PrimitiveType::F32),
-            "f64" => Some(PrimitiveType::F64),
+            "bool" => Some(Type::Bool),
+            "char" => Some(Type::Char),
+            "str" => Some(Type::Str),
+            "bytes" => Some(Type::Bytes),
+            "atom" => Some(Type::Atom),
+            "i8" => Some(Type::I8),
+            "i16" => Some(Type::I16),
+            "i32" => Some(Type::I32),
+            "i64" => Some(Type::I64),
+            "u8" => Some(Type::U8),
+            "u16" => Some(Type::U16),
+            "u32" => Some(Type::U32),
+            "u64" => Some(Type::U64),
+            "f32" => Some(Type::F32),
+            "f64" => Some(Type::F64),
             _ => None,
         },
         TypeExpr::Function(function)
@@ -1937,9 +1945,9 @@ fn primitive_type(value: &TypeExpr) -> Option<PrimitiveType> {
                 })
                 .collect::<Option<Vec<_>>>()?;
             let result = primitive_type(function.result())?;
-            Some(PrimitiveType::Function(Box::new(
-                FunctionSignature::with_labelled(parameters, labelled, result),
-            )))
+            Some(Type::Function(Box::new(FunctionSignature::with_labelled(
+                parameters, labelled, result,
+            ))))
         }
         TypeExpr::Applied { .. }
         | TypeExpr::Tuple(_)
@@ -1967,21 +1975,21 @@ fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
 fn check_sequence(
     environment: &mut CheckEnvironment<'_>,
     expressions: &[Expression],
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     fallback_span: ByteSpan,
     tail_position: bool,
 ) -> Option<Expr> {
     if expressions.is_empty() {
         if expected
             .as_ref()
-            .is_some_and(|expected| *expected != PrimitiveType::Void)
+            .is_some_and(|expected| *expected != Type::Void)
         {
             mismatch(
                 environment.diagnostics,
                 environment.source_id,
                 fallback_span,
-                expected.clone().unwrap_or(PrimitiveType::Void),
-                PrimitiveType::Void,
+                expected.clone().unwrap_or(Type::Void),
+                Type::Void,
                 "an empty sequence returns void",
             );
             return None;
@@ -2024,7 +2032,7 @@ fn check_sequence(
 fn check_expression(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
 ) -> Option<Expr> {
     check_expression_in_position(environment, expression, expected, false)
 }
@@ -2032,7 +2040,7 @@ fn check_expression(
 fn check_expression_in_position(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     tail_position: bool,
 ) -> Option<Expr> {
     match expression.kind() {
@@ -2050,7 +2058,7 @@ fn check_expression_in_position(
             )
         }),
         ExpressionKind::Name(name) if name.kind() == NameKind::Atom => {
-            let actual = PrimitiveType::Atom;
+            let actual = Type::Atom;
             if expected
                 .as_ref()
                 .is_some_and(|expected| *expected != actual)
@@ -2085,8 +2093,7 @@ fn check_expression_in_position(
                     environment.function_indices.get(name.value()).copied()
                     && let Some(header) = environment.functions.get(index)
                 {
-                    let actual =
-                        PrimitiveType::Function(Box::new(header.signature.clone()));
+                    let actual = Type::Function(Box::new(header.signature.clone()));
                     ensure_expected(
                         environment,
                         expression.span(),
@@ -2184,8 +2191,7 @@ fn check_expression_in_position(
             if let Some(index) = environment.function_indices.get(name.value()).copied()
             {
                 let header = environment.functions.get(index)?;
-                let actual =
-                    PrimitiveType::Function(Box::new(header.signature.clone()));
+                let actual = Type::Function(Box::new(header.signature.clone()));
                 ensure_expected(
                     environment,
                     expression.span(),
@@ -2215,7 +2221,7 @@ fn check_expression_in_position(
                 return None;
             }
             let callee = check_expression(environment, application.callee(), None)?;
-            let PrimitiveType::Function(signature) = callee.result_type() else {
+            let Type::Function(signature) = callee.result_type() else {
                 environment.diagnostics.push(
                     Diagnostic::new(
                         DiagnosticCode::TypeNotApplicable,
@@ -2397,8 +2403,8 @@ fn check_expression_in_position(
             body,
         } => {
             let value = check_expression(environment, value, None)?;
-            let function_targets =
-                matches!(value.result_type(), PrimitiveType::Function(_)).then(|| {
+            let function_targets = matches!(value.result_type(), Type::Function(_))
+                .then(|| {
                     function_targets_from_expr(&value, environment, &BTreeMap::new())
                 });
             let mut nested = CheckEnvironment {
@@ -2470,8 +2476,7 @@ fn check_expression_in_position(
             then_branch,
             else_branch,
         } => {
-            let condition =
-                check_expression(environment, condition, Some(PrimitiveType::Bool))?;
+            let condition = check_expression(environment, condition, Some(Type::Bool))?;
             let then_branch = check_expression_in_position(
                 environment,
                 then_branch,
@@ -2607,7 +2612,7 @@ fn check_expression_in_position(
             let capture_sources = std::mem::take(&mut nested.capture_sources);
             let slot_count = nested.next_slot;
             drop(nested);
-            let actual = PrimitiveType::Function(Box::new(signature.clone()));
+            let actual = Type::Function(Box::new(signature.clone()));
             ensure_expected(
                 environment,
                 expression.span(),
@@ -2667,7 +2672,7 @@ fn resolved_reference_target(
 fn check_resolved_reference(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     target: ResolvedReferenceTarget,
 ) -> Option<Expr> {
     match target {
@@ -2692,7 +2697,7 @@ fn check_resolved_reference(
         }
         ResolvedReferenceTarget::Function(index) => {
             let function = environment.functions.get(index)?;
-            let actual = PrimitiveType::Function(Box::new(function.signature.clone()));
+            let actual = Type::Function(Box::new(function.signature.clone()));
             ensure_expected(
                 environment,
                 expression.span(),
@@ -2715,7 +2720,7 @@ fn check_literal(
     source_id: &str,
     span: ByteSpan,
     literal: &Literal,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
     match literal {
@@ -2723,7 +2728,7 @@ fn check_literal(
             source_id,
             span,
             expected,
-            PrimitiveType::Str,
+            Type::Str,
             Value::Str(value.value().to_owned()),
             diagnostics,
         ),
@@ -2731,7 +2736,7 @@ fn check_literal(
             source_id,
             span,
             expected,
-            PrimitiveType::Char,
+            Type::Char,
             Value::Char(value.value()),
             diagnostics,
         ),
@@ -2739,7 +2744,7 @@ fn check_literal(
             source_id,
             span,
             expected,
-            PrimitiveType::Bool,
+            Type::Bool,
             Value::Bool(value.value()),
             diagnostics,
         ),
@@ -2747,7 +2752,7 @@ fn check_literal(
             source_id,
             span,
             expected,
-            PrimitiveType::Void,
+            Type::Void,
             Value::Void,
             diagnostics,
         ),
@@ -2763,8 +2768,8 @@ fn check_literal(
 fn expect_fixed(
     source_id: &str,
     span: ByteSpan,
-    expected: Option<PrimitiveType>,
-    actual: PrimitiveType,
+    expected: Option<Type>,
+    actual: Type,
     value: Value,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
@@ -2790,7 +2795,7 @@ fn check_integer(
     source_id: &str,
     span: ByteSpan,
     literal: &vibra_syntax::IntegerLiteral,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
     let target = literal
@@ -2802,8 +2807,8 @@ fn check_integer(
             diagnostics,
             source_id,
             span,
-            expected.unwrap_or(PrimitiveType::I64),
-            PrimitiveType::I64,
+            expected.unwrap_or(Type::I64),
+            Type::I64,
             "an unsuffixed integer needs one expected integer type",
         );
         return None;
@@ -2848,7 +2853,7 @@ fn check_float(
     source_id: &str,
     span: ByteSpan,
     literal: &vibra_syntax::FloatLiteral,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
     let target = literal
@@ -2860,20 +2865,20 @@ fn check_float(
             diagnostics,
             source_id,
             span,
-            expected.unwrap_or(PrimitiveType::F64),
-            PrimitiveType::F64,
+            expected.unwrap_or(Type::F64),
+            Type::F64,
             "an unsuffixed float needs one expected floating-point type",
         );
         return None;
     };
     let value = match target {
-        PrimitiveType::F32 => literal
+        Type::F32 => literal
             .body()
             .parse::<f32>()
             .ok()
             .filter(|value| value.is_finite())
             .and_then(Value::f32),
-        PrimitiveType::F64 => literal
+        Type::F64 => literal
             .body()
             .parse::<f64>()
             .ok()
@@ -2907,55 +2912,49 @@ fn check_float(
     Some(value)
 }
 
-fn integer_suffix_type(suffix: IntegerSuffix) -> PrimitiveType {
+fn integer_suffix_type(suffix: IntegerSuffix) -> Type {
     match suffix {
-        IntegerSuffix::I8 => PrimitiveType::I8,
-        IntegerSuffix::I16 => PrimitiveType::I16,
-        IntegerSuffix::I32 => PrimitiveType::I32,
-        IntegerSuffix::I64 => PrimitiveType::I64,
-        IntegerSuffix::U8 => PrimitiveType::U8,
-        IntegerSuffix::U16 => PrimitiveType::U16,
-        IntegerSuffix::U32 => PrimitiveType::U32,
-        IntegerSuffix::U64 => PrimitiveType::U64,
+        IntegerSuffix::I8 => Type::I8,
+        IntegerSuffix::I16 => Type::I16,
+        IntegerSuffix::I32 => Type::I32,
+        IntegerSuffix::I64 => Type::I64,
+        IntegerSuffix::U8 => Type::U8,
+        IntegerSuffix::U16 => Type::U16,
+        IntegerSuffix::U32 => Type::U32,
+        IntegerSuffix::U64 => Type::U64,
     }
 }
 
-fn float_suffix_type(suffix: FloatSuffix) -> PrimitiveType {
+fn float_suffix_type(suffix: FloatSuffix) -> Type {
     match suffix {
-        FloatSuffix::F32 => PrimitiveType::F32,
-        FloatSuffix::F64 => PrimitiveType::F64,
+        FloatSuffix::F32 => Type::F32,
+        FloatSuffix::F64 => Type::F64,
     }
 }
 
-fn integer_value(
-    target: PrimitiveType,
-    negative: bool,
-    magnitude: u128,
-) -> Option<Value> {
+fn integer_value(target: Type, negative: bool, magnitude: u128) -> Option<Value> {
     match target {
-        PrimitiveType::I8 => {
-            signed_value(negative, magnitude, i8::MIN as i128, i8::MAX as i128)
-                .map(|value| Value::I8(value as i8))
-        }
-        PrimitiveType::I16 => {
+        Type::I8 => signed_value(negative, magnitude, i8::MIN as i128, i8::MAX as i128)
+            .map(|value| Value::I8(value as i8)),
+        Type::I16 => {
             signed_value(negative, magnitude, i16::MIN as i128, i16::MAX as i128)
                 .map(|value| Value::I16(value as i16))
         }
-        PrimitiveType::I32 => {
+        Type::I32 => {
             signed_value(negative, magnitude, i32::MIN as i128, i32::MAX as i128)
                 .map(|value| Value::I32(value as i32))
         }
-        PrimitiveType::I64 => {
+        Type::I64 => {
             signed_value(negative, magnitude, i64::MIN as i128, i64::MAX as i128)
                 .map(|value| Value::I64(value as i64))
         }
-        PrimitiveType::U8 => (!negative && magnitude <= u8::MAX as u128)
+        Type::U8 => (!negative && magnitude <= u8::MAX as u128)
             .then_some(Value::U8(magnitude as u8)),
-        PrimitiveType::U16 => (!negative && magnitude <= u16::MAX as u128)
+        Type::U16 => (!negative && magnitude <= u16::MAX as u128)
             .then_some(Value::U16(magnitude as u16)),
-        PrimitiveType::U32 => (!negative && magnitude <= u32::MAX as u128)
+        Type::U32 => (!negative && magnitude <= u32::MAX as u128)
             .then_some(Value::U32(magnitude as u32)),
-        PrimitiveType::U64 => (!negative && magnitude <= u64::MAX as u128)
+        Type::U64 => (!negative && magnitude <= u64::MAX as u128)
             .then_some(Value::U64(magnitude as u64)),
         _ => None,
     }
@@ -2976,8 +2975,8 @@ fn mismatch(
     diagnostics: &mut Vec<Diagnostic>,
     source_id: &str,
     span: ByteSpan,
-    expected: PrimitiveType,
-    actual: PrimitiveType,
+    expected: Type,
+    actual: Type,
     message: impl Into<String>,
 ) {
     diagnostics.push(
@@ -3034,7 +3033,7 @@ mod tests {
                 .entry()
                 .body()
                 .result_type(),
-            vibra_ir::PrimitiveType::I32
+            vibra_ir::Type::I32
         );
     }
 

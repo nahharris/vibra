@@ -10,7 +10,7 @@ use std::fmt;
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, DocumentRevision};
-use vibra_ir::{CallTarget, Expr, FunctionSignature, PrimitiveType};
+use vibra_ir::{CallTarget, Expr, FunctionSignature, Type};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedReference, ResolvedSnapshot};
 use vibra_syntax::{
     Application, Attribute, Declaration, Expression, ExpressionKind, FloatSuffix,
@@ -1185,7 +1185,7 @@ impl<'a> SemanticCollector<'a> {
             arguments,
             ..
         } = expression
-            && let PrimitiveType::Function(signature) = callee.result_type()
+            && let Type::Function(signature) = callee.result_type()
         {
             let mut expected_types = signature.parameters().to_vec();
             expected_types.extend(
@@ -1248,6 +1248,14 @@ impl<'a> SemanticCollector<'a> {
                 }
                 for argument in arguments {
                     self.collect_ir(argument);
+                }
+            }
+            Expr::Record { .. }
+            | Expr::Variant { .. }
+            | Expr::Newtype { .. }
+            | Expr::Project { .. } => {
+                for operand in expression.data_operands() {
+                    self.collect_ir(operand);
                 }
             }
         }
@@ -1579,9 +1587,12 @@ fn primitive_name(value: &str) -> Option<&'static str> {
     })
 }
 
-fn semantic_type_primitive(value: &PrimitiveType) -> Option<SemanticType> {
+fn semantic_type_primitive(value: &Type) -> Option<SemanticType> {
     match value {
-        PrimitiveType::Function(signature) => Some(semantic_type_signature(signature)),
+        Type::Function(signature) => Some(semantic_type_signature(signature)),
+        // Declared and structural type facts are part of the M3 index and
+        // query payloads (Step 15); until then the fact is unavailable.
+        Type::Declared(_) | Type::Record(_) | Type::Enum(_) => None,
         _ => Some(SemanticType::primitive(value.as_str())),
     }
 }
@@ -1676,7 +1687,7 @@ fn ir_application_contract(expression: &Expr) -> Option<ApplicationContract> {
     else {
         return None;
     };
-    let PrimitiveType::Function(signature) = callee.result_type() else {
+    let Type::Function(signature) = callee.result_type() else {
         return None;
     };
     let callee_type = semantic_type_signature(signature.as_ref());
