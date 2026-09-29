@@ -1,1 +1,0 @@
-(deftype value (newtype i32 i64))

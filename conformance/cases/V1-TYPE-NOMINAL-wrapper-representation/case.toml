@@ -1,8 +1,8 @@
-id = "V1-TYPE-NOMINAL-newtype-representation"
+id = "V1-TYPE-NOMINAL-wrapper-representation"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
 operation = "type-check"
-description = "A newtype constructor takes exactly one operand of its representation type."
+description = "A wrapper constructor takes exactly one operand of its representation type."
 
 [inputs]
 source = "input.vib"
@@ -16,10 +16,10 @@ accepted = false
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [64, 68]
+span = [54, 58]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [92, 115]
+span = [82, 105]

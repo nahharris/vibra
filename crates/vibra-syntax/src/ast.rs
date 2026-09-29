@@ -14,15 +14,8 @@ use crate::name::{Name, NameClassification, NameKind};
 use crate::reader::{CstNode, SyntaxKind};
 
 /// Type-expression heads that are never an applied type name.
-const RESERVED_TYPE_HEADS: &[&str] = &[
-    "tuple",
-    "record",
-    "enum",
-    "union",
-    "newtype",
-    "intrinsic-type",
-    "fn",
-];
+const RESERVED_TYPE_HEADS: &[&str] =
+    &["tuple", "record", "enum", "union", "intrinsic-type", "fn"];
 /// Builtin type names; only an `intrinsic-type` declaration may use one.
 const BUILTIN_TYPE_NAMES: &[&str] = &[
     "bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8",
@@ -36,7 +29,6 @@ const RESERVED_EXPRESSION_TYPE_HEADS: &[&str] = &[
     "record",
     "enum",
     "union",
-    "newtype",
     "intrinsic-type",
     "fn",
 ];
@@ -1223,13 +1215,12 @@ impl TypeField {
 /// The body of a `deftype`.
 ///
 /// Structural `record`, `enum`, and `union` bodies are ordinary
-/// [`TypeExpr`]s; only `newtype` and `intrinsic-type` are body-only forms.
+/// [`TypeExpr`]s, and any other type expression declares a wrapper type; only
+/// `intrinsic-type` is a body-only form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeftypeBody {
     /// Any type expression, including the structural forms.
     Type(TypeExpr),
-    /// A one-representation newtype.
-    Newtype(Box<TypeExpr>),
     /// A toolchain builtin type binding, `(intrinsic-type @name)`.
     Intrinsic(Name),
 }
@@ -2599,18 +2590,6 @@ impl AstParser {
 
     fn parse_deftype_body(&mut self, node: &CstNode) -> Option<DeftypeBody> {
         match head_text(node) {
-            Some("newtype") => {
-                let forms = meaningful_children(node);
-                if forms.len() != 2 {
-                    self.invalid_form(
-                        node,
-                        "newtype requires exactly one representation type",
-                    );
-                    return None;
-                }
-                self.parse_type_expr(forms[1])
-                    .map(|value| DeftypeBody::Newtype(Box::new(value)))
-            }
             Some("intrinsic-type") => {
                 let forms = meaningful_children(node);
                 let atom = match forms.as_slice() {
@@ -2721,14 +2700,6 @@ impl AstParser {
                 "record" => self.parse_flat_fields(&forms, true).map(TypeExpr::Record),
                 "enum" => self.parse_flat_fields(&forms, false).map(TypeExpr::Enum),
                 "union" => self.parse_union_members(node, &forms).map(TypeExpr::Union),
-                "newtype" => {
-                    self.error(
-                        DiagnosticCode::TypeAnonymousNewtype,
-                        node.span(),
-                        "a newtype is only valid as a deftype body",
-                    );
-                    None
-                }
                 "intrinsic-type" => {
                     self.invalid_form(
                         node,
@@ -3432,9 +3403,7 @@ fn deftype_member_names(body: &DeftypeBody) -> BTreeSet<String> {
             .iter()
             .map(|field| field.name.value().to_owned())
             .collect(),
-        DeftypeBody::Type(_) | DeftypeBody::Newtype(_) | DeftypeBody::Intrinsic(_) => {
-            BTreeSet::new()
-        }
+        DeftypeBody::Type(_) | DeftypeBody::Intrinsic(_) => BTreeSet::new(),
     }
 }
 

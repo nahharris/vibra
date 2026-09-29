@@ -50,7 +50,7 @@ pub enum TypeBody {
     /// Variants, each with one payload slot; `void` marks a nullary variant.
     Enum(Vec<(String, Type)>),
     /// A distinct identity over one representation type.
-    Newtype(Type),
+    Wrapper(Type),
 }
 
 /// One declared type of a checked program.
@@ -84,7 +84,7 @@ impl TypeDefinition {
     pub fn record_fields(&self) -> Option<&[(String, Type)]> {
         match &self.body {
             TypeBody::Record(fields) => Some(fields),
-            TypeBody::Enum(_) | TypeBody::Newtype(_) => None,
+            TypeBody::Enum(_) | TypeBody::Wrapper(_) => None,
         }
     }
 
@@ -93,7 +93,7 @@ impl TypeDefinition {
     pub fn enum_variants(&self) -> Option<&[(String, Type)]> {
         match &self.body {
             TypeBody::Enum(variants) => Some(variants),
-            TypeBody::Record(_) | TypeBody::Newtype(_) => None,
+            TypeBody::Record(_) | TypeBody::Wrapper(_) => None,
         }
     }
 }
@@ -128,7 +128,7 @@ pub(crate) fn type_table(types: &[TypeDefinition]) -> Result<TypeTable<'_>, IrEr
                     validate_declared_type(member, &table)?;
                 }
             }
-            TypeBody::Newtype(representation) => {
+            TypeBody::Wrapper(representation) => {
                 validate_declared_type(representation, &table)?;
             }
         }
@@ -225,13 +225,13 @@ pub(crate) fn validate_declared_expr(
                     )));
                 }
             }
-            Expr::Newtype {
+            Expr::Wrap {
                 value_type, value, ..
             } => {
-                let TypeBody::Newtype(expected) = definition(table, value_type)?.body()
+                let TypeBody::Wrapper(expected) = definition(table, value_type)?.body()
                 else {
                     return Err(invalid(format!(
-                        "`{}` is not a newtype",
+                        "`{}` is not a wrapper type",
                         value_type.id()
                     )));
                 };

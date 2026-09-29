@@ -757,9 +757,9 @@ pub enum Expr {
         /// The source origin of the complete form.
         origin: SourceOrigin,
     },
-    /// A newtype constructor.
-    Newtype {
-        /// The declared newtype.
+    /// A wrapper-type constructor.
+    Wrap {
+        /// The declared wrapper type.
         value_type: TypeId,
         /// The representation operand.
         value: Box<Self>,
@@ -1070,7 +1070,7 @@ impl Expr {
             | Self::Call { origin, .. }
             | Self::Record { origin, .. }
             | Self::Variant { origin, .. }
-            | Self::Newtype { origin, .. }
+            | Self::Wrap { origin, .. }
             | Self::Project { origin, .. } => origin,
         }
     }
@@ -1098,7 +1098,7 @@ impl Expr {
             Self::Record { value_type, .. }
             | Self::Variant { value_type, .. }
             | Self::Project { value_type, .. } => value_type.clone(),
-            Self::Newtype { value_type, .. } => Type::Declared(value_type.clone()),
+            Self::Wrap { value_type, .. } => Type::Declared(value_type.clone()),
         }
     }
 
@@ -1113,7 +1113,7 @@ impl Expr {
             Self::Variant { payload, .. } => {
                 payload.iter().map(|payload| &**payload).collect()
             }
-            Self::Newtype { value, .. } => vec![value],
+            Self::Wrap { value, .. } => vec![value],
             Self::Project { record, .. } => vec![record],
             _ => Vec::new(),
         }
@@ -1136,7 +1136,7 @@ impl Expr {
             | Self::Call { .. }
             | Self::Record { .. }
             | Self::Variant { .. }
-            | Self::Newtype { .. }
+            | Self::Wrap { .. }
             | Self::Project { .. } => &[],
             Self::Sequence { expressions, .. } => expressions,
         }
@@ -1160,7 +1160,7 @@ impl Expr {
             | Self::Call { .. }
             | Self::Record { .. }
             | Self::Variant { .. }
-            | Self::Newtype { .. }
+            | Self::Wrap { .. }
             | Self::Project { .. } => None,
         }
     }
@@ -1213,7 +1213,7 @@ impl Expr {
             Self::Variant { payload, .. } => {
                 payload.as_deref().map_or(0, Self::slot_count)
             }
-            Self::Newtype { value, .. } => value.slot_count(),
+            Self::Wrap { value, .. } => value.slot_count(),
             Self::Project { record, .. } => record.slot_count(),
         }
     }
@@ -1531,7 +1531,7 @@ impl Expr {
                 }
                 Ok(value_type.clone())
             }
-            Self::Newtype {
+            Self::Wrap {
                 value_type, value, ..
             } => {
                 value.validate_shape_with_captures(slots, capture_types)?;
@@ -2353,7 +2353,7 @@ fn validate_program_expr(
     match expression {
         Expr::Record { .. }
         | Expr::Variant { .. }
-        | Expr::Newtype { .. }
+        | Expr::Wrap { .. }
         | Expr::Project { .. } => {
             for operand in expression.data_operands() {
                 validate_program_expr(
@@ -2736,7 +2736,7 @@ fn possible_function_targets(
     match expression {
         // Constructions are never function values; a projected field may hold
         // any function stored into a record, so its targets are unbounded.
-        Expr::Record { .. } | Expr::Variant { .. } | Expr::Newtype { .. } => {
+        Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
             FunctionTargetSummary::default()
         }
         Expr::Project { .. } => FunctionTargetSummary::unknown(),
@@ -3379,7 +3379,7 @@ impl<'a> CallFlow<'a> {
         visiting: &mut BTreeSet<FlowCallId>,
     ) -> FlowTargetSummary {
         match expression {
-            Expr::Record { .. } | Expr::Variant { .. } | Expr::Newtype { .. } => {
+            Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
                 FlowTargetSummary::default()
             }
             Expr::Project { .. } => FlowTargetSummary::unknown_function(),
@@ -3650,7 +3650,7 @@ impl<'a> CallFlow<'a> {
             }
             Expr::Record { .. }
             | Expr::Variant { .. }
-            | Expr::Newtype { .. }
+            | Expr::Wrap { .. }
             | Expr::Project { .. } => {
                 for operand in expression.data_operands() {
                     self.collect_expr(operand, owner, environment, captures)?;
@@ -4053,7 +4053,7 @@ fn validate_tail_calls(
         | Expr::Captured { .. } => {}
         Expr::Record { .. }
         | Expr::Variant { .. }
-        | Expr::Newtype { .. }
+        | Expr::Wrap { .. }
         | Expr::Project { .. } => {
             for operand in expression.data_operands() {
                 validate_tail_calls(
@@ -4372,10 +4372,10 @@ fn canonical_expr(expression: &Expr) -> String {
                 .map(|payload| format!(" payload: {}", canonical_expr(payload)))
                 .unwrap_or_default()
         ),
-        Expr::Newtype {
+        Expr::Wrap {
             value_type, value, ..
         } => format!(
-            "(record kind: @newtype type: @{} value: {})",
+            "(record kind: @wrap type: @{} value: {})",
             value_type.path(),
             canonical_expr(value)
         ),

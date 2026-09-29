@@ -283,8 +283,9 @@ lambda-attribute = "labelled:", labelled-parameters
 
 `deftype-body` is the type chapter's production for a declaration body. It is
 `type-expr`, which includes the structural `tuple`, `record`, `enum`, and
-`union` forms, plus `newtype` and the toolchain-only `intrinsic-type`, which
-are admissible nowhere else.
+`union` forms, plus the toolchain-only `intrinsic-type`, which is admissible
+nowhere else. A `deftype` over any other type expression declares a wrapper
+type: a distinct identity over one representation type.
 
 `def` introduces an immutable module value. There is no separate `const` form
 in v1.
@@ -324,7 +325,7 @@ Visibility is part of the declaration, not a wrapper form.
 ```vibra
 (import io @std.io)
 
-(deftype user-id (newtype u64)
+(deftype user-id u64
   visibility: @public)
 
 (def default-retries u8 3u8)
@@ -461,7 +462,7 @@ in its owner's scope; a reference is a dotted path through owners, so
 never the spelling of a declaration.
 
 Declared records and tuples are constructed by applying their type to their
-fields, and declared unions and newtypes by applying it to one value. Enum
+fields, and declared unions and wrapper types by applying it to one value. Enum
 tags expose qualified constructors. Anonymous values use the reserved forms
 `tupleof`, `recordof`, and `enumof` that the type chapter defines. A record value is
 applied to an atom selector to read one statically known field; there is no

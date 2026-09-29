@@ -1467,7 +1467,7 @@ fn function_targets_from_expr(
     aliases: &BTreeMap<usize, FunctionTargetSet>,
 ) -> FunctionTargetSet {
     match expression {
-        Expr::Record { .. } | Expr::Variant { .. } | Expr::Newtype { .. } => {
+        Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
             FunctionTargetSet::default()
         }
         Expr::Project { value_type, .. } => {

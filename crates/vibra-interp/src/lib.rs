@@ -365,7 +365,7 @@ enum RuntimeValue {
         variant: String,
         payload: Option<Box<RuntimeValue>>,
     },
-    Newtype {
+    Wrapper {
         type_id: TypeId,
         value: Box<RuntimeValue>,
     },
@@ -670,11 +670,11 @@ impl<'a> Machine<'a> {
                     payload,
                 }))
             }
-            Expr::Newtype {
+            Expr::Wrap {
                 value_type, value, ..
             } => {
                 let value = self.evaluate_value(value, slots, captures)?;
-                Some(Evaluation::Value(RuntimeValue::Newtype {
+                Some(Evaluation::Value(RuntimeValue::Wrapper {
                     type_id: value_type.clone(),
                     value: Box::new(value),
                 }))
@@ -971,7 +971,7 @@ impl<'a> Machine<'a> {
                 RuntimeValue::Function(_)
                 | RuntimeValue::Record { .. }
                 | RuntimeValue::Enum { .. }
-                | RuntimeValue::Newtype { .. } => None,
+                | RuntimeValue::Wrapper { .. } => None,
             })
             .collect::<Option<Vec<_>>>()?;
         let (passed, expected, actual) = match (assertion, values.as_slice()) {
@@ -1097,7 +1097,7 @@ fn runtime_type(value: &RuntimeValue) -> Type {
         }
         RuntimeValue::Record { value_type, .. }
         | RuntimeValue::Enum { value_type, .. } => value_type.clone(),
-        RuntimeValue::Newtype { type_id, .. } => Type::Declared(type_id.clone()),
+        RuntimeValue::Wrapper { type_id, .. } => Type::Declared(type_id.clone()),
     }
 }
 
@@ -1168,7 +1168,7 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
                 None => None,
             },
         },
-        RuntimeValue::Newtype { type_id, value } => ObservedValue::Newtype {
+        RuntimeValue::Wrapper { type_id, value } => ObservedValue::Wrapper {
             type_id,
             value: Box::new(observe(*value)?),
         },

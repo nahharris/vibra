@@ -12,7 +12,7 @@ Prerequisite: Step 4 merged. Stage 3A behavior step.
 
 ## Scope
 
-Literal, declared constructor (record, tuple, enum, newtype), anonymous
+Literal, declared constructor (record, tuple, enum, union, wrapper), anonymous
 `tupleof`, `recordof`, and `enumof`, and array patterns in
 `let`, fixed positional parameters, lambda parameters, and `match`; one
 exhaustiveness engine answering both "does this arm set cover the type" and

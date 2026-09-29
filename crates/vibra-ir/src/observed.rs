@@ -29,9 +29,9 @@ pub enum ObservedValue {
         /// The payload; `None` for a `void` payload slot.
         payload: Option<Box<ObservedValue>>,
     },
-    /// A newtype value.
-    Newtype {
-        /// The declared newtype.
+    /// A wrapper-type value.
+    Wrapper {
+        /// The declared wrapper type.
         type_id: TypeId,
         /// The representation value.
         value: Box<ObservedValue>,
@@ -67,8 +67,8 @@ impl ObservedValue {
                     .map(|payload| format!(" payload: {}", payload.canonical_vibon()))
                     .unwrap_or_default()
             ),
-            Self::Newtype { type_id, value } => format!(
-                "(record kind: @newtype type: @{} value: {})",
+            Self::Wrapper { type_id, value } => format!(
+                "(record kind: @wrapper type: @{} value: {})",
                 type_id.path(),
                 value.canonical_vibon()
             ),
@@ -90,7 +90,7 @@ impl ObservedValue {
     pub const fn as_primitive(&self) -> Option<&Value> {
         match self {
             Self::Primitive(value) => Some(value),
-            Self::Record { .. } | Self::Enum { .. } | Self::Newtype { .. } => None,
+            Self::Record { .. } | Self::Enum { .. } | Self::Wrapper { .. } => None,
         }
     }
 }

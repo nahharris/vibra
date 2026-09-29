@@ -25,7 +25,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `ExpressionKind::EnumOf` | Stage 3A | Step 2 | — |
 | `PatternKind::Binding` | M2 | — | — |
 | `PatternKind::Literal` | Stage 3A | Step 5 | — |
-| `PatternKind::Constructor` | Stage 3A | Step 5 | Record, enum, and newtype constructors |
+| `PatternKind::Constructor` | Stage 3A | Step 5 | Record, tuple, enum, union, and wrapper constructors |
 | `PatternKind::Tuple` | Stage 3A | Step 5 | Spelled `(tupleof …)` from Step 2 |
 | `PatternKind::RecordOf` | Stage 3A | Step 5 | Reader and formatter: Step 2 |
 | `PatternKind::EnumOf` | Stage 3A | Step 5 | Reader and formatter: Step 2 |
@@ -54,8 +54,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `TypeExpr::Map` | Stage 3A | Step 4 | Generic key types: Step 11 |
 | `VariadicType::Array` | Stage 3A | Step 4 | — |
 | `VariadicType::Map` | Stage 3A | Step 4 | — |
-| `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record and enum bodies: Step 2; tuple: Step 4; union: Step 6 |
-| `DeftypeBody::Newtype` | Stage 3A | Step 2 | — |
+| `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record, enum, and wrapper bodies: Step 2; tuple: Step 4; union: Step 6 |
 | `DeftypeBody::Intrinsic` | Stage 3A | Step 4 | Reader: Step 2; standard-library declarations: Steps 4 and 8 |
 | `Attribute::Where` | Stage 3A | Step 3 | `any` bounds only; interface bounds: Step 11 |
 | `Attribute::Labelled` | M2 | — | — |

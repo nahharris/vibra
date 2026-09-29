@@ -688,11 +688,6 @@ fn render_deftype_body(body: &DeftypeBody, output: &mut String) {
             output.push_str(atom.raw());
             output.push(')');
         }
-        DeftypeBody::Newtype(value) => {
-            output.push_str("(newtype ");
-            render_type(value, output);
-            output.push(')');
-        }
     }
 }
 

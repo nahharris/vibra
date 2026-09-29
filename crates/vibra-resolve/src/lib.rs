@@ -1578,9 +1578,7 @@ impl Resolution {
         let (fields, kind) = match body {
             DeftypeBody::Type(TypeExpr::Record(fields)) => (fields, EntityKind::Field),
             DeftypeBody::Type(TypeExpr::Enum(fields)) => (fields, EntityKind::Variant),
-            DeftypeBody::Type(_)
-            | DeftypeBody::Newtype(_)
-            | DeftypeBody::Intrinsic(_) => {
+            DeftypeBody::Type(_) | DeftypeBody::Intrinsic(_) => {
                 return;
             }
         };

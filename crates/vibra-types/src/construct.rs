@@ -2,7 +2,7 @@
 //!
 //! `docs/spec/02-type-system.md` fixes the applicable categories: a declared
 //! record is built from its closed labelled fields, an enum through one of its
-//! variants, a newtype from its representation, and a record value applied to
+//! variants, a wrapper type from its representation, and a record value applied to
 //! one atom selector projects a field. `recordof` builds an anonymous record
 //! and `enumof` an anonymous enum checked against a written expected type.
 
@@ -56,12 +56,12 @@ pub(crate) fn check_constructor(
                 origin,
             }
         }
-        (TypeBody::Newtype(representation), None) => {
+        (TypeBody::Wrapper(representation), None) => {
             let operand =
-                single_positional(environment, application, "a newtype constructor")?;
+                single_positional(environment, application, "a wrapper constructor")?;
             let value =
                 check_operand(environment, operand, Some(representation.clone()))?;
-            Expr::Newtype {
+            Expr::Wrap {
                 value_type: declared.id.clone(),
                 value: Box::new(value),
                 origin,
@@ -120,7 +120,7 @@ pub(crate) fn check_constructor(
             );
             return None;
         }
-        (TypeBody::Record(_) | TypeBody::Newtype(_), Some(member)) => {
+        (TypeBody::Record(_) | TypeBody::Wrapper(_), Some(member)) => {
             environment.diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::NameUnknownSymbol,

@@ -727,7 +727,7 @@ fn type_child_context(
             }
         }
         "tuple" | "union" => Context::Type,
-        "array" | "newtype" => Context::Type,
+        "array" => Context::Type,
         "map" => Context::Type,
         "fn" => match index {
             1 => Context::TypeArgumentList,

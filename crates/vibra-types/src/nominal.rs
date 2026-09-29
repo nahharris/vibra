@@ -70,7 +70,7 @@ pub(crate) struct TypeNames {
 /// A value path that names a type constructor or an enum variant.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ConstructorTarget {
-    /// A declared record or newtype constructor.
+    /// A declared record or wrapper constructor.
     Type(usize),
     /// A declared enum variant constructor.
     Variant(usize, String),
@@ -377,9 +377,6 @@ impl TypeNames {
                 DeftypeBody::Type(TypeExpr::Enum(variants)) => self
                     .lower_members(&source_id, Some(&self_type), variants)
                     .map(TypeBody::Enum),
-                DeftypeBody::Newtype(representation) => self
-                    .lower(&source_id, Some(&self_type), representation)
-                    .map(TypeBody::Newtype),
                 DeftypeBody::Type(TypeExpr::Tuple(_)) => Err(LowerError::Unavailable(
                     "declared tuple types arrive in M3 Step 4",
                 )),
@@ -389,9 +386,10 @@ impl TypeNames {
                 DeftypeBody::Intrinsic(_) => Err(LowerError::Unavailable(
                     "intrinsic-type declarations arrive with the M3 standard library in Step 4",
                 )),
-                DeftypeBody::Type(_) => Err(LowerError::Unavailable(
-                    "a deftype over a non-structural type expression has no constructor; see M3 gap G13",
-                )),
+                // Any other body declares a wrapper type over one representation.
+                DeftypeBody::Type(representation) => self
+                    .lower(&source_id, Some(&self_type), representation)
+                    .map(TypeBody::Wrapper),
             };
             match body {
                 Ok(body) => lowered.push((*index, body)),
@@ -466,7 +464,7 @@ impl TypeNames {
             TypeBody::Record(members) | TypeBody::Enum(members) => members
                 .iter()
                 .any(|(_, member)| self.names_unavailable(member)),
-            TypeBody::Newtype(representation) => self.names_unavailable(representation),
+            TypeBody::Wrapper(representation) => self.names_unavailable(representation),
         }
     }
 
@@ -513,7 +511,7 @@ impl TypeNames {
                             self.direct_edges(member, name, &mut edges);
                         }
                     }
-                    Some(TypeBody::Newtype(representation)) => {
+                    Some(TypeBody::Wrapper(representation)) => {
                         self.direct_edges(representation, "", &mut edges);
                     }
                     None => {}

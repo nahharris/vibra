@@ -20,12 +20,12 @@ end = 12
 code = "@name.reserved-value-spelling"
 level = "@error"
 [expect.diagnostics.span]
-start = 35
-end = 38
+start = 25
+end = 28
 
 [[expect.diagnostics]]
 code = "@syntax.invalid-form"
 level = "@error"
 [expect.diagnostics.span]
-start = 62
-end = 83
+start = 52
+end = 73

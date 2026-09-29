@@ -2,7 +2,7 @@ id = "V1-TYPE-NOMINAL-distinct-identity"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
 operation = "type-check"
-description = "Two declared types with the same structure, and a declared type and its structural body, are different types."
+description = "Two declared types with the same structure, a declared type and its structural body, and a wrapper and its representation are different types."
 
 [inputs]
 source = "input.vib"
@@ -23,3 +23,9 @@ code = "@type.mismatch"
 level = "@error"
 source = "input.vib"
 span = [161, 166]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [220, 225]

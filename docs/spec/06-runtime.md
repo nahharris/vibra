@@ -303,7 +303,7 @@ carries `type: P` as its second field; an anonymous structural value omits it:
 | map | `(record kind: @map entries: (array (tuple k v)...))`, in canonical key order |
 | record | `(record kind: @record type: P fields: (record name: v...))` |
 | enum | `(record kind: @enum type: P variant: @name)`, adding `payload: v` for a non-`void` slot |
-| newtype | `(record kind: @newtype type: P value: v)` |
+| wrapper | `(record kind: @wrapper type: P value: v)` |
 | union | `(record kind: @union type: P member: T value: v)` |
 
 Declared record fields appear in declaration order and anonymous record fields

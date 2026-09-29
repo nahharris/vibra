@@ -1,1 +1,0 @@
-(record type: @celsius value: (record kind: @newtype type: @celsius value: 21.5f64))

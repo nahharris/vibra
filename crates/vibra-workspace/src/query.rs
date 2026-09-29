@@ -1252,7 +1252,7 @@ impl<'a> SemanticCollector<'a> {
             }
             Expr::Record { .. }
             | Expr::Variant { .. }
-            | Expr::Newtype { .. }
+            | Expr::Wrap { .. }
             | Expr::Project { .. } => {
                 for operand in expression.data_operands() {
                     self.collect_ir(operand);

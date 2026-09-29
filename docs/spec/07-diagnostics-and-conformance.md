@@ -57,7 +57,6 @@ table governs.
 | `@type.unknown-record-field` | `@error` |
 | `@type.numeric-out-of-range` | `@error` |
 | `@type.initializer-cycle` | `@error` |
-| `@type.anonymous-newtype` | `@error` |
 | `@type.undispatchable-contract-member` | `@error` |
 | `@type.union-too-few-members` | `@error` |
 | `@type.union-member-overlap` | `@error` |
@@ -447,7 +446,7 @@ effect nor a function-call edge. Collection construction covers heterogeneous
 `tupleof` and `recordof`, `enumof` against a written anonymous enum and its
 rejection without one, homogeneous and expected-empty `array.of`, `array.of`
 passed as a function value, even and duplicate-key `map.of`, declared tuple,
-record, enum, union, and newtype constructors, and rejection of the type forms
+record, enum, union, and wrapper constructors, and rejection of the type forms
 `(tuple ...)`, `(record ...)`, `(enum ...)`, and `(union ...)` in value
 position.
 
@@ -514,11 +513,11 @@ used as a `(map k v)` key without explicit `hashable`, `equatable`, and
 
 Structural-type coverage accepts anonymous `tuple`, `record`, `enum`, and
 `union` types in a parameter, a result, a record field, an enum payload, a
-union member, a `def` annotation, an `as` type, and a `types:` argument, and
-rejects `(newtype ...)` in each of those positions with
-`@type.anonymous-newtype`. It proves that two anonymous records or enums
-written with the same fields or variants in different orders are one type and
-that the formatter rewrites both to canonical order; that anonymous unions
+union member, a `def` annotation, an `as` type, and a `types:` argument. It
+proves that a wrapper `(deftype celsius f64)` is distinct from `f64`; that two
+anonymous records or enums written with the same fields or variants in
+different orders are one type and that the formatter rewrites both to
+canonical order; that anonymous unions
 with the same member set in different orders are one type; that a declared
 `(deftype pair (tuple i32 str))` is distinct from `(tuple i32 str)`; that an
 anonymous type used as an `impl` target is rejected; and that each reserved
@@ -597,7 +596,7 @@ member of the same shape, such as a `(defn empty () self)` factory, selected
 from a written expected type and rejected with `@type.ambiguous-destination`
 where none is written.
 
-`@type.anonymous-newtype`, `@type.undispatchable-contract-member`,
+`@type.undispatchable-contract-member`,
 `@type.union-too-few-members`,
 `@type.union-member-overlap`, `@type.union-member-not-concrete`,
 `@type.overlapping-implementation`, `@type.ambiguous-implementation`,
