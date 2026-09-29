@@ -2,16 +2,12 @@
   outer
   (record z (record a (enum x void y void) b str) m (union (record p i32 q i32) u8)))
 
-(
-  defn
+(defn
   commented
   (value
     (record
-      b
-      i32
+      b i32
       ; stays with b
-      a
-      i32))
+      a i32))
   i32
-  0i32
-)
+  0i32)

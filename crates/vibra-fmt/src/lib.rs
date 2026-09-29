@@ -955,86 +955,66 @@ fn render_declaration_with_comments(
     }
     attribute_groups.sort_by_key(|(order, _, _)| *order);
 
-    output.push('(');
-    for item in items.iter().take(header_count) {
-        render_cst_item(
-            item,
-            source,
-            indent.saturating_add(2),
-            layouts,
-            output,
-            false,
-            context,
-        );
-    }
+    // Canonical order: header, sorted attributes, then the body, with a
+    // `deftype` or `defint` listing its methods before its `impl` blocks.
+    let mut ordered: Vec<(&CstItem<'_>, bool)> = items
+        .iter()
+        .take(header_count)
+        .map(|item| (item, false))
+        .collect();
     for (_, label, value) in attribute_groups {
-        render_cst_item(
-            label,
-            source,
-            indent.saturating_add(2),
-            layouts,
-            output,
-            false,
-            context,
-        );
-        render_cst_item(
-            value,
-            source,
-            indent.saturating_add(2),
-            layouts,
-            output,
-            false,
-            context,
-        );
+        ordered.push((label, false));
+        ordered.push((value, false));
     }
     let body = items.iter().skip(cursor);
     if matches!(head, "deftype" | "defint") {
         for member_head in ["defn", "impl"] {
             for item in body.clone() {
                 if meaningful_head(item.node) == Some(member_head) {
-                    render_cst_item(
-                        item,
-                        source,
-                        indent.saturating_add(2),
-                        layouts,
-                        output,
-                        true,
-                        context,
-                    );
+                    ordered.push((item, true));
                 }
             }
         }
         for item in body {
             if !matches!(meaningful_head(item.node), Some("defn" | "impl")) {
-                render_cst_item(
-                    item,
-                    source,
-                    indent.saturating_add(2),
-                    layouts,
-                    output,
-                    is_native_declaration(item.node),
-                    context,
-                );
+                ordered.push((item, is_native_declaration(item.node)));
             }
         }
     } else {
         for item in body {
-            render_cst_item(
-                item,
-                source,
-                indent.saturating_add(2),
-                layouts,
-                output,
-                is_native_declaration(item.node),
-                context,
-            );
+            ordered.push((item, is_native_declaration(item.node)));
         }
     }
-    output.push('\n');
-    output.push_str(&" ".repeat(indent));
+
+    // The head shares the opening delimiter's line, and the closing delimiter
+    // joins the last item unless a line comment ends it: a delimiter stands
+    // alone only when its neighbour is a comment.
+    output.push('(');
+    let mut ends_in_comment = false;
+    for (index, (item, recurse_declaration)) in ordered.into_iter().enumerate() {
+        ends_in_comment = render_cst_item(
+            item,
+            source,
+            indent.saturating_add(2),
+            layouts,
+            output,
+            recurse_declaration,
+            context,
+            index == 0,
+        );
+    }
+    if ends_in_comment {
+        output.push('\n');
+        output.push_str(&" ".repeat(indent));
+    }
     output.push(')');
 }
 
+/// Renders one declaration item on its own line, or directly after the
+/// opening delimiter when `same_line` holds and it has no leading comment.
+/// Returns whether the item ends in a line comment, after which a closing
+/// delimiter must start a new line.
+#[allow(clippy::too_many_arguments)]
 fn render_cst_item(
     item: &CstItem<'_>,
     source: &str,
@@ -1043,14 +1023,17 @@ fn render_cst_item(
     output: &mut String,
     recurse_declaration: bool,
     context: &mut RenderContext<'_>,
-) {
+    same_line: bool,
+) -> bool {
     for comment in &item.leading {
         output.push('\n');
         output.push_str(&" ".repeat(indent));
         output.push_str(&comment_text(comment));
     }
-    output.push('\n');
-    output.push_str(&" ".repeat(indent));
+    if !same_line || !item.leading.is_empty() {
+        output.push('\n');
+        output.push_str(&" ".repeat(indent));
+    }
     if recurse_declaration {
         render_declaration_with_comments(
             item.node, source, indent, layouts, output, context,
@@ -1063,6 +1046,7 @@ fn render_cst_item(
         output.push_str(&" ".repeat(indent));
         output.push_str(&comment_text(comment));
     }
+    !item.trailing.is_empty()
 }
 
 fn cst_items<'source>(node: &'source CstNode, source: &str) -> Vec<CstItem<'source>> {
@@ -1490,7 +1474,7 @@ fn render_node(
                         .and_then(|context| context.binding_facts(node.span()))
                     {
                         match bound_application_groups(node, source, &facts) {
-                            Ok((mut groups, changed)) => {
+                            Ok((groups, changed)) => {
                                 if changed && let Some(context) = context.as_deref_mut()
                                 {
                                     context.argument_order_diagnostic_span(node.span());
@@ -1519,48 +1503,9 @@ fn render_node(
                                         }
                                     }
                                 } else {
-                                    let head_group = groups.remove(0);
-                                    let last = groups
-                                        .last()
-                                        .and_then(|group| group.items.last())
-                                        .and_then(|item| match item {
-                                            LineComponent::Node(node) => Some(node),
-                                            LineComponent::Comment(_) => None,
-                                        });
-                                    let last_is_node = last.is_some_and(|last| {
-                                        layouts.get(&node_key(last)).is_some_and(
-                                            |child_layout| {
-                                                if child_layout.inline {
-                                                    indent
-                                                        .saturating_add(2)
-                                                        .saturating_add(
-                                                            child_layout.inline_width,
-                                                        )
-                                                        .saturating_add(1)
-                                                        <= 88
-                                                } else {
-                                                    true
-                                                }
-                                            },
-                                        )
-                                    });
-                                    if last_is_node {
-                                        tasks.push(RenderTask::Raw(")"));
-                                    } else {
-                                        tasks.push(RenderTask::CloseList(indent));
-                                    }
-                                    for group in groups.into_iter().rev() {
-                                        tasks.push(RenderTask::BoundGroup {
-                                            items: group.items,
-                                            indent: indent.saturating_add(2),
-                                            first: false,
-                                        });
-                                    }
-                                    tasks.push(RenderTask::BoundGroup {
-                                        items: head_group.items,
-                                        indent,
-                                        first: true,
-                                    });
+                                    push_multiline_groups(
+                                        &mut tasks, groups, indent, layouts,
+                                    );
                                 }
                                 continue;
                             }
@@ -1592,6 +1537,11 @@ fn render_node(
                             }
                         }
                     } else {
+                        if let Some(groups) = pair_groups(node, source) {
+                            output.push('(');
+                            push_multiline_groups(&mut tasks, groups, indent, layouts);
+                            continue;
+                        }
                         if let Some(match_layout) = match_layout(node, source) {
                             output.push('(');
                             let last_arm = match_layout.arms.last();
@@ -1851,6 +1801,106 @@ fn multiline_components(node: &CstNode) -> Vec<LineComponent<'_>> {
     }
     components.extend(comments.into_iter().map(LineComponent::Comment));
     components
+}
+
+/// Schedules a multiline list rendered as line groups: the head group on the
+/// opening line, then one line per group. The closing delimiter joins the last
+/// form unless that form is a comment or does not fit beside it.
+fn push_multiline_groups<'source>(
+    tasks: &mut Vec<RenderTask<'source>>,
+    mut groups: Vec<BoundGroup<'source>>,
+    indent: usize,
+    layouts: &HashMap<*const CstNode, NodeLayout>,
+) {
+    if groups.is_empty() {
+        tasks.push(RenderTask::Raw(")"));
+        return;
+    }
+    let head_group = groups.remove(0);
+    let last = groups
+        .last()
+        .unwrap_or(&head_group)
+        .items
+        .last()
+        .and_then(|item| match item {
+            LineComponent::Node(node) => Some(node),
+            LineComponent::Comment(_) => None,
+        });
+    let last_is_node = last.is_some_and(|last| {
+        layouts.get(&node_key(last)).is_some_and(|child_layout| {
+            if child_layout.inline {
+                indent
+                    .saturating_add(2)
+                    .saturating_add(child_layout.inline_width)
+                    .saturating_add(1)
+                    <= 88
+            } else {
+                true
+            }
+        })
+    });
+    if last_is_node {
+        tasks.push(RenderTask::Raw(")"));
+    } else {
+        tasks.push(RenderTask::CloseList(indent));
+    }
+    for group in groups.into_iter().rev() {
+        tasks.push(RenderTask::BoundGroup {
+            items: group.items,
+            indent: indent.saturating_add(2),
+            first: false,
+        });
+    }
+    tasks.push(RenderTask::BoundGroup {
+        items: head_group.items,
+        indent,
+        first: true,
+    });
+}
+
+/// Line groups for a multiline `record` or `enum` type: the head, then one
+/// name/type pair per line, each with the comments attached to its forms.
+/// Returns `None` for any other list or for a malformed pair list.
+fn pair_groups<'source>(
+    node: &'source CstNode,
+    source: &str,
+) -> Option<Vec<BoundGroup<'source>>> {
+    if !matches!(meaningful_head(node), Some("record" | "enum")) {
+        return None;
+    }
+    let bound = bound_nodes(node, source);
+    let (head, members) = bound.split_first()?;
+    if members.is_empty() || !members.len().is_multiple_of(2) {
+        return None;
+    }
+    // A source type names its members with bare symbols. A VIBON data record
+    // uses `label: value` entries and keeps the generic data layout.
+    if members.iter().step_by(2).any(|member| {
+        member
+            .node
+            .leaf_text()
+            .is_none_or(|text| text.ends_with(':'))
+    }) {
+        return None;
+    }
+    let group = |forms: &[BoundNode<'source>]| BoundGroup {
+        nodes: forms.iter().map(|bound| bound.node).collect(),
+        items: forms
+            .iter()
+            .flat_map(|bound| {
+                bound
+                    .leading
+                    .iter()
+                    .copied()
+                    .map(LineComponent::Comment)
+                    .chain(std::iter::once(LineComponent::Node(bound.node)))
+                    .chain(bound.trailing.iter().copied().map(LineComponent::Comment))
+            })
+            .collect(),
+    };
+    let mut groups = vec![group(std::slice::from_ref(head))];
+    groups.extend(members.chunks_exact(2).map(group));
+    Some(groups)
 }
 
 fn bound_application_groups<'source>(

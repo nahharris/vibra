@@ -1,6 +1,6 @@
 # Milestone 3 step plan
 
-Status: Step 1 landed; Step 2 in review
+Status: Steps 1–2 landed
 Milestone: [Milestone 3 — complete nominal static core](../v1.md#milestone-3--complete-nominal-static-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m3`
@@ -98,7 +98,7 @@ failures through a nominal error union with `try`, with no interfaces.
 | Step | One-PR slice | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
 | 1 | [Freeze Stage 3A contracts](01-contracts.md) — specification/infrastructure prerequisite | M2 on `main`; this bootstrap | landed | PR #307, merge `23d5067` |
-| 2 | [Structural and nominal data: reader and formatter support for anonymous `tuple`/`record`/`enum`/`union` types, `tupleof`/`recordof`/`enumof`, and `intrinsic-type`; `deftype` record/enum/wrapper bodies, type-name resolution, flat member namespace, finite-size check, anonymous-body rejection, constructors, record projection, nested non-interface methods](02-nominal.md) | 1 | landed | Step 2 PR (conditional on merge) |
+| 2 | [Structural and nominal data: reader and formatter support for anonymous `tuple`/`record`/`enum`/`union` types, `tupleof`/`recordof`/`enumof`, and `intrinsic-type`; `deftype` record/enum/wrapper bodies, type-name resolution, flat member namespace, finite-size check, anonymous-body rejection, constructors, record projection, nested non-interface methods](02-nominal.md) | 1 | landed | PR #308, merge `bd15e36` |
 | 3 | [Parametric generics (scope per G1): `where:` with `any`, applied types, invariant inference, complete `types:` lists including inherited names, reserved `types` label, the shared unifier](03-generics.md) | 2 | not started | — |
 | 4 | [Collections: anonymous and declared tuples with `tupleof`, `array`/`map` types with `array.of`/`map.of`, tuple projection, bounds/presence lookups returning `option`, variadic array/map declarations and operands, admissible map keys (per G2), canonical map order](04-collections.md) | 3 | not started | — |
 | 5 | [Patterns and `match`: literal, constructor, tuple, record, and array patterns; destructuring `let`, parameters, and lambdas; the shared exhaustiveness/irrefutability engine; unreachable arms](05-patterns.md) | 4 | not started | — |
