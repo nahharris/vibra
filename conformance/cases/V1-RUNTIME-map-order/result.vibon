@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array (record type: @map arguments: (array @str @i32)) (record type: @map arguments: (array @str @i32)))) value: (record kind: @tuple values: (array (record kind: @map entries: (array (tuple "a" 1i32) (tuple "b" 3i32))) (record kind: @map entries: (array (tuple "a" 1i32) (tuple "b" 3i32))))))

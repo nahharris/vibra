@@ -2266,7 +2266,7 @@ fn pack_tail(tail: &Type, operands: Vec<Expr>, origin: SourceOrigin) -> Expr {
     }
 }
 
-/// Reports every map type in `value_type` whose key is inadmissible, as
+/// Reports the first map type in `value_type` whose key is inadmissible, as
 /// `@type.invalid-map-key` (or `@type.function-not-equatable` for a function
 /// key) at the application that inferred it. Returns whether all are valid.
 fn check_inferred_map_keys(
@@ -2274,31 +2274,39 @@ fn check_inferred_map_keys(
     span: ByteSpan,
     value_type: &Type,
 ) -> bool {
-    let mut valid = true;
+    let Some((code, key)) = first_invalid_map_key(value_type) else {
+        return true;
+    };
+    environment.diagnostics.push(
+        Diagnostic::new(
+            code,
+            span,
+            format!("the inferred map key type {key} is not an admissible key"),
+        )
+        .with_source_id(environment.source_id),
+    );
+    false
+}
+
+fn first_invalid_map_key(value_type: &Type) -> Option<(DiagnosticCode, Type)> {
     if let Type::Map(key, _) = value_type {
-        let code = match nominal::map_key(key) {
-            nominal::KeyVerdict::Admissible | nominal::KeyVerdict::Generic => None,
+        match nominal::map_key(key) {
+            nominal::KeyVerdict::Admissible | nominal::KeyVerdict::Generic => {}
             nominal::KeyVerdict::Function => {
-                Some(DiagnosticCode::TypeFunctionNotEquatable)
+                return Some((
+                    DiagnosticCode::TypeFunctionNotEquatable,
+                    key.as_ref().clone(),
+                ));
             }
-            nominal::KeyVerdict::Invalid => Some(DiagnosticCode::TypeInvalidMapKey),
-        };
-        if let Some(code) = code {
-            environment.diagnostics.push(
-                Diagnostic::new(
-                    code,
-                    span,
-                    format!("the inferred map key type {key} is not an admissible key"),
-                )
-                .with_source_id(environment.source_id),
-            );
-            valid = false;
+            nominal::KeyVerdict::Invalid => {
+                return Some((DiagnosticCode::TypeInvalidMapKey, key.as_ref().clone()));
+            }
         }
     }
-    for component in value_type.components() {
-        valid &= check_inferred_map_keys(environment, span, &component);
-    }
-    valid
+    value_type
+        .components()
+        .iter()
+        .find_map(first_invalid_map_key)
 }
 
 /// The generic callee of one application and what the call site wrote.

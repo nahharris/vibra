@@ -70,3 +70,32 @@ User-declared map types whose key is a generic parameter stay
 Inventory rows for the tuple/array/map types, variadics, and `Declaration::Import`
 input replacement reference their cases; M2 row C1.6 is implemented;
 validation passes.
+
+## Delivery notes
+
+- The embedded input lives at `stdlib/manifest.vibon` and `stdlib/src/std/`,
+  loaded by `crates/vibra-types/src/stdlib.rs` (`load_stdlib`). Loading also
+  rejects an embedded module without a manifest entry and a module binding a
+  compiler symbol the manifest does not list. The M2 trust section is gone
+  from the spec, and `ring` and `base64` left the dependency graph.
+- Step 4 embeds `@std.text`, `@std.option`, `@std.builtin`, and `@std.assert`;
+  the other modules of the M3 set arrive with Steps 7 and 8.
+- `@std.option` joins every checking run under its canonical identity, so a
+  lookup answers with it whether or not the module imports it. A single
+  source may write `(import option @std.option)`.
+- `@std.builtin` declares `array` and `map` with `intrinsic-type`; every member
+  binds a registry operation (G16, ledger D16.1). Both check paths add a
+  member's header only when a module names it, the workspace resolver maps a
+  `type.member` path to its fixed `@std.builtin` identity, and an unknown
+  member is `@name.unknown-symbol`.
+- IR `Type` gains `Tuple`, `Array`, and `Map`; a variadic tail is part of the
+  function signature and a call passes it packed as one final argument.
+- The interpreter keeps map entries sorted by canonical key order with no
+  hashing, so no host hash order is reachable.
+- G12 is closed in the call-flow analysis: an unknown call target stands for
+  every function named as a value and every closure in the program, whose
+  captured callables are unknown in turn. Calls through record fields,
+  collections, and callback parameters are admitted, and recursive groups are
+  computed over that over-approximation.
+- Collection cases use the `V1-TYPE-NOMINAL` rule, which owns map keys and
+  constructors.

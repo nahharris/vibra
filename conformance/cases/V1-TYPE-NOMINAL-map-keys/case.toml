@@ -1,0 +1,47 @@
+id = "V1-TYPE-NOMINAL-map-keys"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "Floats, void, arrays, and declared types are not map keys, a function key is not equatable, and an inferred key type is checked at its application."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-map-key"
+level = "@error"
+source = "input.vib"
+span = [48, 63]
+
+[[expect.diagnostics]]
+code = "@type.invalid-map-key"
+level = "@error"
+source = "input.vib"
+span = [89, 105]
+
+[[expect.diagnostics]]
+code = "@type.invalid-map-key"
+level = "@error"
+source = "input.vib"
+span = [132, 155]
+
+[[expect.diagnostics]]
+code = "@type.invalid-map-key"
+level = "@error"
+source = "input.vib"
+span = [181, 197]
+
+[[expect.diagnostics]]
+code = "@type.function-not-equatable"
+level = "@error"
+source = "input.vib"
+span = [227, 250]
+
+[[expect.diagnostics]]
+code = "@type.invalid-map-key"
+level = "@error"
+source = "input.vib"
+span = [292, 312]

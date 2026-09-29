@@ -524,7 +524,7 @@ impl TypeNames {
                     "declared union types arrive in M3 Step 6",
                 )),
                 DeftypeBody::Intrinsic(_) => Err(LowerError::Unavailable(
-                    "intrinsic-type declarations arrive with the M3 standard library in Step 4",
+                    "intrinsic-type is admissible only in the embedded standard library",
                 )),
                 // Any other body declares a wrapper type over one representation.
                 DeftypeBody::Type(representation) => self
@@ -1005,7 +1005,15 @@ pub(crate) fn map_key(key: &Type) -> KeyVerdict {
         Type::Function(_) => KeyVerdict::Function,
         Type::Param(_) => KeyVerdict::Generic,
         Type::Tuple(_) | Type::Record(_) | Type::Enum(_) => {
-            let verdicts = key.components().iter().map(map_key).collect::<Vec<_>>();
+            // A `void` enum payload marks a nullary variant, not a component.
+            let verdicts = key
+                .components()
+                .iter()
+                .filter(|component| {
+                    !(matches!(key, Type::Enum(_)) && **component == Type::Void)
+                })
+                .map(map_key)
+                .collect::<Vec<_>>();
             [
                 KeyVerdict::Function,
                 KeyVerdict::Generic,
