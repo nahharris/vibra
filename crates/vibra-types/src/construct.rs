@@ -82,6 +82,45 @@ pub(crate) fn check_constructor(
                 origin,
             }
         }
+        (TypeBody::Tuple(components), None) => {
+            let operands = application.arguments();
+            if operands.len() != components.len()
+                || operands.iter().any(|operand| operand.label().is_some())
+            {
+                call_contract_error(
+                    environment,
+                    application.span(),
+                    format!(
+                        "a `{}` constructor takes exactly {} unlabelled operands, one per component",
+                        declared.name,
+                        components.len()
+                    ),
+                );
+                return None;
+            }
+            binding = ConstructorBinding::positional(components.len());
+            let mut checked = Vec::with_capacity(components.len());
+            for (component, operand) in components.iter().zip(operands) {
+                let component = instantiation.open(component);
+                checked.push(check_inferred_operand(
+                    environment,
+                    &mut instantiation,
+                    operand.value(),
+                    &component,
+                    types_written,
+                )?);
+            }
+            Expr::Tuple {
+                value_type: instantiated(
+                    environment,
+                    application,
+                    &instantiation,
+                    &pattern,
+                )?,
+                components: checked,
+                origin,
+            }
+        }
         (TypeBody::Wrapper(representation), None) => {
             let operand =
                 single_positional(environment, application, "a wrapper constructor")?;
@@ -176,7 +215,10 @@ pub(crate) fn check_constructor(
             );
             return None;
         }
-        (TypeBody::Record(_) | TypeBody::Wrapper(_), Some(member)) => {
+        (
+            TypeBody::Record(_) | TypeBody::Wrapper(_) | TypeBody::Tuple(_),
+            Some(member),
+        ) => {
             environment.diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::NameUnknownSymbol,

@@ -145,28 +145,11 @@ pub(crate) fn display(value: &Type) -> Type {
 }
 
 fn collect_parameters(value: &Type, found: &mut Vec<String>) {
-    match value {
-        Type::Param(name) => found.push(name.clone()),
-        Type::Applied(_, arguments) => {
-            for argument in arguments {
-                collect_parameters(argument, found);
-            }
-        }
-        Type::Record(members) | Type::Enum(members) => {
-            for (_, member) in members {
-                collect_parameters(member, found);
-            }
-        }
-        Type::Function(signature) => {
-            for parameter in signature.parameters() {
-                collect_parameters(parameter, found);
-            }
-            for parameter in signature.labelled() {
-                collect_parameters(&parameter.value_type(), found);
-            }
-            collect_parameters(&signature.result(), found);
-        }
-        _ => {}
+    if let Type::Param(name) = value {
+        found.push(name.clone());
+    }
+    for component in value.components() {
+        collect_parameters(&component, found);
     }
 }
 
@@ -174,19 +157,7 @@ fn collect_parameters(value: &Type, found: &mut Vec<String>) {
 pub(crate) fn has_variables(value: &Type) -> bool {
     match value {
         Type::Param(name) => is_variable(name),
-        Type::Applied(_, arguments) => arguments.iter().any(has_variables),
-        Type::Record(members) | Type::Enum(members) => {
-            members.iter().any(|(_, member)| has_variables(member))
-        }
-        Type::Function(signature) => {
-            signature.parameters().iter().any(has_variables)
-                || signature
-                    .labelled()
-                    .iter()
-                    .any(|parameter| has_variables(&parameter.value_type()))
-                || has_variables(&signature.result())
-        }
-        _ => false,
+        _ => value.components().iter().any(has_variables),
     }
 }
 
@@ -253,6 +224,16 @@ pub(crate) fn unify(
         (Type::Function(left_signature), Type::Function(right_signature)) => {
             unify_signatures(left_signature, right_signature, bindings)
         }
+        (Type::Tuple(_), Type::Tuple(_))
+        | (Type::Array(_), Type::Array(_))
+        | (Type::Map(_, _), Type::Map(_, _)) => {
+            let (left, right) = (left.components(), right.components());
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(&right)
+                    .all(|(left, right)| unify(left, right, bindings))
+        }
         _ => left.same_shape(&right),
     }
 }
@@ -281,24 +262,10 @@ fn unify_signatures(
 fn occurs(variable: &str, value: &Type) -> bool {
     match value {
         Type::Param(name) => name == variable,
-        Type::Applied(_, arguments) => {
-            arguments.iter().any(|value| occurs(variable, value))
-        }
-        Type::Record(members) | Type::Enum(members) => {
-            members.iter().any(|(_, member)| occurs(variable, member))
-        }
-        Type::Function(signature) => {
-            signature
-                .parameters()
-                .iter()
-                .any(|value| occurs(variable, value))
-                || signature
-                    .labelled()
-                    .iter()
-                    .any(|parameter| occurs(variable, &parameter.value_type()))
-                || occurs(variable, &signature.result())
-        }
-        _ => false,
+        _ => value
+            .components()
+            .iter()
+            .any(|component| occurs(variable, component)),
     }
 }
 

@@ -1523,10 +1523,14 @@ fn function_targets_from_expr(
     aliases: &BTreeMap<usize, FunctionTargetSet>,
 ) -> FunctionTargetSet {
     match expression {
-        Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
-            FunctionTargetSet::default()
-        }
-        Expr::Project { value_type, .. } => {
+        Expr::Record { .. }
+        | Expr::Variant { .. }
+        | Expr::Wrap { .. }
+        | Expr::Tuple { .. }
+        | Expr::Array { .. }
+        | Expr::Map { .. }
+        | Expr::Lookup { .. } => FunctionTargetSet::default(),
+        Expr::Project { value_type, .. } | Expr::TupleProject { value_type, .. } => {
             if matches!(value_type, Type::Function(_)) {
                 FunctionTargetSet::unknown()
             } else {

@@ -369,6 +369,19 @@ enum RuntimeValue {
         value_type: Type,
         value: Box<RuntimeValue>,
     },
+    Tuple {
+        value_type: Type,
+        values: Vec<RuntimeValue>,
+    },
+    Array {
+        value_type: Type,
+        values: Vec<RuntimeValue>,
+    },
+    /// Entries in canonical key order, so no host hash order is reachable.
+    Map {
+        value_type: Type,
+        entries: Vec<(RuntimeValue, RuntimeValue)>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -690,6 +703,13 @@ impl<'a> Machine<'a> {
                     .find(|(name, _)| name == field)
                     .map(|(_, value)| Evaluation::Value(value))
             }
+            Expr::Tuple { .. }
+            | Expr::TupleProject { .. }
+            | Expr::Array { .. }
+            | Expr::Map { .. }
+            | Expr::Lookup { .. } => {
+                self.evaluate_collection(expression, slots, captures)
+            }
             Expr::Let {
                 slot, value, body, ..
             } => self.evaluate_let(*slot, value, body, slots, captures),
@@ -709,6 +729,89 @@ impl<'a> Machine<'a> {
                 target, arguments, result, *tail, origin, slots, captures,
             ),
         }
+    }
+
+    /// Evaluates tuple, array, and map construction, tuple projection, and
+    /// lookup. Operands evaluate from left to right; lookups never trap and
+    /// answer with the standard `option`.
+    #[inline(never)]
+    fn evaluate_collection(
+        &mut self,
+        expression: &Expr,
+        slots: &mut Frame,
+        captures: &[RuntimeValue],
+    ) -> Option<Evaluation> {
+        let value = match expression {
+            Expr::Tuple {
+                value_type,
+                components,
+                ..
+            } => RuntimeValue::Tuple {
+                value_type: value_type.clone(),
+                values: self.evaluate_all(components, slots, captures)?,
+            },
+            Expr::TupleProject { tuple, index, .. } => {
+                let RuntimeValue::Tuple { values, .. } =
+                    self.evaluate_value(tuple, slots, captures)?
+                else {
+                    return None;
+                };
+                values.into_iter().nth(*index)?
+            }
+            Expr::Array {
+                value_type,
+                elements,
+                ..
+            } => RuntimeValue::Array {
+                value_type: value_type.clone(),
+                values: self.evaluate_all(elements, slots, captures)?,
+            },
+            Expr::Map {
+                value_type,
+                entries,
+                ..
+            } => {
+                let mut ordered = Vec::with_capacity(entries.len());
+                for (key, value) in entries {
+                    let key = self.evaluate_value(key, slots, captures)?;
+                    let value = self.evaluate_value(value, slots, captures)?;
+                    insert_entry(&mut ordered, key, value);
+                }
+                RuntimeValue::Map {
+                    value_type: value_type.clone(),
+                    entries: ordered,
+                }
+            }
+            Expr::Lookup {
+                collection,
+                key,
+                value_type,
+                ..
+            } => {
+                let collection = self.evaluate_value(collection, slots, captures)?;
+                let key = self.evaluate_value(key, slots, captures)?;
+                let found = lookup(collection, &key);
+                RuntimeValue::Enum {
+                    value_type: value_type.clone(),
+                    variant: if found.is_some() { "some" } else { "none" }.to_owned(),
+                    payload: found.map(Box::new),
+                }
+            }
+            _ => return None,
+        };
+        Some(Evaluation::Value(value))
+    }
+
+    fn evaluate_all(
+        &mut self,
+        expressions: &[Expr],
+        slots: &mut Frame,
+        captures: &[RuntimeValue],
+    ) -> Option<Vec<RuntimeValue>> {
+        expressions
+            .iter()
+            .map(|expression| self.evaluate_value(expression, slots, captures))
+            .collect()
     }
 
     /// Evaluates record fields in their checked evaluation order, then stores
@@ -968,10 +1071,7 @@ impl<'a> Machine<'a> {
             .into_iter()
             .map(|value| match value {
                 RuntimeValue::Primitive(value) => Some(value),
-                RuntimeValue::Function(_)
-                | RuntimeValue::Record { .. }
-                | RuntimeValue::Enum { .. }
-                | RuntimeValue::Wrapper { .. } => None,
+                _ => None,
             })
             .collect::<Option<Vec<_>>>()?;
         let (passed, expected, actual) = match (assertion, values.as_slice()) {
@@ -1097,7 +1197,10 @@ fn runtime_type(value: &RuntimeValue) -> Type {
         }
         RuntimeValue::Record { value_type, .. }
         | RuntimeValue::Enum { value_type, .. } => value_type.clone(),
-        RuntimeValue::Wrapper { value_type, .. } => value_type.clone(),
+        RuntimeValue::Wrapper { value_type, .. }
+        | RuntimeValue::Tuple { value_type, .. }
+        | RuntimeValue::Array { value_type, .. }
+        | RuntimeValue::Map { value_type, .. } => value_type.clone(),
     }
 }
 
@@ -1172,7 +1275,158 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
             type_id: declared_id(&value_type)?,
             value: Box::new(observe(*value)?),
         },
+        RuntimeValue::Tuple { value_type, values } => ObservedValue::Tuple {
+            type_id: declared_id(&value_type),
+            values: values
+                .into_iter()
+                .map(observe)
+                .collect::<Option<Vec<_>>>()?,
+        },
+        RuntimeValue::Array { values, .. } => ObservedValue::Array(
+            values
+                .into_iter()
+                .map(observe)
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        RuntimeValue::Map { entries, .. } => ObservedValue::Map(
+            entries
+                .into_iter()
+                .map(|(key, value)| Some((observe(key)?, observe(value)?)))
+                .collect::<Option<Vec<_>>>()?,
+        ),
     })
+}
+
+/// Canonical key order over admissible key values
+/// (`docs/spec/02-type-system.md`, "Nominal declarations"): `false` before
+/// `true`, numeric order for integers, scalar order for `char` and `str`,
+/// byte order for `bytes` and for an atom's spelling, and component-wise
+/// order for tuples, records in canonical field order, and enums by canonical
+/// variant then payload. Keys of one map share one type, so values of
+/// different shapes never meet; they compare equal only to stay total.
+fn key_order(left: &RuntimeValue, right: &RuntimeValue) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (left, right) {
+        (RuntimeValue::Primitive(left), RuntimeValue::Primitive(right)) => {
+            primitive_order(left, right)
+        }
+        (
+            RuntimeValue::Tuple { values: left, .. },
+            RuntimeValue::Tuple { values: right, .. },
+        ) => sequence_order(left.iter(), right.iter()),
+        (
+            RuntimeValue::Record { fields: left, .. },
+            RuntimeValue::Record { fields: right, .. },
+        ) => sequence_order(
+            left.iter().map(|(_, value)| value),
+            right.iter().map(|(_, value)| value),
+        ),
+        (
+            RuntimeValue::Enum {
+                variant: left_variant,
+                payload: left_payload,
+                ..
+            },
+            RuntimeValue::Enum {
+                variant: right_variant,
+                payload: right_payload,
+                ..
+            },
+        ) => left_variant
+            .as_bytes()
+            .cmp(right_variant.as_bytes())
+            .then_with(|| match (left_payload, right_payload) {
+                (Some(left), Some(right)) => key_order(left, right),
+                _ => Ordering::Equal,
+            }),
+        _ => Ordering::Equal,
+    }
+}
+
+fn sequence_order<'a>(
+    left: impl Iterator<Item = &'a RuntimeValue>,
+    right: impl Iterator<Item = &'a RuntimeValue>,
+) -> std::cmp::Ordering {
+    let mut right = right;
+    for left in left {
+        let Some(right) = right.next() else {
+            return std::cmp::Ordering::Greater;
+        };
+        let order = key_order(left, right);
+        if order.is_ne() {
+            return order;
+        }
+    }
+    if right.next().is_some() {
+        std::cmp::Ordering::Less
+    } else {
+        std::cmp::Ordering::Equal
+    }
+}
+
+fn primitive_order(left: &Value, right: &Value) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (left, right) {
+        (Value::Bool(left), Value::Bool(right)) => left.cmp(right),
+        (Value::Char(left), Value::Char(right)) => left.cmp(right),
+        // UTF-8 byte order is scalar-value order.
+        (Value::Str(left), Value::Str(right)) => left.as_bytes().cmp(right.as_bytes()),
+        (Value::Bytes(left), Value::Bytes(right)) => left.cmp(right),
+        (Value::Atom(left), Value::Atom(right)) => {
+            left.as_bytes().cmp(right.as_bytes())
+        }
+        (Value::I8(left), Value::I8(right)) => left.cmp(right),
+        (Value::I16(left), Value::I16(right)) => left.cmp(right),
+        (Value::I32(left), Value::I32(right)) => left.cmp(right),
+        (Value::I64(left), Value::I64(right)) => left.cmp(right),
+        (Value::U8(left), Value::U8(right)) => left.cmp(right),
+        (Value::U16(left), Value::U16(right)) => left.cmp(right),
+        (Value::U32(left), Value::U32(right)) => left.cmp(right),
+        (Value::U64(left), Value::U64(right)) => left.cmp(right),
+        _ => Ordering::Equal,
+    }
+}
+
+/// The element at `key` in an array, map, `str`, or `bytes` value. String
+/// indices count Unicode scalars; byte indices count bytes.
+fn lookup(collection: RuntimeValue, key: &RuntimeValue) -> Option<RuntimeValue> {
+    let index = || match key {
+        RuntimeValue::Primitive(Value::U64(index)) => usize::try_from(*index).ok(),
+        _ => None,
+    };
+    match collection {
+        RuntimeValue::Array { values, .. } => values.into_iter().nth(index()?),
+        RuntimeValue::Map { entries, .. } => entries
+            .binary_search_by(|(existing, _)| key_order(existing, key))
+            .ok()
+            .and_then(|position| entries.into_iter().nth(position))
+            .map(|(_, value)| value),
+        RuntimeValue::Primitive(Value::Str(text)) => text
+            .chars()
+            .nth(index()?)
+            .map(|scalar| RuntimeValue::Primitive(Value::Char(scalar))),
+        RuntimeValue::Primitive(Value::Bytes(bytes)) => bytes
+            .get(index()?)
+            .map(|byte| RuntimeValue::Primitive(Value::U8(*byte))),
+        _ => None,
+    }
+}
+
+/// Inserts `key` into entries kept in canonical key order; an equal key's
+/// value is replaced, so the later entry wins.
+fn insert_entry(
+    entries: &mut Vec<(RuntimeValue, RuntimeValue)>,
+    key: RuntimeValue,
+    value: RuntimeValue,
+) {
+    match entries.binary_search_by(|(existing, _)| key_order(existing, &key)) {
+        Ok(position) => {
+            if let Some(entry) = entries.get_mut(position) {
+                entry.1 = value;
+            }
+        }
+        Err(position) => entries.insert(position, (key, value)),
+    }
 }
 
 fn declared_id(value_type: &Type) -> Option<TypeId> {

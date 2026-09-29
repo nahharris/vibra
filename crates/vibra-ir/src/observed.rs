@@ -36,6 +36,17 @@ pub enum ObservedValue {
         /// The representation value.
         value: Box<ObservedValue>,
     },
+    /// A tuple value.
+    Tuple {
+        /// The declared type, or `None` for an anonymous tuple.
+        type_id: Option<TypeId>,
+        /// Component values in order.
+        values: Vec<ObservedValue>,
+    },
+    /// An array value.
+    Array(Vec<ObservedValue>),
+    /// A map value; entries in canonical key order.
+    Map(Vec<(ObservedValue, ObservedValue)>),
 }
 
 impl ObservedValue {
@@ -72,6 +83,28 @@ impl ObservedValue {
                 type_id.path(),
                 value.canonical_vibon()
             ),
+            Self::Tuple { type_id, values } => format!(
+                "(record kind: @tuple{} values: (array{}))",
+                type_field(type_id.as_ref()),
+                encode_all(values)
+            ),
+            Self::Array(values) => {
+                format!(
+                    "(record kind: @array values: (array{}))",
+                    encode_all(values)
+                )
+            }
+            Self::Map(entries) => format!(
+                "(record kind: @map entries: (array{}))",
+                entries
+                    .iter()
+                    .map(|(key, value)| format!(
+                        " (tuple {} {})",
+                        key.canonical_vibon(),
+                        value.canonical_vibon()
+                    ))
+                    .collect::<String>()
+            ),
         }
     }
 
@@ -90,7 +123,12 @@ impl ObservedValue {
     pub const fn as_primitive(&self) -> Option<&Value> {
         match self {
             Self::Primitive(value) => Some(value),
-            Self::Record { .. } | Self::Enum { .. } | Self::Wrapper { .. } => None,
+            Self::Record { .. }
+            | Self::Enum { .. }
+            | Self::Wrapper { .. }
+            | Self::Tuple { .. }
+            | Self::Array(_)
+            | Self::Map(_) => None,
         }
     }
 }
@@ -105,4 +143,11 @@ fn type_field(type_id: Option<&TypeId>) -> String {
     type_id
         .map(|type_id| format!(" type: @{}", type_id.path()))
         .unwrap_or_default()
+}
+
+fn encode_all(values: &[ObservedValue]) -> String {
+    values
+        .iter()
+        .map(|value| format!(" {}", value.canonical_vibon()))
+        .collect()
 }

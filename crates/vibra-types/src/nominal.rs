@@ -548,35 +548,24 @@ impl TypeNames {
     }
 
     fn body_names_unavailable(&self, body: &TypeBody) -> bool {
-        match body {
-            TypeBody::Record(members) | TypeBody::Enum(members) => members
-                .iter()
-                .any(|(_, member)| self.names_unavailable(member)),
-            TypeBody::Wrapper(representation) => self.names_unavailable(representation),
-        }
+        body.slots()
+            .iter()
+            .any(|(_, slot)| self.names_unavailable(slot))
     }
 
     fn names_unavailable(&self, value: &Type) -> bool {
-        match value {
-            Type::Declared(id) => self
+        let head_unavailable = match value {
+            Type::Declared(id) | Type::Applied(id, _) => self
                 .index_of(id)
                 .and_then(|index| self.declared.get(index))
                 .is_none_or(|declared| !declared.available),
-            Type::Record(members) | Type::Enum(members) => members
-                .iter()
-                .any(|(_, member)| self.names_unavailable(member)),
-            Type::Function(signature) => {
-                signature
-                    .parameters()
-                    .iter()
-                    .any(|value| self.names_unavailable(value))
-                    || signature.labelled().iter().any(|parameter| {
-                        self.names_unavailable(&parameter.value_type())
-                    })
-                    || self.names_unavailable(&signature.result())
-            }
             _ => false,
-        }
+        };
+        head_unavailable
+            || value
+                .components()
+                .iter()
+                .any(|component| self.names_unavailable(component))
     }
 
     /// Rejects declared types whose expansion repeats without passing through
@@ -593,16 +582,8 @@ impl TypeNames {
             .iter()
             .map(|declared| {
                 let mut edges = Vec::new();
-                match &declared.body {
-                    Some(TypeBody::Record(members) | TypeBody::Enum(members)) => {
-                        for (name, member) in members {
-                            self.direct_edges(member, name, &mut edges);
-                        }
-                    }
-                    Some(TypeBody::Wrapper(representation)) => {
-                        self.direct_edges(representation, "", &mut edges);
-                    }
-                    None => {}
+                for (name, slot) in declared.body.iter().flat_map(TypeBody::slots) {
+                    self.direct_edges(&slot, &name, &mut edges);
                 }
                 edges
             })
@@ -677,9 +658,11 @@ impl TypeNames {
                     }
                 }
             }
-            Type::Record(members) | Type::Enum(members) => {
-                for (_, nested) in members {
-                    self.direct_edges(nested, member, edges);
+            // Tuple components, fields, and payloads are stored inline; array
+            // and map elements and function types are not.
+            Type::Record(_) | Type::Enum(_) | Type::Tuple(_) => {
+                for nested in value.components() {
+                    self.direct_edges(&nested, member, edges);
                 }
             }
             _ => {}
@@ -705,15 +688,11 @@ impl TypeNames {
         if !visiting.insert(index) {
             return false;
         }
-        let direct = match &declared.body {
-            Some(TypeBody::Record(members) | TypeBody::Enum(members)) => members
-                .iter()
-                .any(|(_, member)| self.contains_directly(member, name, visiting)),
-            Some(TypeBody::Wrapper(representation)) => {
-                self.contains_directly(representation, name, visiting)
-            }
-            None => false,
-        };
+        let direct = declared
+            .body
+            .iter()
+            .flat_map(TypeBody::slots)
+            .any(|(_, slot)| self.contains_directly(&slot, name, visiting));
         visiting.remove(&index);
         direct
     }
@@ -728,9 +707,10 @@ impl TypeNames {
     ) -> bool {
         match value {
             Type::Param(parameter) => parameter == name,
-            Type::Record(members) | Type::Enum(members) => members
+            Type::Record(_) | Type::Enum(_) | Type::Tuple(_) => value
+                .components()
                 .iter()
-                .any(|(_, member)| self.contains_directly(member, name, visiting)),
+                .any(|component| self.contains_directly(component, name, visiting)),
             Type::Applied(id, arguments) => {
                 let Some(index) = self.index_of(id) else {
                     return false;

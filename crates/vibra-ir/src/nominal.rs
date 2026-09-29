@@ -51,6 +51,27 @@ pub enum TypeBody {
     Enum(Vec<(String, Type)>),
     /// A distinct identity over one representation type.
     Wrapper(Type),
+    /// Positional components.
+    Tuple(Vec<Type>),
+}
+
+impl TypeBody {
+    /// Every slot of the body with its name: a field, a variant, a tuple
+    /// component spelled by its index, or the unnamed representation.
+    #[must_use]
+    pub fn slots(&self) -> Vec<(String, Type)> {
+        match self {
+            Self::Record(members) | Self::Enum(members) => members.clone(),
+            Self::Wrapper(representation) => {
+                vec![(String::new(), representation.clone())]
+            }
+            Self::Tuple(components) => components
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (index.to_string(), value.clone()))
+                .collect(),
+        }
+    }
 }
 
 /// One declared type of a checked program.
@@ -111,6 +132,12 @@ impl TypeDefinition {
             TypeBody::Wrapper(representation) => {
                 TypeBody::Wrapper(representation.substitute(&map))
             }
+            TypeBody::Tuple(components) => TypeBody::Tuple(
+                components
+                    .iter()
+                    .map(|value| value.substitute(&map))
+                    .collect(),
+            ),
         })
     }
 
@@ -131,7 +158,7 @@ impl TypeDefinition {
     pub fn record_fields(&self) -> Option<&[(String, Type)]> {
         match &self.body {
             TypeBody::Record(fields) => Some(fields),
-            TypeBody::Enum(_) | TypeBody::Wrapper(_) => None,
+            TypeBody::Enum(_) | TypeBody::Wrapper(_) | TypeBody::Tuple(_) => None,
         }
     }
 
@@ -140,7 +167,7 @@ impl TypeDefinition {
     pub fn enum_variants(&self) -> Option<&[(String, Type)]> {
         match &self.body {
             TypeBody::Enum(variants) => Some(variants),
-            TypeBody::Record(_) | TypeBody::Wrapper(_) => None,
+            TypeBody::Record(_) | TypeBody::Wrapper(_) | TypeBody::Tuple(_) => None,
         }
     }
 }
@@ -169,15 +196,8 @@ pub(crate) fn type_table(types: &[TypeDefinition]) -> Result<TypeTable<'_>, IrEr
         }
     }
     for definition in types {
-        match definition.body() {
-            TypeBody::Record(members) | TypeBody::Enum(members) => {
-                for (_, member) in members {
-                    validate_declared_type(member, &table)?;
-                }
-            }
-            TypeBody::Wrapper(representation) => {
-                validate_declared_type(representation, &table)?;
-            }
+        for (_, slot) in definition.body().slots() {
+            validate_declared_type(&slot, &table)?;
         }
     }
     Ok(table)
@@ -199,11 +219,10 @@ pub(crate) fn validate_declared_type(
             }
             Ok(())
         }
-        Type::Record(members) | Type::Enum(members) => members
+        _ => value
+            .components()
             .iter()
-            .try_for_each(|(_, member)| validate_declared_type(member, table)),
-        Type::Function(signature) => validate_declared_signature(signature, table),
-        _ => Ok(()),
+            .try_for_each(|component| validate_declared_type(component, table)),
     }
 }
 
@@ -312,6 +331,53 @@ pub(crate) fn validate_declared_expr(
                         "{value_type} wraps {expected}, not {}",
                         value.result_type()
                     )));
+                }
+            }
+            Expr::Tuple {
+                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
+                components,
+                ..
+            } => {
+                let TypeBody::Tuple(expected) = declared_body(table, value_type)?
+                else {
+                    return Err(invalid(format!("{value_type} is not a tuple")));
+                };
+                if expected.len() != components.len()
+                    || !expected
+                        .iter()
+                        .zip(components)
+                        .all(|(expected, component)| {
+                            expected.admits(&component.result_type())
+                        })
+                {
+                    return Err(invalid(format!(
+                        "{value_type} construction has the wrong components"
+                    )));
+                }
+            }
+            Expr::TupleProject {
+                tuple,
+                index,
+                value_type,
+                ..
+            } => {
+                let tuple_type = tuple.result_type();
+                if matches!(tuple_type, Type::Declared(_) | Type::Applied(_, _)) {
+                    let TypeBody::Tuple(components) =
+                        declared_body(table, &tuple_type)?
+                    else {
+                        return Err(invalid(format!(
+                            "projection from non-tuple {tuple_type}"
+                        )));
+                    };
+                    if !components
+                        .get(*index)
+                        .is_some_and(|found| found.admits(value_type))
+                    {
+                        return Err(invalid(format!(
+                            "{tuple_type} has no component {index} of type {value_type}"
+                        )));
+                    }
                 }
             }
             Expr::Project {

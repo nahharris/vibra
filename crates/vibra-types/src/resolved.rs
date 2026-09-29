@@ -942,7 +942,10 @@ fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
         | Type::Record(_)
         | Type::Enum(_)
         | Type::Param(_)
-        | Type::Applied(_, _) => None,
+        | Type::Applied(_, _)
+        | Type::Tuple(_)
+        | Type::Array(_)
+        | Type::Map(_, _) => None,
         Type::Function(signature) => {
             let body = default_expression(&signature.result(), origin.clone())?;
             return Some(Expr::closure(
