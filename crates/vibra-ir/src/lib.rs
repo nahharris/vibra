@@ -326,6 +326,34 @@ impl fmt::Display for Type {
                 }
                 formatter.write_str(")")
             }
+            // Spelled like the `fn` type expression, so two function types
+            // in a diagnostic are told apart by their parameters and result.
+            Self::Function(signature) => {
+                formatter.write_str("(fn (")?;
+                for (index, parameter) in signature.parameters().iter().enumerate() {
+                    if index != 0 {
+                        formatter.write_str(" ")?;
+                    }
+                    write!(formatter, "{parameter}")?;
+                }
+                write!(formatter, ") {}", signature.result())?;
+                if !signature.labelled().is_empty() {
+                    formatter.write_str(" labelled: (")?;
+                    for (index, parameter) in signature.labelled().iter().enumerate() {
+                        if index != 0 {
+                            formatter.write_str(" ")?;
+                        }
+                        write!(
+                            formatter,
+                            "{} {}",
+                            parameter.name(),
+                            parameter.value_type()
+                        )?;
+                    }
+                    formatter.write_str(")")?;
+                }
+                formatter.write_str(")")
+            }
             _ => formatter.write_str(self.as_str()),
         }
     }

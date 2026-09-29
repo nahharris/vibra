@@ -1932,7 +1932,8 @@ pub(crate) fn ambiguous_generic(
     span: ByteSpan,
     unbound: &[String],
 ) {
-    environment.diagnostics.push(
+    // One note per missing constraint, as the inference rules require.
+    let diagnostic = unbound.iter().fold(
         Diagnostic::new(
             DiagnosticCode::TypeAmbiguousInference,
             span,
@@ -1945,9 +1946,17 @@ pub(crate) fn ambiguous_generic(
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-        )
-        .with_source_id(environment.source_id),
+        ),
+        |diagnostic, name| {
+            diagnostic.with_note(format!(
+                "no operand, written result type, or `types:` entry determines `{}`",
+                infer::source_name(name)
+            ))
+        },
     );
+    environment
+        .diagnostics
+        .push(diagnostic.with_source_id(environment.source_id));
 }
 
 /// Lowers an application's written `types:` list, if any. The outer `None`

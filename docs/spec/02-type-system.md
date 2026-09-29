@@ -161,8 +161,11 @@ Record and enum types are flat and contain at least one name/type pair whose
 names are pairwise distinct; a repeated name emits `@name.member-collision`.
 Records have closed, named fields. Every enum variant has one written payload
 slot; `void` in that slot declares a nullary, payloadless variant, while any
-other type declares a unary one. Tuples, arrays, maps, records, enums, and
-unions are immutable values.
+other type declares a unary one. A generic payload slot instantiated to `void`
+is nullary in that instantiation: `(maybe.some)` constructs it, a zero-operand
+application fixes the slot's generic argument to `void`, and a `void` operand
+is rejected like any operand of a nullary variant. Tuples, arrays, maps,
+records, enums, and unions are immutable values.
 
 A structural type written outside a `deftype` body is anonymous and its
 identity is its structure. Two anonymous tuple types are the same type when

@@ -316,3 +316,55 @@ fn any_self_and_a_types_slot_are_reserved() {
         vec![DiagnosticCode::NameReservedLabel]
     );
 }
+
+#[test]
+fn an_instantiated_void_payload_is_nullary() {
+    let maybe = "(deftype maybe (enum some t none void)\n  where: (t any))\n\
+                 (defn count (value t) i32\n  where: (t any)\n  0i32)\n";
+    assert_eq!(
+        codes(&format!("{maybe}(defn main () (maybe void) (maybe.some))")),
+        Vec::new()
+    );
+    // Zero operands fix the payload's argument to `void`.
+    assert_eq!(
+        codes(&format!("{maybe}(defn main () i32 (count (maybe.some)))")),
+        Vec::new()
+    );
+    assert_eq!(
+        codes(&format!(
+            "{maybe}(defn main () (maybe void) (maybe.some void))"
+        )),
+        vec![DiagnosticCode::TypeArgumentMismatch]
+    );
+    assert_eq!(
+        codes(&format!("{maybe}(defn main () (maybe i32) (maybe.some))")),
+        vec![DiagnosticCode::TypeArgumentMismatch]
+    );
+}
+
+#[test]
+fn a_function_type_mismatch_spells_both_signatures() {
+    let found = messages(
+        "(defn take (f (fn (i32) i32)) i32 0i32)\n\
+         (defn other (value str) i32 0i32)\n\
+         (defn main () i32 (take other))",
+    );
+    assert_eq!(found.len(), 1);
+    assert!(found[0].1.contains("(fn (i32) i32)"), "{}", found[0].1);
+    assert!(found[0].1.contains("(fn (str) i32)"), "{}", found[0].1);
+}
+
+#[test]
+fn ambiguity_notes_each_unfixed_parameter() {
+    let source = format!(
+        "{PRELUDE}(defn pair-of () (pair a b)\n  where: (a any b any)\n  (pair-of))\n\
+         (defn main () i32 (let p (pair-of) 0i32))"
+    );
+    let checked = check_source("case.vib", &source);
+    let ambiguous = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code() == DiagnosticCode::TypeAmbiguousInference)
+        .expect("ambiguity");
+    assert_eq!(ambiguous.notes().len(), 2);
+}

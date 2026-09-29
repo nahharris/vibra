@@ -119,7 +119,17 @@ pub(crate) fn check_constructor(
                 );
                 return None;
             };
-            let payload = if *payload_type == Type::Void {
+            // A payload is nullary when it is `void`, written or instantiated.
+            // Zero operands against an open generic payload fix it to `void`.
+            let payload_type = instantiation.open(payload_type);
+            let nullary = match instantiation.resolved(&payload_type) {
+                Some(resolved) => resolved == Type::Void,
+                None => {
+                    application.arguments().is_empty()
+                        && instantiation.unify(&payload_type, &Type::Void)
+                }
+            };
+            let payload = if nullary {
                 if !application.arguments().is_empty() {
                     call_contract_error(
                         environment,
@@ -135,7 +145,6 @@ pub(crate) fn check_constructor(
                 let operand =
                     single_positional(environment, application, "an enum variant")?;
                 binding = ConstructorBinding::positional(1);
-                let payload_type = instantiation.open(payload_type);
                 Some(Box::new(check_inferred_operand(
                     environment,
                     &mut instantiation,

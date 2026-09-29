@@ -69,10 +69,10 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 
 | M2 row | Owner |
 | --- | --- |
-| C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13 |
+| C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13; `any`-bounded generics implemented by Step 3 (`V1-RUNTIME-generic-functions`) |
 | C1.5 — `match`, `try`, `option`, `result`, refutable patterns | Steps 4, 5, 7 |
 | C1.6 — variadic array and map operands | Step 4 |
 | C1.7 — `as`, singleton widening, narrowing | Step 6 |
 | C5.2 — constructor and destructuring patterns | Step 5 |
-| C6.2 — `types:` generic arguments | Step 3 |
+| C6.2 — `types:` generic arguments | Step 3; implemented (`V1-TYPE-GENERIC-type-arguments`, `V1-TOOL-format-types-order`) |
 | Unavailable `integer.*` compiler symbols (M2 registry note) | Step 8, as static methods of the numeric primitive types |
