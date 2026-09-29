@@ -3122,6 +3122,14 @@ impl AstParser {
                 );
                 return None;
             }
+            if name.value() == "types" {
+                self.error(
+                    DiagnosticCode::NameReservedLabel,
+                    triple[0].span(),
+                    "types is reserved for call-site type arguments",
+                );
+                return None;
+            }
             if !seen.insert(name.value().to_owned()) {
                 self.error(
                     DiagnosticCode::SyntaxInvalidForm,

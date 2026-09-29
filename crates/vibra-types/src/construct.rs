@@ -14,17 +14,23 @@ use vibra_syntax::{
     Application, BindingFacts, CallArgument, Expression, ExpressionKind, NameKind,
 };
 
-use crate::nominal::ConstructorTarget;
+use crate::infer::Instantiation;
+use crate::nominal::{ConstructorTarget, declared_self_type};
 use crate::{
-    CheckEnvironment, call_contract_error, check_expression, check_operand,
-    ensure_expected, types_match,
+    CheckEnvironment, ambiguous_generic, call_contract_error, check_expression,
+    check_inferred_operand, ensure_expected, start_instantiation, types_match,
 };
 
 /// Checks an application whose callee names a constructor.
+///
+/// A generic declaration infers its complete argument list from the field,
+/// payload, or representation operands, the written result type, and
+/// `types:`, exactly as a generic function application does.
 pub(crate) fn check_constructor(
     environment: &mut CheckEnvironment<'_>,
     application: &Application,
     target: &ConstructorTarget,
+    type_arguments: Option<&[Type]>,
     expected: Option<Type>,
 ) -> Option<Expr> {
     let (index, variant) = match target {
@@ -34,7 +40,16 @@ pub(crate) fn check_constructor(
     let declared = environment.types.get(index)?.clone();
     // A declaration whose body failed to lower already reported why.
     let body = declared.body.clone()?;
-    let value_type = Type::Declared(declared.id.clone());
+    let pattern = declared_self_type(&declared.id, &declared.parameters);
+    let mut instantiation = start_instantiation(
+        environment,
+        application,
+        &declared.parameters,
+        &pattern,
+        type_arguments,
+        expected.as_ref(),
+    )?;
+    let types_written = type_arguments.is_some();
     let origin = SourceOrigin::new(environment.source_id, application.span());
     let expression = match (&body, variant) {
         (TypeBody::Record(fields), None) => {
@@ -43,15 +58,23 @@ pub(crate) fn check_constructor(
             let arguments = bind_labelled(environment, application, &names)?;
             let mut checked = Vec::with_capacity(fields.len());
             for ((name, field_type), argument) in fields.iter().zip(arguments) {
-                let value = check_operand(
+                let field_type = instantiation.open(field_type);
+                let value = check_inferred_operand(
                     environment,
+                    &mut instantiation,
                     argument.value(),
-                    Some(field_type.clone()),
+                    &field_type,
+                    types_written,
                 )?;
                 checked.push((name.clone(), value));
             }
             Expr::Record {
-                value_type: value_type.clone(),
+                value_type: instantiated(
+                    environment,
+                    application,
+                    &instantiation,
+                    &pattern,
+                )?,
                 fields: checked,
                 origin,
             }
@@ -59,10 +82,21 @@ pub(crate) fn check_constructor(
         (TypeBody::Wrapper(representation), None) => {
             let operand =
                 single_positional(environment, application, "a wrapper constructor")?;
-            let value =
-                check_operand(environment, operand, Some(representation.clone()))?;
+            let representation = instantiation.open(representation);
+            let value = check_inferred_operand(
+                environment,
+                &mut instantiation,
+                operand,
+                &representation,
+                types_written,
+            )?;
             Expr::Wrap {
-                value_type: declared.id.clone(),
+                value_type: instantiated(
+                    environment,
+                    application,
+                    &instantiation,
+                    &pattern,
+                )?,
                 value: Box::new(value),
                 origin,
             }
@@ -96,14 +130,22 @@ pub(crate) fn check_constructor(
             } else {
                 let operand =
                     single_positional(environment, application, "an enum variant")?;
-                Some(Box::new(check_operand(
+                let payload_type = instantiation.open(payload_type);
+                Some(Box::new(check_inferred_operand(
                     environment,
+                    &mut instantiation,
                     operand,
-                    Some(payload_type.clone()),
+                    &payload_type,
+                    types_written,
                 )?))
             };
             Expr::Variant {
-                value_type: value_type.clone(),
+                value_type: instantiated(
+                    environment,
+                    application,
+                    &instantiation,
+                    &pattern,
+                )?,
                 variant: variant.to_owned(),
                 payload,
                 origin,
@@ -132,6 +174,7 @@ pub(crate) fn check_constructor(
             return None;
         }
     };
+    let value_type = expression.result_type();
     finish(
         environment,
         application.span(),
@@ -209,12 +252,30 @@ pub(crate) fn record_fields(
 ) -> Option<Vec<(String, Type)>> {
     match value_type {
         Type::Record(fields) => Some(fields.clone()),
-        Type::Declared(id) => {
+        Type::Declared(id) | Type::Applied(id, _) => {
             let index = environment.types.index_of(id)?;
-            match &environment.types.get(index)?.body {
-                Some(TypeBody::Record(fields)) => Some(fields.clone()),
-                _ => None,
-            }
+            let declared = environment.types.get(index)?;
+            let Some(TypeBody::Record(fields)) = &declared.body else {
+                return None;
+            };
+            let arguments = match value_type {
+                Type::Applied(_, arguments) => arguments.as_slice(),
+                _ => &[],
+            };
+            let substitution: std::collections::BTreeMap<String, Type> = declared
+                .parameters
+                .iter()
+                .cloned()
+                .zip(arguments.iter().cloned())
+                .collect();
+            Some(
+                fields
+                    .iter()
+                    .map(|(name, field)| {
+                        (name.clone(), field.substitute(&substitution))
+                    })
+                    .collect(),
+            )
         }
         _ => None,
     }
@@ -403,4 +464,20 @@ fn finish(
         .as_ref()
         .is_none_or(|expected| types_match(expected, &actual))
         .then_some(expression)
+}
+
+/// The constructed type once every generic argument is fixed, or
+/// `@type.ambiguous-inference`.
+fn instantiated(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    instantiation: &Instantiation,
+    pattern: &Type,
+) -> Option<Type> {
+    let opened = instantiation.open(pattern);
+    let resolved = instantiation.resolved(&opened);
+    if resolved.is_none() {
+        ambiguous_generic(environment, application.span(), &instantiation.unbound());
+    }
+    resolved
 }

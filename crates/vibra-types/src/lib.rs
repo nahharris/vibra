@@ -26,13 +26,14 @@ use vibra_ir::{
     external::CompilerIntrinsic,
 };
 use vibra_syntax::{
-    ApplicationBinding, Attribute, BindingFacts, Declaration, Expression,
-    ExpressionKind, FloatSuffix, IntegerSuffix, Literal, NameKind, PatternKind,
-    SourceAst, TypeExpr, TypeMember,
+    Application, ApplicationBinding, Attribute, BindingFacts, CallArgument,
+    Declaration, Expression, ExpressionKind, FloatSuffix, IntegerSuffix, Literal,
+    NameKind, PatternKind, SourceAst, TypeExpr, TypeMember,
 };
 
 mod bootstrap;
 mod construct;
+mod infer;
 mod nominal;
 mod resolved;
 
@@ -483,6 +484,8 @@ struct FunctionHeader {
     member_index: Option<usize>,
     /// The receiver type of a nested method.
     self_type: Option<Type>,
+    /// The complete generic parameter list: the owner's, then the function's.
+    type_parameters: Vec<String>,
 }
 
 const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
@@ -581,10 +584,16 @@ impl<'a> Checker<'a> {
                     else {
                         continue;
                     };
-                    let Some(self_type) = self
-                        .types
-                        .get(type_index)
-                        .map(|declared| Type::Declared(declared.id.clone()))
+                    let Some((self_type, owner_generics)) =
+                        self.types.get(type_index).map(|declared| {
+                            (
+                                nominal::declared_self_type(
+                                    &declared.id,
+                                    &declared.parameters,
+                                ),
+                                declared.parameters.clone(),
+                            )
+                        })
                     else {
                         continue;
                     };
@@ -592,12 +601,20 @@ impl<'a> Checker<'a> {
                         let TypeMember::Method(method) = member else {
                             continue;
                         };
+                        let Some(generics) = nominal::function_generics(
+                            &owner_generics,
+                            method,
+                            self.source_id,
+                            self.diagnostics,
+                        ) else {
+                            continue;
+                        };
                         let Some(signature) = check_signature(
                             self.source_id,
                             method,
                             self.diagnostics,
                             &self.types,
-                            Some(&self_type),
+                            nominal::Scope::new(Some(&self_type), &generics),
                         ) else {
                             continue;
                         };
@@ -621,13 +638,14 @@ impl<'a> Checker<'a> {
                             test_assertion: None,
                             member_index: Some(member_index),
                             self_type: Some(self_type.clone()),
+                            type_parameters: generics,
                         });
                     }
                 }
                 Declaration::Def(definition) => {
                     let Some(value_type) = self.types.lower_or_report(
                         self.source_id,
-                        None,
+                        nominal::Scope::NONE,
                         definition.value_type(),
                         definition.span(),
                         self.diagnostics,
@@ -661,12 +679,20 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Declaration::Defn(function) => {
+                    let Some(generics) = nominal::function_generics(
+                        &[],
+                        function,
+                        self.source_id,
+                        self.diagnostics,
+                    ) else {
+                        continue;
+                    };
                     let Some(signature) = check_signature(
                         self.source_id,
                         function,
                         self.diagnostics,
                         &self.types,
-                        None,
+                        nominal::Scope::new(None, &generics),
                     ) else {
                         continue;
                     };
@@ -707,6 +733,7 @@ impl<'a> Checker<'a> {
                         test_assertion: None,
                         member_index: None,
                         self_type: None,
+                        type_parameters: generics,
                     });
                 }
                 Declaration::Import(import)
@@ -765,6 +792,7 @@ impl<'a> Checker<'a> {
                     test_assertion: None,
                     member_index: None,
                     self_type: None,
+                    type_parameters: Vec::new(),
                 });
             }
             self.text_import_span = Some(import_span);
@@ -922,6 +950,7 @@ impl<'a> Checker<'a> {
                 &self.types,
             );
             environment.self_type = header.self_type.clone();
+            environment.generics = header.type_parameters.clone();
             let mut parameters_valid = true;
             for (parameter_index, parameter) in function.parameters().iter().enumerate()
             {
@@ -1099,6 +1128,11 @@ struct CheckEnvironment<'a> {
     types: &'a nominal::TypeNames,
     /// The receiver type inside a nested method.
     self_type: Option<Type>,
+    /// The generic names in scope: the owner's and the function's own.
+    generics: Vec<String>,
+    /// Whether the expression being checked is an application's callee, where a
+    /// generic function is instantiated by the application rather than here.
+    callee_position: bool,
     global_indices: &'a BTreeMap<String, usize>,
     globals: &'a [GlobalHeader],
     functions: &'a [FunctionHeader],
@@ -1174,6 +1208,8 @@ impl<'a> CheckEnvironment<'a> {
             diagnostics,
             types,
             self_type: None,
+            generics: Vec::new(),
+            callee_position: false,
             global_indices,
             globals,
             functions,
@@ -1202,7 +1238,7 @@ impl<'a> CheckEnvironment<'a> {
     ) -> bool {
         let Some(value_type) = self.types.lower_or_report(
             self.source_id,
-            self.self_type.as_ref(),
+            nominal::Scope::new(self.self_type.as_ref(), &self.generics),
             value_type,
             parameter_span,
             self.diagnostics,
@@ -1710,6 +1746,324 @@ fn ensure_expected(
     }
 }
 
+/// A module-level function or method named as a value.
+///
+/// A generic function in callee position is returned uninstantiated, because
+/// its application infers the arguments. Anywhere else it becomes a
+/// monomorphic function value instantiated from the written expected `fn`
+/// type, or `@type.ambiguous-inference` when that type does not fix every
+/// argument.
+fn function_value(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    index: usize,
+    expected: Option<Type>,
+) -> Option<Expr> {
+    let header = environment.functions.get(index)?;
+    let signature = header.signature.clone();
+    let parameters = header.type_parameters.clone();
+    let origin = SourceOrigin::new(environment.source_id, expression.span());
+    if !parameters.is_empty() && environment.callee_position {
+        return Some(Expr::function(index, signature, origin));
+    }
+    let signature = if parameters.is_empty() {
+        signature
+    } else {
+        let mut instantiation = infer::Instantiation::new(&parameters);
+        let opened = Type::Function(Box::new(instantiation.open_signature(&signature)));
+        if let Some(expected) = &expected {
+            instantiation.unify(&opened, expected);
+        }
+        let Some(Type::Function(instantiated)) = instantiation.resolved(&opened) else {
+            ambiguous_generic(environment, expression.span(), &instantiation.unbound());
+            return None;
+        };
+        *instantiated
+    };
+    let actual = Type::Function(Box::new(signature.clone()));
+    ensure_expected(
+        environment,
+        expression.span(),
+        expected.clone(),
+        actual.clone(),
+    );
+    expected
+        .as_ref()
+        .is_none_or(|expected| types_match(expected, &actual))
+        .then_some(Expr::function(index, signature, origin))
+}
+
+/// `@type.ambiguous-inference` for generic parameters no operand, written
+/// result type, or `types:` list fixes.
+pub(crate) fn ambiguous_generic(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    unbound: &[String],
+) {
+    environment.diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::TypeAmbiguousInference,
+            span,
+            format!(
+                "nothing fixes the generic argument{} {}; write `types:` or an expected type",
+                if unbound.len() == 1 { "" } else { "s" },
+                unbound.join(", ")
+            ),
+        )
+        .with_source_id(environment.source_id),
+    );
+}
+
+/// Lowers an application's written `types:` list, if any. The outer `None`
+/// means a type in the list failed to lower and was reported.
+fn lower_type_arguments(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+) -> Option<Option<Vec<Type>>> {
+    let Some(written) = application.type_arguments() else {
+        return Some(None);
+    };
+    let span = application
+        .type_arguments_span()
+        .unwrap_or_else(|| application.span());
+    let scope =
+        nominal::Scope::new(environment.self_type.as_ref(), &environment.generics);
+    written
+        .iter()
+        .map(|value| {
+            environment.types.lower_or_report(
+                environment.source_id,
+                scope,
+                value,
+                span,
+                environment.diagnostics,
+            )
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(Some)
+}
+
+/// `@type.type-argument-mismatch` at an application's `types:` list.
+fn type_argument_mismatch(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    message: String,
+) {
+    environment.diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::TypeTypeArgumentMismatch,
+            application
+                .type_arguments_span()
+                .unwrap_or_else(|| application.span()),
+            message,
+        )
+        .with_source_id(environment.source_id),
+    );
+}
+
+/// Opens one instantiation of a generic entity at `application`: seeds it
+/// from the written `types:` list and, when the written result type agrees,
+/// from that. `result` is the entity's result type before opening. A
+/// non-generic entity yields an empty instantiation.
+pub(crate) fn start_instantiation(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    parameters: &[String],
+    result: &Type,
+    type_arguments: Option<&[Type]>,
+    expected: Option<&Type>,
+) -> Option<infer::Instantiation> {
+    let mut instantiation = infer::Instantiation::new(parameters);
+    let result = instantiation.open(result);
+    if let Some(arguments) = type_arguments {
+        if !instantiation.is_generic() {
+            type_argument_mismatch(
+                environment,
+                application,
+                "the applied entity declares no generic parameters".to_owned(),
+            );
+            return None;
+        }
+        if arguments.len() != instantiation.len() {
+            type_argument_mismatch(
+                environment,
+                application,
+                format!(
+                    "`types:` supplies {} type argument{}, but the entity takes {}",
+                    arguments.len(),
+                    if arguments.len() == 1 { "" } else { "s" },
+                    instantiation.len()
+                ),
+            );
+            return None;
+        }
+        instantiation.seed(arguments);
+    }
+    if let Some(expected) = expected {
+        let mut probe = instantiation.clone();
+        if probe.unify(&result, expected) {
+            instantiation = probe;
+        } else if type_arguments.is_some() && infer::has_variables(&result) {
+            type_argument_mismatch(
+                environment,
+                application,
+                format!(
+                    "`types:` makes the result {}, but {expected} is expected",
+                    instantiation.apply(&result)
+                ),
+            );
+            return None;
+        }
+    }
+    Some(instantiation)
+}
+
+/// Checks one operand against its opened parameter type `pattern`.
+///
+/// A pattern the instantiation already fixes is the operand's expected type,
+/// and a mismatch against a type fixed by a written `types:` list is
+/// `@type.type-argument-mismatch`. An open pattern is unified with the
+/// operand's own type instead.
+pub(crate) fn check_inferred_operand(
+    environment: &mut CheckEnvironment<'_>,
+    instantiation: &mut infer::Instantiation,
+    operand: &Expression,
+    pattern: &Type,
+    types_written: bool,
+) -> Option<Expr> {
+    if let Some(fixed) = instantiation.resolved(pattern) {
+        let before = environment.diagnostics.len();
+        let checked = check_operand(environment, operand, Some(fixed));
+        if types_written && infer::has_variables(pattern) {
+            for diagnostic in environment.diagnostics.iter_mut().skip(before) {
+                if diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+                    && diagnostic.primary_span() == operand.span()
+                {
+                    *diagnostic = diagnostic
+                        .clone()
+                        .with_code(DiagnosticCode::TypeTypeArgumentMismatch);
+                }
+            }
+        }
+        return checked;
+    }
+    let checked = check_operand(environment, operand, None)?;
+    if !instantiation.unify(pattern, &checked.result_type()) {
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeArgumentMismatch,
+                operand.span(),
+                format!(
+                    "operand has type {}, which does not fit the parameter type {}",
+                    checked.result_type(),
+                    instantiation.apply(pattern)
+                ),
+            )
+            .with_source_id(environment.source_id),
+        );
+        return None;
+    }
+    Some(checked)
+}
+
+/// The generic callee of one application and what the call site wrote.
+struct GenericCall<'a> {
+    parameters: &'a [String],
+    signature: &'a FunctionSignature,
+    type_arguments: Option<&'a [Type]>,
+    expected: Option<&'a Type>,
+}
+
+/// Where one checked operand of a generic application belongs.
+enum OperandSlot {
+    Positional(usize),
+    Labelled(String),
+}
+
+/// Checks the written operands of a generic application and infers its
+/// complete type-argument list from them, the written result type, and
+/// `types:`. Returns the instantiated signature, the positional operands, and
+/// the written labelled operands; omitted labelled operands stay in
+/// `labelled` for the caller's default handling.
+///
+/// Operands whose parameter type is already fixed are checked against it, so
+/// literals and lambdas see a concrete expectation; the rest are checked
+/// alone and unified with their parameter type. Lambda operands wait until
+/// every other operand has had the chance to fix their parameter type.
+#[allow(clippy::type_complexity)]
+fn check_generic_operands(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    call: GenericCall<'_>,
+    ordered: &[&CallArgument],
+    labelled: &mut BTreeMap<String, &CallArgument>,
+) -> Option<(FunctionSignature, Vec<Expr>, BTreeMap<String, Expr>)> {
+    let mut instantiation = start_instantiation(
+        environment,
+        application,
+        call.parameters,
+        &call.signature.result(),
+        call.type_arguments,
+        call.expected,
+    )?;
+    let opened = instantiation.open_signature(call.signature);
+
+    let mut pending = Vec::new();
+    for (index, (argument, pattern)) in ordered
+        .iter()
+        .take(opened.parameters().len())
+        .zip(opened.parameters())
+        .enumerate()
+    {
+        pending.push((OperandSlot::Positional(index), pattern.clone(), *argument));
+    }
+    for parameter in opened.labelled() {
+        if let Some(argument) = labelled.remove(parameter.name()) {
+            pending.push((
+                OperandSlot::Labelled(parameter.name().to_owned()),
+                parameter.value_type(),
+                argument,
+            ));
+        }
+    }
+    let (lambdas, others): (Vec<_>, Vec<_>) =
+        pending.into_iter().partition(|(_, _, argument)| {
+            matches!(argument.value().kind(), ExpressionKind::Lambda(_))
+        });
+
+    let mut positional = BTreeMap::new();
+    let mut labelled_values = BTreeMap::new();
+    for (slot, pattern, argument) in others.into_iter().chain(lambdas) {
+        let checked = check_inferred_operand(
+            environment,
+            &mut instantiation,
+            argument.value(),
+            &pattern,
+            call.type_arguments.is_some(),
+        )?;
+        match slot {
+            OperandSlot::Positional(index) => {
+                positional.insert(index, checked);
+            }
+            OperandSlot::Labelled(name) => {
+                labelled_values.insert(name, checked);
+            }
+        }
+    }
+
+    let Some(Type::Function(instantiated)) =
+        instantiation.resolved(&Type::Function(Box::new(opened)))
+    else {
+        ambiguous_generic(environment, application.span(), &instantiation.unbound());
+        return None;
+    };
+    Some((
+        *instantiated,
+        positional.into_values().collect(),
+        labelled_values,
+    ))
+}
+
 /// Whether `name`, written at `expression`, denotes a value rather than a
 /// constructor: a local, a capture, a module value, or a function.
 fn names_value(
@@ -1807,14 +2161,14 @@ fn check_signature(
     function: &vibra_syntax::FunctionDeclaration,
     diagnostics: &mut Vec<Diagnostic>,
     types: &nominal::TypeNames,
-    self_type: Option<&Type>,
+    scope: nominal::Scope<'_>,
 ) -> Option<FunctionSignature> {
     let mut parameters = Vec::with_capacity(function.parameters().len());
     let mut valid = true;
     for parameter in function.parameters() {
         match types.lower_or_report(
             source_id,
-            self_type,
+            scope,
             parameter.value_type(),
             parameter.span(),
             diagnostics,
@@ -1825,7 +2179,7 @@ fn check_signature(
     }
     let result = match types.lower_or_report(
         source_id,
-        self_type,
+        scope,
         function.result(),
         function.span(),
         diagnostics,
@@ -1843,7 +2197,7 @@ fn check_signature(
                 for entry in entries {
                     let Some(value_type) = types.lower_or_report(
                         source_id,
-                        self_type,
+                        scope,
                         entry.value_type(),
                         entry.span(),
                         diagnostics,
@@ -1992,7 +2346,7 @@ fn check_lambda_signature(
     lambda: &vibra_syntax::LambdaExpression,
     diagnostics: &mut Vec<Diagnostic>,
     types: &nominal::TypeNames,
-    self_type: Option<&Type>,
+    scope: nominal::Scope<'_>,
 ) -> Option<FunctionSignature> {
     let mut valid = true;
     let parameters = lambda
@@ -2001,7 +2355,7 @@ fn check_lambda_signature(
         .map(|parameter| {
             let value_type = types.lower_or_report(
                 source_id,
-                self_type,
+                scope,
                 parameter.value_type(),
                 parameter.span(),
                 diagnostics,
@@ -2014,7 +2368,7 @@ fn check_lambda_signature(
         .collect::<Option<Vec<_>>>()?;
     let result = types.lower_or_report(
         source_id,
-        self_type,
+        scope,
         lambda.result(),
         lambda.span(),
         diagnostics,
@@ -2026,7 +2380,7 @@ fn check_lambda_signature(
                 for entry in entries {
                     let Some(value_type) = types.lower_or_report(
                         source_id,
-                        self_type,
+                        scope,
                         entry.value_type(),
                         entry.span(),
                         diagnostics,
@@ -2078,16 +2432,17 @@ fn check_lambda_signature(
 /// Lowers a type expression that names only primitive and function types,
 /// as compiler-intrinsic signatures do.
 fn primitive_type(value: &TypeExpr) -> Option<Type> {
-    nominal::TypeNames::default().lower("", None, value).ok()
+    nominal::TypeNames::default()
+        .lower("", nominal::Scope::NONE, value)
+        .ok()
 }
 
 fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
     attributes.iter().any(|attribute| match attribute {
-        Attribute::Where(_)
-        | Attribute::Variadic(_)
-        | Attribute::External(_)
-        | Attribute::Symbol(_) => true,
-        Attribute::Labelled(_) => false,
+        // `any`-bounded generics are checked from M3 Step 3; an interface
+        // bound was already reported unavailable at the header.
+        Attribute::Variadic(_) | Attribute::External(_) | Attribute::Symbol(_) => true,
+        Attribute::Where(_) | Attribute::Labelled(_) => false,
         Attribute::Effects(row) => !row.references().is_empty(),
         Attribute::Visibility(_) | Attribute::Doc(_) => false,
     })
@@ -2234,23 +2589,8 @@ fn check_expression_in_position(
                 }
                 if let Some(index) =
                     environment.function_indices.get(name.value()).copied()
-                    && let Some(header) = environment.functions.get(index)
                 {
-                    let actual = Type::Function(Box::new(header.signature.clone()));
-                    ensure_expected(
-                        environment,
-                        expression.span(),
-                        expected.clone(),
-                        actual.clone(),
-                    );
-                    return (expected
-                        .as_ref()
-                        .is_none_or(|expected| types_match(expected, &actual)))
-                    .then_some(Expr::function(
-                        index,
-                        header.signature.clone(),
-                        SourceOrigin::new(environment.source_id, expression.span()),
-                    ));
+                    return function_value(environment, expression, index, expected);
                 }
                 unknown_name(environment, expression, name.value());
                 return None;
@@ -2333,22 +2673,7 @@ fn check_expression_in_position(
             }
             if let Some(index) = environment.function_indices.get(name.value()).copied()
             {
-                let header = environment.functions.get(index)?;
-                let actual = Type::Function(Box::new(header.signature.clone()));
-                ensure_expected(
-                    environment,
-                    expression.span(),
-                    expected.clone(),
-                    actual.clone(),
-                );
-                return (expected
-                    .as_ref()
-                    .is_none_or(|expected| types_match(expected, &actual)))
-                .then_some(Expr::function(
-                    index,
-                    header.signature.clone(),
-                    SourceOrigin::new(environment.source_id, expression.span()),
-                ));
+                return function_value(environment, expression, index, expected);
             }
             unknown_name(environment, expression, name.value());
             None
@@ -2360,32 +2685,37 @@ fn check_expression_in_position(
                 && let Some(target) =
                     environment.types.constructor(environment.source_id, name)
             {
-                if application.type_arguments().is_some() {
-                    unavailable(
-                        environment.diagnostics,
-                        environment.source_id,
-                        application.span(),
-                        "generic type arguments arrive in M3 Step 3",
-                    );
-                    return None;
-                }
+                let type_arguments = lower_type_arguments(environment, application)?;
                 return construct::check_constructor(
                     environment,
                     application,
                     &target,
+                    type_arguments.as_deref(),
                     expected,
                 );
             }
-            if application.type_arguments().is_some() {
-                unavailable(
-                    environment.diagnostics,
-                    environment.source_id,
-                    application.span(),
-                    "generic type arguments are deferred until M3",
+            let type_arguments = lower_type_arguments(environment, application)?;
+            let callee_position =
+                std::mem::replace(&mut environment.callee_position, true);
+            let callee = check_expression(environment, application.callee(), None);
+            environment.callee_position = callee_position;
+            let mut callee = callee?;
+            let generic = match &callee {
+                Expr::Function { function, .. } => environment
+                    .functions
+                    .get(*function)
+                    .filter(|header| !header.type_parameters.is_empty())
+                    .map(|header| (*function, header.type_parameters.clone())),
+                _ => None,
+            };
+            if type_arguments.is_some() && generic.is_none() {
+                type_argument_mismatch(
+                    environment,
+                    application,
+                    "the applied callee declares no generic parameters".to_owned(),
                 );
                 return None;
             }
-            let callee = check_expression(environment, application.callee(), None)?;
             if construct::record_fields(environment, &callee.result_type()).is_some() {
                 return construct::check_projection(
                     environment,
@@ -2467,20 +2797,51 @@ fn check_expression_in_position(
                     labelled.insert(label.value().to_owned(), *argument);
                 }
             }
+            let mut signature = signature;
             let mut arguments = Vec::with_capacity(signature.fixed_parameter_count());
-            for (argument, value_type) in ordered
-                .iter()
-                .take(signature.parameters().len())
-                .zip(signature.parameters())
-            {
-                arguments.push(check_operand(
-                    environment,
-                    argument.value(),
-                    Some(value_type.clone()),
-                )?);
+            let mut checked_labelled = BTreeMap::new();
+            if let Some((function, parameters)) = generic {
+                let (instantiated, positional, labelled_values) =
+                    check_generic_operands(
+                        environment,
+                        application,
+                        GenericCall {
+                            parameters: &parameters,
+                            signature: &signature,
+                            type_arguments: type_arguments.as_deref(),
+                            expected: expected.as_ref(),
+                        },
+                        &ordered,
+                        &mut labelled,
+                    )?;
+                callee = Expr::function(
+                    function,
+                    instantiated.clone(),
+                    SourceOrigin::new(
+                        environment.source_id,
+                        application.callee().span(),
+                    ),
+                );
+                *signature = instantiated;
+                arguments = positional;
+                checked_labelled = labelled_values;
+            } else {
+                for (argument, value_type) in ordered
+                    .iter()
+                    .take(signature.parameters().len())
+                    .zip(signature.parameters())
+                {
+                    arguments.push(check_operand(
+                        environment,
+                        argument.value(),
+                        Some(value_type.clone()),
+                    )?);
+                }
             }
             for parameter in signature.labelled() {
-                if let Some(argument) = labelled.remove(parameter.name()) {
+                if let Some(argument) = checked_labelled.remove(parameter.name()) {
+                    arguments.push(argument);
+                } else if let Some(argument) = labelled.remove(parameter.name()) {
                     arguments.push(check_operand(
                         environment,
                         argument.value(),
@@ -2517,10 +2878,11 @@ fn check_expression_in_position(
             {
                 return None;
             }
-            if ordered
-                .iter()
-                .zip(application.arguments())
-                .any(|(left, right)| !std::ptr::eq(*left, right))
+            if application.type_arguments_after_operands()
+                || ordered
+                    .iter()
+                    .zip(application.arguments())
+                    .any(|(left, right)| !std::ptr::eq(*left, right))
             {
                 environment.diagnostics.push(
                     Diagnostic::new(
@@ -2585,6 +2947,8 @@ fn check_expression_in_position(
                 diagnostics: environment.diagnostics,
                 types: environment.types,
                 self_type: environment.self_type.clone(),
+                generics: environment.generics.clone(),
+                callee_position: false,
                 global_indices: environment.global_indices,
                 globals: environment.globals,
                 functions: environment.functions,
@@ -2688,7 +3052,10 @@ fn check_expression_in_position(
                 lambda,
                 environment.diagnostics,
                 environment.types,
-                environment.self_type.as_ref(),
+                nominal::Scope::new(
+                    environment.self_type.as_ref(),
+                    &environment.generics,
+                ),
             )?;
             let outer = environment.visible_bindings();
             let mut nested = CheckEnvironment::new(
@@ -2704,6 +3071,7 @@ fn check_expression_in_position(
                 environment.types,
             );
             nested.self_type = environment.self_type.clone();
+            nested.generics = environment.generics.clone();
             nested.resolved_targets = environment.resolved_targets;
             nested.reports_redeclarations = environment.reports_redeclarations;
             nested.outer = Some(outer);
@@ -2888,22 +3256,7 @@ fn check_resolved_reference(
             ))
         }
         ResolvedReferenceTarget::Function(index) => {
-            let function = environment.functions.get(index)?;
-            let actual = Type::Function(Box::new(function.signature.clone()));
-            ensure_expected(
-                environment,
-                expression.span(),
-                expected.clone(),
-                actual.clone(),
-            );
-            (expected
-                .as_ref()
-                .is_none_or(|expected| types_match(expected, &actual)))
-            .then_some(Expr::function(
-                index,
-                function.signature.clone(),
-                SourceOrigin::new(environment.source_id, expression.span()),
-            ))
+            function_value(environment, expression, index, expected)
         }
     }
 }

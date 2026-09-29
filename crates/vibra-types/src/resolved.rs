@@ -211,7 +211,7 @@ pub fn check_resolved(
                     };
                     let Some(value_type) = types.lower_or_report(
                         module.record.source_id(),
-                        None,
+                        crate::nominal::Scope::NONE,
                         definition.value_type(),
                         definition.span(),
                         &mut diagnostics,
@@ -239,12 +239,20 @@ pub fn check_resolved(
                     else {
                         continue;
                     };
+                    let Some(generics) = crate::nominal::function_generics(
+                        &[],
+                        function,
+                        module.record.source_id(),
+                        &mut diagnostics,
+                    ) else {
+                        continue;
+                    };
                     let Some(signature) = check_signature(
                         module.record.source_id(),
                         function,
                         &mut diagnostics,
                         &types,
-                        None,
+                        crate::nominal::Scope::new(None, &generics),
                     ) else {
                         continue;
                     };
@@ -282,6 +290,7 @@ pub fn check_resolved(
                         test_assertion: None,
                         member_index: None,
                         self_type: None,
+                        type_parameters: generics,
                     });
                 }
                 Declaration::Test(test) => {
@@ -326,17 +335,26 @@ pub fn check_resolved(
                         test_assertion: None,
                         member_index: None,
                         self_type: None,
+                        type_parameters: Vec::new(),
                     });
                 }
                 Declaration::Deftype(value) => {
-                    let Some(self_type) = types
+                    let Some((self_type, owner_generics)) = types
                         .declared()
                         .iter()
                         .find(|declared| {
                             declared.span == value.span()
                                 && declared.source_id == module.record.source_id()
                         })
-                        .map(|declared| Type::Declared(declared.id.clone()))
+                        .map(|declared| {
+                            (
+                                crate::nominal::declared_self_type(
+                                    &declared.id,
+                                    &declared.parameters,
+                                ),
+                                declared.parameters.clone(),
+                            )
+                        })
                     else {
                         continue;
                     };
@@ -351,12 +369,20 @@ pub fn check_resolved(
                         else {
                             continue;
                         };
+                        let Some(generics) = crate::nominal::function_generics(
+                            &owner_generics,
+                            method,
+                            module.record.source_id(),
+                            &mut diagnostics,
+                        ) else {
+                            continue;
+                        };
                         let Some(signature) = check_signature(
                             module.record.source_id(),
                             method,
                             &mut diagnostics,
                             &types,
-                            Some(&self_type),
+                            crate::nominal::Scope::new(Some(&self_type), &generics),
                         ) else {
                             continue;
                         };
@@ -375,6 +401,7 @@ pub fn check_resolved(
                             test_assertion: None,
                             member_index: Some(member_index),
                             self_type: Some(self_type.clone()),
+                            type_parameters: generics,
                         });
                     }
                 }
@@ -416,6 +443,7 @@ pub fn check_resolved(
             test_assertion: Some(assertion),
             member_index: None,
             self_type: None,
+            type_parameters: Vec::new(),
         });
     }
 
@@ -636,6 +664,7 @@ pub fn check_resolved(
         );
         environment.resolved_targets = Some(&resolved_targets);
         environment.self_type = header.self_type.clone();
+        environment.generics = header.type_parameters.clone();
         environment.reports_redeclarations = false;
         let mut parameters_valid = true;
         for (parameter_index, parameter) in function.parameters().iter().enumerate() {
@@ -909,7 +938,11 @@ fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
         Type::F32 => Value::f32(0.0),
         Type::F64 => Value::f64(0.0),
         // Declared and structural types have no placeholder value.
-        Type::Declared(_) | Type::Record(_) | Type::Enum(_) => None,
+        Type::Declared(_)
+        | Type::Record(_)
+        | Type::Enum(_)
+        | Type::Param(_)
+        | Type::Applied(_, _) => None,
         Type::Function(signature) => {
             let body = default_expression(&signature.result(), origin.clone())?;
             return Some(Expr::closure(
