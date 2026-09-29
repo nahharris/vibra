@@ -1415,7 +1415,7 @@ impl Expr {
                         "capture slot {slot} is outside the closure environment"
                     )));
                 };
-                if !actual.same_shape(value_type) {
+                if !actual.admits(value_type) {
                     return Err(IrError::InvalidExpression(format!(
                         "capture slot {slot} has type {actual}, expression declares {value_type}"
                     )));
@@ -1468,7 +1468,7 @@ impl Expr {
                 for (capture, expected) in captures.iter().zip(closure_capture_types) {
                     let actual =
                         capture.validate_shape_with_captures(slots, capture_types)?;
-                    if !actual.same_shape(expected) {
+                    if !expected.admits(&actual) {
                         return Err(IrError::InvalidExpression(format!(
                             "closure capture has type {actual}, expected {expected}"
                         )));
@@ -1495,7 +1495,7 @@ impl Expr {
                     &mut closure_slots,
                     closure_capture_types,
                 )?;
-                if !actual.same_shape(&signature.result()) {
+                if !signature.result().admits(&actual) {
                     return Err(IrError::ResultTypeMismatch {
                         expected: Box::new(signature.result()),
                         actual: Box::new(actual),
@@ -1514,7 +1514,7 @@ impl Expr {
             Self::Variable {
                 slot, value_type, ..
             } => match slots.get(*slot).cloned().flatten() {
-                Some(actual) if actual.same_shape(value_type) => Ok(value_type.clone()),
+                Some(actual) if actual.admits(value_type) => Ok(value_type.clone()),
                 Some(actual) => Err(IrError::InvalidExpression(format!(
                     "variable slot {slot} has type {actual}, expression declares {value_type}"
                 ))),

@@ -139,3 +139,51 @@ fn a_generic_body_treats_its_parameters_as_rigid() {
         vec![DiagnosticCode::TypeMismatch]
     );
 }
+
+#[test]
+fn a_let_bound_generic_lambda_is_instantiated_at_each_call() {
+    assert_eq!(
+        codes(
+            "(defn main () str\n  (let pick (lambda (a t b t) t\n    where: (t any)\n    a)\n    \
+             (do (pick 1i32 2i32) (pick \"x\" \"y\"))))"
+        ),
+        Vec::new()
+    );
+    assert_eq!(
+        codes(
+            "(defn main () i32\n  (let keep (lambda (a t) t\n    where: (t any)\n    a)\n    \
+             (keep types: (i32) \"x\")))"
+        ),
+        vec![DiagnosticCode::TypeTypeArgumentMismatch]
+    );
+}
+
+#[test]
+fn a_generic_lambda_value_needs_an_expected_type() {
+    assert_eq!(
+        codes("(defn main () i32 ((lambda (a t) t\n  where: (t any)\n  a) 3i32))"),
+        Vec::new()
+    );
+    assert_eq!(
+        codes("(defn main () void (do (lambda (a t) t\n  where: (t any)\n  a) void))"),
+        vec![DiagnosticCode::TypeAmbiguousInference]
+    );
+}
+
+#[test]
+fn a_lambda_sees_and_must_not_redeclare_enclosing_generic_names() {
+    assert_eq!(
+        codes(
+            "(defn outer (v t) t\n  where: (t any)\n  \
+             (let f (lambda (a u) t\n    where: (u any)\n    v)\n    (f 1i32)))"
+        ),
+        Vec::new()
+    );
+    assert_eq!(
+        codes(
+            "(defn outer (v t) t\n  where: (t any)\n  \
+             (let f (lambda (a t) t\n    where: (t any)\n    a)\n    (f v)))"
+        ),
+        vec![DiagnosticCode::NameGenericRedeclaration]
+    );
+}

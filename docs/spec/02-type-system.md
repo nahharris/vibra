@@ -542,8 +542,8 @@ that contract and never rewrites the contract from observed implementation.
 ## Generics
 
 Every generic name is declared by one flat `where:` entry on a `deftype`,
-`defint`, `defn`, or nested method. The value paired with the name is one
-nominal interface bound; the predeclared empty interface `any` is the bound
+`defint`, `defn`, nested method, or `lambda`. The value paired with the name is
+one nominal interface bound; the predeclared empty interface `any` is the bound
 that constrains nothing.
 
 ```vibra
@@ -567,6 +567,25 @@ clause, so an `impl` nested in a `deftype` passes that type's names through
 unchanged, and the target of an `impl` nested in a `defint` MUST be a closed
 type expression. A free generic name in an `impl` target is
 `@name.unknown-symbol`, and generic implementations are a post-v1 concern.
+
+A `lambda` sees every generic name of its enclosing declarations and lambdas,
+and its own `where:` declares only additional ones under the same
+redeclaration rule. A generic `lambda` is generic like a generic `defn`: bound
+by `let`, the binding stays generic wherever it is visible, including through
+a capture, and each application infers or takes through `types:` its own
+complete argument list, in the lambda's `where:` order. A generic `lambda`
+applied directly is one such application. Anywhere else, a generic `lambda` or
+a generic binding is instantiated from its written expected `fn` type, exactly
+as a generic function named as a value is, and emits
+`@type.ambiguous-inference` when that type does not fix every argument.
+Function types themselves are never generic.
+
+```vibra
+(let pick (lambda (left t right t) t
+            where: (t any)
+            left)
+  (pick "x" (pick types: (str) "y" "z")))
+```
 
 The complete type-argument list of a `deftype` method is its type's parameters
 in declaration order followed by the method's own, and `types:` supplies that

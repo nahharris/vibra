@@ -1378,6 +1378,7 @@ pub fn decode_source_root(root: &CstNode) -> SourceDecode {
         recognized: false,
         context_depth: 0,
         context_depth_exceeded: false,
+        generic_scope: Vec::new(),
     };
     let declarations = forms
         .iter()
@@ -1422,6 +1423,9 @@ struct AstParser {
     recognized: bool,
     context_depth: usize,
     context_depth_exceeded: bool,
+    /// Generic names visible to the expression being read: the enclosing
+    /// declaration's, its owner's, and every enclosing `lambda`'s.
+    generic_scope: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -1805,6 +1809,9 @@ impl AstParser {
             .iter()
             .map(|form| RawNode::from_cst(form))
             .collect::<Vec<_>>();
+        let mut scope = inherited_generics.to_vec();
+        scope.extend(generic_names(&parsed.items));
+        let enclosing = std::mem::replace(&mut self.generic_scope, scope);
         let expressions = forms[body_start..]
             .iter()
             .map(|form| {
@@ -1814,7 +1821,9 @@ impl AstParser {
                     self.parse_expression(form)
                 }
             })
-            .collect::<Option<Vec<_>>>()?;
+            .collect::<Option<Vec<_>>>();
+        self.generic_scope = enclosing;
+        let expressions = expressions?;
         let has_external = parsed
             .items
             .iter()
@@ -2125,7 +2134,9 @@ impl AstParser {
         }
         let parameters = self.parse_parameters(forms[1])?;
         let result = self.parse_type_expr(forms[2])?;
-        let parsed = self.parse_attributes(&forms[3..], AttributeContext::Lambda, &[]);
+        let inherited = self.generic_scope.clone();
+        let parsed =
+            self.parse_attributes(&forms[3..], AttributeContext::Lambda, &inherited);
         let body_start = 3 + parsed.next;
         if let Some(attribute) = forms[body_start..]
             .iter()
@@ -2137,6 +2148,9 @@ impl AstParser {
                 "lambda attributes must precede the body",
             );
         }
+        let mut scope = inherited;
+        scope.extend(generic_names(&parsed.items));
+        let enclosing = std::mem::replace(&mut self.generic_scope, scope);
         let body = forms[body_start..]
             .iter()
             .map(|form| {
@@ -2146,7 +2160,9 @@ impl AstParser {
                     self.parse_expression(form)
                 }
             })
-            .collect::<Option<Vec<_>>>()?;
+            .collect::<Option<Vec<_>>>();
+        self.generic_scope = enclosing;
+        let body = body?;
         Some(Expression {
             kind: ExpressionKind::Lambda(LambdaExpression {
                 parameters,
@@ -2949,7 +2965,9 @@ impl AstParser {
                 "symbol",
                 "doc",
             ][..],
-            AttributeContext::Lambda => &["labelled", "variadic", "effects"][..],
+            AttributeContext::Lambda => {
+                &["where", "labelled", "variadic", "effects"][..]
+            }
         };
         let mut items = Vec::new();
         let mut seen = BTreeSet::new();
@@ -3385,7 +3403,7 @@ fn is_declaration_attribute_label(node: &CstNode) -> bool {
 }
 
 fn is_lambda_attribute_label(node: &CstNode) -> bool {
-    ["labelled", "variadic", "effects"]
+    ["where", "labelled", "variadic", "effects"]
         .iter()
         .any(|label| is_label(node, label))
 }

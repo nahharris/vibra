@@ -56,7 +56,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `VariadicType::Map` | Stage 3A | Step 4 | — |
 | `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record, enum, and wrapper bodies: Step 2; tuple: Step 4; union: Step 6 |
 | `DeftypeBody::Intrinsic` | Stage 3A | Step 4 | Reader: Step 2; standard-library declarations: Steps 4 and 8 |
-| `Attribute::Where` | Stage 3A | Step 3 | `any` bounds only (`V1-RUNTIME-generic-functions`); interface bounds: Step 11 (`V1-TYPE-GENERIC-interface-bound`) |
+| `Attribute::Where` | Stage 3A | Step 3 | `any` bounds only (`V1-RUNTIME-generic-functions`, `V1-RUNTIME-generic-lambda`); interface bounds: Step 11 (`V1-TYPE-GENERIC-interface-bound`) |
 | `Attribute::Labelled` | M2 | — | — |
 | `Attribute::Variadic` | Stage 3A | Step 4 | — |
 | `Attribute::Visibility` | M2 | — | — |

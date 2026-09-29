@@ -109,6 +109,62 @@ impl Instantiation {
             .collect()
     }
 }
+/// The name a generic `lambda`'s own parameter takes in the type of the
+/// value it produces, so a bound lambda stays generic wherever the binding is
+/// visible. `#` cannot occur in a source name, so a quantified name never
+/// collides with a rigid parameter in scope; `index` keeps `where:` order.
+pub(crate) fn quantified_name(name: &str, index: usize, site: usize) -> String {
+    format!("{name}#{index}@{site}")
+}
+
+/// The written spelling of a generic parameter, for diagnostics.
+pub(crate) fn source_name(name: &str) -> &str {
+    name.split('#').next().unwrap_or(name)
+}
+
+/// The quantified parameters `value` mentions, in their `where:` order.
+pub(crate) fn quantified_parameters(value: &Type) -> Vec<String> {
+    let mut found = Vec::new();
+    collect_quantified(value, &mut found);
+    found.sort_by_key(|name| {
+        name.split_once('#')
+            .and_then(|(_, rest)| rest.split_once('@'))
+            .and_then(|(index, _)| index.parse::<usize>().ok())
+    });
+    found.dedup();
+    found
+}
+
+fn collect_quantified(value: &Type, found: &mut Vec<String>) {
+    match value {
+        Type::Param(name) if name.contains('#') => {
+            if !found.contains(name) {
+                found.push(name.clone());
+            }
+        }
+        Type::Applied(_, arguments) => {
+            for argument in arguments {
+                collect_quantified(argument, found);
+            }
+        }
+        Type::Record(members) | Type::Enum(members) => {
+            for (_, member) in members {
+                collect_quantified(member, found);
+            }
+        }
+        Type::Function(signature) => {
+            for parameter in signature.parameters() {
+                collect_quantified(parameter, found);
+            }
+            for parameter in signature.labelled() {
+                collect_quantified(&parameter.value_type(), found);
+            }
+            collect_quantified(&signature.result(), found);
+        }
+        _ => {}
+    }
+}
+
 /// Whether `value` still mentions an inference variable.
 pub(crate) fn has_variables(value: &Type) -> bool {
     match value {

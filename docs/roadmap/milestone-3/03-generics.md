@@ -12,7 +12,7 @@ Prerequisite: Step 2 merged. Stage 3A behavior step.
 
 ## Scope
 
-`where:` on `deftype`, `defn`, and nested methods when every bound is
+`where:` on `deftype`, `defn`, `lambda`, and nested methods when every bound is
 `any`; inherited generic names in nested methods; applied type expressions;
 invariant inference of complete argument lists from operands and written
 result types; `types:` with complete lists, agreement checking, reserved
@@ -84,5 +84,8 @@ ledger rows C1.3 (generic part) and C6.2 are implemented; validation passes.
   `@type.infinite-size` while an argument used only under `fn` is not.
 - `option` and `result` in type position stay `@tool.unavailable` until
   Steps 4 and 7 declare them.
-- The guide's scope previously listed `where:` on `lambda`; the reader and the
-  source chapter admit no `where:` there, so the scope was corrected.
+- The reader and the source grammar rejected `where:` on `lambda` (G15). D15.1
+  admits it: a `let`-bound generic lambda stays generic under quantified
+  names (`t#index@site`, which no source name can spell), each call
+  instantiates it, and any other use instantiates it from the expected `fn`
+  type. Closures stay erased, so IR slot and capture checks use `admits`.

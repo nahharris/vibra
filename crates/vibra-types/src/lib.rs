@@ -1133,6 +1133,9 @@ struct CheckEnvironment<'a> {
     /// Whether the expression being checked is an application's callee, where a
     /// generic function is instantiated by the application rather than here.
     callee_position: bool,
+    /// Whether the expression being checked is a `let` value, where a generic
+    /// `lambda` stays generic instead of being instantiated.
+    keeps_generic: bool,
     global_indices: &'a BTreeMap<String, usize>,
     globals: &'a [GlobalHeader],
     functions: &'a [FunctionHeader],
@@ -1210,6 +1213,7 @@ impl<'a> CheckEnvironment<'a> {
             self_type: None,
             generics: Vec::new(),
             callee_position: false,
+            keeps_generic: false,
             global_indices,
             globals,
             functions,
@@ -1758,12 +1762,13 @@ fn function_value(
     expression: &Expression,
     index: usize,
     expected: Option<Type>,
+    callee_position: bool,
 ) -> Option<Expr> {
     let header = environment.functions.get(index)?;
     let signature = header.signature.clone();
     let parameters = header.type_parameters.clone();
     let origin = SourceOrigin::new(environment.source_id, expression.span());
-    if !parameters.is_empty() && environment.callee_position {
+    if !parameters.is_empty() && callee_position {
         return Some(Expr::function(index, signature, origin));
     }
     let signature = if parameters.is_empty() {
@@ -1793,6 +1798,69 @@ fn function_value(
         .then_some(Expr::function(index, signature, origin))
 }
 
+/// A local or captured binding named as a value.
+///
+/// A binding of a generic `lambda` stays generic: in callee position the
+/// application instantiates it, and anywhere else it is instantiated from the
+/// written expected type, like a generic function.
+fn binding_value(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    expected: Option<Type>,
+    value_type: Type,
+    callee_position: bool,
+    build: impl FnOnce(Type, SourceOrigin) -> Expr,
+) -> Option<Expr> {
+    let parameters = infer::quantified_parameters(&value_type);
+    let actual = if parameters.is_empty() || callee_position {
+        value_type
+    } else {
+        instantiate_value(
+            environment,
+            expression.span(),
+            &parameters,
+            &value_type,
+            expected.as_ref(),
+        )?
+    };
+    ensure_expected(
+        environment,
+        expression.span(),
+        expected.clone(),
+        actual.clone(),
+    );
+    expected
+        .as_ref()
+        .is_none_or(|expected| types_match(expected, &actual))
+        .then(|| {
+            build(
+                actual,
+                SourceOrigin::new(environment.source_id, expression.span()),
+            )
+        })
+}
+
+/// `value_type` with its generic `parameters` fixed by unification with the
+/// written expected type, or `@type.ambiguous-inference`.
+fn instantiate_value(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    parameters: &[String],
+    value_type: &Type,
+    expected: Option<&Type>,
+) -> Option<Type> {
+    let mut instantiation = infer::Instantiation::new(parameters);
+    let opened = instantiation.open(value_type);
+    if let Some(expected) = expected {
+        instantiation.unify(&opened, expected);
+    }
+    let resolved = instantiation.resolved(&opened);
+    if resolved.is_none() {
+        ambiguous_generic(environment, span, &instantiation.unbound());
+    }
+    resolved
+}
+
 /// `@type.ambiguous-inference` for generic parameters no operand, written
 /// result type, or `types:` list fixes.
 pub(crate) fn ambiguous_generic(
@@ -1807,7 +1875,11 @@ pub(crate) fn ambiguous_generic(
             format!(
                 "nothing fixes the generic argument{} {}; write `types:` or an expected type",
                 if unbound.len() == 1 { "" } else { "s" },
-                unbound.join(", ")
+                unbound
+                    .iter()
+                    .map(|name| infer::source_name(name))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         )
         .with_source_id(environment.source_id),
@@ -2541,6 +2613,10 @@ fn check_expression_in_position(
     expected: Option<Type>,
     tail_position: bool,
 ) -> Option<Expr> {
+    // Only the expression itself is a callee or a generic binding's value,
+    // never its operands.
+    let callee_position = std::mem::take(&mut environment.callee_position);
+    let keeps_generic = std::mem::take(&mut environment.keeps_generic);
     match expression.kind() {
         ExpressionKind::Literal(literal) => check_literal(
             environment.source_id,
@@ -2585,65 +2661,50 @@ fn check_expression_in_position(
                         expression,
                         expected,
                         target,
+                        callee_position,
                     );
                 }
                 if let Some(index) =
                     environment.function_indices.get(name.value()).copied()
                 {
-                    return function_value(environment, expression, index, expected);
+                    return function_value(
+                        environment,
+                        expression,
+                        index,
+                        expected,
+                        callee_position,
+                    );
                 }
                 unknown_name(environment, expression, name.value());
                 return None;
             }
             if let Some(binding) = environment.locals.get(name.value()).cloned() {
-                ensure_expected(
+                return binding_value(
                     environment,
-                    expression.span(),
-                    expected.clone(),
-                    binding.value_type.clone(),
-                );
-                return (expected.as_ref().is_none_or(|expected| {
-                    types_match(expected, &binding.value_type)
-                }))
-                .then_some(Expr::variable(
-                    binding.slot,
-                    binding.value_type.clone(),
-                    SourceOrigin::new(environment.source_id, expression.span()),
-                ));
-            }
-            if let Some(binding) = environment.captures.get(name.value()).cloned() {
-                ensure_expected(
-                    environment,
-                    expression.span(),
-                    expected.clone(),
-                    binding.value_type.clone(),
-                );
-                return (expected.as_ref().is_none_or(|expected| {
-                    types_match(expected, &binding.value_type)
-                }))
-                .then_some(Expr::captured(
-                    binding.slot,
+                    expression,
+                    expected,
                     binding.value_type,
-                    SourceOrigin::new(environment.source_id, expression.span()),
-                ));
-            }
-            if let Some(binding) =
-                environment.resolve_capture(name.value(), expression.span())
-            {
-                ensure_expected(
-                    environment,
-                    expression.span(),
-                    expected.clone(),
-                    binding.value_type.clone(),
+                    callee_position,
+                    |value_type, origin| {
+                        Expr::variable(binding.slot, value_type, origin)
+                    },
                 );
-                return (expected.as_ref().is_none_or(|expected| {
-                    types_match(expected, &binding.value_type)
-                }))
-                .then_some(Expr::captured(
-                    binding.slot,
+            }
+            let binding = match environment.captures.get(name.value()).cloned() {
+                Some(binding) => Some(binding),
+                None => environment.resolve_capture(name.value(), expression.span()),
+            };
+            if let Some(binding) = binding {
+                return binding_value(
+                    environment,
+                    expression,
+                    expected,
                     binding.value_type,
-                    SourceOrigin::new(environment.source_id, expression.span()),
-                ));
+                    callee_position,
+                    |value_type, origin| {
+                        Expr::captured(binding.slot, value_type, origin)
+                    },
+                );
             }
             if let Some(target) = resolved_reference_target(environment, expression) {
                 return check_resolved_reference(
@@ -2651,6 +2712,7 @@ fn check_expression_in_position(
                     expression,
                     expected,
                     target,
+                    callee_position,
                 );
             }
             if let Some(index) = environment.global_indices.get(name.value()).copied() {
@@ -2673,7 +2735,13 @@ fn check_expression_in_position(
             }
             if let Some(index) = environment.function_indices.get(name.value()).copied()
             {
-                return function_value(environment, expression, index, expected);
+                return function_value(
+                    environment,
+                    expression,
+                    index,
+                    expected,
+                    callee_position,
+                );
             }
             unknown_name(environment, expression, name.value());
             None
@@ -2695,18 +2763,17 @@ fn check_expression_in_position(
                 );
             }
             let type_arguments = lower_type_arguments(environment, application)?;
-            let callee_position =
-                std::mem::replace(&mut environment.callee_position, true);
-            let callee = check_expression(environment, application.callee(), None);
-            environment.callee_position = callee_position;
-            let mut callee = callee?;
+            environment.callee_position = true;
+            let mut callee = check_expression(environment, application.callee(), None)?;
             let generic = match &callee {
                 Expr::Function { function, .. } => environment
                     .functions
                     .get(*function)
                     .filter(|header| !header.type_parameters.is_empty())
-                    .map(|header| (*function, header.type_parameters.clone())),
-                _ => None,
+                    .map(|header| header.type_parameters.clone()),
+                // A generic `lambda`, directly or through a binding.
+                other => Some(infer::quantified_parameters(&other.result_type()))
+                    .filter(|parameters| !parameters.is_empty()),
             };
             if type_arguments.is_some() && generic.is_none() {
                 type_argument_mismatch(
@@ -2800,7 +2867,7 @@ fn check_expression_in_position(
             let mut signature = signature;
             let mut arguments = Vec::with_capacity(signature.fixed_parameter_count());
             let mut checked_labelled = BTreeMap::new();
-            if let Some((function, parameters)) = generic {
+            if let Some(parameters) = generic {
                 let (instantiated, positional, labelled_values) =
                     check_generic_operands(
                         environment,
@@ -2814,14 +2881,19 @@ fn check_expression_in_position(
                         &ordered,
                         &mut labelled,
                     )?;
-                callee = Expr::function(
-                    function,
-                    instantiated.clone(),
-                    SourceOrigin::new(
-                        environment.source_id,
-                        application.callee().span(),
-                    ),
-                );
+                // A named function is rebuilt at its instantiation; a generic
+                // closure value stays erased and the call carries the
+                // instantiated operand and result types.
+                if let Expr::Function { function, .. } = callee {
+                    callee = Expr::function(
+                        function,
+                        instantiated.clone(),
+                        SourceOrigin::new(
+                            environment.source_id,
+                            application.callee().span(),
+                        ),
+                    );
+                }
                 *signature = instantiated;
                 arguments = positional;
                 checked_labelled = labelled_values;
@@ -2937,6 +3009,8 @@ fn check_expression_in_position(
             value,
             body,
         } => {
+            environment.keeps_generic =
+                matches!(value.kind(), ExpressionKind::Lambda(_));
             let value = check_expression(environment, value, None)?;
             let function_targets = matches!(value.result_type(), Type::Function(_))
                 .then(|| {
@@ -2949,6 +3023,7 @@ fn check_expression_in_position(
                 self_type: environment.self_type.clone(),
                 generics: environment.generics.clone(),
                 callee_position: false,
+                keeps_generic: false,
                 global_indices: environment.global_indices,
                 globals: environment.globals,
                 functions: environment.functions,
@@ -3047,15 +3122,23 @@ fn check_expression_in_position(
             ))
         }
         ExpressionKind::Lambda(lambda) => {
+            let attributes = lambda.attributes().items();
+            if !nominal::report_interface_bounds(
+                attributes,
+                environment.source_id,
+                environment.diagnostics,
+            ) {
+                return None;
+            }
+            let own_generics = nominal::generic_names(attributes);
+            let mut generics = environment.generics.clone();
+            generics.extend(own_generics.iter().cloned());
             let signature = check_lambda_signature(
                 environment.source_id,
                 lambda,
                 environment.diagnostics,
                 environment.types,
-                nominal::Scope::new(
-                    environment.self_type.as_ref(),
-                    &environment.generics,
-                ),
+                nominal::Scope::new(environment.self_type.as_ref(), &generics),
             )?;
             let outer = environment.visible_bindings();
             let mut nested = CheckEnvironment::new(
@@ -3071,7 +3154,7 @@ fn check_expression_in_position(
                 environment.types,
             );
             nested.self_type = environment.self_type.clone();
-            nested.generics = environment.generics.clone();
+            nested.generics = generics;
             nested.resolved_targets = environment.resolved_targets;
             nested.reports_redeclarations = environment.reports_redeclarations;
             nested.outer = Some(outer);
@@ -3156,6 +3239,53 @@ fn check_expression_in_position(
             let capture_sources = std::mem::take(&mut nested.capture_sources);
             let slot_count = nested.next_slot;
             drop(nested);
+            // The body is checked with the lambda's own generic names rigid.
+            // A `let` value or a callee stays generic under quantified names;
+            // anywhere else the expected `fn` type instantiates it.
+            let (signature, parameter_types) = if own_generics.is_empty() {
+                (signature, parameter_types)
+            } else if keeps_generic || callee_position {
+                let quantified: BTreeMap<String, Type> = own_generics
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| {
+                        (
+                            name.clone(),
+                            Type::Param(infer::quantified_name(
+                                name,
+                                index,
+                                lambda.span().start(),
+                            )),
+                        )
+                    })
+                    .collect();
+                (
+                    signature.substitute(&quantified),
+                    parameter_types
+                        .iter()
+                        .map(|value| value.substitute(&quantified))
+                        .collect(),
+                )
+            } else {
+                let mut instantiation = infer::Instantiation::new(&own_generics);
+                let opened =
+                    Type::Function(Box::new(instantiation.open_signature(&signature)));
+                if let Some(expected) = &expected {
+                    instantiation.unify(&opened, expected);
+                }
+                let Some(Type::Function(instantiated)) =
+                    instantiation.resolved(&opened)
+                else {
+                    ambiguous_generic(
+                        environment,
+                        expression.span(),
+                        &instantiation.unbound(),
+                    );
+                    return None;
+                };
+                let parameters = instantiated.parameters().to_vec();
+                (*instantiated, parameters)
+            };
             let actual = Type::Function(Box::new(signature.clone()));
             ensure_expected(
                 environment,
@@ -3222,6 +3352,7 @@ fn check_resolved_reference(
     expression: &Expression,
     expected: Option<Type>,
     target: ResolvedReferenceTarget,
+    callee_position: bool,
 ) -> Option<Expr> {
     match target {
         ResolvedReferenceTarget::Unresolved => {
@@ -3256,7 +3387,7 @@ fn check_resolved_reference(
             ))
         }
         ResolvedReferenceTarget::Function(index) => {
-            function_value(environment, expression, index, expected)
+            function_value(environment, expression, index, expected, callee_position)
         }
     }
 }
